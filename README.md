@@ -67,6 +67,7 @@ cargo check --workspace
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
+cargo test --package loomwatch-backend --test team_schema
 ```
 
 The pinned toolchain in `rust-toolchain.toml` keeps local and CI builds aligned. Team files
