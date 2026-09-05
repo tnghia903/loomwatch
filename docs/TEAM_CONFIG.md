@@ -26,7 +26,11 @@ depend on the document as a whole:
 - Configured edges form a directed acyclic graph. Every configured edge has
   `layer: configured` and `kind: sequence`.
 - Every edge and run-event `ts` must parse as RFC 3339 or the loader rejects it. The schema
-  `format` keyword is an annotation in Draft 2020-12 and must not be relied on for this.
+  `format` keyword is an annotation in Draft 2020-12 and must not be relied on for this;
+  the companion `pattern` constrains shape only, so the loader still range-checks the
+  fields. RFC 3339 spells its literals case-insensitively, and `RunEvent.ts` is minted
+  upstream, so the lowercase `t` and `z` separators are accepted on read. LoomWatch emits
+  the uppercase form.
 - Child processes inherit the LoomWatch process environment. `spawn.env` entries are
   applied on top as literal overrides; LoomWatch performs no shell expansion, and team
   files must not contain credentials. An override of `PATH` changes resolution of a bare

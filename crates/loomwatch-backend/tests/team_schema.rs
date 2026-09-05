@@ -122,10 +122,37 @@ fn review_regressions_are_covered() {
         "upstream-generated result call IDs must be opaque"
     );
 
-    let mut invalid_event = tool_call;
+    let mut invalid_event = tool_call.clone();
     invalid_event["ts"] = json!("banana");
     assert!(
         !event_validator.is_valid(&invalid_event),
         "run-event timestamps must reject non-RFC-3339-shaped strings"
     );
+
+    for accepted in [
+        "2026-09-05T00:00:00Z",
+        "2026-09-05t00:00:00z",
+        "2026-09-05T00:00:00.123456+00:00",
+        "2026-09-05T00:00:60Z",
+    ] {
+        let mut event = tool_call.clone();
+        event["ts"] = json!(accepted);
+        assert!(
+            event_validator.is_valid(&event),
+            "{accepted} is RFC 3339 and must be accepted from an upstream harness"
+        );
+    }
+    for rejected in [
+        "2026-09-05T00:00:00",
+        "2026-09-05 00:00:00Z",
+        "2026-09-05",
+        "",
+    ] {
+        let mut event = tool_call.clone();
+        event["ts"] = json!(rejected);
+        assert!(
+            !event_validator.is_valid(&event),
+            "{rejected:?} is not RFC 3339 and must be rejected"
+        );
+    }
 }
