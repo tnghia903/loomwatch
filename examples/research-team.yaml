@@ -2,6 +2,10 @@ schemaVersion: 1
 id: research-team
 name: Research and review
 entrypoint: researcher
+budget:
+  limitUsd: 8
+guards:
+  maxDispatchDepth: 4
 agents:
   - id: researcher
     name: Protocol Researcher
@@ -16,7 +20,7 @@ agents:
     budget:
       limitUsd: 5
       warnAtPercent: 80
-    status: idle
+    allowRecruiting: true
   - id: reviewer
     name: Code Reviewer
     role: Review research findings
@@ -28,7 +32,7 @@ agents:
     model: claude-opus-5
     budget:
       limitUsd: 5
-    status: idle
+    allowRecruiting: false
 edges:
   - from: researcher
     to: reviewer

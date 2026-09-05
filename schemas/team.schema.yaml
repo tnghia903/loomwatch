@@ -22,8 +22,14 @@ properties:
   name:
     type: string
     minLength: 1
+  budget:
+    description: Team-wide ceiling for one run, enforced in addition to agent budgets.
+    $ref: "#/$defs/Budget"
+  guards:
+    description: Server-enforced limits for delegation through the Team Bus.
+    $ref: "#/$defs/Guards"
   entrypoint:
-    description: Agent that receives the initial goal in team mode.
+    description: Agent that receives the initial goal in team or pipeline mode.
     $ref: "#/$defs/Identifier"
   agents:
     type: array
@@ -50,6 +56,12 @@ $defs:
     maxLength: 128
     pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
 
+  OpaqueId:
+    description: Identifier minted by an upstream harness; stored verbatim, never parsed.
+    type: string
+    minLength: 1
+    maxLength: 512
+
   Spawn:
     type: object
     additionalProperties: false
@@ -60,9 +72,12 @@ $defs:
       - cwd
     properties:
       cmd:
-        description: Executable name or absolute path. It is never interpreted by a shell.
+        description: >-
+          Bare executable name resolved on PATH, or an absolute path. It is never
+          interpreted by a shell.
         type: string
         minLength: 1
+        pattern: '^(/[^\x00]*|[A-Za-z0-9._-]+)$'
       args:
         type: array
         items:
@@ -96,6 +111,16 @@ $defs:
         maximum: 100
         default: 80
 
+  Guards:
+    type: object
+    additionalProperties: false
+    properties:
+      maxDispatchDepth:
+        description: Maximum Team Bus dispatch depth before further dispatches are refused.
+        type: integer
+        minimum: 0
+        default: 8
+
   Agent:
     type: object
     additionalProperties: false
@@ -123,8 +148,12 @@ $defs:
         minLength: 1
       budget:
         $ref: "#/$defs/Budget"
+      allowRecruiting:
+        description: Whether this agent may recruit helpers while executing its own step.
+        type: boolean
+        default: true
       status:
-        description: Last known runtime status; omitted configuration defaults to idle.
+        description: Runtime-only status; team-file writers omit it and readers ignore it.
         type: string
         enum:
           - idle
@@ -167,6 +196,7 @@ $defs:
         description: RFC 3339 timestamp for edge creation or observation.
         type: string
         format: date-time
+        pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
     allOf:
       - if:
           properties:
@@ -205,9 +235,9 @@ $defs:
       - payload
     properties:
       id:
-        $ref: "#/$defs/Identifier"
+        $ref: "#/$defs/OpaqueId"
       sessionId:
-        $ref: "#/$defs/Identifier"
+        $ref: "#/$defs/OpaqueId"
       agentId:
         $ref: "#/$defs/Identifier"
       seq:
@@ -216,6 +246,7 @@ $defs:
       ts:
         type: string
         format: date-time
+        pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
       kind:
         type: string
         enum:
@@ -275,7 +306,7 @@ $defs:
       - arguments
     properties:
       callId:
-        $ref: "#/$defs/Identifier"
+        $ref: "#/$defs/OpaqueId"
       name:
         type: string
         minLength: 1
@@ -291,7 +322,7 @@ $defs:
       - isError
     properties:
       callId:
-        $ref: "#/$defs/Identifier"
+        $ref: "#/$defs/OpaqueId"
       content: {}
       isError:
         type: boolean

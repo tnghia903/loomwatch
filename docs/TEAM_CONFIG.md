@@ -5,9 +5,10 @@ LoomWatch team files are YAML documents validated against
 version `1`; readers must reject a version they do not understand instead of guessing.
 
 The root document stores stable, user-authored configuration only: the team identity,
-entrypoint, agents, and configured pipeline edges. Observed edges and run events are
-runtime records archived in SQLite. Their shared wire shapes are defined as `$defs.Edge`
-and `$defs.RunEvent` in the same schema so Phase 02 and later can reference one contract.
+entrypoint, budgets, guard policy, agents, and configured pipeline edges. Observed edges,
+agent status, and run events are runtime records archived in SQLite. Their shared wire
+shapes are defined as `$defs.Edge` and `$defs.RunEvent` in the same schema so Phase 02 and
+later can reference one contract.
 
 See [`examples/research-team.yaml`](../examples/research-team.yaml) for a complete team.
 
@@ -17,19 +18,40 @@ JSON Schema validates each value's shape. Loaders must additionally enforce the 
 depend on the document as a whole:
 
 - Agent IDs are unique, and `entrypoint` names an agent in `agents`.
-- Edge endpoints name agents in the same document, and self-edges are rejected.
+- An empty `edges` array selects team mode: the entrypoint receives the initial goal and
+  self-organizes. A non-empty `edges` array selects pipeline mode: the backend executes the
+  graph, and `entrypoint` must be a source node with no incoming configured edge.
+- Edge endpoints name agents in the same document, self-edges are rejected, and duplicate
+  configured edges with the same `from` and `to` are rejected.
 - Configured edges form a directed acyclic graph. Every configured edge has
   `layer: configured` and `kind: sequence`.
-- Environment entries are literal child-process additions. LoomWatch does not perform
-  shell expansion and team files must not contain credentials.
-- `budget.limitUsd` is a hard per-run ceiling. A zero limit disables paid execution for
-  that agent.
-- Run-event IDs are unique. `seq` is strictly increasing within a session and provides
-  replay order; timestamps are descriptive and do not replace sequence order.
+- Every edge and run-event `ts` must parse as RFC 3339 or the loader rejects it. The schema
+  `format` keyword is an annotation in Draft 2020-12 and must not be relied on for this.
+- Child processes inherit the LoomWatch process environment. `spawn.env` entries are
+  applied on top as literal overrides; LoomWatch performs no shell expansion, and team
+  files must not contain credentials. An override of `PATH` changes resolution of a bare
+  `spawn.cmd`, so an untrusted team file must be treated with the same care as a script.
+- Each `budget.limitUsd` is a hard per-run ceiling and must be finite. A zero agent limit
+  disables paid execution for that agent. When present, the team budget is enforced
+  independently of agent budgets; a run halts on whichever ceiling is reached first, and
+  the team limit need not equal or exceed the sum of agent limits. Loaders apply
+  `warnAtPercent: 80` whenever it is absent; schema defaults are annotations only.
+- `guards.maxDispatchDepth` defaults to `8` when absent. The Team Bus refuses dispatches
+  beyond that depth. `Agent.allowRecruiting` defaults to `true`; `false` forbids that agent
+  from recruiting helpers within its own pipeline step.
+- `status` is a runtime annotation. Team-file writers must not persist it, and team-file
+  readers must ignore it if an older or external document contains it.
+- Run-event IDs are unique. `RunEvent.agentId` names an agent in the team document. `seq`
+  is strictly increasing per session across all agents and is the sole replay order;
+  timestamps are descriptive and do not replace sequence order.
+- A `result` event's `callId` matches a prior `tool_call` in the same session, and the
+  result's `seq` is greater than the tool call's `seq`.
 
 Paths in `spawn.cwd` may be absolute or relative. A relative path is resolved against the
-directory containing the team file. `spawn.cmd` is executed directly with `spawn.args`;
-it is never passed through a shell.
+directory containing the team file. `spawn.cmd` must be either a bare executable name
+resolved on the effective `PATH` after applying `spawn.env`, or an absolute path. Relative
+commands containing a path separator are rejected. The command is executed directly with
+`spawn.args`; it is never passed through a shell.
 
 ## Reusable runtime definitions
 
