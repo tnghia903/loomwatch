@@ -1,0 +1,22 @@
+schemaVersion: 1
+id: phase02-opencode
+name: Phase 02 OpenCode smoke test
+entrypoint: smoke-agent
+budget:
+  limitUsd: 0
+agents:
+  - id: smoke-agent
+    name: OpenCode Smoke Agent
+    role: Verify the single-agent ACP execution spine
+    spawn:
+      cmd: opencode
+      args:
+        - acp
+        - --pure
+      env: {}
+      cwd: ..
+    model: opencode/ling-3.0-flash-fin-free
+    budget:
+      limitUsd: 0
+    allowRecruiting: false
+edges: []

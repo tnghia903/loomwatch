@@ -96,8 +96,14 @@ fn review_regressions_are_covered() {
         "kind": "tool_call",
         "payload": {
             "callId": "_call1",
-            "name": "dispatch",
-            "arguments": {}
+            "title": "dispatch",
+            "name": null,
+            "status": "pending"
+        },
+        "raw": {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {}
         }
     });
     assert!(
@@ -110,16 +116,21 @@ fn review_regressions_are_covered() {
         "agentId": "researcher",
         "seq": 2,
         "ts": "2026-09-05T00:00:01+00:00",
-        "kind": "result",
+        "kind": "tool_update",
         "payload": {
             "callId": "call:1",
-            "content": null,
-            "isError": false
+            "status": "completed",
+            "rawOutput": null
+        },
+        "raw": {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {}
         }
     });
     assert!(
         event_validator.is_valid(&result),
-        "upstream-generated result call IDs must be opaque"
+        "upstream-generated tool update call IDs must be opaque"
     );
 
     let mut invalid_event = tool_call.clone();
