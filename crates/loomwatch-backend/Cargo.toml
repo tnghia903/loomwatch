@@ -1,0 +1,15 @@
+[package]
+name = "loomwatch-backend"
+version = "0.1.0"
+description = "Local execution backend for LoomWatch"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "loomwatchd"
+path = "src/main.rs"
+
+[lints]
+workspace = true

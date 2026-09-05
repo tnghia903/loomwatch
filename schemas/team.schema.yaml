@@ -1,0 +1,297 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://loomwatch.dev/schemas/team.schema.yaml"
+title: LoomWatch team configuration
+description: >-
+  Versioned source-of-truth configuration for one LoomWatch team. Runtime-only
+  records use the reusable Edge and RunEvent definitions under $defs.
+type: object
+additionalProperties: false
+required:
+  - schemaVersion
+  - id
+  - name
+  - entrypoint
+  - agents
+  - edges
+properties:
+  schemaVersion:
+    description: Major schema version. Unknown versions must be rejected.
+    const: 1
+  id:
+    $ref: "#/$defs/Identifier"
+  name:
+    type: string
+    minLength: 1
+  entrypoint:
+    description: Agent that receives the initial goal in team mode.
+    $ref: "#/$defs/Identifier"
+  agents:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/Agent"
+  edges:
+    description: User-configured pipeline edges. Observed edges are runtime data.
+    type: array
+    items:
+      allOf:
+        - $ref: "#/$defs/Edge"
+        - type: object
+          properties:
+            layer:
+              const: configured
+            kind:
+              const: sequence
+
+$defs:
+  Identifier:
+    type: string
+    minLength: 1
+    maxLength: 128
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+
+  Spawn:
+    type: object
+    additionalProperties: false
+    required:
+      - cmd
+      - args
+      - env
+      - cwd
+    properties:
+      cmd:
+        description: Executable name or absolute path. It is never interpreted by a shell.
+        type: string
+        minLength: 1
+      args:
+        type: array
+        items:
+          type: string
+      env:
+        description: Environment additions passed to the child process; no secrets are stored here.
+        type: object
+        propertyNames:
+          pattern: "^[A-Za-z_][A-Za-z0-9_]*$"
+        additionalProperties:
+          type: string
+      cwd:
+        description: Absolute path or path relative to the team file.
+        type: string
+        minLength: 1
+
+  Budget:
+    type: object
+    additionalProperties: false
+    required:
+      - limitUsd
+    properties:
+      limitUsd:
+        description: Hard maximum estimated spend in US dollars for one run.
+        type: number
+        minimum: 0
+      warnAtPercent:
+        description: Percentage of limitUsd at which LoomWatch emits a warning.
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 80
+
+  Agent:
+    type: object
+    additionalProperties: false
+    required:
+      - id
+      - name
+      - role
+      - spawn
+      - model
+      - budget
+    properties:
+      id:
+        $ref: "#/$defs/Identifier"
+      name:
+        type: string
+        minLength: 1
+      role:
+        type: string
+        minLength: 1
+      spawn:
+        $ref: "#/$defs/Spawn"
+      model:
+        description: Harness-specific model selector.
+        type: string
+        minLength: 1
+      budget:
+        $ref: "#/$defs/Budget"
+      status:
+        description: Last known runtime status; omitted configuration defaults to idle.
+        type: string
+        enum:
+          - idle
+          - starting
+          - running
+          - waiting
+          - succeeded
+          - failed
+          - stopped
+          - unavailable
+        default: idle
+
+  Edge:
+    type: object
+    additionalProperties: false
+    required:
+      - from
+      - to
+      - layer
+      - kind
+      - ts
+    properties:
+      from:
+        $ref: "#/$defs/Identifier"
+      to:
+        $ref: "#/$defs/Identifier"
+      layer:
+        type: string
+        enum:
+          - configured
+          - observed
+      kind:
+        type: string
+        enum:
+          - sequence
+          - dispatch
+          - ask
+          - handoff
+      ts:
+        description: RFC 3339 timestamp for edge creation or observation.
+        type: string
+        format: date-time
+    allOf:
+      - if:
+          properties:
+            layer:
+              const: configured
+          required:
+            - layer
+        then:
+          properties:
+            kind:
+              const: sequence
+      - if:
+          properties:
+            layer:
+              const: observed
+          required:
+            - layer
+        then:
+          properties:
+            kind:
+              enum:
+                - dispatch
+                - ask
+                - handoff
+
+  RunEvent:
+    type: object
+    additionalProperties: false
+    required:
+      - id
+      - sessionId
+      - agentId
+      - seq
+      - ts
+      - kind
+      - payload
+    properties:
+      id:
+        $ref: "#/$defs/Identifier"
+      sessionId:
+        $ref: "#/$defs/Identifier"
+      agentId:
+        $ref: "#/$defs/Identifier"
+      seq:
+        type: integer
+        minimum: 0
+      ts:
+        type: string
+        format: date-time
+      kind:
+        type: string
+        enum:
+          - text
+          - tool_call
+          - result
+      payload:
+        description: Kind-specific event content preserved losslessly by the archive.
+        type: object
+    allOf:
+      - if:
+          properties:
+            kind:
+              const: text
+          required:
+            - kind
+        then:
+          properties:
+            payload:
+              $ref: "#/$defs/TextPayload"
+      - if:
+          properties:
+            kind:
+              const: tool_call
+          required:
+            - kind
+        then:
+          properties:
+            payload:
+              $ref: "#/$defs/ToolCallPayload"
+      - if:
+          properties:
+            kind:
+              const: result
+          required:
+            - kind
+        then:
+          properties:
+            payload:
+              $ref: "#/$defs/ResultPayload"
+
+  TextPayload:
+    type: object
+    additionalProperties: false
+    required:
+      - text
+    properties:
+      text:
+        type: string
+
+  ToolCallPayload:
+    type: object
+    additionalProperties: false
+    required:
+      - callId
+      - name
+      - arguments
+    properties:
+      callId:
+        $ref: "#/$defs/Identifier"
+      name:
+        type: string
+        minLength: 1
+      arguments:
+        type: object
+
+  ResultPayload:
+    type: object
+    additionalProperties: false
+    required:
+      - callId
+      - content
+      - isError
+    properties:
+      callId:
+        $ref: "#/$defs/Identifier"
+      content: {}
+      isError:
+        type: boolean
