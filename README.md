@@ -44,4 +44,31 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full specification.
 
 ## Status
 
-Pre-implementation. The architecture is settled; nothing is built yet.
+Phase 01 scaffold. The Rust workspace and versioned team-configuration contract are in
+place; protocol and process-supervision work begins in Phase 02.
+
+## Repository layout
+
+| Path | Purpose |
+|---|---|
+| `crates/loomwatch-backend` | Rust backend binary (`loomwatchd`) |
+| `schemas/team.schema.yaml` | YAML/JSON Schema contract for teams and runtime records |
+| `examples/` | Version-controlled team examples |
+| `docs/` | Architecture and contract documentation |
+
+The Swift package is intentionally deferred to Phase 04.
+
+## Development
+
+Install [rustup](https://rustup.rs/), then run:
+
+```sh
+cargo check --workspace
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+```
+
+The pinned toolchain in `rust-toolchain.toml` keeps local and CI builds aligned. Team files
+use schema version `1`; start with [`examples/research-team.yaml`](examples/research-team.yaml)
+and see [`docs/TEAM_CONFIG.md`](docs/TEAM_CONFIG.md) for semantic validation rules.
