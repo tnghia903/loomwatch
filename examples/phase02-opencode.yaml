@@ -3,7 +3,7 @@ id: phase02-opencode
 name: Phase 02 OpenCode smoke test
 entrypoint: smoke-agent
 budget:
-  limitUsd: 0
+  limitUsd: 1
 agents:
   - id: smoke-agent
     name: OpenCode Smoke Agent
@@ -17,6 +17,6 @@ agents:
       cwd: ..
     model: opencode/ling-3.0-flash-fin-free
     budget:
-      limitUsd: 0
+      limitUsd: 1
     allowRecruiting: false
 edges: []

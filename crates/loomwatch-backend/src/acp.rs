@@ -122,39 +122,44 @@ impl AcpProcess {
         // A protocol or shutdown failure still needs a terminal marker and a recoverable session,
         // otherwise the partial run sits in SQLite with no `crashed` marker and `show` has no
         // session ID to look it up by.
-        if (execution.is_err() || exit.is_err())
+        let crash_marker_error = if (execution.is_err() || exit.is_err())
             && let Some(session_id) = failure_session_id.as_deref()
         {
-            let seq = archive
-                .load_session(session_id)
-                .with_context(|| format!("failed to recover partial ACP session {session_id}"))?
-                .len() as u64;
-            let exit_code = exit.as_ref().map_or(-1, |report| report.code);
-            let mut failures = Vec::new();
-            if let Err(error) = &execution {
-                failures.push(format!("session execution failed: {error:#}"));
-            }
-            match &exit {
-                Ok(report) if !report.stderr.is_empty() => {
-                    failures.push(format!("stderr: {}", report.stderr));
+            (|| -> Result<()> {
+                let seq = archive
+                    .load_session(session_id)
+                    .with_context(|| format!("failed to recover partial ACP session {session_id}"))?
+                    .len() as u64;
+                let exit_code = exit.as_ref().map_or(-1, |report| report.code);
+                let mut failures = Vec::new();
+                if let Err(error) = &execution {
+                    failures.push(format!("session execution failed: {error:#}"));
                 }
-                Err(error) => failures.push(format!("shutdown failed: {error:#}")),
-                Ok(_) => {}
-            }
-            append_archive_event(
-                archive,
-                session_id,
-                agent_id,
-                seq,
-                EventKind::Process,
-                json!({
-                    "phase": "crashed",
-                    "exitCode": exit_code,
-                    "message": failures.join("; ")
-                }),
-                None,
-            )?;
-        }
+                match &exit {
+                    Ok(report) if !report.stderr.is_empty() => {
+                        failures.push(format!("stderr: {}", report.stderr));
+                    }
+                    Err(error) => failures.push(format!("shutdown failed: {error:#}")),
+                    Ok(_) => {}
+                }
+                append_archive_event(
+                    archive,
+                    session_id,
+                    agent_id,
+                    seq,
+                    EventKind::Process,
+                    json!({
+                        "phase": "crashed",
+                        "exitCode": exit_code,
+                        "message": failures.join("; ")
+                    }),
+                    None,
+                )
+            })()
+            .err()
+        } else {
+            None
+        };
 
         match (execution, exit) {
             (Ok((session_id, event_count)), Ok(exit)) => {
@@ -185,14 +190,18 @@ impl AcpProcess {
                     exit_code: exit.code,
                 })
             }
-            (Err(error), Ok(_)) | (Ok(_), Err(error)) => {
-                Err(with_recovery_context(error, failure_session_id.as_deref()))
-            }
-            (Err(protocol), Err(shutdown)) => Err(with_recovery_context(
-                protocol.context(format!(
-                    "the ACP child also failed during shutdown: {shutdown:#}"
-                )),
-                failure_session_id.as_deref(),
+            (Err(error), Ok(_)) | (Ok(_), Err(error)) => Err(with_archive_failure_context(
+                with_recovery_context(error, failure_session_id.as_deref()),
+                crash_marker_error.as_ref(),
+            )),
+            (Err(protocol), Err(shutdown)) => Err(with_archive_failure_context(
+                with_recovery_context(
+                    protocol.context(format!(
+                        "the ACP child also failed during shutdown: {shutdown:#}"
+                    )),
+                    failure_session_id.as_deref(),
+                ),
+                crash_marker_error.as_ref(),
             )),
         }
     }
@@ -210,7 +219,7 @@ impl AcpProcess {
         let initialized = self
             .request(
                 "initialize",
-                json!({
+                &json!({
                     "protocolVersion": 1,
                     "clientCapabilities": {
                         "fs": {"readTextFile": false, "writeTextFile": false},
@@ -225,9 +234,11 @@ impl AcpProcess {
 
         let cwd = self.cwd.to_string_lossy().into_owned();
         let created = self
-            .request("session/new", json!({"cwd": cwd, "mcpServers": []}), |_| {
-                Ok(())
-            })
+            .request(
+                "session/new",
+                &json!({"cwd": cwd, "mcpServers": []}),
+                |_| Ok(()),
+            )
             .await
             .context("ACP session/new failed")?;
         let session_id = created
@@ -253,24 +264,46 @@ impl AcpProcess {
             json!({"phase": "session_new", "result": created.result}),
             Some(created.response),
         )?;
-        let config_response = self
-            .request(
-                "session/set_config_option",
-                json!({"sessionId": session_id, "configId": "model", "value": model}),
-                |message| recorder.record_frame(message),
-            )
-            .await
-            .with_context(|| format!("ACP harness rejected configured model {model:?}"))?;
-        recorder.append(
-            EventKind::SessionMeta,
-            json!({
-                "phase": "set_config_option",
-                "configId": "model",
-                "value": model,
-                "result": config_response.result
-            }),
-            Some(config_response.response),
-        )?;
+        let supports_model_config = created
+            .result
+            .get("configOptions")
+            .and_then(Value::as_array)
+            .is_some_and(|options| {
+                options
+                    .iter()
+                    .any(|option| option.get("id").and_then(Value::as_str) == Some("model"))
+            });
+        if supports_model_config {
+            let config_response = self
+                .request(
+                    "session/set_config_option",
+                    &json!({"sessionId": session_id, "configId": "model", "value": model}),
+                    |message| recorder.record_frame(message),
+                )
+                .await
+                .with_context(|| format!("ACP harness rejected configured model {model:?}"))?;
+            recorder.append(
+                EventKind::SessionMeta,
+                json!({
+                    "phase": "set_config_option",
+                    "configId": "model",
+                    "value": model,
+                    "result": config_response.result
+                }),
+                Some(config_response.response),
+            )?;
+        } else {
+            recorder.append(
+                EventKind::SessionMeta,
+                json!({
+                    "phase": "set_config_option_skipped",
+                    "configId": "model",
+                    "value": model,
+                    "reason": "harness did not advertise a model config option"
+                }),
+                None,
+            )?;
+        }
         Ok(recorder)
     }
 
@@ -287,6 +320,11 @@ impl AcpProcess {
             .await?;
         let session_id = recorder.session_id.clone();
 
+        let prompt_params = json!({
+            "sessionId": session_id,
+            "prompt": [{"type": "text", "text": prompt}]
+        });
+        let (prompt_id, prompt_request) = self.next_request("session/prompt", &prompt_params);
         recorder.append(
             EventKind::Message,
             json!({
@@ -294,25 +332,13 @@ impl AcpProcess {
                 "messageId": null,
                 "content": {"type": "text", "text": prompt}
             }),
-            Some(json!({
-                "jsonrpc": "2.0",
-                "id": self.next_request_id,
-                "method": "session/prompt",
-                "params": {
-                    "sessionId": session_id,
-                    "prompt": [{"type": "text", "text": prompt}]
-                }
-            })),
+            Some(prompt_request.clone()),
         )?;
+        self.send(&prompt_request).await?;
         let prompted = self
-            .request(
-                "session/prompt",
-                json!({
-                    "sessionId": session_id,
-                    "prompt": [{"type": "text", "text": prompt}]
-                }),
-                |message| recorder.record_frame(message),
-            )
+            .read_response(prompt_id, "session/prompt", |message| {
+                recorder.record_frame(message)
+            })
             .await
             .context("ACP session/prompt failed")?;
         let stop_reason = prompted
@@ -335,7 +361,7 @@ impl AcpProcess {
 
         self.request(
             "session/close",
-            json!({"sessionId": session_id}),
+            &json!({"sessionId": session_id}),
             |message| recorder.record_frame(message),
         )
         .await
@@ -345,20 +371,36 @@ impl AcpProcess {
         Ok((session_id, events.len()))
     }
 
-    async fn request<F>(&mut self, method: &str, params: Value, mut observe: F) -> Result<RpcResult>
+    async fn request<F>(
+        &mut self,
+        method: &str,
+        params: &Value,
+        mut observe: F,
+    ) -> Result<RpcResult>
     where
         F: FnMut(&Value) -> Result<()>,
     {
+        let (id, request) = self.next_request(method, params);
+        self.send(&request).await?;
+        self.read_response(id, method, &mut observe).await
+    }
+
+    fn next_request(&mut self, method: &str, params: &Value) -> (u64, Value) {
         let id = self.next_request_id;
         self.next_request_id += 1;
-        self.send(&json!({
+        let request = json!({
             "jsonrpc": "2.0",
             "id": id,
             "method": method,
             "params": params
-        }))
-        .await?;
+        });
+        (id, request)
+    }
 
+    async fn read_response<F>(&mut self, id: u64, method: &str, mut observe: F) -> Result<RpcResult>
+    where
+        F: FnMut(&Value) -> Result<()>,
+    {
         loop {
             let line = timeout(REQUEST_TIMEOUT, self.stdout.next_line())
                 .await
@@ -437,12 +479,24 @@ fn with_recovery_context(error: anyhow::Error, session_id: Option<&str>) -> anyh
     }
 }
 
+fn with_archive_failure_context(
+    error: anyhow::Error,
+    archive_error: Option<&anyhow::Error>,
+) -> anyhow::Error {
+    match archive_error {
+        Some(archive_error) => {
+            error.context(format!("failed to archive crash marker: {archive_error:#}"))
+        }
+        None => error,
+    }
+}
+
 /// Build `LoomWatch`'s reply to an agent-initiated client request.
 ///
 /// For `session/request_permission`, ACP's `cancelled` outcome tells the agent the whole
 /// prompt turn was cancelled, which is wrong for an observer merely declining one tool call.
 /// Prefer an advertised `reject_once` option so the agent denies that call and keeps going,
-/// falling back to `cancelled` only when the harness offered no such option.
+/// then `reject_always`, falling back to `cancelled` only when the harness offered neither.
 fn build_client_response(request: &Value) -> Result<Value> {
     let id = request
         .get("id")
@@ -453,16 +507,23 @@ fn build_client_response(request: &Value) -> Result<Value> {
         .and_then(Value::as_str)
         .context("client request omitted method")?;
     let response = if method == "session/request_permission" {
-        let reject_once = request
+        let rejection = request
             .pointer("/params/options")
             .and_then(Value::as_array)
             .and_then(|options| {
-                options.iter().find(|option| {
-                    option.get("kind").and_then(Value::as_str) == Some("reject_once")
-                })
+                options
+                    .iter()
+                    .find(|option| {
+                        option.get("kind").and_then(Value::as_str) == Some("reject_once")
+                    })
+                    .or_else(|| {
+                        options.iter().find(|option| {
+                            option.get("kind").and_then(Value::as_str) == Some("reject_always")
+                        })
+                    })
             })
             .and_then(|option| option.get("optionId").cloned());
-        let outcome = match reject_once {
+        let outcome = match rejection {
             Some(option_id) => json!({"outcome": "selected", "optionId": option_id}),
             None => json!({"outcome": "cancelled"}),
         };
@@ -515,15 +576,21 @@ impl<'a> Recorder<'a> {
             return self.append(EventKind::Permission, payload, Some(message.clone()));
         }
 
-        if message.get("method").and_then(Value::as_str) != Some("session/update")
-            || message.pointer("/params/sessionId").and_then(Value::as_str)
-                != Some(self.session_id.as_str())
+        if message.get("method").and_then(Value::as_str) != Some("session/update") {
+            return Ok(());
+        }
+        if let Some(session_id) = message.pointer("/params/sessionId").and_then(Value::as_str)
+            && session_id != self.session_id
         {
             return Ok(());
         }
-        let update = message
-            .pointer("/params/update")
-            .context("session/update omitted update")?;
+        let Some(update) = message.pointer("/params/update") else {
+            return self.append(
+                EventKind::SessionMeta,
+                unprojected_update(None, "session/update omitted update"),
+                Some(message.clone()),
+            );
+        };
         let update_type = update.get("sessionUpdate").and_then(Value::as_str);
         let (kind, payload) = match update_type {
             Some("user_message_chunk" | "agent_message_chunk" | "agent_thought_chunk") => {
@@ -534,13 +601,14 @@ impl<'a> Recorder<'a> {
                 };
                 let mut payload = serde_json::Map::new();
                 payload.insert("role".into(), json!(role));
-                payload.insert(
-                    "content".into(),
-                    update
-                        .get("content")
-                        .cloned()
-                        .context("ACP content chunk omitted content")?,
-                );
+                let Some(content) = update.get("content").cloned() else {
+                    return self.append(
+                        EventKind::SessionMeta,
+                        unprojected_update(Some(update), "ACP content chunk omitted content"),
+                        Some(message.clone()),
+                    );
+                };
+                payload.insert("content".into(), content);
                 if let Some(message_id) = update.get("messageId") {
                     payload.insert("messageId".into(), message_id.clone());
                 }
@@ -551,8 +619,20 @@ impl<'a> Recorder<'a> {
                 };
                 (kind, Value::Object(payload))
             }
-            Some("tool_call") => (EventKind::ToolCall, project_tool(update, true)?),
-            Some("tool_call_update") => (EventKind::ToolUpdate, project_tool(update, false)?),
+            Some("tool_call") => match project_tool(update, true) {
+                Ok(payload) => (EventKind::ToolCall, payload),
+                Err(error) => (
+                    EventKind::SessionMeta,
+                    unprojected_update(Some(update), &format!("{error:#}")),
+                ),
+            },
+            Some("tool_call_update") => match project_tool(update, false) {
+                Ok(payload) => (EventKind::ToolUpdate, payload),
+                Err(error) => (
+                    EventKind::SessionMeta,
+                    unprojected_update(Some(update), &format!("{error:#}")),
+                ),
+            },
             Some("plan" | "plan_update" | "plan_removed") => (EventKind::Plan, update.clone()),
             Some("usage_update") => (EventKind::Usage, update.clone()),
             Some(_) | None => (EventKind::SessionMeta, update.clone()),
@@ -573,6 +653,14 @@ impl<'a> Recorder<'a> {
         self.next_seq += 1;
         Ok(())
     }
+}
+
+fn unprojected_update(update: Option<&Value>, warning: &str) -> Value {
+    json!({
+        "phase": "unprojected_session_update",
+        "warning": warning,
+        "update": update.cloned().unwrap_or(Value::Null)
+    })
 }
 
 fn project_tool(update: &Value, initial: bool) -> Result<Value> {
@@ -689,6 +777,91 @@ mod tests {
         );
     }
 
+    #[test]
+    fn archives_unprojectable_updates_instead_of_failing_the_session() {
+        let temp = tempdir().expect("tempdir");
+        let archive = EventArchive::open(&temp.path().join("events.sqlite3")).expect("archive");
+        let mut recorder = Recorder::new(&archive, "session".to_owned(), "agent");
+        let frames = [
+            json!({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "session",
+                    "update": {"sessionUpdate": "agent_message_chunk"}
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "session",
+                    "update": {"sessionUpdate": "tool_call", "title": "missing id"}
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {"sessionId": "session"}
+            }),
+        ];
+
+        for frame in &frames {
+            recorder
+                .record_frame(frame)
+                .expect("unexpected frame must remain archivable");
+        }
+
+        let events = archive.load_session("session").expect("events");
+        assert_eq!(events.len(), frames.len());
+        assert!(
+            events
+                .iter()
+                .all(|event| event.kind == EventKind::SessionMeta)
+        );
+        for (event, frame) in events.iter().zip(frames) {
+            assert_eq!(event.payload["phase"], "unprojected_session_update");
+            assert_eq!(event.raw.as_ref(), Some(&frame));
+        }
+    }
+
+    #[test]
+    fn permission_response_uses_each_supported_rejection_fallback() {
+        let response = build_client_response(&json!({
+            "jsonrpc": "2.0",
+            "id": "permission-1",
+            "method": "session/request_permission",
+            "params": {"options": [
+                {"optionId": "always", "kind": "reject_always"},
+                {"optionId": "once", "kind": "reject_once"}
+            ]}
+        }))
+        .expect("response");
+        assert_eq!(response["result"]["outcome"]["optionId"], "once");
+
+        let response = build_client_response(&json!({
+            "jsonrpc": "2.0",
+            "id": "permission-2",
+            "method": "session/request_permission",
+            "params": {"options": [
+                {"optionId": "always", "kind": "reject_always"}
+            ]}
+        }))
+        .expect("response");
+        assert_eq!(response["result"]["outcome"]["outcome"], "selected");
+        assert_eq!(response["result"]["outcome"]["optionId"], "always");
+    }
+
+    #[test]
+    fn archive_failure_context_retains_the_execution_error() {
+        let execution = anyhow::anyhow!("protocol exploded");
+        let archive = anyhow::anyhow!("SQLite unavailable");
+        let combined = with_archive_failure_context(execution, Some(&archive));
+        let rendered = format!("{combined:#}");
+        assert!(rendered.contains("protocol exploded"));
+        assert!(rendered.contains("SQLite unavailable"));
+    }
+
     #[tokio::test]
     async fn completes_a_turn_and_recovers_the_full_session_after_exit() {
         let script = r#"
@@ -696,7 +869,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
             IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1","configOptions":[{"id":"model"}]}}'
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             IFS= read -r _
@@ -784,6 +957,57 @@ mod tests {
         assert_events_match_schema(&events);
     }
 
+    #[tokio::test]
+    async fn skips_model_configuration_when_the_harness_does_not_advertise_it() {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"no-model-option","configOptions":[]}}'
+            IFS= read -r request
+            case "$request" in
+              *'"method":"session/prompt"'*) ;;
+              *) exit 9 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
+        "#;
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: std::env::current_dir().expect("cwd"),
+        };
+        let temp = tempdir().expect("tempdir");
+        let archive = EventArchive::open(&temp.path().join("events.sqlite3")).expect("archive");
+        let mut process = AcpProcess::spawn(&spec).expect("spawn");
+        process
+            .run_session(
+                "agent",
+                "test/model",
+                "hello",
+                &archive,
+                Duration::from_secs(2),
+            )
+            .await
+            .expect("session without model option");
+
+        let events = archive.load_session("no-model-option").expect("events");
+        let skipped = events
+            .iter()
+            .find(|event| event.payload["phase"] == "set_config_option_skipped")
+            .expect("skip metadata");
+        assert_eq!(skipped.payload["configId"], "model");
+        let prompt = events
+            .iter()
+            .find(|event| event.payload["role"] == "user")
+            .expect("user prompt");
+        assert_eq!(prompt.raw.as_ref().unwrap()["id"], 3);
+        assert_eq!(prompt.raw.as_ref().unwrap()["method"], "session/prompt");
+    }
+
     /// Validate every generated event against the frozen `RunEvent` contract in
     /// `schemas/team.schema.yaml`.
     fn assert_events_match_schema(events: &[RunEvent]) {
@@ -817,7 +1041,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
             IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"partial-session"}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"partial-session","configOptions":[{"id":"model"}]}}'
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             IFS= read -r _
@@ -868,7 +1092,7 @@ mod tests {
     #[tokio::test]
     async fn child_exit_is_reported_without_hanging() {
         let spec = ProcessSpec {
-            cmd: "/usr/bin/false".into(),
+            cmd: "false".into(),
             args: Vec::new(),
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -913,7 +1137,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
             IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1","configOptions":[{"id":"model"}]}}'
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":3,"error":{"code":-32000,"message":"model rejected"}}'
         "#;

@@ -12,7 +12,8 @@ process's standard input and output:
 1. `initialize` with ACP protocol version 1 and the client's deliberately minimal
    filesystem/terminal capabilities.
 2. `session/new` with the resolved agent working directory.
-3. `session/set_config_option` to apply the team file's model exactly.
+3. `session/set_config_option` to apply the team file's model when `session/new` advertises
+   a `model` config option; otherwise LoomWatch records that configuration was skipped.
 4. `session/prompt`, while translating `session/update` notifications into ordered
    `RunEvent` rows.
 5. `session/close`, followed by stdin EOF and a bounded wait for clean process exit.
@@ -22,14 +23,31 @@ exits early, returns a JSON-RPC error, or fails to exit after stdin closes, the 
 returns a contextual error; once `session/new` has succeeded, that error includes the session
 identifier and the archive ends with a `process: crashed` marker so the partial run remains
 recoverable. A hung child is killed and reaped. SQLite is switched to WAL mode before the
-event table is created. The `show` command opens the database independently and replays a
-session by its strictly increasing sequence number.
+event table is created and uses `synchronous=NORMAL` to avoid a disk sync for every streamed
+chunk while retaining process-crash durability. The `show` command opens the database
+independently and replays a session by its strictly increasing sequence number.
 
-The `initialize`, `session/new`, and `session/set_config_option` responses are archived as
-`session_meta` events, including the applied model and the harness's complete negotiated state.
-When a harness requests permission, LoomWatch chooses an advertised `reject_once` option so it
-can decline the individual tool call without cancelling the turn; both the request and the
-client response are archived as `permission` events.
+The ten-minute per-request timeout currently does not send `session/cancel`: timeout handling
+closes the transport and kills a harness that does not exit during shutdown. A harness may
+continue work briefly between timeout and process termination.
+
+The `initialize` and `session/new` responses, plus `session/set_config_option` when sent, are
+archived as `session_meta` events, including the applied model and the harness's complete
+negotiated state.
+When a harness requests permission, LoomWatch chooses an advertised `reject_once` option, or
+`reject_always` when that is the only rejection offered, so it can decline the tool call without
+cancelling the turn; both the request and the client response are archived as `permission`
+events.
+
+Permission negotiation is currently covered with a mock harness only. OpenCode 1.18.23 in
+`acp --pure` mode auto-approves its own tool calls and did not emit
+`session/request_permission` during the Phase 02 probe; exercise this path against a second
+real harness when one is added.
+
+LoomWatch observes and archives an agent process; it does not sandbox it. Declaring filesystem
+and terminal client capabilities as unavailable only says that LoomWatch does not provide those
+ACP services. A harness can still use its own tools to read, write, execute, or access the network
+with the permissions of the spawned process. Run untrusted harnesses inside an external sandbox.
 
 ACP emits more than the original Phase-01 `text | tool_call | result` sketch could retain:
 thoughts, incremental tool updates, plans, permissions, usage, session metadata, and turn
