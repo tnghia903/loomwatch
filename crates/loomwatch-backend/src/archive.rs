@@ -21,7 +21,9 @@ impl EventArchive {
         let connection = Connection::open(path)
             .with_context(|| format!("failed to open SQLite archive {}", path.display()))?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
-        connection.pragma_update(None, "synchronous", "FULL")?;
+        // WAL + NORMAL remains durable across process crashes while avoiding a full
+        // disk sync for every implicitly committed streamed event.
+        connection.pragma_update(None, "synchronous", "NORMAL")?;
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
         connection.pragma_update(None, "foreign_keys", true)?;
         connection.execute_batch(
@@ -221,6 +223,13 @@ mod tests {
         {
             let archive = EventArchive::open(&database).expect("open archive");
             assert_eq!(archive.journal_mode().expect("journal mode"), "wal");
+            let synchronous: i64 = archive
+                .connection
+                .lock()
+                .expect("archive mutex")
+                .pragma_query_value(None, "synchronous", |row| row.get(0))
+                .expect("synchronous level");
+            assert_eq!(synchronous, 1, "WAL archive must use NORMAL sync");
             archive.append(&event).expect("append event");
         }
         let reopened = EventArchive::open(&database).expect("reopen archive");
