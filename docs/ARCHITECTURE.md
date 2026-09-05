@@ -111,7 +111,9 @@ helpers within its own step, with a per-node lock available to forbid it.
 ```
 Agent    { id, name, role, spawn{cmd,args,env,cwd}, model, budget, status }
 Edge     { from, to, layer: configured|observed, kind: sequence|dispatch|ask|handoff, ts }
-RunEvent { id, sessionId, agentId, seq, ts, kind: text|tool_call|result }
+RunEvent { id, sessionId, agentId, seq, ts, kind: message|thought|tool_call|tool_update|
+                                                   plan|permission|session_meta|usage|
+                                                   turn_end|process }
 ```
 
 ---

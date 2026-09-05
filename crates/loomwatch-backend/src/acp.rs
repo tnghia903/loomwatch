@@ -38,6 +38,10 @@ pub struct AcpProcess {
     stderr: JoinHandle<std::io::Result<String>>,
     next_request_id: u64,
     cwd: PathBuf,
+    has_run: bool,
+    /// Set as soon as `session/new` responds, so a mid-turn failure can still
+    /// mark and recover the partial session.
+    session_id: Option<String>,
 }
 
 impl AcpProcess {
@@ -83,6 +87,8 @@ impl AcpProcess {
             stderr,
             next_request_id: 1,
             cwd: spec.cwd.clone(),
+            has_run: false,
+            session_id: None,
         })
     }
 
@@ -99,11 +105,56 @@ impl AcpProcess {
         archive: &EventArchive,
         exit_timeout: Duration,
     ) -> Result<SessionOutcome> {
+        if self.has_run {
+            bail!("this ACP process has already run a session");
+        }
+        self.has_run = true;
         let process_id = self.child.id().context("ACP child has no process id")?;
         let execution = self
             .run_session_inner(agent_id, model, prompt, archive, process_id)
             .await;
         let exit = self.shutdown(exit_timeout).await;
+        let failure_session_id = match &execution {
+            Ok((session_id, _)) => Some(session_id.clone()),
+            Err(_) => self.session_id.clone(),
+        };
+
+        // A protocol or shutdown failure still needs a terminal marker and a recoverable session,
+        // otherwise the partial run sits in SQLite with no `crashed` marker and `show` has no
+        // session ID to look it up by.
+        if (execution.is_err() || exit.is_err())
+            && let Some(session_id) = failure_session_id.as_deref()
+        {
+            let seq = archive
+                .load_session(session_id)
+                .with_context(|| format!("failed to recover partial ACP session {session_id}"))?
+                .len() as u64;
+            let exit_code = exit.as_ref().map_or(-1, |report| report.code);
+            let mut failures = Vec::new();
+            if let Err(error) = &execution {
+                failures.push(format!("session execution failed: {error:#}"));
+            }
+            match &exit {
+                Ok(report) if !report.stderr.is_empty() => {
+                    failures.push(format!("stderr: {}", report.stderr));
+                }
+                Err(error) => failures.push(format!("shutdown failed: {error:#}")),
+                Ok(_) => {}
+            }
+            append_archive_event(
+                archive,
+                session_id,
+                agent_id,
+                seq,
+                EventKind::Process,
+                json!({
+                    "phase": "crashed",
+                    "exitCode": exit_code,
+                    "message": failures.join("; ")
+                }),
+                None,
+            )?;
+        }
 
         match (execution, exit) {
             (Ok((session_id, event_count)), Ok(exit)) => {
@@ -123,7 +174,7 @@ impl AcpProcess {
                 let events = archive.verify_session(&session_id)?;
                 if !exit.success {
                     bail!(
-                        "ACP child exited with code {}; stderr: {}",
+                        "ACP session {session_id} child exited with code {}; stderr: {}",
                         exit.code,
                         exit.stderr
                     );
@@ -134,35 +185,43 @@ impl AcpProcess {
                     exit_code: exit.code,
                 })
             }
-            (Err(error), Ok(_)) | (Ok(_), Err(error)) => Err(error),
-            (Err(protocol), Err(shutdown)) => Err(protocol.context(format!(
-                "the ACP child also failed during shutdown: {shutdown:#}"
-            ))),
+            (Err(error), Ok(_)) | (Ok(_), Err(error)) => {
+                Err(with_recovery_context(error, failure_session_id.as_deref()))
+            }
+            (Err(protocol), Err(shutdown)) => Err(with_recovery_context(
+                protocol.context(format!(
+                    "the ACP child also failed during shutdown: {shutdown:#}"
+                )),
+                failure_session_id.as_deref(),
+            )),
         }
     }
 
-    async fn run_session_inner(
+    /// Run the `initialize` / `session/new` / `session/set_config_option` handshake and
+    /// archive each negotiated response as `session_meta`, so the archive can later say which
+    /// model and capabilities actually produced a transcript.
+    async fn negotiate_session<'a>(
         &mut self,
-        agent_id: &str,
+        agent_id: &'a str,
         model: &str,
-        prompt: &str,
-        archive: &EventArchive,
+        archive: &'a EventArchive,
         process_id: u32,
-    ) -> Result<(String, usize)> {
-        self.request(
-            "initialize",
-            json!({
-                "protocolVersion": 1,
-                "clientCapabilities": {
-                    "fs": {"readTextFile": false, "writeTextFile": false},
-                    "terminal": false
-                },
-                "clientInfo": {"name": "loomwatch", "version": env!("CARGO_PKG_VERSION")}
-            }),
-            |_| Ok(()),
-        )
-        .await
-        .context("ACP initialize failed")?;
+    ) -> Result<Recorder<'a>> {
+        let initialized = self
+            .request(
+                "initialize",
+                json!({
+                    "protocolVersion": 1,
+                    "clientCapabilities": {
+                        "fs": {"readTextFile": false, "writeTextFile": false},
+                        "terminal": false
+                    },
+                    "clientInfo": {"name": "loomwatch", "version": env!("CARGO_PKG_VERSION")}
+                }),
+                |_| Ok(()),
+            )
+            .await
+            .context("ACP initialize failed")?;
 
         let cwd = self.cwd.to_string_lossy().into_owned();
         let created = self
@@ -177,19 +236,56 @@ impl AcpProcess {
             .and_then(Value::as_str)
             .context("ACP session/new response omitted sessionId")?
             .to_owned();
-        let mut recorder = Recorder::new(archive, &session_id, agent_id);
+        self.session_id = Some(session_id.clone());
+        let mut recorder = Recorder::new(archive, session_id.clone(), agent_id);
         recorder.append(
             EventKind::Process,
             json!({"phase": "spawned", "pid": process_id}),
             None,
         )?;
-        self.request(
-            "session/set_config_option",
-            json!({"sessionId": session_id, "configId": "model", "value": model}),
-            |message| recorder.record_frame(message),
-        )
-        .await
-        .with_context(|| format!("ACP harness rejected configured model {model:?}"))?;
+        recorder.append(
+            EventKind::SessionMeta,
+            json!({"phase": "initialize", "result": initialized.result}),
+            Some(initialized.response),
+        )?;
+        recorder.append(
+            EventKind::SessionMeta,
+            json!({"phase": "session_new", "result": created.result}),
+            Some(created.response),
+        )?;
+        let config_response = self
+            .request(
+                "session/set_config_option",
+                json!({"sessionId": session_id, "configId": "model", "value": model}),
+                |message| recorder.record_frame(message),
+            )
+            .await
+            .with_context(|| format!("ACP harness rejected configured model {model:?}"))?;
+        recorder.append(
+            EventKind::SessionMeta,
+            json!({
+                "phase": "set_config_option",
+                "configId": "model",
+                "value": model,
+                "result": config_response.result
+            }),
+            Some(config_response.response),
+        )?;
+        Ok(recorder)
+    }
+
+    async fn run_session_inner(
+        &mut self,
+        agent_id: &str,
+        model: &str,
+        prompt: &str,
+        archive: &EventArchive,
+        process_id: u32,
+    ) -> Result<(String, usize)> {
+        let mut recorder = self
+            .negotiate_session(agent_id, model, archive, process_id)
+            .await?;
+        let session_id = recorder.session_id.clone();
 
         recorder.append(
             EventKind::Message,
@@ -284,34 +380,11 @@ impl AcpProcess {
             }
 
             if message.get("method").is_some() && message.get("id").is_some() {
-                self.answer_client_request(&message).await?;
+                let response = build_client_response(&message)?;
+                observe(&response)?;
+                self.send(&response).await?;
             }
         }
-    }
-
-    async fn answer_client_request(&mut self, request: &Value) -> Result<()> {
-        let id = request
-            .get("id")
-            .cloned()
-            .context("client request omitted id")?;
-        let method = request
-            .get("method")
-            .and_then(Value::as_str)
-            .context("client request omitted method")?;
-        let response = if method == "session/request_permission" {
-            json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {"outcome": {"outcome": "cancelled"}}
-            })
-        } else {
-            json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": {"code": -32601, "message": format!("unsupported client method {method}")}
-            })
-        };
-        self.send(&response).await
     }
 
     async fn send(&mut self, message: &Value) -> Result<()> {
@@ -355,15 +428,68 @@ struct ExitReport {
     stderr: String,
 }
 
+fn with_recovery_context(error: anyhow::Error, session_id: Option<&str>) -> anyhow::Error {
+    match session_id {
+        Some(session_id) => error.context(format!(
+            "partial ACP session is recoverable with session_id={session_id}"
+        )),
+        None => error,
+    }
+}
+
+/// Build `LoomWatch`'s reply to an agent-initiated client request.
+///
+/// For `session/request_permission`, ACP's `cancelled` outcome tells the agent the whole
+/// prompt turn was cancelled, which is wrong for an observer merely declining one tool call.
+/// Prefer an advertised `reject_once` option so the agent denies that call and keeps going,
+/// falling back to `cancelled` only when the harness offered no such option.
+fn build_client_response(request: &Value) -> Result<Value> {
+    let id = request
+        .get("id")
+        .cloned()
+        .context("client request omitted id")?;
+    let method = request
+        .get("method")
+        .and_then(Value::as_str)
+        .context("client request omitted method")?;
+    let response = if method == "session/request_permission" {
+        let reject_once = request
+            .pointer("/params/options")
+            .and_then(Value::as_array)
+            .and_then(|options| {
+                options.iter().find(|option| {
+                    option.get("kind").and_then(Value::as_str) == Some("reject_once")
+                })
+            })
+            .and_then(|option| option.get("optionId").cloned());
+        let outcome = match reject_once {
+            Some(option_id) => json!({"outcome": "selected", "optionId": option_id}),
+            None => json!({"outcome": "cancelled"}),
+        };
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {"outcome": outcome}
+        })
+    } else {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {"code": -32601, "message": format!("unsupported client method {method}")}
+        })
+    };
+    Ok(response)
+}
+
 struct Recorder<'a> {
     archive: &'a EventArchive,
-    session_id: &'a str,
+    session_id: String,
     agent_id: &'a str,
     next_seq: u64,
 }
 
 impl<'a> Recorder<'a> {
-    const fn new(archive: &'a EventArchive, session_id: &'a str, agent_id: &'a str) -> Self {
+    fn new(archive: &'a EventArchive, session_id: String, agent_id: &'a str) -> Self {
         Self {
             archive,
             session_id,
@@ -378,8 +504,20 @@ impl<'a> Recorder<'a> {
             return self.append(EventKind::Permission, payload, Some(message.clone()));
         }
 
+        // LoomWatch's own reply to a session/request_permission: no "method", carries the
+        // RequestPermissionOutcome we chose. Archive it so the archive shows what was decided,
+        // not just what was asked.
+        if message.get("method").is_none()
+            && message.get("id").is_some()
+            && message.pointer("/result/outcome").is_some()
+        {
+            let payload = message.get("result").cloned().unwrap_or_else(|| json!({}));
+            return self.append(EventKind::Permission, payload, Some(message.clone()));
+        }
+
         if message.get("method").and_then(Value::as_str) != Some("session/update")
-            || message.pointer("/params/sessionId").and_then(Value::as_str) != Some(self.session_id)
+            || message.pointer("/params/sessionId").and_then(Value::as_str)
+                != Some(self.session_id.as_str())
         {
             return Ok(());
         }
@@ -425,7 +563,7 @@ impl<'a> Recorder<'a> {
     fn append(&mut self, kind: EventKind, payload: Value, raw: Option<Value>) -> Result<()> {
         append_archive_event(
             self.archive,
-            self.session_id,
+            &self.session_id,
             self.agent_id,
             self.next_seq,
             kind,
@@ -504,7 +642,7 @@ mod tests {
     fn maps_real_acp_updates_without_losing_the_raw_payload() {
         let temp = tempdir().expect("tempdir");
         let archive = EventArchive::open(&temp.path().join("events.sqlite3")).expect("archive");
-        let mut recorder = Recorder::new(&archive, "session", "agent");
+        let mut recorder = Recorder::new(&archive, "session".to_owned(), "agent");
         recorder
             .record_frame(&json!({
                 "jsonrpc": "2.0",
@@ -563,9 +701,15 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"agent_message_chunk","messageId":"message-1","content":{"type":"text","text":"done"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"agent_thought_chunk","messageId":"thought-1","content":{"type":"text","text":"thinking"}}}}'
             printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"inspect","kind":"read","status":"pending"}}}'
             printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"in_progress"}}}'
             printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed","rawOutput":{"ok":true}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":"permission-1","method":"session/request_permission","params":{"sessionId":"session-1","toolCall":{"toolCallId":"call-1"},"options":[{"optionId":"deny-once","name":"Deny","kind":"reject_once"}]}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"plan","entries":[]}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"current_mode_update","currentModeId":"build"}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"usage_update","used":10,"size":100}}}'
             printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
@@ -597,12 +741,128 @@ mod tests {
             .verify_session(&outcome.session_id)
             .expect("recover session");
         assert_eq!(outcome.exit_code, 0);
-        assert_eq!(outcome.event_count, 8);
-        assert_eq!(events.len(), 8);
+        assert_eq!(outcome.event_count, 17);
+        assert_eq!(events.len(), 17);
         assert_eq!(events.first().unwrap().kind, EventKind::Process);
-        assert_eq!(events[4].payload["status"], "in_progress");
-        assert_eq!(events[6].kind, EventKind::TurnEnd);
         assert_eq!(events.last().unwrap().payload["phase"], "exited");
+        let kinds: Vec<EventKind> = events.iter().map(|event| event.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                EventKind::Process,     // spawned
+                EventKind::SessionMeta, // initialize
+                EventKind::SessionMeta, // session/new
+                EventKind::SessionMeta, // session/set_config_option
+                EventKind::Message,     // queued user prompt
+                EventKind::Message,     // agent_message_chunk
+                EventKind::Thought,     // agent_thought_chunk
+                EventKind::ToolCall,
+                EventKind::ToolUpdate, // in_progress
+                EventKind::ToolUpdate, // completed
+                EventKind::Permission, // request
+                EventKind::Permission, // our response
+                EventKind::Plan,
+                EventKind::SessionMeta, // current_mode_update
+                EventKind::Usage,
+                EventKind::TurnEnd,
+                EventKind::Process, // exited
+            ]
+        );
+        assert_eq!(
+            events[10].payload["options"][0]["kind"], "reject_once",
+            "harness offered a reject_once option"
+        );
+        assert_eq!(
+            events[11].payload["outcome"]["outcome"], "selected",
+            "an advertised reject_once option must be selected instead of cancelling the turn"
+        );
+        assert_eq!(events[11].payload["outcome"]["optionId"], "deny-once");
+        assert_eq!(events[1].payload["phase"], "initialize");
+        assert_eq!(events[2].payload["phase"], "session_new");
+        assert_eq!(events[3].payload["phase"], "set_config_option");
+
+        assert_events_match_schema(&events);
+    }
+
+    /// Validate every generated event against the frozen `RunEvent` contract in
+    /// `schemas/team.schema.yaml`.
+    fn assert_events_match_schema(events: &[RunEvent]) {
+        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let schema_source = std::fs::read_to_string(workspace.join("schemas/team.schema.yaml"))
+            .expect("read schema");
+        let schema: Value = serde_yaml::from_str(&schema_source).expect("parse schema");
+        let event_schema = json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": schema["$defs"].clone(),
+            "$ref": "#/$defs/RunEvent"
+        });
+        let validator = jsonschema::draft202012::new(&event_schema).expect("compile schema");
+        for event in events {
+            let value = serde_json::to_value(event).expect("serialize event");
+            let errors: Vec<String> = validator
+                .iter_errors(&value)
+                .map(|error| error.to_string())
+                .collect();
+            assert!(
+                errors.is_empty(),
+                "generated event failed schema validation: {errors:?}\n{value}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn mid_turn_failure_is_marked_and_returns_the_recoverable_session_id() {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"partial-session"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
+            IFS= read -r _
+            printf '%s\n' 'not-json'
+            exit 7
+        "#;
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: std::env::current_dir().expect("cwd"),
+        };
+        let temp = tempdir().expect("tempdir");
+        let archive = EventArchive::open(&temp.path().join("events.sqlite3")).expect("archive");
+        let mut process = AcpProcess::spawn(&spec).expect("spawn");
+
+        let error = process
+            .run_session(
+                "agent",
+                "test/model",
+                "hello",
+                &archive,
+                Duration::from_secs(2),
+            )
+            .await
+            .expect_err("invalid JSON must fail the turn");
+        let error = format!("{error:#}");
+        assert!(
+            error.contains("session_id=partial-session"),
+            "failure must identify the recoverable session: {error}"
+        );
+
+        let events = archive
+            .verify_session("partial-session")
+            .expect("recover partial session");
+        assert_eq!(events.len(), 6);
+        assert_eq!(events.last().unwrap().kind, EventKind::Process);
+        assert_eq!(events.last().unwrap().payload["phase"], "crashed");
+        assert_eq!(events.last().unwrap().payload["exitCode"], 7);
+        assert!(
+            events.last().unwrap().payload["message"]
+                .as_str()
+                .unwrap()
+                .contains("invalid JSON")
+        );
     }
 
     #[tokio::test]
@@ -629,5 +889,65 @@ mod tests {
         .await
         .expect("supervisor hung");
         assert!(result.is_err());
+
+        let second = process
+            .run_session(
+                "agent",
+                "test/model",
+                "hello again",
+                &archive,
+                Duration::from_secs(1),
+            )
+            .await
+            .expect_err("a process cannot run a second session");
+        assert_eq!(
+            second.to_string(),
+            "this ACP process has already run a session"
+        );
+    }
+
+    #[tokio::test]
+    async fn mid_turn_failure_still_marks_and_recovers_the_partial_session() {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"error":{"code":-32000,"message":"model rejected"}}'
+        "#;
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: std::env::current_dir().expect("cwd"),
+        };
+        let temp = tempdir().expect("tempdir");
+        let archive = EventArchive::open(&temp.path().join("events.sqlite3")).expect("archive");
+        let mut process = AcpProcess::spawn(&spec).expect("spawn");
+        let result = process
+            .run_session(
+                "agent",
+                "test/model",
+                "hello",
+                &archive,
+                Duration::from_secs(2),
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "a rejected session/set_config_option must fail the session"
+        );
+
+        let events = archive
+            .verify_session("session-1")
+            .expect("the partial session must still be reachable via show");
+        assert_eq!(
+            events.last().unwrap().kind,
+            EventKind::Process,
+            "a mid-turn failure must still write a terminal process event"
+        );
+        assert_eq!(events.last().unwrap().payload["phase"], "crashed");
     }
 }

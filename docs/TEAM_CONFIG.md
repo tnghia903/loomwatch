@@ -48,8 +48,8 @@ depend on the document as a whole:
 - Run-event IDs are unique. `RunEvent.agentId` names an agent in the team document. `seq`
   is strictly increasing per session across all agents and is the sole replay order;
   timestamps are descriptive and do not replace sequence order.
-- A `result` event's `callId` matches a prior `tool_call` in the same session, and the
-  result's `seq` is greater than the tool call's `seq`.
+- A `tool_update` event's `callId` matches a prior `tool_call` in the same session, and the
+  update's `seq` is greater than the tool call's `seq`.
 
 Paths in `spawn.cwd` may be absolute or relative. A relative path is resolved against the
 directory containing the team file. `spawn.cmd` must be either a bare executable name

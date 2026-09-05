@@ -19,9 +19,17 @@ process's standard input and output:
 
 Standard error is drained concurrently so a chatty harness cannot deadlock. If the child
 exits early, returns a JSON-RPC error, or fails to exit after stdin closes, the supervisor
-returns a contextual error; a hung child is killed and reaped. SQLite is switched to WAL
-mode before the event table is created. The `show` command opens the database independently
-and replays a session by its strictly increasing sequence number.
+returns a contextual error; once `session/new` has succeeded, that error includes the session
+identifier and the archive ends with a `process: crashed` marker so the partial run remains
+recoverable. A hung child is killed and reaped. SQLite is switched to WAL mode before the
+event table is created. The `show` command opens the database independently and replays a
+session by its strictly increasing sequence number.
+
+The `initialize`, `session/new`, and `session/set_config_option` responses are archived as
+`session_meta` events, including the applied model and the harness's complete negotiated state.
+When a harness requests permission, LoomWatch chooses an advertised `reject_once` option so it
+can decline the individual tool call without cancelling the turn; both the request and the
+client response are archived as `permission` events.
 
 ACP emits more than the original Phase-01 `text | tool_call | result` sketch could retain:
 thoughts, incremental tool updates, plans, permissions, usage, session metadata, and turn
