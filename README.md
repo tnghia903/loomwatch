@@ -44,8 +44,10 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full specification.
 
 ## Status
 
-Phase 01 scaffold. The Rust workspace and versioned team-configuration contract are in
-place; protocol and process-supervision work begins in Phase 02.
+Phase 02 ACP spine. The Rust backend can run one entrypoint agent through a real ACP
+harness, supervise its process lifetime, archive the normalized session in SQLite WAL
+mode, and recover the ordered trace after exit. See
+[docs/ACP_SPINE.md](docs/ACP_SPINE.md) for the protocol sequence and smoke test.
 
 ## Repository layout
 

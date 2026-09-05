@@ -57,7 +57,7 @@ $defs:
     pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
 
   OpaqueId:
-    description: Identifier minted by an upstream harness; stored verbatim, never parsed.
+    description: Opaque identifier stored verbatim and never parsed.
     type: string
     minLength: 1
     maxLength: 512
@@ -235,38 +235,73 @@ $defs:
       - payload
     properties:
       id:
+        description: >-
+          Event identifier minted by LoomWatch. ACP session/update notifications do not
+          carry event IDs of their own.
         $ref: "#/$defs/OpaqueId"
       sessionId:
+        description: ACP session ID minted by the harness.
         $ref: "#/$defs/OpaqueId"
       agentId:
         $ref: "#/$defs/Identifier"
       seq:
+        description: Dense per-session replay counter assigned on receipt, starting at zero.
         type: integer
         minimum: 0
       ts:
+        description: >-
+          RFC 3339 client-receipt time. ACP carries no agent-side timestamp, so this is
+          when LoomWatch observed the event.
         type: string
         format: date-time
         pattern: "^\\d{4}-\\d{2}-\\d{2}[Tt]\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?([Zz]|[+-]\\d{2}:\\d{2})$"
       kind:
+        description: Normalized routing hint; raw preserves the complete ACP frame.
         type: string
         enum:
-          - text
+          - message
+          - thought
           - tool_call
-          - result
+          - tool_update
+          - plan
+          - permission
+          - session_meta
+          - usage
+          - turn_end
+          - process
       payload:
-        description: Kind-specific event content preserved losslessly by the archive.
+        description: Kind-specific projection for indexing and rendering.
+        type: object
+      raw:
+        description: >-
+          Originating JSON-RPC frame preserved verbatim. Required for ACP-sourced events
+          and omitted only for LoomWatch-local process events.
         type: object
     allOf:
       - if:
           properties:
             kind:
-              const: text
+              const: message
           required:
             - kind
         then:
           properties:
             payload:
-              $ref: "#/$defs/TextPayload"
+              $ref: "#/$defs/MessagePayload"
+          required:
+            - raw
+      - if:
+          properties:
+            kind:
+              const: thought
+          required:
+            - kind
+        then:
+          properties:
+            payload:
+              $ref: "#/$defs/MessagePayload"
+          required:
+            - raw
       - if:
           properties:
             kind:
@@ -277,52 +312,196 @@ $defs:
           properties:
             payload:
               $ref: "#/$defs/ToolCallPayload"
+          required:
+            - raw
       - if:
           properties:
             kind:
-              const: result
+              const: tool_update
           required:
             - kind
         then:
           properties:
             payload:
-              $ref: "#/$defs/ResultPayload"
+              $ref: "#/$defs/ToolUpdatePayload"
+          required:
+            - raw
+      - if:
+          properties:
+            kind:
+              const: turn_end
+          required:
+            - kind
+        then:
+          properties:
+            payload:
+              $ref: "#/$defs/TurnEndPayload"
+          required:
+            - raw
+      - if:
+          properties:
+            kind:
+              const: process
+          required:
+            - kind
+        then:
+          properties:
+            payload:
+              $ref: "#/$defs/ProcessPayload"
+        else:
+          required:
+            - raw
 
-  TextPayload:
+  MessagePayload:
     type: object
     additionalProperties: false
     required:
-      - text
+      - role
+      - content
     properties:
-      text:
+      role:
+        description: Origin of this content chunk in the normalized transcript.
         type: string
+        enum:
+          - user
+          - agent
+          - thought
+      messageId:
+        description: ACP message identifier shared by chunks in one message.
+        anyOf:
+          - $ref: "#/$defs/OpaqueId"
+          - type: "null"
+      content:
+        description: ACP ContentBlock preserved as structured JSON.
+        type: object
 
   ToolCallPayload:
     type: object
     additionalProperties: false
     required:
       - callId
-      - name
-      - arguments
+      - title
     properties:
       callId:
         $ref: "#/$defs/OpaqueId"
-      name:
+      title:
         type: string
-        minLength: 1
-      arguments:
-        type: object
+      name:
+        type:
+          - string
+          - "null"
+      toolKind:
+        $ref: "#/$defs/ToolCallKind"
+      status:
+        $ref: "#/$defs/ToolCallStatus"
+      rawInput: {}
+      rawOutput: {}
+      content:
+        type: array
+        items:
+          type: object
+      locations:
+        type: array
+        items:
+          type: object
 
-  ResultPayload:
+  ToolUpdatePayload:
     type: object
     additionalProperties: false
     required:
       - callId
-      - content
-      - isError
     properties:
       callId:
         $ref: "#/$defs/OpaqueId"
-      content: {}
-      isError:
-        type: boolean
+      title:
+        type:
+          - string
+          - "null"
+      name:
+        type:
+          - string
+          - "null"
+      toolKind:
+        $ref: "#/$defs/ToolCallKind"
+      status:
+        $ref: "#/$defs/ToolCallStatus"
+      rawInput: {}
+      rawOutput: {}
+      content:
+        type:
+          - array
+          - "null"
+        items:
+          type: object
+      locations:
+        type:
+          - array
+          - "null"
+        items:
+          type: object
+
+  ToolCallKind:
+    type: string
+    enum:
+      - read
+      - edit
+      - delete
+      - move
+      - search
+      - execute
+      - think
+      - fetch
+      - switch_mode
+      - other
+
+  ToolCallStatus:
+    type: string
+    enum:
+      - pending
+      - in_progress
+      - completed
+      - failed
+
+  TurnEndPayload:
+    type: object
+    additionalProperties: false
+    required:
+      - stopReason
+    properties:
+      stopReason:
+        type: string
+        enum:
+          - end_turn
+          - max_tokens
+          - max_turn_requests
+          - refusal
+          - cancelled
+      usage:
+        type: object
+
+  ProcessPayload:
+    type: object
+    additionalProperties: false
+    required:
+      - phase
+    properties:
+      phase:
+        type: string
+        enum:
+          - spawned
+          - exited
+          - crashed
+          - stderr
+      pid:
+        type: integer
+        minimum: 0
+      exitCode:
+        type:
+          - integer
+          - "null"
+      signal:
+        type:
+          - string
+          - "null"
+      message:
+        type: string

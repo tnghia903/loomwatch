@@ -65,6 +65,10 @@ Schema-aware consumers can validate runtime values directly with these reference
 - `schemas/team.schema.yaml#/$defs/Edge`
 - `schemas/team.schema.yaml#/$defs/RunEvent`
 
-The `RunEvent.payload` shape is selected by `kind`: text events contain `text`, tool calls
-contain `callId`, `name`, and object-valued `arguments`, and results contain `callId`,
-lossless `content`, and `isError`.
+The `RunEvent.payload` shape is selected by `kind`. Message and thought events retain a
+role, optional upstream message ID, and structured ACP content block. Tool calls and tool
+updates project the call ID, title, kind, status, input/output, content, and locations when
+present. Plan, permission, session-metadata, usage, turn-end, and process events cover the
+rest of the ACP and supervisor lifecycle. Every harness-originated event also stores the
+complete JSON-RPC frame in top-level `raw`, because ACP presentation and status metadata
+cannot be reconstructed safely from the normalized projection.

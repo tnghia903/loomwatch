@@ -1,7 +1,70 @@
-//! `LoomWatch` backend entry point.
-//!
-//! Process supervision and protocol handling are introduced in Phase 02.
+//! `LoomWatch` Phase-02 command-line backend.
 
 #![forbid(unsafe_code)]
 
-fn main() {}
+use std::path::PathBuf;
+use std::time::Duration;
+
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+use loomwatch_backend::archive::EventArchive;
+
+#[derive(Debug, Parser)]
+#[command(version, about)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    /// Run one turn through the configured entrypoint ACP harness.
+    Run {
+        #[arg(long)]
+        team: PathBuf,
+        #[arg(long)]
+        database: PathBuf,
+        #[arg(long)]
+        prompt: String,
+        #[arg(long, default_value_t = 10)]
+        exit_timeout_seconds: u64,
+    },
+    /// Recover one archived session as ordered JSON lines.
+    Show {
+        #[arg(long)]
+        database: PathBuf,
+        #[arg(long)]
+        session: String,
+    },
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    match Cli::parse().command {
+        Commands::Run {
+            team,
+            database,
+            prompt,
+            exit_timeout_seconds,
+        } => {
+            let outcome = loomwatch_backend::run_team_session(
+                &team,
+                &database,
+                &prompt,
+                Duration::from_secs(exit_timeout_seconds),
+            )
+            .await?;
+            println!(
+                "session={} events={} exit_code={}",
+                outcome.session_id, outcome.event_count, outcome.exit_code
+            );
+        }
+        Commands::Show { database, session } => {
+            let archive = EventArchive::open(&database)?;
+            for event in archive.verify_session(&session)? {
+                println!("{}", serde_json::to_string(&event)?);
+            }
+        }
+    }
+    Ok(())
+}
