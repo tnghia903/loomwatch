@@ -35,5 +35,5 @@ host-installed Rust toolchain.
 - ARCHITECTURE.md §2, README.md, and docs/TEAM_CONFIG.md are updated under TNG-31 to
   describe Postgres rather than SQLite.
 - Implementation vehicle chosen by the Rust Systems Engineer in TNG-31: `sqlx`
-  (postgres + runtime-tokio features) — the natural fit given the crate already
-  depends on tokio.
+  (postgres + tokio runtime, with `migrate` for the versioned migrations) — the natural
+  fit given the crate already depends on tokio.
