@@ -25,6 +25,17 @@ depend on the document as a whole:
   configured edges with the same `from` and `to` are rejected.
 - Configured edges form a directed acyclic graph. Every configured edge has
   `layer: configured` and `kind: sequence`.
+- Pipeline dataflow follows the configured edges, not just the linearized run order: each
+  non-entrypoint node's prompt is built from the replies of its own configured predecessors,
+  looked up by `to`/`from`, not from whichever node happens to run immediately before it in
+  `pipeline_order()`. A node with exactly one configured predecessor receives that
+  predecessor's reply verbatim (so every linear chain, including
+  [`examples/research-team.yaml`](../examples/research-team.yaml), is unaffected). A node
+  with more than one configured predecessor β€” a join in the DAG, e.g. a diamond `a→b`,
+  `a→c`, `b→d`, `c→d` β€” receives every predecessor's reply, each labeled with its agent ID
+  and concatenated in the order those edges are declared in the team file, so a branch is
+  never silently dropped. Only the entrypoint (`pipeline_order()`'s first node) receives the
+  run's original prompt.
 - Every edge and run-event `ts` must parse as RFC 3339 or the loader rejects it. The schema
   `format` keyword is an annotation in Draft 2020-12 and must not be relied on for this;
   the companion `pattern` constrains shape only, so the loader still range-checks the
@@ -35,21 +46,30 @@ depend on the document as a whole:
   applied on top as literal overrides; LoomWatch performs no shell expansion, and team
   files must not contain credentials. An override of `PATH` changes resolution of a bare
   `spawn.cmd`, so an untrusted team file must be treated with the same care as a script.
-- Each `budget.limitUsd` is a hard per-run ceiling and must be finite. A zero agent limit
-  disables paid execution for that agent. When present, the team budget is enforced
-  independently of agent budgets; a run halts on whichever ceiling is reached first, and
-  the team limit need not equal or exceed the sum of agent limits. Loaders apply
-  `warnAtPercent: 80` whenever it is absent; schema defaults are annotations only.
+- Each `budget.limitUsd` is a pre-delegation admission threshold and must be finite. A zero
+  agent limit prevents that agent from being admitted through `dispatch`, `ask`, or
+  `handoff`. When present, the team threshold is checked independently of agent thresholds,
+  and need not equal or exceed their sum. These checks do not stop the entrypoint or an
+  in-flight turn, so observed spend may exceed a threshold. Loaders apply `warnAtPercent:
+  80` whenever it is absent; schema defaults are annotations only.
 - The Team Bus accounts non-negative finite `costUsd` values from normalized `usage` events
   and from `turn_end.payload.usage`. These values are spend deltas supplied by the ACP
-  harness. Before `dispatch`, `ask`, or `handoff` starts another process, the bus checks the
-  target agent and team totals, archives one `usage` warning per scope after its threshold,
-  and archives a failed `tool_update` when it refuses the delegation.
-- `guards.maxDispatchDepth` defaults to `8` when absent. The Team Bus refuses dispatches
-  beyond that depth. Delegation lineage is carried in server-owned bearer-token state, so
-  callers cannot forge the counter or erase an ancestor to bypass cycle detection.
-  `Agent.allowRecruiting` defaults to `true`; `false` forbids that agent from recruiting
-  helpers within its own pipeline step.
+  harness; the bus does not infer whether a reported value is cumulative, so harnesses must
+  normalize cumulative provider totals into deltas. Before `dispatch`, `ask`, or `handoff`
+  starts another process, the bus checks the target agent and team totals, archives one
+  `usage` warning per scope after its threshold, and archives a failed `tool_update` when it
+  refuses the delegation.
+- `guards.maxDispatchDepth` and `guards.maxConcurrentDispatches` both default to `8` when
+  absent. The Team Bus refuses delegation beyond the depth limit and refuses a background
+  `dispatch` or `handoff` while the configured number of those tasks is still running.
+  Delegation lineage and concurrency permits are server-owned, so callers cannot forge the
+  counter, erase an ancestor to bypass cycle detection, or race past the fan-out cap.
+  Synchronous `ask` calls do not consume a background-dispatch permit. `Agent.allowRecruiting`
+  defaults to `true`; `false` forbids that agent from recruiting helpers within its own
+  pipeline step.
+- `handoff` starts the target as a background task and marks the caller's roster status as
+  `stopped`, but it cannot cancel the caller's current ACP turn. The caller must return after
+  a successful handoff; provider spend can continue until that turn exits.
 - `status` is a runtime annotation. Team-file writers must not persist it, and team-file
   readers must ignore it if an older or external document contains it.
 - Run-event IDs are unique. `RunEvent.agentId` names an agent in the team document. `seq`

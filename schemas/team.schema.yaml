@@ -23,7 +23,7 @@ properties:
     type: string
     minLength: 1
   budget:
-    description: Team-wide ceiling for one run, enforced in addition to agent budgets.
+    description: Team-wide pre-delegation admission budget, checked in addition to agent budgets.
     $ref: "#/$defs/Budget"
   guards:
     description: Server-enforced limits for delegation through the Team Bus.
@@ -101,7 +101,7 @@ $defs:
       - limitUsd
     properties:
       limitUsd:
-        description: Hard maximum estimated spend in US dollars for one run.
+        description: Spend threshold used to refuse new Team Bus delegations.
         type: number
         minimum: 0
       warnAtPercent:
@@ -117,6 +117,11 @@ $defs:
     properties:
       maxDispatchDepth:
         description: Maximum Team Bus dispatch depth before further dispatches are refused.
+        type: integer
+        minimum: 0
+        default: 8
+      maxConcurrentDispatches:
+        description: Maximum background dispatch and handoff tasks admitted at one time.
         type: integer
         minimum: 0
         default: 8

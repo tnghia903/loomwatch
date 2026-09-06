@@ -106,10 +106,12 @@ loomwatchd run \
 ```
 
 Hermes uses credentials and the provider/model from its local configuration. Confirm those
-settings and their pricing before running this smoke test: the team-file budget is descriptive
-at this phase and does not prevent provider spend. The example explicitly disables the
-environment-variable hook and YOLO bypasses, but LoomWatch is still an observer rather than a
-sandbox. Inspect the two archived `permission` events with `loomwatchd show`, and verify that
-the probe file was not created. Hermes 0.21 advertises models through ACP's typed `models`
-state rather than a `model` config option, so the archived `session_new` event is authoritative
-for the model actually used; LoomWatch records its team-file model setting as skipped.
+settings and their pricing before running this smoke test. Team-file budgets are enforced as
+pre-delegation admission thresholds for Team Bus `dispatch`, `ask`, and `handoff`; they do not
+stop the entrypoint or an in-flight ACP turn, so they are not hard provider-spend ceilings. The
+example explicitly disables the environment-variable hook and YOLO bypasses, but LoomWatch is
+still an observer rather than a sandbox. Inspect the two archived `permission` events with
+`loomwatchd show`, and verify that the probe file was not created. Hermes 0.21 advertises models
+through ACP's typed `models` state rather than a `model` config option, so the archived
+`session_new` event is authoritative for the model actually used; LoomWatch records its
+team-file model setting as skipped.

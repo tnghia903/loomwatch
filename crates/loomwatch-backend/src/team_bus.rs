@@ -15,7 +15,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, RwLock, oneshot};
+use tokio::sync::{Mutex, RwLock, Semaphore, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -54,6 +54,7 @@ struct TeamBusState {
     tokens: RwLock<BTreeMap<String, AgentSession>>,
     statuses: RwLock<BTreeMap<String, String>>,
     budget_warnings: Mutex<BTreeSet<String>>,
+    dispatch_slots: Arc<Semaphore>,
     tasks: Mutex<Vec<JoinHandle<Result<()>>>>,
     shutdown: Mutex<Option<oneshot::Sender<()>>>,
     server: Mutex<Option<JoinHandle<std::io::Result<()>>>>,
@@ -96,6 +97,15 @@ impl TeamBus {
             .iter()
             .map(|agent| (agent.id.clone(), "idle".to_owned()))
             .collect();
+        let dispatch_limit = usize::try_from(team.guards.max_concurrent_dispatches)
+            .context("guards.maxConcurrentDispatches does not fit this platform")?;
+        if dispatch_limit > Semaphore::MAX_PERMITS {
+            bail!(
+                "guards.maxConcurrentDispatches {} exceeds the server limit {}",
+                team.guards.max_concurrent_dispatches,
+                Semaphore::MAX_PERMITS
+            );
+        }
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let state = Arc::new(TeamBusState {
             team,
@@ -107,6 +117,7 @@ impl TeamBus {
             tokens: RwLock::new(BTreeMap::new()),
             statuses: RwLock::new(statuses),
             budget_warnings: Mutex::new(BTreeSet::new()),
+            dispatch_slots: Arc::new(Semaphore::new(dispatch_limit)),
             tasks: Mutex::new(Vec::new()),
             shutdown: Mutex::new(Some(shutdown_tx)),
             server: Mutex::new(None),
@@ -387,10 +398,18 @@ impl TeamBus {
         context: DelegationContext,
     ) -> Result<()> {
         self.agent(agent_id)?;
+        let permit = match Arc::clone(&self.state.dispatch_slots).try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => bail!(
+                "concurrent dispatch limit reached: guards.maxConcurrentDispatches {}",
+                self.state.team.guards.max_concurrent_dispatches
+            ),
+        };
         let bus = self.clone();
         let agent_id = agent_id.to_owned();
         let prompt = prompt.to_owned();
         let task = tokio::spawn(async move {
+            let _permit = permit;
             bus.run_agent(&agent_id, &prompt, event_log, context)
                 .await
                 .map(|_| ())
@@ -759,7 +778,7 @@ fn tool_definitions(mode: TeamBusMode) -> Vec<Value> {
     if mode == TeamBusMode::Team {
         tools.push(tool(
             "handoff",
-            "Transfer full ownership of work to another agent",
+            "Start a successor, mark this agent stopped, then return from the current turn",
             &two_strings("agent", "Target agent ID", "task", "Task being transferred"),
         ));
     }
@@ -970,6 +989,7 @@ mod tests {
             }),
             guards: GuardsConfig {
                 max_dispatch_depth: 2,
+                ..GuardsConfig::default()
             },
             agents: ["a", "b", "c", "d"]
                 .into_iter()
@@ -1062,6 +1082,82 @@ mod tests {
             .filter_map(|event| event.payload["scope"].as_str())
             .collect();
         assert_eq!(warning_scopes, BTreeSet::from(["agent:c", "team"]));
+        assert_events_match_schema(&events);
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn concurrent_dispatch_guard_caps_and_releases_background_slots(
+        pool: sqlx::PgPool,
+    ) -> Result<()> {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}}}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"worker-acp-session","configOptions":[]}}'
+            IFS= read -r _
+            sleep 1
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
+        "#;
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "fanout-test-team".into(),
+            name: "Fan-out test team".into(),
+            entrypoint: "lead".into(),
+            budget: None,
+            guards: GuardsConfig {
+                max_concurrent_dispatches: 1,
+                ..GuardsConfig::default()
+            },
+            agents: vec![
+                test_agent("lead", "true", Vec::new()),
+                test_agent("worker", "/bin/sh", vec!["-c".into(), script.into()]),
+            ],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            team,
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(2),
+            TeamBusMode::Team,
+        )
+        .await?;
+        let connection = bus.connection("lead").await?;
+        let event_log = EventLog::new(archive.clone(), "fanout-run".into());
+        connection.register(event_log).await;
+
+        let first = call_dispatch(&bus, &connection, "worker").await?;
+        assert_eq!(first["result"]["isError"], false, "{first}");
+        let refused = call_dispatch(&bus, &connection, "worker").await?;
+        assert_tool_error_contains(
+            &refused,
+            "concurrent dispatch limit reached: guards.maxConcurrentDispatches 1",
+        );
+        assert_eq!(bus.state.tasks.lock().await.len(), 1);
+
+        bus.wait_for_tasks().await?;
+        let after_release = call_dispatch(&bus, &connection, "worker").await?;
+        assert_eq!(after_release["result"]["isError"], false, "{after_release}");
+        bus.wait_for_tasks().await?;
+        bus.shutdown().await?;
+
+        let events = archive.verify_session("fanout-run").await?;
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| {
+                    event.kind == EventKind::ToolUpdate
+                        && event.payload["status"].as_str() == Some("failed")
+                })
+                .count(),
+            1
+        );
         assert_events_match_schema(&events);
         Ok(())
     }

@@ -68,7 +68,7 @@ the backend hosts. MCP is the one injection point every harness supports.
 | `roster()` | Who's on the team, capabilities, live status | none — discovery |
 | `dispatch(agent, task)` | Fire-and-forget assignment | A → B · delegation |
 | `ask(agent, question)` | Blocking ask / reply | A ⇄ B · query |
-| `handoff(agent, task)` | Full ownership transfer | A ⇒ B · handoff |
+| `handoff(agent, task)` | Start a successor and request caller exit | A ⇒ B · handoff |
 | `report(status)` | Progress signal | none — node state |
 | `escalate(reason)` | Needs a human | A → user · fires a notification |
 
@@ -79,11 +79,17 @@ text where it doesn't.
 ### Guards — enforced in the bus, never in prompts
 
 A delegation loop burning several vendors' API keys overnight is the failure mode that
-actually costs money. All three are enforced server-side so no agent can prompt past them:
+actually costs money. All four are enforced server-side so no agent can prompt past them:
 
 - **Depth cap** — `dispatch` carries a depth counter, refused past N
+- **Fan-out cap** — only N background `dispatch`/`handoff` tasks may be outstanding
 - **Cycle detection** — A → B → A is rejected
-- **Budget caps** — per-agent and per-team spend ceilings
+- **Budget admission** — new delegations are refused at per-agent or per-team thresholds;
+  entrypoint and in-flight turns are not interrupted
+
+`handoff` marks the caller stopped in Team Bus status, but ACP provides no cancellation hook
+for the active caller turn. The caller is expected to return after the successful tool call;
+the successor starts without waiting for that return.
 
 ---
 

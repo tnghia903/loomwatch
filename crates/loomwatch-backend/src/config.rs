@@ -62,12 +62,15 @@ pub struct BudgetConfig {
 pub struct GuardsConfig {
     #[serde(default = "default_max_dispatch_depth")]
     pub max_dispatch_depth: u32,
+    #[serde(default = "default_max_concurrent_dispatches")]
+    pub max_concurrent_dispatches: u32,
 }
 
 impl Default for GuardsConfig {
     fn default() -> Self {
         Self {
             max_dispatch_depth: default_max_dispatch_depth(),
+            max_concurrent_dispatches: default_max_concurrent_dispatches(),
         }
     }
 }
@@ -86,6 +89,10 @@ const fn default_warn_at_percent() -> u8 {
 }
 
 const fn default_max_dispatch_depth() -> u32 {
+    8
+}
+
+const fn default_max_concurrent_dispatches() -> u32 {
     8
 }
 
@@ -249,6 +256,7 @@ edges:
 
         assert_eq!(team.budget.expect("team budget").warn_at_percent, 80);
         assert_eq!(team.guards.max_dispatch_depth, 8);
+        assert_eq!(team.guards.max_concurrent_dispatches, 8);
         assert!((team.agents[0].budget.limit_usd - 3.0).abs() < f64::EPSILON);
         assert_eq!(team.agents[0].budget.warn_at_percent, 70);
         assert!(team.agents[0].allow_recruiting);
@@ -361,12 +369,13 @@ edges:
     }
 
     #[test]
-    fn parses_dispatch_depth_guard() {
+    fn parses_dispatch_guards() {
         let team: TeamConfig = serde_yaml::from_str(
-            "schemaVersion: 1\nentrypoint: a\nguards:\n  maxDispatchDepth: 3\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nentrypoint: a\nguards:\n  maxDispatchDepth: 3\n  maxConcurrentDispatches: 5\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n",
         )
         .expect("valid config");
 
         assert_eq!(team.guards.max_dispatch_depth, 3);
+        assert_eq!(team.guards.max_concurrent_dispatches, 5);
     }
 }
