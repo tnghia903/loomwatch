@@ -1,0 +1,22 @@
+schemaVersion: 1
+id: phase03-hermes-acp
+name: Phase 03 Hermes permission smoke test
+entrypoint: permission-agent
+budget:
+  limitUsd: 1
+agents:
+  - id: permission-agent
+    name: Hermes Permission Agent
+    role: Verify ACP permission rejection against a permission-gating harness
+    spawn:
+      cmd: hermes-acp
+      args: []
+      env:
+        HERMES_ACCEPT_HOOKS: "0"
+        HERMES_YOLO_MODE: "0"
+      cwd: ..
+    model: deepseek-v4-flash
+    budget:
+      limitUsd: 1
+    allowRecruiting: false
+edges: []

@@ -22,14 +22,18 @@ Standard error is drained concurrently so a chatty harness cannot deadlock. If t
 exits early, returns a JSON-RPC error, or fails to exit after stdin closes, the supervisor
 returns a contextual error; once `session/new` has succeeded, that error includes the session
 identifier and the archive ends with a `process: crashed` marker so the partial run remains
-recoverable. A hung child is killed and reaped. Postgres stores `payload` and `raw` as JSONB,
-and a versioned `sqlx` migration enforces the event-kind check and unique
-`(session_id, seq)` replay order. The `show` command opens an independent Postgres connection
-and replays a session by its strictly increasing sequence number.
+recoverable. That marker carries the exit code and, when a signal terminated the child (the
+common `SIGKILL` timeout path), the signal name — a bare `exitCode: -1` on its own cannot be
+told apart from a genuine −1 exit. A hung child is killed and reaped. Postgres stores
+`payload` and `raw` as JSONB, and a versioned `sqlx` migration enforces the event-kind check
+and unique `(session_id, seq)` replay order. The `show` command opens an independent Postgres
+connection and replays a session by its strictly increasing sequence number.
 
-The ten-minute per-request timeout currently does not send `session/cancel`: timeout handling
-closes the transport and kills a harness that does not exit during shutdown. A harness may
-continue work briefly between timeout and process termination.
+On the ten-minute per-request timeout, LoomWatch sends a best-effort `session/cancel`
+notification before it closes the transport, so a well-behaved harness can stop working — and
+stop spending — instead of running until the process kill lands. The child is still torn down
+and, if it does not exit during the bounded shutdown wait, killed and reaped; `session/cancel`
+only narrows the window, and a wedged harness may never observe it.
 
 The `initialize` and `session/new` responses, plus `session/set_config_option` when sent, are
 archived as `session_meta` events, including the applied model and the harness's complete
@@ -39,10 +43,21 @@ When a harness requests permission, LoomWatch chooses an advertised `reject_once
 cancelling the turn; both the request and the client response are archived as `permission`
 events.
 
-Permission negotiation is currently covered with a mock harness only. OpenCode 1.18.23 in
-`acp --pure` mode auto-approves its own tool calls and did not emit
-`session/request_permission` during the Phase 02 probe; exercise this path against a second
-real harness when one is added.
+Permission negotiation was re-verified end to end on 2026-09-06 with Hermes Agent 0.21.0
+(`hermes-acp`) and [`examples/phase03-hermes-acp.yaml`](../examples/phase03-hermes-acp.yaml).
+Live session `5c5a7645-b50f-4652-a7f9-95b5f857117d` asked Hermes to make one harmless
+`write_file` call. Hermes emitted `session/request_permission` at archive sequence 82 with
+`allow_once` and `reject_once` options; LoomWatch archived its response at sequence 83 with
+`{"outcome":"selected","optionId":"deny"}`. The requested file remained absent and Hermes
+completed the turn normally. This verifies the real `reject_once` path outside the in-process
+mock test.
+
+Hermes' edit gate advertises `reject_once` but not `reject_always`, so the latter remains the
+tested fallback for harnesses that omit a one-shot rejection. A complementary live terminal
+probe did not improve that evidence: Hermes' default `approvals.mode: smart` classified the
+harmless command as safe and auto-approved it before ACP permission negotiation. OpenCode
+1.18.23 in `acp --pure` mode likewise auto-approves its own tool calls and did not emit
+`session/request_permission` during the Phase 02 probe.
 
 LoomWatch observes and archives an agent process; it does not sandbox it. Declaring filesystem
 and terminal client capabilities as unavailable only says that LoomWatch does not provide those
@@ -79,3 +94,22 @@ Use the printed session identifier to verify recovery after the harness exits:
 loomwatchd show \
   --session SESSION_ID
 ```
+
+The Phase 03 permission probe uses the same native workflow with the Hermes example:
+
+```sh
+hermes-acp --check
+
+loomwatchd run \
+  --team examples/phase03-hermes-acp.yaml \
+  --prompt 'Use the write_file tool exactly once (do not use terminal or patch) to create /tmp/loomwatch-permission-probe containing exactly permission probe. If denied, do not retry; reply exactly: permission denied.'
+```
+
+Hermes uses credentials and the provider/model from its local configuration. Confirm those
+settings and their pricing before running this smoke test: the team-file budget is descriptive
+at this phase and does not prevent provider spend. The example explicitly disables the
+environment-variable hook and YOLO bypasses, but LoomWatch is still an observer rather than a
+sandbox. Inspect the two archived `permission` events with `loomwatchd show`, and verify that
+the probe file was not created. Hermes 0.21 advertises models through ACP's typed `models`
+state rather than a `model` config option, so the archived `session_new` event is authoritative
+for the model actually used; LoomWatch records its team-file model setting as skipped.
