@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -18,6 +19,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Serve the embedded web UI.
+    Serve {
+        #[arg(long, default_value = "127.0.0.1:3000")]
+        listen: SocketAddr,
+    },
     /// Run one turn through the configured entrypoint ACP harness.
     Run {
         #[arg(long)]
@@ -41,6 +47,13 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
+        Commands::Serve { listen } => {
+            let listener = tokio::net::TcpListener::bind(listen).await?;
+            let address = listener.local_addr()?;
+            println!("loomwatchd listening on http://{address}");
+            let app = loomwatch_backend::spa::router().merge(loomwatch_backend::api::router());
+            axum::serve(listener, app).await?;
+        }
         Commands::Run {
             team,
             database_url,
