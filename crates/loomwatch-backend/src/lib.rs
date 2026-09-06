@@ -15,10 +15,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::acp::{AcpProcess, ProcessSpec, TeamSessionContext};
+use crate::acp::{AcpProcess, EventLog, ProcessSpec, TeamSessionContext};
 use crate::archive::EventArchive;
 use crate::config::TeamConfig;
-use crate::team_bus::TeamBus;
+use crate::team_bus::{TeamBus, TeamBusMode};
 
 /// One durable event in replay order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -77,7 +77,9 @@ pub struct SessionOutcome {
     pub exit_code: i32,
 }
 
-/// Load a team, run its entrypoint through ACP, and archive the session.
+/// Load a team and run it: team mode (empty `edges`) lets the entrypoint self-organize
+/// through the fully exposed Team Bus; pipeline mode (non-empty `edges`) has the backend
+/// drive each node's turn in topological order instead — see ARCHITECTURE.md §4.
 ///
 /// # Errors
 ///
@@ -89,6 +91,22 @@ pub async fn run_team_session(
     exit_timeout: Duration,
 ) -> Result<SessionOutcome> {
     let team = Arc::new(TeamConfig::load(team_path)?);
+    let archive = EventArchive::connect(database_url).await?;
+    if team.edges.is_empty() {
+        run_team_mode(&team, team_path, archive, prompt, exit_timeout).await
+    } else {
+        run_pipeline_mode(&team, team_path, archive, prompt, exit_timeout).await
+    }
+}
+
+/// Team mode: the entrypoint agent self-organizes through the fully exposed Team Bus.
+async fn run_team_mode(
+    team: &Arc<TeamConfig>,
+    team_path: &Path,
+    archive: EventArchive,
+    prompt: &str,
+    exit_timeout: Duration,
+) -> Result<SessionOutcome> {
     let agent = team.entrypoint_agent()?;
     let cwd = resolve_cwd(team_path, &agent.spawn.cwd)?;
     let spec = ProcessSpec {
@@ -98,10 +116,16 @@ pub async fn run_team_session(
         cwd,
     };
 
-    let archive = EventArchive::connect(database_url).await?;
     let mut process = AcpProcess::spawn(&spec)
         .with_context(|| format!("failed to spawn ACP harness for agent {}", agent.id))?;
-    let bus = TeamBus::start(team.clone(), team_path, archive.clone(), exit_timeout).await?;
+    let bus = TeamBus::start(
+        team.clone(),
+        team_path,
+        archive.clone(),
+        exit_timeout,
+        TeamBusMode::Team,
+    )
+    .await?;
     let connection = bus.connection(&agent.id).await?;
     let root = process
         .run_session_with_bus(
@@ -125,6 +149,132 @@ pub async fn run_team_session(
     Ok(outcome)
 }
 
+/// Pipeline mode: the backend drives each node's turn in the declared topological order.
+/// Every node's events land in one dense, ordered archive session — the first node mints
+/// it, and each later node reuses the same [`EventLog`] so replay stays continuous across
+/// the whole pipeline. The Team Bus is started in [`TeamBusMode::Pipeline`], which
+/// withdraws `dispatch`/`handoff` (sequencing isn't the agent's call here) and gates `ask`
+/// on the node agent's `allowRecruiting` lock.
+async fn run_pipeline_mode(
+    team: &Arc<TeamConfig>,
+    team_path: &Path,
+    archive: EventArchive,
+    prompt: &str,
+    exit_timeout: Duration,
+) -> Result<SessionOutcome> {
+    let order = team.pipeline_order()?;
+    let bus = TeamBus::start(
+        team.clone(),
+        team_path,
+        archive.clone(),
+        exit_timeout,
+        TeamBusMode::Pipeline,
+    )
+    .await?;
+
+    let run = run_pipeline_nodes(
+        team,
+        team_path,
+        &archive,
+        &bus,
+        &order,
+        prompt,
+        exit_timeout,
+    )
+    .await;
+    let shutdown = bus.shutdown().await;
+    let mut outcome = run?;
+    shutdown?;
+    outcome.event_count = archive.verify_session(&outcome.session_id).await?.len();
+    Ok(outcome)
+}
+
+async fn run_pipeline_nodes(
+    team: &Arc<TeamConfig>,
+    team_path: &Path,
+    archive: &EventArchive,
+    bus: &TeamBus,
+    order: &[String],
+    prompt: &str,
+    exit_timeout: Duration,
+) -> Result<SessionOutcome> {
+    let mut shared_log: Option<EventLog> = None;
+    let mut current_prompt = prompt.to_owned();
+    let mut outcome: Option<SessionOutcome> = None;
+
+    for (index, agent_id) in order.iter().enumerate() {
+        let agent = team
+            .agents
+            .iter()
+            .find(|agent| &agent.id == agent_id)
+            .with_context(|| format!("pipeline node {agent_id:?} is not a configured agent"))?;
+        let cwd = resolve_cwd(team_path, &agent.spawn.cwd)?;
+        let spec = ProcessSpec {
+            cmd: agent.spawn.cmd.clone(),
+            args: agent.spawn.args.clone(),
+            env: agent.spawn.env.clone(),
+            cwd,
+        };
+        let start_seq = match &shared_log {
+            Some(log) => log.next_seq().await,
+            None => 0,
+        };
+        let mut process = AcpProcess::spawn(&spec).with_context(|| {
+            format!("failed to spawn ACP harness for pipeline node {}", agent.id)
+        })?;
+        let connection = bus.connection(&agent.id).await?;
+        let node_outcome = process
+            .run_session_with_bus(
+                &agent.id,
+                &agent.model,
+                &current_prompt,
+                TeamSessionContext {
+                    archive,
+                    exit_timeout,
+                    bus: Some(&connection),
+                    event_log: shared_log.clone(),
+                },
+            )
+            .await
+            .with_context(|| format!("pipeline node {} failed", agent.id))?;
+        if shared_log.is_none() {
+            shared_log = process.event_log();
+        }
+        if index + 1 < order.len() {
+            current_prompt =
+                last_agent_reply(archive, &node_outcome.session_id, &agent.id, start_seq).await?;
+        }
+        outcome = Some(node_outcome);
+    }
+    outcome.context("pipeline has no nodes to run")
+}
+
+/// The last `agent`-role message text a given agent produced at or after `start_seq` in one
+/// archived session. Used to feed one pipeline node's reply forward as the next node's
+/// prompt, and shared with the Team Bus's `ask` tool, which needs the same lookup for a
+/// blocking reply.
+pub(crate) async fn last_agent_reply(
+    archive: &EventArchive,
+    session_id: &str,
+    agent_id: &str,
+    start_seq: u64,
+) -> Result<String> {
+    let events = archive.load_session(session_id).await?;
+    Ok(events
+        .iter()
+        .rev()
+        .find(|event| {
+            event.seq >= start_seq
+                && event.agent_id == agent_id
+                && event.kind == EventKind::Message
+                && event.payload.get("role").and_then(Value::as_str) == Some("agent")
+        })
+        .and_then(|event| event.payload.pointer("/content/text"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned())
+}
+
 pub(crate) fn resolve_cwd(team_path: &Path, cwd: &Path) -> Result<PathBuf> {
     let resolved = if cwd.is_absolute() {
         cwd.to_path_buf()
@@ -137,4 +287,124 @@ pub(crate) fn resolve_cwd(team_path: &Path, cwd: &Path) -> Result<PathBuf> {
     resolved
         .canonicalize()
         .with_context(|| format!("failed to resolve harness cwd {}", resolved.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{AgentConfig, BudgetConfig, EdgeConfig, GuardsConfig, SpawnConfig};
+    use std::collections::BTreeMap;
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn pipeline_mode_runs_two_nodes_in_declared_order(pool: sqlx::PgPool) -> Result<()> {
+        let first_script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"pipeline-node-a","configOptions":[]}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"pipeline-node-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"node a done"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
+        "#;
+        let second_script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"pipeline-node-b","configOptions":[]}}'
+            IFS= read -r prompt
+            case "$prompt" in
+              *'"text":"node a done"'*) ;;
+              *) printf 'expected first node reply in prompt: %s\n' "$prompt" >&2; exit 13 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"pipeline-node-b","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"node b done"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
+        "#;
+
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "pipeline-test-team".into(),
+            name: "Pipeline test team".into(),
+            entrypoint: "a".into(),
+            budget: None,
+            guards: GuardsConfig::default(),
+            agents: vec![
+                pipeline_agent("a", vec!["-c".into(), first_script.into()]),
+                pipeline_agent("b", vec!["-c".into(), second_script.into()]),
+            ],
+            edges: vec![EdgeConfig {
+                from: "a".into(),
+                to: "b".into(),
+                layer: "configured".into(),
+                kind: "sequence".into(),
+                ts: "2026-09-06T00:00:00Z".into(),
+            }],
+        });
+        assert_eq!(
+            team.pipeline_order().expect("acyclic two-node pipeline"),
+            vec!["a".to_owned(), "b".to_owned()]
+        );
+
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "start the pipeline",
+            Duration::from_secs(2),
+        )
+        .await?;
+
+        let events = archive.verify_session(&outcome.session_id).await?;
+        assert!(
+            events.windows(2).all(|pair| pair[1].seq == pair[0].seq + 1),
+            "both nodes must archive into one dense, ordered sequence"
+        );
+        let spawn_order: Vec<&str> = events
+            .iter()
+            .filter(|event| event.kind == EventKind::Process && event.payload["phase"] == "spawned")
+            .map(|event| event.agent_id.as_str())
+            .collect();
+        assert_eq!(
+            spawn_order,
+            ["a", "b"],
+            "nodes must run in declared topological order"
+        );
+        assert!(events.iter().any(|event| {
+            event.agent_id == "b"
+                && event.kind == EventKind::Message
+                && event
+                    .payload
+                    .pointer("/content/text")
+                    .and_then(Value::as_str)
+                    == Some("node b done")
+        }));
+        Ok(())
+    }
+
+    fn pipeline_agent(id: &str, args: Vec<String>) -> AgentConfig {
+        AgentConfig {
+            id: id.into(),
+            name: format!("{id} name"),
+            role: format!("{id} role"),
+            spawn: SpawnConfig {
+                cmd: "/bin/sh".into(),
+                args,
+                env: BTreeMap::new(),
+                cwd: PathBuf::from("."),
+            },
+            model: "test/model".into(),
+            budget: BudgetConfig {
+                limit_usd: 1.0,
+                warn_at_percent: 80,
+            },
+            allow_recruiting: true,
+        }
+    }
 }
