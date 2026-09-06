@@ -6,6 +6,7 @@ budget:
   limitUsd: 8
 guards:
   maxDispatchDepth: 4
+  maxConcurrentDispatches: 4
 agents:
   - id: researcher
     name: Protocol Researcher
