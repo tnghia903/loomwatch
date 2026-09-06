@@ -46,10 +46,15 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full specification.
 
 ## Status
 
-Phase 02 ACP spine. The Rust backend can run one entrypoint agent through a real ACP
-harness, supervise its process lifetime, archive the normalized session in Postgres,
-and recover the ordered trace after exit. See
-[docs/ACP_SPINE.md](docs/ACP_SPINE.md) for the protocol sequence and smoke test.
+Phase 03 Team Bus + execution modes. The backend hosts an authenticated Team Bus MCP
+server (`roster`/`dispatch`/`ask`/`handoff`/`report`/`escalate`), enforces the
+delegation guards — depth, fan-out, cycles, budget admission — server-side, and runs
+edge-drawn teams as deterministic pipeline DAGs (dataflow following the drawn edges)
+or edge-free teams as self-organizing. Every event, delegations included, archives
+through the frozen `RunEvent` contract. See
+[docs/ACP_SPINE.md](docs/ACP_SPINE.md) for the Phase 02 protocol sequence and
+[docs/WEBSOCKET_SCHEMA.md](docs/WEBSOCKET_SCHEMA.md) for the frozen WebSocket message
+schema.
 
 ## Repository layout
 
