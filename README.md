@@ -1,10 +1,14 @@
 # LoomWatch
 
-A native macOS canvas for composing and watching multi-vendor autonomous agent teams.
+A local-first canvas for composing and watching multi-vendor autonomous agent teams.
 
 You drag agents onto a canvas from a panel of whatever harnesses are installed on your
 machine, wire them up (or don't), give the team a goal, and watch the work happen as a
 live graph — nodes are agents, edges are the delegations between them.
+
+`loomwatchd` runs on your machine and serves the canvas as a web UI; you open it in a
+browser (or install it as a PWA). No Electron, no native app to build. The UI is
+eye-catching and minimal — the canvas is the product, the chrome gets out of the way.
 
 ## The problem it solves
 
@@ -30,8 +34,9 @@ you can scrub through.
 - **Config is version-controlled YAML.** The canvas is a visual editor over files on disk,
   not an opaque store.
 - **Local-first.** Agent execution and data stay on the user's machine and require no
-  public endpoint. LoomWatch does require a running local Postgres service; Docker Compose
-  provisions it for development.
+  public endpoint. The UI is a web page `loomwatchd` serves — reachable from any device
+  that can reach the daemon (LAN, Tailscale, an SSH tunnel). LoomWatch does require a
+  running local Postgres service; Docker Compose provisions it for development.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full specification.
 
@@ -40,8 +45,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full specification.
 | Layer | Technology |
 |---|---|
 | Agents | Local processes speaking ACP over stdio |
-| Backend | Rust — ACP client, process supervisor, Team Bus MCP server, Postgres, WebSocket |
-| App | Swift 6.3 / SwiftUI, Canvas rendering, MenuBarExtra, UserNotifications |
+| Backend | Rust `loomwatchd` — ACP client, process supervisor, Team Bus MCP server, Postgres, WebSocket, UI host |
+| Client | React + Vite + React Flow web UI, served by `loomwatchd`, PWA-installable |
 | Team config | Version-controlled YAML |
 
 ## Status
@@ -65,7 +70,7 @@ schema.
 | `examples/` | Version-controlled team examples |
 | `docs/` | Architecture and contract documentation |
 
-The Swift package is intentionally deferred to Phase 04.
+The web UI (`ui/`, served by `loomwatchd`) arrives in Phase 04.
 
 ## Development
 

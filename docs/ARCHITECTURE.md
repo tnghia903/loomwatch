@@ -1,10 +1,11 @@
 # LoomWatch — Architecture
 
-Revision 0.3 · 2026-09-06 · implementation
+Revision 0.4 · 2026-09-06 · implementation
 
-This is the specification the build team works from. It supersedes two earlier designs: a
-companion app for Paperclip, and a version built on Anthropic Managed Agents. Both were
-dropped — see [Rejected designs](#rejected-designs) for why, so they don't get relitigated.
+This is the specification the build team works from. It supersedes three earlier designs: a
+companion app for Paperclip, a version built on Anthropic Managed Agents, and a native
+desktop app (SwiftUI, later Tauri). All were dropped — see [Rejected designs](#rejected-designs)
+for why, so they don't get relitigated.
 
 ---
 
@@ -32,20 +33,23 @@ own credentials. Do not add key handling to the backend.
 
 ## 2. Backend — Rust
 
-The backend is a single static binary shipped inside the `.app`. Its job:
+The backend is `loomwatchd`, a single static binary the user runs locally. Its job:
 
 - **ACP client + process supervisor** — spawn, monitor, restart, and multiplex stdio for N
   agent processes
 - **Team Bus** — an MCP server the agents call back into (see §3)
 - **Pipeline orchestrator** — topological execution for drawn DAGs (see §4)
 - **Event archive** — Postgres, the durable and unbounded history
-- **WebSocket server** — live push to the macOS app, plus minimal REST for bootstrap
+- **UI host** — serves the single-page web UI (static assets), a WebSocket for live events,
+  and a minimal REST surface for bootstrap (see §6)
+- **Computer use** — screen capture, input synthesis and accessibility, per-OS behind a
+  trait; the daemon already holds the OS privilege to do this (deferred to a later phase)
 
 **Why Rust rather than TypeScript:** going vendor-neutral means no vendor SDK is usable
 anyway — ACP is JSON-RPC over stdio and there is no second protocol — so the JS ecosystem
-advantage disappears. What remains is process supervision, stdio multiplexing, Postgres and
-WebSocket, which is systems work, plus a native application binary with no language runtime
-for the user to install. Postgres remains a required local service.
+advantage disappears. What remains is process supervision, stdio multiplexing, Postgres,
+WebSocket and per-OS computer-use APIs, which is systems work, in one small static binary
+with no language runtime for the user to install. Postgres remains a required local service.
 
 **Decision reversal (2026-09-06):** the operator explicitly replaced SQLite WAL with
 Postgres as the production event archive, and replaced host-installed rustup with a Docker
@@ -136,11 +140,29 @@ RunEvent { id, sessionId, agentId, seq, ts, kind: message|thought|tool_call|tool
 
 ---
 
-## 6. macOS app
+## 6. Client — a web UI the daemon serves
 
-Swift 6.3 / SwiftUI. Graph rendered with `Canvas` — verified to build against the Xcode
-Command Line Tools SDK, so full Xcode is not required. Packaged with Swift Package Manager.
-`MenuBarExtra` for live status; `UserNotifications` for local alerts (no remote push in v1).
+`loomwatchd` serves a single-page web UI and a WebSocket for live events. You run the daemon
+and open a browser. This borrows only the *deployment* shape from Paperclip (a daemon that
+serves a web page) — no Electron, no native app bundle, no language runtime for the user to
+install.
+
+- **Stack:** React + Vite + [React Flow](https://reactflow.dev) for the canvas. Served by
+  `axum`; `rust-embed` bakes the built `dist/` into `loomwatchd` so the binary is still
+  self-contained.
+- **Look and feel — a first-class goal, not a coat of paint.** Eye-catching and minimal.
+  **Explicitly not Paperclip's UI**, which is dense and complex and a poor experience. Few
+  primary surfaces, generous whitespace, one obvious action per screen, progressive
+  disclosure of everything else. The canvas is the product; the chrome recedes. The design
+  spec (Phase 04) owns this and the build holds to it.
+- **Installable:** the UI ships a PWA manifest, so "install as an app" gives a dock /
+  launcher icon and a standalone window with no wrapper.
+- **Multi-device:** because it is a page the daemon serves, it opens from any device that
+  can reach the daemon's port — LAN, Tailscale, an SSH tunnel.
+- **Computer use** stays in the daemon (§2); the browser renders what the daemon captured
+  and sends intent back. A browser tab never touches the OS directly.
+- **Ambient status** (a menu-bar / tray "N agents running" indicator) is out of scope for
+  the web UI; a small native tray helper beside the daemon can add it later. Deferred.
 
 Writes to *configuration* are in scope for v1. Writes to *running execution* — approving,
 pausing, or commenting on an agent mid-run — are deferred.
@@ -154,8 +176,8 @@ pausing, or commenting on an agent mid-run — are deferred.
 | 01 | Plan & scaffold | Repo, containerized Rust toolchain, YAML schema for team config |
 | 02 | ACP spine | Backend spawns a real harness, speaks ACP, archives a full session to Postgres |
 | 03 | Team Bus + modes | MCP delegation server, pipeline orchestrator, guards, two agents delegating |
-| 04 | Canvas | SwiftUI app: agent panel, drag-to-instantiate, edge drawing, YAML round-trip |
-| 05 | Watch & alert | Observed-edge layer, timeline scrubber, attention queue, menu bar, notifications |
+| 04 | Canvas | Web UI served by `loomwatchd`: agent panel, drag-to-instantiate, edge drawing, YAML round-trip |
+| 05 | Watch & alert | Observed-edge layer over the WebSocket stream, timeline scrubber, attention queue, notifications |
 | 06 | Live & polish | Run a real multi-vendor team against real work |
 
 Contracts frozen between phases: the internal event schema after 02, the WebSocket message
@@ -185,3 +207,13 @@ The operator explicitly reversed that choice on 2026-09-06 in favor of Postgres 
 the required local service. The already-hardened `RunEvent` contract remains unchanged; only
 its storage engine changed. See
 [ADR 0001](decisions/0001-postgres-event-archive-and-docker-dev-toolchain.md).
+
+**Native desktop app (SwiftUI, then Tauri).** Revisions 0.1–0.3 specified a native macOS
+SwiftUI client for phases 04–05. Reconsidered on 2026-09-06 once the product goal became a
+sellable, cross-platform tool: SwiftUI is Apple-only and caps the market; a cross-platform
+native shell (Tauri) adds a per-OS packaging/signing/update burden, and Electron carries the
+resource cost the operator explicitly rejected. The daemon already speaks WebSocket + REST,
+so the UI was always a thin client. Settled on a web UI `loomwatchd` serves — the Paperclip
+model — PWA-installable, reachable from any device on the network, with computer use kept in
+the daemon. Phases 01–03 are unaffected. See
+[ADR 0003](decisions/0003-web-ui-served-by-the-daemon.md).
