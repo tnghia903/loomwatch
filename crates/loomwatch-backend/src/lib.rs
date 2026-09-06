@@ -7,6 +7,7 @@ pub mod archive;
 pub mod config;
 mod team_bus;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -182,8 +183,10 @@ async fn run_pipeline_mode(
         exit_timeout,
     )
     .await;
+    let delegated = bus.wait_for_tasks().await;
     let shutdown = bus.shutdown().await;
     let mut outcome = run?;
+    delegated?;
     shutdown?;
     outcome.event_count = archive.verify_session(&outcome.session_id).await?.len();
     Ok(outcome)
@@ -199,7 +202,7 @@ async fn run_pipeline_nodes(
     exit_timeout: Duration,
 ) -> Result<SessionOutcome> {
     let mut shared_log: Option<EventLog> = None;
-    let mut current_prompt = prompt.to_owned();
+    let mut replies: BTreeMap<String, String> = BTreeMap::new();
     let mut outcome: Option<SessionOutcome> = None;
 
     for (index, agent_id) in order.iter().enumerate() {
@@ -215,6 +218,11 @@ async fn run_pipeline_nodes(
             env: agent.spawn.env.clone(),
             cwd,
         };
+        let node_prompt = if index == 0 {
+            prompt.to_owned()
+        } else {
+            pipeline_node_prompt(team, agent_id, &replies)
+        };
         let start_seq = match &shared_log {
             Some(log) => log.next_seq().await,
             None => 0,
@@ -227,7 +235,7 @@ async fn run_pipeline_nodes(
             .run_session_with_bus(
                 &agent.id,
                 &agent.model,
-                &current_prompt,
+                &node_prompt,
                 TeamSessionContext {
                     archive,
                     exit_timeout,
@@ -241,12 +249,41 @@ async fn run_pipeline_nodes(
             shared_log = process.event_log();
         }
         if index + 1 < order.len() {
-            current_prompt =
+            let reply =
                 last_agent_reply(archive, &node_outcome.session_id, &agent.id, start_seq).await?;
+            replies.insert(agent_id.clone(), reply);
         }
         outcome = Some(node_outcome);
     }
     outcome.context("pipeline has no nodes to run")
+}
+
+/// Build a downstream node's prompt from the replies of its actual configured predecessors,
+/// not from whichever node happens to precede it in the linearized run order. A single
+/// predecessor's reply is passed through verbatim (this keeps every shipped linear-chain team
+/// byte-for-byte compatible); a node with more than one configured predecessor — a DAG join —
+/// gets each predecessor's reply labeled and concatenated, in the order their edges are
+/// declared in the team file, so no branch is silently dropped.
+fn pipeline_node_prompt(team: &TeamConfig, node_id: &str, replies: &BTreeMap<String, String>) -> String {
+    let predecessors: Vec<&str> = team
+        .edges
+        .iter()
+        .filter(|edge| edge.to == node_id)
+        .map(|edge| edge.from.as_str())
+        .collect();
+    match predecessors.as_slice() {
+        [only] => replies.get(*only).cloned().unwrap_or_default(),
+        many => many
+            .iter()
+            .map(|pred| {
+                format!(
+                    "### From {pred}\n\n{}",
+                    replies.get(*pred).map_or("", String::as_str)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+    }
 }
 
 /// The last `agent`-role message text a given agent produced at or after `start_seq` in one
@@ -384,6 +421,127 @@ mod tests {
                     .pointer("/content/text")
                     .and_then(Value::as_str)
                     == Some("node b done")
+        }));
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn pipeline_mode_joins_diamond_predecessor_outputs(pool: sqlx::PgPool) -> Result<()> {
+        let node_script = |session_id: &str, own_reply: &str, checks: &str| {
+            format!(
+                r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"{session_id}","configOptions":[]}}}}'
+            IFS= read -r prompt
+            {checks}
+            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{own_reply}"}}}}}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
+        "#
+            )
+        };
+
+        let a_script = node_script("pipeline-node-a", "node a done", "");
+        let b_script = node_script(
+            "pipeline-node-b",
+            "node b done",
+            r#"case "$prompt" in
+              *'node a done'*) ;;
+              *) printf 'expected node a reply in prompt: %s\n' "$prompt" >&2; exit 13 ;;
+            esac"#,
+        );
+        let c_script = node_script(
+            "pipeline-node-c",
+            "node c done",
+            r#"case "$prompt" in
+              *'node a done'*) ;;
+              *) printf 'expected node a reply in prompt: %s\n' "$prompt" >&2; exit 13 ;;
+            esac
+            case "$prompt" in
+              *'node b done'*) printf 'must not leak node b reply into node c prompt: %s\n' "$prompt" >&2; exit 14 ;;
+              *) ;;
+            esac"#,
+        );
+        let d_script = node_script(
+            "pipeline-node-d",
+            "node d done",
+            r#"case "$prompt" in
+              *'node b done'*) ;;
+              *) printf 'expected node b reply in joined prompt: %s\n' "$prompt" >&2; exit 15 ;;
+            esac
+            case "$prompt" in
+              *'node c done'*) ;;
+              *) printf 'expected node c reply in joined prompt: %s\n' "$prompt" >&2; exit 16 ;;
+            esac"#,
+        );
+
+        let edge = |from: &str, to: &str| EdgeConfig {
+            from: from.into(),
+            to: to.into(),
+            layer: "configured".into(),
+            kind: "sequence".into(),
+            ts: "2026-09-06T00:00:00Z".into(),
+        };
+
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "pipeline-diamond-team".into(),
+            name: "Pipeline diamond team".into(),
+            entrypoint: "a".into(),
+            budget: None,
+            guards: GuardsConfig::default(),
+            agents: vec![
+                pipeline_agent("a", vec!["-c".into(), a_script]),
+                pipeline_agent("b", vec!["-c".into(), b_script]),
+                pipeline_agent("c", vec!["-c".into(), c_script]),
+                pipeline_agent("d", vec!["-c".into(), d_script]),
+            ],
+            edges: vec![
+                edge("a", "b"),
+                edge("a", "c"),
+                edge("b", "d"),
+                edge("c", "d"),
+            ],
+        });
+        assert_eq!(
+            team.pipeline_order().expect("acyclic diamond pipeline"),
+            vec!["a".to_owned(), "b".to_owned(), "c".to_owned(), "d".to_owned()]
+        );
+
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "start the pipeline",
+            Duration::from_secs(2),
+        )
+        .await?;
+
+        let events = archive.verify_session(&outcome.session_id).await?;
+        let spawn_order: Vec<&str> = events
+            .iter()
+            .filter(|event| event.kind == EventKind::Process && event.payload["phase"] == "spawned")
+            .map(|event| event.agent_id.as_str())
+            .collect();
+        assert_eq!(
+            spawn_order,
+            ["a", "b", "c", "d"],
+            "diamond must run in topological order"
+        );
+        assert!(events.iter().any(|event| {
+            event.agent_id == "d"
+                && event.kind == EventKind::Message
+                && event
+                    .payload
+                    .pointer("/content/text")
+                    .and_then(Value::as_str)
+                    == Some("node d done")
         }));
         Ok(())
     }
