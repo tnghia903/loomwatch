@@ -398,12 +398,11 @@ impl TeamBus {
         context: DelegationContext,
     ) -> Result<()> {
         self.agent(agent_id)?;
-        let permit = match Arc::clone(&self.state.dispatch_slots).try_acquire_owned() {
-            Ok(permit) => permit,
-            Err(_) => bail!(
+        let Ok(permit) = Arc::clone(&self.state.dispatch_slots).try_acquire_owned() else {
+            bail!(
                 "concurrent dispatch limit reached: guards.maxConcurrentDispatches {}",
                 self.state.team.guards.max_concurrent_dispatches
-            ),
+            );
         };
         let bus = self.clone();
         let agent_id = agent_id.to_owned();

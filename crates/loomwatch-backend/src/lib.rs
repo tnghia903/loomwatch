@@ -264,7 +264,11 @@ async fn run_pipeline_nodes(
 /// byte-for-byte compatible); a node with more than one configured predecessor — a DAG join —
 /// gets each predecessor's reply labeled and concatenated, in the order their edges are
 /// declared in the team file, so no branch is silently dropped.
-fn pipeline_node_prompt(team: &TeamConfig, node_id: &str, replies: &BTreeMap<String, String>) -> String {
+fn pipeline_node_prompt(
+    team: &TeamConfig,
+    node_id: &str,
+    replies: &BTreeMap<String, String>,
+) -> String {
     let predecessors: Vec<&str> = team
         .edges
         .iter()
@@ -509,7 +513,12 @@ mod tests {
         });
         assert_eq!(
             team.pipeline_order().expect("acyclic diamond pipeline"),
-            vec!["a".to_owned(), "b".to_owned(), "c".to_owned(), "d".to_owned()]
+            vec![
+                "a".to_owned(),
+                "b".to_owned(),
+                "c".to_owned(),
+                "d".to_owned()
+            ]
         );
 
         let archive = EventArchive::from_pool(pool);
