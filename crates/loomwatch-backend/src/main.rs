@@ -22,8 +22,8 @@ enum Commands {
     Run {
         #[arg(long)]
         team: PathBuf,
-        #[arg(long)]
-        database: PathBuf,
+        #[arg(long, env = "DATABASE_URL")]
+        database_url: String,
         #[arg(long)]
         prompt: String,
         #[arg(long, default_value_t = 10)]
@@ -31,8 +31,8 @@ enum Commands {
     },
     /// Recover one archived session as ordered JSON lines.
     Show {
-        #[arg(long)]
-        database: PathBuf,
+        #[arg(long, env = "DATABASE_URL")]
+        database_url: String,
         #[arg(long)]
         session: String,
     },
@@ -43,13 +43,13 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         Commands::Run {
             team,
-            database,
+            database_url,
             prompt,
             exit_timeout_seconds,
         } => {
             let outcome = loomwatch_backend::run_team_session(
                 &team,
-                &database,
+                &database_url,
                 &prompt,
                 Duration::from_secs(exit_timeout_seconds),
             )
@@ -59,9 +59,12 @@ async fn main() -> Result<()> {
                 outcome.session_id, outcome.event_count, outcome.exit_code
             );
         }
-        Commands::Show { database, session } => {
-            let archive = EventArchive::open(&database)?;
-            for event in archive.verify_session(&session)? {
+        Commands::Show {
+            database_url,
+            session,
+        } => {
+            let archive = EventArchive::connect(&database_url).await?;
+            for event in archive.verify_session(&session).await? {
                 println!("{}", serde_json::to_string(&event)?);
             }
         }

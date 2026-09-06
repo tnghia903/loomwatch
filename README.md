@@ -29,7 +29,9 @@ you can scrub through.
   runtime whether it needs a team at all, then self-organizes.
 - **Config is version-controlled YAML.** The canvas is a visual editor over files on disk,
   not an opaque store.
-- **Local-first.** No cloud dependency for execution, no public endpoint required.
+- **Local-first.** Agent execution and data stay on the user's machine and require no
+  public endpoint. LoomWatch does require a running local Postgres service; Docker Compose
+  provisions it for development.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full specification.
 
@@ -38,15 +40,15 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full specification.
 | Layer | Technology |
 |---|---|
 | Agents | Local processes speaking ACP over stdio |
-| Backend | Rust — ACP client, process supervisor, Team Bus MCP server, SQLite, WebSocket |
+| Backend | Rust — ACP client, process supervisor, Team Bus MCP server, Postgres, WebSocket |
 | App | Swift 6.3 / SwiftUI, Canvas rendering, MenuBarExtra, UserNotifications |
 | Team config | Version-controlled YAML |
 
 ## Status
 
 Phase 02 ACP spine. The Rust backend can run one entrypoint agent through a real ACP
-harness, supervise its process lifetime, archive the normalized session in SQLite WAL
-mode, and recover the ordered trace after exit. See
+harness, supervise its process lifetime, archive the normalized session in Postgres,
+and recover the ordered trace after exit. See
 [docs/ACP_SPINE.md](docs/ACP_SPINE.md) for the protocol sequence and smoke test.
 
 ## Repository layout
@@ -62,16 +64,20 @@ The Swift package is intentionally deferred to Phase 04.
 
 ## Development
 
-Install [rustup](https://rustup.rs/), then run:
+Only Docker is required on the host. Create local database credentials once, then start
+Postgres and run the Rust commands inside the pinned development image:
 
 ```sh
-cargo check --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
-cargo test --package loomwatch-backend --test team_schema
+cp .env.example .env
+docker compose up -d postgres
+docker compose run --rm dev cargo check --workspace
+docker compose run --rm dev cargo test --workspace --all-targets
+docker compose run --rm dev cargo clippy --workspace --all-targets -- -D warnings
+docker compose run --rm dev cargo fmt --all -- --check
 ```
 
-The pinned toolchain in `rust-toolchain.toml` keeps local and CI builds aligned. Team files
+The `dev` service installs the exact toolchain from `rust-toolchain.toml`; it is only a
+build and test environment. The Compose file deliberately has no backend service: packaged
+`loomwatchd` binaries run natively on macOS and connect to the local Postgres port. Team files
 use schema version `1`; start with [`examples/research-team.yaml`](examples/research-team.yaml)
 and see [`docs/TEAM_CONFIG.md`](docs/TEAM_CONFIG.md) for semantic validation rules.

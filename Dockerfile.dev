@@ -1,0 +1,6 @@
+FROM rust:1.98-bookworm
+
+COPY rust-toolchain.toml /tmp/loomwatch-toolchain/rust-toolchain.toml
+RUN cd /tmp/loomwatch-toolchain && rustup show active-toolchain
+
+WORKDIR /workspace
