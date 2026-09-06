@@ -17,6 +17,8 @@ pub struct TeamConfig {
     pub entrypoint: String,
     #[serde(default)]
     pub budget: Option<BudgetConfig>,
+    #[serde(default)]
+    pub guards: GuardsConfig,
     pub agents: Vec<AgentConfig>,
     #[serde(default)]
     pub edges: Vec<EdgeConfig>,
@@ -56,6 +58,21 @@ pub struct BudgetConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardsConfig {
+    #[serde(default = "default_max_dispatch_depth")]
+    pub max_dispatch_depth: u32,
+}
+
+impl Default for GuardsConfig {
+    fn default() -> Self {
+        Self {
+            max_dispatch_depth: default_max_dispatch_depth(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct EdgeConfig {
     pub from: String,
     pub to: String,
@@ -66,6 +83,10 @@ pub struct EdgeConfig {
 
 const fn default_warn_at_percent() -> u8 {
     80
+}
+
+const fn default_max_dispatch_depth() -> u32 {
+    8
 }
 
 const fn default_allow_recruiting() -> bool {
@@ -146,10 +167,21 @@ edges:
         .expect("valid config");
 
         assert_eq!(team.budget.expect("team budget").warn_at_percent, 80);
+        assert_eq!(team.guards.max_dispatch_depth, 8);
         assert!((team.agents[0].budget.limit_usd - 3.0).abs() < f64::EPSILON);
         assert_eq!(team.agents[0].budget.warn_at_percent, 70);
         assert!(team.agents[0].allow_recruiting);
         assert_eq!(team.edges[0].from, "a");
         assert_eq!(team.edges[0].to, "b");
+    }
+
+    #[test]
+    fn parses_dispatch_depth_guard() {
+        let team: TeamConfig = serde_yaml::from_str(
+            "schemaVersion: 1\nentrypoint: a\nguards:\n  maxDispatchDepth: 3\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n",
+        )
+        .expect("valid config");
+
+        assert_eq!(team.guards.max_dispatch_depth, 3);
     }
 }

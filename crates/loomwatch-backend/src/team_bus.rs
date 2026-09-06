@@ -1,6 +1,6 @@
 //! Authenticated HTTP MCP Team Bus used by ACP harnesses for structured delegation.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -40,6 +40,7 @@ struct TeamBusState {
     address: SocketAddr,
     tokens: RwLock<BTreeMap<String, AgentSession>>,
     statuses: RwLock<BTreeMap<String, String>>,
+    budget_warnings: Mutex<BTreeSet<String>>,
     tasks: Mutex<Vec<JoinHandle<Result<()>>>>,
     shutdown: Mutex<Option<oneshot::Sender<()>>>,
     server: Mutex<Option<JoinHandle<std::io::Result<()>>>>,
@@ -49,6 +50,13 @@ struct TeamBusState {
 struct AgentSession {
     agent_id: String,
     event_log: Option<EventLog>,
+    delegation_path: Vec<String>,
+    dispatch_depth: u32,
+}
+
+struct DelegationContext {
+    path: Vec<String>,
+    depth: u32,
 }
 
 /// Per-agent credentials and endpoint details injected into ACP `session/new`.
@@ -83,6 +91,7 @@ impl TeamBus {
             address,
             tokens: RwLock::new(BTreeMap::new()),
             statuses: RwLock::new(statuses),
+            budget_warnings: Mutex::new(BTreeSet::new()),
             tasks: Mutex::new(Vec::new()),
             shutdown: Mutex::new(Some(shutdown_tx)),
             server: Mutex::new(None),
@@ -108,6 +117,8 @@ impl TeamBus {
             AgentSession {
                 agent_id: agent_id.to_owned(),
                 event_log: None,
+                delegation_path: vec![agent_id.to_owned()],
+                dispatch_depth: 0,
             },
         );
         Ok(TeamBusConnection {
@@ -192,6 +203,7 @@ impl TeamBus {
             .context("Team Bus session is unknown")?;
         let event_log = session
             .event_log
+            .clone()
             .context("Team Bus session is not attached to an ACP run")?;
         let name = request
             .pointer("/params/name")
@@ -219,7 +231,7 @@ impl TeamBus {
             .await?;
 
         let execution = self
-            .execute_tool(&session.agent_id, &event_log, name, &arguments)
+            .execute_tool(&session, &event_log, name, &arguments)
             .await;
         let (status, raw_output, result) = match execution {
             Ok(output) => ("completed", output.clone(), tool_success(&output)),
@@ -248,7 +260,7 @@ impl TeamBus {
 
     async fn execute_tool(
         &self,
-        caller: &str,
+        session: &AgentSession,
         event_log: &EventLog,
         name: &str,
         arguments: &Value,
@@ -278,16 +290,18 @@ impl TeamBus {
             "dispatch" => {
                 let target = required_string(arguments, "agent")?;
                 let task = required_string(arguments, "task")?;
-                self.spawn_background(&target, &task, event_log.clone())
+                let context = self.guard_delegation(session, &target, event_log).await?;
+                self.spawn_background(&target, &task, event_log.clone(), context)
                     .await?;
                 Ok(json!({"accepted": true, "agent": target, "mode": "dispatch"}))
             }
             "ask" => {
                 let target = required_string(arguments, "agent")?;
                 let question = required_string(arguments, "question")?;
+                let context = self.guard_delegation(session, &target, event_log).await?;
                 let start_seq = event_log.next_seq().await;
                 let outcome = self
-                    .run_agent(&target, &question, event_log.clone())
+                    .run_agent(&target, &question, event_log.clone(), context)
                     .await?;
                 let reply = self.last_reply(&target, event_log, start_seq).await?;
                 Ok(json!({
@@ -299,13 +313,14 @@ impl TeamBus {
             "handoff" => {
                 let target = required_string(arguments, "agent")?;
                 let task = required_string(arguments, "task")?;
-                self.spawn_background(&target, &task, event_log.clone())
+                let context = self.guard_delegation(session, &target, event_log).await?;
+                self.spawn_background(&target, &task, event_log.clone(), context)
                     .await?;
                 self.state
                     .statuses
                     .write()
                     .await
-                    .insert(caller.to_owned(), "stopped".to_owned());
+                    .insert(session.agent_id.clone(), "stopped".to_owned());
                 Ok(json!({
                     "accepted": true,
                     "agent": target,
@@ -319,8 +334,8 @@ impl TeamBus {
                     .statuses
                     .write()
                     .await
-                    .insert(caller.to_owned(), status.clone());
-                Ok(json!({"accepted": true, "agent": caller, "status": status}))
+                    .insert(session.agent_id.clone(), status.clone());
+                Ok(json!({"accepted": true, "agent": session.agent_id, "status": status}))
             }
             "escalate" => {
                 let reason = required_string(arguments, "reason")?;
@@ -328,7 +343,7 @@ impl TeamBus {
                     .statuses
                     .write()
                     .await
-                    .insert(caller.to_owned(), "waiting".to_owned());
+                    .insert(session.agent_id.clone(), "waiting".to_owned());
                 Ok(json!({"accepted": true, "notify": "user", "reason": reason}))
             }
             other => bail!("unknown Team Bus tool {other:?}"),
@@ -340,13 +355,14 @@ impl TeamBus {
         agent_id: &str,
         prompt: &str,
         event_log: EventLog,
+        context: DelegationContext,
     ) -> Result<()> {
         self.agent(agent_id)?;
         let bus = self.clone();
         let agent_id = agent_id.to_owned();
         let prompt = prompt.to_owned();
         let task = tokio::spawn(async move {
-            bus.run_agent(&agent_id, &prompt, event_log)
+            bus.run_agent(&agent_id, &prompt, event_log, context)
                 .await
                 .map(|_| ())
         });
@@ -359,6 +375,7 @@ impl TeamBus {
         agent_id: &str,
         prompt: &str,
         event_log: EventLog,
+        context: DelegationContext,
     ) -> Result<crate::SessionOutcome> {
         let agent = self.agent(agent_id)?;
         self.state
@@ -367,7 +384,7 @@ impl TeamBus {
             .await
             .insert(agent.id.clone(), "starting".to_owned());
         let result = self
-            .run_agent_inner(&agent, prompt, event_log)
+            .run_agent_inner(&agent, prompt, event_log, context)
             .await
             .with_context(|| format!("delegated agent {:?} failed", agent.id));
         self.state.statuses.write().await.insert(
@@ -387,6 +404,7 @@ impl TeamBus {
         agent: &AgentConfig,
         prompt: &str,
         event_log: EventLog,
+        context: DelegationContext,
     ) -> Result<crate::SessionOutcome> {
         let cwd = resolve_cwd(&self.state.team_path, &agent.spawn.cwd)?;
         let spec = ProcessSpec {
@@ -395,7 +413,7 @@ impl TeamBus {
             env: agent.spawn.env.clone(),
             cwd,
         };
-        let connection = self.connection(&agent.id).await?;
+        let connection = self.connection_with_context(&agent.id, context).await?;
         let mut process = AcpProcess::spawn(&spec)
             .with_context(|| format!("failed to spawn ACP harness for agent {}", agent.id))?;
         process
@@ -411,6 +429,138 @@ impl TeamBus {
                 },
             )
             .await
+    }
+
+    async fn connection_with_context(
+        &self,
+        agent_id: &str,
+        context: DelegationContext,
+    ) -> Result<TeamBusConnection> {
+        self.agent(agent_id)?;
+        let token = Uuid::new_v4().to_string();
+        self.state.tokens.write().await.insert(
+            token.clone(),
+            AgentSession {
+                agent_id: agent_id.to_owned(),
+                event_log: None,
+                delegation_path: context.path,
+                dispatch_depth: context.depth,
+            },
+        );
+        Ok(TeamBusConnection {
+            bus: self.clone(),
+            token,
+        })
+    }
+
+    async fn guard_delegation(
+        &self,
+        session: &AgentSession,
+        target: &str,
+        event_log: &EventLog,
+    ) -> Result<DelegationContext> {
+        let target_agent = self.agent(target)?;
+        let next_depth = session
+            .dispatch_depth
+            .checked_add(1)
+            .context("Team Bus dispatch depth overflowed")?;
+        let max_depth = self.state.team.guards.max_dispatch_depth;
+        if next_depth > max_depth {
+            bail!("delegation depth {next_depth} exceeds guards.maxDispatchDepth {max_depth}");
+        }
+        if session.delegation_path.iter().any(|agent| agent == target) {
+            let mut cycle = session.delegation_path.clone();
+            cycle.push(target.to_owned());
+            bail!("delegation cycle rejected: {}", cycle.join(" -> "));
+        }
+
+        let events = self
+            .state
+            .archive
+            .load_session(event_log.session_id())
+            .await?;
+        let agent_spend = spent_usd(&events, Some(target));
+        let agent_scope = format!("agent:{target}");
+        let agent_exhausted = self
+            .observe_budget(
+                event_log,
+                target,
+                &agent_scope,
+                agent_spend,
+                &target_agent.budget,
+            )
+            .await?;
+        let team_budget_state = if let Some(team_budget) = &self.state.team.budget {
+            let team_spend = spent_usd(&events, None);
+            let exhausted = self
+                .observe_budget(
+                    event_log,
+                    &session.agent_id,
+                    "team",
+                    team_spend,
+                    team_budget,
+                )
+                .await?;
+            Some((team_spend, team_budget.limit_usd, exhausted))
+        } else {
+            None
+        };
+        if agent_exhausted {
+            bail!(
+                "{agent_scope} budget exhausted: spent ${agent_spend:.6} of ${:.6}",
+                target_agent.budget.limit_usd
+            );
+        }
+        if let Some((team_spend, team_limit, true)) = team_budget_state {
+            bail!("team budget exhausted: spent ${team_spend:.6} of ${team_limit:.6}");
+        }
+
+        let mut path = session.delegation_path.clone();
+        path.push(target.to_owned());
+        Ok(DelegationContext {
+            path,
+            depth: next_depth,
+        })
+    }
+
+    async fn observe_budget(
+        &self,
+        event_log: &EventLog,
+        event_agent_id: &str,
+        scope: &str,
+        spent_usd: f64,
+        budget: &crate::config::BudgetConfig,
+    ) -> Result<bool> {
+        let warning_at_usd = budget.limit_usd * f64::from(budget.warn_at_percent) / 100.0;
+        if spent_usd >= warning_at_usd {
+            let should_emit = self
+                .state
+                .budget_warnings
+                .lock()
+                .await
+                .insert(scope.to_owned());
+            if should_emit {
+                event_log
+                    .append(
+                        event_agent_id,
+                        EventKind::Usage,
+                        json!({
+                            "phase": "budget_warning",
+                            "scope": scope,
+                            "spentUsd": spent_usd,
+                            "limitUsd": budget.limit_usd,
+                            "warnAtPercent": budget.warn_at_percent
+                        }),
+                        Some(json!({
+                            "source": SERVER_NAME,
+                            "event": "budget_warning",
+                            "scope": scope
+                        })),
+                    )
+                    .await?;
+            }
+        }
+        Ok(spent_usd >= budget.limit_usd)
     }
 
     async fn last_reply(
@@ -438,6 +588,31 @@ impl TeamBus {
             .unwrap_or("")
             .to_owned())
     }
+}
+
+fn spent_usd(events: &[crate::RunEvent], agent_id: Option<&str>) -> f64 {
+    events
+        .iter()
+        .filter(|event| agent_id.is_none_or(|agent_id| event.agent_id == agent_id))
+        .filter_map(event_cost_usd)
+        .sum()
+}
+
+fn event_cost_usd(event: &crate::RunEvent) -> Option<f64> {
+    let value = match event.kind {
+        EventKind::Usage => event
+            .payload
+            .get("costUsd")
+            .or_else(|| event.payload.get("cost_usd")),
+        EventKind::TurnEnd => event
+            .payload
+            .pointer("/usage/costUsd")
+            .or_else(|| event.payload.pointer("/usage/cost_usd")),
+        _ => None,
+    }?;
+    value
+        .as_f64()
+        .filter(|cost| cost.is_finite() && *cost >= 0.0)
 }
 
 impl TeamBusConnection {
@@ -624,7 +799,7 @@ fn two_strings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{BudgetConfig, SpawnConfig};
+    use crate::config::{BudgetConfig, GuardsConfig, SpawnConfig};
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;
@@ -664,6 +839,7 @@ mod tests {
                 limit_usd: 10.0,
                 warn_at_percent: 80,
             }),
+            guards: GuardsConfig::default(),
             agents: vec![
                 test_agent("lead", "true", Vec::new()),
                 test_agent("worker", "/bin/sh", vec!["-c".into(), script.into()]),
@@ -749,6 +925,194 @@ mod tests {
         assert!(events.windows(2).all(|pair| pair[1].seq == pair[0].seq + 1));
         assert_events_match_schema(&events);
         Ok(())
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn delegation_guards_reject_before_spawning_and_archive_failures(
+        pool: sqlx::PgPool,
+    ) -> Result<()> {
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "guard-test-team".into(),
+            name: "Guard test team".into(),
+            entrypoint: "a".into(),
+            budget: Some(BudgetConfig {
+                limit_usd: 1.0,
+                warn_at_percent: 80,
+            }),
+            guards: GuardsConfig {
+                max_dispatch_depth: 2,
+            },
+            agents: ["a", "b", "c", "d"]
+                .into_iter()
+                .map(|id| test_agent(id, "/definitely/not/a/real/acp", Vec::new()))
+                .collect(),
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(team, &team_path, archive.clone(), Duration::from_secs(1)).await?;
+        let event_log = EventLog::new(archive.clone(), "guard-run".into());
+        event_log
+            .append(
+                "c",
+                EventKind::Usage,
+                json!({"costUsd": 1.0}),
+                Some(json!({"source": "test usage"})),
+            )
+            .await?;
+
+        let cycle = bus
+            .connection_with_context(
+                "b",
+                DelegationContext {
+                    path: vec!["a".into(), "b".into()],
+                    depth: 1,
+                },
+            )
+            .await?;
+        cycle.register(event_log.clone()).await;
+        let response = call_dispatch(&bus, &cycle, "a").await?;
+        assert_tool_error_contains(&response, "delegation cycle rejected: a -> b -> a");
+
+        let too_deep = bus
+            .connection_with_context(
+                "c",
+                DelegationContext {
+                    path: vec!["a".into(), "b".into(), "c".into()],
+                    depth: 2,
+                },
+            )
+            .await?;
+        too_deep.register(event_log.clone()).await;
+        let response = call_dispatch(&bus, &too_deep, "d").await?;
+        assert_tool_error_contains(
+            &response,
+            "delegation depth 3 exceeds guards.maxDispatchDepth 2",
+        );
+
+        let budget = bus.connection("b").await?;
+        budget.register(event_log.clone()).await;
+        let response = call_dispatch(&bus, &budget, "c").await?;
+        assert_tool_error_contains(&response, "agent:c budget exhausted");
+        let response = call_dispatch(&bus, &budget, "d").await?;
+        assert_tool_error_contains(&response, "team budget exhausted");
+
+        assert!(bus.state.tasks.lock().await.is_empty());
+        assert!(
+            bus.state
+                .statuses
+                .read()
+                .await
+                .values()
+                .all(|status| status == "idle" || status == "running")
+        );
+        bus.shutdown().await?;
+
+        let events = archive.verify_session("guard-run").await?;
+        let failures: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                event.kind == EventKind::ToolUpdate
+                    && event.payload["status"].as_str() == Some("failed")
+            })
+            .collect();
+        assert_eq!(failures.len(), 4, "every guard refusal must be archived");
+        let warning_scopes: BTreeSet<_> = events
+            .iter()
+            .filter(|event| {
+                event.kind == EventKind::Usage
+                    && event.payload["phase"].as_str() == Some("budget_warning")
+            })
+            .filter_map(|event| event.payload["scope"].as_str())
+            .collect();
+        assert_eq!(warning_scopes, BTreeSet::from(["agent:c", "team"]));
+        assert_events_match_schema(&events);
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn budget_warnings_fire_once_at_agent_and_team_thresholds(
+        pool: sqlx::PgPool,
+    ) -> Result<()> {
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "warning-test-team".into(),
+            name: "Warning test team".into(),
+            entrypoint: "a".into(),
+            budget: Some(BudgetConfig {
+                limit_usd: 2.0,
+                warn_at_percent: 80,
+            }),
+            guards: GuardsConfig::default(),
+            agents: ["a", "b", "c", "d"]
+                .into_iter()
+                .map(|id| test_agent(id, "/definitely/not/a/real/acp", Vec::new()))
+                .collect(),
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(team, &team_path, archive.clone(), Duration::from_secs(1)).await?;
+        let event_log = EventLog::new(archive.clone(), "warning-run".into());
+        for agent_id in ["c", "d"] {
+            event_log
+                .append(
+                    agent_id,
+                    EventKind::Usage,
+                    json!({"costUsd": 0.8}),
+                    Some(json!({"source": "test usage"})),
+                )
+                .await?;
+        }
+        let connection = bus.connection("b").await?;
+        let session = bus.state.tokens.read().await[&connection.token].clone();
+
+        bus.guard_delegation(&session, "d", &event_log).await?;
+        bus.guard_delegation(&session, "d", &event_log).await?;
+        bus.shutdown().await?;
+
+        let events = archive.verify_session("warning-run").await?;
+        let warning_scopes: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                event.kind == EventKind::Usage
+                    && event.payload["phase"].as_str() == Some("budget_warning")
+            })
+            .filter_map(|event| event.payload["scope"].as_str())
+            .collect();
+        assert_eq!(warning_scopes, ["agent:d", "team"]);
+        assert_events_match_schema(&events);
+        Ok(())
+    }
+
+    async fn call_dispatch(
+        bus: &TeamBus,
+        connection: &TeamBusConnection,
+        target: &str,
+    ) -> Result<Value> {
+        post_json(
+            bus,
+            &connection.token,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": Uuid::new_v4().to_string(),
+                "method": "tools/call",
+                "params": {
+                    "name": "dispatch",
+                    "arguments": {"agent": target, "task": "must not execute"}
+                }
+            }),
+        )
+        .await
+    }
+
+    fn assert_tool_error_contains(response: &Value, expected: &str) {
+        assert_eq!(response["result"]["isError"], true, "{response}");
+        let message = response["result"]["content"][0]["text"]
+            .as_str()
+            .expect("tool error text");
+        assert!(message.contains(expected), "{message:?}");
     }
 
     fn test_agent(id: &str, command: &str, args: Vec<String>) -> AgentConfig {
