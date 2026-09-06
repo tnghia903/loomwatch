@@ -59,6 +59,78 @@ harmless command as safe and auto-approved it before ACP permission negotiation.
 1.18.23 in `acp --pure` mode likewise auto-approves its own tool calls and did not emit
 `session/request_permission` during the Phase 02 probe.
 
+### `reject_always` is unreachable with every harness LoomWatch currently targets (TNG-47)
+
+TNG-30 and TNG-44 closed the `reject_once` half of this question but left `reject_always`
+unverified: `acp.rs` only selects it when a harness offers *no* `reject_once` option (see
+`build_client_response` in `crates/loomwatch-backend/src/acp.rs`). TNG-47 checked every
+harness family in the README's spawn table — `claude-agent-acp`, `codex-acp`, Gemini CLI ACP
+mode, and Hermes/OpenCode as `opencode acp` stand-ins — against that specific shape and found
+none of them can produce it, by construction of their own permission-option builders, not by
+chance non-triggering in a single probe:
+
+- **`@agentclientprotocol/claude-agent-acp` 0.75.1** (npm; the current package for the
+  README's `claude-agent-acp`, formerly `@zed-industries/claude-code-acp`). Its
+  `dist/permissions/options/*.js` never defines a `reject_always` kind at all — `shared.js`'s
+  `reject()` helper hard-codes `kind: "reject_once"`, and every option builder
+  (`buildReadPermissionOptions`, `buildEditPermissionOptions`, `buildBashPermissionOptions`,
+  `buildFallbackPermissionOptions`, etc.) calls it unconditionally. Confirmed live: a raw ACP
+  session against this package defaults `session/new`'s `mode` config option to `"auto"`
+  ("Claude handles permission decisions"), which auto-approves and never calls
+  `session/request_permission` — a fourth instance of the auto-approve pattern already seen
+  in Hermes `smart` and OpenCode `acp --pure`. Switching to manual gating requires
+  `session/set_config_option` with `{"configId":"mode","value":"default"}` *before*
+  `session/prompt`. Once in `"default"` mode, a real `write_file` permission request arrived
+  with options `[{"kind":"allow_once"},{"kind":"allow_always"},{"kind":"reject_once"}]` — no
+  `reject_always` — and LoomWatch's existing `reject_once`-preferring logic selected `reject`,
+  which the harness honored (`permission denied`, file not written). **Anyone spawning
+  `claude-agent-acp` for real work must budget for this: LoomWatch will archive zero
+  `permission` events by default unless it explicitly negotiates `mode: "default"` first.**
+- **`@agentclientprotocol/codex-acp` 1.10.0** (npm; the README's `codex-acp`, wrapping the
+  local `codex` CLI's app-server). `src/permissions/options.ts`'s
+  `defaultCommandDecisions()` unconditionally appends `"decline"` and `"cancel"` — both map to
+  `kind: "reject_once"` — to every decision list it builds. `reject_always` appears exactly
+  once in the bundle, as the "No, and block this host in the future" option for a proposed
+  *network policy amendment*, and it is only ever pushed alongside the ambient
+  `decline`/`cancel` reject_once pair, never in their place. Confirmed live: this package's
+  default session mode is `"agent"` ("Approve for me" — only flags actions it judges unsafe),
+  which auto-approved both a `touch` and a `curl` to an external host without any
+  `session/request_permission`. Switching to `"read-only"` ("Ask for approval") via
+  `session/set_config_option {"configId":"mode","value":"read-only"}` still did not produce a
+  permission request for either call in this environment — the failed `curl` (exit 6, DNS
+  resolution failure) points at network being cut at the OS sandbox layer below ACP, not at
+  ACP-level negotiation, so no `permission` event was observable at all for this probe shape.
+  Reaching the one code path that emits `reject_always` would need a prompt that gets codex to
+  propose the network-policy-amendment decision specifically, which was not exercised.
+- **Gemini CLI 0.54.4** (`@google/gemini-cli`, `gemini --acp`). Its bundled
+  `toPermissionOptions()` builds a static `[allow_once, reject_once]` base for every
+  confirmation kind (`edit`, `exec`, `mcp`, `info`, `ask_user`) and only ever *adds*
+  `allow_always` variants on top; `reject_always` occurs exactly once in the entire bundle, in
+  the zod schema (`zPermissionOptionKind`) that validates the ACP-spec enum — it is never
+  constructed. This could not be confirmed live: this dev machine's `oauth-personal` (free
+  tier) auth throws `IneligibleTierError` ("This client is no longer supported for Gemini Code
+  Assist for individuals... migrate to Antigravity") before `session/new` completes, so Gemini
+  CLI ACP mode cannot presently be driven at all here, independent of this question.
+- **Hermes 0.21.0** and **OpenCode 1.18.23** — already documented above: Hermes offers
+  `reject_once` without `reject_always`; OpenCode `acp --pure` offers neither because it
+  auto-approves.
+
+**Conclusion:** across every harness family in the README's spawn table, `reject_always`
+either never appears (Gemini, OpenCode) or appears only as an addition alongside an
+already-present `reject_once` (`claude-agent-acp` never at all; `codex-acp` only bundled with
+`decline`/`cancel`). None can currently produce the shape `acp.rs`'s fallback branch exists
+for — a harness offering *only* an always-style rejection — so that branch stays verified by
+the in-process mock test in `acp.rs` (search `reject_always` in that file) and not by a live
+harness. This is a property of how these harnesses build their option lists today, not a gap
+in how many were tried; a future harness or harness version could still change this, so the
+branch should not be deleted. It does not affect the Team Bus guards in
+[ARCHITECTURE.md §3](ARCHITECTURE.md#3-team-bus--delegation-as-protocol) — permission
+negotiation and delegation-guard enforcement are independent code paths — but the auto-approve
+default in `claude-agent-acp` (`mode: "auto"`) and `codex-acp` (`mode: "agent"`) is a real gap
+for anyone building on the `permission` event archive: both need an explicit
+`session/set_config_option` before archived `permission` events will exist at all when
+LoomWatch spawns them for real work, not just for this probe.
+
 LoomWatch observes and archives an agent process; it does not sandbox it. Declaring filesystem
 and terminal client capabilities as unavailable only says that LoomWatch does not provide those
 ACP services. A harness can still use its own tools to read, write, execute, or access the network
