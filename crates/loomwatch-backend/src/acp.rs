@@ -42,6 +42,9 @@ pub struct AcpProcess {
     /// Set as soon as `session/new` responds, so a mid-turn failure can still
     /// mark and recover the partial session.
     session_id: Option<String>,
+    /// How long to wait for any one JSON-RPC response before abandoning the turn.
+    /// Defaults to [`REQUEST_TIMEOUT`]; overridable in tests.
+    request_timeout: Duration,
 }
 
 impl AcpProcess {
@@ -89,7 +92,14 @@ impl AcpProcess {
             cwd: spec.cwd.clone(),
             has_run: false,
             session_id: None,
+            request_timeout: REQUEST_TIMEOUT,
         })
+    }
+
+    #[cfg(test)]
+    fn with_request_timeout(mut self, request_timeout: Duration) -> Self {
+        self.request_timeout = request_timeout;
+        self
     }
 
     /// Drive one complete ACP turn and wait for the harness to exit.
@@ -125,41 +135,9 @@ impl AcpProcess {
         let crash_marker_error = if (execution.is_err() || exit.is_err())
             && let Some(session_id) = failure_session_id.as_deref()
         {
-            (async {
-                let seq = archive
-                    .load_session(session_id)
-                    .await
-                    .with_context(|| format!("failed to recover partial ACP session {session_id}"))?
-                    .len() as u64;
-                let exit_code = exit.as_ref().map_or(-1, |report| report.code);
-                let mut failures = Vec::new();
-                if let Err(error) = &execution {
-                    failures.push(format!("session execution failed: {error:#}"));
-                }
-                match &exit {
-                    Ok(report) if !report.stderr.is_empty() => {
-                        failures.push(format!("stderr: {}", report.stderr));
-                    }
-                    Err(error) => failures.push(format!("shutdown failed: {error:#}")),
-                    Ok(_) => {}
-                }
-                append_archive_event(
-                    archive,
-                    session_id,
-                    agent_id,
-                    seq,
-                    EventKind::Process,
-                    json!({
-                        "phase": "crashed",
-                        "exitCode": exit_code,
-                        "message": failures.join("; ")
-                    }),
-                    None,
-                )
+            append_crash_marker(archive, session_id, agent_id, &execution, &exit)
                 .await
-            })
-            .await
-            .err()
+                .err()
         } else {
             None
         };
@@ -175,6 +153,7 @@ impl AcpProcess {
                     json!({
                         "phase": if exit.success { "exited" } else { "crashed" },
                         "exitCode": exit.code,
+                        "signal": exit.signal,
                         "message": exit.stderr
                     }),
                     None,
@@ -413,9 +392,15 @@ impl AcpProcess {
         mut recorder: Option<&mut Recorder<'_>>,
     ) -> Result<RpcResult> {
         loop {
-            let line = timeout(REQUEST_TIMEOUT, self.stdout.next_line())
-                .await
-                .with_context(|| format!("timed out waiting for ACP response to {method}"))??
+            let Ok(read) = timeout(self.request_timeout, self.stdout.next_line()).await else {
+                self.cancel_current_turn().await;
+                bail!(
+                    "timed out after {:?} waiting for ACP response to {method}",
+                    self.request_timeout
+                );
+            };
+            let line = read
+                .with_context(|| format!("ACP child stream error waiting for {method}"))?
                 .with_context(|| format!("ACP child exited before responding to {method}"))?;
             let message: Value = serde_json::from_str(&line)
                 .with_context(|| format!("ACP child emitted invalid JSON: {line:?}"))?;
@@ -453,6 +438,22 @@ impl AcpProcess {
         Ok(())
     }
 
+    /// Best-effort `session/cancel` once `LoomWatch` has already abandoned the turn, so a
+    /// well-behaved harness can stop working — and stop spending — before the transport is
+    /// torn down and the child killed in [`shutdown`](Self::shutdown). The harness may be
+    /// wedged and never see this; the failure is expected and deliberately ignored.
+    async fn cancel_current_turn(&mut self) {
+        let Some(session_id) = self.session_id.clone() else {
+            return;
+        };
+        let notification = json!({
+            "jsonrpc": "2.0",
+            "method": "session/cancel",
+            "params": {"sessionId": session_id}
+        });
+        let _ = self.send(&notification).await;
+    }
+
     async fn shutdown(&mut self, exit_timeout: Duration) -> Result<ExitReport> {
         drop(self.stdin.take());
         let status = if let Ok(status) = timeout(exit_timeout, self.child.wait()).await {
@@ -473,6 +474,7 @@ impl AcpProcess {
         let code = status.code().unwrap_or(-1);
         Ok(ExitReport {
             code,
+            signal: signal_death(status),
             success: status.success(),
             stderr: stderr.trim().to_owned(),
         })
@@ -481,8 +483,76 @@ impl AcpProcess {
 
 struct ExitReport {
     code: i32,
+    /// Populated when the child was terminated by a signal — `status.code()` is `None` in
+    /// that case, so a bare `-1` exit code cannot otherwise be told apart from a real one.
+    signal: Option<String>,
     success: bool,
     stderr: String,
+}
+
+/// Name the signal that killed the child, if one did. `SIGKILL` for the common
+/// timeout/OOM path; unrecognized numbers fall back to `SIG<n>`.
+fn signal_death(status: std::process::ExitStatus) -> Option<String> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal().map(|number| {
+        let name = match number {
+            1 => "SIGHUP",
+            2 => "SIGINT",
+            3 => "SIGQUIT",
+            4 => "SIGILL",
+            6 => "SIGABRT",
+            8 => "SIGFPE",
+            9 => "SIGKILL",
+            11 => "SIGSEGV",
+            13 => "SIGPIPE",
+            15 => "SIGTERM",
+            _ => return format!("SIG{number}"),
+        };
+        name.to_owned()
+    })
+}
+
+/// Write the terminal `process: crashed` marker for a run that failed before it could record
+/// its own, so the partial session still ends with a marker `show` can locate. Carries the
+/// exit code and, for a signal death, the signal name.
+async fn append_crash_marker(
+    archive: &EventArchive,
+    session_id: &str,
+    agent_id: &str,
+    execution: &Result<(String, usize)>,
+    exit: &Result<ExitReport>,
+) -> Result<()> {
+    let seq = archive
+        .load_session(session_id)
+        .await
+        .with_context(|| format!("failed to recover partial ACP session {session_id}"))?
+        .len() as u64;
+    let mut failures = Vec::new();
+    if let Err(error) = execution {
+        failures.push(format!("session execution failed: {error:#}"));
+    }
+    match exit {
+        Ok(report) if !report.stderr.is_empty() => {
+            failures.push(format!("stderr: {}", report.stderr));
+        }
+        Err(error) => failures.push(format!("shutdown failed: {error:#}")),
+        Ok(_) => {}
+    }
+    append_archive_event(
+        archive,
+        session_id,
+        agent_id,
+        seq,
+        EventKind::Process,
+        json!({
+            "phase": "crashed",
+            "exitCode": exit.as_ref().map_or(-1, |report| report.code),
+            "signal": exit.as_ref().ok().and_then(|report| report.signal.clone()),
+            "message": failures.join("; ")
+        }),
+        None,
+    )
+    .await
 }
 
 fn with_recovery_context(error: anyhow::Error, session_id: Option<&str>) -> anyhow::Error {
@@ -942,6 +1012,10 @@ mod tests {
         assert_eq!(events.len(), 17);
         assert_eq!(events.first().unwrap().kind, EventKind::Process);
         assert_eq!(events.last().unwrap().payload["phase"], "exited");
+        assert!(
+            events.last().unwrap().payload["signal"].is_null(),
+            "a clean exit carries no signal"
+        );
         let kinds: Vec<EventKind> = events.iter().map(|event| event.kind).collect();
         assert_eq!(
             kinds,
@@ -1198,5 +1272,102 @@ mod tests {
             "a mid-turn failure must still write a terminal process event"
         );
         assert_eq!(events.last().unwrap().payload["phase"], "crashed");
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn signal_death_is_recorded_distinctly_from_a_negative_exit_code(pool: PgPool) {
+        // Answer the handshake so a session id exists, then die by SIGKILL mid-turn. Without
+        // the signal field this is indistinguishable from a genuine exit code of -1.
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"signal-session","configOptions":[]}}'
+            IFS= read -r _
+            kill -KILL $$
+        "#;
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: std::env::current_dir().expect("cwd"),
+        };
+        let archive = EventArchive::from_pool(pool);
+        let mut process = AcpProcess::spawn(&spec).expect("spawn");
+        let error = process
+            .run_session(
+                "agent",
+                "test/model",
+                "hello",
+                &archive,
+                Duration::from_secs(2),
+            )
+            .await
+            .expect_err("a signal-killed child must fail the turn");
+        assert!(format!("{error:#}").contains("session_id=signal-session"));
+
+        let events = archive
+            .verify_session("signal-session")
+            .await
+            .expect("recover partial session");
+        let last = events.last().unwrap();
+        assert_eq!(last.kind, EventKind::Process);
+        assert_eq!(last.payload["phase"], "crashed");
+        assert_eq!(last.payload["exitCode"], -1);
+        assert_eq!(last.payload["signal"], "SIGKILL");
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn request_timeout_sends_session_cancel_before_teardown(pool: PgPool) {
+        // Complete the handshake, then stall the prompt turn. On timeout LoomWatch should
+        // deliver session/cancel; this child echoes whatever it receives to stderr, which
+        // the crash marker then captures.
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"cancel-session","configOptions":[]}}'
+            IFS= read -r _
+            IFS= read -r cancel
+            printf 'cancel-frame: %s\n' "$cancel" >&2
+        "#;
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: std::env::current_dir().expect("cwd"),
+        };
+        let archive = EventArchive::from_pool(pool);
+        let mut process = AcpProcess::spawn(&spec)
+            .expect("spawn")
+            .with_request_timeout(Duration::from_millis(200));
+        let error = process
+            .run_session(
+                "agent",
+                "test/model",
+                "hello",
+                &archive,
+                Duration::from_secs(3),
+            )
+            .await
+            .expect_err("a stalled turn must fail");
+        assert!(
+            format!("{error:#}").contains("timed out after"),
+            "unexpected error: {error:#}"
+        );
+
+        let events = archive
+            .verify_session("cancel-session")
+            .await
+            .expect("recover stalled session");
+        let last = events.last().unwrap();
+        assert_eq!(last.payload["phase"], "crashed");
+        let message = last.payload["message"].as_str().expect("crash message");
+        assert!(
+            message.contains(r#""method":"session/cancel""#),
+            "crash marker must show the session/cancel LoomWatch sent: {message}"
+        );
     }
 }

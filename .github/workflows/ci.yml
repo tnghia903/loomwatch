@@ -10,6 +10,22 @@ permissions:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_USER: loomwatch
+          POSTGRES_PASSWORD: loomwatch
+          POSTGRES_DB: loomwatch
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U loomwatch -d loomwatch"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgres://loomwatch:loomwatch@localhost:5432/loomwatch
     steps:
       - uses: actions/checkout@v6
       - name: Check
