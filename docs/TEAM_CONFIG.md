@@ -40,9 +40,16 @@ depend on the document as a whole:
   independently of agent budgets; a run halts on whichever ceiling is reached first, and
   the team limit need not equal or exceed the sum of agent limits. Loaders apply
   `warnAtPercent: 80` whenever it is absent; schema defaults are annotations only.
+- The Team Bus accounts non-negative finite `costUsd` values from normalized `usage` events
+  and from `turn_end.payload.usage`. These values are spend deltas supplied by the ACP
+  harness. Before `dispatch`, `ask`, or `handoff` starts another process, the bus checks the
+  target agent and team totals, archives one `usage` warning per scope after its threshold,
+  and archives a failed `tool_update` when it refuses the delegation.
 - `guards.maxDispatchDepth` defaults to `8` when absent. The Team Bus refuses dispatches
-  beyond that depth. `Agent.allowRecruiting` defaults to `true`; `false` forbids that agent
-  from recruiting helpers within its own pipeline step.
+  beyond that depth. Delegation lineage is carried in server-owned bearer-token state, so
+  callers cannot forge the counter or erase an ancestor to bypass cycle detection.
+  `Agent.allowRecruiting` defaults to `true`; `false` forbids that agent from recruiting
+  helpers within its own pipeline step.
 - `status` is a runtime annotation. Team-file writers must not persist it, and team-file
   readers must ignore it if an older or external document contains it.
 - Run-event IDs are unique. `RunEvent.agentId` names an agent in the team document. `seq`
