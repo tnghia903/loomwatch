@@ -64,17 +64,23 @@ The Swift package is intentionally deferred to Phase 04.
 
 ## Development
 
-Only Docker is required on the host. Create local database credentials once, then start
-Postgres and run the Rust commands inside the pinned development image:
+Only Docker is required on the host. Copy the environment template, then edit `.env` and
+replace `POSTGRES_PASSWORD` with a local password before starting Postgres for the first
+time. Run the Rust commands inside the pinned development image:
 
 ```sh
 cp .env.example .env
+# Edit .env and set POSTGRES_PASSWORD before continuing.
 docker compose up -d postgres
 docker compose run --rm dev cargo check --workspace
 docker compose run --rm dev cargo test --workspace --all-targets
 docker compose run --rm dev cargo clippy --workspace --all-targets -- -D warnings
 docker compose run --rm dev cargo fmt --all -- --check
 ```
+
+Postgres applies these credentials only when it initializes the data volume. If you change
+them later, run `docker compose down -v` before starting Postgres again; this deletes the
+local development database and recreates it with the new credentials.
 
 The `dev` service installs the exact toolchain from `rust-toolchain.toml`; it is only a
 build and test environment. The Compose file deliberately has no backend service: packaged

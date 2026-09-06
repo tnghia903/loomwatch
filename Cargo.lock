@@ -970,6 +970,7 @@ dependencies = [
  "serde_yaml",
  "sqlx",
  "tokio",
+ "url",
  "uuid",
 ]
 

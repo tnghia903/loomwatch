@@ -135,8 +135,40 @@ fn parse_event_kind(kind: &str) -> Result<EventKind> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use sqlx::postgres::PgConnectOptions;
 
     use super::*;
+
+    #[sqlx::test(migrations = false)]
+    async fn connect_migrates_and_round_trips(
+        _pool_options: PgPoolOptions,
+        connect_options: PgConnectOptions,
+    ) -> Result<()> {
+        let database = connect_options
+            .get_database()
+            .context("SQLx test database has no name")?;
+        let mut database_url = url::Url::parse(
+            &std::env::var("DATABASE_URL").context("DATABASE_URL must be set for SQLx tests")?,
+        )
+        .context("DATABASE_URL is not a valid URL")?;
+        database_url.set_path(database);
+
+        let archive = EventArchive::connect(database_url.as_str()).await?;
+        let event = RunEvent {
+            id: "connected-session:0".into(),
+            session_id: "connected-session".into(),
+            agent_id: "agent".into(),
+            seq: 0,
+            ts: "2026-09-06T00:00:00Z".into(),
+            kind: EventKind::Message,
+            payload: json!({"role": "user", "content": "hello"}),
+            raw: None,
+        };
+
+        archive.append(&event).await?;
+        assert_eq!(archive.verify_session("connected-session").await?, [event]);
+        Ok(())
+    }
 
     #[sqlx::test(migrations = "../../migrations")]
     async fn persists_and_recovers_events(pool: PgPool) -> Result<()> {
