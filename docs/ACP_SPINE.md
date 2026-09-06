@@ -22,10 +22,10 @@ Standard error is drained concurrently so a chatty harness cannot deadlock. If t
 exits early, returns a JSON-RPC error, or fails to exit after stdin closes, the supervisor
 returns a contextual error; once `session/new` has succeeded, that error includes the session
 identifier and the archive ends with a `process: crashed` marker so the partial run remains
-recoverable. A hung child is killed and reaped. SQLite is switched to WAL mode before the
-event table is created and uses `synchronous=NORMAL` to avoid a disk sync for every streamed
-chunk while retaining process-crash durability. The `show` command opens the database
-independently and replays a session by its strictly increasing sequence number.
+recoverable. A hung child is killed and reaped. Postgres stores `payload` and `raw` as JSONB,
+and a versioned `sqlx` migration enforces the event-kind check and unique
+`(session_id, seq)` replay order. The `show` command opens an independent Postgres connection
+and replays a session by its strictly increasing sequence number.
 
 The ten-minute per-request timeout currently does not send `session/cancel`: timeout handling
 closes the transport and kills a harness that does not exit during shutdown. A harness may
@@ -57,19 +57,25 @@ top-level `raw`, before the internal event contract freezes.
 
 ## Smoke test
 
-From the repository root:
+Docker Compose is not a runtime for `loomwatchd`. After starting Postgres and installing a
+packaged native LoomWatch build, export the native connection URL and run the binary on the
+host so it can launch host-installed ACP harnesses:
 
 ```sh
-cargo run --package loomwatch-backend --bin loomwatchd -- run \
+docker compose up -d postgres
+set -a
+. ./.env
+set +a
+export DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
+
+loomwatchd run \
   --team examples/phase02-opencode.yaml \
-  --database /path/to/loomwatch-smoke.sqlite3 \
   --prompt 'Reply with exactly: loomwatch ACP smoke ok'
 ```
 
 Use the printed session identifier to verify recovery after the harness exits:
 
 ```sh
-cargo run --package loomwatch-backend --bin loomwatchd -- show \
-  --database /path/to/loomwatch-smoke.sqlite3 \
+loomwatchd show \
   --session SESSION_ID
 ```

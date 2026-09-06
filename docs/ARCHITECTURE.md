@@ -1,6 +1,6 @@
 # LoomWatch — Architecture
 
-Revision 0.2 · 2026-09-01 · pre-implementation
+Revision 0.3 · 2026-09-06 · implementation
 
 This is the specification the build team works from. It supersedes two earlier designs: a
 companion app for Paperclip, and a version built on Anthropic Managed Agents. Both were
@@ -38,14 +38,22 @@ The backend is a single static binary shipped inside the `.app`. Its job:
   agent processes
 - **Team Bus** — an MCP server the agents call back into (see §3)
 - **Pipeline orchestrator** — topological execution for drawn DAGs (see §4)
-- **Event archive** — SQLite (WAL), the durable and unbounded history
+- **Event archive** — Postgres, the durable and unbounded history
 - **WebSocket server** — live push to the macOS app, plus minimal REST for bootstrap
 
 **Why Rust rather than TypeScript:** going vendor-neutral means no vendor SDK is usable
 anyway — ACP is JSON-RPC over stdio and there is no second protocol — so the JS ecosystem
-advantage disappears. What remains is process supervision, stdio multiplexing, SQLite and
-WebSocket, which is systems work, plus single-binary distribution with no runtime for the
-user to install.
+advantage disappears. What remains is process supervision, stdio multiplexing, Postgres and
+WebSocket, which is systems work, plus a native application binary with no language runtime
+for the user to install. Postgres remains a required local service.
+
+**Decision reversal (2026-09-06):** the operator explicitly replaced SQLite WAL with
+Postgres as the production event archive, and replaced host-installed rustup with a Docker
+Compose development toolchain. `sqlx` is used because its Tokio-native Postgres pool and
+versioned migration runner fit the existing async backend without a second runtime. The
+frozen `RunEvent` wire contract and `UNIQUE(session_id, seq)` replay invariant are unchanged.
+Docker is used for builds and the local Postgres service only; `loomwatchd` still runs as a
+native local process.
 
 ---
 
@@ -133,8 +141,8 @@ pausing, or commenting on an agent mid-run — are deferred.
 
 | # | Phase | Produces |
 |---|---|---|
-| 01 | Plan & scaffold | Repo, `rustup`, YAML schema for team config |
-| 02 | ACP spine | Backend spawns a real harness, speaks ACP, archives a full session to SQLite |
+| 01 | Plan & scaffold | Repo, containerized Rust toolchain, YAML schema for team config |
+| 02 | ACP spine | Backend spawns a real harness, speaks ACP, archives a full session to Postgres |
 | 03 | Team Bus + modes | MCP delegation server, pipeline orchestrator, guards, two agents delegating |
 | 04 | Canvas | SwiftUI app: agent panel, drag-to-instantiate, edge drawing, YAML round-trip |
 | 05 | Watch & alert | Observed-edge layer, timeline scrubber, attention queue, menu bar, notifications |
@@ -159,3 +167,9 @@ agents in a cloud container while LoomWatch's agents are local processes working
 directories. Supporting both would mean two adapter paths and two filesystem models for one
 vendor's benefit. What it traded away: cloud-side scheduling would have fired with the Mac
 asleep or shut. Accepted, since agents need local repo access to be useful.
+
+**SQLite event archive.** Revision 0.2 chose SQLite WAL for a zero-service local archive.
+The operator explicitly reversed that choice on 2026-09-06 in favor of Postgres and accepted
+the required local service. The already-hardened `RunEvent` contract remains unchanged; only
+its storage engine changed. See
+[ADR 0001](decisions/0001-postgres-event-archive-and-docker-dev-toolchain.md).
