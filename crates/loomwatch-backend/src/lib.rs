@@ -5,17 +5,20 @@
 pub mod acp;
 pub mod archive;
 pub mod config;
+mod team_bus;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::acp::{AcpProcess, ProcessSpec};
+use crate::acp::{AcpProcess, ProcessSpec, TeamSessionContext};
 use crate::archive::EventArchive;
 use crate::config::TeamConfig;
+use crate::team_bus::TeamBus;
 
 /// One durable event in replay order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -85,7 +88,7 @@ pub async fn run_team_session(
     prompt: &str,
     exit_timeout: Duration,
 ) -> Result<SessionOutcome> {
-    let team = TeamConfig::load(team_path)?;
+    let team = Arc::new(TeamConfig::load(team_path)?);
     let agent = team.entrypoint_agent()?;
     let cwd = resolve_cwd(team_path, &agent.spawn.cwd)?;
     let spec = ProcessSpec {
@@ -98,12 +101,31 @@ pub async fn run_team_session(
     let archive = EventArchive::connect(database_url).await?;
     let mut process = AcpProcess::spawn(&spec)
         .with_context(|| format!("failed to spawn ACP harness for agent {}", agent.id))?;
-    process
-        .run_session(&agent.id, &agent.model, prompt, &archive, exit_timeout)
-        .await
+    let bus = TeamBus::start(team.clone(), team_path, archive.clone(), exit_timeout).await?;
+    let connection = bus.connection(&agent.id).await?;
+    let root = process
+        .run_session_with_bus(
+            &agent.id,
+            &agent.model,
+            prompt,
+            TeamSessionContext {
+                archive: &archive,
+                exit_timeout,
+                bus: Some(&connection),
+                event_log: None,
+            },
+        )
+        .await;
+    let delegated = bus.wait_for_tasks().await;
+    let shutdown = bus.shutdown().await;
+    let mut outcome = root?;
+    delegated?;
+    shutdown?;
+    outcome.event_count = archive.verify_session(&outcome.session_id).await?.len();
+    Ok(outcome)
 }
 
-fn resolve_cwd(team_path: &Path, cwd: &Path) -> Result<PathBuf> {
+pub(crate) fn resolve_cwd(team_path: &Path, cwd: &Path) -> Result<PathBuf> {
     let resolved = if cwd.is_absolute() {
         cwd.to_path_buf()
     } else {

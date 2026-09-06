@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -8,11 +9,13 @@ use chrono::{SecondsFormat, Utc};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use uuid::Uuid;
 
 use crate::archive::EventArchive;
+use crate::team_bus::TeamBusConnection;
 use crate::{EventKind, RunEvent, SessionOutcome};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
@@ -30,6 +33,20 @@ struct RpcResult {
     response: Value,
 }
 
+struct NegotiatedSession {
+    initialized: RpcResult,
+    created: RpcResult,
+    session_id: String,
+    supports_http_mcp: bool,
+}
+
+pub(crate) struct TeamSessionContext<'a> {
+    pub(crate) archive: &'a EventArchive,
+    pub(crate) exit_timeout: Duration,
+    pub(crate) bus: Option<&'a TeamBusConnection>,
+    pub(crate) event_log: Option<EventLog>,
+}
+
 /// Owns one ACP child and both sides of its line-delimited JSON-RPC stream.
 pub struct AcpProcess {
     child: Child,
@@ -42,6 +59,9 @@ pub struct AcpProcess {
     /// Set as soon as `session/new` responds, so a mid-turn failure can still
     /// mark and recover the partial session.
     session_id: Option<String>,
+    /// Shared archive writer. Delegated agents receive the root writer so all agents in one
+    /// team run share a single dense replay sequence.
+    event_log: Option<EventLog>,
     /// How long to wait for any one JSON-RPC response before abandoning the turn.
     /// Defaults to [`REQUEST_TIMEOUT`]; overridable in tests.
     request_timeout: Duration,
@@ -92,6 +112,7 @@ impl AcpProcess {
             cwd: spec.cwd.clone(),
             has_run: false,
             session_id: None,
+            event_log: None,
             request_timeout: REQUEST_TIMEOUT,
         })
     }
@@ -115,19 +136,54 @@ impl AcpProcess {
         archive: &EventArchive,
         exit_timeout: Duration,
     ) -> Result<SessionOutcome> {
+        self.run_session_with_context(
+            agent_id,
+            model,
+            prompt,
+            TeamSessionContext {
+                archive,
+                exit_timeout,
+                bus: None,
+                event_log: None,
+            },
+        )
+        .await
+    }
+
+    /// Drive a turn with access to the shared Team Bus and, for delegated agents, the root
+    /// run's ordered event log.
+    pub(crate) async fn run_session_with_bus(
+        &mut self,
+        agent_id: &str,
+        model: &str,
+        prompt: &str,
+        context: TeamSessionContext<'_>,
+    ) -> Result<SessionOutcome> {
+        self.run_session_with_context(agent_id, model, prompt, context)
+            .await
+    }
+
+    async fn run_session_with_context(
+        &mut self,
+        agent_id: &str,
+        model: &str,
+        prompt: &str,
+        mut context: TeamSessionContext<'_>,
+    ) -> Result<SessionOutcome> {
         if self.has_run {
             bail!("this ACP process has already run a session");
         }
         self.has_run = true;
         let process_id = self.child.id().context("ACP child has no process id")?;
         let execution = self
-            .run_session_inner(agent_id, model, prompt, archive, process_id)
+            .run_session_inner(agent_id, model, prompt, process_id, &mut context)
             .await;
-        let exit = self.shutdown(exit_timeout).await;
-        let failure_session_id = match &execution {
-            Ok((session_id, _)) => Some(session_id.clone()),
-            Err(_) => self.session_id.clone(),
-        };
+        let exit = self.shutdown(context.exit_timeout).await;
+        let failure_session_id = self
+            .event_log
+            .as_ref()
+            .map(|log| log.session_id().to_owned())
+            .or_else(|| self.session_id.clone());
 
         // A protocol or shutdown failure still needs a terminal marker and a recoverable session,
         // otherwise the partial run sits in Postgres with no `crashed` marker and `show` has no
@@ -135,31 +191,38 @@ impl AcpProcess {
         let crash_marker_error = if (execution.is_err() || exit.is_err())
             && let Some(session_id) = failure_session_id.as_deref()
         {
-            append_crash_marker(archive, session_id, agent_id, &execution, &exit)
-                .await
-                .err()
+            append_crash_marker(
+                context.archive,
+                self.event_log.as_ref(),
+                session_id,
+                agent_id,
+                &execution,
+                &exit,
+            )
+            .await
+            .err()
         } else {
             None
         };
 
         match (execution, exit) {
-            (Ok((session_id, event_count)), Ok(exit)) => {
-                append_archive_event(
-                    archive,
-                    &session_id,
-                    agent_id,
-                    event_count as u64,
-                    EventKind::Process,
-                    json!({
-                        "phase": if exit.success { "exited" } else { "crashed" },
-                        "exitCode": exit.code,
-                        "signal": exit.signal,
-                        "message": exit.stderr
-                    }),
-                    None,
-                )
-                .await?;
-                let events = archive.verify_session(&session_id).await?;
+            (Ok((session_id, _event_count)), Ok(exit)) => {
+                self.event_log
+                    .as_ref()
+                    .context("ACP session completed without an event log")?
+                    .append(
+                        agent_id,
+                        EventKind::Process,
+                        json!({
+                            "phase": if exit.success { "exited" } else { "crashed" },
+                            "exitCode": exit.code,
+                            "signal": exit.signal,
+                            "message": exit.stderr
+                        }),
+                        None,
+                    )
+                    .await?;
+                let events = context.archive.verify_session(&session_id).await?;
                 if !exit.success {
                     bail!(
                         "ACP session {session_id} child exited with code {}; stderr: {}",
@@ -192,13 +255,13 @@ impl AcpProcess {
     /// Run the `initialize` / `session/new` / `session/set_config_option` handshake and
     /// archive each negotiated response as `session_meta`, so the archive can later say which
     /// model and capabilities actually produced a transcript.
-    async fn negotiate_session<'a>(
+    async fn negotiate_session(
         &mut self,
-        agent_id: &'a str,
+        agent_id: &str,
         model: &str,
-        archive: &'a EventArchive,
         process_id: u32,
-    ) -> Result<Recorder<'a>> {
+        context: &mut TeamSessionContext<'_>,
+    ) -> Result<Recorder> {
         let initialized = self
             .request(
                 "initialize",
@@ -215,9 +278,27 @@ impl AcpProcess {
             .await
             .context("ACP initialize failed")?;
 
+        let supports_http_mcp = initialized
+            .result
+            .pointer("/agentCapabilities/mcpCapabilities/http")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let mcp_servers = if supports_http_mcp {
+            context
+                .bus
+                .map(TeamBusConnection::server_definition)
+                .into_iter()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let cwd = self.cwd.to_string_lossy().into_owned();
         let created = self
-            .request("session/new", &json!({"cwd": cwd, "mcpServers": []}), None)
+            .request(
+                "session/new",
+                &json!({"cwd": cwd, "mcpServers": mcp_servers}),
+                None,
+            )
             .await
             .context("ACP session/new failed")?;
         let session_id = created
@@ -226,8 +307,36 @@ impl AcpProcess {
             .and_then(Value::as_str)
             .context("ACP session/new response omitted sessionId")?
             .to_owned();
-        self.session_id = Some(session_id.clone());
-        let mut recorder = Recorder::new(archive, session_id.clone(), agent_id);
+        let negotiated = NegotiatedSession {
+            initialized,
+            created,
+            session_id,
+            supports_http_mcp,
+        };
+        self.session_id = Some(negotiated.session_id.clone());
+        let mut recorder = self
+            .start_recorder(agent_id, process_id, context, &negotiated)
+            .await?;
+        self.configure_model(model, &negotiated, &mut recorder)
+            .await?;
+        Ok(recorder)
+    }
+
+    async fn start_recorder(
+        &mut self,
+        agent_id: &str,
+        process_id: u32,
+        context: &mut TeamSessionContext<'_>,
+        negotiated: &NegotiatedSession,
+    ) -> Result<Recorder> {
+        let event_log = context.event_log.take().unwrap_or_else(|| {
+            EventLog::new(context.archive.clone(), negotiated.session_id.clone())
+        });
+        self.event_log = Some(event_log.clone());
+        if let Some(bus) = context.bus {
+            bus.register(event_log.clone()).await;
+        }
+        let mut recorder = Recorder::with_log(event_log, negotiated.session_id.clone(), agent_id);
         recorder
             .append(
                 EventKind::Process,
@@ -235,21 +344,46 @@ impl AcpProcess {
                 None,
             )
             .await?;
+        if context.bus.is_some() && !negotiated.supports_http_mcp {
+            recorder
+                .append(
+                    EventKind::SessionMeta,
+                    json!({
+                        "phase": "team_bus_unavailable",
+                        "reason": "harness did not advertise HTTP MCP support"
+                    }),
+                    Some(json!({
+                        "source": "loomwatch",
+                        "phase": "team_bus_unavailable"
+                    })),
+                )
+                .await?;
+        }
         recorder
             .append(
                 EventKind::SessionMeta,
-                json!({"phase": "initialize", "result": initialized.result}),
-                Some(initialized.response),
+                json!({"phase": "initialize", "result": negotiated.initialized.result}),
+                Some(negotiated.initialized.response.clone()),
             )
             .await?;
         recorder
             .append(
                 EventKind::SessionMeta,
-                json!({"phase": "session_new", "result": created.result}),
-                Some(created.response),
+                json!({"phase": "session_new", "result": negotiated.created.result}),
+                Some(negotiated.created.response.clone()),
             )
             .await?;
-        let supports_model_config = created
+        Ok(recorder)
+    }
+
+    async fn configure_model(
+        &mut self,
+        model: &str,
+        negotiated: &NegotiatedSession,
+        recorder: &mut Recorder,
+    ) -> Result<()> {
+        let supports_model_config = negotiated
+            .created
             .result
             .get("configOptions")
             .and_then(Value::as_array)
@@ -262,8 +396,8 @@ impl AcpProcess {
             let config_response = self
                 .request(
                     "session/set_config_option",
-                    &json!({"sessionId": session_id, "configId": "model", "value": model}),
-                    Some(&mut recorder),
+                    &json!({"sessionId": negotiated.session_id, "configId": "model", "value": model}),
+                    Some(recorder),
                 )
                 .await
                 .with_context(|| format!("ACP harness rejected configured model {model:?}"))?;
@@ -289,11 +423,14 @@ impl AcpProcess {
                         "value": model,
                         "reason": "harness did not advertise a model config option"
                     }),
-                    None,
+                    Some(json!({
+                        "source": "loomwatch",
+                        "phase": "set_config_option_skipped"
+                    })),
                 )
                 .await?;
         }
-        Ok(recorder)
+        Ok(())
     }
 
     async fn run_session_inner(
@@ -301,13 +438,14 @@ impl AcpProcess {
         agent_id: &str,
         model: &str,
         prompt: &str,
-        archive: &EventArchive,
         process_id: u32,
+        context: &mut TeamSessionContext<'_>,
     ) -> Result<(String, usize)> {
         let mut recorder = self
-            .negotiate_session(agent_id, model, archive, process_id)
+            .negotiate_session(agent_id, model, process_id, context)
             .await?;
-        let session_id = recorder.session_id.clone();
+        let session_id = recorder.acp_session_id.clone();
+        let archive_session_id = recorder.event_log.session_id().to_owned();
 
         let prompt_params = json!({
             "sessionId": session_id,
@@ -358,15 +496,15 @@ impl AcpProcess {
         .await
         .context("ACP session/close failed")?;
 
-        let events = archive.verify_session(&session_id).await?;
-        Ok((session_id, events.len()))
+        let events = context.archive.verify_session(&archive_session_id).await?;
+        Ok((archive_session_id, events.len()))
     }
 
     async fn request(
         &mut self,
         method: &str,
         params: &Value,
-        recorder: Option<&mut Recorder<'_>>,
+        recorder: Option<&mut Recorder>,
     ) -> Result<RpcResult> {
         let (id, request) = self.next_request(method, params);
         self.send(&request).await?;
@@ -389,7 +527,7 @@ impl AcpProcess {
         &mut self,
         id: u64,
         method: &str,
-        mut recorder: Option<&mut Recorder<'_>>,
+        mut recorder: Option<&mut Recorder>,
     ) -> Result<RpcResult> {
         loop {
             let Ok(read) = timeout(self.request_timeout, self.stdout.next_line()).await else {
@@ -517,16 +655,12 @@ fn signal_death(status: std::process::ExitStatus) -> Option<String> {
 /// exit code and, for a signal death, the signal name.
 async fn append_crash_marker(
     archive: &EventArchive,
+    event_log: Option<&EventLog>,
     session_id: &str,
     agent_id: &str,
     execution: &Result<(String, usize)>,
     exit: &Result<ExitReport>,
 ) -> Result<()> {
-    let seq = archive
-        .load_session(session_id)
-        .await
-        .with_context(|| format!("failed to recover partial ACP session {session_id}"))?
-        .len() as u64;
     let mut failures = Vec::new();
     if let Err(error) = execution {
         failures.push(format!("session execution failed: {error:#}"));
@@ -538,21 +672,33 @@ async fn append_crash_marker(
         Err(error) => failures.push(format!("shutdown failed: {error:#}")),
         Ok(_) => {}
     }
-    append_archive_event(
-        archive,
-        session_id,
-        agent_id,
-        seq,
-        EventKind::Process,
-        json!({
-            "phase": "crashed",
-            "exitCode": exit.as_ref().map_or(-1, |report| report.code),
-            "signal": exit.as_ref().ok().and_then(|report| report.signal.clone()),
-            "message": failures.join("; ")
-        }),
-        None,
-    )
-    .await
+    let payload = json!({
+        "phase": "crashed",
+        "exitCode": exit.as_ref().map_or(-1, |report| report.code),
+        "signal": exit.as_ref().ok().and_then(|report| report.signal.clone()),
+        "message": failures.join("; ")
+    });
+    if let Some(event_log) = event_log {
+        event_log
+            .append(agent_id, EventKind::Process, payload, None)
+            .await
+    } else {
+        let seq = archive
+            .load_session(session_id)
+            .await
+            .with_context(|| format!("failed to recover partial ACP session {session_id}"))?
+            .len() as u64;
+        append_archive_event(
+            archive,
+            session_id,
+            agent_id,
+            seq,
+            EventKind::Process,
+            payload,
+            None,
+        )
+        .await
+    }
 }
 
 fn with_recovery_context(error: anyhow::Error, session_id: Option<&str>) -> anyhow::Error {
@@ -627,20 +773,81 @@ fn build_client_response(request: &Value) -> Result<Value> {
     Ok(response)
 }
 
-struct Recorder<'a> {
-    archive: &'a EventArchive,
-    session_id: String,
-    agent_id: &'a str,
-    next_seq: u64,
+/// One dense, serialized event stream shared by every ACP process in a team run.
+#[derive(Clone)]
+pub(crate) struct EventLog {
+    inner: Arc<EventLogInner>,
 }
 
-impl<'a> Recorder<'a> {
-    fn new(archive: &'a EventArchive, session_id: String, agent_id: &'a str) -> Self {
+struct EventLogInner {
+    archive: EventArchive,
+    session_id: String,
+    next_seq: Mutex<u64>,
+}
+
+impl EventLog {
+    pub(crate) fn new(archive: EventArchive, session_id: String) -> Self {
         Self {
-            archive,
+            inner: Arc::new(EventLogInner {
+                archive,
+                session_id,
+                next_seq: Mutex::new(0),
+            }),
+        }
+    }
+
+    pub(crate) fn session_id(&self) -> &str {
+        &self.inner.session_id
+    }
+
+    pub(crate) async fn next_seq(&self) -> u64 {
+        *self.inner.next_seq.lock().await
+    }
+
+    pub(crate) async fn append(
+        &self,
+        agent_id: &str,
+        kind: EventKind,
+        payload: Value,
+        raw: Option<Value>,
+    ) -> Result<()> {
+        let mut next_seq = self.inner.next_seq.lock().await;
+        append_archive_event(
+            &self.inner.archive,
+            &self.inner.session_id,
+            agent_id,
+            *next_seq,
+            kind,
+            payload,
+            raw,
+        )
+        .await?;
+        *next_seq += 1;
+        Ok(())
+    }
+}
+
+struct Recorder {
+    event_log: EventLog,
+    acp_session_id: String,
+    agent_id: String,
+}
+
+impl Recorder {
+    #[cfg(test)]
+    fn new(archive: &EventArchive, session_id: String, agent_id: &str) -> Self {
+        Self::with_log(
+            EventLog::new(archive.clone(), session_id.clone()),
             session_id,
             agent_id,
-            next_seq: 0,
+        )
+    }
+
+    fn with_log(event_log: EventLog, acp_session_id: String, agent_id: &str) -> Self {
+        Self {
+            event_log,
+            acp_session_id,
+            agent_id: agent_id.to_owned(),
         }
     }
 
@@ -669,7 +876,7 @@ impl<'a> Recorder<'a> {
             return Ok(());
         }
         if let Some(session_id) = message.pointer("/params/sessionId").and_then(Value::as_str)
-            && session_id != self.session_id
+            && session_id != self.acp_session_id
         {
             return Ok(());
         }
@@ -734,18 +941,9 @@ impl<'a> Recorder<'a> {
     }
 
     async fn append(&mut self, kind: EventKind, payload: Value, raw: Option<Value>) -> Result<()> {
-        append_archive_event(
-            self.archive,
-            &self.session_id,
-            self.agent_id,
-            self.next_seq,
-            kind,
-            payload,
-            raw,
-        )
-        .await?;
-        self.next_seq += 1;
-        Ok(())
+        self.event_log
+            .append(&self.agent_id, kind, payload, raw)
+            .await
     }
 }
 
