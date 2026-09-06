@@ -346,6 +346,16 @@ $defs:
       - if:
           properties:
             kind:
+              const: usage
+          required:
+            - kind
+        then:
+          properties:
+            payload:
+              $ref: "#/$defs/UsagePayload"
+      - if:
+          properties:
+            kind:
               const: process
           required:
             - kind
@@ -483,6 +493,58 @@ $defs:
           - cancelled
       usage:
         type: object
+
+  UsagePayload:
+    description: >-
+      Either a harness-reported usage update or a LoomWatch-local control-plane
+      event, discriminated structurally. Harness updates carry sessionUpdate
+      (the ACP update archived verbatim, spend deltas as costUsd; cost_usd is
+      accepted as a legacy alias). A bare spend delta carries only costUsd.
+      LoomWatch-local events carry phase and are never spend: they are excluded
+      from budget accounting by contract, not by the absence of costUsd.
+    type: object
+    anyOf:
+      - description: ACP usage_update, archived verbatim.
+        type: object
+        properties:
+          sessionUpdate:
+            const: usage_update
+        required:
+          - sessionUpdate
+      - description: Bare harness-supplied spend delta, counted toward budgets.
+        type: object
+        properties:
+          costUsd:
+            type: number
+            minimum: 0
+        required:
+          - costUsd
+      - description: LoomWatch-local control-plane event; never counted as spend.
+        type: object
+        additionalProperties: false
+        properties:
+          phase:
+            const: budget_warning
+          scope:
+            description: Budget scope - team, or agent:<id> for the delegation target.
+            type: string
+            minLength: 1
+          spentUsd:
+            type: number
+            minimum: 0
+          limitUsd:
+            type: number
+            minimum: 0
+          warnAtPercent:
+            type: integer
+            minimum: 1
+            maximum: 100
+        required:
+          - phase
+          - scope
+          - spentUsd
+          - limitUsd
+          - warnAtPercent
 
   ProcessPayload:
     type: object

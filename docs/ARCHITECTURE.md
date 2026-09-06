@@ -91,6 +91,10 @@ actually costs money. All four are enforced server-side so no agent can prompt p
 for the active caller turn. The caller is expected to return after the successful tool call;
 the successor starts without waiting for that return.
 
+Phase 03's Team Bus decisions — MCP delegation, shared authenticated loopback HTTP
+transport, bus-enforced guards, the mode split — are recorded in
+[ADR 0002](decisions/0002-team-bus-mcp-delegation-and-execution-modes.md).
+
 ---
 
 ## 4. Two execution modes
@@ -155,7 +159,9 @@ pausing, or commenting on an agent mid-run — are deferred.
 | 06 | Live & polish | Run a real multi-vendor team against real work |
 
 Contracts frozen between phases: the internal event schema after 02, the WebSocket message
-schema after 03.
+schema after 03. The WebSocket message schema is frozen in
+[WEBSOCKET_SCHEMA.md](WEBSOCKET_SCHEMA.md) (2026-09-06, including the TNG-42 review
+findings).
 
 ---
 

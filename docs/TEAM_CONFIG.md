@@ -59,6 +59,11 @@ depend on the document as a whole:
   starts another process, the bus checks the target agent and team totals, archives one
   `usage` warning per scope after its threshold, and archives a failed `tool_update` when it
   refuses the delegation.
+- `usage` payloads are discriminated (`$defs.UsagePayload` in the schema): harness-reported
+  updates carry `sessionUpdate: "usage_update"` (or a bare `costUsd` spend delta), while
+  LoomWatch-local control-plane events carry `phase` — today only `phase: "budget_warning"`
+  with `scope`, `spentUsd`, `limitUsd`, and `warnAtPercent`. Control-plane `usage` events are
+  excluded from spend accounting by contract, not by the absence of `costUsd`.
 - `guards.maxDispatchDepth` and `guards.maxConcurrentDispatches` both default to `8` when
   absent. The Team Bus refuses delegation beyond the depth limit and refuses a background
   `dispatch` or `handoff` while the configured number of those tasks is still running.
