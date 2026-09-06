@@ -6,6 +6,7 @@ pub mod acp;
 pub mod api;
 pub mod archive;
 pub mod config;
+pub mod spa;
 mod team_bus;
 
 use std::collections::BTreeMap;
