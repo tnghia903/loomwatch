@@ -6,7 +6,7 @@ version `1`; readers must reject a version they do not understand instead of gue
 
 The root document stores stable, user-authored configuration only: the team identity,
 entrypoint, budgets, guard policy, agents, and configured pipeline edges. Observed edges,
-agent status, and run events are runtime records archived in SQLite. Their shared wire
+agent status, and run events are runtime records archived in Postgres. Their shared wire
 shapes are defined as `$defs.Edge` and `$defs.RunEvent` in the same schema so Phase 02 and
 later can reference one contract.
 

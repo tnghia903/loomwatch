@@ -81,7 +81,7 @@ pub struct SessionOutcome {
 /// Returns an error when configuration, process, protocol, or archive handling fails.
 pub async fn run_team_session(
     team_path: &Path,
-    database_path: &Path,
+    database_url: &str,
     prompt: &str,
     exit_timeout: Duration,
 ) -> Result<SessionOutcome> {
@@ -95,7 +95,7 @@ pub async fn run_team_session(
         cwd,
     };
 
-    let archive = EventArchive::open(database_path)?;
+    let archive = EventArchive::connect(database_url).await?;
     let mut process = AcpProcess::spawn(&spec)
         .with_context(|| format!("failed to spawn ACP harness for agent {}", agent.id))?;
     process

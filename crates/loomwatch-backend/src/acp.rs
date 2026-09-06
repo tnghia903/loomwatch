@@ -120,14 +120,15 @@ impl AcpProcess {
         };
 
         // A protocol or shutdown failure still needs a terminal marker and a recoverable session,
-        // otherwise the partial run sits in SQLite with no `crashed` marker and `show` has no
+        // otherwise the partial run sits in Postgres with no `crashed` marker and `show` has no
         // session ID to look it up by.
         let crash_marker_error = if (execution.is_err() || exit.is_err())
             && let Some(session_id) = failure_session_id.as_deref()
         {
-            (|| -> Result<()> {
+            (async {
                 let seq = archive
                     .load_session(session_id)
+                    .await
                     .with_context(|| format!("failed to recover partial ACP session {session_id}"))?
                     .len() as u64;
                 let exit_code = exit.as_ref().map_or(-1, |report| report.code);
@@ -155,7 +156,9 @@ impl AcpProcess {
                     }),
                     None,
                 )
-            })()
+                .await
+            })
+            .await
             .err()
         } else {
             None
@@ -175,8 +178,9 @@ impl AcpProcess {
                         "message": exit.stderr
                     }),
                     None,
-                )?;
-                let events = archive.verify_session(&session_id)?;
+                )
+                .await?;
+                let events = archive.verify_session(&session_id).await?;
                 if !exit.success {
                     bail!(
                         "ACP session {session_id} child exited with code {}; stderr: {}",
@@ -227,18 +231,14 @@ impl AcpProcess {
                     },
                     "clientInfo": {"name": "loomwatch", "version": env!("CARGO_PKG_VERSION")}
                 }),
-                |_| Ok(()),
+                None,
             )
             .await
             .context("ACP initialize failed")?;
 
         let cwd = self.cwd.to_string_lossy().into_owned();
         let created = self
-            .request(
-                "session/new",
-                &json!({"cwd": cwd, "mcpServers": []}),
-                |_| Ok(()),
-            )
+            .request("session/new", &json!({"cwd": cwd, "mcpServers": []}), None)
             .await
             .context("ACP session/new failed")?;
         let session_id = created
@@ -249,21 +249,27 @@ impl AcpProcess {
             .to_owned();
         self.session_id = Some(session_id.clone());
         let mut recorder = Recorder::new(archive, session_id.clone(), agent_id);
-        recorder.append(
-            EventKind::Process,
-            json!({"phase": "spawned", "pid": process_id}),
-            None,
-        )?;
-        recorder.append(
-            EventKind::SessionMeta,
-            json!({"phase": "initialize", "result": initialized.result}),
-            Some(initialized.response),
-        )?;
-        recorder.append(
-            EventKind::SessionMeta,
-            json!({"phase": "session_new", "result": created.result}),
-            Some(created.response),
-        )?;
+        recorder
+            .append(
+                EventKind::Process,
+                json!({"phase": "spawned", "pid": process_id}),
+                None,
+            )
+            .await?;
+        recorder
+            .append(
+                EventKind::SessionMeta,
+                json!({"phase": "initialize", "result": initialized.result}),
+                Some(initialized.response),
+            )
+            .await?;
+        recorder
+            .append(
+                EventKind::SessionMeta,
+                json!({"phase": "session_new", "result": created.result}),
+                Some(created.response),
+            )
+            .await?;
         let supports_model_config = created
             .result
             .get("configOptions")
@@ -278,31 +284,35 @@ impl AcpProcess {
                 .request(
                     "session/set_config_option",
                     &json!({"sessionId": session_id, "configId": "model", "value": model}),
-                    |message| recorder.record_frame(message),
+                    Some(&mut recorder),
                 )
                 .await
                 .with_context(|| format!("ACP harness rejected configured model {model:?}"))?;
-            recorder.append(
-                EventKind::SessionMeta,
-                json!({
-                    "phase": "set_config_option",
-                    "configId": "model",
-                    "value": model,
-                    "result": config_response.result
-                }),
-                Some(config_response.response),
-            )?;
+            recorder
+                .append(
+                    EventKind::SessionMeta,
+                    json!({
+                        "phase": "set_config_option",
+                        "configId": "model",
+                        "value": model,
+                        "result": config_response.result
+                    }),
+                    Some(config_response.response),
+                )
+                .await?;
         } else {
-            recorder.append(
-                EventKind::SessionMeta,
-                json!({
-                    "phase": "set_config_option_skipped",
-                    "configId": "model",
-                    "value": model,
-                    "reason": "harness did not advertise a model config option"
-                }),
-                None,
-            )?;
+            recorder
+                .append(
+                    EventKind::SessionMeta,
+                    json!({
+                        "phase": "set_config_option_skipped",
+                        "configId": "model",
+                        "value": model,
+                        "reason": "harness did not advertise a model config option"
+                    }),
+                    None,
+                )
+                .await?;
         }
         Ok(recorder)
     }
@@ -325,20 +335,20 @@ impl AcpProcess {
             "prompt": [{"type": "text", "text": prompt}]
         });
         let (prompt_id, prompt_request) = self.next_request("session/prompt", &prompt_params);
-        recorder.append(
-            EventKind::Message,
-            json!({
-                "role": "user",
-                "messageId": null,
-                "content": {"type": "text", "text": prompt}
-            }),
-            Some(prompt_request.clone()),
-        )?;
+        recorder
+            .append(
+                EventKind::Message,
+                json!({
+                    "role": "user",
+                    "messageId": null,
+                    "content": {"type": "text", "text": prompt}
+                }),
+                Some(prompt_request.clone()),
+            )
+            .await?;
         self.send(&prompt_request).await?;
         let prompted = self
-            .read_response(prompt_id, "session/prompt", |message| {
-                recorder.record_frame(message)
-            })
+            .read_response(prompt_id, "session/prompt", Some(&mut recorder))
             .await
             .context("ACP session/prompt failed")?;
         let stop_reason = prompted
@@ -353,36 +363,35 @@ impl AcpProcess {
         if let Some(usage) = prompted.result.get("usage") {
             turn_end.insert("usage".to_owned(), usage.clone());
         }
-        recorder.append(
-            EventKind::TurnEnd,
-            Value::Object(turn_end),
-            Some(prompted.response),
-        )?;
+        recorder
+            .append(
+                EventKind::TurnEnd,
+                Value::Object(turn_end),
+                Some(prompted.response),
+            )
+            .await?;
 
         self.request(
             "session/close",
             &json!({"sessionId": session_id}),
-            |message| recorder.record_frame(message),
+            Some(&mut recorder),
         )
         .await
         .context("ACP session/close failed")?;
 
-        let events = archive.verify_session(&session_id)?;
+        let events = archive.verify_session(&session_id).await?;
         Ok((session_id, events.len()))
     }
 
-    async fn request<F>(
+    async fn request(
         &mut self,
         method: &str,
         params: &Value,
-        mut observe: F,
-    ) -> Result<RpcResult>
-    where
-        F: FnMut(&Value) -> Result<()>,
-    {
+        recorder: Option<&mut Recorder<'_>>,
+    ) -> Result<RpcResult> {
         let (id, request) = self.next_request(method, params);
         self.send(&request).await?;
-        self.read_response(id, method, &mut observe).await
+        self.read_response(id, method, recorder).await
     }
 
     fn next_request(&mut self, method: &str, params: &Value) -> (u64, Value) {
@@ -397,10 +406,12 @@ impl AcpProcess {
         (id, request)
     }
 
-    async fn read_response<F>(&mut self, id: u64, method: &str, mut observe: F) -> Result<RpcResult>
-    where
-        F: FnMut(&Value) -> Result<()>,
-    {
+    async fn read_response(
+        &mut self,
+        id: u64,
+        method: &str,
+        mut recorder: Option<&mut Recorder<'_>>,
+    ) -> Result<RpcResult> {
         loop {
             let line = timeout(REQUEST_TIMEOUT, self.stdout.next_line())
                 .await
@@ -408,7 +419,9 @@ impl AcpProcess {
                 .with_context(|| format!("ACP child exited before responding to {method}"))?;
             let message: Value = serde_json::from_str(&line)
                 .with_context(|| format!("ACP child emitted invalid JSON: {line:?}"))?;
-            observe(&message)?;
+            if let Some(recorder) = recorder.as_deref_mut() {
+                recorder.record_frame(&message).await?;
+            }
             if message.get("id").and_then(Value::as_u64) == Some(id)
                 && (message.get("result").is_some() || message.get("error").is_some())
             {
@@ -423,7 +436,9 @@ impl AcpProcess {
 
             if message.get("method").is_some() && message.get("id").is_some() {
                 let response = build_client_response(&message)?;
-                observe(&response)?;
+                if let Some(recorder) = recorder.as_deref_mut() {
+                    recorder.record_frame(&response).await?;
+                }
                 self.send(&response).await?;
             }
         }
@@ -559,10 +574,12 @@ impl<'a> Recorder<'a> {
         }
     }
 
-    fn record_frame(&mut self, message: &Value) -> Result<()> {
+    async fn record_frame(&mut self, message: &Value) -> Result<()> {
         if message.get("method").and_then(Value::as_str) == Some("session/request_permission") {
             let payload = message.get("params").cloned().unwrap_or_else(|| json!({}));
-            return self.append(EventKind::Permission, payload, Some(message.clone()));
+            return self
+                .append(EventKind::Permission, payload, Some(message.clone()))
+                .await;
         }
 
         // LoomWatch's own reply to a session/request_permission: no "method", carries the
@@ -573,7 +590,9 @@ impl<'a> Recorder<'a> {
             && message.pointer("/result/outcome").is_some()
         {
             let payload = message.get("result").cloned().unwrap_or_else(|| json!({}));
-            return self.append(EventKind::Permission, payload, Some(message.clone()));
+            return self
+                .append(EventKind::Permission, payload, Some(message.clone()))
+                .await;
         }
 
         if message.get("method").and_then(Value::as_str) != Some("session/update") {
@@ -585,11 +604,13 @@ impl<'a> Recorder<'a> {
             return Ok(());
         }
         let Some(update) = message.pointer("/params/update") else {
-            return self.append(
-                EventKind::SessionMeta,
-                unprojected_update(None, "session/update omitted update"),
-                Some(message.clone()),
-            );
+            return self
+                .append(
+                    EventKind::SessionMeta,
+                    unprojected_update(None, "session/update omitted update"),
+                    Some(message.clone()),
+                )
+                .await;
         };
         let update_type = update.get("sessionUpdate").and_then(Value::as_str);
         let (kind, payload) = match update_type {
@@ -602,11 +623,13 @@ impl<'a> Recorder<'a> {
                 let mut payload = serde_json::Map::new();
                 payload.insert("role".into(), json!(role));
                 let Some(content) = update.get("content").cloned() else {
-                    return self.append(
-                        EventKind::SessionMeta,
-                        unprojected_update(Some(update), "ACP content chunk omitted content"),
-                        Some(message.clone()),
-                    );
+                    return self
+                        .append(
+                            EventKind::SessionMeta,
+                            unprojected_update(Some(update), "ACP content chunk omitted content"),
+                            Some(message.clone()),
+                        )
+                        .await;
                 };
                 payload.insert("content".into(), content);
                 if let Some(message_id) = update.get("messageId") {
@@ -637,10 +660,10 @@ impl<'a> Recorder<'a> {
             Some("usage_update") => (EventKind::Usage, update.clone()),
             Some(_) | None => (EventKind::SessionMeta, update.clone()),
         };
-        self.append(kind, payload, Some(message.clone()))
+        self.append(kind, payload, Some(message.clone())).await
     }
 
-    fn append(&mut self, kind: EventKind, payload: Value, raw: Option<Value>) -> Result<()> {
+    async fn append(&mut self, kind: EventKind, payload: Value, raw: Option<Value>) -> Result<()> {
         append_archive_event(
             self.archive,
             &self.session_id,
@@ -649,7 +672,8 @@ impl<'a> Recorder<'a> {
             kind,
             payload,
             raw,
-        )?;
+        )
+        .await?;
         self.next_seq += 1;
         Ok(())
     }
@@ -698,7 +722,7 @@ fn project_tool(update: &Value, initial: bool) -> Result<Value> {
     Ok(Value::Object(payload))
 }
 
-fn append_archive_event(
+async fn append_archive_event(
     archive: &EventArchive,
     session_id: &str,
     agent_id: &str,
@@ -707,29 +731,29 @@ fn append_archive_event(
     payload: Value,
     raw: Option<Value>,
 ) -> Result<()> {
-    archive.append(&RunEvent {
-        id: Uuid::new_v4().to_string(),
-        session_id: session_id.to_owned(),
-        agent_id: agent_id.to_owned(),
-        seq,
-        ts: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true),
-        kind,
-        payload,
-        raw,
-    })
+    archive
+        .append(&RunEvent {
+            id: Uuid::new_v4().to_string(),
+            session_id: session_id.to_owned(),
+            agent_id: agent_id.to_owned(),
+            seq,
+            ts: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true),
+            kind,
+            payload,
+            raw,
+        })
+        .await
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-    use tempfile::tempdir;
-
     use super::*;
+    use serde_json::json;
+    use sqlx::PgPool;
 
-    #[test]
-    fn maps_real_acp_updates_without_losing_the_raw_payload() {
-        let temp = tempdir().expect("tempdir");
-        let archive = EventArchive::open(&temp.path().join("events.sqlite3")).expect("archive");
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn maps_real_acp_updates_without_losing_the_raw_payload(pool: PgPool) {
+        let archive = EventArchive::from_pool(pool);
         let mut recorder = Recorder::new(&archive, "session".to_owned(), "agent");
         recorder
             .record_frame(&json!({
@@ -747,6 +771,7 @@ mod tests {
                     }
                 }
             }))
+            .await
             .expect("record call");
         recorder
             .record_frame(&json!({
@@ -762,8 +787,9 @@ mod tests {
                     }
                 }
             }))
+            .await
             .expect("record result");
-        let events = archive.load_session("session").expect("events");
+        let events = archive.load_session("session").await.expect("events");
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].kind, EventKind::ToolCall);
         assert_eq!(
@@ -777,10 +803,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn archives_unprojectable_updates_instead_of_failing_the_session() {
-        let temp = tempdir().expect("tempdir");
-        let archive = EventArchive::open(&temp.path().join("events.sqlite3")).expect("archive");
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn archives_unprojectable_updates_instead_of_failing_the_session(pool: PgPool) {
+        let archive = EventArchive::from_pool(pool);
         let mut recorder = Recorder::new(&archive, "session".to_owned(), "agent");
         let frames = [
             json!({
@@ -809,10 +834,11 @@ mod tests {
         for frame in &frames {
             recorder
                 .record_frame(frame)
+                .await
                 .expect("unexpected frame must remain archivable");
         }
 
-        let events = archive.load_session("session").expect("events");
+        let events = archive.load_session("session").await.expect("events");
         assert_eq!(events.len(), frames.len());
         assert!(
             events
@@ -855,15 +881,15 @@ mod tests {
     #[test]
     fn archive_failure_context_retains_the_execution_error() {
         let execution = anyhow::anyhow!("protocol exploded");
-        let archive = anyhow::anyhow!("SQLite unavailable");
+        let archive = anyhow::anyhow!("Postgres unavailable");
         let combined = with_archive_failure_context(execution, Some(&archive));
         let rendered = format!("{combined:#}");
         assert!(rendered.contains("protocol exploded"));
-        assert!(rendered.contains("SQLite unavailable"));
+        assert!(rendered.contains("Postgres unavailable"));
     }
 
-    #[tokio::test]
-    async fn completes_a_turn_and_recovers_the_full_session_after_exit() {
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn completes_a_turn_and_recovers_the_full_session_after_exit(pool: PgPool) {
         let script = r#"
             set -eu
             IFS= read -r _
@@ -893,9 +919,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
         };
-        let temp = tempdir().expect("tempdir");
-        let database = temp.path().join("events.sqlite3");
-        let archive = EventArchive::open(&database).expect("archive");
+        let archive = EventArchive::from_pool(pool.clone());
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         let outcome = process
             .run_session(
@@ -908,10 +932,10 @@ mod tests {
             .await
             .expect("session");
         drop(archive);
-
-        let reopened = EventArchive::open(&database).expect("reopen archive");
+        let reopened = EventArchive::from_pool(pool);
         let events = reopened
             .verify_session(&outcome.session_id)
+            .await
             .expect("recover session");
         assert_eq!(outcome.exit_code, 0);
         assert_eq!(outcome.event_count, 17);
@@ -957,8 +981,8 @@ mod tests {
         assert_events_match_schema(&events);
     }
 
-    #[tokio::test]
-    async fn skips_model_configuration_when_the_harness_does_not_advertise_it() {
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn skips_model_configuration_when_the_harness_does_not_advertise_it(pool: PgPool) {
         let script = r#"
             set -eu
             IFS= read -r _
@@ -980,8 +1004,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
         };
-        let temp = tempdir().expect("tempdir");
-        let archive = EventArchive::open(&temp.path().join("events.sqlite3")).expect("archive");
+        let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         process
             .run_session(
@@ -994,7 +1017,10 @@ mod tests {
             .await
             .expect("session without model option");
 
-        let events = archive.load_session("no-model-option").expect("events");
+        let events = archive
+            .load_session("no-model-option")
+            .await
+            .expect("events");
         let skipped = events
             .iter()
             .find(|event| event.payload["phase"] == "set_config_option_skipped")
@@ -1034,8 +1060,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn mid_turn_failure_is_marked_and_returns_the_recoverable_session_id() {
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn mid_turn_failure_is_marked_and_returns_the_recoverable_session_id(pool: PgPool) {
         let script = r#"
             set -eu
             IFS= read -r _
@@ -1054,8 +1080,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
         };
-        let temp = tempdir().expect("tempdir");
-        let archive = EventArchive::open(&temp.path().join("events.sqlite3")).expect("archive");
+        let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
 
         let error = process
@@ -1076,6 +1101,7 @@ mod tests {
 
         let events = archive
             .verify_session("partial-session")
+            .await
             .expect("recover partial session");
         assert_eq!(events.len(), 6);
         assert_eq!(events.last().unwrap().kind, EventKind::Process);
@@ -1089,16 +1115,15 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn child_exit_is_reported_without_hanging() {
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn child_exit_is_reported_without_hanging(pool: PgPool) {
         let spec = ProcessSpec {
             cmd: "false".into(),
             args: Vec::new(),
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
         };
-        let temp = tempdir().expect("tempdir");
-        let archive = EventArchive::open(&temp.path().join("events.sqlite3")).expect("archive");
+        let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         let result = timeout(
             Duration::from_secs(2),
@@ -1130,8 +1155,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn mid_turn_failure_still_marks_and_recovers_the_partial_session() {
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn mid_turn_failure_still_marks_and_recovers_the_partial_session(pool: PgPool) {
         let script = r#"
             set -eu
             IFS= read -r _
@@ -1147,8 +1172,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
         };
-        let temp = tempdir().expect("tempdir");
-        let archive = EventArchive::open(&temp.path().join("events.sqlite3")).expect("archive");
+        let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         let result = process
             .run_session(
@@ -1166,6 +1190,7 @@ mod tests {
 
         let events = archive
             .verify_session("session-1")
+            .await
             .expect("the partial session must still be reachable via show");
         assert_eq!(
             events.last().unwrap().kind,
