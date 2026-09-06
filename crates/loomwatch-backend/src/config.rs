@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -107,6 +107,8 @@ impl TeamConfig {
         if team.schema_version != 1 {
             bail!("unsupported team schema version {}", team.schema_version);
         }
+        team.entrypoint_agent()?;
+        team.pipeline_order()?;
         Ok(team)
     }
 
@@ -120,6 +122,85 @@ impl TeamConfig {
             .iter()
             .find(|agent| agent.id == self.entrypoint)
             .with_context(|| format!("entrypoint agent {:?} does not exist", self.entrypoint))
+    }
+
+    /// Topological run order for pipeline mode (non-empty `edges`).
+    ///
+    /// Team mode (`edges` empty) has no backend-driven order, so this returns an empty
+    /// vector without inspecting agents.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an edge names an unknown agent, is a self-edge, duplicates
+    /// another configured edge, the entrypoint has an incoming configured edge, or the
+    /// configured edges are not a single DAG reachable from the entrypoint (including a
+    /// cycle).
+    pub fn pipeline_order(&self) -> Result<Vec<String>> {
+        if self.edges.is_empty() {
+            return Ok(Vec::new());
+        }
+        let agent_ids: BTreeSet<&str> = self.agents.iter().map(|agent| agent.id.as_str()).collect();
+        let mut adjacency: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut indegree: BTreeMap<String, usize> = BTreeMap::new();
+        let mut seen_edges: BTreeSet<(&str, &str)> = BTreeSet::new();
+
+        for edge in &self.edges {
+            if !agent_ids.contains(edge.from.as_str()) {
+                bail!("configured edge references unknown agent {:?}", edge.from);
+            }
+            if !agent_ids.contains(edge.to.as_str()) {
+                bail!("configured edge references unknown agent {:?}", edge.to);
+            }
+            if edge.from == edge.to {
+                bail!(
+                    "configured edge cannot connect agent {:?} to itself",
+                    edge.from
+                );
+            }
+            if !seen_edges.insert((edge.from.as_str(), edge.to.as_str())) {
+                bail!("duplicate configured edge {:?} -> {:?}", edge.from, edge.to);
+            }
+            adjacency
+                .entry(edge.from.clone())
+                .or_default()
+                .push(edge.to.clone());
+            indegree.entry(edge.from.clone()).or_insert(0);
+            *indegree.entry(edge.to.clone()).or_insert(0) += 1;
+        }
+
+        if indegree.get(&self.entrypoint).copied().unwrap_or(0) != 0 {
+            bail!(
+                "pipeline entrypoint {:?} has an incoming configured edge; it must be a source node",
+                self.entrypoint
+            );
+        }
+
+        let total_nodes = indegree.len();
+        let mut remaining = indegree;
+        let mut ready: BTreeSet<String> = BTreeSet::from([self.entrypoint.clone()]);
+        let mut order = Vec::with_capacity(total_nodes);
+
+        while let Some(node) = ready.iter().next().cloned() {
+            ready.remove(&node);
+            order.push(node.clone());
+            for next in adjacency.get(&node).into_iter().flatten() {
+                let entry = remaining
+                    .get_mut(next)
+                    .context("pipeline edge endpoint missing from indegree map")?;
+                *entry -= 1;
+                if *entry == 0 {
+                    ready.insert(next.clone());
+                }
+            }
+        }
+
+        if order.len() != total_nodes {
+            bail!(
+                "configured edges contain a cycle, or a node unreachable from entrypoint {:?}",
+                self.entrypoint
+            );
+        }
+        Ok(order)
     }
 }
 
@@ -173,6 +254,110 @@ edges:
         assert!(team.agents[0].allow_recruiting);
         assert_eq!(team.edges[0].from, "a");
         assert_eq!(team.edges[0].to, "b");
+    }
+
+    fn pipeline_team(entrypoint: &str, edges_yaml: &str) -> TeamConfig {
+        serde_yaml::from_str(&format!(
+            "schemaVersion: 1\nentrypoint: {entrypoint}\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n  - id: b\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n  - id: c\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\nedges:\n{edges_yaml}\n"
+        ))
+        .expect("valid config")
+    }
+
+    #[test]
+    fn pipeline_order_follows_declared_edges() {
+        let team = pipeline_team(
+            "a",
+            "  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: \"2026-09-06T00:00:00Z\"\n  - from: b\n    to: c\n    layer: configured\n    kind: sequence\n    ts: \"2026-09-06T00:00:00Z\"\n",
+        );
+        assert_eq!(
+            team.pipeline_order().expect("acyclic pipeline"),
+            vec!["a".to_owned(), "b".to_owned(), "c".to_owned()]
+        );
+    }
+
+    #[test]
+    fn pipeline_order_is_empty_in_team_mode() {
+        let team = pipeline_team("a", "");
+        assert!(team.pipeline_order().expect("team mode").is_empty());
+    }
+
+    #[test]
+    fn pipeline_order_rejects_a_cycle() {
+        let team = pipeline_team(
+            "a",
+            "  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: \"2026-09-06T00:00:00Z\"\n  - from: b\n    to: a\n    layer: configured\n    kind: sequence\n    ts: \"2026-09-06T00:00:00Z\"\n",
+        );
+        let error = team.pipeline_order().expect_err("cycle must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("has an incoming configured edge"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn pipeline_order_rejects_a_longer_cycle_not_touching_the_entrypoint() {
+        let team = pipeline_team(
+            "a",
+            "  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: \"2026-09-06T00:00:00Z\"\n  - from: b\n    to: c\n    layer: configured\n    kind: sequence\n    ts: \"2026-09-06T00:00:00Z\"\n  - from: c\n    to: b\n    layer: configured\n    kind: sequence\n    ts: \"2026-09-06T00:00:00Z\"\n",
+        );
+        let error = team.pipeline_order().expect_err("cycle must be rejected");
+        assert!(error.to_string().contains("cycle"), "{error}");
+    }
+
+    #[test]
+    fn pipeline_order_rejects_a_self_edge() {
+        let team = pipeline_team(
+            "a",
+            "  - from: a\n    to: a\n    layer: configured\n    kind: sequence\n    ts: \"2026-09-06T00:00:00Z\"\n",
+        );
+        let error = team
+            .pipeline_order()
+            .expect_err("self-edge must be rejected");
+        assert!(error.to_string().contains("itself"), "{error}");
+    }
+
+    #[test]
+    fn pipeline_order_rejects_a_duplicate_edge() {
+        let team = pipeline_team(
+            "a",
+            "  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: \"2026-09-06T00:00:00Z\"\n  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: \"2026-09-06T00:00:00Z\"\n",
+        );
+        let error = team
+            .pipeline_order()
+            .expect_err("duplicate edge must be rejected");
+        assert!(
+            error.to_string().contains("duplicate configured edge"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn pipeline_order_rejects_an_edge_to_an_unknown_agent() {
+        let team = pipeline_team(
+            "a",
+            "  - from: a\n    to: nobody\n    layer: configured\n    kind: sequence\n    ts: \"2026-09-06T00:00:00Z\"\n",
+        );
+        let error = team
+            .pipeline_order()
+            .expect_err("unknown agent must be rejected");
+        assert!(error.to_string().contains("unknown agent"), "{error}");
+    }
+
+    #[test]
+    fn pipeline_order_rejects_an_entrypoint_with_an_incoming_edge() {
+        let team = pipeline_team(
+            "b",
+            "  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: \"2026-09-06T00:00:00Z\"\n",
+        );
+        let error = team
+            .pipeline_order()
+            .expect_err("entrypoint must be a source node");
+        assert!(
+            error.to_string().contains("must be a source node"),
+            "{error}"
+        );
     }
 
     #[test]

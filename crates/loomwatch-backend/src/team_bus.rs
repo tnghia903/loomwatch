@@ -27,6 +27,18 @@ use crate::{EventKind, resolve_cwd};
 const SERVER_NAME: &str = "loomwatch-team-bus";
 const MCP_PROTOCOL_VERSION: &str = "2025-03-26";
 
+/// Which execution mode is driving this run — see ARCHITECTURE.md §4.
+///
+/// Pipeline mode restricts the tool surface because the backend, not the agent, owns
+/// macro sequencing: `dispatch`/`handoff` are withdrawn outright, and `ask` (recruiting a
+/// helper within one node's own step) is refused for an agent configured with
+/// `allowRecruiting: false`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TeamBusMode {
+    Team,
+    Pipeline,
+}
+
 #[derive(Clone)]
 pub(crate) struct TeamBus {
     state: Arc<TeamBusState>,
@@ -37,6 +49,7 @@ struct TeamBusState {
     team_path: PathBuf,
     archive: EventArchive,
     exit_timeout: Duration,
+    mode: TeamBusMode,
     address: SocketAddr,
     tokens: RwLock<BTreeMap<String, AgentSession>>,
     statuses: RwLock<BTreeMap<String, String>>,
@@ -72,6 +85,7 @@ impl TeamBus {
         team_path: &Path,
         archive: EventArchive,
         exit_timeout: Duration,
+        mode: TeamBusMode,
     ) -> Result<Self> {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
             .await
@@ -88,6 +102,7 @@ impl TeamBus {
             team_path: team_path.to_path_buf(),
             archive,
             exit_timeout,
+            mode,
             address,
             tokens: RwLock::new(BTreeMap::new()),
             statuses: RwLock::new(statuses),
@@ -182,7 +197,9 @@ impl TeamBus {
                 }),
             ),
             Some("ping") => rpc_result(&id, &json!({})),
-            Some("tools/list") => rpc_result(&id, &json!({"tools": tool_definitions()})),
+            Some("tools/list") => {
+                rpc_result(&id, &json!({"tools": tool_definitions(self.state.mode)}))
+            }
             Some("tools/call") => match self.call_tool(token, request).await {
                 Ok(result) => rpc_result(&id, &result),
                 Err(error) => rpc_result(&id, &tool_error(&format!("{error:#}"))),
@@ -265,6 +282,18 @@ impl TeamBus {
         name: &str,
         arguments: &Value,
     ) -> Result<Value> {
+        if self.state.mode == TeamBusMode::Pipeline {
+            match name {
+                "dispatch" | "handoff" => bail!(
+                    "{name} is not available in pipeline mode; the backend drives node sequencing"
+                ),
+                "ask" if !self.agent(&session.agent_id)?.allow_recruiting => bail!(
+                    "agent {:?} may not recruit helpers within its own pipeline step (allowRecruiting: false)",
+                    session.agent_id
+                ),
+                _ => {}
+            }
+        }
         match name {
             "roster" => {
                 let statuses = self.state.statuses.read().await;
@@ -569,24 +598,13 @@ impl TeamBus {
         event_log: &EventLog,
         start_seq: u64,
     ) -> Result<String> {
-        let events = self
-            .state
-            .archive
-            .load_session(event_log.session_id())
-            .await?;
-        Ok(events
-            .iter()
-            .rev()
-            .find(|event| {
-                event.seq >= start_seq
-                    && event.agent_id == agent_id
-                    && event.kind == EventKind::Message
-                    && event.payload.get("role").and_then(Value::as_str) == Some("agent")
-            })
-            .and_then(|event| event.payload.pointer("/content/text"))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_owned())
+        crate::last_agent_reply(
+            &self.state.archive,
+            event_log.session_id(),
+            agent_id,
+            start_seq,
+        )
+        .await
     }
 }
 
@@ -720,39 +738,42 @@ fn tool_error(message: &str) -> Value {
     })
 }
 
-fn tool_definitions() -> Vec<Value> {
-    vec![
-        tool(
-            "roster",
-            "List the team, capabilities, and live status",
-            &json!({"type": "object", "additionalProperties": false}),
-        ),
-        tool(
+fn tool_definitions(mode: TeamBusMode) -> Vec<Value> {
+    let mut tools = vec![tool(
+        "roster",
+        "List the team, capabilities, and live status",
+        &json!({"type": "object", "additionalProperties": false}),
+    )];
+    if mode == TeamBusMode::Team {
+        tools.push(tool(
             "dispatch",
             "Assign work without blocking for the result",
             &two_strings("agent", "Target agent ID", "task", "Task to perform"),
-        ),
-        tool(
-            "ask",
-            "Ask another agent and block for its reply",
-            &two_strings("agent", "Target agent ID", "question", "Question to answer"),
-        ),
-        tool(
+        ));
+    }
+    tools.push(tool(
+        "ask",
+        "Ask another agent and block for its reply",
+        &two_strings("agent", "Target agent ID", "question", "Question to answer"),
+    ));
+    if mode == TeamBusMode::Team {
+        tools.push(tool(
             "handoff",
             "Transfer full ownership of work to another agent",
             &two_strings("agent", "Target agent ID", "task", "Task being transferred"),
-        ),
-        tool(
-            "report",
-            "Publish this agent's current status",
-            &one_string("status", "Progress status"),
-        ),
-        tool(
-            "escalate",
-            "Signal that this run needs a human",
-            &one_string("reason", "Reason human attention is needed"),
-        ),
-    ]
+        ));
+    }
+    tools.push(tool(
+        "report",
+        "Publish this agent's current status",
+        &one_string("status", "Progress status"),
+    ));
+    tools.push(tool(
+        "escalate",
+        "Signal that this run needs a human",
+        &one_string("reason", "Reason human attention is needed"),
+    ));
+    tools
 }
 
 fn tool(name: &str, description: &str, input_schema: &Value) -> Value {
@@ -848,7 +869,14 @@ mod tests {
         });
         let archive = EventArchive::from_pool(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
-        let bus = TeamBus::start(team, &team_path, archive.clone(), Duration::from_secs(2)).await?;
+        let bus = TeamBus::start(
+            team,
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(2),
+            TeamBusMode::Team,
+        )
+        .await?;
         let connection = bus.connection("lead").await?;
         let event_log = EventLog::new(archive.clone(), "team-run".into());
         connection.register(event_log).await;
@@ -951,7 +979,14 @@ mod tests {
         });
         let archive = EventArchive::from_pool(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
-        let bus = TeamBus::start(team, &team_path, archive.clone(), Duration::from_secs(1)).await?;
+        let bus = TeamBus::start(
+            team,
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(1),
+            TeamBusMode::Team,
+        )
+        .await?;
         let event_log = EventLog::new(archive.clone(), "guard-run".into());
         event_log
             .append(
@@ -1032,6 +1067,95 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "../../migrations")]
+    async fn pipeline_mode_withdraws_macro_sequencing_tools_and_enforces_the_recruiting_lock(
+        pool: sqlx::PgPool,
+    ) -> Result<()> {
+        let mut locked = test_agent("locked", "true", Vec::new());
+        locked.allow_recruiting = false;
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "pipeline-restriction-team".into(),
+            name: "Pipeline restriction team".into(),
+            entrypoint: "open".into(),
+            budget: None,
+            guards: GuardsConfig::default(),
+            agents: vec![
+                test_agent("open", "true", Vec::new()),
+                locked,
+                test_agent("helper", "true", Vec::new()),
+            ],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            team,
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(1),
+            TeamBusMode::Pipeline,
+        )
+        .await?;
+        let event_log = EventLog::new(archive.clone(), "pipeline-restriction-run".into());
+
+        let open = bus.connection("open").await?;
+        let listed = post_json(
+            &bus,
+            &open.token,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}),
+        )
+        .await?;
+        let names: Vec<&str> = listed["result"]["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .map(|tool| tool["name"].as_str().expect("tool name"))
+            .collect();
+        assert_eq!(
+            names,
+            ["roster", "ask", "report", "escalate"],
+            "dispatch and handoff must be withdrawn in pipeline mode"
+        );
+
+        open.register(event_log.clone()).await;
+        let response = call_dispatch(&bus, &open, "helper").await?;
+        assert_tool_error_contains(&response, "dispatch is not available in pipeline mode");
+        let response = post_json(
+            &bus,
+            &open.token,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": Uuid::new_v4().to_string(),
+                "method": "tools/call",
+                "params": {"name": "handoff", "arguments": {"agent": "helper", "task": "take over"}}
+            }),
+        )
+        .await?;
+        assert_tool_error_contains(&response, "handoff is not available in pipeline mode");
+
+        let locked_connection = bus.connection("locked").await?;
+        locked_connection.register(event_log.clone()).await;
+        let response = post_json(
+            &bus,
+            &locked_connection.token,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": Uuid::new_v4().to_string(),
+                "method": "tools/call",
+                "params": {"name": "ask", "arguments": {"agent": "helper", "question": "status?"}}
+            }),
+        )
+        .await?;
+        assert_tool_error_contains(
+            &response,
+            "may not recruit helpers within its own pipeline step",
+        );
+
+        bus.shutdown().await?;
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
     async fn budget_warnings_fire_once_at_agent_and_team_thresholds(
         pool: sqlx::PgPool,
     ) -> Result<()> {
@@ -1053,7 +1177,14 @@ mod tests {
         });
         let archive = EventArchive::from_pool(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
-        let bus = TeamBus::start(team, &team_path, archive.clone(), Duration::from_secs(1)).await?;
+        let bus = TeamBus::start(
+            team,
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(1),
+            TeamBusMode::Team,
+        )
+        .await?;
         let event_log = EventLog::new(archive.clone(), "warning-run".into());
         for agent_id in ["c", "d"] {
             event_log

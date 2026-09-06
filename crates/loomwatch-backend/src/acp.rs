@@ -123,6 +123,14 @@ impl AcpProcess {
         self
     }
 
+    /// The shared archive event log this process ended up writing to, once negotiated.
+    ///
+    /// Lets a multi-node caller (the pipeline orchestrator) hand the same log to the next
+    /// node's process so every node's events land in one dense, ordered archive session.
+    pub(crate) fn event_log(&self) -> Option<EventLog> {
+        self.event_log.clone()
+    }
+
     /// Drive one complete ACP turn and wait for the harness to exit.
     ///
     /// # Errors

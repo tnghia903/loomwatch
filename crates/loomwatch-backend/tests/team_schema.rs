@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use loomwatch_backend::config::TeamConfig;
 use serde_json::{Value, json};
 
 fn read_yaml(path: &Path) -> Value {
@@ -8,6 +9,37 @@ fn read_yaml(path: &Path) -> Value {
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
     serde_yaml::from_str(&source)
         .unwrap_or_else(|error| panic!("failed to parse {} as YAML: {error}", path.display()))
+}
+
+fn example_paths() -> Vec<PathBuf> {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let examples_dir = workspace.join("examples");
+    let mut examples: Vec<PathBuf> = fs::read_dir(&examples_dir)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", examples_dir.display()))
+        .map(|entry| {
+            entry
+                .unwrap_or_else(|error| panic!("failed to read examples entry: {error}"))
+                .path()
+        })
+        .filter(|path| {
+            matches!(
+                path.extension().and_then(|value| value.to_str()),
+                Some("yaml" | "yml")
+            )
+        })
+        .collect();
+    examples.sort();
+    examples
+}
+
+#[test]
+fn all_examples_load_and_validate_via_team_config() {
+    let examples = example_paths();
+    assert!(!examples.is_empty(), "no YAML examples found");
+    for path in examples {
+        TeamConfig::load(&path)
+            .unwrap_or_else(|error| panic!("{} failed to load: {error:#}", path.display()));
+    }
 }
 
 #[test]
@@ -26,22 +58,7 @@ fn schema_and_all_examples_are_valid() {
         panic!("failed to compile {}: {error}", schema_path.display());
     });
 
-    let examples_dir = workspace.join("examples");
-    let mut examples: Vec<PathBuf> = fs::read_dir(&examples_dir)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", examples_dir.display()))
-        .map(|entry| {
-            entry
-                .unwrap_or_else(|error| panic!("failed to read examples entry: {error}"))
-                .path()
-        })
-        .filter(|path| {
-            matches!(
-                path.extension().and_then(|value| value.to_str()),
-                Some("yaml" | "yml")
-            )
-        })
-        .collect();
-    examples.sort();
+    let examples = example_paths();
     assert!(!examples.is_empty(), "no YAML examples found");
 
     for path in examples {
