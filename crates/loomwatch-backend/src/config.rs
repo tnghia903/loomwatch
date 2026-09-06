@@ -109,8 +109,21 @@ impl TeamConfig {
     pub fn load(path: &Path) -> Result<Self> {
         let source = fs::read_to_string(path)
             .with_context(|| format!("failed to read team file {}", path.display()))?;
-        let team: Self = serde_yaml::from_str(&source)
-            .with_context(|| format!("failed to parse team file {}", path.display()))?;
+        Self::parse(&source)
+            .with_context(|| format!("failed to parse team file {}", path.display()))
+    }
+
+    /// Parse and minimally validate a team document in memory.
+    ///
+    /// This is the in-memory counterpart to [`Self::load`]. It lets the configuration API
+    /// validate an edited document before replacing its file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the document cannot be parsed, uses an unknown version, or
+    /// fails the runtime's semantic checks.
+    pub fn parse(source: &str) -> Result<Self> {
+        let team: Self = serde_yaml::from_str(source).context("invalid team YAML")?;
         if team.schema_version != 1 {
             bail!("unsupported team schema version {}", team.schema_version);
         }

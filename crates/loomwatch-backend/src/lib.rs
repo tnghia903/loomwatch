@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 pub mod acp;
+pub mod api;
 pub mod archive;
 pub mod config;
 mod team_bus;
