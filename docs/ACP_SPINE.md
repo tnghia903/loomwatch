@@ -22,14 +22,18 @@ Standard error is drained concurrently so a chatty harness cannot deadlock. If t
 exits early, returns a JSON-RPC error, or fails to exit after stdin closes, the supervisor
 returns a contextual error; once `session/new` has succeeded, that error includes the session
 identifier and the archive ends with a `process: crashed` marker so the partial run remains
-recoverable. A hung child is killed and reaped. Postgres stores `payload` and `raw` as JSONB,
-and a versioned `sqlx` migration enforces the event-kind check and unique
-`(session_id, seq)` replay order. The `show` command opens an independent Postgres connection
-and replays a session by its strictly increasing sequence number.
+recoverable. That marker carries the exit code and, when a signal terminated the child (the
+common `SIGKILL` timeout path), the signal name — a bare `exitCode: -1` on its own cannot be
+told apart from a genuine −1 exit. A hung child is killed and reaped. Postgres stores
+`payload` and `raw` as JSONB, and a versioned `sqlx` migration enforces the event-kind check
+and unique `(session_id, seq)` replay order. The `show` command opens an independent Postgres
+connection and replays a session by its strictly increasing sequence number.
 
-The ten-minute per-request timeout currently does not send `session/cancel`: timeout handling
-closes the transport and kills a harness that does not exit during shutdown. A harness may
-continue work briefly between timeout and process termination.
+On the ten-minute per-request timeout, LoomWatch sends a best-effort `session/cancel`
+notification before it closes the transport, so a well-behaved harness can stop working — and
+stop spending — instead of running until the process kill lands. The child is still torn down
+and, if it does not exit during the bounded shutdown wait, killed and reaped; `session/cancel`
+only narrows the window, and a wedged harness may never observe it.
 
 The `initialize` and `session/new` responses, plus `session/set_config_option` when sent, are
 archived as `session_meta` events, including the applied model and the harness's complete
