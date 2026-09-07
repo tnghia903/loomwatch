@@ -1,5 +1,45 @@
 @import 'tailwindcss';
 
+/* docs/CANVAS_SPEC.md §2.2 — starting palette. Hue/role are fixed; only
+   lightness may be adjusted once the contrast pass (§2.2) lands. */
+@theme {
+  --color-canvas: #f6f5f2;
+  --color-canvas-dot: #dad7cf;
+  --color-surface: #ffffff;
+  --color-surface-solid: #ffffff;
+  --color-hairline: #1a1815;
+  --color-ink: #1a1815;
+  --color-ink-2: #5c574e;
+  --color-ink-3: #8c867a;
+  --color-stroke: #8c867a;
+  --color-iris: #5a45e8;
+  --color-iris-soft: #8b7bff;
+  --color-iris-deep: #3a2bb8;
+  --color-copper: #b85c1e;
+  --color-green: #1e7a4f;
+  --color-red: #c4342f;
+  --color-slate: #6b6b76;
+}
+
+.dark {
+  --color-canvas: #0e0e11;
+  --color-canvas-dot: #23232b;
+  --color-surface: #16161b;
+  --color-surface-solid: #191920;
+  --color-hairline: #ffffff;
+  --color-ink: #f2f1ee;
+  --color-ink-2: #a5a29b;
+  --color-ink-3: #6e6b65;
+  --color-stroke: #6e6b65;
+  --color-iris: #8b7bff;
+  --color-iris-soft: #b3a6ff;
+  --color-iris-deep: #6e5cf0;
+  --color-copper: #e8933f;
+  --color-green: #46c08a;
+  --color-red: #f0605b;
+  --color-slate: #8a8a96;
+}
+
 body {
   margin: 0;
 }

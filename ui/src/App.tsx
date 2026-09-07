@@ -1,28 +1,46 @@
-import { Background, Controls, ReactFlow, type Edge, type Node } from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
+import { ReactFlowProvider } from '@xyflow/react'
+import { useEffect, useState } from 'react'
 
-const nodes: Node[] = [
-  { id: 'researcher', position: { x: 0, y: 80 }, data: { label: 'researcher' } },
-  { id: 'reviewer', position: { x: 260, y: 80 }, data: { label: 'reviewer' } },
-]
-
-const edges: Edge[] = [{ id: 'researcher-reviewer', source: 'researcher', target: 'reviewer' }]
+import { Canvas } from './components/Canvas'
+import { Library } from './components/library'
+import { type DetectedHarness, fetchHarnesses } from './lib/harnesses'
 
 function App() {
+  const [harnesses, setHarnesses] = useState<DetectedHarness[]>([])
+  const [harnessesLoading, setHarnessesLoading] = useState(true)
+  const [harnessesError, setHarnessesError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchHarnesses()
+      .then((detected) => {
+        if (!cancelled) {
+          setHarnesses(detected)
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setHarnessesError(error instanceof Error ? error.message : String(error))
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHarnessesLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
-    <div className="h-screen w-screen bg-neutral-50">
-      <header className="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center">
-        <div className="pointer-events-auto rounded-lg border border-neutral-200 bg-white/90 px-4 py-2 text-center shadow-sm backdrop-blur">
-          <h1 className="text-sm font-semibold text-neutral-900">LoomWatch</h1>
-          <p className="text-xs text-neutral-500">
-            Phase 04 scaffold — the canvas arrives in a later issue
-          </p>
+    <div className="relative h-screen w-screen bg-canvas">
+      <ReactFlowProvider>
+        <div className="pointer-events-none absolute inset-4 z-10">
+          <Library harnesses={harnesses} harnessesLoading={harnessesLoading} harnessesError={harnessesError} />
         </div>
-      </header>
-      <ReactFlow nodes={nodes} edges={edges} fitView>
-        <Background />
-        <Controls />
-      </ReactFlow>
+        <Canvas />
+      </ReactFlowProvider>
     </div>
   )
 }
