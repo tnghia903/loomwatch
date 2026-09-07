@@ -5,8 +5,9 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::extract::{Query, Request, State};
+use axum::http::{StatusCode, header, uri::Authority};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -20,6 +21,8 @@ const TEAM_SCHEMA: &str = include_str!("../../../schemas/team.schema.yaml");
 #[derive(Debug, Clone)]
 struct ApiState {
     search_path: Option<OsString>,
+    teams_root: PathBuf,
+    allowed_hosts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -94,28 +97,91 @@ pub struct TeamFile {
 }
 
 /// Build the REST router using the daemon process's `PATH`.
-pub fn router() -> Router {
-    router_with_path(std::env::var_os("PATH"))
+///
+/// # Errors
+///
+/// Returns an error when `teams_root` cannot be canonicalized.
+pub fn router(teams_root: PathBuf, allowed_hosts: Vec<String>) -> io::Result<Router> {
+    router_with_path(teams_root, allowed_hosts, std::env::var_os("PATH"))
 }
 
 /// Build the REST router with an explicit executable search path.
 ///
 /// Keeping the search path in router state makes harness discovery deterministic in tests
 /// and avoids mutating the process environment.
-pub fn router_with_path(search_path: Option<OsString>) -> Router {
-    Router::new()
+///
+/// # Errors
+///
+/// Returns an error when `teams_root` cannot be canonicalized.
+pub fn router_with_path(
+    teams_root: PathBuf,
+    allowed_hosts: Vec<String>,
+    search_path: Option<OsString>,
+) -> io::Result<Router> {
+    let state = ApiState {
+        search_path,
+        teams_root: fs::canonicalize(teams_root)?,
+        allowed_hosts: allowed_hosts
+            .into_iter()
+            .map(|host| normalize_hostname(&host))
+            .filter(|host| !host.is_empty())
+            .collect(),
+    };
+    Ok(Router::new()
         .route("/api/harnesses", get(get_harnesses))
         .route("/api/team", get(get_team).put(put_team))
         .route("/api/config/schema", get(get_config_schema))
-        .with_state(ApiState { search_path })
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            enforce_allowed_host,
+        ))
+        .with_state(state))
+}
+
+async fn enforce_allowed_host(
+    State(state): State<ApiState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let allowed = request
+        .uri()
+        .authority()
+        .cloned()
+        .or_else(|| {
+            request
+                .headers()
+                .get(header::HOST)
+                .and_then(|host| host.to_str().ok())
+                .and_then(|host| host.parse::<Authority>().ok())
+        })
+        .map(|authority| normalize_hostname(authority.host()))
+        .is_some_and(|host| state.allowed_hosts.iter().any(|allowed| allowed == &host));
+
+    if !allowed {
+        return ApiError::new(StatusCode::FORBIDDEN, "host is not allowed".to_owned())
+            .into_response();
+    }
+    next.run(request).await
+}
+
+fn normalize_hostname(host: &str) -> String {
+    let host = host.trim().trim_end_matches('.');
+    host.strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host)
+        .to_ascii_lowercase()
 }
 
 async fn get_harnesses(State(state): State<ApiState>) -> Json<Vec<DetectedHarness>> {
     Json(detect_harnesses(state.search_path.as_deref()))
 }
 
-async fn get_team(Query(query): Query<TeamPath>) -> Result<Json<TeamFile>, ApiError> {
-    let yaml = fs::read_to_string(&query.path).map_err(|error| {
+async fn get_team(
+    State(state): State<ApiState>,
+    Query(query): Query<TeamPath>,
+) -> Result<Json<TeamFile>, ApiError> {
+    let resolved_path = resolve_existing_team_path(&state.teams_root, &query.path)?;
+    let yaml = fs::read_to_string(&resolved_path).map_err(|error| {
         let status = if error.kind() == std::io::ErrorKind::NotFound {
             StatusCode::NOT_FOUND
         } else {
@@ -132,10 +198,14 @@ async fn get_team(Query(query): Query<TeamPath>) -> Result<Json<TeamFile>, ApiEr
     }))
 }
 
-async fn put_team(Json(team_file): Json<TeamFile>) -> Result<Json<TeamFile>, ApiError> {
+async fn put_team(
+    State(state): State<ApiState>,
+    Json(team_file): Json<TeamFile>,
+) -> Result<Json<TeamFile>, ApiError> {
     TeamConfig::parse(&team_file.yaml)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))?;
-    atomic_write(&team_file.path, team_file.yaml.as_bytes()).map_err(|error| {
+    let resolved_path = resolve_writable_team_path(&state.teams_root, &team_file.path)?;
+    atomic_write(&resolved_path, team_file.yaml.as_bytes()).map_err(|error| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!(
@@ -145,6 +215,100 @@ async fn put_team(Json(team_file): Json<TeamFile>) -> Result<Json<TeamFile>, Api
         )
     })?;
     Ok(Json(team_file))
+}
+
+fn resolve_existing_team_path(teams_root: &Path, requested: &Path) -> Result<PathBuf, ApiError> {
+    let candidate = rooted_candidate(teams_root, requested);
+    let resolved = fs::canonicalize(&candidate).map_err(|error| {
+        let status = if error.kind() == io::ErrorKind::NotFound {
+            StatusCode::NOT_FOUND
+        } else {
+            StatusCode::BAD_REQUEST
+        };
+        ApiError::new(
+            status,
+            format!(
+                "failed to resolve team file {}: {error}",
+                requested.display()
+            ),
+        )
+    })?;
+    ensure_under_teams_root(teams_root, requested, resolved)
+}
+
+fn resolve_writable_team_path(teams_root: &Path, requested: &Path) -> Result<PathBuf, ApiError> {
+    let candidate = rooted_candidate(teams_root, requested);
+    match fs::symlink_metadata(&candidate) {
+        Ok(_) => {
+            let resolved = fs::canonicalize(&candidate).map_err(|error| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "failed to resolve team file {}: {error}",
+                        requested.display()
+                    ),
+                )
+            })?;
+            ensure_under_teams_root(teams_root, requested, resolved)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let file_name = candidate.file_name().ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    format!("team path {} has no file name", requested.display()),
+                )
+            })?;
+            let parent = candidate.parent().ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    format!("team path {} has no parent", requested.display()),
+                )
+            })?;
+            let resolved_parent = fs::canonicalize(parent).map_err(|error| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "failed to resolve parent of team file {}: {error}",
+                        requested.display()
+                    ),
+                )
+            })?;
+            ensure_under_teams_root(teams_root, requested, resolved_parent.join(file_name))
+        }
+        Err(error) => Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "failed to inspect team file {}: {error}",
+                requested.display()
+            ),
+        )),
+    }
+}
+
+fn rooted_candidate(teams_root: &Path, requested: &Path) -> PathBuf {
+    if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        teams_root.join(requested)
+    }
+}
+
+fn ensure_under_teams_root(
+    teams_root: &Path,
+    requested: &Path,
+    resolved: PathBuf,
+) -> Result<PathBuf, ApiError> {
+    if resolved.starts_with(teams_root) && resolved != teams_root {
+        Ok(resolved)
+    } else {
+        Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            format!(
+                "team path {} resolves outside the configured teams root",
+                requested.display()
+            ),
+        ))
+    }
 }
 
 /// Replace `path` without ever exposing a partially written team file.
@@ -318,6 +482,19 @@ mod tests {
         }
     }
 
+    fn test_router(teams_root: &Path) -> Router {
+        test_router_with_path(teams_root, None)
+    }
+
+    fn test_router_with_path(teams_root: &Path, search_path: Option<OsString>) -> Router {
+        router_with_path(
+            teams_root.to_path_buf(),
+            vec!["localhost".to_owned()],
+            search_path,
+        )
+        .expect("build API router")
+    }
+
     async fn response_json(response: Response) -> Value {
         let bytes = response
             .into_body()
@@ -337,10 +514,11 @@ mod tests {
         fs::write(first.0.join("codex"), b"not executable").expect("write non-executable");
         let search_path = std::env::join_paths([&first.0, &second.0]).expect("join search path");
 
-        let response = router_with_path(Some(search_path))
+        let response = test_router_with_path(&first.0, Some(search_path))
             .oneshot(
                 Request::builder()
                     .uri("/api/harnesses")
+                    .header(header::HOST, "localhost")
                     .body(Body::empty())
                     .expect("request"),
             )
@@ -370,10 +548,12 @@ mod tests {
 
     #[tokio::test]
     async fn schema_endpoint_returns_the_embedded_schema_as_json() {
-        let response = router_with_path(None)
+        let directory = TempDirectory::new();
+        let response = test_router(&directory.0)
             .oneshot(
                 Request::builder()
                     .uri("/api/config/schema")
+                    .header(header::HOST, "localhost")
                     .body(Body::empty())
                     .expect("request"),
             )
@@ -397,10 +577,11 @@ mod tests {
             .append_pair("path", path.to_str().expect("UTF-8 path"))
             .finish();
 
-        let response = router_with_path(None)
+        let response = test_router(&directory.0)
             .oneshot(
                 Request::builder()
                     .uri(format!("/api/team?{query}"))
+                    .header(header::HOST, "localhost")
                     .body(Body::empty())
                     .expect("request"),
             )
@@ -421,11 +602,12 @@ mod tests {
         })
         .expect("serialize request");
 
-        let response = router_with_path(None)
+        let response = test_router(&directory.0)
             .oneshot(
                 Request::builder()
                     .method("PUT")
                     .uri("/api/team")
+                    .header(header::HOST, "localhost")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(body))
                     .expect("request"),
@@ -447,6 +629,171 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn team_endpoint_rejects_parent_traversal_outside_root() {
+        let directory = TempDirectory::new();
+        let teams_root = directory.0.join("teams");
+        fs::create_dir(&teams_root).expect("create teams root");
+        let outside_path = directory.0.join("outside.yaml");
+        fs::write(&outside_path, "do not replace").expect("write outside file");
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("path", "../outside.yaml")
+            .finish();
+        let get_response = test_router(&teams_root)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/team?{query}"))
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(get_response.status(), StatusCode::FORBIDDEN);
+
+        let body = serde_json::to_vec(&TeamFile {
+            path: PathBuf::from("../outside.yaml"),
+            yaml: VALID_TEAM.to_owned(),
+        })
+        .expect("serialize request");
+
+        let response = test_router(&teams_root)
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/team")
+                    .header(header::HOST, "localhost")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            fs::read_to_string(outside_path).expect("read outside file"),
+            "do not replace"
+        );
+    }
+
+    #[tokio::test]
+    async fn team_endpoint_rejects_absolute_path_outside_root() {
+        let directory = TempDirectory::new();
+        let teams_root = directory.0.join("teams");
+        fs::create_dir(&teams_root).expect("create teams root");
+        let outside_path = directory.0.join("outside.yaml");
+        fs::write(&outside_path, VALID_TEAM).expect("write outside file");
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("path", outside_path.to_str().expect("UTF-8 path"))
+            .finish();
+
+        let response = test_router(&teams_root)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/team?{query}"))
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let body = serde_json::to_vec(&TeamFile {
+            path: outside_path.clone(),
+            yaml: VALID_TEAM.to_owned(),
+        })
+        .expect("serialize request");
+        let put_response = test_router(&teams_root)
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/team")
+                    .header(header::HOST, "localhost")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(put_response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            fs::read_to_string(outside_path).expect("read outside file"),
+            VALID_TEAM
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn team_endpoint_rejects_symlink_escape_after_resolution() {
+        use std::os::unix::fs::symlink;
+
+        let directory = TempDirectory::new();
+        let teams_root = directory.0.join("teams");
+        fs::create_dir(&teams_root).expect("create teams root");
+        let outside_path = directory.0.join("outside.yaml");
+        fs::write(&outside_path, "do not replace").expect("write outside file");
+        let link_path = teams_root.join("team.yaml");
+        symlink(&outside_path, &link_path).expect("create symlink");
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("path", link_path.to_str().expect("UTF-8 path"))
+            .finish();
+
+        let get_response = test_router(&teams_root)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/team?{query}"))
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(get_response.status(), StatusCode::FORBIDDEN);
+
+        let body = serde_json::to_vec(&TeamFile {
+            path: link_path,
+            yaml: VALID_TEAM.to_owned(),
+        })
+        .expect("serialize request");
+        let put_response = test_router(&teams_root)
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/team")
+                    .header(header::HOST, "localhost")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(put_response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            fs::read_to_string(outside_path).expect("read outside file"),
+            "do not replace"
+        );
+    }
+
+    #[tokio::test]
+    async fn api_rejects_a_host_outside_the_allowlist() {
+        let directory = TempDirectory::new();
+        let response = test_router(&directory.0)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/config/schema")
+                    .header(header::HOST, "rebound.example:3000")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
     async fn invalid_save_does_not_replace_the_existing_file() {
         let directory = TempDirectory::new();
         let path = directory.0.join("team.yaml");
@@ -457,11 +804,12 @@ mod tests {
         })
         .expect("serialize request");
 
-        let response = router_with_path(None)
+        let response = test_router(&directory.0)
             .oneshot(
                 Request::builder()
                     .method("PUT")
                     .uri("/api/team")
+                    .header(header::HOST, "localhost")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(body))
                     .expect("request"),

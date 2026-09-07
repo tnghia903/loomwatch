@@ -23,6 +23,12 @@ enum Commands {
     Serve {
         #[arg(long, default_value = "127.0.0.1:3000")]
         listen: SocketAddr,
+        /// Directory containing team YAML files accessible through the web UI.
+        #[arg(long, default_value = ".")]
+        teams_root: PathBuf,
+        /// Additional hostname accepted by the HTTP API (repeatable).
+        #[arg(long = "allow-host", value_name = "HOSTNAME")]
+        allowed_hosts: Vec<String>,
     },
     /// Run one turn through the configured entrypoint ACP harness.
     Run {
@@ -47,11 +53,28 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
-        Commands::Serve { listen } => {
+        Commands::Serve {
+            listen,
+            teams_root,
+            mut allowed_hosts,
+        } => {
+            if !listen.ip().is_loopback() {
+                eprintln!(
+                    "warning: serving on non-loopback address {}; use --allow-host for each trusted hostname",
+                    listen.ip()
+                );
+            }
+            allowed_hosts.extend([
+                "localhost".to_owned(),
+                "127.0.0.1".to_owned(),
+                "::1".to_owned(),
+                listen.ip().to_string(),
+            ]);
             let listener = tokio::net::TcpListener::bind(listen).await?;
             let address = listener.local_addr()?;
             println!("loomwatchd listening on http://{address}");
-            let app = loomwatch_backend::spa::router().merge(loomwatch_backend::api::router());
+            let api = loomwatch_backend::api::router(teams_root, allowed_hosts)?;
+            let app = loomwatch_backend::spa::router().merge(api);
             axum::serve(listener, app).await?;
         }
         Commands::Run {
