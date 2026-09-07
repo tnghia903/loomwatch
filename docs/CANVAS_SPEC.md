@@ -649,6 +649,24 @@ same three Library groups, ↑↓/Enter to choose. Choosing creates the node *an
 `Esc` cancels both. This is the fastest way to build a chain and it is worth the one extra
 component.
 
+**Fields written on draw.** The counterpart to §4.5's defaults-on-drop, and the same
+constraint applies: `$defs.Edge` sets `additionalProperties: false` and requires all five of
+`from`, `to`, `layer`, `kind`, `ts`, so there is no partial edge and nothing extra may ride
+along. A drawn edge is committed as
+`{ from, to, layer: "configured", kind: "sequence", ts: <now> }`. Only `from`, `to` and `ts`
+are the UI's to choose — `layer` and `kind` are forced by the schema's `edges[].allOf`, not
+picked (see **Type.** below). Unlike a freshly dropped node, a drawn edge is therefore
+**always valid on creation**; edge refusals are semantic (the table above), never
+schema-completeness ones.
+
+`ts` is RFC 3339 with an explicit `Z` or `±HH:MM` offset — the schema's `pattern` rejects a
+naive local timestamp, so a bare `new Date().toISOString()` is correct and
+`toLocaleString()` is not. On a configured edge `ts` records **when the user drew it**, not
+anything about a run, and it is stable across saves: reconnecting an endpoint (below)
+preserves the original `ts` rather than restamping, so rearranging a pipeline does not churn
+the diff of a version-controlled file (ARCHITECTURE §5). `ts` is never surfaced in the UI —
+it exists to satisfy the schema and to keep the observed layer's shape identical (§6.5).
+
 **Refusals**, from TEAM_CONFIG.md's semantic rules, all shown as an `e2` popover anchored
 at the cursor with the reason in plain language and an action where one exists:
 
