@@ -6,9 +6,11 @@ You drag agents onto a canvas from a panel of whatever harnesses are installed o
 machine, wire them up (or don't), give the team a goal, and watch the work happen as a
 live graph — nodes are agents, edges are the delegations between them.
 
-`loomwatchd` runs on your machine and serves the canvas as a web UI; you open it in a
-browser (or install it as a PWA). No Electron, no native app to build. The UI is
-eye-catching and minimal — the canvas is the product, the chrome gets out of the way.
+`loomwatchd` runs your teams as local child processes and archives every event to
+Postgres. Phase 04 will deliver the canvas as a web UI the daemon serves — open it
+in a browser (or install it as a PWA). No Electron, no native app to build; the daemon
+is a single static Rust binary. The UI is designed to be eye-catching and minimal — the
+canvas is the product, the chrome gets out of the way.
 
 ## The problem it solves
 
@@ -46,7 +48,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full specification.
 |---|---|
 | Agents | Local processes speaking ACP over stdio |
 | Backend | Rust `loomwatchd` — ACP client, process supervisor, Team Bus MCP server, Postgres, WebSocket, UI host |
-| Client | React + Vite + React Flow web UI, served by `loomwatchd`, PWA-installable |
+| Client (Phase 04) | React + Vite + React Flow web UI, served by `loomwatchd`, PWA-installable |
 | Team config | Version-controlled YAML |
 
 ## Status
@@ -69,8 +71,7 @@ schema.
 | `schemas/team.schema.yaml` | YAML/JSON Schema contract for teams and runtime records |
 | `examples/` | Version-controlled team examples |
 | `docs/` | Architecture and contract documentation |
-
-The web UI (`ui/`, served by `loomwatchd`) arrives in Phase 04.
+| `ui/` (Phase 04) | Web UI — React + Vite + React Flow, served by `loomwatchd` |
 
 ## Development
 
