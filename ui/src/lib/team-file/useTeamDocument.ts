@@ -12,7 +12,22 @@ import type { AgentConfig, EdgeConfig, SpawnConfig } from './types'
 
 export type ConfiguredEdge = Edge<{ kind: EdgeConfig['kind'] }>
 
-export type SaveState = 'no-file' | 'clean' | 'dirty' | 'saving' | 'saved' | 'error'
+export type SaveState = 'no-file' | 'clean' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error'
+
+const EXTERNAL_CHANGE_MESSAGE =
+  'This team file changed on disk while you had unsaved edits. Reload it before saving.'
+
+async function hashTeamYaml(yaml: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(yaml))
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+// Keep the weak Phase 04 detection behind one function so a daemon revision token can replace
+// this GET/hash check when docs/CANVAS_SPEC.md §15.4 lands.
+async function teamFileChangedOnDisk(path: string, loadedRevision: string): Promise<boolean> {
+  const { yaml } = await fetchTeamFile(path)
+  return (await hashTeamYaml(yaml)) !== loadedRevision
+}
 
 /**
  * Blocks `Save` per §5.4/§10.2: no candidate agent to promote means no automatic entrypoint,
@@ -64,6 +79,7 @@ function nodeFromAgent(
  */
 export function useTeamDocument() {
   const modelRef = useRef<TeamFileModel | null>(null)
+  const loadedRevisionRef = useRef<string | null>(null)
   const [path, setPath] = useState<string | null>(null)
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [edges, setEdges] = useState<ConfiguredEdge[]>([])
@@ -83,7 +99,8 @@ export function useTeamDocument() {
     }
     let cancelled = false
     fetchTeamFile(requestedPath)
-      .then(({ yaml }) => {
+      .then(async ({ yaml }) => {
+        const loadedRevision = await hashTeamYaml(yaml)
         if (cancelled) {
           return
         }
@@ -91,6 +108,7 @@ export function useTeamDocument() {
         const snapshot = model.snapshot()
         const positions = seededLayout(snapshot.agents.map((agent) => agent.id))
         modelRef.current = model
+        loadedRevisionRef.current = loadedRevision
         setPath(requestedPath)
         setEntrypointState(snapshot.entrypoint)
         setNodes(
@@ -387,10 +405,27 @@ export function useTeamDocument() {
     }
     setSaveState('saving')
     try {
-      await saveTeamFile(path, modelRef.current.toYaml())
-      setSaveState('saved')
+      const loadedRevision = loadedRevisionRef.current
+      if (!loadedRevision) {
+        throw new Error('Cannot verify whether the team file changed on disk.')
+      }
+      const yaml = modelRef.current.toYaml()
+      const nextRevision = await hashTeamYaml(yaml)
+      if (await teamFileChangedOnDisk(path, loadedRevision)) {
+        setSaveState('conflict')
+        setSaveError(EXTERNAL_CHANGE_MESSAGE)
+        return
+      }
+
+      await saveTeamFile(path, yaml)
+      loadedRevisionRef.current = nextRevision
       setSaveError(null)
-      setTimeout(() => setSaveState((current) => (current === 'saved' ? 'clean' : current)), 2000)
+      if (modelRef.current.toYaml() === yaml) {
+        setSaveState('saved')
+        setTimeout(() => setSaveState((current) => (current === 'saved' ? 'clean' : current)), 2000)
+      } else {
+        setSaveState('dirty')
+      }
     } catch (error) {
       setSaveState('error')
       setSaveError(error instanceof TeamFileApiError ? error.message : String(error))

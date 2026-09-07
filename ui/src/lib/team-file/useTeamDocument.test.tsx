@@ -184,7 +184,7 @@ describe('useTeamDocument', () => {
     expect(node?.data.agent.role).toBe('Investigate protocols')
   })
 
-  it('save() PUTs the mutated YAML and settles on saved', async () => {
+  it('save() rechecks an unchanged disk revision, PUTs the mutated YAML, and settles on saved', async () => {
     const fetchMock = vi.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (!init) {
         return jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })
@@ -210,6 +210,34 @@ describe('useTeamDocument', () => {
       '/api/team',
       expect.objectContaining({ method: 'PUT' }),
     )
+    expect(fetchMock.mock.calls.filter(([, init]) => init === undefined)).toHaveLength(2)
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1)
+  })
+
+  it('refuses and flags a save when the file changed on disk after load', async () => {
+    const diskYaml = TEAM_YAML.replace('name: Research and review', 'name: Edited outside LoomWatch')
+    let getCount = 0
+    const fetchMock = vi.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init) {
+        getCount += 1
+        const yaml = getCount === 1 ? TEAM_YAML : diskYaml
+        return jsonResponse(200, { path: '/teams/research-team.yaml', yaml })
+      }
+      return jsonResponse(200, JSON.parse(init.body as string))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    act(() => result.current.renameAgent('researcher', 'role', 'Investigate protocols'))
+
+    await act(async () => {
+      await result.current.save()
+    })
+
+    expect(result.current.saveState).toBe('conflict')
+    expect(result.current.saveError).toContain('changed on disk')
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0)
   })
 
   describe('deleting the entrypoint node (docs/CANVAS_SPEC.md §5.4)', () => {
@@ -231,7 +259,9 @@ describe('useTeamDocument', () => {
     it('leaves entrypoint unset — not dangling — and blocks save when two or more agents remain', async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: THREE_AGENT_YAML }))
+        .mockImplementation(async () =>
+          jsonResponse(200, { path: '/teams/research-team.yaml', yaml: THREE_AGENT_YAML }),
+        )
       vi.stubGlobal('fetch', fetchMock)
       const { result } = renderHook(() => useTeamDocument())
       await waitFor(() => expect(result.current.saveState).toBe('clean'))
@@ -269,7 +299,9 @@ describe('useTeamDocument', () => {
         await result.current.save()
       })
       expect(fetchMock).toHaveBeenCalledWith('/api/team', expect.objectContaining({ method: 'PUT' }))
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+      const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')
+      expect(putCall).toBeDefined()
+      const [, init] = putCall as [string, RequestInit]
       const body = JSON.parse(init.body as string) as { yaml: string }
       expect(body.yaml).toContain('entrypoint: reviewer')
       expect(body.yaml).not.toContain('entrypoint: researcher')
