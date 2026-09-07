@@ -384,6 +384,16 @@ possible from the rail — the rail is a wayfinding affordance, not a compact li
    names the node. This is correct and intended: the alternative is a plausible-looking
    default that saves cleanly and runs the wrong model. From a **preset**, both are already
    filled and the node is valid on drop — which is the entire argument for presets.
+
+   **The root `entrypoint` is set by the first drop.** It is a required root field naming an
+   agent in `agents` (§9.2), so a document whose only agent is not the entrypoint could never
+   save. Dropping into a document that has no entrypoint — a new team (§10.2), or one whose
+   entrypoint was deleted (§5.4) — therefore promotes that node and shows the `ENTRY` marker
+   (§5.1) immediately. This is not the kind of guess `role` and `model` refuse above: with a
+   single candidate there is no decision to make. Every **later** drop leaves `entrypoint`
+   alone; promotion after the first is always explicit, via the inspector (§5.4) or §6.6's
+   refusal action. This is what makes §10.2 true — `role` and `model` really are the only
+   things standing between a first drop and a valid save.
 5. **Drop outside the canvas** — cancel, ghost returns with an `instant` fade. No dialog.
 
 Keyboard equivalent: ⌘K → "Add agent…" → pick a source → the node is placed at the viewport
@@ -532,6 +542,26 @@ Everything else is the inspector.
   Greeting someone with red the instant they drop a node is punishing them for an action
   the product told them to take; copper says *unfinished*, red says *wrong*. Both block
   the save, so nothing invalid can reach disk either way.
+- **Entrypoint is radio-like in both directions.** Checking it unchecks the previous
+  entrypoint; **unchecking it directly is not possible** — the box on the current entrypoint
+  is inert, because the schema has no "no entrypoint" state to move to. You promote a
+  different node instead. Hovering the checked box explains that: *"Every team starts
+  somewhere. Check another agent to move the entry point."*
+- **Deleting the entrypoint node** is allowed and follows §4.5's rule, mirrored:
+  - If **exactly one** agent remains, it is promoted automatically — one candidate, no
+    decision.
+  - If **two or more** remain, LoomWatch does **not** pick. `entrypoint` is left unset, the
+    document is invalid, `Save` is disabled, and the problems popover (§9.2) carries
+    *"This team has no entry point."* with each remaining agent as a one-click promotion.
+    Silently promoting whichever node happened to be next is precisely the plausible-looking
+    default §4.5 refuses: which agent starts the team decides what the team does.
+  - If it was the **last** agent, the document is invalid on `agents` `minItems: 1` too, and
+    `Save` carries §10.2's existing reason — *"A team needs at least one agent."* The canvas
+    is simply empty: the §10.3 ghost does **not** return, by that section's own rule.
+
+  Deleting any node also deletes its edges, so removing the last configured edge this way
+  changes the execution mode on the same rules as §6.6 — the mode pill confirms inline
+  rather than flipping silently.
 - **Every edit is immediate in memory** — no "Apply" button. The document chip flips to
   *Unsaved changes* on the first keystroke. `Esc` closes the inspector; it does not revert.
 - **Deselecting closes the inspector** with a `quick` slide-right + fade.
