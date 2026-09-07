@@ -8,6 +8,7 @@ import { CanvasActionsContext, type CanvasActions } from './canvas/CanvasActions
 import { ConfiguredEdgeView } from './canvas/ConfiguredEdgeView'
 import { DocumentChip } from './canvas/DocumentChip'
 import { EdgeRefusalPopover } from './canvas/EdgeRefusalPopover'
+import { EntrypointProblemBar } from './canvas/EntrypointProblemBar'
 import { Inspector } from './canvas/Inspector'
 import { LIBRARY_DRAG_MIME } from './library'
 
@@ -92,8 +93,17 @@ export function Canvas() {
         )}
       </ReactFlow>
 
-      <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center">
-        <DocumentChip path={doc.path} saveState={doc.saveState} saveError={doc.saveError} onSave={doc.save} />
+      <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex flex-col items-center gap-2">
+        <DocumentChip
+          path={doc.path}
+          saveState={doc.saveState}
+          saveError={doc.saveError}
+          entrypointProblem={doc.entrypointProblem}
+          onSave={doc.save}
+        />
+        {doc.entrypointProblem && doc.entrypointProblem.candidates.length > 0 && (
+          <EntrypointProblemBar problem={doc.entrypointProblem} onPromote={doc.promoteEntrypoint} />
+        )}
       </div>
 
       {inspectedNode && (

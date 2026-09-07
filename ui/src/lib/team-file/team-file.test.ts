@@ -98,6 +98,17 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
     expect(after.slice(0, 2)).toEqual(before.slice(0, 2))
   })
 
+  it('clearing the entrypoint removes the key rather than leaving a dangling reference', () => {
+    const source = readExample('research-team.yaml')
+    const model = TeamFileModel.parse(source)
+    model.clearEntrypoint()
+    const result = model.toYaml()
+
+    expect(result).not.toContain('entrypoint: researcher')
+    expect(result).not.toMatch(/^entrypoint:/m)
+    expect(model.snapshot().entrypoint).toBeUndefined()
+  })
+
   it('adding then removing an agent nets an identical document', () => {
     const source = readExample('research-team.yaml')
     const model = TeamFileModel.parse(source)

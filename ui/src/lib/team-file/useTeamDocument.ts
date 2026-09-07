@@ -1,6 +1,6 @@
 import { applyEdgeChanges, applyNodeChanges } from '@xyflow/react'
 import type { Connection, Edge, EdgeChange, NodeChange } from '@xyflow/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { AgentNode } from '../library/nodeFromDrop'
 import { nodeFromDrop } from '../library/nodeFromDrop'
@@ -13,6 +13,16 @@ import type { AgentConfig, EdgeConfig, SpawnConfig } from './types'
 export type ConfiguredEdge = Edge<{ kind: EdgeConfig['kind'] }>
 
 export type SaveState = 'no-file' | 'clean' | 'dirty' | 'saving' | 'saved' | 'error'
+
+/**
+ * Blocks `Save` per §5.4/§10.2: no candidate agent to promote means no automatic entrypoint,
+ * and an empty canvas means no agent at all. `candidates` is empty in the latter case — there
+ * is nothing to offer, per §10.2's "the canvas is simply empty".
+ */
+export interface EntrypointProblem {
+  message: string
+  candidates: { id: string; name: string }[]
+}
 
 function edgeId(from: string, to: string): string {
   return `${from}->${to}`
@@ -124,10 +134,14 @@ export function useTeamDocument() {
 
       let nextEntrypoint = entrypoint
       if (entrypoint !== null && idSet.has(entrypoint)) {
-        // §5.4: exactly one survivor is promoted automatically; two or more is left unset.
+        // §5.4: exactly one survivor is promoted automatically; two or more (or zero) is left
+        // unset — and unset must mean unset in the YAML too, not a dangling reference to the
+        // agent that just left `agents`.
         nextEntrypoint = remainingNodes.length === 1 ? remainingNodes[0].id : null
         if (nextEntrypoint) {
           modelRef.current?.setEntrypoint(nextEntrypoint)
+        } else {
+          modelRef.current?.clearEntrypoint()
         }
       }
 
@@ -352,8 +366,23 @@ export function useTeamDocument() {
     [edges, entrypoint, markDirty],
   )
 
+  // §5.4/§10.2: only relevant to a document that is actually open — a pathless canvas (no
+  // `?path=` yet) has nothing to save, so it has no save-blocking problem either.
+  const entrypointProblem = useMemo<EntrypointProblem | null>(() => {
+    if (!path || entrypoint !== null) {
+      return null
+    }
+    if (nodes.length === 0) {
+      return { message: 'A team needs at least one agent.', candidates: [] }
+    }
+    return {
+      message: 'This team has no entry point.',
+      candidates: nodes.map((node) => ({ id: node.id, name: node.data.label })),
+    }
+  }, [path, entrypoint, nodes])
+
   const save = useCallback(async () => {
-    if (!path || !modelRef.current) {
+    if (!path || !modelRef.current || entrypointProblem) {
       return
     }
     setSaveState('saving')
@@ -366,13 +395,14 @@ export function useTeamDocument() {
       setSaveState('error')
       setSaveError(error instanceof TeamFileApiError ? error.message : String(error))
     }
-  }, [path])
+  }, [path, entrypointProblem])
 
   return {
     path,
     nodes,
     edges,
     entrypoint,
+    entrypointProblem,
     saveState,
     saveError,
     refusal,
