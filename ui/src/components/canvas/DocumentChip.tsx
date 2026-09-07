@@ -1,4 +1,4 @@
-import { Check, Loader2, X } from 'lucide-react'
+import { Check, Loader2, TriangleAlert, X } from 'lucide-react'
 
 import type { EntrypointProblem, SaveState } from '../../lib/team-file/useTeamDocument'
 
@@ -21,7 +21,11 @@ export function DocumentChip({ path, saveState, saveError, entrypointProblem, on
 
   return (
     <div
-      title={saveState === 'error' ? (saveError ?? undefined) : (entrypointProblem?.message ?? undefined)}
+      title={
+        saveState === 'error' || saveState === 'conflict'
+          ? (saveError ?? undefined)
+          : (entrypointProblem?.message ?? undefined)
+      }
       className="pointer-events-auto flex h-10 min-w-[260px] items-center gap-2 rounded-full border border-hairline/10 bg-surface/72 px-3 text-[13px] shadow-[0_1px_2px_rgb(0_0_0/.04),0_8px_24px_rgb(0_0_0/.08)] backdrop-blur-xl"
     >
       <Dot saveState={saveState} />
@@ -33,6 +37,7 @@ export function DocumentChip({ path, saveState, saveError, entrypointProblem, on
         {saveState === 'dirty' && !entrypointProblem && <span className="text-ink-2"> · Unsaved changes</span>}
         {saveState === 'saving' && <span className="text-ink-2"> · Saving…</span>}
         {saveState === 'saved' && <span className="text-green"> · Saved</span>}
+        {saveState === 'conflict' && <span className="text-copper"> · Changed on disk</span>}
         {saveState === 'error' && <span className="text-red"> · Couldn't save</span>}
       </span>
       {(saveState === 'dirty' || saveState === 'error') && (
@@ -57,6 +62,8 @@ function Dot({ saveState }: { saveState: SaveState }) {
       return <Loader2 className="size-3 shrink-0 animate-spin text-iris" aria-hidden="true" />
     case 'saved':
       return <Check className="size-3 shrink-0 text-green" aria-hidden="true" />
+    case 'conflict':
+      return <TriangleAlert className="size-3 shrink-0 text-copper" aria-hidden="true" />
     case 'error':
       return <X className="size-3 shrink-0 text-red" aria-hidden="true" />
     default:
