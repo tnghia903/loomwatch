@@ -411,9 +411,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn team_endpoint_saves_valid_yaml_byte_for_byte() {
+    async fn team_endpoint_atomically_replaces_valid_yaml_byte_for_byte() {
         let directory = TempDirectory::new();
         let path = directory.0.join("team.yaml");
+        fs::write(&path, "old contents\n").expect("write original file");
         let body = serde_json::to_vec(&TeamFile {
             path: path.clone(),
             yaml: VALID_TEAM.to_owned(),
@@ -433,9 +434,15 @@ mod tests {
             .expect("response");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
-            fs::read_to_string(path).expect("read saved file"),
+            fs::read_to_string(&path).expect("read saved file"),
             VALID_TEAM
         );
+        let entries = fs::read_dir(&directory.0)
+            .expect("read team directory")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect team directory");
+        assert_eq!(entries.len(), 1, "temporary file should be renamed away");
+        assert_eq!(entries[0].path(), path);
         assert_eq!(response_json(response).await["yaml"], VALID_TEAM);
     }
 
