@@ -5,7 +5,7 @@ import type { AgentConfig } from '../team-file/types'
 import { buildAgentFromSource } from './createAgent'
 import type { LibrarySource } from './types'
 
-export type AgentNode = Node<{ label: string; agent: AgentConfig }>
+export type AgentNode = Node<{ label: string; agent: AgentConfig; isEntrypoint?: boolean }>
 
 /**
  * Parsing/positioning logic for drag-to-instantiate (docs/CANVAS_SPEC.md §4.5), split out from
@@ -28,7 +28,7 @@ export function nodeFromDrop(
 
   return {
     id: agent.id,
-    type: 'default',
+    type: 'agent',
     position: { x: snapToGrid(dropPosition.x), y: snapToGrid(dropPosition.y) },
     data: { label: agent.name, agent },
     selected: true,

@@ -50,3 +50,18 @@ export const KNOWN_HARNESSES: readonly KnownHarness[] = [
   { id: 'gemini', name: 'Gemini', monogram: 'G' },
   { id: 'opencode', name: 'OpenCode', monogram: 'Oc' },
 ]
+
+// docs/CANVAS_SPEC.md §2.6's harness table, keyed by the literal `spawn.cmd` each harness
+// writes into an agent (crates/loomwatch-backend/src/api.rs HARNESSES). An agent's node
+// carries only `spawn`, not the harness `id` it came from, so the monogram is recovered from
+// `cmd` rather than threaded through as extra agent state. `·` is the custom-endpoint mark.
+const SPAWN_CMD_MONOGRAMS: Readonly<Record<string, string>> = {
+  'claude-agent-acp': 'C',
+  'codex-acp': 'Cx',
+  gemini: 'G',
+  opencode: 'Oc',
+}
+
+export function monogramForSpawnCmd(cmd: string): string {
+  return SPAWN_CMD_MONOGRAMS[cmd] ?? '·'
+}
