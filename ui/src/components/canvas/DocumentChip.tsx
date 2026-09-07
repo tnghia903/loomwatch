@@ -1,6 +1,6 @@
 import { Check, Loader2, X } from 'lucide-react'
 
-import type { SaveState } from '../../lib/team-file/useTeamDocument'
+import type { EntrypointProblem, SaveState } from '../../lib/team-file/useTeamDocument'
 
 // docs/CANVAS_SPEC.md §9.1: the document chip is the single place file state is expressed.
 // Scoped to the states useTeamDocument actually tracks — `no-file` renders nothing, since
@@ -9,10 +9,11 @@ export interface DocumentChipProps {
   path: string | null
   saveState: SaveState
   saveError: string | null
+  entrypointProblem: EntrypointProblem | null
   onSave: () => void
 }
 
-export function DocumentChip({ path, saveState, saveError, onSave }: DocumentChipProps) {
+export function DocumentChip({ path, saveState, saveError, entrypointProblem, onSave }: DocumentChipProps) {
   if (!path) {
     return null
   }
@@ -20,13 +21,16 @@ export function DocumentChip({ path, saveState, saveError, onSave }: DocumentChi
 
   return (
     <div
-      title={saveState === 'error' ? (saveError ?? undefined) : undefined}
+      title={saveState === 'error' ? (saveError ?? undefined) : (entrypointProblem?.message ?? undefined)}
       className="pointer-events-auto flex h-10 min-w-[260px] items-center gap-2 rounded-full border border-hairline/10 bg-surface/72 px-3 text-[13px] shadow-[0_1px_2px_rgb(0_0_0/.04),0_8px_24px_rgb(0_0_0/.08)] backdrop-blur-xl"
     >
       <Dot saveState={saveState} />
       <span className="min-w-0 flex-1 truncate text-ink">
         {filename}
-        {saveState === 'dirty' && <span className="text-ink-2"> · Unsaved changes</span>}
+        {saveState === 'dirty' && entrypointProblem && (
+          <span className="text-copper"> · {entrypointProblem.message}</span>
+        )}
+        {saveState === 'dirty' && !entrypointProblem && <span className="text-ink-2"> · Unsaved changes</span>}
         {saveState === 'saving' && <span className="text-ink-2"> · Saving…</span>}
         {saveState === 'saved' && <span className="text-green"> · Saved</span>}
         {saveState === 'error' && <span className="text-red"> · Couldn't save</span>}
@@ -35,7 +39,8 @@ export function DocumentChip({ path, saveState, saveError, onSave }: DocumentChi
         <button
           type="button"
           onClick={onSave}
-          className="shrink-0 rounded-full bg-iris px-2.5 py-1 text-[12px] font-medium text-white hover:opacity-90"
+          disabled={!!entrypointProblem}
+          className="shrink-0 rounded-full bg-iris px-2.5 py-1 text-[12px] font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:opacity-50"
         >
           {saveState === 'error' ? 'Retry' : 'Save ⌘S'}
         </button>

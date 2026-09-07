@@ -40,6 +40,11 @@ export class TeamFileModel {
     this.doc.set('entrypoint', agentId)
   }
 
+  /** Unset `entrypoint` (§5.4: deleting it with 2+ agents left picks no automatic survivor). */
+  clearEntrypoint(): void {
+    this.doc.delete('entrypoint')
+  }
+
   setTeamBudget(budget: BudgetConfig | undefined): void {
     if (budget === undefined) {
       this.doc.delete('budget')
