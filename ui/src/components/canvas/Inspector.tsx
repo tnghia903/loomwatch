@@ -1,3 +1,5 @@
+import { createElement } from 'react'
+
 import { formatUsd } from '../../lib/format'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { roleGlyph } from './roleGlyph'
@@ -32,7 +34,6 @@ export function Inspector({
   onClose,
 }: InspectorProps) {
   const { agent } = node.data
-  const Glyph = roleGlyph(agent.role)
 
   return (
     <div
@@ -42,7 +43,10 @@ export function Inspector({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <Glyph className="size-5 shrink-0 text-ink-2" aria-hidden="true" />
+          {createElement(roleGlyph(agent.role), {
+            className: 'size-5 shrink-0 text-ink-2',
+            'aria-hidden': 'true',
+          })}
           <div className="min-w-0">
             <input
               value={agent.name}
