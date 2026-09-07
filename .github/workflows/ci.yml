@@ -8,7 +8,34 @@ permissions:
   contents: read
 
 jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm run lint
+      - name: Build (includes typecheck)
+        run: pnpm run build
+      - name: Test
+        run: pnpm test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+
   rust:
+    needs: frontend
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -28,6 +55,10 @@ jobs:
       DATABASE_URL: postgres://loomwatch:loomwatch@localhost:5432/loomwatch
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
       - name: Check
         run: cargo check --workspace
       - name: Test
