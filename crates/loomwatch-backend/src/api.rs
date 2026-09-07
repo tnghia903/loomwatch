@@ -1,7 +1,8 @@
 //! REST surface consumed by the `LoomWatch` web UI.
 
 use std::ffi::OsString;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use axum::extract::{Query, State};
@@ -134,7 +135,7 @@ async fn get_team(Query(query): Query<TeamPath>) -> Result<Json<TeamFile>, ApiEr
 async fn put_team(Json(team_file): Json<TeamFile>) -> Result<Json<TeamFile>, ApiError> {
     TeamConfig::parse(&team_file.yaml)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))?;
-    fs::write(&team_file.path, team_file.yaml.as_bytes()).map_err(|error| {
+    atomic_write(&team_file.path, team_file.yaml.as_bytes()).map_err(|error| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!(
@@ -144,6 +145,48 @@ async fn put_team(Json(team_file): Json<TeamFile>) -> Result<Json<TeamFile>, Api
         )
     })?;
     Ok(Json(team_file))
+}
+
+/// Replace `path` without ever exposing a partially written team file.
+///
+/// The temporary file lives beside the destination so the final rename stays on one
+/// filesystem and is atomic. Syncing it before the rename also prevents a successful
+/// response from referring to bytes that are still only in userspace buffers.
+fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "team file path has no file name",
+        )
+    })?;
+    let temporary_path = parent.join(format!(
+        ".{}.{}.tmp",
+        file_name.to_string_lossy(),
+        uuid::Uuid::new_v4()
+    ));
+
+    let result = (|| {
+        let mut temporary_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)?;
+        if let Ok(metadata) = fs::metadata(path) {
+            temporary_file.set_permissions(metadata.permissions())?;
+        }
+        temporary_file.write_all(contents)?;
+        temporary_file.sync_all()?;
+        drop(temporary_file);
+        fs::rename(&temporary_path, path)
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary_path);
+    }
+    result
 }
 
 async fn get_config_schema() -> Result<Json<Value>, ApiError> {
