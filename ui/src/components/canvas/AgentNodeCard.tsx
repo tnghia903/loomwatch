@@ -1,6 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { Check, Lock, X } from 'lucide-react'
-import { useState } from 'react'
+import { createElement, useState } from 'react'
 
 import { formatUsd, middleTruncate } from '../../lib/format'
 import { monogramForSpawnCmd } from '../../lib/harnesses'
@@ -20,8 +20,6 @@ export function AgentNodeCard({ id, data, selected }: NodeProps<AgentNode>) {
   const { renameAgent } = useCanvasActions()
   const [editing, setEditing] = useState<EditableField | null>(null)
   const [draft, setDraft] = useState('')
-
-  const Glyph = roleGlyph(agent.role)
 
   function startEdit(field: EditableField, currentValue: string) {
     setDraft(currentValue)
@@ -63,7 +61,10 @@ export function AgentNodeCard({ id, data, selected }: NodeProps<AgentNode>) {
             isEntrypoint ? 'ring-2 ring-iris' : ''
           }`}
         >
-          <Glyph className="size-4 text-ink-2" aria-hidden="true" />
+          {createElement(roleGlyph(agent.role), {
+            className: 'size-4 text-ink-2',
+            'aria-hidden': 'true',
+          })}
         </span>
 
         {editing === 'name' ? (
