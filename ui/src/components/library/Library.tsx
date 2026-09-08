@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, PanelLeft, Plus, Search } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { DetectedHarness } from '../../lib/harnesses'
 import { KNOWN_HARNESSES } from '../../lib/harnesses'
@@ -34,6 +34,31 @@ export function Library({ harnesses, harnessesLoading, harnessesError }: Library
   const [notInstalledOpen, setNotInstalledOpen] = usePersistedBoolean('not-installed-open', false)
   const [searchPathOpen, setSearchPathOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [compactWindow, setCompactWindow] = useState(() => window.innerWidth < 1024)
+
+  useEffect(() => {
+    const onResize = () => setCompactWindow(window.innerWidth < 1024)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  useEffect(() => {
+    if (compactWindow) setRailCollapsed(true)
+  }, [compactWindow, setRailCollapsed])
+
+  useEffect(() => {
+    const close = () => setRailCollapsed(true)
+    const toggle = () => {
+      if (railCollapsed) window.dispatchEvent(new Event('loomwatch:open-library'))
+      setRailCollapsed(!railCollapsed)
+    }
+    window.addEventListener('loomwatch:close-library', close)
+    window.addEventListener('loomwatch:toggle-library', toggle)
+    return () => {
+      window.removeEventListener('loomwatch:close-library', close)
+      window.removeEventListener('loomwatch:toggle-library', toggle)
+    }
+  }, [railCollapsed, setRailCollapsed])
 
   const detectedSources = useMemo(() => harnesses.map(harnessToSource), [harnesses])
   const notInstalled = useMemo(
@@ -52,8 +77,13 @@ export function Library({ harnesses, harnessesLoading, harnessesError }: Library
   const endpointsSectionRef = useRef<HTMLDivElement>(null)
   const presetsSectionRef = useRef<HTMLDivElement>(null)
 
-  const expandToGroup = (group: 'detected' | 'endpoints' | 'presets') => {
+  const openLibrary = () => {
+    if (compactWindow) window.dispatchEvent(new Event('loomwatch:open-library'))
     setRailCollapsed(false)
+  }
+
+  const expandToGroup = (group: 'detected' | 'endpoints' | 'presets') => {
+    openLibrary()
     const ref =
       group === 'detected' ? detectedSectionRef : group === 'endpoints' ? endpointsSectionRef : presetsSectionRef
     if (group === 'detected') setDetectedOpen(true)
@@ -72,7 +102,7 @@ export function Library({ harnesses, harnessesLoading, harnessesError }: Library
         <button
           type="button"
           aria-label="Expand Library"
-          onClick={() => setRailCollapsed(false)}
+          onClick={openLibrary}
           className="flex size-8 items-center justify-center rounded-md text-ink-2 hover:bg-iris/6"
         >
           <ChevronRight className="size-4" aria-hidden="true" />
@@ -106,11 +136,13 @@ export function Library({ harnesses, harnessesLoading, harnessesError }: Library
   }
 
   return (
-    <div
-      role="region"
-      aria-label="Library"
-      className="pointer-events-auto flex w-72 max-h-[640px] flex-col gap-3 overflow-y-auto rounded-lg border border-hairline/10 bg-surface/72 p-4 shadow-[0_1px_2px_rgb(0_0_0/.04),0_8px_24px_rgb(0_0_0/.08)] backdrop-blur-xl"
-    >
+    <>
+      {compactWindow && <button type="button" className="library-scrim pointer-events-auto fixed inset-0" aria-label="Close Library" onClick={() => setRailCollapsed(true)} />}
+      <div
+        role="region"
+        aria-label="Library"
+        className={`library-sheet pointer-events-auto flex w-72 max-h-[640px] flex-col gap-3 overflow-y-auto rounded-lg border border-hairline/10 bg-surface/72 p-4 shadow-[0_1px_2px_rgb(0_0_0/.04),0_8px_24px_rgb(0_0_0/.08)] backdrop-blur-xl ${compactWindow ? 'fixed left-4 top-4 z-30 max-h-[calc(100vh-32px)]' : ''}`}
+      >
       <div className="flex items-center justify-between">
         <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3">Library</span>
         <button
@@ -250,7 +282,8 @@ export function Library({ harnesses, harnessesLoading, harnessesError }: Library
           </div>
         )}
       </section>
-    </div>
+      </div>
+    </>
   )
 }
 

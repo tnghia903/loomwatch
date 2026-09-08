@@ -16,7 +16,13 @@ const openCode: DetectedHarness = {
 afterEach(() => {
   cleanup()
   window.localStorage.clear()
+  Object.defineProperty(window, 'innerWidth', { value: 1024, configurable: true })
 })
+
+function setWindowWidth(width: number) {
+  Object.defineProperty(window, 'innerWidth', { value: width, configurable: true })
+  window.dispatchEvent(new Event('resize'))
+}
 
 describe('Library', () => {
   it('shows detected harness rows and their counts', () => {
@@ -61,5 +67,18 @@ describe('Library', () => {
     fireEvent.click(screen.getByRole('button', { name: /not installed/i }))
     const row = screen.getByLabelText('Claude, not found on PATH')
     expect(row).toHaveAttribute('draggable', 'false')
+  })
+
+  it('uses a collapsed rail and scrim-backed sheet at tablet widths', () => {
+    setWindowWidth(900)
+    render(<Library harnesses={[openCode]} harnessesLoading={false} harnessesError={null} />)
+
+    expect(screen.getByRole('toolbar', { name: 'Library, collapsed' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Library' }))
+    expect(screen.getByRole('region', { name: 'Library' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close Library' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Library' }))
+    expect(screen.getByRole('toolbar', { name: 'Library, collapsed' })).toBeInTheDocument()
   })
 })

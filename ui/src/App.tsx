@@ -11,6 +11,13 @@ function App() {
   const [harnessesError, setHarnessesError] = useState<string | null>(null)
   const [documentOpen, setDocumentOpen] = useState(() => new URLSearchParams(window.location.search).has('path'))
   const [libraryVisible, setLibraryVisible] = useState(true)
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth)
+
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -38,7 +45,7 @@ function App() {
   return (
     <div className="relative h-screen w-screen bg-canvas">
       <ReactFlowProvider>
-        {documentOpen && libraryVisible && <div className="pointer-events-none absolute inset-4 z-10 canvas-library">
+        {documentOpen && windowWidth >= 768 && (windowWidth < 1024 || libraryVisible) && <div className="pointer-events-none absolute inset-4 z-10 canvas-library">
           <Library harnesses={harnesses} harnessesLoading={harnessesLoading} harnessesError={harnessesError} />
         </div>}
         <Canvas

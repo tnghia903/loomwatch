@@ -10,12 +10,12 @@
   --color-hairline: #1a1815;
   --color-ink: #1a1815;
   --color-ink-2: #5c574e;
-  --color-ink-3: #8c867a;
+  --color-ink-3: #767066;
   --color-stroke: #8c867a;
   --color-iris: #5a45e8;
   --color-iris-soft: #8b7bff;
   --color-iris-deep: #3a2bb8;
-  --color-copper: #b85c1e;
+  --color-copper: #b0581c;
   --color-green: #1e7a4f;
   --color-red: #c4342f;
   --color-slate: #6b6b76;
@@ -29,7 +29,7 @@
   --color-hairline: #ffffff;
   --color-ink: #f2f1ee;
   --color-ink-2: #a5a29b;
-  --color-ink-3: #6e6b65;
+  --color-ink-3: #85817b;
   --color-stroke: #6e6b65;
   --color-iris: #8b7bff;
   --color-iris-soft: #b3a6ff;
@@ -61,6 +61,18 @@ input:focus-visible,
 
 .react-flow__node.dragging {
   transition: none;
+}
+
+/* React Flow's focus targets are div/SVG wrappers, so give them an explicit ring in
+   addition to the shared interactive-element outline above. */
+.react-flow__node:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-iris), 0 0 0 4px var(--color-surface-solid);
+}
+
+.react-flow__edge:focus-visible .react-flow__edge-path {
+  stroke: var(--color-iris);
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 2px var(--color-iris));
 }
 
 .react-flow__edge-interaction {
@@ -99,12 +111,23 @@ input:focus-visible,
   animation: step-badge-in 300ms both cubic-bezier(.2, .8, .2, 1);
 }
 
-@media (max-width: 1023px) {
+/* §13: medium windows retain the Library panel. At tablet widths it becomes a rail that
+   opens as a sheet; Canvas closes it whenever an inspector opens. */
+@media (min-width: 768px) and (max-width: 1023px) {
   .canvas-library {
-    right: auto;
+    inset: 1rem;
   }
 
-  .canvas-library > * {
+  .canvas-library > [role='toolbar'] {
+    box-shadow: 0 16px 48px rgb(0 0 0 / .18);
+  }
+
+  .library-scrim {
+    z-index: 20;
+    background: rgb(26 24 21 / .12);
+  }
+
+  .library-sheet {
     box-shadow: 0 16px 48px rgb(0 0 0 / .18);
   }
 }
@@ -134,6 +157,11 @@ input:focus-visible,
     bottom: .5rem;
     right: .5rem;
     left: auto;
+  }
+
+  .canvas-mode-control {
+    justify-content: flex-end;
+    padding-right: 3.5rem;
   }
 }
 
