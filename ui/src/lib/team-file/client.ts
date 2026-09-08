@@ -39,3 +39,15 @@ export async function saveTeamFile(path: string, yaml: string): Promise<TeamFile
   })
   return readTeamFileResponse(response)
 }
+
+// docs/CANVAS_SPEC.md §9.2: "Fetch it once at load; do not bundle a copy into the UI, because
+// a bundled copy is a second source of truth that silently drifts from the daemon that will
+// reject the save." `schemas/team.schema.yaml` embedded in the running binary is the only copy.
+export async function fetchConfigSchema(): Promise<object> {
+  const response = await fetch('/api/config/schema')
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null
+    throw new TeamFileApiError(body?.error ?? response.statusText, response.status)
+  }
+  return (await response.json()) as object
+}

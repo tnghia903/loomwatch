@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { useTeamDocument } from './useTeamDocument'
+import { slugifyTeamName, useTeamDocument } from './useTeamDocument'
 
 const TEAM_YAML = `schemaVersion: 1
 id: research-team
@@ -103,6 +103,28 @@ agents:
 edges: []
 `
 
+const SCHEMA_GATE = {
+  type: 'object',
+  required: ['entrypoint', 'agents'],
+  properties: {
+    entrypoint: { type: 'string', minLength: 1 },
+    agents: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['name', 'role', 'model', 'spawn', 'budget'],
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          role: { type: 'string', minLength: 1 },
+          model: { type: 'string', minLength: 1 },
+          spawn: { type: 'object', required: ['cwd'], properties: { cwd: { type: 'string', minLength: 1 } } },
+          budget: { type: 'object', required: ['limitUsd'], properties: { limitUsd: { type: 'number', minimum: 0 } } },
+        },
+      },
+    },
+  },
+} as const
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
@@ -121,6 +143,55 @@ afterEach(() => {
 })
 
 describe('useTeamDocument', () => {
+  it('slugifies names and creates a new document without writing until its first save', async () => {
+    window.history.pushState({}, '', '/')
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
+      if (init?.method === 'PUT') return jsonResponse(200, JSON.parse(init.body as string))
+      return jsonResponse(404, { error: 'not found' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+
+    expect(slugifyTeamName('  Research & Réview  ')).toBe('research-review')
+    await waitFor(() => expect(result.current.isValid).toBe(true))
+    act(() => result.current.createNewDocument('Research & Review'))
+    expect(result.current.path).toBe('research-review.yaml')
+    expect(result.current.saveState).toBe('new')
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+
+    act(() => result.current.addAgentFromDrop(JSON.stringify({
+      group: 'presets', id: 'reviewer', label: 'Reviewer', role: 'Review work', model: 'model-1',
+      budgetUsd: 5, spawn: { cmd: 'codex-acp', args: [] },
+    }), { x: 0, y: 0 }))
+    await act(async () => { await result.current.save() })
+
+    expect(result.current.saveState).toBe('saved')
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1)
+  })
+
+  it('opens an unknown schema version read-only', async () => {
+    const versionTwo = TEAM_YAML.replace('schemaVersion: 1', 'schemaVersion: 2')
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
+      String(input).startsWith('/api/team')
+        ? jsonResponse(200, { path: '/teams/research-team.yaml', yaml: versionTwo })
+        : jsonResponse(500, { error: 'not available in test' }),
+    ))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('read-only'))
+    expect(result.current.readOnlyReason).toContain('schema version 2')
+    expect(result.current.nodes).toHaveLength(2)
+  })
+
+  it('surfaces malformed YAML as a parse failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, {
+      path: '/teams/research-team.yaml', yaml: 'schemaVersion: [\n',
+    })))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.loadFailure).not.toBeNull())
+    expect(result.current.saveState).toBe('error')
+  })
+
   it('loads the team file named by ?path= into nodes, edges and entrypoint', async () => {
     vi.stubGlobal(
       'fetch',
@@ -133,6 +204,27 @@ describe('useTeamDocument', () => {
     expect(result.current.nodes.map((node) => node.id).sort()).toEqual(['researcher', 'reviewer'])
     expect(result.current.entrypoint).toBe('researcher')
     expect(result.current.edges).toHaveLength(0)
+  })
+
+  it('fetches the daemon schema, exposes incomplete fields live, and blocks their save', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
+      if (init?.method === 'PUT') return jsonResponse(200, JSON.parse(init.body as string))
+      return jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.isValid).toBe(true))
+
+    act(() => result.current.renameAgent('researcher', 'role', ''))
+
+    await waitFor(() => expect(result.current.isValid).toBe(false))
+    expect(result.current.fieldProblemsByAgent.get('researcher')?.role).toMatchObject({ weight: 'incomplete' })
+
+    await act(async () => { await result.current.save() })
+
+    expect(result.current.fieldProblemsByAgent.get('researcher')?.role).toMatchObject({ weight: 'error' })
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
   })
 
   it('drawing a valid edge marks the document dirty and adds a configured edge', async () => {
@@ -210,7 +302,7 @@ describe('useTeamDocument', () => {
       '/api/team',
       expect.objectContaining({ method: 'PUT' }),
     )
-    expect(fetchMock.mock.calls.filter(([, init]) => init === undefined)).toHaveLength(2)
+    expect(fetchMock.mock.calls.filter(([input, init]) => init === undefined && String(input).startsWith('/api/team'))).toHaveLength(2)
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1)
   })
 
@@ -412,6 +504,30 @@ describe('useTeamDocument', () => {
       expect(result.current.mode).toBe('pipeline')
       expect(result.current.edges).toHaveLength(1)
       expect(result.current.pendingEdgeRemoval).toBeNull()
+    })
+
+    it('offers the same undo when deleting a node removes the final edge', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+      )
+      const { result } = renderHook(() => useTeamDocument())
+      await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+      act(() => {
+        result.current.onConnect({ source: 'researcher', target: 'reviewer', sourceHandle: null, targetHandle: null })
+      })
+      act(() => result.current.removeAgent('reviewer'))
+
+      expect(result.current.mode).toBe('team')
+      expect(result.current.pendingEdgeRemoval).toMatchObject({
+        edges: [{ from: 'researcher', to: 'reviewer' }],
+      })
+
+      act(() => result.current.undoLastEdgeRemoval())
+      expect(result.current.mode).toBe('pipeline')
+      expect(result.current.edges).toHaveLength(1)
+      expect(result.current.nodes.map((node) => node.id).sort()).toEqual(['researcher', 'reviewer'])
     })
 
     it('"Keep it" clears the pending removal without restoring the edge', async () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchTeamFile, saveTeamFile, TeamFileApiError } from './client'
+import { fetchConfigSchema, fetchTeamFile, saveTeamFile, TeamFileApiError } from './client'
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -60,5 +60,16 @@ describe('saveTeamFile', () => {
     const failure = saveTeamFile('/teams/a.yaml', 'schemaVersion: 2\n')
     await expect(failure).rejects.toThrow(TeamFileApiError)
     await expect(failure).rejects.toMatchObject({ status: 422 })
+  })
+})
+
+describe('fetchConfigSchema', () => {
+  it('loads the daemon-served schema', async () => {
+    const schema = { type: 'object', properties: { schemaVersion: { const: 1 } } }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, schema))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchConfigSchema()).resolves.toEqual(schema)
+    expect(fetchMock).toHaveBeenCalledWith('/api/config/schema')
   })
 })

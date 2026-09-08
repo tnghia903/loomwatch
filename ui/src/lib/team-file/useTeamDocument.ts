@@ -1,19 +1,37 @@
 import { applyEdgeChanges, applyNodeChanges } from '@xyflow/react'
-import type { Connection, Edge, EdgeChange, NodeChange } from '@xyflow/react'
+import { MarkerType, type Connection, type Edge, type EdgeChange, type NodeChange } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { AgentNode } from '../library/nodeFromDrop'
 import { nodeFromDrop } from '../library/nodeFromDrop'
-import { fetchTeamFile, saveTeamFile, TeamFileApiError } from './client'
+import { fetchConfigSchema, fetchTeamFile, saveTeamFile, TeamFileApiError } from './client'
 import { TeamFileModel, TeamFileParseError } from './document'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
-import { seededLayout } from './layout'
+import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
 import type { AgentConfig, BudgetConfig, EdgeConfig, GuardsConfig, SpawnConfig } from './types'
+import {
+  compileTeamValidator,
+  displayFieldProblems,
+  type AgentField,
+  type DocumentProblem,
+  type TeamValidator,
+  type ValidationResult,
+} from './validation'
 
-export type ConfiguredEdge = Edge<{ kind: EdgeConfig['kind'] }>
+export type ConfiguredEdge = Edge<{ kind: EdgeConfig['kind']; ts: string }>
 
-export type SaveState = 'no-file' | 'clean' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error'
+export type SaveState =
+  | 'no-file'
+  | 'new'
+  | 'clean'
+  | 'dirty'
+  | 'saving'
+  | 'saved'
+  | 'invalid'
+  | 'conflict'
+  | 'read-only'
+  | 'error'
 
 /** docs/CANVAS_SPEC.md §8: a consequence of `edges`, never a setting the UI can flip directly. */
 export type ExecutionMode = 'team' | 'pipeline'
@@ -21,6 +39,24 @@ export type ExecutionMode = 'team' | 'pipeline'
 /** §8.3: the last-edge deletion is applied immediately, then offered a 5s undo window. */
 export interface PendingEdgeRemoval {
   edges: EdgeConfig[]
+  /** The final edge disappeared as part of a node deletion, so Undo restores that whole edit. */
+  restoreDocument?: boolean
+}
+
+export interface ExternalChange {
+  diskYaml: string
+  diskRevision: string
+}
+
+export interface LoadFailure {
+  message: string
+  line: string | null
+}
+
+interface HistoryEntry {
+  yaml: string
+  positions: Record<string, { x: number; y: number }>
+  isNew: boolean
 }
 
 const EXTERNAL_CHANGE_MESSAGE =
@@ -29,13 +65,6 @@ const EXTERNAL_CHANGE_MESSAGE =
 async function hashTeamYaml(yaml: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(yaml))
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
-// Keep the weak Phase 04 detection behind one function so a daemon revision token can replace
-// this GET/hash check when docs/CANVAS_SPEC.md §15.4 lands.
-async function teamFileChangedOnDisk(path: string, loadedRevision: string): Promise<boolean> {
-  const { yaml } = await fetchTeamFile(path)
-  return (await hashTeamYaml(yaml)) !== loadedRevision
 }
 
 /**
@@ -52,13 +81,27 @@ function edgeId(from: string, to: string): string {
   return `${from}->${to}`
 }
 
+export function slugifyTeamName(name: string): string {
+  return (
+    name
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'new-team'
+  )
+}
+
 function edgeFromConfig(edge: EdgeConfig): ConfiguredEdge {
   return {
     id: edgeId(edge.from, edge.to),
     type: 'configured',
     source: edge.from,
     target: edge.to,
-    data: { kind: edge.kind },
+    data: { kind: edge.kind, ts: edge.ts },
+    markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--color-stroke)', width: 14, height: 14 },
+    ariaLabel: `sequence from ${edge.from} to ${edge.to}`,
   }
 }
 
@@ -82,9 +125,9 @@ function nodeFromAgent(
  * save. Node positions are not part of the team file (docs/CANVAS_SPEC.md §7.3 — flagged, not
  * decided), so drags never touch the model; only agent/edge/entrypoint content does.
  *
- * There is no "create a new team" flow yet — that needs a teams-directory/create endpoint the
- * backend does not have (§15.4). Without `?path=` the canvas still works against local state
- * (matching TNG-54's baseline), it just has nothing to save to.
+ * New teams use the daemon's existing relative-path PUT support: the document remains in memory
+ * until its first agent makes it valid, then the first explicit save creates `<slug>.yaml` below
+ * the configured teams root (§10.2).
  */
 export function useTeamDocument() {
   const modelRef = useRef<TeamFileModel | null>(null)
@@ -100,41 +143,170 @@ export function useTeamDocument() {
   const [refusal, setRefusal] = useState<EdgeRefusal | null>(null)
   const [modeSwitchBanner, setModeSwitchBanner] = useState(false)
   const [pendingEdgeRemoval, setPendingEdgeRemoval] = useState<PendingEdgeRemoval | null>(null)
+  const [validator, setValidator] = useState<TeamValidator | null>(null)
+  const [schemaLoading, setSchemaLoading] = useState(true)
+  const [touchedFields, setTouchedFields] = useState<ReadonlySet<string>>(new Set())
+  const [attemptedSave, setAttemptedSave] = useState(false)
+  const [documentSnapshot, setDocumentSnapshot] = useState<ReturnType<TeamFileModel['snapshot']> | null>(null)
+  const [readOnlyReason, setReadOnlyReason] = useState<string | null>(null)
+  const [loadFailure, setLoadFailure] = useState<LoadFailure | null>(null)
+  const [externalChange, setExternalChange] = useState<ExternalChange | null>(null)
+  const [diskNotice, setDiskNotice] = useState<string | null>(null)
+  const [yamlPreview, setYamlPreview] = useState('')
+  const isNewRef = useRef(false)
+  const undoRef = useRef<HistoryEntry[]>([])
+  const redoRef = useRef<HistoryEntry[]>([])
+  const [historyState, setHistoryState] = useState({ undo: 0, redo: 0 })
+
+  const currentHistoryEntry = useCallback((): HistoryEntry | null => {
+    if (!modelRef.current) return null
+    return {
+      yaml: modelRef.current.toYaml(),
+      positions: Object.fromEntries(nodes.map((node) => [node.id, node.position])),
+      isNew: isNewRef.current,
+    }
+  }, [nodes])
+
+  const captureHistory = useCallback(() => {
+    const entry = currentHistoryEntry()
+    if (!entry) return
+    undoRef.current.push(entry)
+    redoRef.current = []
+    setHistoryState({ undo: undoRef.current.length, redo: 0 })
+  }, [currentHistoryEntry])
+
+  const restoreHistoryEntry = useCallback((entry: HistoryEntry) => {
+    const model = TeamFileModel.parse(entry.yaml)
+    const snapshot = model.snapshot()
+    modelRef.current = model
+    isNewRef.current = entry.isNew
+    setDocumentSnapshot(snapshot)
+    setYamlPreview(entry.yaml)
+    setEntrypointState(snapshot.entrypoint || null)
+    setTeamGuards(snapshot.guards ?? null)
+    setTeamBudget(snapshot.budget ?? null)
+    setNodes(
+      snapshot.agents.map((agent) =>
+        nodeFromAgent(agent, entry.positions[agent.id] ?? { x: 0, y: 0 }, agent.id === snapshot.entrypoint),
+      ),
+    )
+    setEdges(snapshot.edges.filter((edge) => edge.layer === 'configured').map(edgeFromConfig))
+    setSaveState(entry.isNew ? 'new' : 'dirty')
+  }, [])
+
+  const undo = useCallback(() => {
+    const prior = undoRef.current.pop()
+    const current = currentHistoryEntry()
+    if (!prior || !current) return
+    redoRef.current.push(current)
+    restoreHistoryEntry(prior)
+    setHistoryState({ undo: undoRef.current.length, redo: redoRef.current.length })
+  }, [currentHistoryEntry, restoreHistoryEntry])
+
+  const redo = useCallback(() => {
+    const next = redoRef.current.pop()
+    const current = currentHistoryEntry()
+    if (!next || !current) return
+    undoRef.current.push(current)
+    restoreHistoryEntry(next)
+    setHistoryState({ undo: undoRef.current.length, redo: redoRef.current.length })
+  }, [currentHistoryEntry, restoreHistoryEntry])
 
   const markDirty = useCallback(() => {
-    setSaveState((current) => (current === 'no-file' ? current : 'dirty'))
+    setDocumentSnapshot(modelRef.current?.snapshot() ?? null)
+    setYamlPreview(modelRef.current?.toYaml() ?? '')
+    setSaveState((current) => {
+      if (current === 'no-file' || current === 'read-only') return current
+      return isNewRef.current ? 'new' : 'dirty'
+    })
+  }, [])
+
+  const createNewDocument = useCallback((name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const id = slugifyTeamName(trimmed)
+    const model = TeamFileModel.create(id, trimmed)
+    modelRef.current = model
+    loadedRevisionRef.current = null
+    isNewRef.current = true
+    setPath(`${id}.yaml`)
+    setNodes([])
+    setEdges([])
+    setEntrypointState(null)
+    setTeamGuards(null)
+    setTeamBudget(null)
+    setDocumentSnapshot(model.snapshot())
+    setYamlPreview(model.toYaml())
+    setSaveError(null)
+    setReadOnlyReason(null)
+    setLoadFailure(null)
+    setExternalChange(null)
+    setAttemptedSave(false)
+    setSaveState('new')
+    undoRef.current = []
+    redoRef.current = []
+    setHistoryState({ undo: 0, redo: 0 })
   }, [])
 
   useEffect(() => {
     const requestedPath = new URLSearchParams(window.location.search).get('path')
-    if (!requestedPath) {
-      return
-    }
     let cancelled = false
-    fetchTeamFile(requestedPath)
-      .then(async ({ yaml }) => {
+    setSchemaLoading(true)
+
+    async function load() {
+      if (!requestedPath) {
+        try {
+          const schema = await fetchConfigSchema()
+          const nextValidator = compileTeamValidator(schema)
+          if (!cancelled) setValidator(() => nextValidator)
+        } catch {
+          // Client validation is a courtesy; the daemon still validates every PUT.
+        } finally {
+          if (!cancelled) setSchemaLoading(false)
+        }
+        return
+      }
+      try {
+        const { yaml } = await fetchTeamFile(requestedPath)
         const loadedRevision = await hashTeamYaml(yaml)
         if (cancelled) {
           return
         }
         const model = TeamFileModel.parse(yaml)
         const snapshot = model.snapshot()
-        const positions = seededLayout(snapshot.agents.map((agent) => agent.id))
+        const agents = Array.isArray(snapshot.agents) ? snapshot.agents : []
+        const configured = Array.isArray(snapshot.edges)
+          ? snapshot.edges.filter((edge) => edge.layer === 'configured')
+          : []
+        const positions = seededLayout(
+          agents.map((agent) => agent.id),
+          configured.map((edge) => ({ from: edge.from, to: edge.to })),
+          snapshot.id,
+        )
         modelRef.current = model
         loadedRevisionRef.current = loadedRevision
+        isNewRef.current = false
         setPath(requestedPath)
         setEntrypointState(snapshot.entrypoint)
         setTeamGuards(snapshot.guards ?? null)
         setTeamBudget(snapshot.budget ?? null)
         setNodes(
-          snapshot.agents.map((agent) =>
+          agents.map((agent) =>
             nodeFromAgent(agent, positions[agent.id] ?? { x: 0, y: 0 }, agent.id === snapshot.entrypoint),
           ),
         )
-        setEdges(snapshot.edges.filter((edge) => edge.layer === 'configured').map(edgeFromConfig))
-        setSaveState('clean')
-      })
-      .catch((error: unknown) => {
+        setEdges(configured.map(edgeFromConfig))
+        setDocumentSnapshot(snapshot)
+        setYamlPreview(yaml)
+        const schemaVersion = (snapshot as { schemaVersion?: unknown }).schemaVersion
+        if (schemaVersion !== 1) {
+          const reason = `This file uses schema version ${String(schemaVersion)}. This build of LoomWatch understands version 1.`
+          setReadOnlyReason(reason)
+          setSaveState('read-only')
+        } else {
+          setSaveState('clean')
+        }
+      } catch (error: unknown) {
         if (cancelled) {
           return
         }
@@ -143,12 +315,139 @@ export function useTeamDocument() {
             ? error.message
             : String(error)
         setSaveError(message)
+        if (error instanceof TeamFileParseError) {
+          const line = message.match(/line \d+[^;]*/i)?.[0] ?? null
+          setLoadFailure({ message, line })
+        }
         setSaveState('error')
-      })
+      }
+
+      try {
+        const schema = await fetchConfigSchema()
+        const nextValidator = compileTeamValidator(schema)
+        if (!cancelled) setValidator(() => nextValidator)
+      } catch {
+        // Client validation is a courtesy; the daemon still validates every PUT.
+      } finally {
+        if (!cancelled) setSchemaLoading(false)
+      }
+    }
+    void load()
     return () => {
       cancelled = true
     }
   }, [])
+
+  const applyDiskYaml = useCallback(
+    async (yaml: string, notice?: string) => {
+      const model = TeamFileModel.parse(yaml)
+      const snapshot = model.snapshot()
+      const agents = Array.isArray(snapshot.agents) ? snapshot.agents : []
+      const configured = Array.isArray(snapshot.edges)
+        ? snapshot.edges.filter((edge) => edge.layer === 'configured')
+        : []
+      const positions = seededLayout(
+        agents.map((agent) => agent.id),
+        configured.map((edge) => ({ from: edge.from, to: edge.to })),
+        snapshot.id,
+      )
+      const currentPositions = new Map(nodes.map((node) => [node.id, node.position]))
+      modelRef.current = model
+      loadedRevisionRef.current = await hashTeamYaml(yaml)
+      isNewRef.current = false
+      setEntrypointState(snapshot.entrypoint)
+      setTeamGuards(snapshot.guards ?? null)
+      setTeamBudget(snapshot.budget ?? null)
+      setNodes(
+        agents.map((agent) =>
+          nodeFromAgent(
+            agent,
+            currentPositions.get(agent.id) ?? positions[agent.id] ?? { x: 0, y: 0 },
+            agent.id === snapshot.entrypoint,
+          ),
+        ),
+      )
+      setEdges(configured.map(edgeFromConfig))
+      setDocumentSnapshot(snapshot)
+      setYamlPreview(yaml)
+      setExternalChange(null)
+      setSaveError(null)
+      const schemaVersion = (snapshot as { schemaVersion?: unknown }).schemaVersion
+      if (schemaVersion !== 1) {
+        const reason = `This file uses schema version ${String(schemaVersion)}. This build of LoomWatch understands version 1.`
+        setReadOnlyReason(reason)
+        setSaveState('read-only')
+      } else {
+        setReadOnlyReason(null)
+        setSaveState('clean')
+      }
+      if (notice) {
+        setDiskNotice(notice)
+        window.setTimeout(() => setDiskNotice((current) => (current === notice ? null : current)), 3000)
+      }
+    },
+    [nodes],
+  )
+
+  const reloadFromDisk = useCallback(async () => {
+    if (!path || isNewRef.current) return
+    try {
+      const { yaml } = await fetchTeamFile(path)
+      await applyDiskYaml(yaml, 'Reloaded from disk')
+    } catch (error) {
+      if (error instanceof TeamFileApiError && error.status === 404) {
+        const reason = 'File is gone. Save a copy to continue editing.'
+        setReadOnlyReason(reason)
+        setSaveError(reason)
+        setSaveState('read-only')
+        return
+      }
+      setSaveError(error instanceof Error ? error.message : String(error))
+      setSaveState('error')
+    }
+  }, [path, applyDiskYaml])
+
+  // §9.3's intentionally weak but honest focus polling until the daemon has revision events.
+  useEffect(() => {
+    async function checkForExternalChange() {
+      const loadedRevision = loadedRevisionRef.current
+      if (!path || !loadedRevision || isNewRef.current) return
+      try {
+        const { yaml } = await fetchTeamFile(path)
+        const diskRevision = await hashTeamYaml(yaml)
+        if (diskRevision === loadedRevision) return
+        if (saveState === 'clean' || saveState === 'saved') {
+          await applyDiskYaml(yaml, 'Reloaded from disk')
+        } else {
+          setExternalChange({ diskYaml: yaml, diskRevision })
+          setSaveError(EXTERNAL_CHANGE_MESSAGE)
+          setSaveState('conflict')
+        }
+      } catch (error) {
+        if (error instanceof TeamFileApiError && error.status === 404) {
+          const reason = 'File is gone. Save a copy to continue editing.'
+          setReadOnlyReason(reason)
+          setSaveError(reason)
+          setSaveState('read-only')
+        }
+      }
+    }
+    window.addEventListener('focus', checkForExternalChange)
+    return () => window.removeEventListener('focus', checkForExternalChange)
+  }, [path, saveState, applyDiskYaml])
+
+  const keepMine = useCallback(() => {
+    if (!externalChange) return
+    loadedRevisionRef.current = externalChange.diskRevision
+    setExternalChange(null)
+    setSaveError(null)
+    setSaveState('dirty')
+  }, [externalChange])
+
+  const useDisk = useCallback(async () => {
+    if (!externalChange) return
+    await applyDiskYaml(externalChange.diskYaml)
+  }, [externalChange, applyDiskYaml])
 
   // Batched so a multi-select delete (several 'remove' NodeChanges in one call) computes the
   // survivor set once, instead of each single-id removal racing the others over stale state.
@@ -157,6 +456,7 @@ export function useTeamDocument() {
       if (ids.length === 0) {
         return
       }
+      captureHistory()
       const idSet = new Set(ids)
       const remainingNodes = nodes.filter((node) => !idSet.has(node.id))
       const droppedEdges = edges.filter((edge) => idSet.has(edge.source) || idSet.has(edge.target))
@@ -182,8 +482,24 @@ export function useTeamDocument() {
       setEdges(remainingEdges)
       setEntrypointState(nextEntrypoint)
       markDirty()
+
+      // Deleting a node also deletes every incident edge (§5.4). If that happens to remove
+      // the final configured edge, it has the exact same execution-mode consequence as
+      // deleting the edge itself, so retain the inline five-second undo affordance (§8.3).
+      if (edges.length > 0 && remainingEdges.length === 0 && droppedEdges.length > 0) {
+        setPendingEdgeRemoval({
+          edges: droppedEdges.map((edge) => ({
+            from: edge.source,
+            to: edge.target,
+            layer: 'configured',
+            kind: edge.data?.kind ?? 'sequence',
+            ts: edge.data?.ts ?? new Date().toISOString(),
+          })),
+          restoreDocument: true,
+        })
+      }
     },
-    [nodes, edges, entrypoint, markDirty],
+    [nodes, edges, entrypoint, markDirty, captureHistory],
   )
 
   const removeAgent = useCallback((id: string) => removeAgents([id]), [removeAgents])
@@ -193,12 +509,13 @@ export function useTeamDocument() {
       if (pairs.length === 0) {
         return
       }
+      captureHistory()
       const hadEdges = edges.length > 0
       const removed: EdgeConfig[] = []
       const remaining = edges.filter((edge) => {
         const match = pairs.some((pair) => pair.from === edge.source && pair.to === edge.target)
         if (match) {
-          removed.push({ from: edge.source, to: edge.target, layer: 'configured', kind: edge.data?.kind ?? 'sequence', ts: new Date().toISOString() })
+          removed.push({ from: edge.source, to: edge.target, layer: 'configured', kind: edge.data?.kind ?? 'sequence', ts: edge.data?.ts ?? new Date().toISOString() })
         }
         return !match
       })
@@ -213,7 +530,7 @@ export function useTeamDocument() {
         setPendingEdgeRemoval({ edges: removed })
       }
     },
-    [edges, markDirty],
+    [edges, markDirty, captureHistory],
   )
 
   const removeEdgeBetween = useCallback(
@@ -259,6 +576,7 @@ export function useTeamDocument() {
         return
       }
 
+      captureHistory()
       modelRef.current?.addAgent(newNode.data.agent)
 
       const promoteToEntrypoint = entrypoint === null
@@ -276,11 +594,12 @@ export function useTeamDocument() {
       }
       markDirty()
     },
-    [nodes, entrypoint, markDirty],
+    [nodes, entrypoint, markDirty, captureHistory],
   )
 
   const renameAgent = useCallback(
     (id: string, field: 'name' | 'role', value: string) => {
+      captureHistory()
       modelRef.current?.setAgentField(id, field, value)
       setNodes((current) =>
         current.map((node) =>
@@ -298,11 +617,12 @@ export function useTeamDocument() {
       )
       markDirty()
     },
-    [markDirty],
+    [markDirty, captureHistory],
   )
 
   const updateAgentModel = useCallback(
     (id: string, value: string) => {
+      captureHistory()
       modelRef.current?.setAgentField(id, 'model', value)
       setNodes((current) =>
         current.map((node) =>
@@ -311,11 +631,12 @@ export function useTeamDocument() {
       )
       markDirty()
     },
-    [markDirty],
+    [markDirty, captureHistory],
   )
 
   const updateAgentCwd = useCallback(
     (id: string, cwd: string) => {
+      captureHistory()
       setNodes((current) =>
         current.map((node) => {
           if (node.id !== id) {
@@ -328,11 +649,12 @@ export function useTeamDocument() {
       )
       markDirty()
     },
-    [markDirty],
+    [markDirty, captureHistory],
   )
 
   const updateAgentBudget = useCallback(
     (id: string, limitUsd: number) => {
+      captureHistory()
       setNodes((current) =>
         current.map((node) => {
           if (node.id !== id) {
@@ -345,11 +667,12 @@ export function useTeamDocument() {
       )
       markDirty()
     },
-    [markDirty],
+    [markDirty, captureHistory],
   )
 
   const updateAgentAllowRecruiting = useCallback(
     (id: string, allowRecruiting: boolean) => {
+      captureHistory()
       modelRef.current?.setAgentField(id, 'allowRecruiting', allowRecruiting)
       setNodes((current) =>
         current.map((node) =>
@@ -358,24 +681,26 @@ export function useTeamDocument() {
       )
       markDirty()
     },
-    [markDirty],
+    [markDirty, captureHistory],
   )
 
   const promoteEntrypoint = useCallback(
     (id: string) => {
+      captureHistory()
       modelRef.current?.setEntrypoint(id)
       setNodes((current) => current.map((node) => ({ ...node, data: { ...node.data, isEntrypoint: node.id === id } })))
       setEntrypointState(id)
       setRefusal(null)
       markDirty()
     },
-    [markDirty],
+    [markDirty, captureHistory],
   )
 
   // §8.1: the mode-pill popover's edit affordance for team-level `guards`/`budget` — the only
   // home these fields have, per TEAM_CONFIG.md's default-to-8 rule when a guard is absent.
   const updateTeamGuards = useCallback(
     (field: keyof GuardsConfig, value: number) => {
+      captureHistory()
       setTeamGuards((current) => {
         const next: GuardsConfig = {
           maxDispatchDepth: current?.maxDispatchDepth ?? 8,
@@ -387,11 +712,12 @@ export function useTeamDocument() {
       })
       markDirty()
     },
-    [markDirty],
+    [markDirty, captureHistory],
   )
 
   const updateTeamBudget = useCallback(
     (limitUsd: number) => {
+      captureHistory()
       setTeamBudget((current) => {
         const next: BudgetConfig = { ...current, limitUsd }
         modelRef.current?.setTeamBudget(next)
@@ -399,7 +725,7 @@ export function useTeamDocument() {
       })
       markDirty()
     },
-    [markDirty],
+    [markDirty, captureHistory],
   )
 
   const dismissRefusal = useCallback(() => setRefusal(null), [])
@@ -418,16 +744,17 @@ export function useTeamDocument() {
 
   // §8.3: "Undo restores the edge" — re-added with a fresh `ts`; nothing downstream reads it.
   const undoLastEdgeRemoval = useCallback(() => {
-    setPendingEdgeRemoval((pending) => {
-      if (!pending) {
-        return pending
-      }
-      pending.edges.forEach((edge) => modelRef.current?.addEdge(edge))
-      setEdges((current) => [...current, ...pending.edges.map(edgeFromConfig)])
-      markDirty()
-      return null
-    })
-  }, [markDirty])
+    if (!pendingEdgeRemoval) return
+    if (pendingEdgeRemoval.restoreDocument) {
+      undo()
+      setPendingEdgeRemoval(null)
+      return
+    }
+    pendingEdgeRemoval.edges.forEach((edge) => modelRef.current?.addEdge(edge))
+    setEdges((current) => [...current, ...pendingEdgeRemoval.edges.map(edgeFromConfig)])
+    markDirty()
+    setPendingEdgeRemoval(null)
+  }, [markDirty, pendingEdgeRemoval, undo])
 
   useEffect(() => {
     if (!pendingEdgeRemoval) {
@@ -469,6 +796,7 @@ export function useTeamDocument() {
         kind: 'sequence',
         ts: new Date().toISOString(),
       }
+      captureHistory()
       modelRef.current?.addEdge(newEdge)
       setEdges((current) => [...current, edgeFromConfig(newEdge)])
       if (edges.length === 0) {
@@ -476,7 +804,7 @@ export function useTeamDocument() {
       }
       markDirty()
     },
-    [edges, entrypoint, markDirty],
+    [edges, entrypoint, markDirty, captureHistory],
   )
 
   // §8: a consequence of `edges`, not a setting — team when empty, pipeline otherwise.
@@ -485,6 +813,34 @@ export function useTeamDocument() {
   const pipelineSteps = useMemo<PipelineStep[]>(
     () => pipelineOrder(nodes.map((node) => node.id), edges.map((edge) => ({ from: edge.source, to: edge.target })), entrypoint),
     [nodes, edges, entrypoint],
+  )
+
+  const layoutNodes = useCallback(() => {
+    if (nodes.length === 0) return
+    captureHistory()
+    const positions = autoLayout(
+      nodes,
+      edges.map((edge) => ({ from: edge.source, to: edge.target })),
+    )
+    setNodes((current) =>
+      current.map((node) => ({ ...node, position: positions[node.id] ?? node.position })),
+    )
+  }, [nodes, edges, captureHistory])
+
+  const settleNodeCollision = useCallback(
+    (id: string) => {
+      const node = nodes.find((candidate) => candidate.id === id)
+      if (!node) return
+      const next = offsetCollision(
+        node.position,
+        nodes.filter((candidate) => candidate.id !== id).map((candidate) => candidate.position),
+      )
+      if (next.x === node.position.x && next.y === node.position.y) return
+      setNodes((current) =>
+        current.map((candidate) => (candidate.id === id ? { ...candidate, position: next } : candidate)),
+      )
+    },
+    [nodes],
   )
 
   // §5.4/§10.2: only relevant to a document that is actually open — a pathless canvas (no
@@ -502,26 +858,92 @@ export function useTeamDocument() {
     }
   }, [path, entrypoint, nodes])
 
+  // §9.2: schema-plus-semantic-rules validation of the document as it stands right now. `null`
+  // until the schema fetch above resolves — treated as "no known problems yet" everywhere below
+  // rather than blocking, since client validation is a courtesy layer (§9.2), not the gate.
+  const validation = useMemo<ValidationResult | null>(() => {
+    if (!validator || !documentSnapshot) {
+      return null
+    }
+    return validator(documentSnapshot)
+  }, [validator, documentSnapshot])
+
+  // §5.4: `incomplete` always shows; `error` waits for a blur or a save attempt so a field never
+  // flashes red mid-keystroke, and a field still incomplete after a save attempt turns red too.
+  const fieldProblemsByAgent = useMemo(
+    () =>
+      validation
+        ? displayFieldProblems(validation.fieldProblemsByAgent, touchedFields, attemptedSave)
+        : new Map(),
+    [validation, touchedFields, attemptedSave],
+  )
+
+  const touchField = useCallback((agentId: string, field: AgentField) => {
+    setTouchedFields((current) => {
+      const key = `${agentId}:${field}`
+      return current.has(key) ? current : new Set([...current, key])
+    })
+  }, [])
+
+  // The node cards (§5.2) render the same reveal-gated problems as the inspector, merged into
+  // `data` rather than threaded through context so `AgentNodeCard` stays a plain data renderer.
+  const nodesForCanvas = useMemo(
+    () =>
+      nodes.map((node) => {
+        const problems = fieldProblemsByAgent.get(node.id)
+        const status = node.data.agent.status ?? 'idle'
+        const ariaLabel = `${node.data.agent.name}, ${node.data.agent.role || 'no role'}, ${node.data.agent.model || 'no model'}, ${status}`
+        return problems
+          ? { ...node, ariaLabel, data: { ...node.data, fieldProblems: problems } }
+          : { ...node, ariaLabel }
+      }),
+    [nodes, fieldProblemsByAgent],
+  )
+
+  const documentProblems: DocumentProblem[] = validation?.documentProblems ?? []
+  // Both weights block the save (§5.4: "nothing invalid can reach disk either way").
+  // Never let the brief load race bypass the client gate: wait for the daemon schema before a
+  // save can start. If the fetch itself fails, the backend's 422 remains the documented
+  // correctness backstop rather than pretending we validated against a bundled copy.
+  const isValid = !schemaLoading && !entrypointProblem && (validation?.valid ?? true)
+  const documentChipState: SaveState =
+    !isValid && saveState !== 'no-file' && saveState !== 'new' && saveState !== 'read-only'
+      ? 'invalid'
+      : saveState
+
   const save = useCallback(async () => {
-    if (!path || !modelRef.current || entrypointProblem) {
+    // "Settles ... on ⌘S" (§5.4): an attempted save is itself what reveals a still-incomplete
+    // field as an error, whether or not the save actually proceeds below.
+    setAttemptedSave(true)
+    if (!path || !modelRef.current || schemaLoading || readOnlyReason || entrypointProblem || (validation && !validation.valid)) {
       return
     }
     setSaveState('saving')
     try {
       const loadedRevision = loadedRevisionRef.current
-      if (!loadedRevision) {
-        throw new Error('Cannot verify whether the team file changed on disk.')
-      }
       const yaml = modelRef.current.toYaml()
       const nextRevision = await hashTeamYaml(yaml)
-      if (await teamFileChangedOnDisk(path, loadedRevision)) {
-        setSaveState('conflict')
-        setSaveError(EXTERNAL_CHANGE_MESSAGE)
-        return
+      if (!isNewRef.current) {
+        if (!loadedRevision) {
+          throw new Error('Cannot verify whether the team file changed on disk.')
+        }
+        const disk = await fetchTeamFile(path)
+        const diskRevision = await hashTeamYaml(disk.yaml)
+        if (diskRevision !== loadedRevision) {
+          setExternalChange({ diskYaml: disk.yaml, diskRevision })
+          setSaveState('conflict')
+          setSaveError(EXTERNAL_CHANGE_MESSAGE)
+          return
+        }
       }
 
+      const wasNew = isNewRef.current
       await saveTeamFile(path, yaml)
       loadedRevisionRef.current = nextRevision
+      isNewRef.current = false
+      if (wasNew) {
+        window.history.replaceState({}, '', `/?path=${encodeURIComponent(path)}`)
+      }
       setSaveError(null)
       if (modelRef.current.toYaml() === yaml) {
         setSaveState('saved')
@@ -533,23 +955,43 @@ export function useTeamDocument() {
       setSaveState('error')
       setSaveError(error instanceof TeamFileApiError ? error.message : String(error))
     }
-  }, [path, entrypointProblem])
+  }, [path, schemaLoading, readOnlyReason, entrypointProblem, validation])
 
   return {
     path,
-    nodes,
+    nodes: nodesForCanvas,
     edges,
     entrypoint,
     entrypointProblem,
     teamGuards,
     teamBudget,
     saveState,
+    documentChipState,
     saveError,
+    documentProblems,
+    fieldProblemsByAgent,
+    isValid,
+    readOnlyReason,
+    loadFailure,
+    externalChange,
+    diskNotice,
+    yamlPreview,
+    canUndo: historyState.undo > 0,
+    canRedo: historyState.redo > 0,
     refusal,
     mode,
     pipelineSteps,
     modeSwitchBanner,
     pendingEdgeRemoval,
+    createNewDocument,
+    reloadFromDisk,
+    keepMine,
+    useDisk,
+    layoutNodes,
+    settleNodeCollision,
+    capturePositionHistory: captureHistory,
+    undo,
+    redo,
     onNodesChange,
     onEdgesChange,
     onConnect,
@@ -564,6 +1006,7 @@ export function useTeamDocument() {
     promoteEntrypoint,
     updateTeamGuards,
     updateTeamBudget,
+    touchField,
     dismissRefusal,
     keepLastEdgeRemoval,
     undoLastEdgeRemoval,
