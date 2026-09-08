@@ -96,8 +96,16 @@ describe('AgentNodeCard level of detail', () => {
     const name = screen.getByText('Agent Ada')
     expect(name).toHaveClass('text-[11px]')
     expect(container.firstElementChild).toHaveClass('size-11', 'shadow-[0_0_0_2px_var(--color-iris)]')
+    expect(container.firstElementChild).not.toHaveClass('shadow-sm')
     expect(screen.queryByLabelText('idle')).not.toBeInTheDocument()
     expect(container.querySelector('[data-handle="target"]')).toHaveClass('!opacity-0')
     expect(container.querySelector('[data-handle="source"]')).toHaveClass('!opacity-0')
+  })
+
+  it('keeps the normal shadow on an unselected glyph chip', () => {
+    const { container } = renderAtZoom(0.349, false)
+
+    expect(container.firstElementChild).toHaveClass('size-11', 'shadow-sm')
+    expect(container.firstElementChild).not.toHaveClass('shadow-[0_0_0_2px_var(--color-iris)]')
   })
 })
