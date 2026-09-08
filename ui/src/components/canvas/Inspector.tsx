@@ -2,6 +2,7 @@ import { createElement } from 'react'
 
 import { formatUsd } from '../../lib/format'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
+import type { AgentField, AgentFieldProblems } from '../../lib/team-file/validation'
 import { roleGlyph } from './roleGlyph'
 
 // docs/CANVAS_SPEC.md §5.4: the node inspector. Scoped to the fields TNG-55 names —
@@ -19,6 +20,9 @@ export interface InspectorProps {
   onPromoteEntrypoint: () => void
   onDelete: () => void
   onClose: () => void
+  onFieldBlur: (field: AgentField) => void
+  fieldProblems?: AgentFieldProblems
+  readOnly?: boolean
 }
 
 export function Inspector({
@@ -32,6 +36,9 @@ export function Inspector({
   onPromoteEntrypoint,
   onDelete,
   onClose,
+  onFieldBlur,
+  fieldProblems,
+  readOnly = false,
 }: InspectorProps) {
   const { agent } = node.data
 
@@ -51,9 +58,12 @@ export function Inspector({
             <input
               value={agent.name}
               onChange={(event) => onRename('name', event.target.value)}
+              onBlur={() => onFieldBlur('name')}
+              readOnly={readOnly}
               aria-label="Name"
-              className="w-full truncate rounded-sm border-none bg-transparent text-[20px] font-semibold leading-7 text-ink outline-none"
+              className={inputClass(fieldProblems?.name, 'w-full truncate rounded-sm border border-transparent bg-transparent text-[20px] font-semibold leading-7 text-ink outline-none')}
             />
+            <Problem problem={fieldProblems?.name} />
             <p className="truncate font-mono text-[12px] text-ink-2">{agent.id}</p>
           </div>
         </div>
@@ -73,29 +83,36 @@ export function Inspector({
         <input
           value={agent.role}
           onChange={(event) => onRename('role', event.target.value)}
+          onBlur={() => onFieldBlur('role')}
+          readOnly={readOnly}
           placeholder="Add a role"
-          className="h-9 w-full rounded-sm border border-hairline/10 bg-surface-solid px-2 text-[14px] text-ink outline-none focus:border-iris"
+          className={inputClass(fieldProblems?.role, 'h-9 w-full rounded-sm border border-hairline/10 bg-surface-solid px-2 text-[14px] text-ink outline-none')}
         />
-        {agent.role === '' && <p className="mt-1 text-[12px] text-copper">Required</p>}
+        <Problem problem={fieldProblems?.role} />
       </Field>
 
       <Field label="Model">
         <input
           value={agent.model}
           onChange={(event) => onModelChange(event.target.value)}
+          onBlur={() => onFieldBlur('model')}
+          readOnly={readOnly}
           placeholder="e.g. claude-opus-5"
-          className="h-9 w-full rounded-sm border border-hairline/10 bg-surface-solid px-2 font-mono text-[12px] text-ink outline-none focus:border-iris"
+          className={inputClass(fieldProblems?.model, 'h-9 w-full rounded-sm border border-hairline/10 bg-surface-solid px-2 font-mono text-[12px] text-ink outline-none')}
         />
-        {agent.model === '' && <p className="mt-1 text-[12px] text-copper">Required</p>}
+        <Problem problem={fieldProblems?.model} />
       </Field>
 
       <Field label="Cwd">
         <input
           value={agent.spawn.cwd}
           onChange={(event) => onCwdChange(event.target.value)}
-          className="h-9 w-full rounded-sm border border-hairline/10 bg-surface-solid px-2 font-mono text-[12px] text-ink outline-none focus:border-iris"
+          onBlur={() => onFieldBlur('cwd')}
+          readOnly={readOnly}
+          className={inputClass(fieldProblems?.cwd, 'h-9 w-full rounded-sm border border-hairline/10 bg-surface-solid px-2 font-mono text-[12px] text-ink outline-none')}
         />
         <p className="mt-1 text-[12px] text-ink-3">Relative to the team file</p>
+        <Problem problem={fieldProblems?.cwd} />
       </Field>
 
       <Field label="Budget">
@@ -107,11 +124,14 @@ export function Inspector({
             step={0.01}
             value={agent.budget.limitUsd}
             onChange={(event) => onBudgetChange(Number(event.target.value))}
+            onBlur={() => onFieldBlur('limitUsd')}
+            readOnly={readOnly}
             aria-label="Budget limit in USD"
-            className="h-9 w-full rounded-sm border border-hairline/10 bg-surface-solid px-2 font-mono text-[12px] text-ink outline-none focus:border-iris"
+            className={inputClass(fieldProblems?.limitUsd, 'h-9 w-full rounded-sm border border-hairline/10 bg-surface-solid px-2 font-mono text-[12px] text-ink outline-none')}
           />
         </div>
         <p className="mt-1 font-mono text-[12px] text-ink-3">{formatUsd(agent.budget.limitUsd)} limit</p>
+        <Problem problem={fieldProblems?.limitUsd} />
       </Field>
 
       <div className="h-px bg-hairline/10" />
@@ -120,7 +140,7 @@ export function Inspector({
         <input
           type="checkbox"
           checked={isEntrypoint}
-          disabled={isEntrypoint}
+          disabled={isEntrypoint || readOnly}
           onChange={() => onPromoteEntrypoint()}
           className="size-4 accent-[var(--color-iris)]"
         />
@@ -132,6 +152,7 @@ export function Inspector({
           type="checkbox"
           checked={agent.allowRecruiting !== false}
           onChange={(event) => onAllowRecruitingChange(event.target.checked)}
+          disabled={readOnly}
           className="size-4 accent-[var(--color-iris)]"
         />
         May recruit helpers
@@ -139,15 +160,29 @@ export function Inspector({
 
       <div className="h-px bg-hairline/10" />
 
-      <button
+      {!readOnly && <button
         type="button"
         onClick={onDelete}
         className="self-start text-[13px] text-ink-2 hover:text-red"
       >
         Delete node
-      </button>
+      </button>}
     </div>
   )
+}
+
+function Problem({ problem }: { problem: AgentFieldProblems[AgentField] }) {
+  if (!problem) return null
+  return (
+    <p className={`mt-1 text-[12px] ${problem.weight === 'error' ? 'text-red' : 'text-copper'}`}>
+      {problem.message}
+    </p>
+  )
+}
+
+function inputClass(problem: AgentFieldProblems[AgentField], base: string): string {
+  const border = problem?.weight === 'error' ? 'border-red' : problem ? 'border-copper' : 'focus:border-iris'
+  return `${base} ${border}`
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

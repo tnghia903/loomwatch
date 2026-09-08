@@ -24,7 +24,10 @@ interface LibraryProps {
 }
 
 export function Library({ harnesses, harnessesLoading, harnessesError }: LibraryProps) {
-  const [railCollapsed, setRailCollapsed] = usePersistedBoolean('rail-collapsed', false)
+  const [railCollapsed, setRailCollapsed] = usePersistedBoolean(
+    'rail-collapsed',
+    typeof window !== 'undefined' && window.innerWidth < 1024,
+  )
   const [detectedOpen, setDetectedOpen] = usePersistedBoolean('detected-open', true)
   const [endpointsOpen, setEndpointsOpen] = usePersistedBoolean('endpoints-open', true)
   const [presetsOpen, setPresetsOpen] = usePersistedBoolean('presets-open', true)

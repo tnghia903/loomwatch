@@ -1,4 +1,4 @@
-import { type Document, isMap, isSeq, parseDocument } from 'yaml'
+import { type Document, isMap, isSeq, parseDocument, stringify } from 'yaml'
 
 import type { AgentConfig, BudgetConfig, EdgeConfig, GuardsConfig, TeamDocument } from './types'
 
@@ -20,6 +20,17 @@ export class TeamFileModel {
       throw new TeamFileParseError(doc.errors.map((error) => error.message).join('; '))
     }
     return new TeamFileModel(doc)
+  }
+
+  /** §10.2: creates an in-memory, intentionally incomplete document; it is not written until
+   * its first agent makes it schema-valid. */
+  static create(id: string, name: string): TeamFileModel {
+    return TeamFileModel.parse(
+      stringify(
+        { schemaVersion: 1, id, name, entrypoint: '', agents: [], edges: [] },
+        { lineWidth: 0 },
+      ),
+    )
   }
 
   /** A plain-JS snapshot for rendering. Mutating the result does not affect the document. */

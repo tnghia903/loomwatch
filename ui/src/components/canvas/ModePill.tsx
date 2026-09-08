@@ -18,6 +18,7 @@ export interface ModePillProps {
   pendingRemoval: PendingEdgeRemoval | null
   onKeepRemoval: () => void
   onUndoRemoval: () => void
+  readOnly?: boolean
 }
 
 // docs/CANVAS_SPEC.md §8: "a consequence of the file, not a setting" — this never renders a
@@ -35,6 +36,7 @@ export function ModePill({
   pendingRemoval,
   onKeepRemoval,
   onUndoRemoval,
+  readOnly = false,
 }: ModePillProps) {
   const [open, setOpen] = useState(false)
 
@@ -75,6 +77,7 @@ export function ModePill({
               budget={teamBudget}
               onUpdateGuards={onUpdateGuards}
               onUpdateBudget={onUpdateBudget}
+              readOnly={readOnly}
             />
           ) : (
             <PipelineModeDetails steps={pipelineSteps} nodeNames={nodeNames} />
@@ -85,7 +88,8 @@ export function ModePill({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="flex h-9 items-center gap-2 rounded-full border border-hairline/10 bg-surface-solid px-4 text-[13px] shadow-[0_1px_2px_rgb(0_0_0/.04),0_8px_24px_rgb(0_0_0/.08)]"
+        aria-label={mode === 'team' ? 'Team mode, self-organizing' : `Pipeline mode, ${pipelineSteps.length} steps`}
+        className={`mode-pill flex h-9 items-center gap-2 rounded-full border bg-surface-solid px-4 text-[13px] shadow-[0_1px_2px_rgb(0_0_0/.04),0_8px_24px_rgb(0_0_0/.08)] ${switchBanner ? 'mode-pill-switch border-iris' : 'border-hairline/10'}`}
       >
         {mode === 'team' ? (
           <>
@@ -94,7 +98,7 @@ export function ModePill({
           </>
         ) : (
           <>
-            <Workflow className="size-4 shrink-0 text-iris" aria-hidden="true" />
+            <Workflow className={`size-4 shrink-0 text-iris ${switchBanner ? 'mode-glyph-switch' : ''}`} aria-hidden="true" />
             <span className="text-ink">Pipeline · {pipelineSteps.length} steps</span>
           </>
         )}
@@ -116,12 +120,14 @@ function TeamModeDetails({
   budget,
   onUpdateGuards,
   onUpdateBudget,
+  readOnly,
 }: {
   entrypointName: string | null
   guards: GuardsConfig | null
   budget: BudgetConfig | null
   onUpdateGuards: (field: keyof GuardsConfig, value: number) => void
   onUpdateBudget: (limitUsd: number) => void
+  readOnly: boolean
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -137,11 +143,13 @@ function TeamModeDetails({
           label="Max dispatch depth"
           value={guards?.maxDispatchDepth ?? 8}
           onChange={(value) => onUpdateGuards('maxDispatchDepth', value)}
+          disabled={readOnly}
         />
         <GuardField
           label="Max concurrent dispatches"
           value={guards?.maxConcurrentDispatches ?? 8}
           onChange={(value) => onUpdateGuards('maxConcurrentDispatches', value)}
+          disabled={readOnly}
         />
       </div>
       <div>
@@ -157,6 +165,7 @@ function TeamModeDetails({
             value={budget?.limitUsd ?? ''}
             placeholder="No limit"
             onChange={(event) => onUpdateBudget(Number(event.target.value))}
+            disabled={readOnly}
             aria-label="Team budget limit in USD"
             className="h-8 w-28 rounded-sm border border-hairline/10 bg-canvas px-2 font-mono text-[12px] text-ink outline-none focus:border-iris"
           />
@@ -166,7 +175,7 @@ function TeamModeDetails({
   )
 }
 
-function GuardField({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
+function GuardField({ label, value, onChange, disabled }: { label: string; value: number; onChange: (value: number) => void; disabled: boolean }) {
   return (
     <label className="flex flex-1 flex-col gap-1">
       <span className="text-[11px] text-ink-3">{label}</span>
@@ -175,6 +184,7 @@ function GuardField({ label, value, onChange }: { label: string; value: number; 
         min={1}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
+        disabled={disabled}
         className="h-8 rounded-sm border border-hairline/10 bg-canvas px-2 font-mono text-[12px] text-ink outline-none focus:border-iris"
       />
     </label>

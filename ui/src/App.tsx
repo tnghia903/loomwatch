@@ -9,6 +9,8 @@ function App() {
   const [harnesses, setHarnesses] = useState<DetectedHarness[]>([])
   const [harnessesLoading, setHarnessesLoading] = useState(true)
   const [harnessesError, setHarnessesError] = useState<string | null>(null)
+  const [documentOpen, setDocumentOpen] = useState(() => new URLSearchParams(window.location.search).has('path'))
+  const [libraryVisible, setLibraryVisible] = useState(true)
 
   useEffect(() => {
     let cancelled = false
@@ -36,10 +38,16 @@ function App() {
   return (
     <div className="relative h-screen w-screen bg-canvas">
       <ReactFlowProvider>
-        <div className="pointer-events-none absolute inset-4 z-10">
+        {documentOpen && libraryVisible && <div className="pointer-events-none absolute inset-4 z-10 canvas-library">
           <Library harnesses={harnesses} harnessesLoading={harnessesLoading} harnessesError={harnessesError} />
-        </div>
-        <Canvas />
+        </div>}
+        <Canvas
+          harnessCount={harnesses.length}
+          harnessesLoading={harnessesLoading}
+          libraryVisible={libraryVisible}
+          onToggleLibrary={() => setLibraryVisible((visible) => !visible)}
+          onDocumentOpen={() => setDocumentOpen(true)}
+        />
       </ReactFlowProvider>
     </div>
   )

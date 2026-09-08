@@ -43,3 +43,107 @@
 body {
   margin: 0;
 }
+
+:root {
+  --canvas-bottom-offset: 1rem;
+}
+
+button:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-iris);
+  outline-offset: 2px;
+}
+
+.react-flow__node {
+  transition: transform 300ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.react-flow__node.dragging {
+  transition: none;
+}
+
+.react-flow__edge-interaction {
+  stroke-width: 12px;
+}
+
+@keyframes mode-pill-switch {
+  0% { transform: scale(.98); box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-iris) 45%, transparent); }
+  55% { transform: scale(1.03); box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-iris) 16%, transparent); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 transparent; }
+}
+
+.mode-pill {
+  transition: width 300ms cubic-bezier(.2, .8, .2, 1), border-color 120ms ease, color 120ms ease;
+}
+
+.mode-pill-switch {
+  animation: mode-pill-switch 300ms cubic-bezier(.2, .8, .2, 1);
+}
+
+@keyframes mode-glyph-switch {
+  from { transform: rotate(-180deg); opacity: 0; }
+  to { transform: rotate(0); opacity: 1; }
+}
+
+@keyframes step-badge-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.mode-glyph-switch {
+  animation: mode-glyph-switch 300ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.step-badge {
+  animation: step-badge-in 300ms both cubic-bezier(.2, .8, .2, 1);
+}
+
+@media (max-width: 1023px) {
+  .canvas-library {
+    right: auto;
+  }
+
+  .canvas-library > * {
+    box-shadow: 0 16px 48px rgb(0 0 0 / .18);
+  }
+}
+
+@media (max-width: 767px) {
+  .canvas-library {
+    display: none;
+  }
+
+  .canvas-inspector {
+    inset: auto .5rem .5rem .5rem;
+    justify-content: center;
+  }
+
+  .canvas-inspector > * {
+    width: min(100%, 32rem);
+    max-height: 70vh;
+  }
+}
+
+@media (max-height: 599px) {
+  :root {
+    --canvas-bottom-offset: .5rem;
+  }
+
+  .react-flow__controls {
+    bottom: .5rem;
+    right: .5rem;
+    left: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}

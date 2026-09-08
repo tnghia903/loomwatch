@@ -11,6 +11,7 @@ import type { ExecutionMode } from '../../lib/team-file/useTeamDocument'
  */
 export interface CanvasActions {
   renameAgent: (id: string, field: 'name' | 'role', value: string) => void
+  touchField: (id: string, field: 'name' | 'role') => void
   mode: ExecutionMode
   stepById: ReadonlyMap<string, PipelineStep>
   nodeNames: ReadonlyMap<string, string>

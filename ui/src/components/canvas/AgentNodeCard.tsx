@@ -1,6 +1,6 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { Handle, Position, type NodeProps, useStore } from '@xyflow/react'
 import { Check, GitMerge, Lock, X } from 'lucide-react'
-import { createElement, useState } from 'react'
+import { createElement, useEffect, useState } from 'react'
 
 import { formatUsd, middleTruncate } from '../../lib/format'
 import { monogramForSpawnCmd } from '../../lib/harnesses'
@@ -17,7 +17,8 @@ type EditableField = 'name' | 'role'
 // implemented in full so Phase 05 does not have to revisit this component.
 export function AgentNodeCard({ id, data, selected }: NodeProps<AgentNode>) {
   const { agent, isEntrypoint } = data
-  const { renameAgent, mode, stepById, nodeNames } = useCanvasActions()
+  const { renameAgent, touchField, mode, stepById, nodeNames } = useCanvasActions()
+  const zoom = useStore((store) => store.transform[2])
   const [editing, setEditing] = useState<EditableField | null>(null)
   const [draft, setDraft] = useState('')
   const step = stepById.get(id)
@@ -31,6 +32,7 @@ export function AgentNodeCard({ id, data, selected }: NodeProps<AgentNode>) {
 
   function commit(field: EditableField) {
     setEditing(null)
+    touchField(id, field)
     if (draft !== agent[field]) {
       renameAgent(id, field, draft)
     }
@@ -44,11 +46,53 @@ export function AgentNodeCard({ id, data, selected }: NodeProps<AgentNode>) {
     }
   }
 
+  useEffect(() => {
+    function beginKeyboardRename(event: Event) {
+      const detail = (event as CustomEvent<{ id: string }>).detail
+      if (detail?.id === id) startEdit('name', agent.name)
+    }
+    window.addEventListener('loomwatch:rename-agent', beginKeyboardRename)
+    return () => window.removeEventListener('loomwatch:rename-agent', beginKeyboardRename)
+  }, [id, agent.name])
+
+  const problem = data.fieldProblems
+  const hasError = Object.values(problem ?? {}).some((item) => item?.weight === 'error')
+  const hasIncomplete = Object.keys(problem ?? {}).length > 0
+  const outline = hasError ? 'border-red' : hasIncomplete ? 'border-copper' : 'border-hairline/10'
+  const glyph = createElement(roleGlyph(agent.role), {
+    className: zoom < 0.35 ? 'size-5 text-surface-solid' : 'size-4 text-ink-2',
+    'aria-hidden': 'true',
+  })
+
+  if (zoom < 0.35) {
+    return (
+      <div className="relative flex size-11 items-center justify-center rounded-[12px] border border-hairline/10 bg-surface-solid shadow-sm">
+        <span className={`flex size-8 items-center justify-center rounded-[10px] ${statusRailColor(agent.status)}`}>{glyph}</span>
+        <span className="absolute top-12 max-w-28 truncate whitespace-nowrap text-[11px] text-ink">{agent.name}</span>
+        <Handle type="target" position={Position.Left} className="!opacity-0" />
+        <Handle type="source" position={Position.Right} className="!opacity-0" />
+      </div>
+    )
+  }
+
+  if (zoom < 0.6) {
+    return (
+      <div className={`relative flex h-11 w-[264px] items-center gap-2 rounded-[12px] border bg-surface-solid px-3 ${outline}`}>
+        <span className={`absolute inset-y-0 left-0 w-[3px] rounded-l-[12px] ${statusRailColor(agent.status)}`} />
+        {glyph}
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{agent.name}</span>
+        <StatusIndicator status={agent.status} />
+        <Handle type="target" position={Position.Left} className={handleClasses} />
+        <Handle type="source" position={Position.Right} className={handleClasses} />
+      </div>
+    )
+  }
+
   return (
     <div
       className={`relative flex h-[88px] w-[264px] flex-col rounded-[14px] border bg-surface-solid text-left ${
-        selected ? 'shadow-[0_0_0_2px_var(--color-iris)]' : 'border-hairline/10'
-      } ${agent.role === '' || agent.model === '' ? 'border-copper' : ''}`}
+        selected ? 'shadow-[0_0_0_2px_var(--color-iris)]' : ''
+      } ${outline}`}
     >
       <span
         className={`absolute inset-y-0 left-0 w-[3px] rounded-l-[14px] ${statusRailColor(agent.status)}`}
@@ -59,7 +103,7 @@ export function AgentNodeCard({ id, data, selected }: NodeProps<AgentNode>) {
       <Handle type="source" position={Position.Right} className={handleClasses} />
 
       {step && (
-        <span className="absolute -left-1.5 -top-1.5 flex items-center gap-0.5">
+        <span className="step-badge absolute -left-1.5 -top-1.5 flex items-center gap-0.5" style={{ animationDelay: `${(step.step - 1) * 40}ms` }}>
           <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-iris font-mono text-[10px] font-semibold text-white">
             {step.step}
           </span>
