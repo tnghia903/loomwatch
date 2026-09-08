@@ -10,6 +10,7 @@ import { DocumentChip } from './canvas/DocumentChip'
 import { EdgeRefusalPopover } from './canvas/EdgeRefusalPopover'
 import { EntrypointProblemBar } from './canvas/EntrypointProblemBar'
 import { Inspector } from './canvas/Inspector'
+import { ModePill } from './canvas/ModePill'
 import { LIBRARY_DRAG_MIME } from './library'
 
 const nodeTypes = { agent: AgentNodeCard }
@@ -53,9 +54,15 @@ export function Canvas() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [doc])
 
+  const stepById = useMemo(() => new Map(doc.pipelineSteps.map((step) => [step.id, step])), [doc.pipelineSteps])
+  const nodeNames = useMemo(
+    () => new Map(doc.nodes.map((node) => [node.id, node.data.label])),
+    [doc.nodes],
+  )
+
   const actions: CanvasActions = useMemo(
-    () => ({ renameAgent: doc.renameAgent }),
-    [doc.renameAgent],
+    () => ({ renameAgent: doc.renameAgent, mode: doc.mode, stepById, nodeNames }),
+    [doc.renameAgent, doc.mode, stepById, nodeNames],
   )
 
   const selectedNodes = doc.nodes.filter((node) => node.selected)
@@ -129,6 +136,25 @@ export function Canvas() {
             refusal={doc.refusal}
             onPromote={(id) => doc.promoteEntrypoint(id)}
             onDismiss={doc.dismissRefusal}
+          />
+        </div>
+      )}
+
+      {doc.path && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center">
+          <ModePill
+            mode={doc.mode}
+            pipelineSteps={doc.pipelineSteps}
+            nodeNames={nodeNames}
+            entrypointName={doc.entrypoint ? (nodeNames.get(doc.entrypoint) ?? doc.entrypoint) : null}
+            teamGuards={doc.teamGuards}
+            teamBudget={doc.teamBudget}
+            onUpdateGuards={doc.updateTeamGuards}
+            onUpdateBudget={doc.updateTeamBudget}
+            switchBanner={doc.modeSwitchBanner}
+            pendingRemoval={doc.pendingEdgeRemoval}
+            onKeepRemoval={doc.keepLastEdgeRemoval}
+            onUndoRemoval={doc.undoLastEdgeRemoval}
           />
         </div>
       )}
