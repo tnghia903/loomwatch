@@ -974,7 +974,7 @@ is **withdrawn**, because the round-trip turned out to be faithful on both sides
 - `TeamFileModel` (TNG-53, `ui/src/lib/team-file/document.ts`) wraps a CST-preserving
   `yaml.Document`, so untouched fields keep their original formatting, comments and key
   order across load → edit → save.
-- `PUT /api/team` writes the submitted string with `fs::write` — **verbatim bytes**. The
+- `PUT /api/team` writes the submitted string via `atomic_write` (temp file + atomic rename) — **verbatim bytes**. The
   daemon does not re-serialize, so it contributes no reformatting of its own.
 
 A save therefore changes the lines the user changed, and leaves the rest alone. That is what
@@ -1242,7 +1242,7 @@ asks for it twice:
 | `GET` | `/api/harnesses` | Detected harnesses only — `{id, name, command, executablePath, spawn:{cmd, args}}` |
 | `GET` | `/api/teams` | Teams discovery — `{root, files}`; see representative response below |
 | `GET` | `/api/team?path=` | `{path, yaml}` — confined to teams root |
-| `PUT` | `/api/team` | Validates, `422` on invalid (server-side `TeamConfig::parse`), `atomic_write` (temp file + atomic rename) with no re-serialization — **unchanged from TNG-52** |
+| `PUT` | `/api/team` | Validates, `422` on invalid (server-side `TeamConfig::parse`), `atomic_write` (temp file + atomic rename) with no re-serialization — **unchanged by TNG-74** |
 | `GET` | `/api/config/schema` | Embedded `team.schema.yaml` as JSON |
 
 **Teams discovery representative response:**
@@ -1266,10 +1266,11 @@ asks for it twice:
   symlink following, file symlinks accepted only when `fs::canonicalize` resolves inside root,
   paths with non-normal components silently excluded.
 - Empty root returns `"files": []`.
-- **Errors:** `GET /api/teams` is read-only; the only failure mode is an internal scan error,
-  which returns `500` with a `failed to discover team files` message. It never fails for a
-  missing root — the daemon canonicalizes `LOOMWATCH_TEAMS_DIR` at startup and refuses to
-  boot if it cannot, so an unreachable root is a startup error, not a per-request one.
+- **Errors:** `GET /api/teams` is read-only; the only discovery-specific failure is an internal
+  scan error, which returns `500` with a `failed to discover team files` message. (Standard HTTP
+  statuses — `403` for unallowed hosts, `405` for unsupported methods — also apply.) It never
+  fails for a missing root — the daemon canonicalizes `LOOMWATCH_TEAMS_DIR` at startup and
+  refuses to boot if it cannot, so an unreachable root is a startup error, not a per-request one.
 
 The gaps below are what Phase 04 still needs *beyond* that.
 

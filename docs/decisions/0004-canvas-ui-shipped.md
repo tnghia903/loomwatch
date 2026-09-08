@@ -16,7 +16,7 @@ inspector, and YAML round-trip. Over five commits the build team delivered that 
 | Commit | TNG | Deliverable |
 |---|---|---|
 | `a2cc0a9` | 51 | `rust-embed` SPA serving via `axum` — baked `ui/dist/` into the binary; SPA fallback for client-side routes |
-| `cd69911` | 52 | Daemon config API: `GET /api/harnesses`, `GET/PUT /api/team?path=`, `GET /api/config/schema` |
+| `cd69911` | 52 | Daemon config API: `GET /api/harnesses`, `GET /api/team?path=`, `PUT /api/team` (body `{path,yaml}`), `GET /api/config/schema` |
 | `1bd6b1c` | 53 | CST-preserving `TeamFileModel` — YAML load/edit/save with comment and key-order preservation |
 | `67dc34c` | 54 | Library panel over `GET /api/harnesses`; drag-to-instantiate with defaults-on-drop rules |
 | `7c9e54d` | 55 | Agent node rendering, configured edges with draw/reconnect/delete, inspector with live validation, `PUT /api/team` save gate, canvas mechanics |
