@@ -55,6 +55,14 @@ input:focus-visible,
   outline-offset: 2px;
 }
 
+/* §12.1: controls must remain comfortably operable independently of their visual
+   treatment. This also covers the compact icon buttons in the Library and inspector. */
+button,
+[role='button'],
+input:not([type='checkbox']):not([type='radio']) {
+  min-height: 32px;
+}
+
 .react-flow__node {
   transition: transform 240ms cubic-bezier(.2, 0, 0, 1);
 }
@@ -77,6 +85,15 @@ input:focus-visible,
 
 .react-flow__edge-interaction {
   stroke-width: 12px;
+}
+
+/* Handles deliberately remain visually quiet, but their interaction box is the same
+   32px minimum as every other canvas control. */
+.react-flow__handle {
+  width: 32px !important;
+  height: 32px !important;
+  border: 0 !important;
+  background: transparent !important;
 }
 
 @keyframes mode-pill-switch {
@@ -174,4 +191,21 @@ input:focus-visible,
     scroll-behavior: auto !important;
     transition-duration: .01ms !important;
   }
+
+  /* §12.2: retain the explanatory mode change as one opacity-only cross-fade;
+     omit the standard rotation, scale, and staggered step motion. */
+  .mode-pill-switch {
+    animation: mode-pill-cross-fade 120ms ease-in both !important;
+  }
+
+  .mode-glyph-switch,
+  .step-badge {
+    animation: none !important;
+    transform: none;
+  }
+}
+
+@keyframes mode-pill-cross-fade {
+  from { opacity: .72; }
+  to { opacity: 1; }
 }
