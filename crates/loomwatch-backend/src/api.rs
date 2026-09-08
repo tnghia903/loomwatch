@@ -701,6 +701,34 @@ mod tests {
         assert_eq!(response_json(response).await["files"], json!([]));
     }
 
+    #[tokio::test]
+    async fn teams_endpoint_reports_a_scan_failure_after_router_construction() {
+        let directory = TempDirectory::new();
+        let teams_root = directory.0.join("teams");
+        let unavailable_root = directory.0.join("teams-unavailable");
+        fs::create_dir(&teams_root).expect("create teams root");
+        let router = test_router(&teams_root);
+        fs::rename(&teams_root, &unavailable_root).expect("make teams root unavailable");
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/teams")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            response_json(response).await["error"]
+                .as_str()
+                .is_some_and(|error| error.starts_with("failed to discover team files:"))
+        );
+    }
+
     #[test]
     fn teams_router_rejects_a_missing_root() {
         let directory = TempDirectory::new();

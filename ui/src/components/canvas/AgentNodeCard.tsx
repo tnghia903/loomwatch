@@ -67,7 +67,11 @@ export function AgentNodeCard({ id, data, selected }: NodeProps<AgentNode>) {
 
   if (zoom < 0.35) {
     return (
-      <div className={`relative flex size-11 items-center justify-center rounded-[12px] border border-hairline/10 bg-surface-solid shadow-sm ${selectionOutline}`}>
+      <div
+        className={`relative flex size-11 items-center justify-center rounded-[12px] border border-hairline/10 bg-surface-solid ${
+          selected ? selectionOutline : 'shadow-sm'
+        }`}
+      >
         <span className={`flex size-8 items-center justify-center rounded-[10px] ${statusRailColor(agent.status)}`}>{glyph}</span>
         <span className="absolute top-12 max-w-28 truncate whitespace-nowrap text-[11px] text-ink">{agent.name}</span>
         <Handle type="target" position={Position.Left} className="!opacity-0" />
