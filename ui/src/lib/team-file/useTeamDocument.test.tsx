@@ -190,6 +190,7 @@ describe('useTeamDocument', () => {
     const { result } = renderHook(() => useTeamDocument())
     await waitFor(() => expect(result.current.loadFailure).not.toBeNull())
     expect(result.current.saveState).toBe('error')
+    expect(result.current.loadFailure?.line).toBe('schemaVersion: [')
   })
 
   it('loads the team file named by ?path= into nodes, edges and entrypoint', async () => {
@@ -365,6 +366,49 @@ describe('useTeamDocument', () => {
     expect(result.current.saveState).toBe('conflict')
     expect(result.current.saveError).toContain('changed on disk')
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0)
+  })
+
+  it('detects a changed file on window focus and lets a dirty canvas keep its edits', async () => {
+    let diskYaml = TEAM_YAML
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
+      String(input).startsWith('/api/team')
+        ? jsonResponse(200, { path: '/teams/research-team.yaml', yaml: diskYaml })
+        : jsonResponse(200, SCHEMA_GATE),
+    ))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+    act(() => result.current.renameAgent('researcher', 'role', 'Investigate protocols'))
+    diskYaml = TEAM_YAML.replace('name: Research and review', 'name: Edited outside LoomWatch')
+    act(() => window.dispatchEvent(new Event('focus')))
+
+    await waitFor(() => expect(result.current.saveState).toBe('conflict'))
+    expect(result.current.externalChange?.diskYaml).toBe(diskYaml)
+
+    act(() => result.current.keepMine())
+    expect(result.current.saveState).toBe('dirty')
+
+    act(() => window.dispatchEvent(new Event('focus')))
+    await waitFor(() => expect(result.current.externalChange).toBeNull())
+    expect(result.current.saveState).toBe('dirty')
+  })
+
+  it('silently reloads a clean canvas when its file changed on focus', async () => {
+    let diskYaml = TEAM_YAML
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
+      String(input).startsWith('/api/team')
+        ? jsonResponse(200, { path: '/teams/research-team.yaml', yaml: diskYaml })
+        : jsonResponse(200, SCHEMA_GATE),
+    ))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+    diskYaml = TEAM_YAML.replace('name: Research and review', 'name: Edited outside LoomWatch')
+    act(() => window.dispatchEvent(new Event('focus')))
+
+    await waitFor(() => expect(result.current.diskNotice).toBe('Reloaded from disk'))
+    expect(result.current.saveState).toBe('clean')
+    expect(result.current.nodes.find((node) => node.id === 'researcher')?.data.agent.name).toBe('Protocol Researcher')
   })
 
   describe('deleting the entrypoint node (docs/CANVAS_SPEC.md §5.4)', () => {
