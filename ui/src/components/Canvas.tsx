@@ -246,7 +246,7 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
           onDrop={onDrop}
           onNodeDragStart={doc.capturePositionHistory}
           onNodeDrag={onNodeDrag}
-          onNodeDragStop={(_event, node) => { setGuides({}); doc.settleNodeCollision(node.id) }}
+          onNodeDragStop={(_event, node) => { setGuides({}); doc.settleNodeCollision(node.id, node.position) }}
           deleteKeyCode={editable ? ['Backspace', 'Delete'] : null}
           nodesDraggable={editable}
           nodesConnectable={editable}
