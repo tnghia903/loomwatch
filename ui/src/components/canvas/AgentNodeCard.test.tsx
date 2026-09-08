@@ -8,7 +8,7 @@ import { AgentNodeCard } from './AgentNodeCard'
 const viewport = vi.hoisted(() => ({ zoom: 1 }))
 
 vi.mock('@xyflow/react', () => ({
-  Handle: ({ type }: { type: string }) => <span data-handle={type} />,
+  Handle: ({ type, className }: { type: string; className?: string }) => <span data-handle={type} className={className} />,
   Position: { Left: 'left', Right: 'right' },
   useStore: (selector: (store: { transform: [number, number, number] }) => unknown) =>
     selector({ transform: [0, 0, viewport.zoom] }),
@@ -35,7 +35,7 @@ const nodeData: AgentNode['data'] = {
   },
 }
 
-function renderAtZoom(zoom: number) {
+function renderAtZoom(zoom: number, selected = true) {
   viewport.zoom = zoom
   return render(
     <CanvasActionsContext.Provider value={actions}>
@@ -47,7 +47,7 @@ function renderAtZoom(zoom: number) {
         zIndex={0}
         selectable
         deletable
-        selected={false}
+        selected={selected}
         draggable
         isConnectable
         positionAbsoluteX={0}
@@ -65,25 +65,39 @@ describe('AgentNodeCard level of detail', () => {
 
     expect(screen.getByText('Protocol Researcher')).toBeInTheDocument()
     expect(screen.getByText('openai/gpt-5.4')).toBeInTheDocument()
-    expect(container.firstElementChild).toHaveClass('h-[88px]', 'w-[264px]')
+    expect(container.firstElementChild).toHaveClass('h-[88px]', 'w-[264px]', 'shadow-[0_0_0_2px_var(--color-iris)]')
+    expect(container.querySelector('[data-handle="target"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-handle="source"]')).toBeInTheDocument()
   })
 
-  it('renders the compact 264 × 44 card from 0.35 up to 0.6 zoom', () => {
-    const { container } = renderAtZoom(0.35)
+  it('renders the selected compact 264 × 44 card below 0.6 zoom', () => {
+    const { container } = renderAtZoom(0.599)
 
     expect(screen.getByText('Agent Ada')).toBeInTheDocument()
     expect(screen.queryByText('Protocol Researcher')).not.toBeInTheDocument()
     expect(screen.queryByText('openai/gpt-5.4')).not.toBeInTheDocument()
     expect(screen.getByLabelText('idle')).toBeInTheDocument()
-    expect(container.firstElementChild).toHaveClass('h-11', 'w-[264px]')
+    expect(container.firstElementChild).toHaveClass('h-11', 'w-[264px]', 'shadow-[0_0_0_2px_var(--color-iris)]')
+    expect(container.querySelector('[data-handle="target"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-handle="source"]')).toBeInTheDocument()
   })
 
-  it('renders the 44 × 44 glyph chip with an 11 px name label below 0.35 zoom', () => {
+  it('keeps selected compact styling and handles at the 0.35 boundary', () => {
+    const { container } = renderAtZoom(0.35)
+
+    expect(container.firstElementChild).toHaveClass('h-11', 'w-[264px]', 'shadow-[0_0_0_2px_var(--color-iris)]')
+    expect(container.querySelector('[data-handle="target"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-handle="source"]')).toBeInTheDocument()
+  })
+
+  it('renders the selected 44 × 44 glyph chip with hidden handles below 0.35 zoom', () => {
     const { container } = renderAtZoom(0.349)
 
     const name = screen.getByText('Agent Ada')
     expect(name).toHaveClass('text-[11px]')
-    expect(container.firstElementChild).toHaveClass('size-11')
+    expect(container.firstElementChild).toHaveClass('size-11', 'shadow-[0_0_0_2px_var(--color-iris)]')
     expect(screen.queryByLabelText('idle')).not.toBeInTheDocument()
+    expect(container.querySelector('[data-handle="target"]')).toHaveClass('!opacity-0')
+    expect(container.querySelector('[data-handle="source"]')).toHaveClass('!opacity-0')
   })
 })
