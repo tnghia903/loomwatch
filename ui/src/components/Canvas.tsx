@@ -211,7 +211,13 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
     })
   }, [doc.nodes, flow])
 
-  if (!doc.path && !doc.loadFailure) {
+  // §9.5: a failed load has no canvas to return to. Keep the product's only modal
+  // genuinely modal by mounting it instead of React Flow, not over a blank canvas.
+  if (doc.loadFailure) {
+    return <ParseFailureModal failure={doc.loadFailure} />
+  }
+
+  if (!doc.path) {
     return (
       <FirstRun
         harnessCount={harnessCount}
