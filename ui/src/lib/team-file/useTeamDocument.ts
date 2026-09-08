@@ -8,11 +8,20 @@ import { fetchTeamFile, saveTeamFile, TeamFileApiError } from './client'
 import { TeamFileModel, TeamFileParseError } from './document'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
 import { seededLayout } from './layout'
-import type { AgentConfig, EdgeConfig, SpawnConfig } from './types'
+import { pipelineOrder, type PipelineStep } from './pipelineOrder'
+import type { AgentConfig, BudgetConfig, EdgeConfig, GuardsConfig, SpawnConfig } from './types'
 
 export type ConfiguredEdge = Edge<{ kind: EdgeConfig['kind'] }>
 
 export type SaveState = 'no-file' | 'clean' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error'
+
+/** docs/CANVAS_SPEC.md §8: a consequence of `edges`, never a setting the UI can flip directly. */
+export type ExecutionMode = 'team' | 'pipeline'
+
+/** §8.3: the last-edge deletion is applied immediately, then offered a 5s undo window. */
+export interface PendingEdgeRemoval {
+  edges: EdgeConfig[]
+}
 
 const EXTERNAL_CHANGE_MESSAGE =
   'This team file changed on disk while you had unsaved edits. Reload it before saving.'
@@ -84,9 +93,13 @@ export function useTeamDocument() {
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [edges, setEdges] = useState<ConfiguredEdge[]>([])
   const [entrypoint, setEntrypointState] = useState<string | null>(null)
+  const [teamGuards, setTeamGuards] = useState<GuardsConfig | null>(null)
+  const [teamBudget, setTeamBudget] = useState<BudgetConfig | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('no-file')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [refusal, setRefusal] = useState<EdgeRefusal | null>(null)
+  const [modeSwitchBanner, setModeSwitchBanner] = useState(false)
+  const [pendingEdgeRemoval, setPendingEdgeRemoval] = useState<PendingEdgeRemoval | null>(null)
 
   const markDirty = useCallback(() => {
     setSaveState((current) => (current === 'no-file' ? current : 'dirty'))
@@ -111,6 +124,8 @@ export function useTeamDocument() {
         loadedRevisionRef.current = loadedRevision
         setPath(requestedPath)
         setEntrypointState(snapshot.entrypoint)
+        setTeamGuards(snapshot.guards ?? null)
+        setTeamBudget(snapshot.budget ?? null)
         setNodes(
           snapshot.agents.map((agent) =>
             nodeFromAgent(agent, positions[agent.id] ?? { x: 0, y: 0 }, agent.id === snapshot.entrypoint),
@@ -178,13 +193,27 @@ export function useTeamDocument() {
       if (pairs.length === 0) {
         return
       }
+      const hadEdges = edges.length > 0
+      const removed: EdgeConfig[] = []
+      const remaining = edges.filter((edge) => {
+        const match = pairs.some((pair) => pair.from === edge.source && pair.to === edge.target)
+        if (match) {
+          removed.push({ from: edge.source, to: edge.target, layer: 'configured', kind: edge.data?.kind ?? 'sequence', ts: new Date().toISOString() })
+        }
+        return !match
+      })
+
       pairs.forEach((pair) => modelRef.current?.removeEdge(pair.from, pair.to))
-      setEdges((current) =>
-        current.filter((edge) => !pairs.some((pair) => pair.from === edge.source && pair.to === edge.target)),
-      )
+      setEdges(remaining)
       markDirty()
+
+      // §8.3: dropping the last edge reverts the team to self-organizing — that widens what
+      // agents may do, so it gets a 5s undo window instead of taking effect silently.
+      if (hadEdges && remaining.length === 0) {
+        setPendingEdgeRemoval({ edges: removed })
+      }
     },
-    [markDirty],
+    [edges, markDirty],
   )
 
   const removeEdgeBetween = useCallback(
@@ -343,6 +372,36 @@ export function useTeamDocument() {
     [markDirty],
   )
 
+  // §8.1: the mode-pill popover's edit affordance for team-level `guards`/`budget` — the only
+  // home these fields have, per TEAM_CONFIG.md's default-to-8 rule when a guard is absent.
+  const updateTeamGuards = useCallback(
+    (field: keyof GuardsConfig, value: number) => {
+      setTeamGuards((current) => {
+        const next: GuardsConfig = {
+          maxDispatchDepth: current?.maxDispatchDepth ?? 8,
+          maxConcurrentDispatches: current?.maxConcurrentDispatches ?? 8,
+          [field]: value,
+        }
+        modelRef.current?.setGuards(next)
+        return next
+      })
+      markDirty()
+    },
+    [markDirty],
+  )
+
+  const updateTeamBudget = useCallback(
+    (limitUsd: number) => {
+      setTeamBudget((current) => {
+        const next: BudgetConfig = { ...current, limitUsd }
+        modelRef.current?.setTeamBudget(next)
+        return next
+      })
+      markDirty()
+    },
+    [markDirty],
+  )
+
   const dismissRefusal = useCallback(() => setRefusal(null), [])
 
   // §6.6: "The popover dismisses on the next click or after 4 s."
@@ -353,6 +412,39 @@ export function useTeamDocument() {
     const timer = setTimeout(() => setRefusal(null), 4000)
     return () => clearTimeout(timer)
   }, [refusal])
+
+  // §8.3: "Keep it" (or letting it time out) accepts a deletion that already happened.
+  const keepLastEdgeRemoval = useCallback(() => setPendingEdgeRemoval(null), [])
+
+  // §8.3: "Undo restores the edge" — re-added with a fresh `ts`; nothing downstream reads it.
+  const undoLastEdgeRemoval = useCallback(() => {
+    setPendingEdgeRemoval((pending) => {
+      if (!pending) {
+        return pending
+      }
+      pending.edges.forEach((edge) => modelRef.current?.addEdge(edge))
+      setEdges((current) => [...current, ...pending.edges.map(edgeFromConfig)])
+      markDirty()
+      return null
+    })
+  }, [markDirty])
+
+  useEffect(() => {
+    if (!pendingEdgeRemoval) {
+      return
+    }
+    const timer = setTimeout(() => setPendingEdgeRemoval(null), 5000)
+    return () => clearTimeout(timer)
+  }, [pendingEdgeRemoval])
+
+  // §8.3: drawing the first configured edge is the team → pipeline switch event.
+  useEffect(() => {
+    if (!modeSwitchBanner) {
+      return
+    }
+    const timer = setTimeout(() => setModeSwitchBanner(false), 4000)
+    return () => clearTimeout(timer)
+  }, [modeSwitchBanner])
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -379,9 +471,20 @@ export function useTeamDocument() {
       }
       modelRef.current?.addEdge(newEdge)
       setEdges((current) => [...current, edgeFromConfig(newEdge)])
+      if (edges.length === 0) {
+        setModeSwitchBanner(true)
+      }
       markDirty()
     },
     [edges, entrypoint, markDirty],
+  )
+
+  // §8: a consequence of `edges`, not a setting — team when empty, pipeline otherwise.
+  const mode: ExecutionMode = edges.length === 0 ? 'team' : 'pipeline'
+
+  const pipelineSteps = useMemo<PipelineStep[]>(
+    () => pipelineOrder(nodes.map((node) => node.id), edges.map((edge) => ({ from: edge.source, to: edge.target })), entrypoint),
+    [nodes, edges, entrypoint],
   )
 
   // §5.4/§10.2: only relevant to a document that is actually open — a pathless canvas (no
@@ -438,9 +541,15 @@ export function useTeamDocument() {
     edges,
     entrypoint,
     entrypointProblem,
+    teamGuards,
+    teamBudget,
     saveState,
     saveError,
     refusal,
+    mode,
+    pipelineSteps,
+    modeSwitchBanner,
+    pendingEdgeRemoval,
     onNodesChange,
     onEdgesChange,
     onConnect,
@@ -453,7 +562,11 @@ export function useTeamDocument() {
     updateAgentBudget,
     updateAgentAllowRecruiting,
     promoteEntrypoint,
+    updateTeamGuards,
+    updateTeamBudget,
     dismissRefusal,
+    keepLastEdgeRemoval,
+    undoLastEdgeRemoval,
     save,
   }
 }

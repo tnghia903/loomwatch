@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Check, Lock, X } from 'lucide-react'
+import { Check, GitMerge, Lock, X } from 'lucide-react'
 import { createElement, useState } from 'react'
 
 import { formatUsd, middleTruncate } from '../../lib/format'
@@ -17,9 +17,12 @@ type EditableField = 'name' | 'role'
 // implemented in full so Phase 05 does not have to revisit this component.
 export function AgentNodeCard({ id, data, selected }: NodeProps<AgentNode>) {
   const { agent, isEntrypoint } = data
-  const { renameAgent } = useCanvasActions()
+  const { renameAgent, mode, stepById, nodeNames } = useCanvasActions()
   const [editing, setEditing] = useState<EditableField | null>(null)
   const [draft, setDraft] = useState('')
+  const step = stepById.get(id)
+  const handleClasses =
+    mode === 'pipeline' ? '!size-2 !border-iris !bg-iris/40' : '!size-2 !border-hairline !bg-ink-3/25'
 
   function startEdit(field: EditableField, currentValue: string) {
     setDraft(currentValue)
@@ -52,8 +55,24 @@ export function AgentNodeCard({ id, data, selected }: NodeProps<AgentNode>) {
         aria-hidden="true"
       />
 
-      <Handle type="target" position={Position.Left} className="!size-2 !border-hairline !bg-ink-3" />
-      <Handle type="source" position={Position.Right} className="!size-2 !border-hairline !bg-ink-3" />
+      <Handle type="target" position={Position.Left} className={handleClasses} />
+      <Handle type="source" position={Position.Right} className={handleClasses} />
+
+      {step && (
+        <span className="absolute -left-1.5 -top-1.5 flex items-center gap-0.5">
+          <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-iris font-mono text-[10px] font-semibold text-white">
+            {step.step}
+          </span>
+          {step.joinFrom.length > 0 && (
+            <span
+              className="flex size-4 shrink-0 items-center justify-center rounded-full bg-surface-solid text-ink-2 shadow-[0_1px_2px_rgb(0_0_0/.12)]"
+              title={`receives replies from ${step.joinFrom.map((joinId) => nodeNames.get(joinId) ?? joinId).join(', ')} in that order`}
+            >
+              <GitMerge className="size-2.5" aria-hidden="true" />
+            </span>
+          )}
+        </span>
+      )}
 
       <div className="flex items-center gap-2 px-3 pt-2.5">
         <span

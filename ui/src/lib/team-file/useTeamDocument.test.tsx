@@ -331,4 +331,159 @@ describe('useTeamDocument', () => {
       expect(fetchMock).not.toHaveBeenCalled()
     })
   })
+
+  describe('execution modes (docs/CANVAS_SPEC.md §8)', () => {
+    it('is team mode with no pipeline steps until the first edge is drawn', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+      )
+      const { result } = renderHook(() => useTeamDocument())
+      await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+      expect(result.current.mode).toBe('team')
+      expect(result.current.pipelineSteps).toEqual([])
+      expect(result.current.modeSwitchBanner).toBe(false)
+    })
+
+    it('switches to pipeline mode and raises the switch banner on the first edge', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+      )
+      const { result } = renderHook(() => useTeamDocument())
+      await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+      act(() => {
+        result.current.onConnect({ source: 'researcher', target: 'reviewer', sourceHandle: null, targetHandle: null })
+      })
+
+      expect(result.current.mode).toBe('pipeline')
+      expect(result.current.modeSwitchBanner).toBe(true)
+      expect(result.current.pipelineSteps).toEqual([
+        { id: 'researcher', step: 1, joinFrom: [] },
+        { id: 'reviewer', step: 2, joinFrom: [] },
+      ])
+    })
+
+    it('clears the switch banner after 4s', async () => {
+      vi.useFakeTimers()
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+      )
+      const { result } = renderHook(() => useTeamDocument())
+      await vi.waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+      act(() => {
+        result.current.onConnect({ source: 'researcher', target: 'reviewer', sourceHandle: null, targetHandle: null })
+      })
+      expect(result.current.modeSwitchBanner).toBe(true)
+
+      act(() => vi.advanceTimersByTime(4000))
+      expect(result.current.modeSwitchBanner).toBe(false)
+      vi.useRealTimers()
+    })
+
+    it('deleting the last edge offers a 5s undo before reverting to team mode', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+      )
+      const { result } = renderHook(() => useTeamDocument())
+      await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+      act(() => {
+        result.current.onConnect({ source: 'researcher', target: 'reviewer', sourceHandle: null, targetHandle: null })
+      })
+      expect(result.current.mode).toBe('pipeline')
+
+      act(() => result.current.removeEdgeBetween('researcher', 'reviewer'))
+
+      // The deletion already took effect — mode has reverted — but it is undoable for 5s.
+      expect(result.current.mode).toBe('team')
+      expect(result.current.edges).toHaveLength(0)
+      expect(result.current.pendingEdgeRemoval).toMatchObject({
+        edges: [{ from: 'researcher', to: 'reviewer' }],
+      })
+
+      act(() => result.current.undoLastEdgeRemoval())
+
+      expect(result.current.mode).toBe('pipeline')
+      expect(result.current.edges).toHaveLength(1)
+      expect(result.current.pendingEdgeRemoval).toBeNull()
+    })
+
+    it('"Keep it" clears the pending removal without restoring the edge', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+      )
+      const { result } = renderHook(() => useTeamDocument())
+      await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+      act(() => {
+        result.current.onConnect({ source: 'researcher', target: 'reviewer', sourceHandle: null, targetHandle: null })
+      })
+      act(() => result.current.removeEdgeBetween('researcher', 'reviewer'))
+      expect(result.current.pendingEdgeRemoval).not.toBeNull()
+
+      act(() => result.current.keepLastEdgeRemoval())
+
+      expect(result.current.pendingEdgeRemoval).toBeNull()
+      expect(result.current.edges).toHaveLength(0)
+      expect(result.current.mode).toBe('team')
+    })
+
+    it('auto-accepts the removal after 5s of inaction', async () => {
+      vi.useFakeTimers()
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+      )
+      const { result } = renderHook(() => useTeamDocument())
+      await vi.waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+      act(() => {
+        result.current.onConnect({ source: 'researcher', target: 'reviewer', sourceHandle: null, targetHandle: null })
+      })
+      act(() => result.current.removeEdgeBetween('researcher', 'reviewer'))
+      expect(result.current.pendingEdgeRemoval).not.toBeNull()
+
+      act(() => vi.advanceTimersByTime(5000))
+      expect(result.current.pendingEdgeRemoval).toBeNull()
+      vi.useRealTimers()
+    })
+
+    it('edits team guards and budget through the mode-pill affordance', async () => {
+      const fetchMock = vi.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (!init) {
+          return jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })
+        }
+        return jsonResponse(200, JSON.parse(init.body as string))
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const { result } = renderHook(() => useTeamDocument())
+      await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+      expect(result.current.teamGuards).toBeNull()
+      expect(result.current.teamBudget).toBeNull()
+
+      act(() => result.current.updateTeamGuards('maxDispatchDepth', 3))
+      expect(result.current.teamGuards).toEqual({ maxDispatchDepth: 3, maxConcurrentDispatches: 8 })
+
+      act(() => result.current.updateTeamBudget(25))
+      expect(result.current.teamBudget).toEqual({ limitUsd: 25 })
+      expect(result.current.saveState).toBe('dirty')
+
+      await act(async () => {
+        await result.current.save()
+      })
+      const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')
+      const [, init] = putCall as [string, RequestInit]
+      const body = JSON.parse(init.body as string) as { yaml: string }
+      expect(body.yaml).toContain('maxDispatchDepth: 3')
+      expect(body.yaml).toContain('limitUsd: 25')
+    })
+  })
 })
