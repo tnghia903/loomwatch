@@ -1,6 +1,6 @@
 import { Background, Controls, MiniMap, ReactFlow, useReactFlow, type Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useTeamDocument } from '../lib/team-file/useTeamDocument'
 import { unifiedYamlDiff } from '../lib/team-file/diff'
@@ -84,9 +84,13 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
   const [openPathOpen, setOpenPathOpen] = useState(false)
   const [openPath, setOpenPath] = useState('')
   const [newTeamSheet, setNewTeamSheet] = useState(false)
+  const [discardConfirm, setDiscardConfirm] = useState(false)
+  const [pendingNodeDelete, setPendingNodeDelete] = useState<string[]>([])
   const [guides, setGuides] = useState<Guides>({})
   const [windowWidth, setWindowWidth] = useState(window.innerWidth)
   const [oneNodeHint, setOneNodeHint] = useState(false)
+  const [statusAnnouncement, setStatusAnnouncement] = useState('')
+  const priorStatuses = useRef<Map<string, string> | null>(null)
   const editable = !doc.readOnlyReason && windowWidth >= 768
 
   useEffect(() => {
@@ -103,6 +107,14 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
       return () => { window.clearTimeout(showTimer); window.clearTimeout(hideTimer) }
     }
   }, [doc.path, doc.nodes.length, doc.edges.length])
+
+  const toggleLibrary = useCallback(() => {
+    if (windowWidth < 1024) {
+      window.dispatchEvent(new Event('loomwatch:toggle-library'))
+      return
+    }
+    onToggleLibrary()
+  }, [onToggleLibrary, windowWidth])
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     if (!editable || !event.dataTransfer.types.includes(LIBRARY_DRAG_MIME)) return
@@ -123,8 +135,27 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
     if (selected.length > 0) void flow.fitView({ nodes: selected, padding: 0.2, maxZoom: 1, duration: 300 })
   }, [doc.nodes, flow])
 
+  const clearSelection = useCallback(() => {
+    doc.onNodesChange(doc.nodes.filter((node) => node.selected).map((node) => ({ id: node.id, type: 'select' as const, selected: false })))
+    doc.onEdgesChange(doc.edges.filter((edge) => edge.selected).map((edge) => ({ id: edge.id, type: 'select' as const, selected: false })))
+  }, [doc])
+
+  const deleteNodes = useCallback((ids: readonly string[]) => {
+    if (ids.length > 0) doc.onNodesChange(ids.map((id) => ({ id, type: 'remove' as const })))
+  }, [doc])
+
+  const requestNodeDelete = useCallback((ids: readonly string[]) => {
+    if (!editable || ids.length === 0) return
+    const connected = doc.edges.some((edge) => ids.includes(edge.source) || ids.includes(edge.target))
+    if (connected) {
+      setPendingNodeDelete([...ids])
+      return
+    }
+    deleteNodes(ids)
+  }, [doc.edges, editable, deleteNodes])
+
   const actions = useMemo<CommandAction[]>(() => [
-    { label: 'Add agent…', run: onToggleLibrary, disabled: !doc.path || !editable },
+    { label: 'Add agent…', run: toggleLibrary, disabled: !doc.path || !editable },
     { label: 'Save', shortcut: '⌘S', run: () => void doc.save(), disabled: !doc.path || !editable || !doc.isValid },
     { label: 'Open team…', run: () => { setOpenPath(''); setOpenPathOpen(true) } },
     { label: 'New team…', run: () => {
@@ -133,37 +164,45 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
       else setCreating(true)
     } },
     { label: 'Reload from disk', run: () => void doc.reloadFromDisk(), disabled: !doc.path || doc.saveState === 'new' },
+    { label: 'Discard changes', run: () => setDiscardConfirm(true), disabled: !doc.path || !['dirty', 'invalid', 'conflict'].includes(doc.documentChipState) },
     { label: 'Fit view', shortcut: 'F', run: () => void flow.fitView({ padding: 0.2, maxZoom: 1, duration: 300 }) },
     { label: 'Auto-layout', shortcut: '⌥⌘L', run: doc.layoutNodes, disabled: !editable },
-    { label: libraryVisible ? 'Hide library' : 'Show library', shortcut: '⌘\\', run: onToggleLibrary, disabled: !doc.path },
+    { label: 'Toggle library', shortcut: '⌘\\', run: toggleLibrary, disabled: !doc.path || windowWidth < 768 },
     { label: 'Toggle minimap', run: () => setMinimapOpen((open) => !open) },
     { label: 'Toggle theme', run: () => document.documentElement.classList.toggle('dark') },
     { label: 'Copy file path', run: () => { if (doc.path) void navigator.clipboard?.writeText(doc.path) }, disabled: !doc.path },
     { label: 'Show YAML', run: () => setYamlOpen(true), disabled: !doc.path },
-  ], [doc, editable, flow, libraryVisible, onToggleLibrary])
+  ], [doc, editable, flow, libraryVisible, toggleLibrary, windowWidth])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const mod = event.metaKey || event.ctrlKey
       const key = event.key.toLowerCase()
       if (mod && key === 'k') { event.preventDefault(); setPaletteOpen(true); return }
+      const editingText = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
+      if (editingText) return
       if (mod && key === 's') { event.preventDefault(); if (editable) void doc.save(); return }
       if (mod && key === 'z') { event.preventDefault(); if (event.shiftKey) doc.redo(); else doc.undo(); return }
-      if (mod && key === '\\') { event.preventDefault(); onToggleLibrary(); return }
+      if (mod && key === '\\') { event.preventDefault(); if (windowWidth >= 768) toggleLibrary(); return }
       if (mod && key === '0') { event.preventDefault(); void flow.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 300 }); return }
       if (mod && (key === '+' || key === '=')) { event.preventDefault(); void flow.zoomIn({ duration: 200 }); return }
       if (mod && key === '-') { event.preventDefault(); void flow.zoomOut({ duration: 200 }); return }
       if (event.altKey && mod && key === 'l') { event.preventDefault(); if (editable) doc.layoutNodes(); return }
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
       if (event.key === 'Escape') {
-        if (paletteOpen) setPaletteOpen(false)
+        if (pendingNodeDelete.length > 0) setPendingNodeDelete([])
+        else if (discardConfirm) setDiscardConfirm(false)
+        else if (paletteOpen) setPaletteOpen(false)
         else if (yamlOpen) setYamlOpen(false)
         else if (compareOpen) setCompareOpen(false)
         else if (doc.refusal) doc.dismissRefusal()
-        else {
-          doc.onNodesChange(doc.nodes.filter((node) => node.selected).map((node) => ({ id: node.id, type: 'select' as const, selected: false })))
-          doc.onEdgesChange(doc.edges.filter((edge) => edge.selected).map((edge) => ({ id: edge.id, type: 'select' as const, selected: false })))
-        }
+        else clearSelection()
+        return
+      }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && editable) {
+        const selectedNodeIds = doc.nodes.filter((node) => node.selected).map((node) => node.id)
+        const selectedEdgeIds = doc.edges.filter((edge) => edge.selected).map((edge) => edge.id)
+        if (selectedNodeIds.length > 0) requestNodeDelete(selectedNodeIds)
+        else if (selectedEdgeIds.length > 0) doc.onEdgesChange(selectedEdgeIds.map((id) => ({ id, type: 'remove' as const })))
         return
       }
       if (event.key === 'Tab' && doc.nodes.length > 0) {
@@ -178,6 +217,16 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
         return
       }
       if (event.key === 'Enter') {
+        if (pendingNodeDelete.length > 0) {
+          deleteNodes(pendingNodeDelete)
+          setPendingNodeDelete([])
+          return
+        }
+        if (discardConfirm) {
+          setDiscardConfirm(false)
+          void doc.reloadFromDisk()
+          return
+        }
         const selected = doc.nodes.find((node) => node.selected)
         if (selected && editable) window.dispatchEvent(new CustomEvent('loomwatch:rename-agent', { detail: { id: selected.id } }))
         return
@@ -190,7 +239,7 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [doc, editable, fitSelection, flow, onToggleLibrary, paletteOpen, yamlOpen, compareOpen])
+  }, [doc, editable, fitSelection, flow, toggleLibrary, paletteOpen, yamlOpen, compareOpen, windowWidth, clearSelection, discardConfirm, pendingNodeDelete, requestNodeDelete, deleteNodes])
 
   const stepById = useMemo(() => new Map(doc.pipelineSteps.map((step) => [step.id, step])), [doc.pipelineSteps])
   const nodeNames = useMemo(() => new Map(doc.nodes.map((node) => [node.id, node.data.label])), [doc.nodes])
@@ -201,6 +250,68 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
   const selectedNodes = doc.nodes.filter((node) => node.selected)
   const selectedEdges = doc.edges.filter((edge) => edge.selected)
   const inspectedNode = selectedNodes.length === 1 && selectedEdges.length === 0 ? selectedNodes[0] : null
+
+  const accessibleNodes = useMemo(
+    () => doc.nodes.map((node) => ({
+      ...node,
+      ariaLabel: `${node.data.agent.name}, ${node.data.agent.role || 'no role'}, ${node.data.agent.model || 'no model'}, ${node.data.agent.status ?? 'idle'}`,
+      ariaRole: 'button' as const,
+    })),
+    [doc.nodes],
+  )
+  const accessibleEdges = useMemo(
+    () => doc.edges.map((edge) => ({
+      ...edge,
+      ariaLabel: `sequence from ${nodeNames.get(edge.source) ?? edge.source} to ${nodeNames.get(edge.target) ?? edge.target}`,
+    })),
+    [doc.edges, nodeNames],
+  )
+  const statusById = useMemo(
+    () => new Map(doc.nodes.map((node) => [node.id, `${node.data.agent.name}: ${node.data.agent.status ?? 'idle'}`])),
+    [doc.nodes],
+  )
+
+  useEffect(() => {
+    const previous = priorStatuses.current
+    priorStatuses.current = statusById
+    if (!previous) return
+    const changed = [...statusById].filter(([id, status]) => previous.get(id) !== status).map(([, status]) => status)
+    if (changed.length === 0) return
+    setStatusAnnouncement(changed.join('. '))
+    const clear = window.setTimeout(() => setStatusAnnouncement(''), 3000)
+    return () => window.clearTimeout(clear)
+  }, [statusById])
+
+  useEffect(() => {
+    if (inspectedNode && windowWidth >= 768 && windowWidth < 1024) {
+      window.dispatchEvent(new Event('loomwatch:close-library'))
+    }
+  }, [inspectedNode, windowWidth])
+
+  // §13 keeps the tablet canvas legible by allowing either the Library sheet or the
+  // inspector sheet, never both. The Library emits this only when it opens as a sheet.
+  useEffect(() => {
+    const closeInspector = () => {
+      if (window.innerWidth < 768 || window.innerWidth >= 1024) return
+      doc.onNodesChange(doc.nodes.filter((node) => node.selected).map((node) => ({ id: node.id, type: 'select' as const, selected: false })))
+      doc.onEdgesChange(doc.edges.filter((edge) => edge.selected).map((edge) => ({ id: edge.id, type: 'select' as const, selected: false })))
+    }
+    window.addEventListener('loomwatch:open-library', closeInspector)
+    return () => window.removeEventListener('loomwatch:open-library', closeInspector)
+  }, [doc.nodes, doc.edges, doc.onNodesChange, doc.onEdgesChange])
+
+  const validationProblemCount = doc.documentProblems.length
+    + Array.from(doc.fieldProblemsByAgent.values()).reduce((count, fields) => count + Object.keys(fields).length, 0)
+    + (doc.entrypointProblem ? 1 : 0)
+  const politeAnnouncement = [
+    doc.modeSwitchBanner ? 'Team changed to pipeline mode.' : null,
+    statusAnnouncement,
+    doc.documentChipState === 'saving' ? 'Saving team.' : null,
+    doc.documentChipState === 'saved' ? 'Team saved.' : null,
+    doc.documentChipState === 'error' ? 'Could not save team.' : null,
+    doc.documentChipState === 'invalid' ? `Team has ${validationProblemCount} validation problem${validationProblemCount === 1 ? '' : 's'}.` : null,
+    doc.diskNotice,
+  ].find(Boolean) ?? ''
 
   const onNodeDrag = useCallback((_event: MouseEvent | TouchEvent, dragged: Node) => {
     const others = doc.nodes.filter((node) => node.id !== dragged.id)
@@ -241,8 +352,8 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
     <CanvasActionsContext.Provider value={canvasActions}>
       <div role="application" aria-label="Team canvas" className="absolute inset-0">
         <ReactFlow
-          nodes={doc.nodes}
-          edges={doc.edges}
+          nodes={accessibleNodes}
+          edges={accessibleEdges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onNodesChange={doc.onNodesChange}
@@ -253,7 +364,7 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
           onNodeDragStart={doc.capturePositionHistory}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={(_event, node) => { setGuides({}); doc.settleNodeCollision(node.id, node.position) }}
-          deleteKeyCode={editable ? ['Backspace', 'Delete'] : null}
+          deleteKeyCode={null}
           nodesDraggable={editable}
           nodesConnectable={editable}
           edgesReconnectable={editable}
@@ -267,8 +378,8 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
           fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
         >
           <Background variant={'dots' as never} gap={16} size={1} color="var(--color-canvas-dot)" />
-          <Controls />
-          {minimapOpen && <MiniMap pannable zoomable nodeColor="var(--color-ink-3)" />}
+          <Controls aria-label="Canvas view controls" />
+          {minimapOpen && <MiniMap pannable zoomable nodeColor="var(--color-ink-3)" ariaLabel="Team canvas minimap" />}
           {doc.nodes.length === 0 && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
               <div className="flex h-[88px] w-[264px] items-center justify-center rounded-[14px] border-[1.5px] border-dashed border-hairline/20 text-center text-[13px] text-ink-3">Drag an agent here<br />from the left</div>
@@ -283,7 +394,7 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
       {guides.vertical !== undefined && <div className="pointer-events-none fixed inset-y-0 z-20 w-px bg-iris" style={{ left: guides.vertical }} />}
       {guides.horizontal !== undefined && <div className="pointer-events-none fixed inset-x-0 z-20 h-px bg-iris" style={{ top: guides.horizontal }} />}
 
-      <div aria-live="polite" className="sr-only">{doc.diskNotice ?? (doc.modeSwitchBanner ? 'Team changed to pipeline mode.' : '')}</div>
+      <div aria-live="polite" aria-atomic="true" className="sr-only">{politeAnnouncement}</div>
       <div aria-live="assertive" className="sr-only">{doc.externalChange ? 'The team file changed on disk.' : doc.refusal?.message ?? ''}</div>
 
       {doc.externalChange && <div className="absolute inset-x-0 top-0 z-30"><ConflictBar filename={doc.path?.split('/').pop() ?? 'Team file'} onKeepMine={doc.keepMine} onUseDisk={() => void doc.useDisk()} onCompare={() => setCompareOpen(true)} /></div>}
@@ -294,19 +405,33 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
         {doc.entrypointProblem && doc.entrypointProblem.candidates.length > 0 && editable && <EntrypointProblemBar problem={doc.entrypointProblem} onPromote={doc.promoteEntrypoint} />}
       </div>
 
-      {inspectedNode && windowWidth < 1024 && <div className="absolute inset-0 z-20 bg-ink/10" />}
-      {inspectedNode && <div className="canvas-inspector pointer-events-none absolute inset-y-4 right-4 z-30 flex items-start"><Inspector node={inspectedNode} isEntrypoint={inspectedNode.id === doc.entrypoint} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => doc.renameAgent(inspectedNode.id, field, value)} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onCwdChange={(value) => doc.updateAgentCwd(inspectedNode.id, value)} onBudgetChange={(value) => doc.updateAgentBudget(inspectedNode.id, value)} onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onDelete={() => doc.removeAgent(inspectedNode.id)} onClose={() => doc.onNodesChange([{ id: inspectedNode.id, type: 'select', selected: false }])} /></div>}
+      {inspectedNode && windowWidth < 1024 && <div className="absolute inset-0 z-20 bg-ink/10" aria-hidden="true" />}
+      {inspectedNode && <div className="canvas-inspector pointer-events-none absolute inset-y-4 right-4 z-30 flex items-start"><Inspector node={inspectedNode} isEntrypoint={inspectedNode.id === doc.entrypoint} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => doc.renameAgent(inspectedNode.id, field, value)} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onCwdChange={(value) => doc.updateAgentCwd(inspectedNode.id, value)} onBudgetChange={(value) => doc.updateAgentBudget(inspectedNode.id, value)} onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onDelete={() => requestNodeDelete([inspectedNode.id])} onClose={() => doc.onNodesChange([{ id: inspectedNode.id, type: 'select', selected: false }])} /></div>}
 
       {doc.refusal && <div className="pointer-events-none absolute inset-x-0 bottom-20 z-20 flex justify-center"><EdgeRefusalPopover refusal={doc.refusal} onPromote={doc.promoteEntrypoint} onDismiss={doc.dismissRefusal} /></div>}
-      {doc.path && <div className="pointer-events-none absolute inset-x-0 bottom-[var(--canvas-bottom-offset,1rem)] z-10 flex justify-center"><ModePill mode={doc.mode} pipelineSteps={doc.pipelineSteps} nodeNames={nodeNames} entrypointName={doc.entrypoint ? nodeNames.get(doc.entrypoint) ?? doc.entrypoint : null} teamGuards={doc.teamGuards} teamBudget={doc.teamBudget} onUpdateGuards={doc.updateTeamGuards} onUpdateBudget={doc.updateTeamBudget} switchBanner={doc.modeSwitchBanner} pendingRemoval={doc.pendingEdgeRemoval} onKeepRemoval={doc.keepLastEdgeRemoval} onUndoRemoval={doc.undoLastEdgeRemoval} readOnly={!editable} /></div>}
+      {doc.path && <div className="canvas-mode-control pointer-events-none absolute inset-x-0 bottom-[var(--canvas-bottom-offset,1rem)] z-10 flex justify-center"><ModePill mode={doc.mode} pipelineSteps={doc.pipelineSteps} nodeNames={nodeNames} entrypointName={doc.entrypoint ? nodeNames.get(doc.entrypoint) ?? doc.entrypoint : null} teamGuards={doc.teamGuards} teamBudget={doc.teamBudget} onUpdateGuards={doc.updateTeamGuards} onUpdateBudget={doc.updateTeamBudget} switchBanner={doc.modeSwitchBanner} pendingRemoval={doc.pendingEdgeRemoval} onKeepRemoval={doc.keepLastEdgeRemoval} onUndoRemoval={doc.undoLastEdgeRemoval} readOnly={!editable} /></div>}
 
       {paletteOpen && <CommandPalette actions={actions} onClose={() => setPaletteOpen(false)} />}
+      {discardConfirm && <InlineConfirm message="Discard changes and reload from disk?" confirmLabel="Discard changes" onConfirm={() => { setDiscardConfirm(false); void doc.reloadFromDisk() }} onCancel={() => setDiscardConfirm(false)} />}
+      {pendingNodeDelete.length > 0 && <InlineConfirm message={`Delete ${pendingNodeDelete.length === 1 ? 'this node and its connections' : `${pendingNodeDelete.length} nodes and their connections`}?`} confirmLabel="Delete" onConfirm={() => { deleteNodes(pendingNodeDelete); setPendingNodeDelete([]) }} onCancel={() => setPendingNodeDelete([])} />}
       {openPathOpen && <OpenTeamSheet path={openPath} onPathChange={setOpenPath} onClose={() => setOpenPathOpen(false)} />}
       {newTeamSheet && <NewTeamSheet name={newName} onNameChange={setNewName} onClose={() => setNewTeamSheet(false)} onCreate={() => { doc.createNewDocument(newName); setNewTeamSheet(false); onDocumentOpen() }} />}
       {yamlOpen && <YamlSheet title="YAML preview" yaml={doc.yamlPreview} onClose={() => setYamlOpen(false)} />}
       {compareOpen && doc.externalChange && <YamlSheet title="Disk ↔ in-memory YAML" yaml={unifiedYamlDiff(doc.externalChange.diskYaml, doc.yamlPreview)} onClose={() => setCompareOpen(false)} />}
       {doc.loadFailure && <ParseFailureModal failure={doc.loadFailure} />}
     </CanvasActionsContext.Provider>
+  )
+}
+
+function InlineConfirm({ message, confirmLabel, onConfirm, onCancel }: { message: string; confirmLabel: string; onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div role="alertdialog" aria-label={message} className="absolute inset-x-0 bottom-20 z-40 flex justify-center">
+      <div className="pointer-events-auto flex items-center gap-3 rounded-lg border border-red/30 bg-surface-solid px-3 py-2 text-[13px] text-ink shadow-lg">
+        <span>{message}</span>
+        <button type="button" onClick={onCancel} className="rounded-md px-2 py-1 text-ink-2 hover:bg-hairline/10">Cancel</button>
+        <button type="button" onClick={onConfirm} className="rounded-md bg-red px-2 py-1 text-white">{confirmLabel}</button>
+      </div>
+    </div>
   )
 }
 
