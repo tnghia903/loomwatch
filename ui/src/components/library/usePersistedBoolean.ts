@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 
 // "Open/closed state persists per browser" (§4) and the rail collapse (§4.4) both need this.
 export function usePersistedBoolean(key: string, initial: boolean): [boolean, (next: boolean) => void] {
@@ -11,12 +11,12 @@ export function usePersistedBoolean(key: string, initial: boolean): [boolean, (n
     return stored === null ? initial : stored === 'true'
   })
 
-  const set = (next: boolean) => {
+  const set = useCallback((next: boolean) => {
     setValue(next)
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(storageKey, String(next))
     }
-  }
+  }, [storageKey])
 
   return [value, set]
 }
