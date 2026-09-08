@@ -225,6 +225,27 @@ describe('useTeamDocument', () => {
     expect(result.current.nodes.find((node) => node.id === 'researcher')?.position).toEqual({ x: 999, y: 999 })
   })
 
+  it('keeps history through a save but resets it after reloading from disk', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
+      if (init?.method === 'PUT') return jsonResponse(200, JSON.parse(init.body as string))
+      return jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+    act(() => result.current.renameAgent('researcher', 'role', 'Changed role'))
+    expect(result.current.canUndo).toBe(true)
+    await act(async () => { await result.current.save() })
+    expect(result.current.canUndo).toBe(true)
+
+    await act(async () => { await result.current.reloadFromDisk() })
+    expect(result.current.canUndo).toBe(false)
+    expect(result.current.canRedo).toBe(false)
+    expect(result.current.nodes.find((node) => node.id === 'researcher')?.data.agent.role).toBe('Research ACP behavior')
+  })
+
   it('settles collision from the final drop position rather than stale drag state', async () => {
     vi.stubGlobal(
       'fetch',
