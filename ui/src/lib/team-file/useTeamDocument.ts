@@ -170,6 +170,12 @@ export function useTeamDocument() {
   const redoRef = useRef<HistoryEntry[]>([])
   const [historyState, setHistoryState] = useState({ undo: 0, redo: 0 })
 
+  const resetHistory = useCallback(() => {
+    undoRef.current = []
+    redoRef.current = []
+    setHistoryState({ undo: 0, redo: 0 })
+  }, [])
+
   const currentHistoryEntry = useCallback((): HistoryEntry | null => {
     if (!modelRef.current) return null
     return {
@@ -255,10 +261,8 @@ export function useTeamDocument() {
     setExternalChange(null)
     setAttemptedSave(false)
     setSaveState('new')
-    undoRef.current = []
-    redoRef.current = []
-    setHistoryState({ undo: 0, redo: 0 })
-  }, [])
+    resetHistory()
+  }, [resetHistory])
 
   useEffect(() => {
     const requestedPath = new URLSearchParams(window.location.search).get('path')
@@ -312,6 +316,7 @@ export function useTeamDocument() {
         setEdges(configured.map(edgeFromConfig))
         setDocumentSnapshot(snapshot)
         setYamlPreview(yaml)
+        resetHistory()
         const schemaVersion = (snapshot as { schemaVersion?: unknown }).schemaVersion
         if (schemaVersion !== 1) {
           const reason = `This file uses schema version ${String(schemaVersion)}. This build of LoomWatch understands version 1.`
@@ -353,7 +358,7 @@ export function useTeamDocument() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [resetHistory])
 
   const applyDiskYaml = useCallback(
     async (yaml: string, notice?: string) => {
@@ -387,6 +392,7 @@ export function useTeamDocument() {
       setEdges(configured.map(edgeFromConfig))
       setDocumentSnapshot(snapshot)
       setYamlPreview(yaml)
+      resetHistory()
       setExternalChange(null)
       setSaveError(null)
       const schemaVersion = (snapshot as { schemaVersion?: unknown }).schemaVersion
@@ -403,7 +409,7 @@ export function useTeamDocument() {
         window.setTimeout(() => setDiskNotice((current) => (current === notice ? null : current)), 3000)
       }
     },
-    [nodes],
+    [nodes, resetHistory],
   )
 
   const reloadFromDisk = useCallback(async () => {
