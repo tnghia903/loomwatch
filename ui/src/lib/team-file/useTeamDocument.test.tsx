@@ -206,6 +206,41 @@ describe('useTeamDocument', () => {
     expect(result.current.edges).toHaveLength(0)
   })
 
+  it('makes auto-layout undoable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+    )
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+    act(() => result.current.onNodesChange([
+      { id: 'researcher', type: 'position', position: { x: 999, y: 999 } },
+    ]))
+    act(() => result.current.layoutNodes())
+    expect(result.current.nodes.find((node) => node.id === 'researcher')?.position).not.toEqual({ x: 999, y: 999 })
+
+    act(() => result.current.undo())
+    expect(result.current.nodes.find((node) => node.id === 'researcher')?.position).toEqual({ x: 999, y: 999 })
+  })
+
+  it('settles collision from the final drop position rather than stale drag state', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+    )
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    const occupied = result.current.nodes.find((node) => node.id === 'researcher')!.position
+
+    act(() => result.current.settleNodeCollision('reviewer', occupied))
+
+    expect(result.current.nodes.find((node) => node.id === 'reviewer')?.position).toEqual({
+      x: occupied.x + 24,
+      y: occupied.y + 24,
+    })
+  })
+
   it('fetches the daemon schema, exposes incomplete fields live, and blocks their save', async () => {
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)

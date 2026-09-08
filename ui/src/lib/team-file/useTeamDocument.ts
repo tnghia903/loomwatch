@@ -828,19 +828,24 @@ export function useTeamDocument() {
   }, [nodes, edges, captureHistory])
 
   const settleNodeCollision = useCallback(
-    (id: string) => {
-      const node = nodes.find((candidate) => candidate.id === id)
-      if (!node) return
-      const next = offsetCollision(
-        node.position,
-        nodes.filter((candidate) => candidate.id !== id).map((candidate) => candidate.position),
-      )
-      if (next.x === node.position.x && next.y === node.position.y) return
-      setNodes((current) =>
-        current.map((candidate) => (candidate.id === id ? { ...candidate, position: next } : candidate)),
-      )
+    (id: string, droppedPosition?: { x: number; y: number }) => {
+      setNodes((current) => {
+        const node = current.find((candidate) => candidate.id === id)
+        if (!node) return current
+        // React Flow supplies the authoritative final position to onNodeDragStop. Prefer it
+        // over render-closure state, which can still be one drag event behind on a fast drop.
+        const position = droppedPosition ?? node.position
+        const next = offsetCollision(
+          position,
+          current.filter((candidate) => candidate.id !== id).map((candidate) => candidate.position),
+        )
+        if (next.x === node.position.x && next.y === node.position.y) return current
+        return current.map((candidate) =>
+          candidate.id === id ? { ...candidate, position: next } : candidate,
+        )
+      })
     },
-    [nodes],
+    [],
   )
 
   // §5.4/§10.2: only relevant to a document that is actually open — a pathless canvas (no
