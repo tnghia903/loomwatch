@@ -67,6 +67,18 @@ async function hashTeamYaml(yaml: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
+function sourceLineAtError(source: string, lineNumber: number): string | null {
+  const lines = source.split(/\r?\n/)
+  const atError = lines[lineNumber - 1]
+  if (atError?.trim()) return atError
+  // YAML often reports an unclosed collection at the following empty EOF line. In that case,
+  // show the preceding non-empty line that actually needs the operator's attention.
+  for (let index = lineNumber - 2; index >= 0; index -= 1) {
+    if (lines[index]?.trim()) return lines[index]
+  }
+  return atError ?? null
+}
+
 /**
  * Blocks `Save` per §5.4/§10.2: no candidate agent to promote means no automatic entrypoint,
  * and an empty canvas means no agent at all. `candidates` is empty in the latter case — there
@@ -266,8 +278,10 @@ export function useTeamDocument() {
         }
         return
       }
+      let source: string | null = null
       try {
         const { yaml } = await fetchTeamFile(requestedPath)
+        source = yaml
         const loadedRevision = await hashTeamYaml(yaml)
         if (cancelled) {
           return
@@ -316,7 +330,10 @@ export function useTeamDocument() {
             : String(error)
         setSaveError(message)
         if (error instanceof TeamFileParseError) {
-          const line = message.match(/line \d+[^;]*/i)?.[0] ?? null
+          const lineNumber = Number(message.match(/(?:at )?line (\d+)/i)?.[1])
+          const line = lineNumber > 0 && source
+            ? sourceLineAtError(source, lineNumber)
+            : message.match(/line \d+[^;]*/i)?.[0] ?? null
           setLoadFailure({ message, line })
         }
         setSaveState('error')
