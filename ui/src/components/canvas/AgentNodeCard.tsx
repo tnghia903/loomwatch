@@ -59,6 +59,7 @@ export function AgentNodeCard({ id, data, selected }: NodeProps<AgentNode>) {
   const hasError = Object.values(problem ?? {}).some((item) => item?.weight === 'error')
   const hasIncomplete = Object.keys(problem ?? {}).length > 0
   const outline = hasError ? 'border-red' : hasIncomplete ? 'border-copper' : 'border-hairline/10'
+  const selectionOutline = selected ? 'shadow-[0_0_0_2px_var(--color-iris)]' : ''
   const glyph = createElement(roleGlyph(agent.role), {
     className: zoom < 0.35 ? 'size-5 text-surface-solid' : 'size-4 text-ink-2',
     'aria-hidden': 'true',
@@ -66,7 +67,7 @@ export function AgentNodeCard({ id, data, selected }: NodeProps<AgentNode>) {
 
   if (zoom < 0.35) {
     return (
-      <div className="relative flex size-11 items-center justify-center rounded-[12px] border border-hairline/10 bg-surface-solid shadow-sm">
+      <div className={`relative flex size-11 items-center justify-center rounded-[12px] border border-hairline/10 bg-surface-solid shadow-sm ${selectionOutline}`}>
         <span className={`flex size-8 items-center justify-center rounded-[10px] ${statusRailColor(agent.status)}`}>{glyph}</span>
         <span className="absolute top-12 max-w-28 truncate whitespace-nowrap text-[11px] text-ink">{agent.name}</span>
         <Handle type="target" position={Position.Left} className="!opacity-0" />
@@ -77,7 +78,7 @@ export function AgentNodeCard({ id, data, selected }: NodeProps<AgentNode>) {
 
   if (zoom < 0.6) {
     return (
-      <div className={`relative flex h-11 w-[264px] items-center gap-2 rounded-[12px] border bg-surface-solid px-3 ${outline}`}>
+      <div className={`relative flex h-11 w-[264px] items-center gap-2 rounded-[12px] border bg-surface-solid px-3 ${selectionOutline} ${outline}`}>
         <span className={`absolute inset-y-0 left-0 w-[3px] rounded-l-[12px] ${statusRailColor(agent.status)}`} />
         {glyph}
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{agent.name}</span>
@@ -91,7 +92,7 @@ export function AgentNodeCard({ id, data, selected }: NodeProps<AgentNode>) {
   return (
     <div
       className={`relative flex h-[88px] w-[264px] flex-col rounded-[14px] border bg-surface-solid text-left ${
-        selected ? 'shadow-[0_0_0_2px_var(--color-iris)]' : ''
+        selectionOutline
       } ${outline}`}
     >
       <span
