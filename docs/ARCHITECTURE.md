@@ -1,6 +1,6 @@
 # LoomWatch — Architecture
 
-Revision 0.4 · 2026-09-06 · implementation
+Revision 0.5 · 2026-09-07 · implementation
 
 This is the specification the build team works from. It supersedes three earlier designs: a
 companion app for Paperclip, a version built on Anthropic Managed Agents, and a native
@@ -154,7 +154,7 @@ install.
   **Explicitly not Paperclip's UI**, which is dense and complex and a poor experience. Few
   primary surfaces, generous whitespace, one obvious action per screen, progressive
   disclosure of everything else. The canvas is the product; the chrome recedes. The design
-  spec (Phase 04) owns this and the build holds to it.
+  is specified in [CANVAS_SPEC.md](CANVAS_SPEC.md) and the build holds to it.
 - **Installable:** the UI ships a PWA manifest, so "install as an app" gives a dock /
   launcher icon and a standalone window with no wrapper.
 - **Multi-device:** because it is a page the daemon serves, it opens from any device that
@@ -171,14 +171,14 @@ pausing, or commenting on an agent mid-run — are deferred.
 
 ## 7. Build phases
 
-| # | Phase | Produces |
-|---|---|---|
-| 01 | Plan & scaffold | Repo, containerized Rust toolchain, YAML schema for team config |
-| 02 | ACP spine | Backend spawns a real harness, speaks ACP, archives a full session to Postgres |
-| 03 | Team Bus + modes | MCP delegation server, pipeline orchestrator, guards, two agents delegating |
-| 04 | Canvas | Web UI served by `loomwatchd`: agent panel, drag-to-instantiate, edge drawing, YAML round-trip |
-| 05 | Watch & alert | Observed-edge layer over the WebSocket stream, timeline scrubber, attention queue, notifications |
-| 06 | Live & polish | Run a real multi-vendor team against real work |
+| # | Phase | Produces | Status |
+|---|---|---|---|
+| 01 | Plan & scaffold | Repo, containerized Rust toolchain, YAML schema for team config | Shipped |
+| 02 | ACP spine | Backend spawns a real harness, speaks ACP, archives a full session to Postgres | Shipped |
+| 03 | Team Bus + modes | MCP delegation server, pipeline orchestrator, guards, two agents delegating | Shipped |
+| 04 | Canvas | Web UI served by `loomwatchd`: agent panel, drag-to-instantiate, edge drawing, YAML round-trip | Shipped 2026-09-07 |
+| 05 | Watch & alert | Observed-edge layer over the WebSocket stream, timeline scrubber, attention queue, notifications | Next |
+| 06 | Live & polish | Run a real multi-vendor team against real work | Next |
 
 Contracts frozen between phases: the internal event schema after 02, the WebSocket message
 schema after 03. The WebSocket message schema is frozen in
