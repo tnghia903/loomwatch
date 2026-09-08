@@ -122,9 +122,5 @@ browser. To load a specific team file, append `?path=`:
 http://127.0.0.1:3000/?path=/absolute/path/to/team.yaml
 ```
 
-`?path=` is the only way to open a team file today — a teams-directory listing and
-create endpoint (`GET /api/teams`) is deferred (see
-[docs/CANVAS_SPEC.md §15.4](docs/CANVAS_SPEC.md#15-open-decisions--operator--backend)).
-Without `?path=` the canvas opens in an empty state with no file to save to; the `New team`
-entry point in the UI is visible but cannot write to disk until the directory endpoint ships.
-The UI saves back via `PUT /api/team?path=...`, so once a file is opened it can be saved.
+`?path=` is the only way to open a team file today — a teams-directory listing exists (`GET /api/teams`), and `New team` works by **create-on-save**: `PUT /api/team` accepts `{path, yaml}` in the JSON body and creates a missing file when its parent directory exists beneath the teams root (`resolve_writable_team_path` + `atomic_write`). There is no distinct `POST`/create route. See [docs/CANVAS_SPEC.md §15.4](docs/CANVAS_SPEC.md#15-open-decisions--operator--backend). Without `?path=` the canvas opens in an empty state with no file to save to; the `New team`
+entry point is visible and its first save writes the file via the PUT above.

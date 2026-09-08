@@ -1234,11 +1234,44 @@ Not specified here — they get their own document — but Phase 04 must leave r
 Flagged rather than decided, per the design/backend boundary. Each blocks a specific part
 of the build.
 
-**What already exists** (TNG-52, `crates/loomwatch-backend/src/api.rs`), so nobody asks for
-it twice: `GET /api/harnesses` → detected harnesses only, `{id, name, command,
-executablePath, spawn:{cmd, args}}`; `GET /api/team?path=` → `{path, yaml}`;
-`PUT /api/team` → validates, `422` on invalid, writes; `GET /api/config/schema` → the
-embedded team schema. The gaps below are what Phase 04 needs *beyond* that.
+**What already exists** (TNG-52 + TNG-74, `crates/loomwatch-backend/src/api.rs`), so nobody
+asks for it twice:
+
+| Method | Route | Response |
+|--------|-------|----------|
+| `GET` | `/api/harnesses` | Detected harnesses only — `{id, name, command, executablePath, spawn:{cmd, args}}` |
+| `GET` | `/api/teams` | Teams discovery — `{root, files}`; see representative response below |
+| `GET` | `/api/team?path=` | `{path, yaml}` — confined to teams root |
+| `PUT` | `/api/team` | Validates, `422` on invalid (server-side `TeamConfig::parse`), `atomic_write` (temp file + atomic rename) with no re-serialization — **unchanged from TNG-52** |
+| `GET` | `/api/config/schema` | Embedded `team.schema.yaml` as JSON |
+
+**Teams discovery representative response:**
+
+```json
+{
+  "root": "/Users/me/.loomwatch/teams",
+  "files": [
+    "nested/a.YAML",
+    "nested/b.yml",
+    "z.yaml"
+  ]
+}
+```
+
+- `root` is the canonical absolute `LOOMWATCH_TEAMS_DIR` path (default `~/.loomwatch/teams`),
+  `to_string_lossy()` encoded. Safe for display as-is or abbreviated (e.g. `~/…/teams`).
+- `files` entries are lexicographically sorted, `/`-separated relative paths confined below
+  `root`. The UI can safely form `{root}/{file}` with no path-traversal risk.
+- Recursive directory scan: `.yaml` / `.yml` extension (case-insensitive), no directory
+  symlink following, file symlinks accepted only when `fs::canonicalize` resolves inside root,
+  paths with non-normal components silently excluded.
+- Empty root returns `"files": []`.
+- **Errors:** `GET /api/teams` is read-only; the only failure mode is an internal scan error,
+  which returns `500` with a `failed to discover team files` message. It never fails for a
+  missing root — the daemon canonicalizes `LOOMWATCH_TEAMS_DIR` at startup and refuses to
+  boot if it cannot, so an unreachable root is a startup error, not a per-request one.
+
+The gaps below are what Phase 04 still needs *beyond* that.
 
 1. **Node layout persistence (§7.3).** Sidecar `<team>.layout.json` (recommended), an
    `Agent.ui` schema addition, or `localStorage`. Needs a schema/backend call. *Blocks:*
@@ -1266,15 +1299,14 @@ embedded team schema. The gaps below are what Phase 04 needs *beyond* that.
      `team.schema.yaml`, and neither belongs to any one team file. Proposal:
      `~/.loomwatch/library.yaml`, its own small schema, its own ADR. *Blocks:* two of the
      three Library groups; Phase 04 builds them against fixtures and ships them empty.
-4. **Teams directory, file listing, and change notification (§9.3, §10.2).** `GET|PUT
-   /api/team` take an arbitrary `path`, which is enough to open and save a known file but
-   not enough for the UI to **offer a choice** — a browser cannot browse the local disk.
-   Needed: a teams root (proposal: `LOOMWATCH_TEAMS_DIR`, default `~/.loomwatch/teams`), a
-   `GET /api/teams` list, and a create path for §10.2. Also worth deciding: `PUT /api/team`
-   currently writes to any path the caller names, which is a wide-open primitive for a
-   daemon that may be reachable over a LAN or Tailscale (ARCHITECTURE §6) — that is a
-   backend security call, not a design one, but it surfaces here because §10.2 is the
-   feature that first depends on it.
+4. **Teams directory: change notification and the `Open team…` workflow (§9.3, §10.2).**
+   `GET /api/teams` (TNG-74) and create-on-save via the existing `PUT /api/team` — a missing
+   file with an existing parent beneath the teams root is created by `atomic_write` — cover
+   listing and §10.2's create. What remains genuinely missing: a **change notification**
+   channel and a picker for the UI to resolve a listed relative `{root}/{file}` into an
+   absolute `?path=` (which `GET /api/team` still requires). Also worth deciding: the daemon
+   currently isolates all team-file access to `LOOMWATCH_TEAMS_DIR` and rejects paths that
+   resolve outside it (TNG-59), which closes the LAN security concern noted earlier.
    - **Conflict detection needs a revision token.** `{path, yaml}` carries no `mtime` or
      `etag`, so §9.3 currently hashes the YAML client-side. An `etag` on `GET` plus
      `If-Match` on `PUT` would make it correct and would close the lost-update window
@@ -1284,7 +1316,8 @@ embedded team schema. The gaps below are what Phase 04 needs *beyond* that.
      Proposal: a separate `/api/config/events` SSE stream, leaving the frozen socket
      untouched. **Escalating this one** — it is exactly the frozen-schema conflict my
      instructions say to raise rather than decide.
-   - *Blocks:* §10.2's create and `Open team…`; §9.3 degrades to focus-polling without it.
+   - *Blocks:* `Open team…` reaching files by picker instead of typed path; §9.3 degrades to
+     focus-polling without it.
 5. ~~**YAML comment preservation on save (§9.4).**~~ **Resolved, no decision needed.**
    `TeamFileModel` is CST-preserving and `PUT /api/team` writes verbatim bytes, so comments
    and key order survive. The reformat modal is withdrawn (§9.4). The standing ask is a

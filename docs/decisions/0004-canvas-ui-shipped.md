@@ -27,8 +27,11 @@ None material. Three items surfaced as deferred (recorded in `CANVAS_SPEC.md §1
 
 1. **Node layout persistence** (§7.3) — sidecar `.layout.json` recommended but not implemented;
    the canvas falls back to deterministic `dagre` auto-layout on every load.
-2. **Teams directory endpoint** (§15.4) — `GET /api/team?path=` requires an absolute path with
-   no listing or create endpoint, so "New team" and "Open team…" work against local-only state.
+2. **Teams directory endpoint** (§15.4) — `GET /api/teams` shipped in TNG-74 (2026-09-08),
+   providing the listing half. New-file creation is **create-on-save**: the existing
+   `PUT /api/team` creates a missing path with an existing parent beneath the teams root, so
+   no separate `POST`/create route is needed. **Change notification** remains deferred; see
+   updated §15.4.
 3. **Harnesses endpoint completeness** (§15.3) — not-installed-list is a client-side constant;
    advertised models are absent; endpoints and presets have no backend.
 
