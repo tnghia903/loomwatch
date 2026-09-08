@@ -96,6 +96,15 @@ pub struct TeamFile {
     pub yaml: String,
 }
 
+/// Read-only discovery data for team files available to the web UI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TeamsDiscovery {
+    /// Canonical configured root, encoded lossily only when the platform path is not UTF-8.
+    pub root: String,
+    /// YAML files below `root`, encoded as sorted, `/`-separated relative paths.
+    pub files: Vec<String>,
+}
+
 /// Build the REST router using the daemon process's `PATH`.
 ///
 /// # Errors
@@ -129,6 +138,7 @@ pub fn router_with_path(
     };
     Ok(Router::new()
         .route("/api/harnesses", get(get_harnesses))
+        .route("/api/teams", get(get_teams))
         .route("/api/team", get(get_team).put(put_team))
         .route("/api/config/schema", get(get_config_schema))
         .route_layer(middleware::from_fn_with_state(
@@ -174,6 +184,78 @@ fn normalize_hostname(host: &str) -> String {
 
 async fn get_harnesses(State(state): State<ApiState>) -> Json<Vec<DetectedHarness>> {
     Json(detect_harnesses(state.search_path.as_deref()))
+}
+
+async fn get_teams(State(state): State<ApiState>) -> Result<Json<TeamsDiscovery>, ApiError> {
+    let files = discover_team_files(&state.teams_root).map_err(|error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to discover team files: {error}"),
+        )
+    })?;
+    Ok(Json(TeamsDiscovery {
+        root: state.teams_root.to_string_lossy().into_owned(),
+        files,
+    }))
+}
+
+fn discover_team_files(teams_root: &Path) -> io::Result<Vec<String>> {
+    let mut directories = vec![teams_root.to_path_buf()];
+    let mut files = Vec::new();
+
+    while let Some(directory) = directories.pop() {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            let path = entry.path();
+
+            // Directory symlinks are deliberately not followed. This both avoids cycles and
+            // makes it impossible for traversal to leave the configured tree while scanning.
+            if file_type.is_dir() {
+                directories.push(path);
+                continue;
+            }
+            if !(file_type.is_file() || file_type.is_symlink()) || !is_team_file(&path) {
+                continue;
+            }
+
+            // A file symlink is useful when it still resolves inside the teams root. Broken
+            // links and links to files outside the root are not discoverable.
+            let Ok(resolved) = fs::canonicalize(&path) else {
+                continue;
+            };
+            if !resolved.starts_with(teams_root) || !resolved.is_file() {
+                continue;
+            }
+            if let Some(relative) = normalized_relative_path(teams_root, &path) {
+                files.push(relative);
+            }
+        }
+    }
+
+    files.sort_unstable();
+    files.dedup();
+    Ok(files)
+}
+
+fn is_team_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("yaml") || extension.eq_ignore_ascii_case("yml")
+        })
+}
+
+fn normalized_relative_path(teams_root: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(teams_root).ok()?;
+    let mut parts = Vec::new();
+    for component in relative.components() {
+        match component {
+            std::path::Component::Normal(part) => parts.push(part.to_str()?),
+            _ => return None,
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("/"))
 }
 
 async fn get_team(
@@ -566,6 +648,124 @@ mod tests {
             "https://loomwatch.dev/schemas/team.schema.yaml"
         );
         assert_eq!(schema["properties"]["schemaVersion"]["const"], 1);
+    }
+
+    #[tokio::test]
+    async fn teams_endpoint_returns_root_and_sorted_relative_yaml_paths() {
+        let directory = TempDirectory::new();
+        let nested = directory.0.join("nested");
+        fs::create_dir(&nested).expect("create nested directory");
+        fs::write(directory.0.join("z.yaml"), VALID_TEAM).expect("write root team");
+        fs::write(nested.join("b.yml"), VALID_TEAM).expect("write nested team");
+        fs::write(nested.join("a.YAML"), VALID_TEAM).expect("write uppercase team");
+        fs::write(directory.0.join("notes.txt"), "not a team").expect("write non-team file");
+
+        let response = test_router(&directory.0)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/teams")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(response).await,
+            json!({
+                "root": fs::canonicalize(&directory.0)
+                    .expect("canonical teams root")
+                    .to_string_lossy(),
+                "files": ["nested/a.YAML", "nested/b.yml", "z.yaml"]
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn teams_endpoint_returns_an_empty_list_for_an_empty_root() {
+        let directory = TempDirectory::new();
+        let response = test_router(&directory.0)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/teams")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await["files"], json!([]));
+    }
+
+    #[test]
+    fn teams_router_rejects_a_missing_root() {
+        let directory = TempDirectory::new();
+        let missing = directory.0.join("missing");
+        let error = router_with_path(missing, vec!["localhost".to_owned()], None)
+            .err()
+            .expect("missing teams root should fail router construction");
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn teams_discovery_rejects_lexical_escape_paths() {
+        let root = Path::new("/teams");
+        assert_eq!(
+            normalized_relative_path(root, Path::new("/teams/nested/team.yaml")),
+            Some("nested/team.yaml".to_owned())
+        );
+        assert_eq!(
+            normalized_relative_path(root, Path::new("/teams/../outside.yaml")),
+            None
+        );
+        assert_eq!(
+            normalized_relative_path(root, Path::new("/outside.yaml")),
+            None
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn teams_endpoint_excludes_symlink_escapes_and_directory_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let directory = TempDirectory::new();
+        let teams_root = directory.0.join("teams");
+        let outside_directory = directory.0.join("outside");
+        fs::create_dir(&teams_root).expect("create teams root");
+        fs::create_dir(&outside_directory).expect("create outside directory");
+        let inside_file = teams_root.join("inside.yaml");
+        let outside_file = outside_directory.join("outside.yaml");
+        fs::write(&inside_file, VALID_TEAM).expect("write inside team");
+        fs::write(&outside_file, VALID_TEAM).expect("write outside team");
+        symlink(&inside_file, teams_root.join("inside-link.yaml"))
+            .expect("create confined file symlink");
+        symlink(&outside_file, teams_root.join("outside-link.yaml"))
+            .expect("create escaping file symlink");
+        symlink(&outside_directory, teams_root.join("outside-directory"))
+            .expect("create escaping directory symlink");
+
+        let response = test_router(&teams_root)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/teams")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(response).await["files"],
+            json!(["inside-link.yaml", "inside.yaml"])
+        );
     }
 
     #[tokio::test]
