@@ -7,7 +7,7 @@ machine, wire them up (or don't), give the team a goal, and watch the work happe
 live graph — nodes are agents, edges are the delegations between them.
 
 `loomwatchd` runs your teams as local child processes and archives every event to
-Postgres. Phase 04 will deliver the canvas as a web UI the daemon serves — open it
+Postgres. Phase 04 shipped the canvas as a web UI the daemon serves — open it
 in a browser (or install it as a PWA). No Electron, no native app to build; the daemon
 is a single static Rust binary. The UI is designed to be eye-catching and minimal — the
 canvas is the product, the chrome gets out of the way.
@@ -48,14 +48,20 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full specification.
 |---|---|
 | Agents | Local processes speaking ACP over stdio |
 | Backend | Rust `loomwatchd` — ACP client, process supervisor, Team Bus MCP server, Postgres, WebSocket, UI host |
-| Client (Phase 04) | React + Vite + React Flow web UI, served by `loomwatchd`, PWA-installable |
+| Client | React + Vite + React Flow web UI, served by `loomwatchd`, PWA-installable |
 | Team config | Version-controlled YAML |
 
 ## Status
 
-Phase 03 Team Bus + execution modes. The backend hosts an authenticated Team Bus MCP
-server (`roster`/`dispatch`/`ask`/`handoff`/`report`/`escalate`), enforces the
-delegation guards — depth, fan-out, cycles, budget admission — server-side, and runs
+Phase 04 (Canvas) shipped 2026-09-07. `loomwatchd serve` hosts the single-page web UI,
+including the agent Library panel (TNG-54), the node/edge canvas (TNG-55), the inspector
+and YAML round-trip (TNG-53), and the daemon's config API (TNG-52). See
+[docs/CANVAS_SPEC.md](docs/CANVAS_SPEC.md) for the full interaction and visual
+specification.
+
+Phase 03 Team Bus + execution modes (shipped prior). The backend hosts an authenticated
+Team Bus MCP server (`roster`/`dispatch`/`ask`/`handoff`/`report`/`escalate`), enforces
+the delegation guards — depth, fan-out, cycles, budget admission — server-side, and runs
 edge-drawn teams as deterministic pipeline DAGs (dataflow following the drawn edges)
 or edge-free teams as self-organizing. Every event, delegations included, archives
 through the frozen `RunEvent` contract. See
@@ -71,7 +77,7 @@ schema.
 | `schemas/team.schema.yaml` | YAML/JSON Schema contract for teams and runtime records |
 | `examples/` | Version-controlled team examples |
 | `docs/` | Architecture and contract documentation |
-| `ui/` (Phase 04) | Web UI — React + Vite + React Flow, served by `loomwatchd` |
+| `ui/` | Web UI — React + Vite + React Flow, served by `loomwatchd` |
 
 ## Development
 
@@ -98,3 +104,27 @@ build and test environment. The Compose file deliberately has no backend service
 `loomwatchd` binaries run natively on macOS and connect to the local Postgres port. Team files
 use schema version `1`; start with [`examples/research-team.yaml`](examples/research-team.yaml)
 and see [`docs/TEAM_CONFIG.md`](docs/TEAM_CONFIG.md) for semantic validation rules.
+
+## Using the UI
+
+Build the UI assets and start the daemon:
+
+```sh
+cd ui && npm install && npm run build && cd ..
+cargo build --release
+./target/release/loomwatchd serve
+```
+
+The daemon prints the listening address (default `http://127.0.0.1:3000`). Open it in a
+browser. To load a specific team file, append `?path=`:
+
+```
+http://127.0.0.1:3000/?path=/absolute/path/to/team.yaml
+```
+
+`?path=` is the only way to open a team file today — a teams-directory listing and
+create endpoint (`GET /api/teams`) is deferred (see
+[docs/CANVAS_SPEC.md §15.4](docs/CANVAS_SPEC.md#15-open-decisions--operator--backend)).
+Without `?path=` the canvas opens in an empty state with no file to save to; the `New team`
+entry point in the UI is visible but cannot write to disk until the directory endpoint ships.
+The UI saves back via `PUT /api/team?path=...`, so once a file is opened it can be saved.
