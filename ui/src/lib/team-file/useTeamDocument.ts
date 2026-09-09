@@ -483,7 +483,10 @@ export function useTeamDocument() {
         const { yaml } = await fetchTeamFile(path)
         const diskRevision = await hashTeamYaml(yaml)
         if (diskRevision === loadedRevision) return
-        if (saveState === 'clean' || saveState === 'saved') {
+        // §9.5: a read-only document cannot hold unsaved edits, so a changed disk revision is
+        // not a conflict — re-evaluate it like a clean canvas (§9.3), which re-classifies the
+        // new schemaVersion and may even lift the read-only state.
+        if (saveState === 'clean' || saveState === 'saved' || saveState === 'read-only') {
           await applyDiskYaml(yaml, 'Reloaded from disk')
         } else {
           setExternalChange({ diskYaml: yaml, diskRevision })

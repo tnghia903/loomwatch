@@ -534,6 +534,51 @@ describe('useTeamDocument', () => {
     expect(result.current.nodes.find((node) => node.id === 'researcher')?.data.agent.name).toBe('Protocol Researcher')
   })
 
+  it('reloads a changed read-only canvas on focus instead of raising a false conflict (§9.3/§9.5)', async () => {
+    const versionTwo = TEAM_YAML.replace('schemaVersion: 1', 'schemaVersion: 2')
+    let diskYaml = versionTwo
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
+      String(input).startsWith('/api/team')
+        ? jsonResponse(200, { path: '/teams/research-team.yaml', yaml: diskYaml })
+        : jsonResponse(200, SCHEMA_GATE),
+    ))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('read-only'))
+
+    diskYaml = versionTwo.replace('name: Protocol Researcher', 'name: Edited outside LoomWatch')
+    act(() => window.dispatchEvent(new Event('focus')))
+
+    await waitFor(() => expect(result.current.diskNotice).toBe('Reloaded from disk'))
+    expect(result.current.saveState).toBe('read-only')
+    expect(result.current.externalChange).toBeNull()
+    expect(result.current.saveError).toBeNull()
+    expect(result.current.readOnlyReason).toContain('schema version 2')
+    expect(result.current.nodes.find((node) => node.id === 'researcher')?.data.agent.name).toBe('Edited outside LoomWatch')
+  })
+
+  it('re-evaluates a read-only canvas to clean when focus brings a supported schema version (§9.5)', async () => {
+    const versionTwo = TEAM_YAML.replace('schemaVersion: 1', 'schemaVersion: 2')
+    let diskYaml = versionTwo
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
+      String(input).startsWith('/api/team')
+        ? jsonResponse(200, { path: '/teams/research-team.yaml', yaml: diskYaml })
+        : jsonResponse(200, SCHEMA_GATE),
+    ))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('read-only'))
+
+    diskYaml = TEAM_YAML
+    act(() => window.dispatchEvent(new Event('focus')))
+
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    expect(result.current.readOnlyReason).toBeNull()
+    expect(result.current.externalChange).toBeNull()
+    expect(result.current.diskNotice).toBe('Reloaded from disk')
+
+    act(() => result.current.renameAgent('researcher', 'role', 'Investigate protocols'))
+    expect(result.current.saveState).toBe('dirty')
+  })
+
   describe('deleting the entrypoint node (docs/CANVAS_SPEC.md §5.4)', () => {
     it('promotes the sole survivor automatically when exactly one agent remains', async () => {
       vi.stubGlobal(
