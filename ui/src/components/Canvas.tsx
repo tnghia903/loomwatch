@@ -182,8 +182,10 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
       const key = event.key.toLowerCase()
       const editingText = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
       if (mod && key === 'k') { event.preventDefault(); setPaletteOpen(true); return }
-      if (editingText) return
+      // §9.1: ⌘S works from anywhere, including while an input is focused — so it is
+      // handled before the generic editing-text early return. Text entry is untouched.
       if (mod && key === 's') { event.preventDefault(); if (editable) void doc.save(); return }
+      if (editingText) return
       if (mod && key === 'z') { event.preventDefault(); if (event.shiftKey) doc.redo(); else doc.undo(); return }
       if (mod && key === '\\') { event.preventDefault(); if (windowWidth >= 768) toggleLibrary(); return }
       if (mod && key === '0') { event.preventDefault(); void flow.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 300 }); return }
@@ -440,8 +442,31 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
       {newTeamSheet && <NewTeamSheet name={newName} onNameChange={setNewName} onClose={() => setNewTeamSheet(false)} onCreate={() => { doc.createNewDocument(newName); setNewTeamSheet(false); onDocumentOpen() }} />}
       {saveCopyOpen && <SaveCopySheet onClose={() => setSaveCopyOpen(false)} onSave={doc.saveCopy} />}
       {yamlOpen && <YamlSheet title="YAML preview" yaml={doc.yamlPreview} onClose={() => setYamlOpen(false)} />}
-      {compareOpen && doc.externalChange && <YamlSheet title="Disk ↔ in-memory YAML" yaml={unifiedYamlDiff(doc.externalChange.diskYaml, doc.yamlPreview)} onClose={() => setCompareOpen(false)} />}
+      {compareOpen && doc.externalChange && (
+        <YamlSheet
+          title="Disk ↔ in-memory YAML"
+          yaml={unifiedYamlDiff(doc.externalChange.diskYaml, doc.yamlPreview)}
+          onClose={() => setCompareOpen(false)}
+          footer={<ConflictSheetFooter onKeepMine={doc.keepMine} onUseDisk={() => void doc.useDisk()} />}
+        />
+      )}
     </CanvasActionsContext.Provider>
+  )
+}
+
+function ConflictSheetFooter({ onKeepMine, onUseDisk }: { onKeepMine: () => void; onUseDisk: () => void }) {
+  const [confirmDisk, setConfirmDisk] = useState(false)
+  return (
+    <footer className="flex h-12 items-center justify-end gap-2 border-t border-hairline/10 px-4">
+      <button type="button" onClick={onKeepMine} className="rounded-md px-2 py-1 text-[13px] text-ink-2 hover:bg-hairline/10">Keep mine</button>
+      <button
+        type="button"
+        onClick={() => (confirmDisk ? onUseDisk() : setConfirmDisk(true))}
+        className={confirmDisk ? 'rounded-md bg-red px-2 py-1 text-[13px] text-white' : 'rounded-md px-2 py-1 text-[13px] text-red hover:bg-red/10'}
+      >
+        {confirmDisk ? 'Discard my edits?' : 'Use disk'}
+      </button>
+    </footer>
   )
 }
 
