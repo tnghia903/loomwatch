@@ -1,7 +1,7 @@
 import { Check, Clipboard, Loader2, Lock, TriangleAlert, X } from 'lucide-react'
 import { useState } from 'react'
 
-import type { DocumentProblem } from '../../lib/team-file/validation'
+import type { AgentField, AgentFieldProblems, DocumentProblem } from '../../lib/team-file/validation'
 import type { EntrypointProblem, SaveState } from '../../lib/team-file/useTeamDocument'
 
 export interface DocumentChipProps {
@@ -10,13 +10,25 @@ export interface DocumentChipProps {
   saveError: string | null
   entrypointProblem: EntrypointProblem | null
   documentProblems: DocumentProblem[]
-  fieldProblemCount?: number
+  fieldProblemsByAgent: ReadonlyMap<string, AgentFieldProblems>
+  agentNames: ReadonlyMap<string, string>
   isValid: boolean
   readOnlyReason: string | null
+  fileGone?: boolean
   editingDisabled?: boolean
   onSave: () => void
+  onSaveCopy?: () => void
   onReload: () => void
   onShowYaml: () => void
+  onSelectProblem?: (problem: DocumentProblem) => void
+}
+
+const FIELD_LABELS: Record<AgentField, string> = {
+  name: 'Name',
+  role: 'Role',
+  model: 'Model',
+  cwd: 'Working directory',
+  limitUsd: 'Budget',
 }
 
 // docs/CANVAS_SPEC.md §9.1/§9.5: all file state lives in this one top-centre control.
@@ -26,20 +38,39 @@ export function DocumentChip({
   saveError,
   entrypointProblem,
   documentProblems,
-  fieldProblemCount = 0,
+  fieldProblemsByAgent,
+  agentNames,
   isValid,
   readOnlyReason,
+  fileGone = false,
   editingDisabled = false,
   onSave,
+  onSaveCopy,
   onReload,
   onShowYaml,
+  onSelectProblem,
 }: DocumentChipProps) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [problemsOpen, setProblemsOpen] = useState(false)
   const [discardConfirm, setDiscardConfirm] = useState(false)
   if (!path) return null
   const filename = path.split('/').pop() ?? path
-  const problemCount = documentProblems.length + fieldProblemCount + (entrypointProblem ? 1 : 0)
+  const fieldProblems: DocumentProblem[] = Array.from(fieldProblemsByAgent, ([agentId, fields]) =>
+    (Object.entries(fields) as [AgentField, NonNullable<AgentFieldProblems[AgentField]>][]).map(
+      ([field, problem]) => ({
+        message: `${agentNames.get(agentId) ?? agentId} · ${FIELD_LABELS[field]}: ${problem.message}`,
+        agentId,
+      } satisfies DocumentProblem),
+    ),
+  ).flat()
+  // One array owns both the visible count and the popover rows, so a counted problem can
+  // never disappear from Review (CANVAS_SPEC §9.1/§9.2).
+  const reviewProblems = [
+    ...(entrypointProblem ? [{ message: entrypointProblem.message }] : []),
+    ...fieldProblems,
+    ...documentProblems,
+  ]
+  const problemCount = reviewProblems.length
   const saveDisabled = !isValid || editingDisabled || saveState === 'read-only'
 
   return (
@@ -54,18 +85,22 @@ export function DocumentChip({
           onClick={() => setDetailsOpen((open) => !open)}
           className="min-w-0 flex-1 truncate text-left text-ink"
         >
-          {saveState === 'invalid' ? `${problemCount} problem${problemCount === 1 ? '' : 's'}` : filename}
+          {fileGone ? 'File is gone' : saveState === 'invalid' ? `${problemCount} problem${problemCount === 1 ? '' : 's'}` : filename}
           {saveState === 'dirty' && <span className="text-ink-2"> · Unsaved changes</span>}
           {saveState === 'new' && <span className="text-ink-2"> · Not saved yet</span>}
           {saveState === 'saving' && <span className="text-ink-2"> · Saving…</span>}
           {saveState === 'saved' && <span className="text-green"> · Saved</span>}
           {saveState === 'conflict' && <span className="text-copper"> · Changed on disk</span>}
-          {saveState === 'read-only' && <span className="text-slate"> · Read-only</span>}
+          {saveState === 'read-only' && !fileGone && <span className="text-slate"> · Read-only</span>}
           {saveState === 'error' && <span className="text-red"> · Couldn't save</span>}
           {editingDisabled && <span className="text-ink-3"> · Editing needs a wider window</span>}
         </button>
 
-        {saveState === 'invalid' ? (
+        {fileGone ? (
+          <button type="button" onClick={onSaveCopy} className="shrink-0 rounded-full bg-slate px-2.5 py-1 text-[12px] font-medium text-white hover:opacity-90">
+            Save a copy…
+          </button>
+        ) : saveState === 'invalid' ? (
           <button type="button" onClick={() => setProblemsOpen((open) => !open)} className="rounded-full px-2.5 py-1 text-[12px] font-medium text-red hover:bg-red/10">
             Review
           </button>
@@ -110,8 +145,22 @@ export function DocumentChip({
         <div role="dialog" aria-label="Document problems" className="w-96 rounded-lg border border-red/30 bg-surface-solid p-3 text-[12px] shadow-[0_16px_40px_rgb(0_0_0/.14)]">
           <p className="mb-2 font-semibold text-ink">Resolve before saving</p>
           <ul className="space-y-1 text-red">
-            {entrypointProblem && <li>{entrypointProblem.message}</li>}
-            {documentProblems.map((problem, index) => <li key={`${problem.message}-${index}`}>{problem.message}</li>)}
+            {reviewProblems.map((problem, index) => {
+              const actionable = Boolean(problem.agentId || problem.edge) && Boolean(onSelectProblem)
+              return (
+                <li key={`${problem.message}-${index}`}>
+                  {actionable ? (
+                    <button
+                      type="button"
+                      onClick={() => { onSelectProblem?.(problem); setProblemsOpen(false) }}
+                      className="w-full rounded px-1 py-0.5 text-left hover:bg-red/10"
+                    >
+                      {problem.message}
+                    </button>
+                  ) : problem.message}
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}

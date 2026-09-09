@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { AgentNode } from '../library/nodeFromDrop'
 import { nodeFromDrop } from '../library/nodeFromDrop'
-import { fetchConfigSchema, fetchTeamFile, saveTeamFile, TeamFileApiError } from './client'
+import { fetchConfigSchema, fetchTeamFile, fetchTeamsDiscovery, saveTeamFile, TeamFileApiError } from './client'
 import { TeamFileModel, TeamFileParseError } from './document'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
 import { autoLayout, offsetCollision, seededLayout } from './layout'
@@ -79,6 +79,31 @@ function sourceLineAtError(source: string, lineNumber: number): string | null {
   return atError ?? null
 }
 
+function parseFailure(error: TeamFileParseError, source: string): LoadFailure {
+  const lineNumber = Number(error.message.match(/(?:at )?line (\d+)/i)?.[1])
+  const line = lineNumber > 0
+    ? sourceLineAtError(source, lineNumber)
+    : error.message.match(/line \d+[^;]*/i)?.[0] ?? null
+  return { message: error.message, line }
+}
+
+/** Resolve a daemon-approved relative team path against its canonical discovery root. */
+export function absoluteTeamPath(root: string, requestedPath: string): string {
+  if (requestedPath.startsWith('/')) return requestedPath
+  const parts: string[] = []
+  for (const part of requestedPath.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (parts.length === 0) throw new Error('Team path escapes the configured teams directory.')
+      parts.pop()
+      continue
+    }
+    parts.push(part)
+  }
+  if (parts.length === 0) throw new Error('Team path does not name a file.')
+  return `${root.replace(/\/+$/, '')}/${parts.join('/')}`
+}
+
 /**
  * Blocks `Save` per §5.4/§10.2: no candidate agent to promote means no automatic entrypoint,
  * and an empty canvas means no agent at all. `candidates` is empty in the latter case — there
@@ -145,6 +170,7 @@ export function useTeamDocument() {
   const modelRef = useRef<TeamFileModel | null>(null)
   const loadedRevisionRef = useRef<string | null>(null)
   const [path, setPath] = useState<string | null>(null)
+  const [teamsRoot, setTeamsRoot] = useState<string | null>(null)
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [edges, setEdges] = useState<ConfiguredEdge[]>([])
   const [entrypoint, setEntrypointState] = useState<string | null>(null)
@@ -161,6 +187,7 @@ export function useTeamDocument() {
   const [attemptedSave, setAttemptedSave] = useState(false)
   const [documentSnapshot, setDocumentSnapshot] = useState<ReturnType<TeamFileModel['snapshot']> | null>(null)
   const [readOnlyReason, setReadOnlyReason] = useState<string | null>(null)
+  const [fileGone, setFileGone] = useState(false)
   const [loadFailure, setLoadFailure] = useState<LoadFailure | null>(null)
   const [externalChange, setExternalChange] = useState<ExternalChange | null>(null)
   const [diskNotice, setDiskNotice] = useState<string | null>(null)
@@ -257,6 +284,7 @@ export function useTeamDocument() {
     setYamlPreview(model.toYaml())
     setSaveError(null)
     setReadOnlyReason(null)
+    setFileGone(false)
     setLoadFailure(null)
     setExternalChange(null)
     setAttemptedSave(false)
@@ -284,7 +312,10 @@ export function useTeamDocument() {
       }
       let source: string | null = null
       try {
-        const { yaml } = await fetchTeamFile(requestedPath)
+        const [{ yaml }, discovery] = await Promise.all([
+          fetchTeamFile(requestedPath),
+          requestedPath.startsWith('/') ? Promise.resolve(null) : fetchTeamsDiscovery(),
+        ])
         source = yaml
         const loadedRevision = await hashTeamYaml(yaml)
         if (cancelled) {
@@ -304,7 +335,8 @@ export function useTeamDocument() {
         modelRef.current = model
         loadedRevisionRef.current = loadedRevision
         isNewRef.current = false
-        setPath(requestedPath)
+        if (discovery) setTeamsRoot(discovery.root)
+        setPath(discovery ? absoluteTeamPath(discovery.root, requestedPath) : requestedPath)
         setEntrypointState(snapshot.entrypoint)
         setTeamGuards(snapshot.guards ?? null)
         setTeamBudget(snapshot.budget ?? null)
@@ -317,6 +349,7 @@ export function useTeamDocument() {
         setDocumentSnapshot(snapshot)
         setYamlPreview(yaml)
         resetHistory()
+        setFileGone(false)
         const schemaVersion = (snapshot as { schemaVersion?: unknown }).schemaVersion
         if (schemaVersion !== 1) {
           const reason = `This file uses schema version ${String(schemaVersion)}. This build of LoomWatch understands version 1.`
@@ -335,11 +368,7 @@ export function useTeamDocument() {
             : String(error)
         setSaveError(message)
         if (error instanceof TeamFileParseError) {
-          const lineNumber = Number(message.match(/(?:at )?line (\d+)/i)?.[1])
-          const line = lineNumber > 0 && source
-            ? sourceLineAtError(source, lineNumber)
-            : message.match(/line \d+[^;]*/i)?.[0] ?? null
-          setLoadFailure({ message, line })
+          setLoadFailure(parseFailure(error, source ?? ''))
         }
         setSaveState('error')
       }
@@ -362,7 +391,18 @@ export function useTeamDocument() {
 
   const applyDiskYaml = useCallback(
     async (yaml: string, notice?: string) => {
-      const model = TeamFileModel.parse(yaml)
+      let model: TeamFileModel
+      try {
+        model = TeamFileModel.parse(yaml)
+      } catch (error) {
+        if (error instanceof TeamFileParseError) {
+          setLoadFailure(parseFailure(error, yaml))
+          setSaveError(error.message)
+          setSaveState('error')
+          return false
+        }
+        throw error
+      }
       const snapshot = model.snapshot()
       const agents = Array.isArray(snapshot.agents) ? snapshot.agents : []
       const configured = Array.isArray(snapshot.edges)
@@ -395,6 +435,8 @@ export function useTeamDocument() {
       resetHistory()
       setExternalChange(null)
       setSaveError(null)
+      setLoadFailure(null)
+      setFileGone(false)
       const schemaVersion = (snapshot as { schemaVersion?: unknown }).schemaVersion
       if (schemaVersion !== 1) {
         const reason = `This file uses schema version ${String(schemaVersion)}. This build of LoomWatch understands version 1.`
@@ -408,6 +450,7 @@ export function useTeamDocument() {
         setDiskNotice(notice)
         window.setTimeout(() => setDiskNotice((current) => (current === notice ? null : current)), 3000)
       }
+      return true
     },
     [nodes, resetHistory],
   )
@@ -421,6 +464,7 @@ export function useTeamDocument() {
       if (error instanceof TeamFileApiError && error.status === 404) {
         const reason = 'File is gone. Save a copy to continue editing.'
         setReadOnlyReason(reason)
+        setFileGone(true)
         setSaveError(reason)
         setSaveState('read-only')
         return
@@ -450,6 +494,7 @@ export function useTeamDocument() {
         if (error instanceof TeamFileApiError && error.status === 404) {
           const reason = 'File is gone. Save a copy to continue editing.'
           setReadOnlyReason(reason)
+          setFileGone(true)
           setSaveError(reason)
           setSaveState('read-only')
         }
@@ -471,6 +516,37 @@ export function useTeamDocument() {
     if (!externalChange) return
     await applyDiskYaml(externalChange.diskYaml)
   }, [externalChange, applyDiskYaml])
+
+  const saveCopy = useCallback(async (requestedPath: string) => {
+    const targetPath = requestedPath.trim()
+    if (!targetPath || !modelRef.current) return false
+    setSaveState('saving')
+    try {
+      const yaml = modelRef.current.toYaml()
+      const saved = await saveTeamFile(targetPath, yaml)
+      let root = teamsRoot
+      if (!saved.path.startsWith('/') && !root) {
+        const discovery = await fetchTeamsDiscovery()
+        root = discovery.root
+        setTeamsRoot(root)
+      }
+      const displayPath = root ? absoluteTeamPath(root, saved.path) : saved.path
+      loadedRevisionRef.current = await hashTeamYaml(yaml)
+      isNewRef.current = false
+      setPath(displayPath)
+      setReadOnlyReason(null)
+      setFileGone(false)
+      setSaveError(null)
+      setSaveState('saved')
+      window.history.replaceState({}, '', `/?path=${encodeURIComponent(displayPath)}`)
+      window.setTimeout(() => setSaveState((current) => (current === 'saved' ? 'clean' : current)), 2000)
+      return true
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error))
+      setSaveState('read-only')
+      return false
+    }
+  }, [teamsRoot])
 
   // Batched so a multi-select delete (several 'remove' NodeChanges in one call) computes the
   // survivor set once, instead of each single-id removal racing the others over stale state.
@@ -1000,6 +1076,7 @@ export function useTeamDocument() {
     fieldProblemsByAgent,
     isValid,
     readOnlyReason,
+    fileGone,
     loadFailure,
     externalChange,
     diskNotice,
@@ -1015,6 +1092,7 @@ export function useTeamDocument() {
     reloadFromDisk,
     keepMine,
     useDisk,
+    saveCopy,
     layoutNodes,
     settleNodeCollision,
     capturePositionHistory: captureHistory,

@@ -5,6 +5,11 @@ export interface TeamFilePayload {
   yaml: string
 }
 
+export interface TeamsDiscoveryPayload {
+  root: string
+  files: string[]
+}
+
 export class TeamFileApiError extends Error {
   readonly status: number
 
@@ -27,6 +32,17 @@ export async function fetchTeamFile(path: string): Promise<TeamFilePayload> {
   const query = new URLSearchParams({ path })
   const response = await fetch(`/api/team?${query}`)
   return readTeamFileResponse(response)
+}
+
+/** docs/CANVAS_SPEC.md §15.4: the canonical root is the source for absolute display paths. */
+export async function fetchTeamsDiscovery(): Promise<TeamsDiscoveryPayload> {
+  const response = await fetch('/api/teams')
+  const body = (await response.json()) as TeamsDiscoveryPayload | { error: string }
+  if (!response.ok) {
+    const message = 'error' in body ? body.error : response.statusText
+    throw new TeamFileApiError(message, response.status)
+  }
+  return body as TeamsDiscoveryPayload
 }
 
 // The daemon re-validates and rejects (422) before touching the file on disk, so an
