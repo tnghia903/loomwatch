@@ -27,9 +27,9 @@ Keyboard behavior is now executable rather than merely labelled:
 - Provenance summary/entity rerenders restore focus to the owning control. `Esc` collapses
   entity → category → provenance in that order; **Back to response** returns focus to the
   terminal Response.
-- Popovers restore focus to their trigger. The document chip retains equivalent custom
-  semantics because it contains its own independent Save/Review action; the non-action
-  mode display no longer advertises a false button role.
+- Popovers restore focus to their trigger. The document chip is a group with separate
+  native Open and Save/Review buttons; the non-action mode display no longer advertises a
+  false button role.
 
 The narrow interaction pass covers prompt submission, automatic Agent A → Notion activity,
 activity inspection, terminal-response activation, provenance expand/collapse, filtering,

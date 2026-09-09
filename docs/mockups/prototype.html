@@ -213,17 +213,19 @@
        only place file state is expressed, and the only way to reach
        another file. Nine states; `n lines differ` states a magnitude.
        ================================================================= -->
-  <div class="panel top cx e1" id="chip" role="button" tabindex="0" onclick="openSwitcher(this)"
-       aria-controls="switcherPop" aria-expanded="false" aria-label="research-team.yaml, 3 lines differ">
-    <span class="dot" id="chipDot"></span>
-    <span class="chip-text">
-      <span class="chip-l1 t-body-m" id="chipL1">research-team.yaml</span>
-      <span class="chip-l2 t-meta" id="chipL2">3 lines differ</span>
-    </span>
+  <div class="panel top cx e1" id="chip">
+    <button type="button" class="chip-open" id="chipOpen" onclick="openSwitcher(this)"
+            aria-controls="switcherPop" aria-expanded="false" aria-label="research-team.yaml, 3 lines differ, open team switcher">
+      <span class="dot" id="chipDot"></span>
+      <span class="chip-text">
+        <span class="chip-l1 t-body-m" id="chipL1">research-team.yaml</span>
+        <span class="chip-l2 t-meta" id="chipL2">3 lines differ</span>
+      </span>
+      <span class="chev">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </span>
+    </button>
     <span id="chipAction"></span>
-    <span class="chev">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 9l6 6 6-6"/></svg>
-    </span>
     <span class="ledger"></span>
   </div>
 

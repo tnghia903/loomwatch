@@ -628,8 +628,8 @@ CANVAS_SPEC §12 stands in full. Restated with what v2 adds:
   provenance state. Dismissing a panel or popover restores its trigger; collapsing an
   entity/category restores its owner; Back to response restores the terminal Response.
 - Informational surfaces are not controls: the standalone mode display no longer exposes a
-  button role. The document chip remains the one composite custom button because it contains
-  an independent Save/Review button, and implements explicit `Enter`/`Space` behavior.
+  button role. The document chip is now a group with separate native Open and Save/Review
+  buttons, avoiding nested or composite button semantics.
 
 ---
 

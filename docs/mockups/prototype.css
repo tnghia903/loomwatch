@@ -233,6 +233,20 @@ html, body {
      Absolute positioning already establishes the containing block the
      ledger sweep needs. */
 }
+#chip .chip-open {
+  align-self: stretch;
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 #chip .chip-text { display: flex; flex-direction: column; gap: 1px; }
 #chip .chip-l1 { color: var(--color-ink); display: flex; align-items: center; gap: var(--sp-2); }
 #chip .chip-l2 { color: var(--color-ink-3); display: flex; align-items: center; gap: var(--sp-2); }
@@ -1438,7 +1452,7 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
     grid-template-areas: "chip" "nodes" "overlay" "composer";
     align-content: start;
     gap: 12px;
-    padding: 12px 12px 96px;
+    padding: 12px 12px 148px;
   }
 
   #chip {
@@ -1454,6 +1468,7 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
     padding-left: 12px;
   }
   #chip .chip-text { min-width: 0; }
+  #chip .chip-open { min-height: 44px; }
   #chip .chip-l1, #chip .chip-l2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   #viewctl {
@@ -1470,6 +1485,16 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
   }
   #viewctl .iconbtn:not(#themeBtn) { display: none; }
   #viewctl .iconbtn { width: 44px; height: 44px; }
+  #viewctl #themeBtn {
+    color: var(--color-ink);
+    background: var(--color-panel-solid);
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--r-full);
+    font-size: 18px;
+  }
+  #viewctl #themeBtn > svg { display: none; }
+  [data-theme="dark"] #viewctl #themeBtn::before { content: "☼"; }
+  [data-theme="light"] #viewctl #themeBtn::before { content: "☾"; }
 
   #nodes {
     grid-area: nodes;
@@ -1557,6 +1582,25 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
   #composer .comp-mid { grid-area: input; min-height: 56px; }
   #composer .comp-act { grid-area: action; padding: 8px 0 8px 12px; flex-wrap: wrap; }
   #composer > .iconbtn { grid-area: history; align-self: center; width: 44px; height: 44px; margin: 6px !important; }
+  #composer.run-busy, #composer.run-terminal {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "mode" "action" "input";
+  }
+  #composer.run-busy .mode-chip, #composer.run-terminal .mode-chip {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-hairline);
+  }
+  #composer.run-busy textarea, #composer.run-terminal textarea,
+  #composer.run-busy > .iconbtn, #composer.run-terminal > .iconbtn { display: none; }
+  #composer.run-busy .comp-mid, #composer.run-terminal .comp-mid {
+    min-height: 0;
+    padding: 8px 12px 10px;
+    border-top: 1px solid var(--color-hairline);
+  }
+  #composer.run-busy .comp-act, #composer.run-terminal .comp-act {
+    justify-content: flex-start;
+    padding: 6px 12px;
+  }
 
   .btn, .iconbtn, .filt, .seg button { min-height: 44px; }
   .input { min-height: 44px; }

@@ -163,6 +163,7 @@ try {
       const themeButton = document.querySelector('#themeBtn');
       const themeRect = themeButton.getBoundingClientRect();
       const composerRect = composer.getBoundingClientRect();
+      const themeHit = document.elementFromPoint(themeRect.left + themeRect.width / 2, themeRect.top + themeRect.height / 2);
       return {
         layout: document.documentElement.dataset.layout,
         theme: document.documentElement.dataset.theme,
@@ -170,7 +171,10 @@ try {
         responseFont: getComputedStyle(response.querySelector('.rr-body')).fontSize,
         themeTarget: themeButton.getBoundingClientRect().height,
         themeDisplay: getComputedStyle(themeButton).display,
+        themeParentDisplay: getComputedStyle(themeButton.parentElement).display,
+        themeTop: themeRect.top,
         themeRight: themeRect.right,
+        themeHit: themeHit?.closest('button')?.id || themeHit?.id || '',
         composerWidth: composerRect.width,
         composerBottom: composerRect.bottom,
         stageWidth: stage.clientWidth,
@@ -181,7 +185,7 @@ try {
     assert(narrow.layout === 'narrow' && narrow.theme === theme, `${theme} narrow mode did not initialize`);
     assert(narrow.transform === 'none', `${theme} narrow mode still scales the stage`);
     assert(narrow.responseFont === '14px', `${theme} narrow response text was scaled`);
-    assert(narrow.themeTarget >= 44 && narrow.themeDisplay !== 'none' && narrow.themeRight <= 390, `${theme} narrow theme control is not visible/reachable: ${JSON.stringify(narrow)}`);
+    assert(narrow.themeTarget >= 44 && narrow.themeDisplay !== 'none' && narrow.themeParentDisplay !== 'none' && narrow.themeTop >= 82 && narrow.themeRight <= 390 && narrow.themeHit === 'themeBtn', `${theme} narrow theme control is not visible/reachable: ${JSON.stringify(narrow)}`);
     assert(narrow.composerWidth <= narrow.stageWidth && narrow.overflow <= 1, `${theme} narrow composition overflows horizontally`);
     assert(narrow.composerBottom <= narrow.viewportHeight && narrow.composerBottom >= narrow.viewportHeight - 16, `${theme} narrow composer is not viewport-docked`);
   }

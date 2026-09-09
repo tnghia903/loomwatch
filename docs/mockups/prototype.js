@@ -324,6 +324,7 @@ function renderChip(s) {
   $('#chipDot').innerHTML = chipDotSVG(s);
   $('#chipL1').textContent = c.l1;
   $('#chipL2').textContent = c.l2;
+  $('#chipOpen').setAttribute('aria-label', `${c.l1}, ${c.l2}, open team switcher`);
 
   let html = '';
   if (c.action) {
@@ -1026,6 +1027,8 @@ function paintRun() {
 
   /* composer reflects the phase; Stop is gated, Retry is not */
   const busy = !isTerminal() && run.phase !== 'idle';
+  $('#composer').classList.toggle('run-busy', busy);
+  $('#composer').classList.toggle('run-terminal', isTerminal());
   $('#compInput').value = busy || isTerminal() ? '' : $('#compInput').value;
   $('#compInput').placeholder = busy ? 'A run is in flight…' : 'What should the team do?';
   $('#compAct').innerHTML =
@@ -1609,14 +1612,14 @@ function openSwitcher(trigger) {
   rememberPopFocus(trigger);
   closePops(false);
   $('#switcherPop').hidden = false;
-  $('#chip').setAttribute('aria-expanded', 'true');
+  $('#chipOpen').setAttribute('aria-expanded', 'true');
   focusAfterPaint('#switcherPop input');
 }
 function openProblems(trigger) { rememberPopFocus(trigger); closePops(false); $('#problemsPop').hidden = false; focusAfterPaint('#problemsPop button'); }
 function openPalette(trigger) { rememberPopFocus(trigger); closePops(false); $('#palette').hidden = false; $('#paletteInput').focus(); }
 function closePops(restore = true) {
   ['switcherPop', 'palette', 'problemsPop', 'history'].forEach((i) => { const el = $('#' + i); if (el) el.hidden = true; });
-  $('#chip').setAttribute('aria-expanded', 'false');
+  $('#chipOpen').setAttribute('aria-expanded', 'false');
   if (restore && state.popFocus && state.popFocus.isConnected) state.popFocus.focus({ preventScroll: true });
   if (restore) state.popFocus = null;
 }
@@ -1819,17 +1822,6 @@ $('#motionBtn').addEventListener('click', () => {
   });
   document.querySelectorAll('.shuttle').forEach((el) => { el.style.display = state.motion ? '' : 'none'; });
   $('#motionBtn').textContent = 'Motion: ' + (state.motion ? 'on' : 'reduced');
-});
-
-/* The document chip contains its own Save/Review button, so it cannot be a
-   native button. Give the custom outer control the exact Enter/Space contract
-   without allowing Space to scroll the viewport. */
-$('#chip').addEventListener('keydown', (e) => {
-  if (e.target !== e.currentTarget) return;
-  if (e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault();
-    openSwitcher(e.currentTarget);
-  }
 });
 
 /* fit the fixed 1600 × 1000 stage into whatever the reviewer's window is */
