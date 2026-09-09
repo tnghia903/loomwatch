@@ -295,6 +295,33 @@ describe('useTeamDocument', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/team', expect.objectContaining({ method: 'PUT' }))
   })
 
+  it('enters the File is gone recovery state when the pre-save fetch 404s instead of a generic save error', async () => {
+    let deleted = false
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
+      if (String(input) === '/api/teams') return jsonResponse(200, { root: '/Users/operator/.loomwatch/teams', files: [] })
+      if (init?.method === 'PUT') return jsonResponse(200, JSON.parse(init.body as string))
+      return deleted
+        ? jsonResponse(404, { error: 'team file not found' })
+        : jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+    act(() => result.current.renameAgent('researcher', 'role', 'Edited after deletion'))
+
+    deleted = true
+    await act(async () => { await result.current.save() })
+
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+    expect(result.current.saveState).toBe('read-only')
+    expect(result.current.fileGone).toBe(true)
+    expect(result.current.readOnlyReason).toContain('File is gone')
+    expect(result.current.saveError).toContain('File is gone')
+    expect(result.current.yamlPreview).toContain('Edited after deletion')
+  })
+
   it('loads the team file named by ?path= into nodes, edges and entrypoint', async () => {
     vi.stubGlobal(
       'fetch',
