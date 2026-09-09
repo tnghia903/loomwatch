@@ -1059,6 +1059,17 @@ export function useTeamDocument() {
         setSaveState('dirty')
       }
     } catch (error) {
+      // §9.3: the backing file was deleted or renamed before this save reached disk. Like
+      // reloadFromDisk and focus polling, keep the in-memory document, go read-only with a
+      // File is gone reason, and leave Save a copy available instead of a generic error.
+      if (error instanceof TeamFileApiError && error.status === 404) {
+        const reason = 'File is gone. Save a copy to continue editing.'
+        setReadOnlyReason(reason)
+        setFileGone(true)
+        setSaveError(reason)
+        setSaveState('read-only')
+        return
+      }
       setSaveState('error')
       setSaveError(error instanceof TeamFileApiError ? error.message : String(error))
     }
