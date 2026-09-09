@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Canvas } from './Canvas'
 
@@ -42,6 +42,7 @@ const documentState = vi.hoisted(() => ({
   fieldProblemsByAgent: new Map(),
   isValid: true,
   readOnlyReason: null,
+  fileGone: false,
   loadFailure: null,
   externalChange: null,
   diskNotice: null,
@@ -53,12 +54,16 @@ const documentState = vi.hoisted(() => ({
   pipelineSteps: [],
   modeSwitchBanner: false,
   pendingEdgeRemoval: null,
-  createNewDocument: vi.fn(), reloadFromDisk: vi.fn(), keepMine: vi.fn(), useDisk: vi.fn(), layoutNodes: vi.fn(),
+  createNewDocument: vi.fn(), reloadFromDisk: vi.fn(), keepMine: vi.fn(), useDisk: vi.fn(), saveCopy: vi.fn(), layoutNodes: vi.fn(),
   settleNodeCollision: vi.fn(), capturePositionHistory: vi.fn(), undo: vi.fn(), redo: vi.fn(),
   onNodesChange: vi.fn(), onEdgesChange: vi.fn(), onConnect: vi.fn(), addAgentFromDrop: vi.fn(), save: vi.fn(),
   touchField: vi.fn(), renameAgent: vi.fn(), updateAgentModel: vi.fn(), updateAgentCwd: vi.fn(), updateAgentBudget: vi.fn(),
   updateAgentAllowRecruiting: vi.fn(), promoteEntrypoint: vi.fn(), removeAgent: vi.fn(), updateTeamGuards: vi.fn(),
   updateTeamBudget: vi.fn(), dismissRefusal: vi.fn(),
+}))
+
+const flowState = vi.hoisted(() => ({
+  fitView: vi.fn(), screenToFlowPosition: vi.fn(), setViewport: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn(),
 }))
 
 vi.mock('@xyflow/react', () => ({
@@ -76,16 +81,26 @@ vi.mock('@xyflow/react', () => ({
     {edges.map((edge) => <button key={edge.id} aria-label={edge.ariaLabel} />)}
     {children}
   </div>,
-  useReactFlow: () => ({ fitView: vi.fn(), screenToFlowPosition: vi.fn(), setViewport: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn() }),
+  useReactFlow: () => flowState,
 }))
 
 vi.mock('../lib/team-file/useTeamDocument', () => ({ useTeamDocument: () => documentState }))
 vi.mock('./canvas/AgentNodeCard', () => ({ AgentNodeCard: () => null }))
 vi.mock('./canvas/ConfiguredEdgeView', () => ({ ConfiguredEdgeView: () => null }))
-vi.mock('./canvas/DocumentChip', () => ({ DocumentChip: () => null }))
+vi.mock('./canvas/DocumentChip', () => ({
+  DocumentChip: ({ onSelectProblem }: { onSelectProblem: (problem: { agentId: string }) => void }) =>
+    <button type="button" onClick={() => onSelectProblem({ agentId: 'ada' })}>Select validation problem</button>,
+}))
 vi.mock('./canvas/ModePill', () => ({ ModePill: () => null }))
 
 describe('Canvas accessibility', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    Object.assign(documentState, { readOnlyReason: null, saveState: 'saved', documentChipState: 'saved' })
+  })
+
+  afterEach(cleanup)
+
   it('labels the application, focusable graph elements, and saved-state announcement', () => {
     render(<Canvas harnessCount={1} harnessesLoading={false} libraryVisible onToggleLibrary={vi.fn()} onDocumentOpen={vi.fn()} />)
 
@@ -95,5 +110,28 @@ describe('Canvas accessibility', () => {
     expect(screen.getByTestId('flow')).toHaveAttribute('data-nodes-focusable', 'true')
     expect(screen.getByTestId('flow')).toHaveAttribute('data-edges-focusable', 'true')
     expect(screen.getByText('Team saved.').closest('[aria-live]')).toHaveAttribute('aria-live', 'polite')
+  })
+
+  it('keeps the schema-version mismatch notice persistently visible', () => {
+    const reason = 'This file uses schema version 2. This build of LoomWatch understands version 1.'
+    Object.assign(documentState, { readOnlyReason: reason, saveState: 'read-only', documentChipState: 'read-only' })
+
+    render(<Canvas harnessCount={1} harnessesLoading={false} libraryVisible onToggleLibrary={vi.fn()} onDocumentOpen={vi.fn()} />)
+
+    expect(screen.getByRole('status')).toHaveTextContent(reason)
+  })
+
+  it('selects and centres the node identified by a validation problem', () => {
+    render(<Canvas harnessCount={1} harnessesLoading={false} libraryVisible onToggleLibrary={vi.fn()} onDocumentOpen={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select validation problem' }))
+
+    expect(documentState.onNodesChange).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ id: 'ada', selected: true }),
+      expect.objectContaining({ id: 'reviewer', selected: false }),
+    ]))
+    expect(flowState.fitView).toHaveBeenCalledWith(expect.objectContaining({
+      nodes: [expect.objectContaining({ id: 'ada' })],
+    }))
   })
 })

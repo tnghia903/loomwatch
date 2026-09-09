@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchConfigSchema, fetchTeamFile, saveTeamFile, TeamFileApiError } from './client'
+import { fetchConfigSchema, fetchTeamFile, fetchTeamsDiscovery, saveTeamFile, TeamFileApiError } from './client'
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -33,6 +33,17 @@ describe('fetchTeamFile', () => {
     const failure = fetchTeamFile('/teams/missing.yaml')
     await expect(failure).rejects.toThrow(TeamFileApiError)
     await expect(failure).rejects.toThrow('team file not found')
+  })
+})
+
+describe('fetchTeamsDiscovery', () => {
+  it('loads the canonical teams root used for absolute display paths', async () => {
+    const payload = { root: '/Users/operator/.loomwatch/teams', files: ['nested/research.yaml'] }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, payload))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchTeamsDiscovery()).resolves.toEqual(payload)
+    expect(fetchMock).toHaveBeenCalledWith('/api/teams')
   })
 })
 

@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { slugifyTeamName, useTeamDocument } from './useTeamDocument'
+import { absoluteTeamPath, slugifyTeamName, useTeamDocument } from './useTeamDocument'
 
 const TEAM_YAML = `schemaVersion: 1
 id: research-team
@@ -143,6 +143,23 @@ afterEach(() => {
 })
 
 describe('useTeamDocument', () => {
+  it('resolves a relative requested path against the canonical teams root for display', async () => {
+    setPath('nested/research-team.yaml')
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/teams') {
+        return jsonResponse(200, { root: '/Users/operator/.loomwatch/teams', files: ['nested/research-team.yaml'] })
+      }
+      if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
+      return jsonResponse(200, { path: 'nested/research-team.yaml', yaml: TEAM_YAML })
+    }))
+
+    expect(absoluteTeamPath('/Users/operator/.loomwatch/teams/', 'nested/./research-team.yaml'))
+      .toBe('/Users/operator/.loomwatch/teams/nested/research-team.yaml')
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    expect(result.current.path).toBe('/Users/operator/.loomwatch/teams/nested/research-team.yaml')
+  })
+
   it('slugifies names and creates a new document without writing until its first save', async () => {
     window.history.pushState({}, '', '/')
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -191,6 +208,91 @@ describe('useTeamDocument', () => {
     await waitFor(() => expect(result.current.loadFailure).not.toBeNull())
     expect(result.current.saveState).toBe('error')
     expect(result.current.loadFailure?.line).toBe('schemaVersion: [')
+  })
+
+  it('routes malformed YAML from manual reload through the parse-failure modal state', async () => {
+    let yaml = TEAM_YAML
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
+      String(input) === '/api/config/schema'
+        ? jsonResponse(200, SCHEMA_GATE)
+        : jsonResponse(200, { path: '/teams/research-team.yaml', yaml }),
+    ))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+    yaml = 'schemaVersion: [\n'
+    await act(async () => { await result.current.reloadFromDisk() })
+
+    expect(result.current.loadFailure?.line).toBe('schemaVersion: [')
+    expect(result.current.saveState).toBe('error')
+  })
+
+  it('routes malformed YAML from a clean focus refresh through the parse-failure modal state', async () => {
+    let yaml = TEAM_YAML
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
+      String(input) === '/api/config/schema'
+        ? jsonResponse(200, SCHEMA_GATE)
+        : jsonResponse(200, { path: '/teams/research-team.yaml', yaml }),
+    ))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+    yaml = 'schemaVersion: [\n'
+    act(() => window.dispatchEvent(new Event('focus')))
+
+    await waitFor(() => expect(result.current.loadFailure?.line).toBe('schemaVersion: ['))
+    expect(result.current.saveState).toBe('error')
+  })
+
+  it('routes malformed YAML chosen with Use disk through the parse-failure modal without rejecting', async () => {
+    let yaml = TEAM_YAML
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
+      String(input) === '/api/config/schema'
+        ? jsonResponse(200, SCHEMA_GATE)
+        : jsonResponse(200, { path: '/teams/research-team.yaml', yaml }),
+    ))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    act(() => result.current.renameAgent('researcher', 'role', 'Changed locally'))
+    yaml = 'schemaVersion: [\n'
+    act(() => window.dispatchEvent(new Event('focus')))
+    await waitFor(() => expect(result.current.saveState).toBe('conflict'))
+
+    await expect(act(async () => { await result.current.useDisk() })).resolves.toBeUndefined()
+
+    expect(result.current.loadFailure?.line).toBe('schemaVersion: [')
+    expect(result.current.saveState).toBe('error')
+  })
+
+  it('recovers a deleted backing file by saving the in-memory document to a new path', async () => {
+    let deleted = false
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
+      if (String(input) === '/api/teams') return jsonResponse(200, { root: '/Users/operator/.loomwatch/teams', files: [] })
+      if (init?.method === 'PUT') {
+        const body = JSON.parse(init.body as string) as { path: string; yaml: string }
+        return jsonResponse(200, body)
+      }
+      return deleted
+        ? jsonResponse(404, { error: 'team file not found' })
+        : jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+    deleted = true
+    await act(async () => { await result.current.reloadFromDisk() })
+    expect(result.current.fileGone).toBe(true)
+    expect(result.current.readOnlyReason).toContain('File is gone')
+
+    let saved = false
+    await act(async () => { saved = await result.current.saveCopy('copies/research-team.yaml') })
+
+    expect(saved).toBe(true)
+    expect(result.current.fileGone).toBe(false)
+    expect(result.current.path).toBe('/Users/operator/.loomwatch/teams/copies/research-team.yaml')
+    expect(fetchMock).toHaveBeenCalledWith('/api/team', expect.objectContaining({ method: 'PUT' }))
   })
 
   it('loads the team file named by ?path= into nodes, edges and entrypoint', async () => {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useTeamDocument } from '../lib/team-file/useTeamDocument'
 import { unifiedYamlDiff } from '../lib/team-file/diff'
+import type { DocumentProblem } from '../lib/team-file/validation'
 import { AgentNodeCard } from './canvas/AgentNodeCard'
 import { CanvasActionsContext, type CanvasActions } from './canvas/CanvasActionsContext'
 import { CommandPalette, type CommandAction } from './canvas/CommandPalette'
@@ -84,6 +85,7 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
   const [openPathOpen, setOpenPathOpen] = useState(false)
   const [openPath, setOpenPath] = useState('')
   const [newTeamSheet, setNewTeamSheet] = useState(false)
+  const [saveCopyOpen, setSaveCopyOpen] = useState(false)
   const [discardConfirm, setDiscardConfirm] = useState(false)
   const [pendingNodeDelete, setPendingNodeDelete] = useState<string[]>([])
   const [guides, setGuides] = useState<Guides>({})
@@ -178,8 +180,8 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
     function onKeyDown(event: KeyboardEvent) {
       const mod = event.metaKey || event.ctrlKey
       const key = event.key.toLowerCase()
-      if (mod && key === 'k') { event.preventDefault(); setPaletteOpen(true); return }
       const editingText = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
+      if (mod && key === 'k') { event.preventDefault(); setPaletteOpen(true); return }
       if (editingText) return
       if (mod && key === 's') { event.preventDefault(); if (editable) void doc.save(); return }
       if (mod && key === 'z') { event.preventDefault(); if (event.shiftKey) doc.redo(); else doc.undo(); return }
@@ -251,6 +253,20 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
   const selectedEdges = doc.edges.filter((edge) => edge.selected)
   const inspectedNode = selectedNodes.length === 1 && selectedEdges.length === 0 ? selectedNodes[0] : null
 
+  const selectProblem = useCallback((problem: DocumentProblem) => {
+    const problemEdge = problem.edge
+      ? doc.edges.find((edge) => edge.source === problem.edge?.from && edge.target === problem.edge?.to)
+      : undefined
+    const targetIds = problem.agentId
+      ? [problem.agentId]
+      : problem.edge
+        ? [problem.edge.from, problem.edge.to]
+        : []
+    doc.onNodesChange(doc.nodes.map((node) => ({ id: node.id, type: 'select' as const, selected: targetIds.includes(node.id) })))
+    doc.onEdgesChange(doc.edges.map((edge) => ({ id: edge.id, type: 'select' as const, selected: edge.id === problemEdge?.id })))
+    const targets = doc.nodes.filter((node) => targetIds.includes(node.id))
+    if (targets.length > 0) void flow.fitView({ nodes: targets, padding: 0.35, maxZoom: 1, duration: 300 })
+  }, [doc.edges, doc.nodes, doc.onEdgesChange, doc.onNodesChange, flow])
   const accessibleNodes = useMemo(
     () => doc.nodes.map((node) => ({
       ...node,
@@ -399,8 +415,14 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
 
       {doc.externalChange && <div className="absolute inset-x-0 top-0 z-30"><ConflictBar filename={doc.path?.split('/').pop() ?? 'Team file'} onKeepMine={doc.keepMine} onUseDisk={() => void doc.useDisk()} onCompare={() => setCompareOpen(true)} /></div>}
 
+      {doc.readOnlyReason && (
+        <div role="status" className="pointer-events-none absolute inset-x-4 top-16 z-20 rounded-lg border border-slate/50 bg-surface-solid px-4 py-3 text-center text-[13px] text-slate shadow-lg">
+          {doc.readOnlyReason}
+        </div>
+      )}
+
       <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex flex-col items-center gap-2">
-        <DocumentChip path={doc.path} saveState={doc.documentChipState} saveError={doc.saveError} entrypointProblem={doc.entrypointProblem} documentProblems={doc.documentProblems} fieldProblemCount={Array.from(doc.fieldProblemsByAgent.values()).reduce((count, fields) => count + Object.keys(fields).length, 0)} isValid={doc.isValid} readOnlyReason={doc.readOnlyReason} editingDisabled={windowWidth < 768} onSave={doc.save} onReload={doc.reloadFromDisk} onShowYaml={() => setYamlOpen(true)} />
+        <DocumentChip path={doc.path} saveState={doc.documentChipState} saveError={doc.saveError} entrypointProblem={doc.entrypointProblem} documentProblems={doc.documentProblems} fieldProblemsByAgent={doc.fieldProblemsByAgent} agentNames={nodeNames} isValid={doc.isValid} readOnlyReason={doc.readOnlyReason} fileGone={doc.fileGone} editingDisabled={windowWidth < 768} onSave={doc.save} onSaveCopy={() => setSaveCopyOpen(true)} onReload={doc.reloadFromDisk} onShowYaml={() => setYamlOpen(true)} onSelectProblem={selectProblem} />
         {doc.diskNotice && <p className="rounded-md bg-surface-solid px-2 py-1 text-[12px] text-ink-2">{doc.diskNotice}</p>}
         {doc.entrypointProblem && doc.entrypointProblem.candidates.length > 0 && editable && <EntrypointProblemBar problem={doc.entrypointProblem} onPromote={doc.promoteEntrypoint} />}
       </div>
@@ -416,9 +438,9 @@ export function Canvas({ harnessCount, harnessesLoading, libraryVisible, onToggl
       {pendingNodeDelete.length > 0 && <InlineConfirm message={`Delete ${pendingNodeDelete.length === 1 ? 'this node and its connections' : `${pendingNodeDelete.length} nodes and their connections`}?`} confirmLabel="Delete" onConfirm={() => { deleteNodes(pendingNodeDelete); setPendingNodeDelete([]) }} onCancel={() => setPendingNodeDelete([])} />}
       {openPathOpen && <OpenTeamSheet path={openPath} onPathChange={setOpenPath} onClose={() => setOpenPathOpen(false)} />}
       {newTeamSheet && <NewTeamSheet name={newName} onNameChange={setNewName} onClose={() => setNewTeamSheet(false)} onCreate={() => { doc.createNewDocument(newName); setNewTeamSheet(false); onDocumentOpen() }} />}
+      {saveCopyOpen && <SaveCopySheet onClose={() => setSaveCopyOpen(false)} onSave={doc.saveCopy} />}
       {yamlOpen && <YamlSheet title="YAML preview" yaml={doc.yamlPreview} onClose={() => setYamlOpen(false)} />}
       {compareOpen && doc.externalChange && <YamlSheet title="Disk ↔ in-memory YAML" yaml={unifiedYamlDiff(doc.externalChange.diskYaml, doc.yamlPreview)} onClose={() => setCompareOpen(false)} />}
-      {doc.loadFailure && <ParseFailureModal failure={doc.loadFailure} />}
     </CanvasActionsContext.Provider>
   )
 }
@@ -469,6 +491,27 @@ function OpenTeamSheet({ path, onPathChange, onClose }: { path: string; onPathCh
         <label className="text-[12px] font-semibold uppercase tracking-[.06em] text-ink-3">Open team path<input autoFocus value={path} onChange={(event) => onPathChange(event.target.value)} placeholder="research-team.yaml" className="mt-2 h-10 w-full rounded-md border border-hairline/10 bg-canvas px-3 font-mono text-[13px] normal-case tracking-normal text-ink outline-none focus:border-iris" /></label>
         <p className="mt-2 text-[12px] text-ink-3">Relative to the daemon teams directory.</p>
         <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-full px-3 py-1.5 text-[13px] text-ink-2">Cancel</button><button type="submit" disabled={!path.trim()} className="rounded-full bg-iris px-4 py-1.5 text-[13px] text-white disabled:opacity-40">Open</button></div>
+      </form>
+    </div>
+  )
+}
+
+function SaveCopySheet({ onClose, onSave }: { onClose: () => void; onSave: (path: string) => Promise<boolean> }) {
+  const [path, setPath] = useState('')
+  const [saving, setSaving] = useState(false)
+  return (
+    <div className="absolute inset-0 z-50 bg-ink/10" onMouseDown={onClose}>
+      <form onSubmit={async (event) => {
+        event.preventDefault()
+        if (!path.trim() || saving) return
+        setSaving(true)
+        const saved = await onSave(path.trim())
+        setSaving(false)
+        if (saved) onClose()
+      }} onMouseDown={(event) => event.stopPropagation()} className="mx-auto mt-[22vh] w-[min(480px,calc(100vw-32px))] rounded-xl border border-hairline/10 bg-surface-solid p-4 text-left shadow-[0_24px_80px_rgb(0_0_0/.2)]">
+        <label className="text-[12px] font-semibold uppercase tracking-[.06em] text-ink-3">Save copy as<input autoFocus value={path} onChange={(event) => setPath(event.target.value)} placeholder="research-team-copy.yaml" className="mt-2 h-10 w-full rounded-md border border-hairline/10 bg-canvas px-3 font-mono text-[13px] normal-case tracking-normal text-ink outline-none focus:border-iris" /></label>
+        <p className="mt-2 text-[12px] text-ink-3">Relative to the daemon teams directory.</p>
+        <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-full px-3 py-1.5 text-[13px] text-ink-2">Cancel</button><button type="submit" disabled={!path.trim() || saving} className="rounded-full bg-slate px-4 py-1.5 text-[13px] text-white disabled:opacity-40">{saving ? 'Saving…' : 'Save a copy'}</button></div>
       </form>
     </div>
   )
