@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>LoomWatch — Obsidian &amp; Gilt · TNG-87 design prototype</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#08080A">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&family=Instrument+Serif&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+
+<!-- =====================================================================
+     PROTOTYPE CHROME — not product design. Neutral palette, own values.
+     ===================================================================== -->
+<div id="protobar">
+  <span class="brand">LoomWatch <em>Obsidian &amp; Gilt</em></span>
+  <nav class="tabs" id="tabs"></nav>
+  <span class="spacer"></span>
+  <span class="hint"><kbd>1</kbd>–<kbd>9</kbd><kbd>0</kbd><kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd> · <kbd>⌘⇧L</kbd> theme · <kbd>?</kbd> notes</span>
+  <button id="motionBtn" title="Simulate prefers-reduced-motion">Motion: on</button>
+  <button id="notesBtn" aria-pressed="false">Notes</button>
+</div>
+
+<aside id="notes" aria-label="Spec notes"><div id="notesBody"></div></aside>
+
+<div id="stageWrap">
+<div id="stage" class="theme-dark mode-pipeline solo-both">
+
+  <div class="canvas-ground"></div>
+
+  <!-- =================================================================
+       EDGE LAYERS — DESIGN_LANGUAGE §13. Configured = warp (grey solid),
+       observed = weft (gold, dashed, travelling). Four channels apart.
+       ================================================================= -->
+  <svg id="edges" viewBox="0 0 1600 1000" preserveAspectRatio="none" aria-hidden="true">
+    <defs>
+      <marker id="mWarp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 1 9 5 0 9z" fill="var(--lw-edge-warp)"/>
+      </marker>
+      <marker id="mWeft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M1 1 9 5 1 9" fill="none" stroke="var(--lw-edge-weft)" stroke-width="1.6"/>
+      </marker>
+      <marker id="mWeftBack" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M9 1 1 5 9 9" fill="none" stroke="var(--lw-edge-weft)" stroke-width="1.6"/>
+      </marker>
+      <marker id="mChevron" viewBox="0 0 14 10" refX="12" refY="5" markerWidth="9" markerHeight="8" orient="auto-start-reverse">
+        <path d="M1 1 5 5 1 9M6 1 10 5 6 9" fill="none" stroke="var(--lw-edge-weft)" stroke-width="1.6"/>
+      </marker>
+      <marker id="mAlert" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M1 1 9 5 1 9" fill="none" stroke="var(--lw-edge-anomaly)" stroke-width="1.6"/>
+      </marker>
+    </defs>
+    <g id="edgeGroup"></g>
+  </svg>
+
+  <div id="edgeLabels"></div>
+  <div id="nodes"></div>
+
+  <!-- =================================================================
+       RUNTIME OVERLAY — TNG89_INTERACTION.md §0, §3.
+       Runtime nodes (goal, response, provenance) are tinted and ringed;
+       configuration nodes are opaque and bordered. Nothing in here is
+       ever written to the team file, and nothing in here moves a saved
+       node position (TNG-89E/F acceptance).
+       ================================================================= -->
+  <svg id="provEdges" viewBox="0 0 1600 1000" preserveAspectRatio="none" aria-hidden="true">
+    <defs>
+      <marker id="mProv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M2 2 8 5 2 8" fill="none" stroke="var(--color-warp)" stroke-opacity=".6" stroke-width="1.4"/>
+      </marker>
+      <marker id="mLive" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M1 1 9 5 1 9" fill="none" stroke="var(--color-live)" stroke-width="1.7"/>
+      </marker>
+    </defs>
+    <g id="provGroup"></g>
+  </svg>
+  <div id="overlay"></div>
+
+  <!-- =================================================================
+       PROMPT COMPOSER — TNG89_INTERACTION.md §1.
+       Absorbs the mode pill: the pill explains how the document will
+       execute, and that fact is worth most at the moment you execute it.
+       `Enter` inserts a newline; `⌘↵` submits — goals are prose.
+       ================================================================= -->
+  <div class="panel bottom cx e1" id="composer">
+    <button class="mode-chip t-body-m" id="compMode" title="How this team will execute">
+      <span class="glyph" id="compModeGlyph">⇉</span>
+      <span id="compModeLabel">Pipeline · 3 steps</span>
+    </button>
+    <div class="comp-mid">
+      <textarea id="compInput" rows="1" aria-label="What should the team do?"
+                placeholder="What should the team do?"></textarea>
+      <span class="comp-note t-meta" id="compNote" hidden></span>
+    </div>
+    <div class="comp-act" id="compAct"></div>
+    <button class="iconbtn" style="margin-right:6px" onclick="openHistory()"
+            title="Reopen a previous run (replay)" aria-label="Run history">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3v6h6"/><path d="M3.5 9a9 9 0 1 0 2.1-4.2L3 9"/><path d="M12 8v5l4 2"/></svg>
+    </button>
+  </div>
+
+  <!-- =================================================================
+       RUN HISTORY — addendum §2, "how the user reopens prior runs".
+       Selecting a run loads it in REPLAY: same picture, no motion.
+       ================================================================= -->
+  <div class="pop e2" id="history" style="bottom:96px;left:50%;transform:translateX(-50%)" hidden>
+    <div class="pop-search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
+      <input placeholder="Filter runs" aria-label="Filter runs">
+    </div>
+    <div class="pop-list" id="historyList"></div>
+    <div class="pop-sep"></div>
+    <div class="pop-foot">
+      <span class="pop-note t-meta">Reopening a run is a replay. It never re-executes, and a
+        replayed graph is byte-equivalent to the live one.</span>
+    </div>
+  </div>
+
+  <!-- =================================================================
+       LIBRARY — UX_REDESIGN §4. 288 px, collapsible to a 48 px rail (⌘\).
+       Rows are drag sources only: clicking never selects or opens.
+       ================================================================= -->
+  <section class="panel left top e1" id="library" aria-label="Agent library">
+    <div class="rail-only">
+      <button class="iconbtn" title="Expand library (⌘\)" onclick="toggleLibrary()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+      <span class="monogram">Oc</span><span class="monogram">C</span><span class="monogram">Cx</span><span class="monogram">G</span>
+    </div>
+
+    <header class="lib-head">
+      <span class="t-micro lib-head-text">Library</span>
+      <button class="iconbtn lib-head-text" title="Collapse library (⌘\)" onclick="toggleLibrary()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+    </header>
+
+    <div class="lib-group" id="grpHarness">
+      <div class="lib-group-head"><span class="t-micro">Detected harnesses</span><span class="t-meta">4</span></div>
+      <div class="lib-rows">
+        <div class="lib-row" draggable="true">
+          <span class="monogram">Oc</span>
+          <span class="lib-row-text">
+            <span class="lib-row-name t-body-m">opencode</span>
+            <span class="lib-row-sub t-mono-sm">/opt/homebrew/bin/opencode</span>
+          </span>
+          <span class="drag-dots t-body">⠿</span>
+        </div>
+        <div class="lib-row" draggable="true">
+          <span class="monogram">C</span>
+          <span class="lib-row-text">
+            <span class="lib-row-name t-body-m">claude</span>
+            <span class="lib-row-sub t-mono-sm">/Users/me/Library/Application Support/claude/bin/claude</span>
+          </span>
+          <span class="drag-dots t-body">⠿</span>
+        </div>
+        <div class="lib-row" draggable="true">
+          <span class="monogram">Cx</span>
+          <span class="lib-row-text">
+            <span class="lib-row-name t-body-m">codex</span>
+            <span class="lib-row-sub t-mono-sm">/opt/homebrew/bin/codex</span>
+          </span>
+          <span class="drag-dots t-body">⠿</span>
+        </div>
+        <div class="lib-row unavailable">
+          <span class="monogram">G</span>
+          <span class="lib-row-text">
+            <span class="lib-row-name t-body-m">gemini</span>
+            <span class="lib-row-sub t-meta">Not installed</span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="lib-group">
+      <div class="lib-group-head"><span class="t-micro">Endpoints</span><span class="t-meta">0</span></div>
+      <div class="lib-empty t-meta">
+        <span>No ACP endpoints yet.</span>
+        <button class="link">Add an endpoint…</button>
+      </div>
+    </div>
+
+    <div class="lib-group">
+      <div class="lib-group-head"><span class="t-micro">Role presets</span><span class="t-meta">2</span></div>
+      <div class="lib-rows">
+        <div class="lib-row" draggable="true">
+          <span class="monogram">·</span>
+          <span class="lib-row-text">
+            <span class="lib-row-name t-body-m">Reviewer</span>
+            <span class="lib-row-sub t-meta">claude · opus · $3.00 cap</span>
+          </span>
+          <span class="drag-dots t-body">⠿</span>
+        </div>
+        <div class="lib-row" draggable="true">
+          <span class="monogram">·</span>
+          <span class="lib-row-text">
+            <span class="lib-row-name t-body-m">Researcher</span>
+            <span class="lib-row-sub t-meta">opencode · $5.00 cap</span>
+          </span>
+          <span class="drag-dots t-body">⠿</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================================================================
+       DOCUMENT SWITCHER — UX_REDESIGN §9.1. The canvas is a view over a
+       file and the file is the truth (ARCHITECTURE §5). This chip is the
+       only place file state is expressed, and the only way to reach
+       another file. Nine states; `n lines differ` states a magnitude.
+       ================================================================= -->
+  <div class="panel top cx e1" id="chip" role="button" tabindex="0" onclick="openSwitcher()" aria-label="research-team.yaml, 3 lines differ">
+    <span class="dot" id="chipDot"></span>
+    <span class="chip-text">
+      <span class="chip-l1 t-body-m" id="chipL1">research-team.yaml</span>
+      <span class="chip-l2 t-meta" id="chipL2">3 lines differ</span>
+    </span>
+    <span id="chipAction"></span>
+    <span class="chev">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 9l6 6 6-6"/></svg>
+    </span>
+    <span class="ledger"></span>
+  </div>
+
+  <!-- =================================================================
+       INSPECTOR — UX_REDESIGN §5.4. Three zones in the order the operator
+       thinks: IDENTITY (what stands between a drop and a valid save),
+       BEHAVIOUR (what the agent may do), PROCESS (collapsed).
+       ================================================================= -->
+  <aside class="panel right top e1" id="inspector" aria-label="Inspector" hidden>
+    <header class="insp-head">
+      <span class="node-glyph" id="ispGlyph"></span>
+      <span style="flex:1;min-width:0">
+        <div class="insp-title t-title" id="ispName">Protocol Researcher</div>
+        <div class="insp-id t-mono" id="ispId">researcher</div>
+        <div class="insp-status t-micro" id="ispStatus"></div>
+      </span>
+      <button class="iconbtn" title="Close (Esc)" onclick="selectNode(null)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+
+    <div class="zone">
+      <div class="zone-head t-micro">Identity</div>
+      <div class="field" id="fRole">
+        <label class="t-meta" for="iRole">Role</label>
+        <input class="input" id="iRole" value="Research ACP behaviour">
+        <span class="hint t-meta"></span>
+      </div>
+      <div class="field" id="fModel">
+        <label class="t-meta" for="iModel">Model</label>
+        <input class="input mono" id="iModel" value="kimi-for-coding/k3-256k">
+        <span class="hint t-meta"></span>
+      </div>
+    </div>
+
+    <div class="zone">
+      <div class="zone-head t-micro">Behaviour</div>
+      <button class="check round on" id="cEntry" onclick="this.classList.toggle('on')">
+        <span class="box">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path d="M20 6 9 17l-5-5"/></svg>
+        </span>
+        <span class="txt"><b class="t-body">Entry point for this team</b><span class="t-meta">Receives the goal first</span></span>
+      </button>
+      <button class="check" id="cRecruit" onclick="this.classList.toggle('on')">
+        <span class="box">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path d="M20 6 9 17l-5-5"/></svg>
+        </span>
+        <span class="txt"><b class="t-body">May recruit helpers</b><span class="t-meta">Withdrawn in pipeline mode</span></span>
+      </button>
+      <div class="field">
+        <label class="t-meta">Budget</label>
+        <div class="row2">
+          <input class="input mono" value="$ 5.00" aria-label="Budget limit">
+          <input class="input mono" value="warn at 80 %" aria-label="Warn at percent">
+        </div>
+        <div class="budget-lane" style="margin:6px 0 0;border-radius:var(--r-full)"><i style="width:25%"></i></div>
+        <span class="hint t-mono-sm">$1.24 spent · phase 05</span>
+      </div>
+    </div>
+
+    <div class="zone">
+      <button class="zone-head toggle t-micro" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden">
+        <span id="procChev">▸</span> Process
+      </button>
+      <dl class="proc-list t-mono-sm" hidden>
+        <dt>cmd</dt><dd>opencode</dd>
+        <dt>args</dt><dd>acp</dd>
+        <dt>cwd</dt><dd>.</dd>
+        <dt>env</dt><dd>—</dd>
+      </dl>
+    </div>
+
+    <footer class="insp-foot">
+      <button class="btn" style="border:0">Save as preset</button>
+      <button class="btn btn-danger" style="border:0">Delete</button>
+    </footer>
+  </aside>
+
+  <!-- =================================================================
+       LAYER LEGEND — UX_REDESIGN §6.7. Conditional chrome: present only
+       while ≥1 observed edge exists. Click a row to solo that layer;
+       `L` cycles. View state, never document state.
+       ================================================================= -->
+  <div class="panel left bottom e1" id="legend" aria-label="Edge layers">
+    <button class="legend-row t-meta" id="legWarp" onclick="soloLayer('configured')">
+      <svg width="22" height="8" aria-hidden="true"><line x1="0" y1="4" x2="22" y2="4" stroke="var(--lw-edge-warp)" stroke-width="1.5"/></svg>
+      Configured <span class="count t-mono-sm" id="cntWarp">2</span>
+    </button>
+    <button class="legend-row t-meta" id="legWeft" onclick="soloLayer('observed')">
+      <svg width="22" height="8" aria-hidden="true"><line x1="0" y1="4" x2="22" y2="4" stroke="var(--lw-edge-weft)" stroke-width="1.5" stroke-dasharray="6 4"/></svg>
+      Observed <span class="count t-mono-sm" id="cntWeft">×5</span>
+    </button>
+  </div>
+
+  <!-- =================================================================
+       MODE PILL — CANVAS_SPEC §8.1. Mode is a consequence of the file
+       (`edges: []` → team), never a toggle. The run slot stays reserved
+       and disabled: running a team arrives in a later phase (§14).
+       ================================================================= -->
+  <div class="panel bottom cx e1" id="modepill" role="button" tabindex="0">
+    <span class="glyph" id="modeGlyph"></span>
+    <span class="label t-body-m" id="modeLabel">Pipeline · 3 steps</span>
+    <span class="anomaly t-micro" id="modeAnomaly">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+      1
+    </span>
+    <span class="runslot" title="Running a team arrives in a later phase.">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4l12 8-12 8z"/></svg>
+    </span>
+  </div>
+
+  <!-- =================================================================
+       VIEW CONTROLS — 168 px, carries the theme toggle (DESIGN_LANGUAGE
+       §11). The glyph names the DESTINATION, not the current state.
+       ================================================================= -->
+  <div class="panel right bottom e1" id="viewctl" aria-label="View controls">
+    <button class="iconbtn" title="Zoom out (⌘−)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12h14"/></svg></button>
+    <button class="iconbtn" title="Zoom in (⌘+)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button class="iconbtn" title="Fit view (F)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 3H5a2 2 0 0 0-2 2v4M15 3h4a2 2 0 0 1 2 2v4M21 15v4a2 2 0 0 1-2 2h-4M3 15v4a2 2 0 0 0 2 2h4"/></svg></button>
+    <button class="iconbtn" id="themeBtn" onclick="toggleTheme()"><span class="sysdot"></span></button>
+  </div>
+
+  <!-- =================================================================
+       DOCUMENT SWITCHER POPOVER — §9.1. Backed by GET /api/teams, which
+       already ships (TNG-74). No new endpoint. Switching a dirty document
+       asks inline on the row and never silently drops work.
+       ================================================================= -->
+  <div class="pop e2" id="switcherPop" style="top:76px;left:50%;transform:translateX(-50%);width:392px" hidden>
+    <div class="pop-search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
+      <input placeholder="Filter teams" aria-label="Filter teams">
+    </div>
+    <div class="pop-list">
+      <button class="pop-row current">
+        <span class="dot" data-dot="dirty"></span>
+        <span class="name t-body-m">research-team.yaml</span>
+        <span class="aside t-mono-sm">3 differ</span>
+      </button>
+      <button class="pop-row"><span style="width:12px"></span><span class="name t-body">review-pipeline.yaml</span></button>
+      <button class="pop-row"><span style="width:12px"></span><span class="name t-body">nested/spike.yml</span></button>
+    </div>
+    <div class="pop-sep"></div>
+    <div class="pop-list">
+      <button class="pop-row">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>
+        <span class="name t-body">New team…</span><span class="kbd t-mono-sm">⌘N</span>
+      </button>
+    </div>
+    <div class="pop-sep"></div>
+    <div class="pop-foot">
+      <span class="path t-mono-sm">/Users/me/.loomwatch/teams/research-team.yaml</span>
+      <span class="acts">
+        <button class="link">Copy path</button>
+        <button class="link">Reload from disk</button>
+        <button class="link" style="color:var(--color-alert)">Discard</button>
+      </span>
+      <span class="pop-note t-meta">Saves keep your comments and key order.</span>
+    </div>
+  </div>
+
+  <!-- =================================================================
+       COMMAND PALETTE — §11. ⌘K is the menu. 560 px, flat ranked list,
+       no groups. Every primary flow is reachable without a pointer.
+       ================================================================= -->
+  <div class="pop e2" id="palette" hidden>
+    <div class="pop-search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
+      <input placeholder="Type a command" aria-label="Command" id="paletteInput">
+    </div>
+    <div class="pop-list" id="paletteList"></div>
+  </div>
+
+  <!-- =================================================================
+       PROBLEMS POPOVER — §9.2. Two weights, separated and navigable.
+       F8 / ⇧F8 selects, centres and focuses the offending field.
+       ================================================================= -->
+  <div class="pop e2" id="problemsPop" style="top:76px;left:50%;transform:translateX(-50%);width:392px" hidden>
+    <div class="prob-group">
+      <div class="prob-head needs t-micro">
+        <span class="dot" data-dot="dirty"></span> 1 thing to finish
+      </div>
+      <button class="prob-row" onclick="selectNode('n4')">
+        <b class="t-body">Test Runner · Model</b>
+        <span class="t-meta">An agent needs a model before it can run.</span>
+      </button>
+    </div>
+    <div class="pop-sep"></div>
+    <div class="prob-group">
+      <div class="prob-head errs t-micro">
+        <span class="dot" data-dot="invalid"></span> 2 problems
+      </div>
+      <button class="prob-row" onclick="selectNode('n3')">
+        <b class="t-body">Doc Author · Budget</b>
+        <span class="t-meta">warnAtPercent must be between 1 and 100.</span>
+      </button>
+      <button class="prob-row">
+        <b class="t-body">Edge · reviewer → author</b>
+        <span class="t-meta">Target agent `author` has no entry in `agents`.</span>
+      </button>
+    </div>
+    <div class="pop-sep"></div>
+    <div class="pop-foot">
+      <span class="acts"><button class="link">Next problem · F8</button><button class="link">Previous · ⇧F8</button></span>
+    </div>
+  </div>
+
+  <!-- =================================================================
+       FIRST RUN — §10.1. One centred composition, one action, no wizard,
+       no tour, no sample gallery. The only screen using the serif
+       display step, and the reason the third face is worth one file.
+       ================================================================= -->
+  <div id="firstrun" hidden>
+    <div class="fr-stack">
+      <!-- the loom mark: two strands crossing. Warp solid, weft dimmed —
+           the same two-layer idea the whole canvas is built on (§13). -->
+      <svg class="fr-mark" width="102" height="44" viewBox="0 0 102 44" fill="none"
+           stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+           stroke-linejoin="round" aria-hidden="true">
+        <path d="M6 34 24 10 42 34 60 10 78 34 96 10"/>
+        <path d="M6 10 24 34 42 10 60 34 78 10 96 34" opacity=".34"/>
+      </svg>
+      <h1 class="fr-title t-display">LoomWatch</h1>
+      <p class="fr-sub t-body">Compose a team of agents. Watch them work.</p>
+      <div class="fr-cta"><button class="btn btn-primary btn-lg">New team</button></div>
+      <button class="link fr-alt">or open an existing team</button>
+    </div>
+    <div class="fr-foot t-meta">
+      <span class="dot" data-dot="dirty" style="width:10px;height:10px"></span>
+      <button class="link" style="color:inherit;font:inherit">3 harnesses ready</button>
+    </div>
+    <div class="panel right bottom e1" style="height:36px;width:auto;padding:0 6px;border-radius:var(--r-full);display:flex;align-items:center;gap:8px">
+      <span class="t-meta" style="color:var(--color-ink-3);padding-left:8px">⌘K</span>
+      <button class="iconbtn" id="themeBtn2" onclick="toggleTheme()"></button>
+    </div>
+  </div>
+
+  <!-- =================================================================
+       STATE MATRIX — UX_REDESIGN §16. Two rules hold across every row:
+       an error always carries the server's own message verbatim, and no
+       error state destroys the in-memory document.
+       ================================================================= -->
+  <div id="states" class="board" hidden>
+    <div class="sys-grid">
+
+      <section class="sys-card e1 wide">
+        <h3 class="sys-h t-title">Document switcher — nine states</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§9.1. The dot's shape carries the state as well as its colour, so the row survives greyscale. `n lines differ` states a magnitude, not a mood.</p>
+        <div id="chipStates" style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sp-4)"></div>
+      </section>
+
+      <section class="sys-card e1">
+        <h3 class="sys-h t-title">Harnesses loading</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§4.0. `GET /api/harnesses` is a PATH scan. Three skeleton rows per group — no spinner: a spinner in a list is a smaller lie than a shape that becomes the thing.</p>
+        <div class="lib-rows" style="max-width:248px">
+          <div class="skel-row"><span class="skel-sq"></span><span class="skel-bars"><i class="skel-bar" style="width:40%"></i><i class="skel-bar" style="width:60%"></i></span></div>
+          <div class="skel-row"><span class="skel-sq"></span><span class="skel-bars"><i class="skel-bar" style="width:52%"></i><i class="skel-bar" style="width:44%"></i></span></div>
+          <div class="skel-row"><span class="skel-sq"></span><span class="skel-bars"><i class="skel-bar" style="width:36%"></i><i class="skel-bar" style="width:66%"></i></span></div>
+        </div>
+      </section>
+
+      <section class="sys-card e1">
+        <h3 class="sys-h t-title">Harnesses failed</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§16. The server's message verbatim — LoomWatch never paraphrases a daemon error into something friendlier and less diagnostic.</p>
+        <div class="inline-error" style="max-width:248px">
+          <span class="msg t-body">Couldn't read the harness list.</span>
+          <span class="detail t-mono-sm">500: EACCES scanning /usr/local/bin</span>
+          <span><button class="btn">Retry</button></span>
+        </div>
+      </section>
+
+      <section class="sys-card e1 wide">
+        <h3 class="sys-h t-title">Transport states</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§16. The daemon is a local process that can die. The canvas stays interactive and the in-memory document survives; only `Save` disables, with the reason.</p>
+        <div style="display:flex;flex-direction:column;gap:var(--sp-3)">
+          <div class="bar halt" style="position:relative;border-radius:var(--r-sm);border:1px solid var(--color-hairline)">
+            <span class="dot" data-dot="readonly"></span>
+            <span class="msg t-body-m">LoomWatch can't reach the daemon.</span>
+            <span class="sub t-meta">Retrying in 3s…</span>
+            <span class="acts"><button class="btn">Retry now</button></span>
+          </div>
+          <div class="bar" style="position:relative;border-radius:var(--r-sm);border:1px solid var(--color-hairline);box-shadow:inset 3px 0 0 var(--color-ok)">
+            <span class="dot" data-dot="saved"></span>
+            <span class="msg t-body-m">Reconnected</span>
+            <span class="sub t-meta">Collapses after 2 s.</span>
+          </div>
+          <div class="bar halt" style="position:relative;border-radius:var(--r-sm);border:1px solid var(--color-hairline)">
+            <span class="dot" data-dot="readonly"></span>
+            <span class="msg t-body-m">This file uses schemaVersion 3. LoomWatch reads 1 and 2.</span>
+            <span class="sub t-meta">Read-only. Pan and inspect still work.</span>
+          </div>
+          <div class="bar alert" style="position:relative;border-radius:var(--r-sm);border:1px solid var(--color-hairline)">
+            <span class="dot" data-dot="invalid"></span>
+            <span class="msg t-body-m">research-team.yaml changed on disk while you were editing.</span>
+            <span class="acts">
+              <button class="btn">Compare…</button>
+              <button class="btn">Keep mine</button>
+              <button class="btn">Use disk</button>
+            </span>
+          </div>
+          <div style="display:flex;gap:var(--sp-4);align-items:center">
+            <div class="e1" style="height:36px;border-radius:var(--r-full);padding:0 var(--sp-2) 0 var(--sp-4);display:inline-flex;align-items:center;gap:var(--sp-3)">
+              <span class="glyph" style="color:var(--color-accent)">⇉</span>
+              <span class="t-body-m">Pipeline · 3 steps</span>
+              <span class="t-micro" style="color:var(--color-halt);padding-left:var(--sp-3);border-left:1px solid var(--color-hairline)">live feed lost</span>
+              <span class="runslot" style="width:36px;height:28px;display:grid;place-items:center;opacity:.45;color:var(--color-ink-3)">▶</span>
+            </div>
+            <span class="t-meta" style="color:var(--color-ink-3);max-width:340px">Phase 05. Observed edges freeze at <code class="t-mono-sm">accent-dim</code> rather than disappearing — vanishing edges would read as “the run ended”.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="sys-card e1 wide">
+        <h3 class="sys-h t-title">Run states the addendum added</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">Live vs replay must be unmistakable: live breathes and is gold, replay is inert and <code class="t-mono-sm">halt</code>. A replay that looked live would make an operator think a finished run is still moving.</p>
+        <div style="display:flex;gap:var(--sp-6);align-items:center;flex-wrap:wrap">
+          <span class="badge t-micro badge-live"><span class="pip"></span>Live</span>
+          <span class="badge t-micro badge-replay"><span class="pip"></span>Replay</span>
+          <span class="t-meta" style="color:var(--color-ink-3)">Live execution is blue; replay is inert and explicitly labelled. Replay removes the streaming underline, weft travel, and shuttle.</span>
+        </div>
+
+        <h3 class="sys-h t-title" style="margin-top:var(--sp-4)">Three lifecycles — labels are not interchangeable</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">An agent task can be <b>done</b> while the run is still <b>running</b>; a run can <b>succeed</b> while its durable result is <b>done</b>. Every state below keeps a glyph and visible word when colour and motion disappear.</p>
+        <div id="lifecycleMatrix" class="life-matrix"></div>
+
+        <h3 class="sys-h t-title" style="margin-top:var(--sp-4)">Cancelled — <span style="color:var(--color-alert)">needs a board ruling</span></h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">The addendum asks for a <code class="t-mono-sm">cancelled</code> state and a cancel control. <code class="t-mono-sm">RUN_PROVENANCE_CONTRACT §3.2</code> places cancellation <b style="color:var(--color-ink)">outside</b> the contract and lists only six run states; <code class="t-mono-sm">ARCHITECTURE §6</code> defers writes to running execution. Both surfaces below are therefore rendered <b style="color:var(--color-ink)">gated</b> — drawn so the board can rule on something concrete, not approved by default. See <code class="t-mono-sm">TNG89_INTERACTION.md §8.1</code>.</p>
+        <div style="display:flex;gap:var(--sp-6);flex-wrap:wrap;align-items:flex-start">
+          <div class="e1" style="width:400px;padding:0;overflow:hidden;border-radius:var(--r-lg)">
+            <div class="rr-head t-body-m" style="display:flex;align-items:center;gap:8px;padding:12px 12px 8px 16px">
+              <svg width="12" height="12" viewBox="0 0 12 12" style="color:var(--color-halt)"><rect x="2.2" y="2.2" width="7.6" height="7.6" rx="1.2" fill="currentColor"/></svg>
+              <span>Cancelled — partial answer kept.</span>
+            </div>
+            <div class="rr-sub t-micro" style="padding:0 16px 12px;color:var(--color-ink-3);border-bottom:1px solid var(--color-hairline)">Response · researcher</div>
+            <div class="t-body" style="padding:16px;color:var(--color-ink)">ACP negotiates capabilities during the initialize handshake: the client advertises what it supports…</div>
+            <div class="rt-strip halt t-meta gated"><span>Cancelled by the operator. Partial answer kept.</span><span class="wm">stopReason: cancelled</span></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:var(--sp-3)">
+            <button class="btn btn-danger gated" style="width:120px">Stop</button>
+            <span class="t-meta" style="color:var(--color-ink-3);max-width:280px">If the ruling is “no cancel”, both disappear and nothing else in the design changes — the run slot stays start-only.</span>
+          </div>
+        </div>
+
+        <h3 class="sys-h t-title" style="margin-top:var(--sp-4)">Provenance offline and empty</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">The provenance channel fails independently of the event channel, so it gets its own watermark and its own words.</p>
+        <div style="display:flex;gap:var(--sp-4);flex-wrap:wrap">
+          <div class="e1" style="padding:12px 16px;display:flex;align-items:center;gap:10px;box-shadow:inset 3px 0 0 var(--color-halt)">
+            <span class="t-meta">Provenance reconnecting — graph shown to</span><span class="wm t-mono-sm">cursor 42</span>
+          </div>
+          <div style="position:relative;width:400px">
+            <div class="prov-empty t-meta" style="--x:0;--y:0;position:relative">
+              <b class="t-body-m" style="color:var(--color-ink-2)">Nothing captured for skills.</b>
+              <span>No skill-use adapter is installed. Presence of a skill in a prompt or on disk is not use, so LoomWatch will not claim it.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sys-card e1">
+        <h3 class="sys-h t-title">Parse failure — the only modal</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§9.5. The one place LoomWatch blocks the operator, because there is no document to fall back to.</p>
+        <div class="e2" style="padding:var(--sp-5);display:flex;flex-direction:column;gap:var(--sp-4)">
+          <div style="display:flex;gap:var(--sp-3);align-items:flex-start">
+            <span class="dot" data-dot="invalid" style="margin-top:3px"></span>
+            <span>
+              <div class="t-title">This file isn't valid YAML.</div>
+              <div class="t-meta" style="color:var(--color-ink-3)">mapping values are not allowed in this context</div>
+            </span>
+          </div>
+          <pre class="code t-mono">  12 |   role: reviewer
+  13 |   model claude-opus-4-6
+<span class="bad">     |         ^ line 13, column 9</span></pre>
+          <div style="display:flex;gap:var(--sp-3)">
+            <button class="btn btn-primary">Open another team…</button>
+            <button class="btn">Copy path</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="sys-card e1">
+        <h3 class="sys-h t-title">Empty — file open, no agents</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§10.3. The ghost carries the real 276 × 96 geometry, so the first drop lands where the eye already is. That, plus one 6-second line, is the entire onboarding.</p>
+        <div style="position:relative;height:150px">
+          <div class="ghost t-body" style="--x:0px;--y:0px">
+            <span style="display:flex;flex-direction:column;gap:4px">
+              <span>Drag a harness here to add your first agent.</span>
+              <span class="t-meta">It becomes the entry point.</span>
+            </span>
+          </div>
+          <p class="t-meta" style="position:absolute;top:112px;color:var(--color-ink-3)">Drag from the right edge of a node to sequence another after it.</p>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- =================================================================
+       DESIGN SYSTEM BOARD — DESIGN_LANGUAGE §3–§13, rendered live from
+       tokens.css so what you see IS the token layer, not a picture of it.
+       Flip the theme and every value below re-resolves.
+       ================================================================= -->
+  <div id="system" class="board" hidden>
+    <div class="sys-grid">
+
+      <section class="sys-card e1 wide">
+        <h3 class="sys-h t-title">Tier 2 — the semantic palette</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§3, §4. Tier 2 is the only tier that flips. A component may reference tier 2 or tier 3 only — a hex value or a <code class="t-mono-sm">--lw-*</code> primitive inside a component is a bug, and it is a bug that only shows up in one theme. Ratios are against the theme's own ground.</p>
+        <div class="sw-grid" id="swatches"></div>
+      </section>
+
+      <section class="sys-card e1">
+        <h3 class="sys-h t-title">Type — nine steps, three faces</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§6. Inter carries the product, JetBrains Mono carries anything the operator could paste into a terminal, Instrument Serif appears on exactly two strings. Numerals are tabular everywhere so a live counter reads calm, not broken.</p>
+        <div>
+          <div class="type-row"><span class="tag t-mono-sm">display</span><span class="t-display">LoomWatch</span></div>
+          <div class="type-row"><span class="tag t-mono-sm">title</span><span class="t-title">Protocol Researcher</span></div>
+          <div class="type-row"><span class="tag t-mono-sm">node</span><span class="t-node">Protocol Researcher</span></div>
+          <div class="type-row"><span class="tag t-mono-sm">body</span><span class="t-body">Review against TEAM_CONFIG</span></div>
+          <div class="type-row"><span class="tag t-mono-sm">ui/13</span><span class="t-ui">Reload from disk</span></div>
+          <div class="type-row"><span class="tag t-mono-sm">meta</span><span class="t-meta">3 lines differ · $1.24 of $5.00</span></div>
+          <div class="type-row"><span class="tag t-mono-sm">micro</span><span class="t-micro">Identity</span></div>
+          <div class="type-row"><span class="tag t-mono-sm">mono</span><span class="t-mono">kimi-for-coding/k3-256k</span></div>
+          <div class="type-row"><span class="tag t-mono-sm">mono-sm</span><span class="t-mono-sm">/Users/me/.loomwatch/teams</span></div>
+        </div>
+      </section>
+
+      <section class="sys-card e1">
+        <h3 class="sys-h t-title">Elevation — two levels, two models</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§7. Nothing stacks three deep. Dark adds a top-inset rim light — the cheapest thing that makes dark mode look built rather than inverted. <code class="t-mono-sm">e2</code> is opaque in both themes: never blur text the operator is being asked to read carefully.</p>
+        <div style="display:flex;gap:var(--sp-4);flex-wrap:wrap">
+          <div class="e1" style="width:180px;padding:var(--sp-4)">
+            <div class="t-body-m">e1 — floating panel</div>
+            <div class="t-meta" style="color:var(--color-ink-3)">translucent, blur 20</div>
+          </div>
+          <div class="e2" style="width:180px;padding:var(--sp-4)">
+            <div class="t-body-m">e2 — popover, palette</div>
+            <div class="t-meta" style="color:var(--color-ink-3)">opaque, always</div>
+          </div>
+        </div>
+        <h3 class="sys-h t-title" style="margin-top:var(--sp-4)">Space &amp; radius</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§7. 4 px base, eight steps only. Five radii.</p>
+        <div style="display:flex;align-items:flex-end;gap:var(--sp-2)" id="spaceRow"></div>
+        <div style="display:flex;align-items:center;gap:var(--sp-3)" id="radiusRow"></div>
+      </section>
+
+      <section class="sys-card e1 wide">
+        <h3 class="sys-h t-title">Status — shape and colour, both, always</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§12. Shape is the primary channel, so the table survives greyscale and colour-blindness (§8, Law 3). <code class="t-mono-sm">running</code> and <code class="t-mono-sm">waiting</code> are both gold and are separated by shape and motion — a moving filled dot versus a static hollow diamond. In phase 04 every node is <code class="t-mono-sm">idle</code>.</p>
+        <table class="sys">
+          <thead><tr><th style="width:60px">Shape</th><th style="width:120px">Status</th><th style="width:120px">Colour</th><th>Motion</th><th style="width:60px">Grey</th></tr></thead>
+          <tbody id="statusRows"></tbody>
+        </table>
+      </section>
+
+      <section class="sys-card e1 wide">
+        <h3 class="sys-h t-title">The two edge layers — warp and weft</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§13, and ARCHITECTURE §5's named requirement. In one line: <b style="color:var(--color-ink)">structure is a quiet grey solid line; activity is a travelling gold dashed line beside it.</b> The three observed kinds are separated by dash pattern, stroke weight and marker rather than by three shades of gold.</p>
+        <table class="sys">
+          <thead><tr><th style="width:150px">Stroke</th><th style="width:190px">Layer · kind</th><th style="width:130px">Colour</th><th>Motion</th><th style="width:150px">Greyscale proof</th></tr></thead>
+          <tbody id="edgeRows"></tbody>
+        </table>
+        <p class="t-meta" style="color:var(--color-ink-3)">Drop all colour and the five rows remain <code class="t-mono-sm">solid+filled arrow</code> / <code class="t-mono-sm">6 4</code> / <code class="t-mono-sm">2 3 two arrows</code> / <code class="t-mono-sm">10 4 heavy, chevron</code> / <code class="t-mono-sm">1 4 dot, ⚠</code>. Five distinct rows, no colour used — that is the §16 acceptance test.</p>
+      </section>
+
+      <section class="sys-card e1 wide">
+        <h3 class="sys-h t-title">Agent node — 276 × 96, every state</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§5.1, §5.2. The border is reserved for <b style="color:var(--color-ink)">validity</b>; the rail and indicator carry <b style="color:var(--color-ink)">status</b>. Overloading the border would make an invalid running node unreadable. The 3 px budget lane is always rendered — empty in phase 04 — so the geometry never changes when phase 05 fills it.</p>
+        <div class="node-gallery" id="nodeGallery"></div>
+      </section>
+
+      <section class="sys-card e1 wide">
+        <h3 class="sys-h t-title">Evidence quality — the honesty layer</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">TNG89 §5, from <code class="t-mono-sm">RUN_PROVENANCE_CONTRACT §8.1</code>. TNG-89F requires the four <code class="t-mono-sm">capture</code> values to be <b style="color:var(--color-ink)">visibly and textually distinct</b>, so each gets a border treatment, a glyph <b style="color:var(--color-ink)">and</b> a word — three channels, and the word is never dropped to save space. <code class="t-mono-sm">unavailable</code> always states its reason: an empty category with no explanation reads as a bug in LoomWatch, the same category with a reason reads as an honest boundary.</p>
+        <div id="capRow" style="display:flex;gap:var(--sp-4);flex-wrap:wrap"></div>
+        <div id="capGrey" style="display:flex;gap:var(--sp-4);flex-wrap:wrap" class="grey"></div>
+        <h3 class="sys-h t-title" style="margin-top:var(--sp-4)">Coverage per category</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)"><code class="t-mono-sm">CONTRACT §12</code>. A graph-level “Complete capture” label is permitted <b style="color:var(--color-ink)">only</b> when every requested category is complete; otherwise the header reads “Partial capture” and names the gaps. “Complete” is scoped in words the operator can check — complete for what the adapters can observe, never an agent’s private internal state.</p>
+        <div id="covRow" style="display:flex;gap:var(--sp-6);flex-wrap:wrap"></div>
+      </section>
+
+      <section class="sys-card e1 wide">
+        <h3 class="sys-h t-title">Level of detail</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">§5.5. Transitions between levels are instantaneous — animating at low zoom while panning is where a canvas starts dropping frames.</p>
+        <table class="sys">
+          <thead><tr><th style="width:140px">Zoom</th><th style="width:120px">Size</th><th>Renders</th></tr></thead>
+          <tbody>
+            <tr><td><b>≥ 0.6</b></td><td class="t-mono-sm">276 × 96</td><td>full — rail, glyph (+ entrypoint ring), name, role, status, meta row, budget lane</td></tr>
+            <tr><td><b>0.35 – 0.6</b></td><td class="t-mono-sm">276 × 48</td><td>rail, role glyph, name, status indicator. Role, meta row and budget lane hidden.</td></tr>
+            <tr><td><b>&lt; 0.35</b></td><td class="t-mono-sm">48 × 48</td><td>role glyph on the status-rail colour, name beneath at <code class="t-mono-sm">micro</code></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+    </div>
+  </div>
+
+  <div id="sweep"></div>
+
+</div>
+</div>
+
+<script>
+  // a TDZ or typo in prototype.js must not fail silently: surface it.
+  window.addEventListener('error', (e) => {
+    const b = document.createElement('pre');
+    b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;margin:0;padding:10px 14px;'
+      + 'background:#2a1113;color:#f2635c;font:500 12px/1.5 ui-monospace,monospace;border-top:1px solid #f2635c';
+    b.textContent = 'prototype.js failed to initialise: ' + (e.message || 'unknown')
+      + (e.filename ? '  (' + e.filename.split('/').pop() + ':' + e.lineno + ')' : '');
+    document.body.appendChild(b);
+  }, { once: true });
+</script>
+<script src="prototype.js"></script>
+</body>
+</html>

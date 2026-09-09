@@ -1,0 +1,1334 @@
+/* ===========================================================================
+   LoomWatch — TNG-87 prototype component styles
+   Built strictly on ./tokens.css. THE ONE RULE (DESIGN_LANGUAGE §3): no hex
+   values and no --lw-* primitives below this line. Only tier 2 / tier 3.
+
+   Every rule below cites the spec section it implements so the SwiftUI /
+   React engineer can diff implementation against intent.
+   =========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   RESET + STAGE
+   The stage is a fixed 1600 × 1000 canvas scaled to fit, so the composition
+   reviews at the proportions it was designed at (UX_REDESIGN §13: ≥1280).
+   --------------------------------------------------------------------------- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* id-level selectors below would otherwise out-specify the UA [hidden] rule */
+[hidden] { display: none !important; }
+
+html, body {
+  height: 100%;
+  background: #17181c;                 /* prototype chrome only — not a token */
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+#stageWrap {
+  position: absolute;
+  inset: 44px 0 0 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+#stage {
+  position: relative;
+  width: 1600px;
+  height: 1000px;
+  flex: none;
+  transform-origin: center center;
+  background: var(--color-ground);
+  color: var(--color-ink);
+  overflow: hidden;
+  border-radius: 12px;
+  box-shadow: 0 30px 90px rgb(0 0 0 / .6);
+  /* the theme cross-fade — DESIGN_LANGUAGE §9 */
+  transition: background-color var(--t-move) var(--ease-out),
+              color var(--t-move) var(--ease-out);
+}
+
+/* dot grid — UX_REDESIGN §7: gap 16, size 1, ground-dot */
+.canvas-ground {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 1px 1px,
+                    var(--color-ground-dot) 1px, transparent 0);
+  background-size: 16px 16px;
+  transition: opacity var(--t-quick) var(--ease-out);
+}
+#stage.dragging .canvas-ground { opacity: .6; }
+/* §4.5 — the drop target is legible before the drop */
+#stage.dragging::after {
+  content: "";
+  position: absolute;
+  inset: var(--lw-panel-inset);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  border-radius: var(--r-lg);
+  pointer-events: none;
+  z-index: 60;
+}
+
+/* the theme sweep — DESIGN_LANGUAGE §9. A single gold wipe, 320ms. */
+#sweep {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(100deg, transparent 38%,
+              color-mix(in srgb, var(--color-accent) 22%, transparent) 50%,
+              transparent 62%);
+}
+#stage.sweeping #sweep {
+  animation: sweep var(--t-entrance) var(--ease-out);
+}
+@keyframes sweep {
+  from { opacity: 1; transform: translateX(-100%); }
+  to   { opacity: 1; transform: translateX(100%); }
+}
+
+/* ---------------------------------------------------------------------------
+   FLOATING PANEL PRIMITIVE — UX_REDESIGN §3, elevation from tokens.css
+   --------------------------------------------------------------------------- */
+.panel { position: absolute; z-index: 40; }
+.panel.left   { left: var(--lw-panel-inset); }
+.panel.right  { right: var(--lw-panel-inset); }
+.panel.top    { top: var(--lw-panel-inset); }
+.panel.bottom { bottom: var(--lw-panel-inset); }
+.panel.cx     { left: 50%; transform: translateX(-50%); }
+
+/* ---------------------------------------------------------------------------
+   LIBRARY — UX_REDESIGN §4
+   288 px, collapsible to a 48 px rail. 40 px rows, 6 px gutter, 20 px padding.
+   --------------------------------------------------------------------------- */
+#library {
+  width: var(--lw-library-w);
+  height: calc(100% - 40px);
+  max-height: 640px;
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  overflow: hidden;
+  transition: width var(--t-move) var(--ease-out),
+              padding var(--t-move) var(--ease-out);
+}
+#stage.lib-collapsed #library {
+  width: var(--lw-library-rail-w);
+  padding: var(--sp-2) 0;
+}
+#stage.lib-collapsed #library .lib-group,
+#stage.lib-collapsed #library .lib-head-text { display: none; }
+#library .rail-only { display: none; }
+#stage.lib-collapsed #library .rail-only {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.lib-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.lib-head-text { color: var(--color-ink-3); }
+
+.lib-group { display: flex; flex-direction: column; gap: var(--sp-2); }
+.lib-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--color-ink-3);
+  padding: 0 var(--sp-1) var(--sp-1);
+}
+.lib-rows { display: flex; flex-direction: column; gap: 6px; }
+
+.lib-row {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  cursor: grab;
+  border: 1px solid transparent;
+  transition: background-color var(--t-instant) var(--ease-out);
+}
+.lib-row:hover { background: var(--color-accent-tint); }
+.lib-row:hover .drag-dots { opacity: .6; }
+.lib-row .drag-dots {
+  margin-left: auto;
+  color: var(--color-ink-3);
+  opacity: 0;
+  transition: opacity var(--t-instant) var(--ease-out);
+  letter-spacing: -1px;
+}
+.lib-row.unavailable { opacity: .5; cursor: default; }
+
+/* harness monogram — DESIGN_LANGUAGE §12: monochrome, never vendor art */
+.monogram {
+  width: 20px; height: 20px;
+  flex: none;
+  display: grid; place-items: center;
+  border-radius: var(--r-md);
+  background: var(--color-hairline);
+  color: var(--color-ink-2);
+  font: 600 10px/1 var(--font-mono);
+}
+.lib-row-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.lib-row-name {
+  color: var(--color-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lib-row-sub {
+  color: var(--color-ink-2);
+  white-space: nowrap; overflow: hidden;   /* JS middleTruncate() owns this */
+}
+
+/* §4.0 loading skeletons — no spinner in a list */
+.skel-row { height: 40px; display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); }
+.skel-sq { width: 20px; height: 20px; border-radius: var(--r-md); background: var(--color-accent-tint); flex: none; }
+.skel-bars { display: flex; flex-direction: column; gap: 5px; flex: 1; }
+.skel-bar { height: 7px; border-radius: var(--r-full); background: var(--color-hairline); }
+.skel-row, .skel-frozen { animation: skel 1200ms ease-in-out infinite; }
+.skel-frozen { animation: none; opacity: .4; }
+@keyframes skel { 0%,100% { opacity: .4 } 50% { opacity: .7 } }
+
+/* §16 inline error block */
+.inline-error {
+  border: 1px dashed var(--color-alert);
+  border-radius: var(--r-md);
+  padding: var(--sp-3);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+}
+.inline-error .msg { color: var(--color-ink); }
+.inline-error .detail { color: var(--color-ink-2); overflow-wrap: anywhere; }
+
+/* §4.3 empty group */
+.lib-empty {
+  padding: var(--sp-3);
+  border: 1px dashed var(--color-hairline);
+  border-radius: var(--r-md);
+  color: var(--color-ink-3);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+}
+
+/* ---------------------------------------------------------------------------
+   DOCUMENT SWITCHER — UX_REDESIGN §9.1 / §9.1a
+   44 px, two lines, top-centre. The save-to-disk moment lives here.
+   --------------------------------------------------------------------------- */
+#chip {
+  min-width: 280px;
+  height: var(--lw-chip-h);
+  padding: 0 var(--sp-3) 0 var(--sp-4);
+  display: flex; align-items: center; gap: var(--sp-3);
+  cursor: pointer;
+  overflow: hidden;
+  /* NB: no `position: relative` here — an id selector would out-specify
+     `.panel { position: absolute }` and drop the chip into normal flow.
+     Absolute positioning already establishes the containing block the
+     ledger sweep needs. */
+}
+#chip .chip-text { display: flex; flex-direction: column; gap: 1px; }
+#chip .chip-l1 { color: var(--color-ink); display: flex; align-items: center; gap: var(--sp-2); }
+#chip .chip-l2 { color: var(--color-ink-3); display: flex; align-items: center; gap: var(--sp-2); }
+#chip .chev { margin-left: auto; color: var(--color-ink-3); flex: none; }
+
+/* the state dot — nine states, shape carries meaning as well as colour */
+.dot { width: 12px; height: 12px; flex: none; }
+
+/* the ledger sweep — §9.1a. 2px line along the chip's bottom edge. */
+#chip .ledger {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 2px; width: 100%;
+  background: var(--color-accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  opacity: 0;
+}
+#chip.saving .ledger { opacity: 1; animation: ledger var(--t-settle) var(--ease-out) forwards; }
+#chip.saved  .ledger { opacity: 1; transform: scaleX(1); background: var(--color-ok); }
+#chip.failed .ledger { opacity: 1; transform: scaleX(.55); background: var(--color-alert); }
+@keyframes ledger { from { transform: scaleX(0) } to { transform: scaleX(1) } }
+
+/* ---------------------------------------------------------------------------
+   BUTTONS — the gold fill is rationed. DESIGN_LANGUAGE §8, Law 2.
+   --------------------------------------------------------------------------- */
+.btn {
+  height: 28px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--color-hairline);
+  background: transparent;
+  color: var(--color-ink-2);
+  font: 500 13px/1 var(--font-sans);
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--t-instant) var(--ease-out),
+              color var(--t-instant) var(--ease-out);
+}
+.btn:hover { background: var(--color-accent-tint); color: var(--color-ink); }
+.btn-primary {
+  background: var(--color-accent-fill);
+  border-color: transparent;
+  color: var(--color-accent-on-fill);
+  font-weight: 600;
+}
+.btn-primary:hover { background: var(--color-accent-fill); filter: brightness(1.06); color: var(--color-accent-on-fill); }
+.btn-primary:disabled, .btn:disabled {
+  background: var(--color-hairline);
+  color: var(--color-ink-3);
+  border-color: transparent;
+  cursor: not-allowed;
+  filter: none;
+}
+.btn-lg { height: 44px; padding: 0 var(--sp-7); border-radius: var(--r-md); font-size: 15px; }
+.btn-danger:hover { background: color-mix(in srgb, var(--color-alert) 12%, transparent); color: var(--color-alert); }
+.link {
+  background: none; border: 0; padding: 0;
+  color: var(--color-accent);
+  font: 500 13px/18px var(--font-sans);
+  cursor: pointer;
+  text-underline-offset: 3px;
+}
+.link:hover { text-decoration: underline; }
+
+/* icon button — ≥32px hit target, UX_REDESIGN §12 */
+.iconbtn {
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  border: 0; background: transparent;
+  color: var(--color-ink-2);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  position: relative;
+}
+.iconbtn:hover { background: var(--color-accent-tint); color: var(--color-ink); }
+
+/* ---------------------------------------------------------------------------
+   AGENT NODE — UX_REDESIGN §5.1. 276 × 96.
+   --------------------------------------------------------------------------- */
+#nodes { position: absolute; inset: 0; z-index: 30; }
+
+.node {
+  position: absolute;
+  left: var(--x); top: var(--y);
+  width: 276px; height: 96px;
+  padding: 13px 14px 0 17px;          /* 3px status rail + 14px */
+  background: var(--lw-node-fill);
+  border: 1px solid var(--lw-node-border);
+  border-radius: var(--r-lg);
+  display: flex; flex-direction: column;
+  cursor: default;
+  transition: border-color var(--t-instant) var(--ease-out),
+              box-shadow var(--t-quick) var(--ease-out);
+}
+.node:hover { border-color: var(--lw-node-border-hover); box-shadow: var(--e1-shadow); }
+.node:hover .handle { width: 12px; height: 12px; background: var(--lw-handle-live); }
+
+/* selected — 2px accent ring at 3px offset (§5.2) */
+.node.selected {
+  box-shadow: var(--e1-shadow), 0 0 0 3px var(--color-panel-solid), 0 0 0 5px var(--lw-node-ring);
+}
+/* keyboard focus adds the inner panel ring so it reads over any fill */
+.node.kbd {
+  box-shadow: 0 0 0 1px var(--color-panel-solid), 0 0 0 3px var(--lw-node-ring);
+}
+/* validity, not status, owns the border (§5.2) */
+.node.incomplete { border-color: var(--color-accent); }
+.node.invalid    { border-color: var(--color-alert); border-width: 1.5px; }
+.node.dragging   { opacity: .85; box-shadow: var(--e2-shadow); }
+
+/* 3px status rail, lg radius on the left corners only */
+.node .rail {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: var(--r-lg) 0 0 var(--r-lg);
+  background: var(--color-ink-3);
+}
+.node.st-running .rail   { background: var(--color-live); }
+.node.st-waiting .rail   { background: var(--color-halt); }
+.node.st-starting .rail  { background: var(--color-live); }
+.node.st-succeeded .rail { background: var(--color-ok); }
+.node.st-failed .rail    { background: var(--color-alert); }
+.node.st-stopped .rail   { background: var(--color-halt); }
+.node.st-unavailable .rail { background: color-mix(in srgb, var(--color-ink-3) 40%, transparent); }
+
+/* TNG-113: task execution owns the whole perimeter. Blue means executing,
+   never selection or brand. The visible RUNNING/STREAMING word is primary;
+   the animated border is a redundant live cue. */
+.node.has-task { height: 124px; }
+.node.has-task.st-running,
+.node.has-task.st-starting {
+  border-color: var(--lw-node-live);
+  box-shadow: 0 0 0 1px var(--color-live-tint), 0 0 0 3px color-mix(in srgb, var(--color-live) 28%, transparent);
+  animation: live-border var(--t-breathe) ease-in-out infinite;
+}
+.node.has-task.st-succeeded { border-color: var(--color-ok); }
+.node.has-task.st-failed { border-color: var(--color-alert); }
+.node.has-task.st-stopped { border-color: var(--color-halt); border-style: dashed; }
+@keyframes live-border {
+  50% { box-shadow: 0 0 0 1px var(--color-live-tint), 0 0 0 6px color-mix(in srgb, var(--color-live) 12%, transparent); }
+}
+.node-task {
+  min-width: 0;
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 8px; padding-top: 7px;
+  border-top: 1px solid var(--color-hairline);
+  color: var(--color-ink-2);
+  white-space: nowrap;
+}
+.node-task b { flex: none; color: var(--color-ink); font-size: 10px; letter-spacing: .07em; }
+.node-task span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.node.has-task .node-rule { display: none; }
+.node.has-task .node-meta { margin-top: auto; }
+
+.node-top { display: flex; align-items: flex-start; gap: var(--sp-3); flex: none; }
+.node-glyph {
+  width: 18px; height: 18px; flex: none;
+  color: var(--color-ink-2);
+  margin-top: 1px;
+}
+/* the entrypoint gets a 2px accent ring around its role glyph (§5.1) */
+.node.entry .node-glyph {
+  color: var(--color-accent);
+  box-sizing: content-box;
+  padding: 3px;
+  border: 2px solid var(--color-accent);
+  border-radius: var(--r-full);
+  margin: -3px -3px 0;
+}
+.node-id { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.node-name {
+  color: var(--lw-node-name);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;   /* tail truncate */
+}
+.node-role { color: var(--lw-node-role); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-role.empty { color: var(--color-ink-3); font-style: italic; }
+
+/* WITHDRAWN in favour of the role-glyph ring — see README "Deltas".
+   Retained only for the design-system board's before/after. */
+.pill-entry {
+  flex: none;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-xs);
+  border: 1px solid var(--color-accent-dim);
+  color: var(--color-accent);
+}
+.node-rule {
+  height: 1px; background: var(--color-hairline);
+  flex: none;
+  margin-top: auto;                   /* pins the telemetry group to the base */
+}
+.node-meta {
+  display: flex; align-items: center; gap: var(--sp-2);
+  color: var(--lw-node-meta);
+  min-width: 0;
+  flex: none;
+  margin-top: var(--sp-2);
+}
+.node-meta .model {
+  min-width: 0; flex: 1;
+  white-space: nowrap; overflow: hidden;   /* JS middleTruncate() owns this */
+}
+.node-meta .cost { flex: none; color: var(--color-ink-2); }
+
+/* 3px budget lane — always rendered, empty in phase 04 (§5.1) */
+.budget-lane {
+  height: 3px;
+  flex: none;
+  margin: var(--sp-2) -14px 0 -17px;
+  background: var(--lw-budget-track);
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+  overflow: hidden;
+}
+.budget-lane > i { display: block; height: 100%; background: var(--lw-budget-fill); }
+.budget-lane.warn > i { background: var(--lw-budget-warn); }
+.budget-lane.over > i { background: var(--lw-budget-over); }
+
+/* handles — dormant in team mode, active in pipeline mode (CANVAS_SPEC §8.2) */
+.handle {
+  position: absolute;
+  top: 50%;
+  width: 8px; height: 8px;
+  margin-top: -4px;
+  border-radius: var(--r-full);
+  background: var(--lw-handle-dormant);
+  transition: width var(--t-instant), height var(--t-instant), background-color var(--t-instant);
+}
+.handle.l { left: -4px; }
+.handle.r { right: -4px; }
+#stage.mode-team .handle { opacity: .25; }
+#stage.mode-pipeline .handle { opacity: .4; background: var(--lw-handle-live); }
+
+/* pipeline step badge (top-left, outside) + validity dot (top-right, outside).
+   PROTOTYPE DELTA to §5.2 — see README "Deltas": the incomplete/invalid dot was
+   specified top-left, which collides with the pipeline step number. Moved to the
+   top-right outside corner so both can coexist in pipeline mode. */
+.node .step {
+  position: absolute;
+  left: -8px; top: -8px;
+  width: 16px; height: 16px;
+  border-radius: var(--r-full);
+  display: grid; place-items: center;
+  background: var(--color-panel-solid);
+  border: 1px solid var(--color-hairline);
+  color: var(--color-ink-2);
+  font: 600 10px/1 var(--font-sans);
+}
+#stage.mode-team .node .step { display: none; }
+.node .vdot {
+  position: absolute;
+  right: -5px; top: -5px;
+  width: 10px; height: 10px;
+  border-radius: var(--r-full);
+  border: 2px solid var(--color-panel-solid);
+  display: none;
+}
+.node.incomplete .vdot { display: block; background: var(--color-accent); }
+.node.invalid    .vdot { display: block; background: var(--color-alert); }
+
+/* §10.3 ghost node — same 276 × 96 geometry */
+.ghost {
+  position: absolute;
+  left: var(--x); top: var(--y);
+  width: 276px; height: 96px;
+  border: 1px dashed var(--color-hairline);
+  border-radius: var(--r-lg);
+  display: grid; place-items: center;
+  color: var(--color-ink-3);
+  text-align: center;
+}
+#stage.dragging .ghost { border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
+
+/* ---------------------------------------------------------------------------
+   EDGES — DESIGN_LANGUAGE §13. Four channels of separation.
+   --------------------------------------------------------------------------- */
+#edges { position: absolute; inset: 0; z-index: 20; pointer-events: none; }
+#edgeLabels { position: absolute; inset: 0; z-index: 25; pointer-events: none; }
+
+.warp {                                    /* configured: structure */
+  fill: none;
+  stroke: var(--lw-edge-warp);
+  stroke-width: 1.5;
+}
+.weft {                                    /* observed: activity */
+  fill: none;
+  stroke: var(--lw-edge-weft);
+  stroke-width: 1.5;
+  filter: var(--bloom);
+  animation: flow var(--t-flow) linear infinite;
+}
+.weft.dispatch { stroke-dasharray: 6 4; }
+.weft.ask      { stroke-dasharray: 2 3; stroke-opacity: .8; animation-direction: alternate; }
+.weft.handoff  { stroke-dasharray: 10 4; stroke-width: 2.5; animation: none; }
+.weft.anomaly  { stroke-dasharray: 1 4; stroke: var(--lw-edge-anomaly); filter: none; }
+.weft.aged     { stroke: var(--lw-edge-weft-aged); animation: none; }
+@keyframes flow { to { stroke-dashoffset: -28; } }
+
+/* the coincidence shuttle — a 24px accent segment on the configured path (§13) */
+.shuttle {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 24 4000;
+  filter: var(--bloom);
+  animation: shuttle 1400ms var(--ease-out) infinite;
+}
+@keyframes shuttle { from { stroke-dashoffset: 24 } to { stroke-dashoffset: -700 } }
+
+/* layer solo is view state, never document state (§6.7) */
+#stage.solo-configured .weft, #stage.solo-configured .shuttle, #stage.solo-configured .edge-badge { display: none; }
+#stage.solo-observed .warp, #stage.solo-observed .warp-marker { display: none; }
+
+.edge-badge {
+  padding: 1px var(--sp-2);
+  border-radius: var(--r-full);
+  background: var(--color-accent-tint);
+  border: 1px solid var(--color-accent-dim);
+  color: var(--color-ink);
+}
+.edge-badge.alert { border-color: var(--color-alert); color: var(--color-alert); background: transparent; }
+.edge-label { position: absolute; z-index: 25; transform: translate(-50%, -50%); pointer-events: none; }
+
+/* ---------------------------------------------------------------------------
+   LAYER LEGEND — §6.7. Conditional chrome: only while observed edges exist.
+   --------------------------------------------------------------------------- */
+#legend { width: 148px; padding: var(--sp-3); display: flex; flex-direction: column; gap: 6px; }
+.legend-row {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  color: var(--color-ink-2);
+  cursor: pointer;
+  background: none;
+  width: 100%;
+  font: inherit;
+}
+.legend-row:hover { background: var(--color-accent-tint); }
+.legend-row .count { margin-left: auto; color: var(--color-ink-3); }
+.legend-row.soloed { border-color: var(--color-accent); color: var(--color-ink); }
+.legend-row.dimmed { color: var(--color-ink-3); opacity: .55; }
+
+/* ---------------------------------------------------------------------------
+   MODE PILL — CANVAS_SPEC §8.1, UX_REDESIGN §8
+   --------------------------------------------------------------------------- */
+#modepill {
+  height: 36px;
+  border-radius: var(--r-full);
+  padding: 0 var(--sp-2) 0 var(--sp-4);
+  display: flex; align-items: center; gap: var(--sp-3);
+  cursor: pointer;
+}
+#modepill .glyph { color: var(--color-accent); display: grid; place-items: center; }
+#stage.mode-team #modepill .glyph { color: var(--color-ink-3); }
+#modepill .label { color: var(--color-ink); }
+#stage.mode-team #modepill .label { color: var(--color-ink-2); }
+#modepill .anomaly {
+  color: var(--color-alert);
+  display: flex; align-items: center; gap: 3px;
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--color-hairline);
+}
+/* the reserved, disabled run slot — CANVAS_SPEC §14 */
+#modepill .runslot {
+  width: 36px; height: 28px;
+  display: grid; place-items: center;
+  border-radius: var(--r-full);
+  color: var(--color-ink-3);
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+   VIEW CONTROLS — §3 / DESIGN_LANGUAGE §11. 168 px, carries the theme toggle.
+   --------------------------------------------------------------------------- */
+#viewctl {
+  width: var(--lw-viewctl-w);
+  height: 36px;
+  transition: right var(--t-move) var(--ease-out), opacity var(--t-quick) var(--ease-out);
+  border-radius: var(--r-full);
+  display: flex; align-items: center; justify-content: space-evenly;
+  padding: 0 var(--sp-1);
+  opacity: .4;
+  transition: opacity var(--t-quick) var(--ease-out);
+}
+#viewctl:hover, #viewctl:focus-within { opacity: 1; }
+/* while the inspector is open the cluster slides clear of it */
+#stage.inspecting #viewctl {
+  right: calc(var(--lw-inspector-w) + var(--lw-panel-inset) + var(--sp-3));
+}
+/* the third theme state — "follow system" — is a hairline dot under the glyph */
+#themeBtn .sysdot {
+  position: absolute;
+  bottom: 3px; left: 50%; transform: translateX(-50%);
+  width: 3px; height: 3px; border-radius: var(--r-full);
+  background: var(--color-ink-3);
+  display: none;
+}
+#stage.theme-system #themeBtn .sysdot { display: block; }
+
+/* ---------------------------------------------------------------------------
+   INSPECTOR — UX_REDESIGN §5.4. Three zones: IDENTITY, BEHAVIOUR, PROCESS.
+   --------------------------------------------------------------------------- */
+#inspector {
+  width: var(--lw-inspector-w);
+  height: calc(100% - 40px);
+  padding: var(--sp-5);
+  display: flex; flex-direction: column; gap: var(--sp-5);
+  overflow-y: auto;
+}
+#inspector[hidden] { display: none; }
+.insp-head { display: flex; align-items: flex-start; gap: var(--sp-3); }
+.insp-head .node-glyph { width: 20px; height: 20px; }
+.insp-title { color: var(--color-ink); }
+.insp-id { color: var(--color-ink-2); }
+.insp-status { color: var(--color-ink-3); display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+
+.zone { display: flex; flex-direction: column; gap: var(--sp-3); }
+.zone-head {
+  display: flex; align-items: center; gap: var(--sp-3);
+  color: var(--color-ink-3);
+}
+.zone-head::after { content: ""; flex: 1; height: 1px; background: var(--color-hairline); }
+.zone-head.toggle { cursor: pointer; background: none; border: 0; padding: 0; font: inherit; width: 100%; }
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field > label { color: var(--color-ink-2); }
+.input {
+  height: 32px;
+  padding: 0 var(--sp-3);
+  width: 100%;
+  background: var(--color-panel-solid);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-sm);
+  color: var(--color-ink);
+  font: 400 14px/20px var(--font-sans);
+}
+.input.mono { font: 400 12px/17px var(--font-mono); }
+.input::placeholder { color: var(--color-ink-3); }
+/* the two validation weights, never both (§5.4) */
+.field.needs .input { border-color: var(--color-accent); }
+.field.needs .hint  { color: var(--color-accent); }
+.field.error .input { border-color: var(--color-alert); }
+.field.error .hint  { color: var(--color-alert); }
+.hint { color: var(--color-ink-3); }
+
+/* these are <button>s, so they need the UA reset or the browser's own
+   background, border, padding and font win and the sub-label clips */
+.check {
+  display: flex; gap: var(--sp-3); align-items: flex-start;
+  cursor: pointer;
+  background: none; border: 0; padding: 0;
+  width: 100%; text-align: left; font: inherit; color: inherit;
+}
+.check .box {
+  width: 16px; height: 16px; flex: none; margin-top: 2px;
+  border: 1px solid var(--color-ink-3);
+  border-radius: var(--r-xs);
+  display: grid; place-items: center;
+  color: var(--color-accent-on-fill);
+}
+.check.round .box { border-radius: var(--r-full); }
+.check.on .box { background: var(--color-accent-fill); border-color: transparent; }
+.check .txt { display: flex; flex-direction: column; gap: 1px; }
+.check .txt b { color: var(--color-ink); font-weight: 500; }
+.check .txt span { color: var(--color-ink-3); }
+
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.proc-list { display: grid; grid-template-columns: 44px 1fr; gap: var(--sp-2) var(--sp-3); }
+.proc-list dt { color: var(--color-ink-3); }
+.proc-list dd { color: var(--color-ink-2); overflow-wrap: anywhere; }
+.insp-foot {
+  margin-top: auto;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--color-hairline);
+  display: flex; justify-content: space-between;
+}
+
+/* ---------------------------------------------------------------------------
+   POPOVERS / PALETTE / DIALOG — e2, opaque. Never blur text (tokens.css).
+   --------------------------------------------------------------------------- */
+.pop { position: absolute; z-index: 100; overflow: hidden; }
+.pop-search {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--color-hairline);
+  color: var(--color-ink-3);
+}
+.pop-search input {
+  flex: 1; background: none; border: 0; outline: none;
+  color: var(--color-ink); font: 400 14px/20px var(--font-sans);
+}
+.pop-list { padding: var(--sp-2); display: flex; flex-direction: column; gap: 2px; }
+.pop-row {
+  display: flex; align-items: center; gap: var(--sp-3);
+  height: 34px; padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  color: var(--color-ink-2);
+  cursor: pointer; background: none; border: 0; width: 100%;
+  font: inherit; text-align: left;
+}
+.pop-row:hover, .pop-row.active { background: var(--color-accent-tint); color: var(--color-ink); }
+.pop-row.current { background: var(--color-accent-tint); }
+.pop-row .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pop-row .aside { color: var(--color-ink-3); flex: none; }
+.pop-row .kbd { color: var(--color-ink-3); flex: none; }
+.pop-sep { height: 1px; background: var(--color-hairline); }
+.pop-foot { padding: var(--sp-3) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); }
+.pop-foot .path { color: var(--color-ink-3); overflow-wrap: anywhere; }
+.pop-foot .acts { display: flex; gap: var(--sp-4); }
+.pop-note { color: var(--color-ink-3); }
+
+#palette { width: 560px; left: 50%; top: 22%; transform: translateX(-50%); }
+
+/* problems popover — two weights, separated (§9.2) */
+.prob-group { padding: var(--sp-2); }
+.prob-head { padding: var(--sp-2) var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); }
+.prob-head.needs { color: var(--color-accent); }
+.prob-head.errs  { color: var(--color-alert); }
+.prob-row { display: flex; flex-direction: column; gap: 1px; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-sm); cursor: pointer; }
+.prob-row:hover { background: var(--color-accent-tint); }
+.prob-row b { color: var(--color-ink); font-weight: 500; }
+.prob-row span { color: var(--color-ink-3); }
+
+/* the product's only modal — §9.5 parse failure */
+#scrim {
+  position: absolute; inset: 0; z-index: 150;
+  background: color-mix(in srgb, var(--color-ground) 65%, transparent);
+  backdrop-filter: blur(2px);
+  display: grid; place-items: center;
+}
+#parseDialog { width: 520px; padding: var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-4); }
+.code {
+  background: var(--color-ground);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-sm);
+  padding: var(--sp-3);
+  color: var(--color-ink-2);
+  overflow-x: auto;
+  white-space: pre;
+}
+.code .bad { color: var(--color-alert); }
+
+/* transport bars — §16. Full width, top. */
+.bar {
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  z-index: 120;
+  height: 40px;
+  padding: 0 var(--sp-6);
+  display: flex; align-items: center; gap: var(--sp-4);
+  border-bottom: 1px solid var(--color-hairline);
+  background: var(--color-panel-solid);
+}
+.bar.halt  { box-shadow: inset 3px 0 0 var(--color-halt); }
+.bar.alert { box-shadow: inset 3px 0 0 var(--color-alert); }
+.bar .msg { color: var(--color-ink); }
+.bar .sub { color: var(--color-ink-3); }
+.bar .acts { margin-left: auto; display: flex; gap: var(--sp-3); }
+
+/* ---------------------------------------------------------------------------
+   FIRST RUN — §10.1. The one screen that uses the serif display step.
+   --------------------------------------------------------------------------- */
+#firstrun {
+  position: absolute; inset: 0; z-index: 50;
+  display: grid; place-items: center;
+}
+.fr-stack {
+  display: flex; flex-direction: column; align-items: center;
+  gap: var(--sp-4);
+  text-align: center;
+}
+.fr-mark { color: var(--color-accent); animation: frIn var(--t-entrance) var(--ease-out) both; }
+.fr-title { color: var(--color-ink); animation: frIn var(--t-entrance) var(--ease-out) 60ms both; }
+.fr-sub { color: var(--color-ink-2); animation: frIn var(--t-entrance) var(--ease-out) 120ms both; }
+.fr-cta { margin-top: var(--sp-4); animation: frIn var(--t-entrance) var(--ease-out) 180ms both; }
+.fr-alt { animation: frIn var(--t-entrance) var(--ease-out) 240ms both; }
+@keyframes frIn { from { opacity: 0; transform: translateY(8px) scale(.96) } to { opacity: 1; transform: none } }
+.fr-foot {
+  position: absolute; left: var(--sp-6); bottom: var(--sp-5);
+  color: var(--color-ink-3);
+  display: flex; align-items: center; gap: var(--sp-2);
+}
+
+/* ---------------------------------------------------------------------------
+   SYSTEM BOARD — the reviewable token / status / edge tables
+   --------------------------------------------------------------------------- */
+#system { position: absolute; inset: 0; z-index: 50; overflow-y: auto; padding: var(--sp-8); }
+.board { position: absolute; inset: 0; z-index: 50; overflow-y: auto; padding: var(--sp-8); }
+.board[hidden] { display: none; }
+/* the greyscale proof cell — §16 acceptance test, run in the browser */
+.grey { filter: grayscale(1) contrast(1.1); }
+.sys-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-7); max-width: 1400px; margin: 0 auto; }
+.sys-card { padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-4); }
+.sys-card.wide { grid-column: 1 / -1; }
+.sys-h { color: var(--color-ink); }
+.sw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: var(--sp-3); }
+.sw { display: flex; flex-direction: column; gap: 6px; }
+.sw i {
+  height: 44px; border-radius: var(--r-sm);
+  border: 1px solid var(--color-hairline);
+  display: block;
+}
+.sw b { color: var(--color-ink-2); font-weight: 500; }
+.sw span { color: var(--color-ink-3); }
+
+table.sys { width: 100%; border-collapse: collapse; }
+table.sys th {
+  text-align: left; color: var(--color-ink-3);
+  font: 600 11px/14px var(--font-sans); letter-spacing: .07em; text-transform: uppercase;
+  padding: 0 var(--sp-3) var(--sp-2) 0;
+  border-bottom: 1px solid var(--color-hairline);
+}
+table.sys td {
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) 0;
+  border-bottom: 1px solid var(--color-hairline);
+  color: var(--color-ink-2);
+  vertical-align: middle;
+}
+table.sys td b { color: var(--color-ink); font-weight: 500; }
+.type-row { display: flex; align-items: baseline; gap: var(--sp-4); padding: var(--sp-2) 0; border-bottom: 1px solid var(--color-hairline); }
+.type-row .tag { width: 88px; flex: none; color: var(--color-ink-3); }
+.node-gallery { display: flex; flex-wrap: wrap; gap: var(--sp-7) var(--sp-6); }
+.node-gallery .cell { position: relative; width: 276px; height: 96px; }
+.node-gallery .cell .node { left: 0; top: 0; }
+.node-gallery .cell figcaption { position: absolute; top: 104px; left: 0; color: var(--color-ink-3); }
+
+/* ---------------------------------------------------------------------------
+   PROTOTYPE CHROME — deliberately NOT product design. Neutral, own values.
+   --------------------------------------------------------------------------- */
+#protobar {
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 44px;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 16px;
+  background: #101116;
+  border-bottom: 1px solid #26282f;
+  color: #9ea3ae;
+  font: 500 12px/1 var(--font-sans);
+  z-index: 500;
+}
+#protobar .brand { color: #e7e3d8; font-weight: 600; letter-spacing: .02em; white-space: nowrap; flex: none; }
+#protobar .brand em { color: #d8a93c; font-style: normal; }
+#protobar .tabs { display: flex; gap: 2px; overflow-x: auto; min-width: 0; flex: 1 1 auto; scrollbar-width: none; }
+#protobar .tabs::-webkit-scrollbar { display: none; }
+#protobar button {
+  height: 26px; padding: 0 8px;
+  border-radius: 6px; border: 1px solid transparent;
+  background: transparent; color: #9ea3ae;
+  font: 500 12px/1 var(--font-sans); cursor: pointer; white-space: nowrap;
+}
+#protobar button:hover { background: #1b1d24; color: #e7e3d8; }
+#protobar button[aria-current="true"] { background: #23262f; color: #e7e3d8; border-color: #34384250; }
+#protobar .spacer { flex: 1; }
+#protobar .hint { color: #6a6f7a; white-space: nowrap; flex: none; }
+#protobar .hint kbd {
+  font: 500 11px/1 var(--font-mono);
+  background: #1b1d24; border: 1px solid #2b2e36;
+  border-radius: 4px; padding: 3px 5px; color: #9ea3ae;
+}
+
+#notes {
+  position: absolute;
+  right: 0; top: 44px; bottom: 0;
+  width: 320px;
+  z-index: 490;
+  background: #0f1015;
+  border-left: 1px solid #26282f;
+  padding: 20px;
+  overflow-y: auto;
+  color: #9ea3ae;
+  font: 400 12.5px/1.65 var(--font-sans);
+  transform: translateX(100%);
+  transition: transform 240ms cubic-bezier(.2,0,0,1);
+}
+#notes.open { transform: none; }
+#notes h3 { color: #e7e3d8; font: 600 13px/1.4 var(--font-sans); margin-bottom: 10px; }
+#notes h4 { color: #d8a93c; font: 600 10.5px/1.4 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; margin: 18px 0 6px; }
+#notes ul { padding-left: 16px; }
+#notes li { margin-bottom: 7px; }
+#notes code { font: 400 11.5px/1.4 var(--font-mono); color: #c9c3b2; background: #1a1c22; padding: 1px 4px; border-radius: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+  /* the weft stops travelling but stays a dash — DESIGN_LANGUAGE §10 */
+  .weft { animation: none !important; }
+  .shuttle { display: none; }
+  .node.has-task.st-running, .node.has-task.st-starting {
+    animation: none !important;
+    border-width: 2px;
+    box-shadow: 0 0 0 2px var(--color-live-tint);
+  }
+}
+[data-motion="reduce"] .node.has-task.st-running,
+[data-motion="reduce"] .node.has-task.st-starting {
+  animation: none !important;
+  border-width: 2px;
+  box-shadow: 0 0 0 2px var(--color-live-tint);
+}
+
+/* ===========================================================================
+   TNG-89 — prompt composer, runtime overlay, provenance
+   Spec: ../TNG89_INTERACTION.md. Vocabulary is taken verbatim from
+   ../RUN_PROVENANCE_CONTRACT.md; nothing here invents an entity, edge,
+   capture value or coverage level.
+   =========================================================================== */
+
+/* all bottom chrome positions from one variable, because there are now three
+   occupants and a phase-05 scrubber to come (TNG89 §1, CANVAS_SPEC §14) */
+:root { --lw-bottom-offset: 0px; }
+.panel.bottom { bottom: calc(var(--lw-panel-inset) + var(--lw-bottom-offset)); }
+
+/* ---------------------------------------------------------------------------
+   COMPOSER — TNG89 §1. 720 × 56, absorbs the mode pill.
+   --------------------------------------------------------------------------- */
+#composer {
+  width: 720px;
+  min-height: 56px;
+  padding: 0;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+}
+#composer .mode-chip {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 0 var(--sp-4);
+  border-right: 1px solid var(--color-hairline);
+  color: var(--color-ink-2);
+  cursor: pointer;
+  flex: none;
+  background: none; border-top: 0; border-left: 0; border-bottom: 0;
+  font: inherit;
+}
+#composer .mode-chip .glyph { color: var(--color-accent); }
+#stage.mode-team #composer .mode-chip .glyph { color: var(--color-ink-3); }
+#composer .comp-mid {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; justify-content: center;
+  padding: var(--sp-3) var(--sp-4);
+  gap: 3px;
+}
+#composer textarea {
+  width: 100%;
+  border: 0; background: none; outline: none; resize: none;
+  color: var(--color-ink);
+  font: 400 14px/20px var(--font-sans);
+  max-height: 100px;
+}
+#composer textarea::placeholder { color: var(--color-ink-3); }
+#composer .comp-note { color: var(--color-ink-3); display: flex; align-items: center; gap: var(--sp-2); }
+#composer .comp-note.block { color: var(--color-accent); }
+#composer .comp-note.err { color: var(--color-alert); }
+#composer .comp-act {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 0 var(--sp-3) 0 0;
+  flex: none;
+}
+#composer.focused { border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
+
+/* ---------------------------------------------------------------------------
+   RUNTIME OVERLAY — TNG89 §0, §3. The material law: configuration nodes are
+   opaque and bordered; runtime nodes are tinted and ringed, and are NEVER
+   written to the team file.
+   --------------------------------------------------------------------------- */
+#overlay { position: absolute; inset: 0; z-index: 32; }
+#provEdges { position: absolute; inset: 0; z-index: 31; pointer-events: none; }
+
+.rt {
+  position: absolute;
+  left: var(--x); top: var(--y);
+  border-radius: var(--r-lg);
+  background: var(--color-live-tint);
+  border: 1px solid var(--color-live-dim);
+  padding: var(--sp-3) var(--sp-4);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+}
+.rt-head {
+  display: flex; align-items: center; gap: var(--sp-2);
+  color: var(--color-ink-3);
+}
+.rt-head .spacer { flex: 1; }
+.rt-body { color: var(--color-ink); }
+
+/* the Response is the one runtime node that is OPAQUE: it is the thing being
+   read, and e2's law forbids tinting text the operator reads carefully. */
+.rt-response {
+  background: var(--color-panel-solid);
+  padding: 0;
+  overflow: hidden;
+}
+.rt-response .rr-head {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-3) var(--sp-2) var(--sp-4);
+  color: var(--color-ink-2);
+}
+.rt-response .rr-sub {
+  padding: 0 var(--sp-4) var(--sp-3);
+  color: var(--color-ink-3);
+  border-bottom: 1px solid var(--color-hairline);
+}
+.rt-response .rr-body {
+  padding: var(--sp-4);
+  color: var(--color-ink);
+  overflow-y: auto;
+  max-height: 300px;
+}
+/* the answer stays readable in the canvas (§3.3): it grows in place to 560,
+   then scrolls internally. `compact` is the state where a trace is expanded
+   and the answer yields vertical room to its own provenance. */
+.rt-response.compact .rr-body { max-height: 96px; }
+.rt-response .rr-body p { margin-bottom: var(--sp-3); }
+.rt-response .rr-body code {
+  font: 400 12px/17px var(--font-mono);
+  background: var(--color-hairline);
+  padding: 1px 4px; border-radius: var(--r-xs);
+}
+/* streaming: a travelling accent underline. Same family as the chip's ledger
+   sweep, one meaning apart — "still being written". */
+.rt-response .rr-stream {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--color-live), transparent);
+  background-size: 40% 100%;
+  animation: streamline 1600ms linear infinite;
+}
+@keyframes streamline { from { background-position: -40% 0 } to { background-position: 140% 0 } }
+.caret {
+  display: inline-block; width: 2px; height: 15px;
+  background: var(--color-live); vertical-align: -2px;
+  animation: caret 1000ms steps(1) infinite;
+}
+@keyframes caret { 50% { opacity: 0 } }
+
+/* transport strips — TNG89 §2.2. TWO channels, TWO indicators, each naming
+   the watermark it is complete to. Never merged into one "something's wrong". */
+.rt-strip {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border-top: 1px solid var(--color-hairline);
+  color: var(--color-ink-3);
+}
+.rt-strip.halt { box-shadow: inset 3px 0 0 var(--color-halt); }
+.rt-strip.alert { box-shadow: inset 3px 0 0 var(--color-alert); color: var(--color-ink-2); }
+.rt-strip .wm { font: 400 11px/15px var(--font-mono); color: var(--color-ink-2); flex: none; }
+
+/* ---------------------------------------------------------------------------
+   PROVENANCE — summaries, entities, capture states (TNG89 §4, §5)
+   --------------------------------------------------------------------------- */
+.rt-chip {
+  position: absolute;
+  left: var(--x); top: var(--y);
+  width: 190px; height: 64px;
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--color-panel-solid);
+  border: 1px solid var(--color-hairline);
+  display: flex; flex-direction: column; justify-content: space-between;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.rt-chip:hover { border-color: var(--color-accent); }
+.rt-chip.open { border-color: var(--color-accent); border-width: 2px; padding: 11px; }
+.rt-chip .c-top { display: flex; align-items: center; gap: 6px; color: var(--color-ink-2); }
+.rt-chip .c-top .n { margin-left: auto; color: var(--color-ink); }
+.rt-chip .c-cov { display: flex; align-items: center; gap: 5px; color: var(--color-ink-3); }
+
+/* coverage level — shape + colour + WORD, never colour alone (§5.2) */
+.cov { width: 10px; height: 10px; flex: none; }
+
+/* the four capture states. Border treatment + glyph + word = three channels,
+   so the set survives greyscale (§5.1). */
+.ent {
+  position: absolute;
+  left: var(--x); top: var(--y);
+  width: 190px;
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  display: flex; flex-direction: column; gap: 3px;
+  cursor: pointer; text-align: left; font: inherit;
+}
+.ent .e-top { display: flex; align-items: center; gap: 6px; color: var(--color-ink); }
+.ent .e-sub { color: var(--color-ink-3); }
+.ent .e-own { color: var(--color-ink-2); letter-spacing: .035em; }
+.ent .e-cap { display: flex; align-items: center; gap: 5px; margin-top: 3px; }
+
+.cap-recorded    { border: 1px solid var(--color-hairline); background: var(--color-panel-solid); }
+.cap-recorded    .e-cap { color: var(--color-ink-3); }
+.cap-recorded    .e-cap .dotfill { color: var(--color-ink-2); }
+.cap-derived     { border: 1px dashed var(--color-warp); background: none; }
+.cap-derived     .e-cap { color: var(--color-ink-3); }
+.cap-redacted    { border: 1px solid var(--color-halt); background: none; }
+.cap-redacted    .e-cap { color: var(--color-halt); }
+/* the hatch says "there is something here you are not being shown" without
+   implying it is one click away — no reveal affordance, ever (§5.1) */
+.cap-redacted::before {
+  content: ""; position: absolute; inset: 0; border-radius: var(--r-md);
+  pointer-events: none;
+  background: repeating-linear-gradient(45deg,
+    color-mix(in srgb, var(--color-halt) 8%, transparent) 0 2px,
+    transparent 2px 6px);
+}
+.cap-unavailable { border: 1px dotted color-mix(in srgb, var(--color-ink-3) 40%, transparent); background: none; }
+.cap-unavailable .e-top { color: var(--color-ink-2); }
+.cap-unavailable .e-cap { color: var(--color-ink-3); }
+
+/* provenance edges — ONE stroke for all ten kinds, never animated (§4.3) */
+.prov {
+  fill: none;
+  stroke: var(--color-warp);
+  stroke-opacity: .6;
+  stroke-width: 1;
+}
+.prov.prov-live {
+  stroke: var(--color-live);
+  stroke-opacity: .78;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  animation: flow var(--t-flow) linear infinite;
+}
+.prov-live-label { color: var(--color-live); background: var(--color-ground); }
+.prov-label {
+  position: absolute; z-index: 33;
+  transform: translate(-50%, -50%);
+  color: var(--color-ink-3);
+  pointer-events: none;
+  background: var(--color-ground);
+  padding: 0 4px;
+}
+
+/* filters + capture header (§4.4, §5.2) */
+#provHead {
+  position: absolute; left: var(--x); top: var(--y);
+  width: 400px;
+  display: flex; align-items: center; gap: var(--sp-2);
+  color: var(--color-ink-2);
+}
+#provHead .gaps { color: var(--color-ink-3); }
+#filters {
+  position: absolute; left: var(--x); top: var(--y);
+  width: 190px; padding: var(--sp-3);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.filt {
+  display: flex; align-items: center; gap: var(--sp-2);
+  color: var(--color-ink-2); cursor: pointer;
+  background: none; border: 0; padding: 2px; font: inherit; text-align: left;
+}
+.filt .bx {
+  width: 12px; height: 12px; flex: none;
+  border: 1px solid var(--color-ink-3); border-radius: 3px;
+}
+.filt.on .bx { background: var(--color-accent-fill); border-color: transparent; }
+
+.btn-back {
+  position: absolute; left: var(--x); top: var(--y);
+}
+
+
+/* ===========================================================================
+   TNG-89 revision 3 — the board addendum of 2026-09-09
+   =========================================================================== */
+
+/* live vs replay must be unmistakable (addendum §5). Live breathes and is
+   blue; replay is inert and `halt`, because a replay that looks live would
+   make an operator think a finished run is still moving. */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 1px var(--sp-2);
+  border-radius: var(--r-full);
+  border: 1px solid currentColor;
+  flex: none;
+}
+.badge-live    { color: var(--color-live); }
+.badge-replay  { color: var(--color-halt); }
+.badge-live .pip {
+  width: 6px; height: 6px; border-radius: var(--r-full);
+  background: currentColor;
+  animation: breathe 2400ms ease-in-out infinite;
+}
+@keyframes breathe { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+.badge-replay .pip { width: 6px; height: 6px; background: currentColor; }
+
+/* a design that is NOT approved-by-default: anything gated on a board ruling
+   carries this, so nobody can mistake it for a settled decision. */
+.gated {
+  position: relative;
+  outline: 1px dashed var(--color-alert);
+  outline-offset: 3px;
+}
+.gated::after {
+  content: "NEEDS RULING";
+  position: absolute; top: -9px; right: 6px;
+  font: 600 9px/1 var(--font-sans); letter-spacing: .08em;
+  color: var(--color-alert);
+  background: var(--color-ground);
+  padding: 2px 4px;
+}
+
+/* command detail — sanitized text, exit status, duration, expandable output */
+.ent.open { border-color: var(--color-accent); }
+.ent-detail {
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--color-hairline);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.ent-detail .kv { display: flex; gap: var(--sp-2); color: var(--color-ink-3); }
+.ent-detail .kv b { color: var(--color-ink-2); font-weight: 500; }
+.ent-out {
+  background: var(--color-ground);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-xs);
+  padding: 5px 6px;
+  max-height: 76px; overflow-y: auto;
+  white-space: pre-wrap;
+  color: var(--color-ink-2);
+}
+.cite { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+
+/* filters gain agent / status / time (addendum §5) */
+#filters { width: 210px; max-height: 400px; overflow-y: auto; }
+#filters .fgroup { display: flex; flex-direction: column; gap: 5px; }
+#filters .fhead { color: var(--color-ink-3); margin-top: var(--sp-2); }
+.seg { display: flex; gap: 3px; }
+.seg button {
+  flex: 1; padding: 3px 2px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-xs);
+  background: none; color: var(--color-ink-3);
+  font: 500 11px/14px var(--font-sans); cursor: pointer;
+}
+.seg button.on { background: var(--color-accent-tint); color: var(--color-ink); border-color: var(--color-accent-dim); }
+
+/* run history — reopening prior runs (addendum §2) */
+#history { width: 380px; }
+.hrow { display: flex; align-items: center; gap: var(--sp-3); }
+.hrow .goal { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hrow .when { color: var(--color-ink-3); flex: none; }
+
+/* provenance empty / offline (addendum §6) */
+.prov-empty {
+  position: absolute; left: var(--x); top: var(--y);
+  width: 400px; padding: var(--sp-4);
+  border: 1px dashed var(--color-hairline);
+  border-radius: var(--r-md);
+  color: var(--color-ink-3);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+}
+
+/* TNG-113 live activity projection. Compact evidence cards share one geometry
+   across tool/search/file/repository/command/source; kind and ownership live in
+   the words, not in decorative colour. */
+.activity-ent {
+  position: absolute; left: var(--x); top: var(--y);
+  width: 180px; min-height: 68px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-md);
+  background: var(--color-panel-solid);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.activity-ent.st-running { border: 2px solid var(--color-live); padding: 7px 9px; }
+.activity-ent.st-succeeded { border-color: var(--color-ok); }
+.activity-ent .ae-order { color: var(--color-ink-3); }
+.activity-ent .ae-main { display: flex; align-items: center; gap: 6px; color: var(--color-ink); }
+.activity-ent .ae-sub { display: flex; align-items: center; gap: 5px; color: var(--color-ink-2); white-space: nowrap; }
+
+.life-strip {
+  position: absolute; left: var(--x); top: var(--y);
+  width: 400px; min-height: 34px; padding: 5px 8px;
+  display: flex; align-items: center; gap: 8px;
+}
+.life-strip > span:not(.badge) {
+  min-width: 0; display: flex; flex-direction: column;
+  color: var(--color-ink-2);
+  font: 500 10px/12px var(--font-sans);
+  text-transform: uppercase; letter-spacing: .055em;
+}
+.life-strip > span:not(.badge) b { color: var(--color-ink-3); font-size: 8px; line-height: 10px; }
+.life-strip .badge { margin-left: auto; }
+
+.life-matrix { display: grid; gap: 8px; }
+.life-row { display: grid; grid-template-columns: 118px 1fr; gap: 10px; align-items: start; }
+.life-row > b { color: var(--color-ink-2); padding-top: 5px; }
+.life-cells { display: flex; flex-wrap: wrap; gap: 6px; }
+.life-state {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 7px; border: 1px solid var(--color-hairline);
+  border-radius: var(--r-full); color: var(--color-ink-2);
+}

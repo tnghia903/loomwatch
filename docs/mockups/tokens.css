@@ -1,0 +1,268 @@
+/* ===========================================================================
+   LoomWatch — "Obsidian & Gilt" design tokens
+   Reference implementation of DESIGN_LANGUAGE.md §3, §4, §6, §7, §9.
+
+   This file is the normative token layer for the TNG-87 redesign. It is
+   written to be liftable almost verbatim into ui/src/index.css: swap the
+   `@theme { }` wrapper back in for the light tier-2 block and change the
+   `[data-theme="dark"]` selector to `.dark`.
+
+   THE ONE RULE (DESIGN_LANGUAGE §3): a component may reference tier 2 or
+   tier 3 only. A hex value or a --lw-* primitive inside a component is a
+   bug, and it is a bug that only shows up in one theme.
+   =========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   TIER 1 — PRIMITIVES
+   Raw ramps. No semantics. Identical in both themes. Never referenced by a
+   component. Deliberately NOT in @theme: they must not generate utilities.
+   --------------------------------------------------------------------------- */
+:root {
+  /* obsidian — the dark ground */
+  --lw-obsidian-950: #08080A;
+  --lw-obsidian-900: #101013;
+  --lw-obsidian-850: #131316;
+  --lw-obsidian-800: #1E1E23;
+
+  /* graphite / bone — dark-mode neutrals */
+  --lw-graphite-600: #666259;
+  --lw-graphite-500: #85817A;
+  --lw-graphite-400: #A9A59C;
+  --lw-bone-100:     #F5F3EE;
+
+  /* paper / stone / ink — light-mode neutrals */
+  --lw-paper-50:  #FAF8F3;
+  --lw-paper-0:   #FFFFFF;
+  --lw-paper-200: #DFD9CD;
+  --lw-stone-400: #8B857C;
+  --lw-stone-600: #6E6862;
+  --lw-stone-700: #56524A;
+  --lw-ink-950:   #17150F;
+
+  /* gilt — the one accent, expressed at two lightnesses per theme */
+  --lw-gold-200: #E9C46A;
+  --lw-gold-400: #D8A93C;
+  --lw-gold-500: #AD8A20;
+  --lw-gold-600: #8A6A16;
+  --lw-gold-700: #8C7130;
+  --lw-brass-450: #9C8440;
+  --lw-gold-tint-dark:  #1A1508;
+  --lw-gold-tint-light: #F5F0E4;
+
+  /* live execution — deliberately separate from gilt/selection */
+  --lw-blue-300: #6AB8FF;
+  --lw-blue-500: #2F7DD3;
+  --lw-blue-700: #175CD3;
+  --lw-blue-tint-dark:  #0A2038;
+  --lw-blue-tint-light: #EAF2FF;
+
+  /* signal */
+  --lw-red-400:   #F2635C;
+  --lw-red-600:   #C0342E;
+  --lw-jade-400:  #4FC98D;
+  --lw-jade-700:  #17724A;
+  --lw-slate-400: #8C8C98;
+  --lw-slate-600: #605F6B;
+}
+
+/* ---------------------------------------------------------------------------
+   TIER 2 — SEMANTIC · LIGHT ("quarry") is the default
+   The ONLY tier that flips. In production this block is `@theme { }` so
+   Tailwind generates bg-ground / text-ink / border-hairline / text-accent.
+   Contrast ratios in comments are verified against DESIGN_LANGUAGE §4.
+   --------------------------------------------------------------------------- */
+:root,
+[data-theme="light"] {
+  --color-ground:         var(--lw-paper-50);   /* canvas ground              */
+  --color-ground-dot:     var(--lw-paper-200);  /* 1.32 — texture, by design  */
+  --color-panel:          var(--lw-paper-0);    /* e1 fill, used at 72%       */
+  --color-panel-solid:    var(--lw-paper-0);    /* e2, inputs, node fill      */
+  --color-ink:            var(--lw-ink-950);    /* 17.20                      */
+  --color-ink-2:          var(--lw-stone-700);  /*  7.32                      */
+  --color-ink-3:          var(--lw-stone-600);  /*  5.18                      */
+  --color-warp:           var(--lw-stone-400);  /*  3.44 — configured edge    */
+  --color-accent:         var(--lw-gold-600);   /*  4.76 — gold-as-bronze     */
+  --color-accent-fill:    var(--lw-gold-500);   /*  3.08 — non-text floor     */
+  --color-accent-on-fill: var(--lw-ink-950);    /*  5.59 on fill              */
+  --color-accent-dim:     var(--lw-brass-450);  /*  3.42                      */
+  --color-accent-tint:    var(--lw-gold-tint-light);
+  --color-live:           var(--lw-blue-700);   /* running/streaming only    */
+  --color-live-dim:       var(--lw-blue-500);
+  --color-live-tint:      var(--lw-blue-tint-light);
+  --color-alert:          var(--lw-red-600);    /*  5.25                      */
+  --color-ok:             var(--lw-jade-700);   /*  5.59                      */
+  --color-halt:           var(--lw-slate-600);  /*  5.91                      */
+
+  /* hairline is a channel-alpha token, not a colour: a 10%-black border and
+     a 9%-white border are the same design decision on two grounds. */
+  --color-hairline: color-mix(in srgb, var(--lw-ink-950) 10%, transparent);
+
+  /* elevation — specified twice, because dark and light do not share a model */
+  --e1-fill:   color-mix(in srgb, var(--color-panel) 72%, transparent);
+  --e1-shadow: 0 1px 2px rgb(0 0 0 / .04), 0 8px 24px rgb(0 0 0 / .08);
+  --e2-shadow: 0 2px 4px rgb(0 0 0 / .06), 0 16px 40px rgb(0 0 0 / .14);
+
+  /* bloom is dark-mode only — glow on paper looks like a rendering bug */
+  --bloom: none;
+
+  color-scheme: light;
+}
+
+/* ---------------------------------------------------------------------------
+   TIER 2 — SEMANTIC · DARK ("obsidian")
+   Reassign the same custom properties. Never redeclare @theme.
+   --------------------------------------------------------------------------- */
+[data-theme="dark"] {
+  --color-ground:         var(--lw-obsidian-950); /* #08080A                  */
+  --color-ground-dot:     var(--lw-obsidian-800); /* 1.21 — texture           */
+  --color-panel:          var(--lw-obsidian-900);
+  --color-panel-solid:    var(--lw-obsidian-850);
+  --color-ink:            var(--lw-bone-100);     /* 18.05                    */
+  --color-ink-2:          var(--lw-graphite-400); /*  8.15                    */
+  --color-ink-3:          var(--lw-graphite-500); /*  5.16                    */
+  --color-warp:           var(--lw-graphite-600); /*  3.29                    */
+  --color-accent:         var(--lw-gold-200);     /* 11.98 — gilt on stone    */
+  --color-accent-fill:    var(--lw-gold-400);     /*  9.21                    */
+  --color-accent-on-fill: var(--lw-obsidian-950); /*  9.10 on fill            */
+  --color-accent-dim:     var(--lw-gold-700);     /*  4.31                    */
+  --color-accent-tint:    var(--lw-gold-tint-dark);
+  --color-live:           var(--lw-blue-300);   /* running/streaming only    */
+  --color-live-dim:       var(--lw-blue-500);
+  --color-live-tint:      var(--lw-blue-tint-dark);
+  --color-alert:          var(--lw-red-400);      /*  6.40                    */
+  --color-ok:             var(--lw-jade-400);     /*  9.60                    */
+  --color-halt:           var(--lw-slate-400);    /*  6.02                    */
+
+  --color-hairline: color-mix(in srgb, #FFFFFF 9%, transparent);
+
+  /* the rim light is the single cheapest thing that makes dark mode look
+     built rather than inverted. Top-inset only — a full inset ring reads
+     as an embossed 2007 button. */
+  --e1-fill:   color-mix(in srgb, var(--color-panel) 76%, transparent);
+  --e1-shadow: inset 0 1px 0 rgb(255 255 255 / .07), 0 8px 32px rgb(0 0 0 / .55);
+  --e2-shadow: inset 0 1px 0 rgb(255 255 255 / .07),
+               0 2px 6px rgb(0 0 0 / .5), 0 24px 64px rgb(0 0 0 / .7);
+
+  --bloom: drop-shadow(0 0 6px color-mix(in srgb, var(--color-accent) 22%, transparent));
+
+  color-scheme: dark;
+}
+
+/* ---------------------------------------------------------------------------
+   TIER 3 — COMPONENT ALIASES
+   Aliases of tier 2 with a name a builder can grep for. Identical in both
+   themes, because tier 2 already resolved the theme.
+   --------------------------------------------------------------------------- */
+:root {
+  /* node */
+  --lw-node-fill:        var(--color-panel-solid);
+  --lw-node-border:      var(--color-hairline);
+  --lw-node-border-hover: color-mix(in srgb, var(--color-ink-3) 40%, transparent);
+  --lw-node-ring:        var(--color-accent);
+  --lw-node-live:        var(--color-live);
+  --lw-node-name:        var(--color-ink);
+  --lw-node-role:        var(--color-ink-2);
+  --lw-node-meta:        var(--color-ink-3);
+  --lw-budget-track:     var(--color-hairline);
+  --lw-budget-fill:      var(--color-accent-dim);
+  --lw-budget-warn:      var(--color-accent);
+  --lw-budget-over:      var(--color-alert);
+
+  /* the two edge layers — DESIGN_LANGUAGE §13 */
+  --lw-edge-warp:        var(--color-warp);       /* configured: structure   */
+  --lw-edge-weft:        var(--color-accent);     /* observed: activity      */
+  --lw-edge-weft-aged:   var(--color-accent-dim); /* 4s after last event     */
+  --lw-edge-anomaly:     var(--color-alert);
+  --lw-handle-dormant:   var(--color-warp);
+  --lw-handle-live:      var(--color-accent);
+
+  /* chrome */
+  --lw-panel-inset:      20px;
+  --lw-library-w:        288px;
+  --lw-library-rail-w:   48px;
+  --lw-inspector-w:      320px;
+  --lw-chip-h:           44px;
+  --lw-viewctl-w:        168px;
+
+  /* space — 4px base, eight steps only */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 48px;
+
+  /* radius */
+  --r-xs: 4px; --r-sm: 8px; --r-md: 10px; --r-lg: 14px; --r-full: 999px;
+
+  /* motion — DESIGN_LANGUAGE §9 */
+  --ease-out:    cubic-bezier(.2, 0, 0, 1);
+  --ease-in:     cubic-bezier(.4, 0, 1, 1);
+  --t-instant:   90ms;
+  --t-quick:    160ms;
+  --t-move:     240ms;
+  --t-entrance: 320ms;
+  --t-flow:    1400ms;
+  --t-breathe: 2400ms;
+  --t-settle:   900ms;
+
+  /* type — DESIGN_LANGUAGE §6 */
+  --font-sans:  "Inter", "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono:  "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+}
+
+/* ---------------------------------------------------------------------------
+   TYPE SCALE — nine steps, DESIGN_LANGUAGE §6
+   --------------------------------------------------------------------------- */
+.t-display { font: 400 34px/38px var(--font-serif); letter-spacing: -.01em; }
+.t-title   { font: 600 19px/26px var(--font-sans);  letter-spacing: -.01em; }
+.t-body    { font: 400 14px/20px var(--font-sans); }
+.t-body-m  { font: 500 14px/20px var(--font-sans); }
+.t-node    { font: 550 15px/20px var(--font-sans);  letter-spacing: -.01em; }
+.t-ui      { font: 500 13px/18px var(--font-sans); }
+.t-meta    { font: 400 12px/16px var(--font-sans); }
+.t-micro   { font: 600 11px/14px var(--font-sans);  letter-spacing: .07em; text-transform: uppercase; }
+.t-mono    { font: 400 12px/17px var(--font-mono); }
+.t-mono-sm { font: 400 11px/15px var(--font-mono); }
+
+/* Numerals never shift width as they change. One line of CSS, and it is the
+   difference between a live counter looking calm and looking broken. */
+.tnum, .t-mono, .t-mono-sm, .t-micro { font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------------------
+   ELEVATION — two levels. Nothing stacks three deep.
+   --------------------------------------------------------------------------- */
+.e1 {
+  background: var(--e1-fill);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--color-hairline);
+  box-shadow: var(--e1-shadow);
+  border-radius: var(--r-lg);
+}
+/* e2 is OPAQUE in both themes: never blur text the operator is being asked
+   to read carefully. That is why the palette, the problems popover and the
+   parse dialog are e2. */
+.e2 {
+  background: var(--color-panel-solid);
+  border: 1px solid var(--color-hairline);
+  box-shadow: var(--e2-shadow);
+  border-radius: var(--r-lg);
+}
+
+/* ---------------------------------------------------------------------------
+   FOCUS — gold, 2px, always visible. Never removed.
+   --------------------------------------------------------------------------- */
+:where(button, [role="button"], a, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* ---------------------------------------------------------------------------
+   REDUCED MOTION — DESIGN_LANGUAGE §10
+   Weft stops travelling but stays a dash; bloom is removed with the motion
+   it accompanies; the theme sweep is removed. Both edge layers remain
+   distinguishable on colour + stroke + geometry.
+   --------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  :root { --bloom: none; }
+}
+[data-motion="reduce"] { --bloom: none; }
