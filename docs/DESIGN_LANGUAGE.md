@@ -1,6 +1,6 @@
 # LoomWatch — Design language "Obsidian & Gilt"
 
-Revision 2 · 2026-09-09 · **proposed — awaiting board approval (TNG-87)**
+Revision 3 · 2026-09-10 · **proposed — awaiting board approval (TNG-87)**
 
 This document replaces [CANVAS_SPEC.md](CANVAS_SPEC.md) **§2 (Visual language)** in full. It
 does not change CANVAS_SPEC's interaction contracts; those are amended separately in
@@ -279,10 +279,11 @@ Read this as law, not guidance. A reviewer can fail an implementation with it.
 | **Structure** | `warp` | configured edges · dormant handles · ghost node outline |
 | **Everything else** | `ink` / `ink-2` / `ink-3` | all text, all glyphs, `idle`, `unavailable`, harness monograms |
 
-**Gold absorbs three v1 roles** — `iris` (brand/selected/live), `copper` (attention), and
-part of `iris-soft` (hover). The v1 `iris-deep` / `iris-soft` split is deleted; observed
-edge *kind* is now carried by stroke pattern and marker, which §13 shows is already
-sufficient and which frees the palette.
+**Gold absorbs the v1 selection and attention roles** — `iris` (brand/selected) and
+`copper` (attention), plus part of `iris-soft` (hover). Live execution is deliberately
+split to `live` blue. The v1 `iris-deep` / `iris-soft` split is deleted; observed edge
+*kind* is now carried by stroke pattern and marker, which §13 shows is already sufficient
+and which frees the palette.
 
 **Unfinished is gold, wrong is red.** CANVAS_SPEC §5.4's two-weight validation model is
 preserved exactly, with `copper` → `accent`: a required-but-never-filled field gets a 1 px
@@ -371,20 +372,22 @@ themes. That is why the palette, the problems popover and the parse dialog are `
 
 ### Bloom — dark mode only
 
-In dark, the live weft and the `running` halo carry a 6 px `accent` blur at 22% alpha
-(`filter: drop-shadow(0 0 6px …)`). This is what makes a gold thread look lit rather than
-painted. It is **suppressed entirely in light mode** (glow on paper looks like a rendering
-bug) and **suppressed under `prefers-reduced-motion`** together with the motion it
-accompanies. Bloom is the only effect in the product that exists in one theme and not the
-other, and it is allowed because the physical metaphor differs: light catches on stone, not
-on paper.
+In dark, the live weft carries a 6 px `accent` blur and the `running` halo carries the same
+6 px treatment in `live`, both at 22% alpha (`filter: drop-shadow(0 0 6px …)`). The first
+makes a gold thread look lit rather than painted; the second keeps blue exclusively tied to
+execution. Both are **suppressed entirely in light mode** (glow on paper looks like a
+rendering bug) and **suppressed under `prefers-reduced-motion`** together with the motion
+they accompany. Bloom is the only effect in the product that exists in one theme and not
+the other, and it is allowed because the physical metaphor differs: light catches on stone,
+not on paper.
 
 ---
 
 ## 8. Colour discipline — four laws
 
 1. **Gold is semantic, never decorative.** A button is not gold because buttons are coloured
-   somewhere else. The single primary action is gold *because it is the live action*.
+   somewhere else. The single primary action is gold because it is the operator's current
+   action; active execution remains blue.
 2. **One gold fill per screen. Gold as a line is unlimited.** This is the law that lets gold
    carry three roles without the screen turning yellow: `accent-fill` (a solid gold plane
    with a dark label) appears **at most once** — the primary action of the current state. All

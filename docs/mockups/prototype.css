@@ -390,6 +390,19 @@ html, body {
 .node.has-task .node-rule { display: none; }
 .node.has-task .node-meta { margin-top: auto; }
 
+/* CSS-owned status motion can be fully suppressed by reduced-motion media or
+   the prototype's manual Motion control. SMIL would continue animating. */
+.status-arc {
+  transform-origin: 6px 6px;
+  animation: status-spin 1200ms linear infinite;
+}
+.status-halo { animation: status-breathe 2400ms ease-in-out infinite; }
+@keyframes status-spin { to { transform: rotate(360deg); } }
+@keyframes status-breathe {
+  0%, 100% { transform: scale(.78); opacity: .35; transform-origin: 6px 6px; }
+  50% { transform: scale(1.08); opacity: 0; transform-origin: 6px 6px; }
+}
+
 .node-top { display: flex; align-items: flex-start; gap: var(--sp-3); flex: none; }
 .node-glyph {
   width: 18px; height: 18px; flex: none;
@@ -941,6 +954,8 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
   border-width: 2px;
   box-shadow: 0 0 0 2px var(--color-live-tint);
 }
+[data-motion="reduce"] .status-arc,
+[data-motion="reduce"] .status-halo { animation: none !important; }
 
 /* ===========================================================================
    TNG-89 — prompt composer, runtime overlay, provenance

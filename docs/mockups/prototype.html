@@ -536,7 +536,7 @@
 
       <section class="sys-card e1 wide">
         <h3 class="sys-h t-title">Run states the addendum added</h3>
-        <p class="t-meta" style="color:var(--color-ink-3)">Live vs replay must be unmistakable: live breathes and is gold, replay is inert and <code class="t-mono-sm">halt</code>. A replay that looked live would make an operator think a finished run is still moving.</p>
+        <p class="t-meta" style="color:var(--color-ink-3)">Live vs replay must be unmistakable: live execution breathes in blue, while replay is inert and explicitly labelled with <code class="t-mono-sm">halt</code>. A replay that looked live would make an operator think a finished run is still moving.</p>
         <div style="display:flex;gap:var(--sp-6);align-items:center;flex-wrap:wrap">
           <span class="badge t-micro badge-live"><span class="pip"></span>Live</span>
           <span class="badge t-micro badge-replay"><span class="pip"></span>Replay</span>
@@ -669,7 +669,7 @@
 
       <section class="sys-card e1 wide">
         <h3 class="sys-h t-title">Status — shape and colour, both, always</h3>
-        <p class="t-meta" style="color:var(--color-ink-3)">§12. Shape is the primary channel, so the table survives greyscale and colour-blindness (§8, Law 3). <code class="t-mono-sm">running</code> and <code class="t-mono-sm">waiting</code> are both gold and are separated by shape and motion — a moving filled dot versus a static hollow diamond. In phase 04 every node is <code class="t-mono-sm">idle</code>.</p>
+        <p class="t-meta" style="color:var(--color-ink-3)">§12. Shape and visible words remain authoritative, so the table survives greyscale, colour-blindness, and reduced motion (§8, Law 3). <code class="t-mono-sm">running</code> is blue with a filled dot and visible task state; <code class="t-mono-sm">waiting</code> is neutral with a static hollow diamond and <code class="t-mono-sm">QUEUED</code>. In phase 04 every node is <code class="t-mono-sm">idle</code>.</p>
         <table class="sys">
           <thead><tr><th style="width:60px">Shape</th><th style="width:120px">Status</th><th style="width:120px">Colour</th><th>Motion</th><th style="width:60px">Grey</th></tr></thead>
           <tbody id="statusRows"></tbody>

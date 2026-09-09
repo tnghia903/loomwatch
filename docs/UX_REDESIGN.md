@@ -1,10 +1,10 @@
 # LoomWatch — UX redesign delta
 
-Revision 1 · 2026-09-09 · **proposed — awaiting board approval (TNG-87)**
+Revision 2 · 2026-09-10 · **proposed — awaiting board approval (TNG-87)**
 
 This document is a **delta against [CANVAS_SPEC.md](CANVAS_SPEC.md)**, not a replacement.
 Sections are numbered to match it. Anything CANVAS_SPEC says that is not contradicted here
-still holds. The visual language is in [DESIGN_LANGUAGE.md](DESIGN_LANGUAGE.md) (rev 2) and
+still holds. The visual language is in [DESIGN_LANGUAGE.md](DESIGN_LANGUAGE.md) (rev 3) and
 all tokens below are that document's.
 
 A delta rather than a rewrite is deliberate: CANVAS_SPEC is 1 367 lines of verified detail
@@ -189,14 +189,17 @@ is not the only channel — the fill width is the primary signal.
 | incomplete | **1 px `accent` border + `accent` dot, top-left** — required field never filled |
 | invalid | 1.5 px `alert` border + `alert` dot, top-left; tooltip names the failing rule from TEAM_CONFIG.md |
 | dragging | 0.85 opacity, `e2`, grid-snapped |
-| `running` (Phase 05) | status rail and indicator carry it; **the node border never changes on status** — border is reserved for validity, and overloading it would make an invalid running node unreadable |
+| `running` / `starting` (live run) | runtime-only 2 px `live` perimeter and visible task row; the validity dot remains independently visible, and no runtime treatment serializes to YAML |
+| `done` / `error` / `cancelled` / `offline` | semantic perimeter plus glyph, state word, and preserved task title; colour is redundant, never the only channel |
 
 The incomplete/invalid split is new on the node and mirrors the inspector's two validation
 weights (CANVAS_SPEC §5.4), which previously had no node-level distinction.
 
 ### 5.3 Status indicator — see DESIGN_LANGUAGE §12
 
-Same eight states, same shapes, retokenised. `copper` → `accent` for `waiting`.
+Same eight states and shapes, retokenised. `starting` / `running` use `live` blue;
+`waiting` uses neutral `halt`. Task lifecycle labels are specified in
+TNG89_INTERACTION §11 and remain separate from run/result lifecycle labels.
 
 ### 5.4 Inspector — re-zoned
 
@@ -611,8 +614,10 @@ CANVAS_SPEC §12 stands in full. Restated with what v2 adds:
 - Hit targets ≥ 32 px; edge hit area 12 px regardless of stroke. The theme toggle is a
   32 px button inside the 36 px cluster.
 - **Colour is never the only channel** — and v2 leans on this harder because the palette is
-  smaller. `running` vs `waiting` (both gold) differ in shape and motion; incomplete vs
-  invalid differ in hue *and* dot glyph; the two edge layers differ in four channels.
+  smaller. `running` is blue with a filled dot, visible word, task title, and optional
+  breathing perimeter; `waiting` is neutral with a static hollow diamond and `QUEUED`.
+  Incomplete vs invalid differ in hue *and* dot glyph; the two edge layers differ in four
+  channels.
 - **The theme toggle is not a `prefers-color-scheme` override only** — `system` remains a
   first-class third state so an operator whose OS switches at sunset is not fighting a
   sticky choice.

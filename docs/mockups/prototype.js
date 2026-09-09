@@ -30,12 +30,9 @@ const STATUS = {
                  body: '<circle cx="6" cy="6" r="4.4" fill="none" stroke="currentColor" stroke-width="1.5"/>' },
   starting:    { colour: 'var(--color-live)', motion: 'arc rotates, 1200 ms linear',
                  body: '<circle cx="6" cy="6" r="4.4" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".35"/>' +
-                       '<path d="M6 1.6A4.4 4.4 0 0 1 10.4 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">' +
-                       '<animateTransform attributeName="transform" type="rotate" from="0 6 6" to="360 6 6" dur="1.2s" repeatCount="indefinite"/></path>' },
+                       '<path class="status-arc" d="M6 1.6A4.4 4.4 0 0 1 10.4 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
   running:     { colour: 'var(--color-live)', motion: 'blue border + breathe halo, 2400 ms',
-                 body: '<circle cx="6" cy="6" r="5.4" fill="currentColor" opacity=".18">' +
-                       '<animate attributeName="r" values="4.2;5.9;4.2" dur="2.4s" repeatCount="indefinite"/>' +
-                       '<animate attributeName="opacity" values=".35;0;.35" dur="2.4s" repeatCount="indefinite"/></circle>' +
+                 body: '<circle class="status-halo" cx="6" cy="6" r="5.4" fill="currentColor" opacity=".18"/>' +
                        '<circle cx="6" cy="6" r="3.4" fill="currentColor"/>' },
   waiting:     { colour: 'var(--color-halt)', motion: 'none — it waits on a handoff, and motion would imply progress',
                  body: '<path d="M6 1.4 10.6 6 6 10.6 1.4 6z" fill="none" stroke="currentColor" stroke-width="1.5"/>' },
