@@ -1,0 +1,8 @@
+{
+  "lastContiguousSeq": 5,
+  "receivedSeq": 7,
+  "action": "pause_replay_reconnect",
+  "replayAfterSeq": 5,
+  "expectedReplaySeqs": [6, 7],
+  "resumeAfterSeq": 7
+}

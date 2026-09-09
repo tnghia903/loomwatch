@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "runId": "01991f8a-7e39-7b86-8c37-0bd0e5b94e11",
+  "clientRequestId": "30c35b8b-f29b-4ec1-9894-e833846db485",
+  "team": {
+    "path": "research-team.yaml",
+    "revision": "sha256:4f2d8e51b3be927f387b5089cc80b09ad296de5a0efca0bd6e3e17cb721a1fb8",
+    "sizeBytes": 1842
+  },
+  "prompt": "Compare the two migration strategies and recommend one.",
+  "promptRedactions": [],
+  "mode": "pipeline",
+  "status": "partial",
+  "archiveSessionId": "acp-session-lead-12",
+  "acpSessions": [
+    {
+      "agentId": "lead",
+      "processAttempt": 1,
+      "acpSessionId": "acp-session-lead-12",
+      "archiveSessionId": "acp-session-lead-12",
+      "boundAt": "2026-09-09T03:00:00.160Z",
+      "firstSeq": 0,
+      "lastSeq": 1
+    },
+    {
+      "agentId": "reviewer",
+      "processAttempt": 1,
+      "acpSessionId": "acp-session-reviewer-47",
+      "archiveSessionId": "acp-session-lead-12",
+      "boundAt": "2026-09-09T03:00:04.010Z",
+      "firstSeq": 2,
+      "lastSeq": 4
+    }
+  ],
+  "createdAt": "2026-09-09T03:00:00Z",
+  "startedAt": "2026-09-09T03:00:00.120Z",
+  "completedAt": "2026-09-09T03:00:06.421Z",
+  "canonicalResponderAgentId": "reviewer",
+  "canonicalResponse": {
+    "agentId": "reviewer",
+    "eventIds": [
+      "evt-2"
+    ],
+    "markdown": "Prefer the expand/contract migration because it keeps old readers valid.",
+    "truncated": false,
+    "complete": false,
+    "assemblyVersion": "1.0.0",
+    "sanitizerVersion": "1.0.0",
+    "sourceDigest": "sha256:cc970825b9e9a56f4b546816557181b4dfc4b3bd5a8ad785ab97c52f010461ac",
+    "markdownDigest": "sha256:6cc94f4c7bf72a29064338c0aaa2e2e16452049f372654dbaaf968b23ce5fb92",
+    "redactions": []
+  },
+  "terminal": {
+    "outcome": "partial",
+    "code": "canonical_turn_max_tokens",
+    "message": "The canonical responder reached its token limit after producing output.",
+    "canonicalStopReason": "max_tokens",
+    "processFailures": [],
+    "outstandingTeamBusCalls": 0
+  },
+  "projectionVersions": {
+    "contractSchema": 1,
+    "responseAssembler": "1.0.0",
+    "projector": "1.0.0",
+    "normalizer": "1.0.0",
+    "redactionPolicy": "1.0.0",
+    "markdownSanitizer": "1.0.0"
+  },
+  "captureCoverage": {
+    "agents": {
+      "category": "agents",
+      "level": "complete",
+      "basis": ["team_snapshot", "run_event", "deterministic_projection"],
+      "observedCount": 2,
+      "redactedCount": 0,
+      "adapterIds": [],
+      "reasons": []
+    },
+    "reasoning": {
+      "category": "reasoning",
+      "level": "partial",
+      "basis": ["run_event"],
+      "observedCount": 1,
+      "redactedCount": 0,
+      "adapterIds": ["acp:opencode"],
+      "reasons": ["harness_omitted_metadata"]
+    },
+    "skills": {
+      "category": "skills",
+      "level": "unavailable",
+      "basis": [],
+      "observedCount": 0,
+      "redactedCount": 0,
+      "adapterIds": [],
+      "reasons": ["adapter_not_instrumented"]
+    },
+    "tools": {
+      "category": "tools",
+      "level": "complete",
+      "basis": ["run_event"],
+      "observedCount": 1,
+      "redactedCount": 0,
+      "adapterIds": ["acp:opencode"],
+      "reasons": []
+    },
+    "commands": {
+      "category": "commands",
+      "level": "unavailable",
+      "basis": [],
+      "observedCount": 0,
+      "redactedCount": 0,
+      "adapterIds": [],
+      "reasons": ["harness_omitted_metadata"]
+    },
+    "sources": {
+      "category": "sources",
+      "level": "partial",
+      "basis": ["run_event", "deterministic_projection"],
+      "observedCount": 1,
+      "redactedCount": 1,
+      "adapterIds": ["acp:opencode"],
+      "reasons": ["redacted_evidence"]
+    }
+  }
+}

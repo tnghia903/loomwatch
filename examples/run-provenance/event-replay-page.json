@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "runId": "01991f8a-7e39-7b86-8c37-0bd0e5b94e11",
+  "archiveSessionId": "acp-session-lead-12",
+  "events": [
+    {
+      "id": "evt-0",
+      "sessionId": "acp-session-lead-12",
+      "agentId": "lead",
+      "seq": 0,
+      "ts": "2026-09-09T03:00:00.200Z",
+      "kind": "message",
+      "payload": {
+        "role": "user",
+        "messageId": null,
+        "content": {
+          "type": "text",
+          "text": "Compare the two migration strategies and recommend one."
+        }
+      },
+      "raw": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "session/prompt"
+      }
+    },
+    {
+      "id": "evt-2",
+      "sessionId": "acp-session-lead-12",
+      "agentId": "reviewer",
+      "seq": 2,
+      "ts": "2026-09-09T03:00:05.900Z",
+      "kind": "message",
+      "payload": {
+        "role": "agent",
+        "messageId": "msg-final",
+        "content": {
+          "type": "text",
+          "text": "Prefer the expand/contract migration because it keeps old readers valid."
+        }
+      },
+      "raw": {
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+          "sessionId": "acp-session-reviewer-47",
+          "update": {
+            "sessionUpdate": "agent_message_chunk"
+          }
+        }
+      }
+    }
+  ],
+  "nextAfterSeq": 2,
+  "hasMore": true
+}

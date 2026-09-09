@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "runId": "01991f8a-7e39-7b86-8c37-0bd0e5b94e22",
+  "clientRequestId": "3c5a8379-38ae-4bf8-9126-66c28dd41c24",
+  "team": {
+    "path": "research-team.yaml",
+    "revision": "sha256:4f2d8e51b3be927f387b5089cc80b09ad296de5a0efca0bd6e3e17cb721a1fb8",
+    "sizeBytes": 1842
+  },
+  "prompt": "Choose a migration strategy.",
+  "promptRedactions": [],
+  "mode": "team",
+  "status": "succeeded",
+  "archiveSessionId": "acp-session-lead-88",
+  "acpSessions": [
+    {
+      "agentId": "lead",
+      "processAttempt": 1,
+      "acpSessionId": "acp-session-lead-88",
+      "archiveSessionId": "acp-session-lead-88",
+      "boundAt": "2026-09-09T03:10:00.160Z",
+      "firstSeq": 0,
+      "lastSeq": 10
+    }
+  ],
+  "createdAt": "2026-09-09T03:10:00Z",
+  "startedAt": "2026-09-09T03:10:00.120Z",
+  "completedAt": "2026-09-09T03:10:06.421Z",
+  "canonicalResponderAgentId": "lead",
+  "canonicalResponse": {
+    "agentId": "lead",
+    "eventIds": ["team-evt-9"],
+    "markdown": "Use the expand/contract migration.",
+    "truncated": false,
+    "complete": true,
+    "assemblyVersion": "1.0.0",
+    "sanitizerVersion": "1.0.0",
+    "sourceDigest": "sha256:58f2ca3b641633286674f234d7f575fae43e1edd965de14e31d4fec5b77b802b",
+    "markdownDigest": "sha256:2d5ade817462017622ba5e0977e1c63039d5fed0fe68cfb9f8d525e2b7ce5f33",
+    "redactions": []
+  },
+  "terminal": {
+    "outcome": "succeeded",
+    "code": null,
+    "message": null,
+    "canonicalStopReason": "end_turn",
+    "processFailures": [],
+    "outstandingTeamBusCalls": 0
+  },
+  "projectionVersions": {
+    "contractSchema": 1,
+    "responseAssembler": "1.0.0",
+    "projector": "1.0.0",
+    "normalizer": "1.0.0",
+    "redactionPolicy": "1.0.0",
+    "markdownSanitizer": "1.0.0"
+  },
+  "captureCoverage": {
+    "agents": {"category":"agents","level":"complete","basis":["team_snapshot","run_event","deterministic_projection"],"observedCount":1,"redactedCount":0,"adapterIds":[],"reasons":[]},
+    "reasoning": {"category":"reasoning","level":"unavailable","basis":[],"observedCount":0,"redactedCount":0,"adapterIds":[],"reasons":["no_artifacts_emitted"]},
+    "skills": {"category":"skills","level":"unavailable","basis":[],"observedCount":0,"redactedCount":0,"adapterIds":[],"reasons":["adapter_not_instrumented"]},
+    "tools": {"category":"tools","level":"complete","basis":["run_event"],"observedCount":2,"redactedCount":0,"adapterIds":["acp:opencode"],"reasons":[]},
+    "commands": {"category":"commands","level":"unavailable","basis":[],"observedCount":0,"redactedCount":0,"adapterIds":[],"reasons":["harness_omitted_metadata"]},
+    "sources": {"category":"sources","level":"partial","basis":["run_event","deterministic_projection"],"observedCount":1,"redactedCount":0,"adapterIds":["acp:opencode"],"reasons":["harness_omitted_metadata"]}
+  }
+}

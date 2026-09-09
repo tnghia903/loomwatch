@@ -1,0 +1,24 @@
+{
+  "source": [
+    {
+      "eventId": "evt-2",
+      "seq": 2,
+      "content": {
+        "type": "text",
+        "text": "Prefer the expand/contract migration because it keeps old readers valid."
+      }
+    }
+  ],
+  "canonicalJcs": "[{\"content\":{\"text\":\"Prefer the expand/contract migration because it keeps old readers valid.\",\"type\":\"text\"},\"eventId\":\"evt-2\",\"seq\":2}]",
+  "sourceDigest": "sha256:cc970825b9e9a56f4b546816557181b4dfc4b3bd5a8ad785ab97c52f010461ac",
+  "markdown": "Prefer the expand/contract migration because it keeps old readers valid.",
+  "markdownDigest": "sha256:6cc94f4c7bf72a29064338c0aaa2e2e16452049f372654dbaaf968b23ce5fb92",
+  "versions": {
+    "contractSchema": 1,
+    "responseAssembler": "1.0.0",
+    "projector": "1.0.0",
+    "normalizer": "1.0.0",
+    "redactionPolicy": "1.0.0",
+    "markdownSanitizer": "1.0.0"
+  }
+}

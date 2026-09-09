@@ -1,0 +1,15 @@
+{
+  "fixture": "provenance-snapshot.json",
+  "projectionGenerationId": "projection:1",
+  "versions": {
+    "contractSchema": 1,
+    "responseAssembler": "1.0.0",
+    "projector": "1.0.0",
+    "normalizer": "1.0.0",
+    "redactionPolicy": "1.0.0",
+    "markdownSanitizer": "1.0.0"
+  },
+  "firstCanonicalDigest": "sha256:e2b16e5b63ed3da9ef99479cc40e19e0328b937b0ba3eadecc7a593e876fe2f9",
+  "replayedCanonicalDigest": "sha256:e2b16e5b63ed3da9ef99479cc40e19e0328b937b0ba3eadecc7a593e876fe2f9",
+  "byteEqual": true
+}

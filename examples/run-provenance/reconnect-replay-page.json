@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "runId": "01991f8a-7e39-7b86-8c37-0bd0e5b94e11",
+  "archiveSessionId": "acp-session-lead-12",
+  "events": [
+    {
+      "id": "evt-6",
+      "sessionId": "acp-session-lead-12",
+      "agentId": "reviewer",
+      "seq": 6,
+      "ts": "2026-09-09T03:00:06.100Z",
+      "kind": "turn_end",
+      "payload": {"stopReason": "max_tokens"},
+      "raw": {"jsonrpc":"2.0","id":2,"result":{"stopReason":"max_tokens"}}
+    },
+    {
+      "id": "evt-7",
+      "sessionId": "acp-session-lead-12",
+      "agentId": "reviewer",
+      "seq": 7,
+      "ts": "2026-09-09T03:00:06.200Z",
+      "kind": "process",
+      "payload": {"phase": "exited", "exitCode": 0}
+    }
+  ],
+  "nextAfterSeq": 7,
+  "hasMore": false
+}

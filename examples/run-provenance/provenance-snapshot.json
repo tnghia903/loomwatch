@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "runId": "01991f8a-7e39-7b86-8c37-0bd0e5b94e11",
+  "cursor": 18,
+  "status": "partial",
+  "projectionGenerationId": "projection:1",
+  "projectionVersions": {
+    "contractSchema": 1,
+    "responseAssembler": "1.0.0",
+    "projector": "1.0.0",
+    "normalizer": "1.0.0",
+    "redactionPolicy": "1.0.0",
+    "markdownSanitizer": "1.0.0"
+  },
+  "entities": [
+    {
+      "id": "run:01991f8a-7e39-7b86-8c37-0bd0e5b94e11:agent:reviewer",
+      "runId": "01991f8a-7e39-7b86-8c37-0bd0e5b94e11",
+      "kind": "agent",
+      "label": "Reviewer",
+      "status": "completed",
+      "agentId": "reviewer",
+      "firstSeq": 1,
+      "lastSeq": 4,
+      "summary": "Canonical pipeline responder",
+      "detailsRef": "/api/runs/01991f8a-7e39-7b86-8c37-0bd0e5b94e11/provenance/entities/run%3A01991f8a-7e39-7b86-8c37-0bd0e5b94e11%3Aagent%3Areviewer",
+      "capture": "recorded",
+      "evidenceEventIds": ["evt-1", "evt-2", "evt-3", "evt-4"],
+      "attributes": {
+        "role": "reviewer"
+      },
+      "redactions": []
+    },
+    {
+      "id": "run:01991f8a-7e39-7b86-8c37-0bd0e5b94e11:prompt",
+      "runId": "01991f8a-7e39-7b86-8c37-0bd0e5b94e11",
+      "kind": "prompt",
+      "label": "Migration recommendation",
+      "status": "completed",
+      "agentId": null,
+      "firstSeq": 0,
+      "lastSeq": 0,
+      "summary": "Compare two migration strategies.",
+      "detailsRef": null,
+      "capture": "recorded",
+      "evidenceEventIds": ["evt-0"],
+      "attributes": {},
+      "redactions": []
+    },
+    {
+      "id": "run:01991f8a-7e39-7b86-8c37-0bd0e5b94e11:response",
+      "runId": "01991f8a-7e39-7b86-8c37-0bd0e5b94e11",
+      "kind": "response",
+      "label": "Team response",
+      "status": "failed",
+      "agentId": "reviewer",
+      "firstSeq": 2,
+      "lastSeq": 2,
+      "summary": "Partial response: canonical turn reached max_tokens.",
+      "detailsRef": null,
+      "capture": "recorded",
+      "evidenceEventIds": ["evt-2", "evt-3"],
+      "attributes": {
+        "partial": true
+      },
+      "redactions": []
+    },
+    {
+      "id": "run:01991f8a-7e39-7b86-8c37-0bd0e5b94e11:source:809f",
+      "runId": "01991f8a-7e39-7b86-8c37-0bd0e5b94e11",
+      "kind": "source",
+      "label": "Repository document",
+      "status": "completed",
+      "agentId": "reviewer",
+      "firstSeq": 1,
+      "lastSeq": 1,
+      "summary": "[PATH REDACTED]",
+      "detailsRef": null,
+      "capture": "redacted",
+      "evidenceEventIds": ["evt-1"],
+      "attributes": {
+        "path": "[PATH REDACTED]"
+      },
+      "redactions": [
+        {
+          "path": "/attributes/path",
+          "reason": "unauthorized_path"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge:reviewer:response:contributed_to",
+      "runId": "01991f8a-7e39-7b86-8c37-0bd0e5b94e11",
+      "from": "run:01991f8a-7e39-7b86-8c37-0bd0e5b94e11:agent:reviewer",
+      "to": "run:01991f8a-7e39-7b86-8c37-0bd0e5b94e11:response",
+      "kind": "contributed_to",
+      "firstSeq": 2,
+      "lastSeq": 2,
+      "capture": "derived",
+      "evidenceEventIds": ["evt-2"]
+    }
+  ],
+  "captureCoverage": {
+    "agents": {
+      "category": "agents",
+      "level": "complete",
+      "basis": ["team_snapshot", "run_event", "deterministic_projection"],
+      "observedCount": 2,
+      "redactedCount": 0,
+      "adapterIds": [],
+      "reasons": []
+    },
+    "reasoning": {
+      "category": "reasoning",
+      "level": "partial",
+      "basis": ["run_event"],
+      "observedCount": 1,
+      "redactedCount": 0,
+      "adapterIds": ["acp:opencode"],
+      "reasons": ["harness_omitted_metadata"]
+    },
+    "skills": {
+      "category": "skills",
+      "level": "unavailable",
+      "basis": [],
+      "observedCount": 0,
+      "redactedCount": 0,
+      "adapterIds": [],
+      "reasons": ["adapter_not_instrumented"]
+    },
+    "tools": {
+      "category": "tools",
+      "level": "complete",
+      "basis": ["run_event"],
+      "observedCount": 1,
+      "redactedCount": 0,
+      "adapterIds": ["acp:opencode"],
+      "reasons": []
+    },
+    "commands": {
+      "category": "commands",
+      "level": "unavailable",
+      "basis": [],
+      "observedCount": 0,
+      "redactedCount": 0,
+      "adapterIds": [],
+      "reasons": ["harness_omitted_metadata"]
+    },
+    "sources": {
+      "category": "sources",
+      "level": "partial",
+      "basis": ["run_event", "deterministic_projection"],
+      "observedCount": 1,
+      "redactedCount": 1,
+      "adapterIds": ["acp:opencode"],
+      "reasons": ["redacted_evidence"]
+    }
+  }
+}
