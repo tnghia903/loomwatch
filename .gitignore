@@ -6,3 +6,6 @@ target/
 node_modules/
 *.swp
 *.swo
+
+# build cache for docs/mockups/build-standalone.mjs (fetched woff2 subsets)
+docs/mockups/.font-cache/
