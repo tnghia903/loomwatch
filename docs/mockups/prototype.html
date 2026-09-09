@@ -87,10 +87,10 @@
        `Enter` inserts a newline; `⌘↵` submits — goals are prose.
        ================================================================= -->
   <div class="panel bottom cx e1" id="composer">
-    <button class="mode-chip t-body-m" id="compMode" title="How this team will execute">
+    <div class="mode-chip t-body-m" id="compMode" aria-label="Execution mode" title="How this team will execute">
       <span class="glyph" id="compModeGlyph">⇉</span>
       <span id="compModeLabel">Pipeline · 3 steps</span>
-    </button>
+    </div>
     <div class="comp-mid">
       <textarea id="compInput" rows="1" aria-label="What should the team do?"
                 placeholder="What should the team do?"></textarea>
@@ -213,7 +213,8 @@
        only place file state is expressed, and the only way to reach
        another file. Nine states; `n lines differ` states a magnitude.
        ================================================================= -->
-  <div class="panel top cx e1" id="chip" role="button" tabindex="0" onclick="openSwitcher()" aria-label="research-team.yaml, 3 lines differ">
+  <div class="panel top cx e1" id="chip" role="button" tabindex="0" onclick="openSwitcher(this)"
+       aria-controls="switcherPop" aria-expanded="false" aria-label="research-team.yaml, 3 lines differ">
     <span class="dot" id="chipDot"></span>
     <span class="chip-text">
       <span class="chip-l1 t-body-m" id="chipL1">research-team.yaml</span>
@@ -301,6 +302,34 @@
     </footer>
   </aside>
 
+  <!-- Live activity uses a compact inspection panel. It is deliberately not
+       modal: the run stays visible and Escape/Close returns focus to the card
+       that opened it. -->
+  <aside class="panel right top e1" id="activityPanel" aria-labelledby="activityTitle" hidden>
+    <header class="insp-head">
+      <span class="node-glyph" id="activityGlyph"></span>
+      <span style="flex:1;min-width:0">
+        <div class="insp-title t-title" id="activityTitle">Activity</div>
+        <div class="insp-id t-mono" id="activityId"></div>
+        <div class="insp-status t-micro" id="activityStatus"></div>
+      </span>
+      <button class="iconbtn" id="activityClose" type="button" aria-label="Close activity details" title="Close (Esc)" onclick="closeActivity()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <div class="zone activity-detail">
+      <div class="zone-head t-micro">Observed event</div>
+      <dl class="proc-list t-mono-sm">
+        <dt>Owner</dt><dd id="activityOwner"></dd>
+        <dt>Kind</dt><dd id="activityKind"></dd>
+        <dt>Event</dt><dd id="activityOrder"></dd>
+        <dt>Time</dt><dd id="activityTime"></dd>
+        <dt>Detail</dt><dd id="activitySub"></dd>
+      </dl>
+      <p class="hint t-meta">Projected from an observed activity event. It never changes the saved team file.</p>
+    </div>
+  </aside>
+
   <!-- =================================================================
        LAYER LEGEND — UX_REDESIGN §6.7. Conditional chrome: present only
        while ≥1 observed edge exists. Click a row to solo that layer;
@@ -322,7 +351,7 @@
        (`edges: []` → team), never a toggle. The run slot stays reserved
        and disabled: running a team arrives in a later phase (§14).
        ================================================================= -->
-  <div class="panel bottom cx e1" id="modepill" role="button" tabindex="0">
+  <div class="panel bottom cx e1" id="modepill">
     <span class="glyph" id="modeGlyph"></span>
     <span class="label t-body-m" id="modeLabel">Pipeline · 3 steps</span>
     <span class="anomaly t-micro" id="modeAnomaly">

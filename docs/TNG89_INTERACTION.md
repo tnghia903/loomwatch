@@ -465,16 +465,23 @@ observed, and says plainly where it could not see.
 
 ### 6.1 Tab order
 
-1. Composer: mode chip → input → primary action
+1. Composer: input → primary action → run history (the mode display is informational)
 2. Document chip → library → inspector (existing, `UX_REDESIGN §11`)
 3. Canvas configuration nodes, in `pipeline_order()` else creation order
-4. **Runtime overlay:** Goal → Response → filters → the six summaries in fixed order →
-   expanded entities in deterministic entity-ID order
+4. **Runtime overlay:** live-activity cards in event order → Response → filters → the six
+   summaries in fixed order → expanded entities in deterministic entity-ID order
 
 Expansion never steals focus. Collapsing a subtree returns focus to the node that owned it;
 `[ Back to response ]` returns focus to the Response node. Focus is stable across
 expand/collapse — a requirement of `TNG-89F`, and the reason order is by deterministic ID
 rather than by arrival.
+
+TNG-115 makes the activation contract explicit. Configuration nodes and live-activity
+cards are native buttons. The terminal Response keeps `role="button"` because its structured
+answer cannot validly be nested in a native button; `Enter` and `Space` run the click path,
+and Space prevents viewport scrolling. `aria-expanded` tracks every inspector/provenance
+disclosure. `Esc` unwinds activity panel → entity → category → provenance and returns focus
+to the control that owned the dismissed layer.
 
 ### 6.2 The synchronized outline
 
@@ -699,3 +706,34 @@ Assumptions:
     rule or lacks order/time/status. **Fail.**
 17. A finished Agent A task forces the whole run/result to read `done`. **Fail.**
 18. Replay animates, calls anything, or loses direct agent ownership. **Fail.**
+
+### 11.6 TNG-115 keyboard and narrow composition
+
+Below 768 px the prototype stops fitting the entire 1600 × 1000 stage with a transform.
+The run workspace becomes one source-ordered Command / Inspect column:
+
+```text
+document + theme
+configured agent tasks
+lifecycle → goal → observed activity → response
+coverage → filters → summaries → selected evidence
+viewport-docked composer
+```
+
+Configured/provenance edge geometry and the library are omitted at this width. Their
+essential information is not: cards continue to state owner, event order/time, status,
+capture quality, and relationship. The composition keeps authored text sizes and 44 px
+targets, uses an overlay sheet for either inspector, and keeps prompt/run/history/theme
+controls reachable. Quarry Light and Obsidian & Gilt reflow identically because the narrow
+rules consume only semantic tokens.
+
+Additional acceptance failures:
+
+19. Enter or Space on a node, activity card, or terminal Response differs from click, or
+    Space scrolls instead of activating. **Fail.**
+20. Closing an inspector, activity panel, entity/category disclosure, provenance view, or
+    popover loses focus or returns it to an unrelated control. **Fail.**
+21. A viewport below 768 px uses whole-stage scaling, clips the composer/response, makes a
+    core action smaller than 44 px, or hides theme switching. **Fail.**
+22. Narrow mode loses submission, response/provenance selection, filtering, automatic
+    Agent A → Notion evidence, or cancel/retry state coverage. **Fail.**

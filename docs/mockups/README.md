@@ -3,6 +3,39 @@
 The reviewable output of the "Obsidian & Gilt" redesign. No design tool the rest of the
 team cannot open.
 
+## TNG-115 revision — keyboard and narrow-layout remediation
+
+The approval candidate now treats the run workspace as a **Command / Inspect** surface at
+narrow widths instead of shrinking the 1600 × 1000 desktop stage. Below 768 px the saved
+configuration nodes, lifecycle summary, goal, activity, response, provenance summaries,
+evidence, filters, and composer form one readable vertical sequence. Coordinate edges and
+the library are intentionally deprioritized in that composition; ownership, order, time,
+status, and relationship words remain on the cards. The theme control stays visible, the
+composer sticks to the bottom edge, targets grow to at least 44 px, and text keeps its
+authored size in both Quarry Light and Obsidian & Gilt. The composer stays docked to the
+viewport while the content column scrolls behind reserved bottom space.
+
+Keyboard behavior is now executable rather than merely labelled:
+
+- Agent nodes and live-activity cards are native buttons. `Enter` and `Space` open the
+  agent or observed-event inspector, and closing with `Esc` or the close button returns
+  focus to the originating card.
+- The rich terminal Response remains an article with button semantics because it contains
+  prose/code structure that cannot validly live inside a native button. Its explicit
+  `Enter`/`Space` handler mirrors click, prevents Space from scrolling, and keeps
+  `aria-expanded` synchronized with provenance visibility.
+- Provenance summary/entity rerenders restore focus to the owning control. `Esc` collapses
+  entity → category → provenance in that order; **Back to response** returns focus to the
+  terminal Response.
+- Popovers restore focus to their trigger. The document chip retains equivalent custom
+  semantics because it contains its own independent Save/Review action; the non-action
+  mode display no longer advertises a false button role.
+
+The narrow interaction pass covers prompt submission, automatic Agent A → Notion activity,
+activity inspection, terminal-response activation, provenance expand/collapse, filtering,
+theme switching, and the existing stop/cancel/retry state demonstration. Desktop geometry
+and all TNG-113 live ownership behavior remain unchanged.
+
 ## TNG-113 revision — operational provenance
 
 The board-requested revision is now visible in screens 8–13 without changing the production
@@ -118,6 +151,10 @@ neutral values and never touches a token, so it cannot be confused with the desi
 | `F8` · `Esc` | problems popover · dismiss |
 | `?` | the spec-notes drawer — per-screen rationale with section citations |
 | `Motion:` button | simulates `prefers-reduced-motion` |
+
+On a focused node, live-activity card, or terminal Response, `Enter` and `Space` activate
+the same path as a pointer click. `Esc` unwinds the active detail level and returns focus to
+the control that opened it.
 
 Click a node to open the inspector. The **Notes** drawer is the fastest way to read the
 argument for each screen; it carries the decisions and the section numbers.
@@ -244,6 +281,16 @@ substantive part of what the board is being asked to approve.
 ---
 
 ## What was verified, and how
+
+### TNG-115 remediation — 26 focused browser assertions, all passing
+
+Run `node docs/mockups/verify-prototype.mjs`. The verifier launches headless Chrome with
+external name resolution disabled and drives actual keyboard events against the generated
+standalone. It covers node/inspector activation and focus return, live-activity inspection,
+terminal Response and provenance expansion/collapse, filter state across rerenders,
+keyboard prompt submission, and cancel/retry continuity. At 390 × 844 it checks both
+themes, an unscaled stage, 14 px response text, a reachable 44 px theme target, a
+viewport-docked composer, and no horizontal overflow.
 
 ### Packaging (TNG-99) — 43 automated checks, all passing
 

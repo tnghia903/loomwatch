@@ -326,6 +326,9 @@ html, body {
   border-radius: var(--r-lg);
   display: flex; flex-direction: column;
   cursor: default;
+  font: inherit;
+  color: inherit;
+  text-align: left;
   transition: border-color var(--t-instant) var(--ease-out),
               box-shadow var(--t-quick) var(--ease-out);
 }
@@ -661,6 +664,18 @@ html, body {
   overflow-y: auto;
 }
 #inspector[hidden] { display: none; }
+#activityPanel {
+  width: var(--lw-inspector-w);
+  min-height: 260px;
+  max-height: calc(100% - 40px);
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  overflow-y: auto;
+}
+#activityPanel[hidden] { display: none; }
+.activity-detail .proc-list { grid-template-columns: 52px 1fr; }
 .insp-head { display: flex; align-items: flex-start; gap: var(--sp-3); }
 .insp-head .node-glyph { width: 20px; height: 20px; }
 .insp-title { color: var(--color-ink); }
@@ -933,6 +948,17 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
 #notes li { margin-bottom: 7px; }
 #notes code { font: 400 11.5px/1.4 var(--font-mono); color: #c9c3b2; background: #1a1c22; padding: 1px 4px; border-radius: 3px; }
 
+/* One visible focus contract for native controls and the two composite
+   controls that cannot be native because they contain independent buttons. */
+:where(button, [role="button"], input, textarea):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.node:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 1px var(--color-panel-solid), 0 0 0 3px var(--lw-node-ring);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 1ms !important;
@@ -1046,7 +1072,12 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
   background: var(--color-panel-solid);
   padding: 0;
   overflow: hidden;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: default;
 }
+.rt-response[role="button"] { cursor: pointer; }
 .rt-response .rr-head {
   display: flex; align-items: center; gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-3) var(--sp-2) var(--sp-4);
@@ -1317,6 +1348,10 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
   border-radius: var(--r-md);
   background: var(--color-panel-solid);
   display: flex; flex-direction: column; gap: 2px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 .activity-ent.st-running { border: 2px solid var(--color-live); padding: 7px 9px; }
 .activity-ent.st-succeeded { border-color: var(--color-ok); }
@@ -1346,4 +1381,240 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
   display: inline-flex; align-items: center; gap: 5px;
   padding: 4px 7px; border: 1px solid var(--color-hairline);
   border-radius: var(--r-full); color: var(--color-ink-2);
+}
+
+/* ===========================================================================
+   TNG-115 — intentional narrow composition
+   Desktop remains the 1600 × 1000 review canvas. Below 768 px the canvas
+   becomes a single readable command/inspect column: configuration, runtime
+   response, provenance, then the sticky composer. Coordinates and edges are
+   deprioritized, not uniformly shrunk. All text remains at its authored size.
+   =========================================================================== */
+@media (max-width: 767px) {
+  html, body { overflow: hidden; }
+
+  #protobar {
+    height: 82px;
+    padding: 7px 8px 6px;
+    gap: 6px 8px;
+    flex-wrap: wrap;
+    align-content: center;
+  }
+  #protobar .brand { font-size: 11px; }
+  #protobar .brand em, #protobar .hint { display: none; }
+  #protobar .tabs {
+    order: 5;
+    flex: 1 0 100%;
+    height: 30px;
+  }
+  #protobar button { min-height: 30px; }
+  #protobar #motionBtn { display: none; }
+  #protobar #notesBtn { margin-left: auto; }
+
+  #stageWrap {
+    inset: 82px 0 0;
+    display: block;
+    overflow: hidden;
+  }
+  #stage {
+    width: 100%;
+    height: 100%;
+    transform: none !important;
+    margin: 0 !important;
+    border-radius: 0;
+    box-shadow: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  /* The relationship words stay in cards; geometry is deliberately omitted
+     from the one-column reading mode. */
+  #edges, #provEdges, #edgeLabels, #legend, #library { display: none !important; }
+
+  #stage:not([data-screen="first-run"]):not([data-screen="states"]):not([data-screen="system"]) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto;
+    grid-template-areas: "chip" "nodes" "overlay" "composer";
+    align-content: start;
+    gap: 12px;
+    padding: 12px 12px 96px;
+  }
+
+  #chip {
+    grid-area: chip;
+    position: sticky;
+    inset: 0 auto auto 0;
+    transform: none;
+    z-index: 70;
+    width: auto;
+    margin-right: 52px;
+    min-width: 0;
+    height: 52px;
+    padding-left: 12px;
+  }
+  #chip .chip-text { min-width: 0; }
+  #chip .chip-l1, #chip .chip-l2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  #viewctl {
+    position: fixed;
+    top: 94px;
+    left: calc(100vw - 56px);
+    right: auto !important;
+    bottom: auto;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    opacity: 1;
+    z-index: 90;
+  }
+  #viewctl .iconbtn:not(#themeBtn) { display: none; }
+  #viewctl .iconbtn { width: 44px; height: 44px; }
+
+  #nodes {
+    grid-area: nodes;
+    position: relative;
+    inset: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+  #nodes > .node {
+    position: relative;
+    inset: auto;
+    left: auto;
+    top: auto;
+    width: 100%;
+    height: auto;
+    min-height: 108px;
+  }
+  #nodes > .node.has-task { min-height: 132px; }
+  #nodes > .node .handle, #nodes > .node .step { display: none; }
+
+  #overlay {
+    grid-area: overlay;
+    position: relative;
+    inset: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+  #overlay:empty { display: none; }
+  #overlay > :not(.prov-label) {
+    position: relative !important;
+    inset: auto !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    min-width: 0;
+    transform: none !important;
+  }
+  #overlay > .prov-label { display: none; }
+  #overlay .life-strip {
+    min-height: 56px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  #overlay .life-strip > span:not(.badge) { flex: 1 1 28%; }
+  #overlay .life-strip .badge { margin-left: 0; }
+  #overlay .rt-response .rr-body { max-height: none; }
+  #overlay .rt-response.compact .rr-body { max-height: 180px; }
+  #overlay .activity-ent { min-height: 76px; }
+  #overlay #provHead { min-height: 44px; flex-wrap: wrap; }
+  #overlay #filters {
+    max-height: none;
+    order: 6;
+    padding: 14px;
+  }
+  #overlay .rt-chip { order: 7; height: 72px; }
+  #overlay .ent { order: 8; min-height: 88px; }
+  #overlay .btn-back { order: 9; min-height: 44px; }
+
+  #composer {
+    grid-area: composer;
+    position: fixed;
+    inset: auto auto 12px 12px;
+    left: 12px;
+    right: auto;
+    bottom: 12px;
+    transform: none;
+    z-index: 80;
+    width: calc(100vw - 24px);
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "mode mode" "input input" "action history";
+    align-items: stretch;
+  }
+  #composer .mode-chip {
+    grid-area: mode;
+    min-height: 44px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-hairline);
+  }
+  #composer .comp-mid { grid-area: input; min-height: 56px; }
+  #composer .comp-act { grid-area: action; padding: 8px 0 8px 12px; flex-wrap: wrap; }
+  #composer > .iconbtn { grid-area: history; align-self: center; width: 44px; height: 44px; margin: 6px !important; }
+
+  .btn, .iconbtn, .filt, .seg button { min-height: 44px; }
+  .input { min-height: 44px; }
+
+  #modepill {
+    position: fixed;
+    left: 12px;
+    right: 68px;
+    bottom: 12px;
+    transform: none;
+    width: auto;
+    min-height: 44px;
+  }
+
+  #inspector, #activityPanel {
+    position: fixed;
+    left: 12px;
+    right: auto;
+    top: 100px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
+    height: auto;
+    max-height: none;
+    z-index: 120;
+    background: var(--color-panel-solid);
+  }
+
+  .pop, #palette, #history {
+    position: fixed !important;
+    left: 12px !important;
+    right: auto !important;
+    top: 104px !important;
+    bottom: auto !important;
+    width: calc(100vw - 24px) !important;
+    max-height: calc(100vh - 128px);
+    transform: none !important;
+    overflow-y: auto;
+  }
+  .pop-row { min-height: 44px; height: auto; }
+
+  #notes {
+    top: 82px;
+    width: min(88vw, 320px);
+  }
+
+  .board, #system {
+    position: relative;
+    inset: auto;
+    min-height: 100%;
+    padding: 16px 12px 48px;
+  }
+  .sys-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .sys-card.wide { grid-column: auto; }
+  .sys-card { padding: 16px; overflow-x: auto; }
+  .node-gallery { gap: 32px 12px; }
+  .node-gallery .cell { max-width: 100%; }
+
+  #firstrun { padding: 24px 18px; }
+  .fr-stack { max-width: 100%; }
+  .fr-foot { left: 18px; right: 18px; }
 }

@@ -116,37 +116,41 @@ function nodeHTML(n) {
     : '';
 
   const task = n.task
-    ? `<div class="node-task t-meta">
+    ? `<span class="node-task t-meta">
         ${statusSVG(n.status)}
         <b>${n.taskState || n.status}</b>
         <span>${n.task}</span>
-      </div>`
+      </span>`
     : '';
 
-  return `<div class="${cls.join(' ')}" style="--x:${n.x || 0}px;--y:${n.y || 0}px"
-       data-node="${n.id}" tabindex="0" role="button"
+  const tag = n.demo ? 'div' : 'button';
+  const control = n.demo
+    ? 'aria-hidden="true"'
+    : `type="button" data-node="${n.id}" aria-controls="inspector" aria-expanded="${n.selected ? 'true' : 'false'}"`;
+
+  return `<${tag} ${control} class="${cls.join(' ')}" style="--x:${n.x || 0}px;--y:${n.y || 0}px"
        aria-label="${n.name}, ${n.role || 'no role'}, ${n.model || 'no model'}, ${n.taskState || n.status}${n.task ? ', current task ' + n.task : ''}${n.entry ? ', entry point' : ''}">
     <span class="rail"></span>
     ${n.step ? `<span class="step">${n.step}</span>` : ''}
     <span class="vdot"></span>
-    <div class="node-top">
+    <span class="node-top">
       <span class="node-glyph">${glyphSVG(n.glyph)}</span>
       <span class="node-id">
         <span class="node-name t-node">${n.name}</span>
         ${role}
       </span>
       ${statusSVG(n.status)}
-    </div>
+    </span>
     ${task}
-    <div class="node-rule"></div>
-    <div class="node-meta t-mono-sm">
+    <span class="node-rule"></span>
+    <span class="node-meta t-mono-sm">
       ${lock}
       <span class="monogram" style="width:18px;height:18px;font-size:9px">${n.harness}</span>
       <span class="model">&lrm;${n.model || '—'}</span>
       <span class="cost">${n.cost || ''}</span>
-    </div>
-    <div class="budget-lane ${laneCls}"><i style="width:${pct}%"></i></div>
-  </div>`;
+    </span>
+    <span class="budget-lane ${laneCls}"><i style="width:${pct}%"></i></span>
+  </${tag}>`;
 }
 
 /* ---------------------------------------------------------------------------
@@ -254,7 +258,7 @@ const GRAPHS = {
 const $ = (s) => document.querySelector(s);
 const stage = $('#stage');
 let state = { screen: 'canvas', theme: 'dark', graph: 'pipeline',
-              solo: 'both', selected: null, lib: false, motion: true };
+              solo: 'both', selected: null, lib: false, motion: true, popFocus: null };
 
 function markerFor(e) {
   if (e.layer === 'warp') return ' marker-end="url(#mWarp)"';
@@ -282,8 +286,7 @@ function renderGraph(name) {
 
   $('#nodes').innerHTML = g.nodes
     .map((n) => nodeHTML({ ...n, selected: n.id === state.selected })).join('');
-  $('#nodes').querySelectorAll('[data-node]').forEach((el) =>
-    el.addEventListener('click', () => selectNode(el.dataset.node)));
+  $('#nodes').querySelectorAll('[data-node]').forEach(bindNodeControl);
 
   stage.classList.toggle('mode-pipeline', g.mode === 'pipeline');
   stage.classList.toggle('mode-team', g.mode === 'team');
@@ -294,6 +297,24 @@ function renderGraph(name) {
   $('#cntWeft').textContent = g.counts.weft;
   $('#legend').hidden = !g.legend;
   truncateAll();
+}
+
+function focusAfterPaint(selector) {
+  requestAnimationFrame(() => {
+    const el = $(selector);
+    if (el && !el.hidden) el.focus({ preventScroll: true });
+  });
+}
+
+function activateKey(event, action) {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  action();
+}
+
+function bindNodeControl(el) {
+  el.addEventListener('click', () => selectNode(el.dataset.node));
+  el.addEventListener('keydown', (event) => activateKey(event, () => selectNode(el.dataset.node)));
 }
 
 function renderChip(s) {
@@ -322,6 +343,8 @@ function paintDots() {
 
 /* the inspector is the detail surface; the node is the map (§5.4) */
 function selectNode(id) {
+  if (!$('#activityPanel').hidden) closeActivity(false);
+  const restoreId = state.selected;
   state.selected = id;
   const insp = $('#inspector');
   stage.classList.toggle('inspecting', !!id);
@@ -329,6 +352,7 @@ function selectNode(id) {
     insp.hidden = true;
     renderGraph(state.graph);
     if (stage.classList.contains('workspace')) renderAgentExecution();
+    if (restoreId) focusAfterPaint(`[data-node="${restoreId}"]`);
     return;
   }
   const a = AGENTS[id];
@@ -363,6 +387,7 @@ function selectNode(id) {
   }
   insp.hidden = false;
   renderGraph(state.graph);
+  focusAfterPaint(`[data-node="${id}"]`);
 }
 
 /* ===========================================================================
@@ -674,6 +699,7 @@ const run = {
   openEnt: null,            /* expanded entity (command detail)              */
   gap: false,               /* events-channel gap                            */
   eventCount: 0,            /* ordered live evidence projected so far         */
+  activity: null,           /* live activity card owning the detail panel      */
   timers: []
 };
 const FILTERS = { cats: new Set(CATS.map((c) => c[0])), agent: 'all', status: 'all', time: 'all' };
@@ -812,9 +838,8 @@ function agentExecutionNodes() {
 function renderAgentExecution() {
   const host = $('#nodes');
   if (!host) return;
-  host.innerHTML = agentExecutionNodes().map((n) => nodeHTML(n)).join('');
-  host.querySelectorAll('[data-node]').forEach((el) =>
-    el.addEventListener('click', () => selectNode(el.dataset.node)));
+  host.innerHTML = agentExecutionNodes().map((n) => nodeHTML({ ...n, selected: n.id === state.selected })).join('');
+  host.querySelectorAll('[data-node]').forEach(bindNodeControl);
 }
 
 const agentOrigin = (agent) => agent === 'reviewer' ? { x: 366, y: 502 } : { x: 366, y: 242 };
@@ -866,10 +891,20 @@ function stopRun() {
   paintRun();
 }
 
-function focusResponse() { requestAnimationFrame(() => { const el = $('.rt-response'); if (el) el.focus(); }); }
+function focusResponse() { focusAfterPaint('#runtimeResponse'); }
 function selectResponse() { if (isTerminal()) { run.selected = !run.selected; paintRun(); focusResponse(); } }
-function toggleCat(c) { run.open = run.open === c ? null : c; run.openEnt = null; paintRun(); }
-function toggleEnt(id) { run.openEnt = run.openEnt === id ? null : id; paintRun(); }
+function toggleCat(c) {
+  run.open = run.open === c ? null : c;
+  run.openEnt = null;
+  paintRun();
+  focusAfterPaint(`[data-category="${c}"]`);
+}
+function toggleEnt(id) {
+  const closing = !id || run.openEnt === id;
+  run.openEnt = closing ? null : id;
+  paintRun();
+  focusAfterPaint(closing ? `[data-category="${run.open}"]` : `[data-entity="${id}"]`);
+}
 function backToResponse() { run.open = null; run.openEnt = null; run.selected = false; paintRun(); focusResponse(); }
 function loadReplay(i) {
   clearTimers(); closePops();
@@ -914,19 +949,56 @@ function lifecycleForRun() {
 function activityCard(e, newest) {
   const status = newest && run.phase === 'running' ? e.live : 'succeeded';
   const text = status === 'running' ? 'RUNNING' : 'SUCCEEDED';
-  return `<div class="activity-ent st-${status}" style="--x:${e.x}px;--y:${e.y}px"
-      role="button" tabindex="0" aria-label="${e.owner} ${text.toLowerCase()} ${e.kind} ${e.name}, event ${e.order}, ${e.t}">
+  const open = run.activity === e.id;
+  return `<button type="button" class="activity-ent st-${status}" style="--x:${e.x}px;--y:${e.y}px"
+      data-activity="${e.id}" onclick="inspectActivity('${e.id}')"
+      onkeydown="activateKey(event, () => inspectActivity('${e.id}'))" aria-controls="activityPanel"
+      aria-expanded="${open}" aria-label="Inspect ${e.owner} ${text.toLowerCase()} ${e.kind} ${e.name}, event ${e.order}, ${e.t}">
     <span class="ae-order t-micro">#${String(e.order).padStart(2, '0')} · ${e.t}</span>
     <span class="ae-main t-body-m">${entGlyph(e.kind, 13)} ${e.name}</span>
     <span class="ae-sub t-meta">${statusSVG(status)} ${text} · ${e.owner} · ${e.sub}</span>
-  </div>`;
+  </button>`;
+}
+
+function inspectActivity(id) {
+  const e = LIVE_ACTIVITY.find((item) => item.id === id);
+  if (!e) return;
+  const index = LIVE_ACTIVITY.indexOf(e);
+  const status = run.phase === 'running' && index === run.eventCount - 1 ? e.live : 'succeeded';
+  run.activity = id;
+  const panel = $('#activityPanel');
+  $('#activityGlyph').innerHTML = entGlyph(e.kind, 20);
+  $('#activityTitle').textContent = e.name;
+  $('#activityId').textContent = e.id;
+  $('#activityStatus').innerHTML = statusSVG(status) + ' ' + status + ' observed activity';
+  $('#activityOwner').textContent = e.owner;
+  $('#activityKind').textContent = e.kind;
+  $('#activityOrder').textContent = '#' + String(e.order).padStart(2, '0');
+  $('#activityTime').textContent = e.t;
+  $('#activitySub').textContent = e.sub;
+  panel.hidden = false;
+  stage.classList.add('activity-inspecting');
+  document.querySelectorAll('[data-activity]').forEach((card) =>
+    card.setAttribute('aria-expanded', String(card.dataset.activity === id)));
+  focusAfterPaint('#activityClose');
+}
+
+function closeActivity(restore = true) {
+  const id = run.activity;
+  run.activity = null;
+  $('#activityPanel').hidden = true;
+  stage.classList.remove('activity-inspecting');
+  document.querySelectorAll('[data-activity]').forEach((card) => card.setAttribute('aria-expanded', 'false'));
+  if (restore && id) focusAfterPaint(`[data-activity="${id}"]`);
 }
 
 function entCard(e, x, y, open) {
   const c = CAPTURE[e.cap];
   const d = e.detail;
-  return `<button class="ent cap-${e.cap} ${open ? 'open' : ''}" style="--x:${x}px;--y:${y}px"
-      onclick="toggleEnt('${e.id}')" aria-expanded="${!!open}"
+  return `<button type="button" class="ent cap-${e.cap} ${open ? 'open' : ''}" style="--x:${x}px;--y:${y}px"
+      data-entity="${e.id}"
+      onclick="toggleEnt('${e.id}')" onkeydown="activateKey(event, () => toggleEnt('${e.id}'))"
+      aria-expanded="${!!open}"
       aria-label="${e.kind}: ${e.name}, ${c.word}${e.why ? ', ' + e.why : ''}">
     <span class="e-top t-body-m">${entGlyph(e.kind, 13)}
       <span class="e-name" style="min-width:0;overflow:hidden;white-space:nowrap">${e.name}</span></span>
@@ -1012,8 +1084,11 @@ function paintRun() {
   const pre = run.phase === 'queued' || run.phase === 'starting';
   const shown = pre ? '' : ANSWER_TEXT.slice(0, run.chars);
   const compact = run.selected;
-  h += `<div class="rt rt-response ${compact ? 'compact' : ''}" style="--x:812px;--y:232px;width:400px"
-      ${isTerminal() ? 'onclick="selectResponse()" role="button" tabindex="0" style="cursor:pointer;--x:812px;--y:232px;width:400px"' : ''}>
+  const responseState = isTerminal() ? `${run.selected ? 'provenance expanded' : 'provenance collapsed'}` : 'not expandable while the run is active';
+  h += `<article ${isTerminal() ? 'role="button" tabindex="0" onclick="selectResponse()" onkeydown="activateKey(event, selectResponse)"' : 'role="status"'}
+      id="runtimeResponse" class="rt rt-response ${compact ? 'compact' : ''}"
+      style="--x:812px;--y:232px;width:400px" ${isTerminal() ? `aria-expanded="${run.selected}"` : ''}
+      aria-label="Response from researcher, ${phaseText}, ${responseState}">
     <div class="rr-head t-body-m">${statusSVG(p.s)} <span>${phaseText}</span>
       <span style="flex:1"></span>
       <span class="badge t-micro ${live ? 'badge-live' : 'badge-replay'}">
@@ -1033,7 +1108,7 @@ function paintRun() {
         <span>⚠ reviewer crashed after 2 turns.</span><span class="wm">process_crashed</span></div>` : ''}
     ${run.phase === 'cancelled' ? `<div class="rt-strip halt t-meta gated">
         <span>Cancelled by the operator. Partial answer kept.</span><span class="wm">stopReason: cancelled</span></div>` : ''}
-  </div>`;
+  </article>`;
 
   if (run.selected) {
     const respBottom = 232 + 210;
@@ -1055,8 +1130,10 @@ function paintRun() {
       if (!FILTERS.cats.has(name)) return;
       const list = filtered(name), cov = COVER[name];
       const x = CAT_POS[i][0], y = rowY[i], open = run.open === name;
-      h += `<button class="rt-chip ${open ? 'open' : ''}" style="--x:${x}px;--y:${y}px"
-          onclick="toggleCat('${name}')" aria-expanded="${open}"
+      h += `<button type="button" class="rt-chip ${open ? 'open' : ''}" style="--x:${x}px;--y:${y}px"
+          data-category="${name}"
+          onclick="toggleCat('${name}')" onkeydown="activateKey(event, () => toggleCat('${name}'))"
+          aria-expanded="${open}"
           aria-label="${name}, ${list.length} entities, ${COVERAGE[cov].word}">
         <span class="c-top t-micro">${entGlyph(kind, 13)} ${name}
           <span class="n t-mono-sm">${list.length || '—'}</span></span>
@@ -1100,16 +1177,17 @@ function paintRun() {
     h += `<div id="filters" class="e1" style="--x:1230px;--y:${headY - 6}px">
       <span class="t-micro" style="color:var(--color-ink-3)">Artifact type</span>
       ${CATS.map(([n]) => `<button class="filt t-meta ${FILTERS.cats.has(n) ? 'on' : ''}"
-          onclick="toggleFilterCat('${n}')"><span class="bx"></span>${n}</button>`).join('')}
+          data-filter-cat="${n}" aria-pressed="${FILTERS.cats.has(n)}"
+          onclick="toggleFilterCat('${n}')" onkeydown="activateKey(event, () => toggleFilterCat('${n}'))"><span class="bx"></span>${n}</button>`).join('')}
       <span class="fhead t-micro">Agent</span>
       <span class="seg">${['all', 'researcher', 'reviewer'].map((a) =>
-        `<button class="${FILTERS.agent === a ? 'on' : ''}" onclick="setFilter('agent','${a}')">${a === 'all' ? 'All' : a.slice(0, 8)}</button>`).join('')}</span>
+        `<button data-filter="agent:${a}" aria-pressed="${FILTERS.agent === a}" class="${FILTERS.agent === a ? 'on' : ''}" onclick="setFilter('agent','${a}')">${a === 'all' ? 'All' : a.slice(0, 8)}</button>`).join('')}</span>
       <span class="fhead t-micro">Status</span>
       <span class="seg">${['all', 'succeeded', 'failed'].map((a) =>
-        `<button class="${FILTERS.status === a ? 'on' : ''}" onclick="setFilter('status','${a}')">${a === 'all' ? 'All' : a === 'succeeded' ? 'OK' : 'Failed'}</button>`).join('')}</span>
+        `<button data-filter="status:${a}" aria-pressed="${FILTERS.status === a}" class="${FILTERS.status === a ? 'on' : ''}" onclick="setFilter('status','${a}')">${a === 'all' ? 'All' : a === 'succeeded' ? 'OK' : 'Failed'}</button>`).join('')}</span>
       <span class="fhead t-micro">Time</span>
       <span class="seg">${['all', 'first10'].map((a) =>
-        `<button class="${FILTERS.time === a ? 'on' : ''}" onclick="setFilter('time','${a}')">${a === 'all' ? 'Whole run' : 'First 10s'}</button>`).join('')}</span>
+        `<button data-filter="time:${a}" aria-pressed="${FILTERS.time === a}" class="${FILTERS.time === a ? 'on' : ''}" onclick="setFilter('time','${a}')">${a === 'all' ? 'Whole run' : 'First 10s'}</button>`).join('')}</span>
       <span class="pop-sep" style="margin:6px 0"></span>
       <span class="t-meta" style="color:var(--color-ink-3)">Filters are view state. They never re-run the projector.</span>
     </div>`;
@@ -1123,9 +1201,10 @@ function toggleFilterCat(n) {
   FILTERS.cats.has(n) ? FILTERS.cats.delete(n) : FILTERS.cats.add(n);
   if (run.open && !FILTERS.cats.has(run.open)) run.open = null;
   paintRun();
+  focusAfterPaint(`[data-filter-cat="${n}"]`);
 }
-function setFilter(k, v) { FILTERS[k] = v; run.openEnt = null; paintRun(); }
-function openHistory() { closePops(); $('#history').hidden = false; }
+function setFilter(k, v) { FILTERS[k] = v; run.openEnt = null; paintRun(); focusAfterPaint(`[data-filter="${k}:${v}"]`); }
+function openHistory(trigger) { rememberPopFocus(trigger); closePops(false); $('#history').hidden = false; focusAfterPaint('#history input'); }
 
 /* run history rows — selecting one loads a replay, never re-executes */
 if ($('#historyList')) {
@@ -1158,7 +1237,7 @@ const SEEDS = {
 const CANVAS_PARTS = ['library', 'chip', 'modepill', 'viewctl', 'legend', 'edges', 'edgeLabels', 'nodes'];
 const ALL = [...CANVAS_PARTS, 'inspector', 'firstrun', 'states', 'system',
              'switcherPop', 'palette', 'problemsPop',
-             'composer', 'overlay', 'provEdges', 'history'];
+             'composer', 'overlay', 'provEdges', 'history', 'activityPanel'];
 /* On run screens the mode pill is absorbed into the composer (TNG89 §1), so
    `modepill` is deliberately absent from this list. */
 const RUN_PARTS = ['library', 'chip', 'viewctl', 'legend', 'edges', 'edgeLabels',
@@ -1404,6 +1483,9 @@ function go(key) {
   const s = SCREENS[key];
   if (!s) return;
   state.screen = key;
+  stage.dataset.screen = key;
+  run.activity = null;
+  stage.classList.remove('activity-inspecting');
 
   ALL.forEach((id) => { const el = document.getElementById(id); if (el) el.hidden = true; });
   s.show.forEach((id) => { const el = document.getElementById(id); if (el) el.hidden = false; });
@@ -1519,10 +1601,25 @@ function paintSolo() {
 }
 
 function toggleLibrary() { state.lib = !state.lib; stage.classList.toggle('lib-collapsed', state.lib); }
-function openSwitcher() { closePops(); $('#switcherPop').hidden = false; }
-function openProblems() { closePops(); $('#problemsPop').hidden = false; }
-function openPalette() { closePops(); $('#palette').hidden = false; $('#paletteInput').focus(); }
-function closePops() { ['switcherPop', 'palette', 'problemsPop', 'history'].forEach((i) => { const el = $('#' + i); if (el) el.hidden = true; }); }
+function rememberPopFocus(trigger) {
+  const candidate = trigger || document.activeElement;
+  if (candidate && candidate !== document.body) state.popFocus = candidate;
+}
+function openSwitcher(trigger) {
+  rememberPopFocus(trigger);
+  closePops(false);
+  $('#switcherPop').hidden = false;
+  $('#chip').setAttribute('aria-expanded', 'true');
+  focusAfterPaint('#switcherPop input');
+}
+function openProblems(trigger) { rememberPopFocus(trigger); closePops(false); $('#problemsPop').hidden = false; focusAfterPaint('#problemsPop button'); }
+function openPalette(trigger) { rememberPopFocus(trigger); closePops(false); $('#palette').hidden = false; $('#paletteInput').focus(); }
+function closePops(restore = true) {
+  ['switcherPop', 'palette', 'problemsPop', 'history'].forEach((i) => { const el = $('#' + i); if (el) el.hidden = true; });
+  $('#chip').setAttribute('aria-expanded', 'false');
+  if (restore && state.popFocus && state.popFocus.isConnected) state.popFocus.focus({ preventScroll: true });
+  if (restore) state.popFocus = null;
+}
 
 /* the palette's action list — §11 */
 const CMDS = [
@@ -1628,7 +1725,7 @@ const GALLERY = [
   [{ ...AGENTS.n2, status: 'idle', lock: true, drag: true }, 'dragging · allowRecruiting false']
 ];
 $('#nodeGallery').innerHTML = GALLERY.map(([n, cap]) =>
-  `<figure class="cell">${nodeHTML({ ...n, x: 0, y: 0 })}<figcaption class="t-meta">${cap}</figcaption></figure>`
+  `<figure class="cell">${nodeHTML({ ...n, x: 0, y: 0, demo: true })}<figcaption class="t-meta">${cap}</figcaption></figure>`
 ).join('');
 
 $('#chipStates').innerHTML = Object.keys(CHIP).map((k) => {
@@ -1684,9 +1781,18 @@ document.addEventListener('keydown', (e) => {
   if (meta && e.key === '\\') { e.preventDefault(); return toggleLibrary(); }
   if (e.key === 'Escape') {
     /* Esc order: dismiss popover → deselect → close inspector (§11) */
+    if (!$('#activityPanel').hidden) return closeActivity();
     const open = ['switcherPop', 'palette', 'problemsPop', 'history'].some((i) => { const el = $('#' + i); return el && !el.hidden; });
     if (open) return closePops();
     if (state.selected) return selectNode(null);
+    if (stage.classList.contains('workspace') && run.openEnt) return toggleEnt(null);
+    if (stage.classList.contains('workspace') && run.open) {
+      const category = run.open;
+      run.open = null;
+      paintRun();
+      return focusAfterPaint(`[data-category="${category}"]`);
+    }
+    if (stage.classList.contains('workspace') && run.selected) return backToResponse();
     return;
   }
   if (typing) return;
@@ -1715,9 +1821,27 @@ $('#motionBtn').addEventListener('click', () => {
   $('#motionBtn').textContent = 'Motion: ' + (state.motion ? 'on' : 'reduced');
 });
 
+/* The document chip contains its own Save/Review button, so it cannot be a
+   native button. Give the custom outer control the exact Enter/Space contract
+   without allowing Space to scroll the viewport. */
+$('#chip').addEventListener('keydown', (e) => {
+  if (e.target !== e.currentTarget) return;
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    openSwitcher(e.currentTarget);
+  }
+});
+
 /* fit the fixed 1600 × 1000 stage into whatever the reviewer's window is */
 function fit() {
   const wrap = $('#stageWrap');
+  const narrow = window.matchMedia('(max-width: 767px)').matches;
+  document.documentElement.dataset.layout = narrow ? 'narrow' : 'wide';
+  if (narrow) {
+    stage.style.transform = 'none';
+    stage.style.marginRight = '0';
+    return;
+  }
   const pad = 32;
   const notesW = $('#notes').classList.contains('open') ? 320 : 0;
   const s = Math.min((wrap.clientWidth - notesW - pad) / 1600, (wrap.clientHeight - pad) / 1000, 1);

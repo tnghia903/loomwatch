@@ -622,18 +622,35 @@ CANVAS_SPEC §12 stands in full. Restated with what v2 adds:
   first-class third state so an operator whose OS switches at sunset is not fighting a
   sticky choice.
 - Reduced motion: DESIGN_LANGUAGE §10.
+- **TNG-115 activation contract.** Agent nodes and live-activity cards are native buttons.
+  The structured terminal Response uses equivalent button semantics: click, `Enter`, and
+  `Space` share one action and Space prevents scrolling. `aria-expanded` names inspector /
+  provenance state. Dismissing a panel or popover restores its trigger; collapsing an
+  entity/category restores its owner; Back to response restores the terminal Response.
+- Informational surfaces are not controls: the standalone mode display no longer exposes a
+  button role. The document chip remains the one composite custom button because it contains
+  an independent Save/Review button, and implements explicit `Enter`/`Space` behavior.
 
 ---
 
-## 13. Window sizes — unchanged, one addition
+## 13. Window sizes — TNG-115 amendment
 
-≥ 1280 as specified · 1024–1280 inspector overlays the canvas edge · 768–1024 Library and
-inspector become scrimmed overlay sheets, only one open at a time · < 768 view-only with
-`"Editing needs a wider window."` in the chip.
+≥ 1280 keeps the authored canvas composition · 1024–1280 inspector overlays the canvas
+edge · 768–1024 Library and inspector become scrimmed overlay sheets, only one open at a
+time · < 768 becomes an intentional single-column **Command / Inspect** composition.
 
-**Addition:** below 1024 the view-control cluster drops the zoom buttons (pinch and `⌘±`
-still work) and keeps `⤢` and `◐`, so the theme toggle survives every breakpoint. Below
-768 the layer legend is hidden; the solo cycle stays on `L` and in ⌘K.
+The earlier `< 768 view-only` rule is withdrawn for the approval candidate: it hid the
+prompt-to-response flow that TNG-89 requires the design to prove. Narrow mode preserves
+configuration inspection, prompt submission, automatic activity, response/provenance
+selection, filtering, theme switching, and the error/cancel/retry demonstrations. The
+desktop coordinate graph is reprioritized into document → configured agents → runtime
+content → viewport-docked composer; library and edge geometry are suppressed while their labels,
+ownership, ordering, statuses, and capture words remain in the card sequence. Text does not
+scale, and interactive targets are at least 44 px.
+
+Below 1024 the view-control cluster drops the zoom buttons (pinch and `⌘±` still work) and
+keeps the theme toggle, so it survives every breakpoint. Below 768 the layer legend is
+hidden; the solo cycle stays on `L` and in ⌘K.
 
 Height below 600: mode pill and view controls merge into one bottom-right cluster, and the
 layer legend is suppressed.
