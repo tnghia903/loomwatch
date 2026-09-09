@@ -1,0 +1,20 @@
+{
+  "id": "observation:skill:design-language:open",
+  "runId": "01991f8a-7e39-7b86-8c37-0bd0e5b94e11",
+  "agentId": "reviewer",
+  "observedAt": "2026-09-09T03:00:01.240Z",
+  "kind": "skill",
+  "externalId": "skill:design-language:open:1",
+  "adapter": {
+    "id": "codex-skill-capture",
+    "version": "1.0.0",
+    "capabilities": ["skills"]
+  },
+  "normalizedPayload": {
+    "identity": "design-language",
+    "fingerprint": "sha256:64f377c184ffe0469e3438c7737a070e5a6f80f16c8567935e399fe48873713a",
+    "action": "opened"
+  },
+  "evidenceEventIds": [],
+  "redactions": []
+}

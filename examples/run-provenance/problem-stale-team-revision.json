@@ -1,0 +1,8 @@
+{
+  "type": "https://loomwatch.dev/problems/stale-team-revision",
+  "title": "Team revision is stale",
+  "status": 409,
+  "code": "stale_team_revision",
+  "detail": "The saved team changed after the client loaded it; reload before starting a run.",
+  "currentTeamRevision": "sha256:7b2a5b149aa5f2d449da79473b8e99b76490a05e1e24870f42b497d16fa66354"
+}

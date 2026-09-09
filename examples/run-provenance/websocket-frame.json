@@ -1,0 +1,26 @@
+{
+  "id": "evt-2",
+  "sessionId": "acp-session-lead-12",
+  "agentId": "reviewer",
+  "seq": 2,
+  "ts": "2026-09-09T03:00:05.900Z",
+  "kind": "message",
+  "payload": {
+    "role": "agent",
+    "messageId": "msg-final",
+    "content": {
+      "type": "text",
+      "text": "Prefer the expand/contract migration because it keeps old readers valid."
+    }
+  },
+  "raw": {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "acp-session-reviewer-47",
+      "update": {
+        "sessionUpdate": "agent_message_chunk"
+      }
+    }
+  }
+}

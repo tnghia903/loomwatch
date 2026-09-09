@@ -1,0 +1,8 @@
+{
+  "type": "https://loomwatch.dev/problems/idempotency-conflict",
+  "title": "Idempotency key conflicts with an accepted run",
+  "status": 409,
+  "code": "idempotency_conflict",
+  "detail": "This clientRequestId was already accepted with different prompt, path, or revision bytes.",
+  "runId": "01991f8a-7e39-7b86-8c37-0bd0e5b94e11"
+}

@@ -1,0 +1,7 @@
+{
+  "type": "https://loomwatch.dev/problems/invalid-team",
+  "title": "Pipeline requires one canonical responder",
+  "status": 422,
+  "code": "multiple_pipeline_sinks",
+  "detail": "The pipeline has two terminal agents; connect the graph so exactly one terminal agent produces the canonical response."
+}

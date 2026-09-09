@@ -1,0 +1,1079 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://loomwatch.dev/schemas/run-provenance.schema.yaml"
+title: LoomWatch run control and provenance companion contracts
+description: >-
+  Design-time schemas for TNG-89. RunEvent is intentionally referenced from the
+  frozen team schema and is not redefined here.
+
+$defs:
+  Uuid:
+    type: string
+    format: uuid
+    pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+
+  OpaqueId:
+    type: string
+    minLength: 1
+    maxLength: 512
+
+  Timestamp:
+    type: string
+    format: date-time
+    pattern: "^\\d{4}-\\d{2}-\\d{2}[Tt]\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?([Zz]|[+-]\\d{2}:\\d{2})$"
+
+  TeamRevision:
+    description: SHA-256 of exact persisted YAML bytes.
+    type: string
+    pattern: "^sha256:[0-9a-f]{64}$"
+
+  Sha256Digest:
+    type: string
+    pattern: "^sha256:[0-9a-f]{64}$"
+
+  ProjectionVersions:
+    type: object
+    additionalProperties: false
+    required:
+      - contractSchema
+      - responseAssembler
+      - projector
+      - normalizer
+      - redactionPolicy
+      - markdownSanitizer
+    properties:
+      contractSchema:
+        const: 1
+      responseAssembler:
+        type: string
+        minLength: 1
+      projector:
+        type: string
+        minLength: 1
+      normalizer:
+        type: string
+        minLength: 1
+      redactionPolicy:
+        type: string
+        minLength: 1
+      markdownSanitizer:
+        type: string
+        minLength: 1
+
+  RunStatus:
+    type: string
+    enum:
+      - queued
+      - starting
+      - running
+      - succeeded
+      - partial
+      - failed
+
+  CaptureState:
+    type: string
+    enum:
+      - recorded
+      - derived
+      - redacted
+      - unavailable
+
+  CoverageLevel:
+    type: string
+    enum:
+      - complete
+      - partial
+      - unavailable
+
+  TraceCategory:
+    type: string
+    enum:
+      - agents
+      - reasoning
+      - skills
+      - tools
+      - commands
+      - sources
+
+  Redaction:
+    type: object
+    additionalProperties: false
+    required:
+      - path
+      - reason
+    properties:
+      path:
+        description: JSON Pointer into the public resource.
+        type: string
+      reason:
+        type: string
+        enum:
+          - secret_key
+          - credential_value
+          - environment_value
+          - uri_credential
+          - sensitive_query
+          - high_entropy_value
+          - unauthorized_path
+          - policy_failure
+          - size_limit
+
+  TeamSnapshotRef:
+    type: object
+    additionalProperties: false
+    required:
+      - path
+      - revision
+      - sizeBytes
+    properties:
+      path:
+        description: Root-relative original team path, never a snapshot storage path.
+        type: string
+        minLength: 1
+      revision:
+        $ref: "#/$defs/TeamRevision"
+      sizeBytes:
+        type: integer
+        minimum: 1
+        maximum: 1048576
+
+  DirectoryBinding:
+    description: Internal capability-reconstruction record; never a public path grant.
+    type: object
+    additionalProperties: false
+    required:
+      - authorizedRootId
+      - rootRelativePath
+      - platformIdentity
+      - capturedAt
+    properties:
+      authorizedRootId:
+        $ref: "#/$defs/OpaqueId"
+      rootRelativePath:
+        type: string
+        minLength: 1
+      platformIdentity:
+        description: Stable device/inode, file ID, or platform-equivalent identity.
+        $ref: "#/$defs/OpaqueId"
+      capturedAt:
+        $ref: "#/$defs/Timestamp"
+
+  SnapshotExecutionBinding:
+    description: Internal immutable team snapshot and race-free cwd bindings.
+    type: object
+    additionalProperties: false
+    required:
+      - team
+      - teamBase
+      - agentCwds
+    properties:
+      team:
+        $ref: "#/$defs/TeamSnapshotRef"
+      teamBase:
+        $ref: "#/$defs/DirectoryBinding"
+      agentCwds:
+        type: object
+        minProperties: 1
+        additionalProperties:
+          $ref: "#/$defs/DirectoryBinding"
+
+  StartRunRequest:
+    type: object
+    additionalProperties: false
+    required:
+      - teamPath
+      - expectedTeamRevision
+      - prompt
+      - clientRequestId
+    properties:
+      teamPath:
+        type: string
+        minLength: 1
+      expectedTeamRevision:
+        $ref: "#/$defs/TeamRevision"
+      prompt:
+        description: Maximum is 65,536 UTF-8 bytes; maxLength is a coarse code-point guard.
+        type: string
+        minLength: 1
+        maxLength: 65536
+        x-maxUtf8Bytes: 65536
+      clientRequestId:
+        $ref: "#/$defs/Uuid"
+
+  StartRunResponse:
+    type: object
+    additionalProperties: false
+    required:
+      - runId
+      - clientRequestId
+      - status
+      - archiveSessionId
+      - teamRevision
+      - createdAt
+    properties:
+      runId:
+        $ref: "#/$defs/Uuid"
+      clientRequestId:
+        $ref: "#/$defs/Uuid"
+      status:
+        const: queued
+      archiveSessionId:
+        type: "null"
+      teamRevision:
+        $ref: "#/$defs/TeamRevision"
+      createdAt:
+        $ref: "#/$defs/Timestamp"
+
+  CanonicalResponse:
+    type: object
+    additionalProperties: false
+    required:
+      - agentId
+      - eventIds
+      - markdown
+      - truncated
+      - complete
+      - assemblyVersion
+      - sanitizerVersion
+      - sourceDigest
+      - markdownDigest
+      - redactions
+    properties:
+      agentId:
+        $ref: "#/$defs/OpaqueId"
+      eventIds:
+        type: array
+        uniqueItems: true
+        items:
+          $ref: "#/$defs/OpaqueId"
+      markdown:
+        description: Sanitized bounded materialization; eventIds remain canonical.
+        type: string
+        maxLength: 4194304
+        x-maxUtf8Bytes: 4194304
+      truncated:
+        type: boolean
+      complete:
+        type: boolean
+      assemblyVersion:
+        type: string
+        minLength: 1
+      sanitizerVersion:
+        type: string
+        minLength: 1
+      sourceDigest:
+        $ref: "#/$defs/Sha256Digest"
+      markdownDigest:
+        $ref: "#/$defs/Sha256Digest"
+      redactions:
+        type: array
+        items:
+          $ref: "#/$defs/Redaction"
+
+  AcpSessionBinding:
+    type: object
+    additionalProperties: false
+    required:
+      - agentId
+      - processAttempt
+      - acpSessionId
+      - archiveSessionId
+      - boundAt
+      - firstSeq
+      - lastSeq
+    properties:
+      agentId:
+        $ref: "#/$defs/OpaqueId"
+      processAttempt:
+        type: integer
+        minimum: 1
+      acpSessionId:
+        $ref: "#/$defs/OpaqueId"
+      archiveSessionId:
+        $ref: "#/$defs/OpaqueId"
+      boundAt:
+        $ref: "#/$defs/Timestamp"
+      firstSeq:
+        type: integer
+        minimum: 0
+      lastSeq:
+        type:
+          - integer
+          - "null"
+        minimum: 0
+
+  ProcessFailure:
+    type: object
+    additionalProperties: false
+    required:
+      - agentId
+      - phase
+      - eventId
+    properties:
+      agentId:
+        $ref: "#/$defs/OpaqueId"
+      phase:
+        enum:
+          - crashed
+          - exited_nonzero
+          - protocol_error
+      eventId:
+        anyOf:
+          - $ref: "#/$defs/OpaqueId"
+          - type: "null"
+      exitCode:
+        type:
+          - integer
+          - "null"
+      message:
+        type:
+          - string
+          - "null"
+
+  TerminalSummary:
+    type: object
+    additionalProperties: false
+    required:
+      - outcome
+      - code
+      - message
+      - canonicalStopReason
+      - processFailures
+      - outstandingTeamBusCalls
+    properties:
+      outcome:
+        enum:
+          - succeeded
+          - partial
+          - failed
+      code:
+        type:
+          - string
+          - "null"
+      message:
+        type:
+          - string
+          - "null"
+      canonicalStopReason:
+        type:
+          - string
+          - "null"
+        enum:
+          - end_turn
+          - max_tokens
+          - max_turn_requests
+          - refusal
+          - cancelled
+          - null
+      processFailures:
+        type: array
+        items:
+          $ref: "#/$defs/ProcessFailure"
+      outstandingTeamBusCalls:
+        const: 0
+
+  CoverageRecord:
+    type: object
+    additionalProperties: false
+    required:
+      - category
+      - level
+      - basis
+      - observedCount
+      - redactedCount
+      - adapterIds
+      - reasons
+    properties:
+      category:
+        $ref: "#/$defs/TraceCategory"
+      level:
+        $ref: "#/$defs/CoverageLevel"
+      basis:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          enum:
+            - run_event
+            - team_snapshot
+            - trace_observation
+            - deterministic_projection
+      observedCount:
+        type: integer
+        minimum: 0
+      redactedCount:
+        type: integer
+        minimum: 0
+      adapterIds:
+        type: array
+        uniqueItems: true
+        items:
+          $ref: "#/$defs/OpaqueId"
+      reasons:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          enum:
+            - adapter_not_instrumented
+            - adapter_degraded
+            - harness_omitted_metadata
+            - no_artifacts_emitted
+            - missing_terminal_evidence
+            - malformed_evidence
+            - redacted_evidence
+            - unauthorized_reference
+            - projection_limit
+            - projector_degraded
+            - unpaired_tool_call
+
+  CaptureCoverage:
+    type: object
+    additionalProperties: false
+    required:
+      - agents
+      - reasoning
+      - skills
+      - tools
+      - commands
+      - sources
+    properties:
+      agents:
+        allOf:
+          - $ref: "#/$defs/CoverageRecord"
+          - properties:
+              category:
+                const: agents
+      reasoning:
+        allOf:
+          - $ref: "#/$defs/CoverageRecord"
+          - properties:
+              category:
+                const: reasoning
+      skills:
+        allOf:
+          - $ref: "#/$defs/CoverageRecord"
+          - properties:
+              category:
+                const: skills
+      tools:
+        allOf:
+          - $ref: "#/$defs/CoverageRecord"
+          - properties:
+              category:
+                const: tools
+      commands:
+        allOf:
+          - $ref: "#/$defs/CoverageRecord"
+          - properties:
+              category:
+                const: commands
+      sources:
+        allOf:
+          - $ref: "#/$defs/CoverageRecord"
+          - properties:
+              category:
+                const: sources
+
+  RunSummary:
+    type: object
+    additionalProperties: false
+    required:
+      - schemaVersion
+      - runId
+      - clientRequestId
+      - team
+      - prompt
+      - promptRedactions
+      - mode
+      - status
+      - archiveSessionId
+      - acpSessions
+      - createdAt
+      - startedAt
+      - completedAt
+      - canonicalResponderAgentId
+      - canonicalResponse
+      - terminal
+      - projectionVersions
+      - captureCoverage
+    properties:
+      schemaVersion:
+        const: 1
+      runId:
+        $ref: "#/$defs/Uuid"
+      clientRequestId:
+        $ref: "#/$defs/Uuid"
+      team:
+        $ref: "#/$defs/TeamSnapshotRef"
+      prompt:
+        description: Maximum is 65,536 UTF-8 bytes; maxLength is a coarse code-point guard.
+        type: string
+        maxLength: 65536
+        x-maxUtf8Bytes: 65536
+      promptRedactions:
+        type: array
+        items:
+          $ref: "#/$defs/Redaction"
+      mode:
+        type: string
+        enum:
+          - team
+          - pipeline
+      status:
+        $ref: "#/$defs/RunStatus"
+      archiveSessionId:
+        anyOf:
+          - $ref: "#/$defs/OpaqueId"
+          - type: "null"
+      acpSessions:
+        type: array
+        items:
+          $ref: "#/$defs/AcpSessionBinding"
+      createdAt:
+        $ref: "#/$defs/Timestamp"
+      startedAt:
+        anyOf:
+          - $ref: "#/$defs/Timestamp"
+          - type: "null"
+      completedAt:
+        anyOf:
+          - $ref: "#/$defs/Timestamp"
+          - type: "null"
+      canonicalResponderAgentId:
+        anyOf:
+          - $ref: "#/$defs/OpaqueId"
+          - type: "null"
+      canonicalResponse:
+        anyOf:
+          - $ref: "#/$defs/CanonicalResponse"
+          - type: "null"
+      terminal:
+        anyOf:
+          - $ref: "#/$defs/TerminalSummary"
+          - type: "null"
+      projectionVersions:
+        $ref: "#/$defs/ProjectionVersions"
+      captureCoverage:
+        $ref: "#/$defs/CaptureCoverage"
+
+  EventReplayPage:
+    type: object
+    additionalProperties: false
+    required:
+      - schemaVersion
+      - runId
+      - archiveSessionId
+      - events
+      - nextAfterSeq
+      - hasMore
+    properties:
+      schemaVersion:
+        const: 1
+      runId:
+        $ref: "#/$defs/Uuid"
+      archiveSessionId:
+        anyOf:
+          - $ref: "#/$defs/OpaqueId"
+          - type: "null"
+      events:
+        type: array
+        maxItems: 1000
+        items:
+          $ref: "https://loomwatch.dev/schemas/team.schema.yaml#/$defs/RunEvent"
+      nextAfterSeq:
+        type:
+          - integer
+          - "null"
+        minimum: 0
+      hasMore:
+        type: boolean
+
+  TraceEntity:
+    type: object
+    additionalProperties: false
+    required:
+      - id
+      - runId
+      - kind
+      - label
+      - status
+      - agentId
+      - firstSeq
+      - lastSeq
+      - summary
+      - detailsRef
+      - capture
+      - evidenceEventIds
+      - attributes
+      - redactions
+    properties:
+      id:
+        $ref: "#/$defs/OpaqueId"
+      runId:
+        $ref: "#/$defs/Uuid"
+      kind:
+        type: string
+        enum:
+          - prompt
+          - response
+          - agent
+          - reasoning
+          - skill
+          - tool
+          - command
+          - source
+      label:
+        type: string
+        minLength: 1
+        maxLength: 512
+      status:
+        type: string
+        enum:
+          - pending
+          - in_progress
+          - completed
+          - failed
+          - unavailable
+      agentId:
+        anyOf:
+          - $ref: "#/$defs/OpaqueId"
+          - type: "null"
+      firstSeq:
+        type:
+          - integer
+          - "null"
+        minimum: 0
+      lastSeq:
+        type:
+          - integer
+          - "null"
+        minimum: 0
+      summary:
+        type:
+          - string
+          - "null"
+        maxLength: 4096
+      detailsRef:
+        type:
+          - string
+          - "null"
+      capture:
+        $ref: "#/$defs/CaptureState"
+      evidenceEventIds:
+        type: array
+        uniqueItems: true
+        items:
+          $ref: "#/$defs/OpaqueId"
+      attributes:
+        description: Sanitized, kind-specific bounded public fields.
+        type: object
+      redactions:
+        type: array
+        items:
+          $ref: "#/$defs/Redaction"
+
+  TraceEdge:
+    type: object
+    additionalProperties: false
+    required:
+      - id
+      - runId
+      - from
+      - to
+      - kind
+      - firstSeq
+      - lastSeq
+      - capture
+      - evidenceEventIds
+    properties:
+      id:
+        $ref: "#/$defs/OpaqueId"
+      runId:
+        $ref: "#/$defs/Uuid"
+      from:
+        $ref: "#/$defs/OpaqueId"
+      to:
+        $ref: "#/$defs/OpaqueId"
+      kind:
+        type: string
+        enum:
+          - initiated
+          - participated
+          - delegated_to
+          - reasoned_with
+          - used_skill
+          - invoked_tool
+          - ran_command
+          - consulted_source
+          - contributed_to
+          - derived_from
+      firstSeq:
+        type:
+          - integer
+          - "null"
+        minimum: 0
+      lastSeq:
+        type:
+          - integer
+          - "null"
+        minimum: 0
+      capture:
+        type: string
+        enum:
+          - recorded
+          - derived
+      evidenceEventIds:
+        type: array
+        uniqueItems: true
+        items:
+          $ref: "#/$defs/OpaqueId"
+
+  TraceGraph:
+    type: object
+    additionalProperties: false
+    required:
+      - schemaVersion
+      - runId
+      - cursor
+      - status
+      - projectionGenerationId
+      - projectionVersions
+      - entities
+      - edges
+      - captureCoverage
+    properties:
+      schemaVersion:
+        const: 1
+      runId:
+        $ref: "#/$defs/Uuid"
+      cursor:
+        type: integer
+        minimum: 0
+      status:
+        $ref: "#/$defs/RunStatus"
+      projectionGenerationId:
+        $ref: "#/$defs/OpaqueId"
+      projectionVersions:
+        $ref: "#/$defs/ProjectionVersions"
+      entities:
+        type: array
+        maxItems: 10000
+        items:
+          $ref: "#/$defs/TraceEntity"
+      edges:
+        type: array
+        maxItems: 25000
+        items:
+          $ref: "#/$defs/TraceEdge"
+      captureCoverage:
+        $ref: "#/$defs/CaptureCoverage"
+
+  CaptureAdapter:
+    type: object
+    additionalProperties: false
+    required:
+      - id
+      - version
+      - capabilities
+    properties:
+      id:
+        $ref: "#/$defs/OpaqueId"
+      version:
+        type: string
+        minLength: 1
+      capabilities:
+        type: array
+        uniqueItems: true
+        items:
+          $ref: "#/$defs/TraceCategory"
+
+  TraceObservation:
+    description: Internal persisted companion observation; never a RunEvent.
+    type: object
+    additionalProperties: false
+    required:
+      - id
+      - runId
+      - agentId
+      - observedAt
+      - kind
+      - externalId
+      - adapter
+      - normalizedPayload
+      - evidenceEventIds
+      - redactions
+    properties:
+      id:
+        $ref: "#/$defs/OpaqueId"
+      runId:
+        $ref: "#/$defs/Uuid"
+      agentId:
+        $ref: "#/$defs/OpaqueId"
+      observedAt:
+        $ref: "#/$defs/Timestamp"
+      kind:
+        type: string
+        enum:
+          - skill
+          - source
+          - command
+          - tool_metadata
+      externalId:
+        description: Stable adapter-supplied retry identity.
+        $ref: "#/$defs/OpaqueId"
+      adapter:
+        $ref: "#/$defs/CaptureAdapter"
+      normalizedPayload:
+        description: Sanitized explicit fact; prose inference is forbidden.
+        type: object
+      evidenceEventIds:
+        type: array
+        uniqueItems: true
+        items:
+          $ref: "#/$defs/OpaqueId"
+      redactions:
+        type: array
+        items:
+          $ref: "#/$defs/Redaction"
+
+  RunProjectionState:
+    type: object
+    additionalProperties: false
+    required:
+      - status
+      - degraded
+      - finalCursor
+    properties:
+      status:
+        $ref: "#/$defs/RunStatus"
+      degraded:
+        type: boolean
+      finalCursor:
+        type:
+          - integer
+          - "null"
+        minimum: 0
+
+  ProvenanceChange:
+    type: object
+    additionalProperties: false
+    required:
+      - schemaVersion
+      - runId
+      - projectionGenerationId
+      - cursor
+      - op
+      - resourceType
+      - resource
+    properties:
+      schemaVersion:
+        const: 1
+      runId:
+        $ref: "#/$defs/Uuid"
+      projectionGenerationId:
+        $ref: "#/$defs/OpaqueId"
+      cursor:
+        type: integer
+        minimum: 0
+      op:
+        const: upsert
+      resourceType:
+        type: string
+        enum:
+          - entity
+          - edge
+          - coverage
+          - run
+      resource:
+        oneOf:
+          - $ref: "#/$defs/TraceEntity"
+          - $ref: "#/$defs/TraceEdge"
+          - $ref: "#/$defs/CoverageRecord"
+          - $ref: "#/$defs/RunProjectionState"
+    allOf:
+      - if:
+          properties:
+            resourceType:
+              const: entity
+        then:
+          properties:
+            resource:
+              $ref: "#/$defs/TraceEntity"
+      - if:
+          properties:
+            resourceType:
+              const: edge
+        then:
+          properties:
+            resource:
+              $ref: "#/$defs/TraceEdge"
+      - if:
+          properties:
+            resourceType:
+              const: coverage
+        then:
+          properties:
+            resource:
+              $ref: "#/$defs/CoverageRecord"
+      - if:
+          properties:
+            resourceType:
+              const: run
+        then:
+          properties:
+            resource:
+              $ref: "#/$defs/RunProjectionState"
+
+  Problem:
+    type: object
+    additionalProperties: false
+    required:
+      - type
+      - title
+      - status
+      - code
+      - detail
+    properties:
+      type:
+        type: string
+      title:
+        type: string
+      status:
+        type: integer
+        minimum: 400
+        maximum: 599
+      code:
+        type: string
+        pattern: "^[a-z][a-z0-9_]*$"
+      detail:
+        type: string
+      runId:
+        $ref: "#/$defs/Uuid"
+      currentTeamRevision:
+        $ref: "#/$defs/TeamRevision"
+      retryAfterSeconds:
+        type: integer
+        minimum: 0
+
+  CanonicalReprojectionVector:
+    description: Fixture proving canonical response source and Markdown digests.
+    type: object
+    additionalProperties: false
+    required:
+      - source
+      - canonicalJcs
+      - sourceDigest
+      - markdown
+      - markdownDigest
+      - versions
+    properties:
+      source:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required:
+            - eventId
+            - seq
+            - content
+          properties:
+            eventId:
+              $ref: "#/$defs/OpaqueId"
+            seq:
+              type: integer
+              minimum: 0
+            content:
+              type: object
+      canonicalJcs:
+        type: string
+      sourceDigest:
+        $ref: "#/$defs/Sha256Digest"
+      markdown:
+        type: string
+      markdownDigest:
+        $ref: "#/$defs/Sha256Digest"
+      versions:
+        $ref: "#/$defs/ProjectionVersions"
+
+  DuplicateStartVector:
+    description: Same-principal, same-key retry returns one accepted run and enqueues once.
+    type: object
+    additionalProperties: false
+    required:
+      - clientRequestId
+      - requestFingerprint
+      - firstStatus
+      - retryStatus
+      - runId
+      - enqueueCount
+    properties:
+      clientRequestId:
+        $ref: "#/$defs/Uuid"
+      requestFingerprint:
+        $ref: "#/$defs/Sha256Digest"
+      firstStatus:
+        const: 202
+      retryStatus:
+        const: 200
+      runId:
+        $ref: "#/$defs/Uuid"
+      enqueueCount:
+        const: 1
+
+  ReconnectGapVector:
+    description: Client detects a WebSocket sequence gap, replays, then reconnects.
+    type: object
+    additionalProperties: false
+    required:
+      - lastContiguousSeq
+      - receivedSeq
+      - action
+      - replayAfterSeq
+      - expectedReplaySeqs
+      - resumeAfterSeq
+    properties:
+      lastContiguousSeq:
+        type: integer
+        minimum: 0
+      receivedSeq:
+        type: integer
+        minimum: 0
+      action:
+        const: pause_replay_reconnect
+      replayAfterSeq:
+        type: integer
+        minimum: 0
+      expectedReplaySeqs:
+        type: array
+        minItems: 1
+        items:
+          type: integer
+          minimum: 0
+      resumeAfterSeq:
+        type: integer
+        minimum: 0
+
+  TraceReprojectionVector:
+    description: Expected equality proof for a pinned-version TraceGraph reprojection.
+    type: object
+    additionalProperties: false
+    required:
+      - fixture
+      - projectionGenerationId
+      - versions
+      - firstCanonicalDigest
+      - replayedCanonicalDigest
+      - byteEqual
+    properties:
+      fixture:
+        const: provenance-snapshot.json
+      projectionGenerationId:
+        $ref: "#/$defs/OpaqueId"
+      versions:
+        $ref: "#/$defs/ProjectionVersions"
+      firstCanonicalDigest:
+        $ref: "#/$defs/Sha256Digest"
+      replayedCanonicalDigest:
+        $ref: "#/$defs/Sha256Digest"
+      byteEqual:
+        const: true
