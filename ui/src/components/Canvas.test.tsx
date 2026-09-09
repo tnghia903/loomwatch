@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Canvas } from './Canvas'
@@ -133,5 +133,105 @@ describe('Canvas accessibility', () => {
     expect(flowState.fitView).toHaveBeenCalledWith(expect.objectContaining({
       nodes: [expect.objectContaining({ id: 'ada' })],
     }))
+  })
+})
+
+function renderCanvas() {
+  return render(<Canvas harnessCount={1} harnessesLoading={false} libraryVisible onToggleLibrary={vi.fn()} onDocumentOpen={vi.fn()} />)
+}
+
+function focusEditingElement(tagName: 'input' | 'textarea') {
+  const element = document.createElement(tagName)
+  document.body.appendChild(element)
+  element.focus()
+  return element
+}
+
+describe('Canvas save shortcut (§9.1)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    Object.assign(documentState, { readOnlyReason: null, saveState: 'saved', documentChipState: 'saved', externalChange: null })
+  })
+
+  afterEach(cleanup)
+
+  it('saves with ⌘S while an input is focused', () => {
+    renderCanvas()
+    const input = focusEditingElement('input')
+
+    expect(fireEvent.keyDown(input, { key: 's', metaKey: true })).toBe(false)
+
+    expect(documentState.save).toHaveBeenCalledOnce()
+    input.remove()
+  })
+
+  it('saves with Ctrl+S while a textarea is focused', () => {
+    renderCanvas()
+    const textarea = focusEditingElement('textarea')
+
+    fireEvent.keyDown(textarea, { key: 's', ctrlKey: true })
+
+    expect(documentState.save).toHaveBeenCalledOnce()
+    textarea.remove()
+  })
+
+  it('does not save from an input when the document is read-only', () => {
+    Object.assign(documentState, { readOnlyReason: 'This file uses schema version 2. This build of LoomWatch understands version 1.' })
+    renderCanvas()
+    const input = focusEditingElement('input')
+
+    fireEvent.keyDown(input, { key: 's', metaKey: true })
+
+    expect(documentState.save).not.toHaveBeenCalled()
+    input.remove()
+  })
+
+  it('preserves normal text entry in a focused input', () => {
+    renderCanvas()
+    const input = focusEditingElement('input')
+
+    expect(fireEvent.keyDown(input, { key: 's' })).toBe(true)
+
+    expect(documentState.save).not.toHaveBeenCalled()
+    input.remove()
+  })
+})
+
+describe('Canvas conflict compare sheet (§9.3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    Object.assign(documentState, {
+      readOnlyReason: null,
+      saveState: 'conflict',
+      documentChipState: 'conflict',
+      externalChange: { diskYaml: 'agents: []\n', diskRevision: 'disk-hash' },
+    })
+  })
+
+  afterEach(cleanup)
+
+  it('repeats Keep mine and Use disk at the sheet foot, with Use disk confirming inline', () => {
+    renderCanvas()
+    fireEvent.click(screen.getByRole('button', { name: 'Compare…' }))
+    const sheet = screen.getByRole('dialog', { name: 'Disk ↔ in-memory YAML' })
+
+    expect(sheet).toHaveTextContent('--- disk')
+
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Use disk' }))
+    expect(documentState.useDisk).not.toHaveBeenCalled()
+
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Discard my edits?' }))
+    expect(documentState.useDisk).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the in-memory edits from the compare sheet', () => {
+    renderCanvas()
+    fireEvent.click(screen.getByRole('button', { name: 'Compare…' }))
+    const sheet = screen.getByRole('dialog', { name: 'Disk ↔ in-memory YAML' })
+
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Keep mine' }))
+
+    expect(documentState.keepMine).toHaveBeenCalledOnce()
+    expect(documentState.useDisk).not.toHaveBeenCalled()
   })
 })
