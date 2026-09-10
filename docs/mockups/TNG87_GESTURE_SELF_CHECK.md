@@ -83,6 +83,48 @@ whether or not anything was placed (measured +6 for a single drop). Both gates
 assert the precise question instead — is there a node for *the row that was
 dragged*, at *the point where it was released* (±2px).
 
+## Independent re-verification, and the artifact the board was actually holding
+
+Everything above was written by the run that made the fix. A later heartbeat
+re-ran it against the *shipped* bytes, because the board's approval card was
+still bound to `8f0c3b4` — the build this document measures as a no-op — and a
+self-report has not held up on this issue before.
+
+Reproducibility, checked in both directions:
+
+| check | result |
+|---|---|
+| committed `prototype-standalone.html` vs. a fresh `build-standalone.mjs` | byte-identical, `git diff` clean |
+| the uploaded approval attachment, downloaded back from the API, vs. `HEAD` | `cmp` clean — 608,839 bytes, SHA-256 `e47054cb…` |
+| `bindLibraryCarry` in the uploaded bytes / in the `8f0c3b4` attachment | 4 / **0** |
+
+The counterfactual was run against attachment `876facde` fetched from the
+issue, not a local rebuild — 600,866 bytes, SHA-256 `7dfd115b…`, `cmp`-identical
+to commit `8f0c3b4`, so it is the file a reviewer would have opened:
+
+| `webkit-probe-library-gesture.js` | `8f0c3b4` (was in front of the board) | `6e87d28` |
+|---|---|---|
+| `canvas` | **FAIL** — no native drag source, no pointer carry, click lands on `DIV#stage` | ok — carried `r-oc` to the release point, `canvas → wiring` |
+| `wiring` | native attribute only | ok — placed at the release point |
+| after a tab round-trip | **FAIL** — 12/12 rows keep a stale `draggable="true"` | ok — 0 stale |
+| verdict | **FAIL 2 check(s)** | **PASS every reviewed screen** |
+
+`verify-prototype.mjs`, the `verify-webkit.swift` selection suite, and
+`webkit-probe-library-routing.js` were all re-run clean on `HEAD` at the same
+time.
+
+### One gate was scoring itself green
+
+`webkit-probe-library-routing.js` printed its three canvas-affordance counts
+with a bare `(want …)` and then computed PASS/FAIL from the click routing
+alone. `6e87d28` deliberately inverted two of those expectations — a usable row
+now shows `grab` on every screen, because the carry works there — so the probe
+printed `grab cursors on canvas: 12 (want 0)` immediately above the word
+`PASS`. Nothing was broken, but the log read as a silent failure to anyone
+auditing it, and the counts could not have caught a real regression. They are
+assertions now, and the verdict counts them: green on `6e87d28`, `FAIL 2
+check(s)` against the `8f0c3b4` candidate.
+
 ## Standing constraint
 
 `dragstart` can only be raised by trusted input, so no script-driven harness

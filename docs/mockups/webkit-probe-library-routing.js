@@ -14,6 +14,15 @@
  * Note `wiring` is a top-level `let`, not a window property, so it is read
  * through a bare reference in try/catch — `window.wiring` reads undefined and
  * silently scores a pass as a failure.
+ *
+ * The cursor expectations inverted at 6e87d28 and the counts below are real
+ * assertions, not annotations. Before it, a canvas row was `pointer` because a
+ * click was all it could serve; now `bindLibraryCarry()` makes every usable row
+ * draggable by hand on every screen, so the row shows `grab` wherever it
+ * renders. `draggable="true"` still stays scoped to where drop is wired — the
+ * look follows the carry, the attribute follows the drop wiring. Until 6e87d28
+ * these lines printed a bare `(want …)` next to an unconditional PASS, so a
+ * mismatch read as green; the verdict now counts them.
  */
 (function () {
   var out = [];
@@ -26,22 +35,35 @@
   }
   go('canvas');
   var rows = [].slice.call(document.querySelectorAll('#libGroups .lib-row[data-res]'));
+  var draggable = rows.filter(function (r) {
+    return r.getAttribute('draggable') === 'true'; }).length;
+  var grab = rows.filter(function (r) {
+    return getComputedStyle(r).cursor === 'grab'; }).length;
+  var pointer = rows.filter(function (r) {
+    return getComputedStyle(r).cursor === 'pointer'; }).length;
+  var fails = 0;
+  function want(label, got, expected) {
+    var ok = got === expected;
+    if (!ok) fails++;
+    out.push((ok ? 'ok   ' : 'FAIL ') + label + ': ' + got + ' (want ' + expected + ')');
+  }
   out.push('canvas usable rows: ' + rows.length);
-  out.push('draggable on canvas: ' + rows.filter(function (r) {
-    return r.getAttribute('draggable') === 'true'; }).length + ' (want 0)');
-  out.push('grab cursors on canvas: ' + rows.filter(function (r) {
-    return getComputedStyle(r).cursor === 'grab'; }).length + ' (want 0)');
-  out.push('pointer cursors on canvas: ' + rows.filter(function (r) {
-    return getComputedStyle(r).cursor === 'pointer'; }).length + ' (want ' + rows.length + ')');
+  want('draggable on canvas', draggable, 0);
+  want('grab cursors on canvas', grab, rows.length);
+  want('pointer cursors on canvas', pointer, 0);
 
   var before = snap();
   rows[0].click();
   var after = snap();
   out.push('BEFORE click: ' + JSON.stringify(before));
   out.push('AFTER  click: ' + JSON.stringify(after));
-  var routed = before.screen === 'canvas' && after.screen === 'wiring'
-    && after.placing && after.ghosts === 1;
-  out.push(routed ? 'PASS desktop click on canvas routed to wiring and armed a visible ghost'
-                  : 'FAIL desktop click on canvas did not place anything');
+  if (!(before.screen === 'canvas' && after.screen === 'wiring'
+        && after.placing && after.ghosts === 1)) {
+    fails++;
+    out.push('FAIL desktop click on canvas did not place anything');
+  } else {
+    out.push('ok   desktop click on canvas routed to wiring and armed a visible ghost');
+  }
+  out.push(fails ? 'FAIL ' + fails + ' check(s)' : 'PASS click path and canvas affordance both hold');
   return out.join('\n');
 })()
