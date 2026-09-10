@@ -266,7 +266,25 @@ try {
   await navigate('compose,dark');
   await evaluate("document.querySelector('#compInput').focus()");
   await key('Enter', { code: 'Enter', modifiers: 2, virtualKeyCode: 13 });
-  assert(await evaluate("document.querySelector('#runtimeResponse')?.getAttribute('role') === 'status' && /Queued/.test(document.querySelector('#runtimeResponse').getAttribute('aria-label'))"), 'Keyboard prompt submission did not land a queued response');
+  /* The composer opens on a dirty document, and TNG89_INTERACTION §1.4 makes
+     that a two-step intent: the write lands first and the run is created
+     against the revision it returns. So the queued announcement is a moment
+     later, not on the next tick. This waits for it rather than racing it —
+     the requirement being gated is that keyboard submission *reaches* a
+     queued response with a live-region announcement, not that it does so
+     synchronously. */
+  assert(await evaluate(`(async () => {
+    const started = Date.now();
+    const landed = () => {
+      const el = document.querySelector('#runtimeResponse');
+      return !!el && el.getAttribute('role') === 'status'
+        && /Queued/.test(el.getAttribute('aria-label') || '');
+    };
+    while (!landed() && Date.now() - started < 5000) {
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    return landed();
+  })()`), 'Keyboard prompt submission did not land a queued response');
 
   await navigate('running,dark');
   await evaluate("[...document.querySelectorAll('#compAct button')].find((button) => button.textContent.trim() === 'Stop').click()");
@@ -312,13 +330,22 @@ try {
     focus: document.activeElement?.dataset?.node }))()`);
   assert(dropFocus.nodes[1]?.startsWith('ins') && dropFocus.focus === dropFocus.nodes[1],
     `Inserted agent did not land in the flow and take focus: ${JSON.stringify(dropFocus)}`);
-  const flowIntact = await evaluate(`(() => {
+  /* The composer opens dirty, so submitting writes the file first and creates
+     the run against that revision (§1.4). Freezing the timers on the next tick
+     would freeze the *save*, before any run story exists — so wait for the run
+     to be created, then freeze it and read the spine. */
+  const flowIntact = await evaluate(`(async () => {
     document.querySelector('#compInput').value = 'Find out how ACP negotiates capabilities.';
     submitRun();
+    const started = Date.now();
+    while (run.phase === 'idle' && Date.now() - started < 5000) {
+      await new Promise((r) => setTimeout(r, 40));
+    }
     clearTimers();
     const labels = [...document.querySelectorAll('.story-label, .prov-label')].map((l) => l.textContent.trim());
     const agentCards = [...document.querySelectorAll('#overlay [data-node]')].map((n) => n.textContent);
-    return { delegates: labels.filter((t) => t === 'delegates review').length,
+    return { phase: run.phase,
+             delegates: labels.filter((t) => t === 'delegates review').length,
              responder: agentCards[agentCards.length - 1] || '' };
   })()`);
   assert(flowIntact.delegates === 2 && /Agent B · responder/.test(flowIntact.responder),

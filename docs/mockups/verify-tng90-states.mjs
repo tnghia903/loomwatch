@@ -218,14 +218,29 @@ try {
      Driven through the prototype's own model, so the states are the ones a
      reviewer sees rather than hand-set DOM.
      --------------------------------------------------------------------- */
+  /* A run started from a dirty document is deliberately not synchronous: the
+     write happens first and the run is created against the revision it
+     returns, so the probe waits for `queued` instead of asserting it on the
+     next tick. Asserting immediately is how this check failed against a
+     correct build. */
   await navigate('compose');
-  const queued = await evaluate(`(() => {
+  const queued = await evaluate(`(async () => {
     submitRun('Find out how ACP negotiates capabilities.');
-    return { phase: run.phase, text: document.body.innerText };
+    const started = Date.now();
+    while (run.phase !== 'queued' && Date.now() - started < 5000) {
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    return {
+      phase: run.phase,
+      text: document.body.innerText,
+      chipL2: document.querySelector('#chipL2')?.textContent.trim()
+    };
   })()`);
   check('queued — run reports queued and names what it waits for',
     queued.phase === 'queued' && /Queued/i.test(queued.text),
     `phase=${queued.phase}`);
+  check('queued — the document was written before the run was created',
+    queued.chipL2 !== '3 lines differ', `chip still ${JSON.stringify(queued.chipL2)}`);
 
   await navigate('running');
   const streaming = await evaluate(`({
