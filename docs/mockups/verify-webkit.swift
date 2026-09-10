@@ -31,9 +31,34 @@
 // `--eval <file.js>` evaluates a script against the loaded page and prints the
 // result instead of asserting — for surveying the DOM when selectors drift.
 //
+// `--eval-async <file.js>` is the same, for a probe whose IIFE is `async` and
+// has to await something the page does on a callback. The command exits 1 when
+// a probe's own output contains `FAIL`, so a probe that reports failures can
+// actually fail the run.
+//
 // `--shot <out.png>` writes a PNG of the loaded page, after `--eval` has run if
 // both are given. The board reviews in Safari, so a picture offered as evidence
 // should come out of the engine they are looking at rather than out of Chrome.
+//
+// LIMIT — this view renders offscreen, so the animation clock never advances.
+// Measured from inside the page: 0 requestAnimationFrame callbacks in a full
+// second. Nothing here is a bug in the artifact, but two things follow, and
+// both have already produced a false finding:
+//
+//   1. A transitioned property is frozen at its from-value permanently. The
+//      stage cross-fades `background-color` over 240 ms, so reading it after a
+//      scripted theme change reports the *previous* ground no matter how long
+//      the probe waits. That is the real reason a scripted light theme looks
+//      near-black here — not a stale rasterization tile, which is what this
+//      comment used to say. Chrome resolves the identical flip correctly at
+//      t=600 ms, and suppressing the transition resolves it here immediately.
+//      Measure theme tokens (`--color-ground`), or suppress the transition
+//      first; never sample a transitioned paint.
+//   2. Declared animation values are still trustworthy, because they are style,
+//      not timeline: `animation-name`, `animation-iteration-count` and
+//      `animation-play-state` all read correctly. Reduced-motion coverage is
+//      therefore measurable here, and that is how the `[data-motion="reduce"]`
+//      gap on the run screens was found.
 
 import Cocoa
 import WebKit
@@ -68,6 +93,29 @@ if let i = argv.firstIndex(of: "--eval"), i + 1 < argv.count {
     evalScript = try? String(contentsOfFile: argv[i + 1], encoding: .utf8)
     if evalScript == nil {
         FileHandle.standardError.write("could not read --eval script\n".data(using: .utf8)!)
+        exit(2)
+    }
+}
+
+// `--eval-async` is `--eval` for a probe that has to wait for the prototype.
+//
+// `evaluateJavaScript` hands back whatever the expression evaluates to *now*.
+// Give it a promise and it reports the promise, not the value — so a probe
+// written against an asynchronous path (`saveAndRun` writes the document and
+// only then creates the run, via a `doSave` callback) either reads the state
+// before the write lands or has to assert on a timer and hope. Both of those
+// produce a green probe on a build that never saved.
+//
+// `callAsyncJavaScript` runs the script as an async function body and resolves
+// the promise before returning, which is the only way to assert "the write
+// happened *before* the run was created" in WebKit. It takes a function body
+// rather than an expression, hence the `return await (...)` wrap: the probe
+// file stays an ordinary IIFE and is still readable on its own.
+var asyncScript: String?
+if let i = argv.firstIndex(of: "--eval-async"), i + 1 < argv.count {
+    asyncScript = try? String(contentsOfFile: argv[i + 1], encoding: .utf8)
+    if asyncScript == nil {
+        FileHandle.standardError.write("could not read --eval-async script\n".data(using: .utf8)!)
         exit(2)
     }
 }
@@ -119,10 +167,12 @@ final class Probe: NSObject, WKNavigationDelegate {
     var shotWritten: String?
     private let webView: WKWebView
     private let custom: String?
+    private let asyncCustom: String?
     private let shot: String?
 
-    init(custom: String?, shot: String?) {
+    init(custom: String?, asyncCustom: String? = nil, shot: String?) {
         self.custom = custom
+        self.asyncCustom = asyncCustom
         self.shot = shot
         // Layout has to be real: a zero-sized frame can short-circuit style resolution.
         webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1600, height: 1000),
@@ -175,6 +225,28 @@ final class Probe: NSObject, WKNavigationDelegate {
     func webView(_ wv: WKWebView, didFinish nav: WKNavigation!) {
         // Let the prototype's own boot scripts build the library and canvas.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            if let asyncCustom = self.asyncCustom {
+                wv.callAsyncJavaScript("return await (\(asyncCustom))",
+                                       arguments: [:], in: nil, in: .page) { result in
+                    switch result {
+                    case .success(let value): self.evaluated = String(describing: value)
+                    case .failure(let error):
+                        // localizedDescription is just "A JavaScript exception
+                        // occurred", which cannot be debugged. The real message
+                        // and line are in the WKError userInfo.
+                        let info = (error as NSError).userInfo
+                        let detail = [info["WKJavaScriptExceptionMessage"],
+                                      info["WKJavaScriptExceptionLineNumber"],
+                                      info["WKJavaScriptExceptionColumnNumber"]]
+                            .compactMap { $0.map { "\($0)" } }
+                            .joined(separator: " @ ")
+                        self.failure = "async eval failed: "
+                            + (detail.isEmpty ? error.localizedDescription : detail)
+                    }
+                    if self.shot != nil { self.capture(wv) } else { self.done = true }
+                }
+                return
+            }
             if let custom = self.custom {
                 wv.evaluateJavaScript(custom) { result, error in
                     if let error = error { self.failure = "eval failed: \(error.localizedDescription)" }
@@ -209,10 +281,13 @@ final class Probe: NSObject, WKNavigationDelegate {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
-let probe = Probe(custom: evalScript, shot: shotPath)
+let probe = Probe(custom: evalScript, asyncCustom: asyncScript, shot: shotPath)
 probe.run(target)
 
-let deadline = Date().addingTimeInterval(45)
+// An async probe spends real time inside the page (it waits on the document
+// write, and drives a dozen screens), so it gets a longer leash than the
+// synchronous selection passes this harness was written for.
+let deadline = Date().addingTimeInterval(asyncScript != nil ? 180 : 45)
 while !probe.done && Date() < deadline {
     RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
 }
@@ -222,9 +297,22 @@ if let failure = probe.failure {
     exit(1)
 }
 
-if evalScript != nil || shotPath != nil {
+if evalScript != nil || asyncScript != nil || shotPath != nil {
     if let out = probe.evaluated { print(out) }
     if let written = probe.shotWritten { print("wrote \(written)") }
+    // A probe that reports its own failures has to be able to fail the command,
+    // otherwise a red run is indistinguishable from a green one in CI.
+    //
+    // Matched per line rather than as a substring: the probe quotes page text
+    // back as evidence, and one of the capture cards legitimately reads
+    // "… 15S · FAILED", which a naive `contains("FAIL")` scored as a failure on
+    // a run where all 39 checks passed.
+    if let out = probe.evaluated,
+       out.split(separator: "\n").contains(where: {
+           $0.trimmingCharacters(in: .whitespaces).hasPrefix("FAIL ")
+       }) {
+        exit(1)
+    }
     exit(0)
 }
 
