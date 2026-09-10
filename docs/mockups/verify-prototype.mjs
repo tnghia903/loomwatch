@@ -397,6 +397,45 @@ try {
   await key('Escape', { code: 'Escape', virtualKeyCode: 27 });
 
   /* =====================================================================
+     TNG-127 follow-up — a visible, un-selectable grab handle is still a
+     false affordance if dragstart/dragover/drop only exist on the Freeform
+     wiring screen. The board's rejection screenshot was taken on the
+     default canvas screen ("Pipeline · 3 steps"), not wiring, so the row
+     there must not look draggable — it must say where dragging works.
+     Runs before the wiring section below so it doesn't disturb the
+     cumulative wiring/placement state that section builds up.
+     ===================================================================== */
+  await viewport(1600, 1000);
+  await navigate('canvas,dark');
+  const elsewhere = await evaluate(`(() => {
+    const usable = [...document.querySelectorAll('#libGroups .lib-row[data-res]')];
+    return {
+      screen: document.querySelector('#stage').dataset.screen,
+      usable: usable.length,
+      draggableCount: usable.filter((r) => r.getAttribute('draggable') === 'true').length,
+      dotsCount: usable.filter((r) => r.querySelector('.drag-dots')).length,
+      grabCursors: usable.filter((r) => getComputedStyle(r).cursor === 'grab').length,
+      hintedTitles: usable.filter((r) => /Freeform wiring/.test(r.getAttribute('title') || '')).length,
+      hintedAria: usable.filter((r) => /Freeform wiring/.test(r.getAttribute('aria-label') || '')).length
+    };
+  })()`);
+  assert(elsewhere.screen === 'canvas' && elsewhere.usable > 0, `Canvas screen did not render library rows: ${JSON.stringify(elsewhere)}`);
+  assert(elsewhere.draggableCount === 0, `Library rows still claim draggable="true" on the canvas screen, where dragstart is refused: ${JSON.stringify(elsewhere)}`);
+  assert(elsewhere.dotsCount === 0, `Library rows still show a grab handle on the canvas screen, where the drag never arms: ${JSON.stringify(elsewhere)}`);
+  assert(elsewhere.grabCursors === 0, `Library rows still show a grab cursor on the canvas screen: ${JSON.stringify(elsewhere)}`);
+  assert(elsewhere.hintedTitles === elsewhere.usable && elsewhere.hintedAria === elsewhere.usable,
+    `Library rows on the canvas screen do not point at the Freeform wiring tab: ${JSON.stringify(elsewhere)}`);
+
+  /* Enter must not silently no-op on a row that cannot arm here — it should
+     narrate where dragging actually works, via the same #liveRegion channel
+     every other keyboard flow in this prototype already uses. */
+  await evaluate(`document.querySelector('#libGroups .lib-row[data-res]').focus()`);
+  await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
+  const elsewhereEnter = await evaluate(`({ region: document.querySelector('#liveRegion').textContent, placing: !!wiring.placing })`);
+  assert(/Freeform wiring/.test(elsewhereEnter.region) && !elsewhereEnter.placing,
+    `Enter on a canvas-screen library row did not explain the Freeform wiring tab: ${JSON.stringify(elsewhereEnter)}`);
+
+  /* =====================================================================
      TNG-122 — freeform placement, typed wiring, capability library,
      keyboard parity, planned-vs-observed separation, themes, narrow.
      ===================================================================== */
@@ -751,7 +790,7 @@ try {
   assert(runtimeErrors.length === 0, `Standalone emitted runtime exceptions: ${JSON.stringify(runtimeErrors)}`);
   assert(requests.every((url) => url.startsWith('file:') || url.startsWith('data:')), `Standalone attempted a network request: ${JSON.stringify(requests)}`);
 
-  console.log('TNG-119 + TNG-121 + TNG-122 + TNG-124 + TNG-125 + TNG-127 verification passed: causal graph, editable pipeline, freeform placement + typed wiring (pointer, keyboard, narrow tap), resting grab affordance, drag-not-selection invariant (proxy — see verify-webkit.swift for the WebKit proof), armed-source row + cancel with focus return, capability library states, planned-vs-observed separation, interaction, overflow bounds, themes, narrow relationship flow, reduced motion, replay, retry retention, and offline loading');
+  console.log('TNG-119 + TNG-121 + TNG-122 + TNG-124 + TNG-125 + TNG-127 verification passed: causal graph, editable pipeline, freeform placement + typed wiring (pointer, keyboard, narrow tap), resting grab affordance scoped to the Freeform wiring screen (honest elsewhere, with a live-region hint on Enter), drag-not-selection invariant (proxy — see verify-webkit.swift for the WebKit proof), armed-source row + cancel with focus return, capability library states, planned-vs-observed separation, interaction, overflow bounds, themes, narrow relationship flow, reduced motion, replay, retry retention, and offline loading');
 } finally {
   if (socket) socket.close();
   await new Promise((resolveExit) => {

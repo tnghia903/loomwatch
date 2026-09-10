@@ -2724,15 +2724,22 @@ function renderLibrary() {
     }));
   host.querySelectorAll('.lib-row[data-res]').forEach((row) =>
     row.addEventListener('keydown', (e) => activateKey(e, () => {
-      if (stage.dataset.screen !== 'wiring') return;
       /* the document-level handler would double-fire (arm, then commit) */
       e.stopPropagation();
+      if (stage.dataset.screen !== 'wiring') {
+        announce(`${resById(row.dataset.res).name} can only be placed from the Freeform wiring tab.`);
+        return;
+      }
       if (wiring.placing && wiring.placing.ref === row.dataset.res) { commitPlace(); return; }
       armPlaceFromLibrary(row.dataset.res);
     })));
   host.querySelectorAll('.lib-row[data-res]').forEach((row) =>
     row.addEventListener('click', () => {
-      if (stage.dataset.screen !== 'wiring' || !window.matchMedia('(max-width: 767px)').matches) return;
+      if (!window.matchMedia('(max-width: 767px)').matches) return;
+      if (stage.dataset.screen !== 'wiring') {
+        announce(`${resById(row.dataset.res).name} can only be placed from the Freeform wiring tab.`);
+        return;
+      }
       if (wiring.placing && wiring.placing.ref === row.dataset.res) commitPlace();
       else armPlaceFromLibrary(row.dataset.res);
     }));
@@ -2760,10 +2767,22 @@ function libRowHTML(r, wiringScreen) {
     ? (r.kind === 'agent' ? 'wires: goal, agents, skills, tools, knowledge, output' : 'wires to agents · use direction only')
     : 'Not placeable in this workspace';
   const arming = wiring.placing && wiring.placing.ref === r.id;
-  return `<div class="lib-row ${usable ? '' : 'unavailable'}${arming ? ' lib-row-arming' : ''}" role="button" ${usable ? `draggable="true" data-res="${r.id}"` : 'aria-disabled="true"'}
-      title="${escapeMarkup(r.kind === 'agent' ? 'Wires to: prompt/goal, agents, skills, tools, knowledge, response' : 'Wires to agents only — use direction')}"
+  /* TNG-127 follow-up: draggable="true", the grab cursor and the drag-dots
+     handle used to render on every screen the library appears on, but
+     dragstart/dragover/drop and Enter-to-arm are only wired on the Freeform
+     wiring screen (stage.dataset.screen === 'wiring'). The board's rejection
+     screenshot was taken on the default canvas screen, where the row looked
+     draggable and silently wasn't. Scope the look of the affordance to where
+     it actually works; elsewhere the row stays focusable and names the tab
+     that does. */
+  const draggableHere = usable && wiringScreen;
+  const dragHint = draggableHere
+    ? 'Press Enter to arm placement on the freeform canvas.'
+    : (usable ? 'Open the Freeform wiring tab to drag this onto the canvas.' : 'Not usable in this workspace.');
+  return `<div class="lib-row ${usable ? '' : 'unavailable'}${usable && !wiringScreen ? ' lib-row-elsewhere' : ''}${arming ? ' lib-row-arming' : ''}" role="button" ${usable ? `${draggableHere ? 'draggable="true" ' : ''}data-res="${r.id}"` : 'aria-disabled="true"'}
+      title="${escapeMarkup(r.kind === 'agent' ? 'Wires to: prompt/goal, agents, skills, tools, knowledge, response' : 'Wires to agents only — use direction')}${draggableHere ? '' : escapeMarkup(usable ? ' — open the Freeform wiring tab to drag this onto the canvas.' : '')}"
       tabindex="0"
-      aria-label="${KIND_WORD[r.kind]} ${escapeMarkup(r.name)}, ${st.word}${wired ? `, ${wired} ${wired === 1 ? 'wire' : 'wires'} on canvas` : ''}${arming ? ', armed for placement' : ''}. ${usable ? 'Press Enter to arm placement on the freeform canvas.' : 'Not usable in this workspace.'}">
+      aria-label="${KIND_WORD[r.kind]} ${escapeMarkup(r.name)}, ${st.word}${wired ? `, ${wired} ${wired === 1 ? 'wire' : 'wires'} on canvas` : ''}${arming ? ', armed for placement' : ''}. ${dragHint}">
     ${r.kind === 'agent'
       ? `<span class="monogram">${r.harness || '·'}</span>`
       : `<span class="monogram res">${entGlyph(r.kind === 'knowledge' ? 'source' : r.kind, 11)}</span>`}
@@ -2772,7 +2791,7 @@ function libRowHTML(r, wiringScreen) {
       <span class="lib-row-sub t-mono-sm">${escapeMarkup(r.sub)}</span>
       <span class="lib-row-meta t-meta">${badge}${wiredBadge}<span class="lib-row-compat">${escapeMarkup(compat)}</span></span>
     </span>
-    ${usable ? '<span class="drag-dots t-body" aria-hidden="true">⠿</span>' : ''}
+    ${draggableHere ? '<span class="drag-dots t-body" aria-hidden="true">⠿</span>' : ''}
   </div>`;
 }
 

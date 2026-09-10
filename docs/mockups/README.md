@@ -443,6 +443,32 @@ substantive part of what the board is being asked to approve.
 
 ## What was verified, and how
 
+### TNG-87 follow-up — the drag affordance overpromised on every non-wiring screen
+
+The board's rejection screenshot for TNG-127 was taken on the **canvas** screen
+(`"Pipeline · 3 steps"`), not wiring. Even after TNG-127's `user-select` fix let `dragstart`
+arm correctly in WebKit, `dragstart`/`dragover`/`drop` and Enter-to-arm are wired **only** to
+`stage.dataset.screen === 'wiring'` — but `libRowHTML` rendered `draggable="true"`, a resting
+grab cursor and the drag-dots handle unconditionally on every screen the library appears on
+(canvas, inspector, team, switcher, palette). A retest on the board's actual screen would still
+have read as "I still cannot drag" — just silently, instead of via a text highlight.
+
+Fixed by scoping the affordance's *appearance* to where it actually works, rather than
+extending drop-handling to every screen (a bigger, riskier change for a critical, repeatedly
+rejected issue): `draggable="true"`, the grab cursor and the drag-dots handle now only render
+when `stage.dataset.screen === 'wiring'`. Elsewhere the row stays focusable, its title/aria-label
+name the Freeform wiring tab instead of claiming "Press Enter to arm placement," and pressing
+Enter narrates the same redirection through `#liveRegion` instead of silently no-op'ing.
+
+`verify-prototype.mjs` now asserts, on the canvas screen: zero library rows carry
+`draggable="true"`, zero carry a drag-dots handle, zero compute a `grab` cursor, every usable
+row's title and aria-label name the Freeform wiring tab, and Enter on such a row updates
+`#liveRegion` with that redirection instead of arming placement. The pre-existing wiring-screen
+assertions (resting grab handle, drag-not-selection invariant) are unchanged and still pass —
+this only removes a false affordance elsewhere, it does not touch the screen where dragging is
+real. Re-ran `verify-webkit.swift` after this change: both passes still green, confirming the
+text-selection lock from TNG-127 is untouched.
+
 ### Cross-engine gate (TNG-127) — run this before any drag fix goes to the board
 
 `verify-prototype.mjs` drives **headless Chrome only**, and that blind spot shipped a

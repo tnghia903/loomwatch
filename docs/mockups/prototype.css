@@ -212,6 +212,12 @@ html, body {
   letter-spacing: -1px;
 }
 .lib-row.unavailable { opacity: .5; cursor: default; }
+/* TNG-127 follow-up: usable but not on the Freeform wiring screen — the
+   only screen dragstart/dragover/drop and Enter-to-arm are wired to. The
+   grab cursor and drag-dots handle are withheld in libRowHTML for the same
+   reason; this just matches the pointer so it doesn't promise a drag the
+   row cannot start. */
+.lib-row.lib-row-elsewhere { cursor: default; }
 /* the row actually being HTML5-dragged — a visible hole where it left,
    distinct from :hover so the drag source reads as "in flight." */
 .lib-row.dragging { opacity: .35; border-style: dashed; }
