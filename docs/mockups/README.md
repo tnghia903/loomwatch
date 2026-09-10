@@ -443,6 +443,31 @@ substantive part of what the board is being asked to approve.
 
 ## What was verified, and how
 
+### Cross-engine gate (TNG-127) — run this before any drag fix goes to the board
+
+`verify-prototype.mjs` drives **headless Chrome only**, and that blind spot shipped a
+rejection. Chromium's UA stylesheet already forces `user-select: none` on
+`[draggable="true"]` and its descendants, so when the prototype declared `user-select`
+nowhere, every library row still reported `none` under test — while on Safari, pressing a row
+started a *text selection* and the drag never armed. Five consecutive self-checks passed on a
+gesture that did not work.
+
+So drag/selection behaviour is now also proven in WebKit:
+
+```
+swiftc -O docs/mockups/verify-webkit.swift -o /tmp/verify-webkit
+/tmp/verify-webkit docs/mockups/prototype-standalone.html
+```
+
+It loads the shipped standalone into a real `WKWebView` — the engine Safari uses — and probes
+it twice: once as shipped, once with the author rule defeated. The second pass is the
+counterfactual Chrome cannot produce; it reproduces the pre-fix state and proves WebKit has
+no UA fallback, so the rule is load-bearing rather than decorative. Delete the rule and pass A
+fails; lean on a UA sheet that only Chromium has and pass B fails.
+
+Uses only the macOS command-line tools (Swift + WebKit). No Safari automation, no admin
+enablement, no package install.
+
 ### TNG-115 remediation — 26 focused browser assertions, all passing
 
 Run `node docs/mockups/verify-prototype.mjs`. The verifier launches headless Chrome with

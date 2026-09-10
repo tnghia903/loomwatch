@@ -486,11 +486,24 @@ try {
      assumed. WebKit has no such UA rule, which is the whole bug. So the checks
      below deliberately target what is genuinely author-driven: the shell and
      the non-draggable canvas labels (both verified to fail without the fix),
-     plus the declaration itself via CSSOM and the shipped bytes. */
+     plus the declaration itself via CSSOM and the shipped bytes.
+
+     These are proxies. The real proof lives in verify-webkit.swift, which loads
+     the shipped standalone into a WKWebView and re-runs this probe with the
+     author rule defeated — the counterfactual this Chrome harness cannot
+     produce. Run it before asking the board to look at a drag fix. */
   const selectability = await evaluate(`(() => {
     const sel = (el) => getComputedStyle(el).webkitUserSelect || getComputedStyle(el).userSelect;
     const optIns = ['.rr-body', '.ent-out', '.story-prompt .rt-body', '.cite', '.input', 'input', 'textarea']
       .flatMap((q) => [...document.querySelectorAll('#stage ' + q)]);
+    const libraryText = [...document.querySelectorAll('#libGroups .lib-row-name, #libGroups .lib-row-sub')];
+    /* These are the labels the rejection screenshot showed the selection running
+       across. The class .n-title never existed and .w-top only renders in the
+       wiring view, so the first cut of this check matched zero elements and
+       asserted nothing — the totals below are asserted non-zero so it cannot
+       silently go vacuous again if a class is renamed. */
+    const nodeLabels = [...document.querySelectorAll(
+      '#nodes .node-name, #nodes .node-top, #nodes .w-name, #nodes .w-top')];
     let declared = null;
     for (const sheet of document.styleSheets) {
       for (const rule of sheet.cssRules || []) {
@@ -503,9 +516,10 @@ try {
       stage: sel(document.querySelector('#stage')),
       declared,
       prefixedInBytes: document.documentElement.outerHTML.includes('-webkit-user-select: none'),
-      libraryText: [...document.querySelectorAll('#libGroups .lib-row-name, #libGroups .lib-row-sub')]
-        .filter((n) => sel(n) !== 'none').length,
-      nodeLabels: [...document.querySelectorAll('#nodes .w-top, #nodes .n-title')].filter((n) => sel(n) !== 'none').length,
+      libraryTotal: libraryText.length,
+      libraryText: libraryText.filter((n) => sel(n) !== 'none').length,
+      nodeLabelTotal: nodeLabels.length,
+      nodeLabels: nodeLabels.filter((n) => sel(n) !== 'none').length,
       optIns: optIns.length,
       lockedOptIns: optIns.filter((el) => sel(el) === 'none').length };
   })()`);
@@ -515,9 +529,9 @@ try {
     `No author rule locks selection on #stage — Chromium's UA sheet would hide this, WebKit will not: ${JSON.stringify(selectability)}`);
   assert(selectability.prefixedInBytes,
     `The -webkit-user-select fallback was stripped from the shipped bytes: ${JSON.stringify(selectability)}`);
-  assert(selectability.libraryText === 0,
+  assert(selectability.libraryTotal > 0 && selectability.libraryText === 0,
     `Library row text is selectable, so pressing a row label starts a selection: ${JSON.stringify(selectability)}`);
-  assert(selectability.nodeLabels === 0,
+  assert(selectability.nodeLabelTotal > 0 && selectability.nodeLabels === 0,
     `Canvas node labels are selectable, so dragging a node smears a selection: ${JSON.stringify(selectability)}`);
   /* The inverse: locking the shell must not cost the user the ability to copy
      the answer, command output, their own prompt, or to edit a field at all. */
@@ -737,7 +751,7 @@ try {
   assert(runtimeErrors.length === 0, `Standalone emitted runtime exceptions: ${JSON.stringify(runtimeErrors)}`);
   assert(requests.every((url) => url.startsWith('file:') || url.startsWith('data:')), `Standalone attempted a network request: ${JSON.stringify(requests)}`);
 
-  console.log('TNG-119 + TNG-121 + TNG-122 + TNG-124 + TNG-125 verification passed: causal graph, editable pipeline, freeform placement + typed wiring (pointer, keyboard, narrow tap), resting grab affordance, armed-source row + cancel with focus return, capability library states, planned-vs-observed separation, interaction, overflow bounds, themes, narrow relationship flow, reduced motion, replay, retry retention, and offline loading');
+  console.log('TNG-119 + TNG-121 + TNG-122 + TNG-124 + TNG-125 + TNG-127 verification passed: causal graph, editable pipeline, freeform placement + typed wiring (pointer, keyboard, narrow tap), resting grab affordance, drag-not-selection invariant (proxy — see verify-webkit.swift for the WebKit proof), armed-source row + cancel with focus return, capability library states, planned-vs-observed separation, interaction, overflow bounds, themes, narrow relationship flow, reduced motion, replay, retry retention, and offline loading');
 } finally {
   if (socket) socket.close();
   await new Promise((resolveExit) => {
