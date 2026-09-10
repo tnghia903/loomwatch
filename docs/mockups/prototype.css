@@ -1912,3 +1912,252 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
   #provTray .prov-empty { width: 100%; }
   .story-prompt .rt-body { max-height: 180px; }
 }
+
+/* ===========================================================================
+   TNG-123 — freeform placement, typed wiring, capability library
+   The planned graph is the configured warp layer (grey solid, named); the
+   observed runtime cluster is the provenance vocabulary (blue edges, gold
+   shuttle) and never the two at once. Library rows carry state, permission
+   and wired badges; unusable resources state their reason and cannot be
+   dragged. Design prototype only — backend assumptions live in
+   TNG89_INTERACTION.md §14.7.
+   =========================================================================== */
+
+/* library grows to full height; rows scroll inside .lib-scroll */
+#library {
+  height: calc(100% - 40px);
+  max-height: calc(100% - 40px);
+}
+.lib-controls { display: flex; flex-direction: column; gap: var(--sp-2); flex: none; }
+.lib-search {
+  display: flex; align-items: center; gap: var(--sp-2);
+  height: 30px; padding: 0 var(--sp-2);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-sm);
+  color: var(--color-ink-3);
+}
+.lib-search:focus-within { border-color: var(--color-accent); }
+.lib-search input {
+  flex: 1; min-width: 0; background: none; border: 0; outline: none;
+  color: var(--color-ink); font: 400 12px/16px var(--font-sans);
+}
+.lib-search input::placeholder { color: var(--color-ink-3); }
+.lib-filters { display: flex; flex-wrap: wrap; gap: 3px; }
+.lfilt {
+  height: 22px; padding: 0 var(--sp-2);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-full);
+  background: none; color: var(--color-ink-3);
+  font: 500 11px/1 var(--font-sans); cursor: pointer;
+  white-space: nowrap;
+}
+.lfilt:hover { background: var(--color-accent-tint); color: var(--color-ink); }
+.lfilt.on { background: var(--color-accent-tint); color: var(--color-ink); border-color: var(--color-accent-dim); }
+.lib-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-4); padding-right: 2px; }
+.lib-foot { flex: none; display: flex; flex-direction: column; gap: 2px; padding-top: var(--sp-2); border-top: 1px solid var(--color-hairline); }
+.lib-foot .t-meta { color: var(--color-ink-3); }
+.lib-foot-hidden { color: var(--color-ink-3) !important; }
+
+.lib-chev {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--color-ink-2);
+  font: inherit; letter-spacing: .07em; text-transform: uppercase;
+  text-align: left;
+}
+.lib-chev:hover { color: var(--color-ink); }
+.lib-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); color: var(--color-ink-3); padding: 0 var(--sp-1) var(--sp-1); }
+
+/* row badges — state, permission, wired. Shape+word, greyscale-safe. */
+.lbadge {
+  display: inline-block; margin-left: 4px; padding: 1px 5px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--color-hairline);
+  color: var(--color-ink-3);
+  font: 500 9px/1.4 var(--font-sans); letter-spacing: .04em;
+  white-space: nowrap; vertical-align: 1px;
+}
+.lbadge.st-available { color: var(--color-ok); border-color: color-mix(in srgb, var(--color-ok) 40%, transparent); }
+.lbadge.st-permission { color: var(--color-accent); border-color: var(--color-accent-dim); }
+.lbadge.st-disconnected { color: var(--color-halt); border-color: color-mix(in srgb, var(--color-halt) 50%, transparent); }
+.lbadge.st-unavailable { color: var(--color-ink-3); border-style: dashed; }
+.lbadge.wired { color: var(--color-ink); background: var(--color-accent-tint); border-color: var(--color-accent-dim); }
+.lib-row-meta { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.lib-row-compat {
+  color: var(--color-ink-3); font-size: 10px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+.lib-row[aria-disabled="true"] { cursor: not-allowed; }
+.lib-row[aria-disabled="true"]:hover { background: none; }
+.lib-row.unavailable .lib-row-name { color: var(--color-ink-2); }
+
+/* ---------------------------------------------------------------------------
+   WIRE NODES — resources, prompt, response. Same family as the runtime
+   overlay vocabulary: configuration nodes opaque and bordered.
+   --------------------------------------------------------------------------- */
+.wres {
+  position: absolute;
+  left: var(--x); top: var(--y);
+  width: 216px; min-height: 76px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-md);
+  background: var(--color-panel-solid);
+  display: flex; flex-direction: column; gap: 2px;
+  cursor: grab;
+  text-align: left; font: inherit; color: inherit;
+  transition: border-color var(--t-instant) var(--ease-out), box-shadow var(--t-quick) var(--ease-out);
+}
+.wres:hover { border-color: var(--lw-node-border-hover); box-shadow: var(--e1-shadow); }
+.wres.selected { box-shadow: 0 0 0 3px var(--color-panel-solid), 0 0 0 5px var(--lw-node-ring); }
+.wres.kbd { box-shadow: 0 0 0 1px var(--color-panel-solid), 0 0 0 3px var(--lw-node-ring); }
+.wres.kind-prompt { width: 272px; height: 92px; border-width: 1.5px; cursor: grab; }
+.wres.kind-response { width: 264px; height: 88px; border-width: 1.5px; }
+.wres .w-top { display: flex; align-items: center; gap: 5px; color: var(--color-ink-3); }
+.wres .w-name { color: var(--color-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wres .w-sub { color: var(--color-ink-2); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.wres.kind-prompt .w-sub, .wres.kind-response .w-sub { -webkit-line-clamp: 2; }
+.wres .w-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.wbadge {
+  display: inline-flex; align-items: center;
+  padding: 1px 6px; border-radius: var(--r-full);
+  border: 1px solid var(--color-hairline);
+  font: 500 9px/1.5 var(--font-sans); letter-spacing: .04em;
+  color: var(--color-ink-2); white-space: nowrap;
+}
+.wbadge.st-available { color: var(--color-ok); border-color: color-mix(in srgb, var(--color-ok) 40%, transparent); }
+.wbadge.st-permission { color: var(--color-accent); border-color: var(--color-accent-dim); }
+.wbadge.st-disconnected { color: var(--color-halt); border-color: color-mix(in srgb, var(--color-halt) 50%, transparent); }
+.wbadge.wired { color: var(--color-ink); background: var(--color-accent-tint); border-color: var(--color-accent-dim); }
+.wres.dragging { opacity: .92; box-shadow: var(--e2-shadow); cursor: grabbing; }
+
+/* candidate states while wiring is armed — accent = valid target, dashed
+   alert = refused target with the reason in the strip and the live region */
+.wnode.cand-ok { box-shadow: 0 0 0 2px var(--color-panel-solid), 0 0 0 4px var(--color-accent); }
+.wnode.cand-bad { box-shadow: 0 0 0 2px var(--color-panel-solid), 0 0 0 4px color-mix(in srgb, var(--color-alert) 55%, transparent); border-style: dashed; border-color: var(--color-alert); }
+#stage.wiring-armed .wnode:not(.cand-ok):not(.cand-bad):not(.kbd) { opacity: .5; }
+
+/* wiring handles: always visible on the freeform canvas, crosshair cursor */
+#stage.wiring-mode .node .handle { opacity: .9; background: var(--lw-handle-live); cursor: crosshair; }
+#stage.wiring-mode .node .handle:hover { width: 12px; height: 12px; }
+
+/* ---------------------------------------------------------------------------
+   WIRED EDGES — planned edges are the warp layer, selectable. The hit path
+   is 18 px wide and invisible; visibility never lies about the real target.
+   --------------------------------------------------------------------------- */
+.wire-hit {
+  fill: none; stroke: transparent; stroke-width: 18;
+  pointer-events: stroke; cursor: pointer;
+}
+.warp.wire-sel { stroke: var(--color-accent); stroke-width: 2.5; }
+.rel-label {
+  z-index: 26;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 6px;
+  border-radius: var(--r-full);
+  background: var(--color-ground);
+  border: 1px solid var(--color-hairline);
+  color: var(--color-ink-2);
+  pointer-events: none;
+}
+.rel-label.sel { border-color: var(--color-accent); background: var(--color-accent-tint); color: var(--color-ink); }
+.rel-perm {
+  padding: 0 4px; border-radius: var(--r-full);
+  border: 1px solid var(--color-accent-dim);
+  color: var(--color-accent);
+}
+.rel-label .rx {
+  pointer-events: auto;
+  width: 16px; height: 16px; padding: 0;
+  display: grid; place-items: center;
+  border: 0; border-radius: var(--r-full);
+  background: none; color: var(--color-ink-2); cursor: pointer;
+  font: 500 12px/1 var(--font-sans);
+}
+.rel-label .rx:hover { background: color-mix(in srgb, var(--color-alert) 14%, transparent); color: var(--color-alert); }
+
+/* endpoint handles on the selected edge; origin dot while armed */
+.wire-end { fill: var(--color-panel-solid); stroke: var(--color-accent); stroke-width: 1.5; cursor: move; }
+.wire-origin { fill: var(--color-accent); }
+.wire-temp {
+  fill: none; stroke: var(--color-accent); stroke-width: 1.5;
+  stroke-dasharray: 6 4; stroke-opacity: .85;
+}
+
+/* the drop ghost — follows the pointer (HTML5 drag) or the arrows (keyboard) */
+.wire-ghost {
+  position: absolute; z-index: 26;
+  border: 1.5px dashed var(--color-accent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--color-accent-tint) 55%, transparent);
+  pointer-events: none;
+}
+#stage.wiring-placing .wire-ghost { border-style: solid; }
+#stage.lib-dragging .canvas-ground, #stage.wiring-armed .canvas-ground { opacity: .7; }
+
+/* ---------------------------------------------------------------------------
+   WIRE STRIP — bottom-centre. Selected entity, its typed connections, the
+   non-destructive refusal explanation, planned-vs-observed counts, replay.
+   --------------------------------------------------------------------------- */
+#wireStrip {
+  height: auto; min-height: 44px; max-width: 1060px;
+  padding: var(--sp-2) var(--sp-3);
+  display: flex; align-items: center; gap: var(--sp-3);
+}
+#wireStrip[hidden] { display: none; }
+.ws-glyph { color: var(--color-accent); flex: none; font-size: 14px; }
+.ws-main { display: flex; flex-direction: column; gap: 1px; min-width: 260px; flex: 1; }
+.ws-context { color: var(--color-ink-2); }
+.ws-notice { color: var(--color-alert); }
+#stage.wire-refused .ws-notice { animation: refused 320ms var(--ease-out); }
+@keyframes refused {
+  25% { transform: translateX(-3px); }
+  60% { transform: translateX(3px); }
+  100% { transform: none; }
+}
+.ws-connections { display: flex; flex-wrap: wrap; gap: 4px; flex: none; max-width: 420px; }
+.ws-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 22px; padding: 0 8px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-full);
+  background: none; color: var(--color-ink-2); cursor: pointer;
+  font: inherit; white-space: nowrap;
+}
+.ws-chip:hover { background: var(--color-accent-tint); color: var(--color-ink); }
+.ws-chip.sel { border-color: var(--color-accent); background: var(--color-accent-tint); color: var(--color-ink); }
+.ws-chip .t-mono-sm { color: var(--color-ink-3); }
+.ws-counts { flex: none; color: var(--color-ink-3); font: 500 11px/16px var(--font-mono); white-space: nowrap; }
+.ws-sep { width: 1px; align-self: stretch; background: var(--color-hairline); flex: none; }
+#wireReplayBtn { flex: none; }
+
+/* the observed cluster sits above the nodes; only its cards take the pointer */
+#stage.wiring-mode #overlay { pointer-events: none; }
+#stage.wiring-mode #overlay > * { pointer-events: auto; }
+#stage.wiring-mode .prov-label { pointer-events: none; }
+
+/* reduced motion: candidate pulse and refusal shake hold their static state */
+@media (prefers-reduced-motion: reduce) {
+  #stage.wire-refused .ws-notice { animation: none !important; }
+}
+[data-motion="reduce"] #stage.wire-refused .ws-notice { animation: none !important; }
+
+/* ---------------------------------------------------------------------------
+   NARROW (≤ 767 px) — placement and wiring are desktop precision
+   interactions (the TNG-121 rule again). The column stays a readable,
+   read-only sequence: nodes in source order, observed evidence, composer.
+   --------------------------------------------------------------------------- */
+@media (max-width: 767px) {
+  #wireStrip, #stage.wiring-mode #legend, #stage.wiring-mode #viewctl { display: none !important; }
+  #nodes > .wres, #nodes > .wnode {
+    position: relative;
+    inset: auto;
+    left: auto; top: auto;
+    width: 100% !important;
+    height: auto;
+    min-height: 84px;
+  }
+  #nodes > .wnode.node { position: relative; left: auto; top: auto; width: 100%; }
+  #stage.wiring-mode #overlay > .activity-ent { order: 44; }
+  #stage.wiring-mode #overlay > .prov-label { display: none; }
+}

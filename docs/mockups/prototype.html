@@ -20,7 +20,7 @@
   <span class="brand">LoomWatch <em>Obsidian &amp; Gilt</em></span>
   <nav class="tabs" id="tabs"></nav>
   <span class="spacer"></span>
-  <span class="hint"><kbd>1</kbd>–<kbd>9</kbd><kbd>0</kbd><kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd> · <kbd>⌘⇧L</kbd> theme · <kbd>?</kbd> notes</span>
+  <span class="hint"><kbd>1</kbd>–<kbd>9</kbd><kbd>0</kbd><kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd><kbd>R</kbd> · <kbd>⌘⇧L</kbd> theme · <kbd>?</kbd> notes</span>
   <button id="motionBtn" title="Simulate prefers-reduced-motion">Motion: on</button>
   <button id="notesBtn" aria-pressed="false">Notes</button>
 </div>
@@ -55,6 +55,7 @@
       </marker>
     </defs>
     <g id="edgeGroup"></g>
+    <g id="wireGroup"></g>
   </svg>
 
   <div id="edgeLabels"></div>
@@ -186,15 +187,21 @@
   </div>
 
   <!-- =================================================================
-       LIBRARY — UX_REDESIGN §4. 288 px, collapsible to a 48 px rail (⌘\).
-       Rows are drag sources only: clicking never selects or opens.
-       ================================================================= -->
-  <section class="panel left top e1" id="library" aria-label="Agent library">
+        CAPABILITY LIBRARY — TNG-123 (extends UX_REDESIGN §4). Everything
+        that is available and authorized in the current workspace: Agents,
+        Skills, Tools/Connectors, Knowledge sources. Search + category and
+        state filters, collapsed groups, per-group counts, connection and
+        permission badges, compatibility cues. Globally hidden resources
+        are never shown; unusable ones (not installed / disconnected)
+        render greyed with their reason and cannot be dragged or wired.
+        Rows are drag sources AND keyboard placement sources (Enter).
+        ================================================================= -->
+  <section class="panel left top e1" id="library" aria-label="Capability library">
     <div class="rail-only">
       <button class="iconbtn" title="Expand library (⌘\)" onclick="toggleLibrary()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 6l6 6-6 6"/></svg>
       </button>
-      <span class="monogram">Oc</span><span class="monogram">C</span><span class="monogram">Cx</span><span class="monogram">G</span>
+      <span class="monogram">Oc</span><span class="monogram">C</span><span class="monogram">Cx</span><span class="monogram">S</span>
     </div>
 
     <header class="lib-head">
@@ -204,72 +211,32 @@
       </button>
     </header>
 
-    <div class="lib-group" id="grpHarness">
-      <div class="lib-group-head"><span class="t-micro">Detected harnesses</span><span class="t-meta">4</span></div>
-      <div class="lib-rows">
-        <div class="lib-row" draggable="true">
-          <span class="monogram">Oc</span>
-          <span class="lib-row-text">
-            <span class="lib-row-name t-body-m">opencode</span>
-            <span class="lib-row-sub t-mono-sm">/opt/homebrew/bin/opencode</span>
-          </span>
-          <span class="drag-dots t-body">⠿</span>
-        </div>
-        <div class="lib-row" draggable="true">
-          <span class="monogram">C</span>
-          <span class="lib-row-text">
-            <span class="lib-row-name t-body-m">claude</span>
-            <span class="lib-row-sub t-mono-sm">/Users/me/Library/Application Support/claude/bin/claude</span>
-          </span>
-          <span class="drag-dots t-body">⠿</span>
-        </div>
-        <div class="lib-row" draggable="true">
-          <span class="monogram">Cx</span>
-          <span class="lib-row-text">
-            <span class="lib-row-name t-body-m">codex</span>
-            <span class="lib-row-sub t-mono-sm">/opt/homebrew/bin/codex</span>
-          </span>
-          <span class="drag-dots t-body">⠿</span>
-        </div>
-        <div class="lib-row unavailable">
-          <span class="monogram">G</span>
-          <span class="lib-row-text">
-            <span class="lib-row-name t-body-m">gemini</span>
-            <span class="lib-row-sub t-meta">Not installed</span>
-          </span>
-        </div>
+    <div class="lib-controls">
+      <div class="lib-search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
+        <input id="libSearch" placeholder="Search resources" aria-label="Search resources" autocomplete="off">
+      </div>
+      <div class="lib-filters" role="group" aria-label="Filter by category" id="libCatFilters">
+        <button class="lfilt t-meta on" data-lf="cat" data-v="all" aria-pressed="true">All</button>
+        <button class="lfilt t-meta" data-lf="cat" data-v="agent" aria-pressed="false">Agents</button>
+        <button class="lfilt t-meta" data-lf="cat" data-v="skill" aria-pressed="false">Skills</button>
+        <button class="lfilt t-meta" data-lf="cat" data-v="tool" aria-pressed="false">Tools</button>
+        <button class="lfilt t-meta" data-lf="cat" data-v="knowledge" aria-pressed="false">Knowledge</button>
+      </div>
+      <div class="lib-filters" role="group" aria-label="Filter by state" id="libStateFilters">
+        <button class="lfilt t-meta on" data-lf="status" data-v="all" aria-pressed="true">Any state</button>
+        <button class="lfilt t-meta" data-lf="status" data-v="available" aria-pressed="false">Available</button>
+        <button class="lfilt t-meta" data-lf="status" data-v="permission" aria-pressed="false">Needs approval</button>
+        <button class="lfilt t-meta" data-lf="status" data-v="disconnected" aria-pressed="false">Disconnected</button>
       </div>
     </div>
 
-    <div class="lib-group">
-      <div class="lib-group-head"><span class="t-micro">Endpoints</span><span class="t-meta">0</span></div>
-      <div class="lib-empty t-meta">
-        <span>No ACP endpoints yet.</span>
-        <button class="link">Add an endpoint…</button>
-      </div>
-    </div>
+    <div class="lib-scroll" id="libGroups"><!-- rendered from RESOURCES in prototype.js --></div>
 
-    <div class="lib-group">
-      <div class="lib-group-head"><span class="t-micro">Role presets</span><span class="t-meta">2</span></div>
-      <div class="lib-rows">
-        <div class="lib-row" draggable="true">
-          <span class="monogram">·</span>
-          <span class="lib-row-text">
-            <span class="lib-row-name t-body-m">Reviewer</span>
-            <span class="lib-row-sub t-meta">claude · opus · $3.00 cap</span>
-          </span>
-          <span class="drag-dots t-body">⠿</span>
-        </div>
-        <div class="lib-row" draggable="true">
-          <span class="monogram">·</span>
-          <span class="lib-row-text">
-            <span class="lib-row-name t-body-m">Researcher</span>
-            <span class="lib-row-sub t-meta">opencode · $5.00 cap</span>
-          </span>
-          <span class="drag-dots t-body">⠿</span>
-        </div>
-      </div>
-    </div>
+    <footer class="lib-foot">
+      <span class="t-meta" id="libFootCount"></span>
+      <span class="t-meta lib-foot-hidden" id="libFootHidden"></span>
+    </footer>
   </section>
 
   <!-- =================================================================
@@ -428,6 +395,25 @@
     <span class="runslot" title="Running a team arrives in a later phase.">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4l12 8-12 8z"/></svg>
     </span>
+  </div>
+
+  <!-- =================================================================
+        WIRE STRIP — TNG-123. Bottom-centre on the freeform canvas screen,
+        where the mode pill sits elsewhere. It carries the selected entity's
+        typed connections, the non-destructive explanation for a refused
+        connection, the planned-vs-observed counts, and the replay control.
+        ================================================================= -->
+  <div class="panel bottom cx e1" id="wireStrip" hidden>
+    <span class="ws-glyph" aria-hidden="true">⌥</span>
+    <div class="ws-main">
+      <span class="ws-context t-meta" id="wireContext">Drag from the Library to place · drag a node's right handle to wire</span>
+      <span class="ws-notice t-meta" id="wireNotice" role="status"></span>
+    </div>
+    <div class="ws-connections" id="wireConnections" aria-label="Connections of the selected node"></div>
+    <span class="ws-counts t-meta" id="wireCounts" title="Planned edges are your authored wiring; observed events are projected from the live run"></span>
+    <span class="ws-sep" aria-hidden="true"></span>
+    <button class="btn" id="wireReplayBtn" onclick="wireReplay()" title="Replay the observed run inertly — never re-executes">Replay observed run</button>
+    <span class="badge t-micro badge-live" id="wireBadge"><span class="pip"></span>Live</span>
   </div>
 
   <!-- =================================================================

@@ -106,19 +106,30 @@ async function viewport(width, height) {
 async function navigate(hash) {
   const key = hash.split(',')[0];
   const url = `${pathToFileURL(artifact).href}#${hash}`;
-  await send('Page.navigate', { url });
-  // Same-URL navigation fires no hashchange (and the app reloads on
-  // hashchange), so force a reload when the document is already there.
-  const alreadyThere = await evaluate(`location.href.endsWith(${JSON.stringify('#' + hash)})`).catch(() => false);
-  if (alreadyThere) await send('Page.reload');
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    const ready = await evaluate(`document.readyState === 'complete'
-      && document.querySelector('#stage')?.dataset.screen === ${JSON.stringify(key)}`)
-      .catch(() => false);
-    if (ready) break;
-    await sleep(50);
+  /* The app reloads on hashchange, so same-URL navigations can race the
+     previous document's teardown; retry the navigation once on a transient
+     CDP detach instead of failing the run. */
+  for (let navAttempt = 0; navAttempt < 2; navAttempt += 1) {
+    try {
+      await send('Page.navigate', { url });
+      // Same-URL navigation fires no hashchange (and the app reloads on
+      // hashchange), so force a reload when the document is already there.
+      const alreadyThere = await evaluate(`location.href.endsWith(${JSON.stringify('#' + hash)})`).catch(() => false);
+      if (alreadyThere) await send('Page.reload');
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        const ready = await evaluate(`document.readyState === 'complete'
+          && document.querySelector('#stage')?.dataset.screen === ${JSON.stringify(key)}`)
+          .catch(() => false);
+        if (ready) break;
+        await sleep(50);
+      }
+      await sleep(120);
+      return;
+    } catch (err) {
+      if (navAttempt === 1) throw err;
+      await sleep(300);
+    }
   }
-  await sleep(80);
 }
 
 async function key(key, { code = key, modifiers = 0, virtualKeyCode = 0 } = {}) {
@@ -385,10 +396,181 @@ try {
   assert(histOverflow === 0, `Run history rows overflow their rows: ${histOverflow}`);
   await key('Escape', { code: 'Escape', virtualKeyCode: 27 });
 
+  /* =====================================================================
+     TNG-123 — freeform placement, typed wiring, capability library,
+     keyboard parity, planned-vs-observed separation, themes, narrow.
+     ===================================================================== */
+  await viewport(1600, 1000);
+  await navigate('wiring,dark');
+  const wireReady = await evaluate(`(() => ({
+    screen: document.querySelector('#stage').dataset.screen,
+    planned: document.querySelectorAll('#edgeGroup .warp').length,
+    libRows: document.querySelectorAll('#libGroups .lib-row').length,
+    usableRows: document.querySelectorAll('#libGroups .lib-row[data-res]').length,
+    foot: document.querySelector('#libFootCount').textContent,
+    hidden: document.querySelector('#libFootHidden').textContent,
+    strip: !!document.querySelector('#wireStrip'),
+    counts: document.querySelector('#wireCounts')?.textContent
+  }))()`);
+  assert(wireReady.screen === 'wiring' && wireReady.planned === 4, `Wiring screen did not initialize: ${JSON.stringify(wireReady)}`);
+  assert(wireReady.strip && /Planned 4/.test(wireReady.counts), `Wire strip missing or wrong counts: ${JSON.stringify(wireReady)}`);
+  /* expand every collapsed group, then the full catalogue is in the DOM */
+  await evaluate(`RES_GROUPS.forEach((g) => { g.collapsed = false; }); renderLibrary();`);
+  const expanded = await evaluate(`({ rows: document.querySelectorAll('#libGroups .lib-row').length,
+    usable: document.querySelectorAll('#libGroups .lib-row[data-res]').length,
+    groups: document.querySelectorAll('#libGroups .lib-group').length })`);
+  assert(expanded.rows === 20 && expanded.usable === 16 && expanded.groups === 4, `Library catalogue wrong: ${JSON.stringify(expanded)}`);
+  assert(/2 hidden by workspace policy/.test(wireReady.hidden), `Hidden-resource boundary not stated: ${JSON.stringify(wireReady)}`);
+
+  /* library: search, category filter, state filter, collapsed group, empty state */
+  await evaluate(`(() => { const i = document.querySelector('#libSearch'); i.value = 'notion'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  const searched = await evaluate(`({ names: [...document.querySelectorAll('#libGroups .lib-row-name')].map((n) => n.textContent.trim()), foot: document.querySelector('#libFootCount').textContent })`);
+  assert(searched.names.length === 2 && searched.names.every((n) => /Notion/.test(n)), `Library search failed: ${JSON.stringify(searched)}`);
+  await evaluate(`(() => { const i = document.querySelector('#libSearch'); i.value = 'zzzz-nothing'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  const emptyState = await evaluate(`({ foot: document.querySelector('#libFootCount').textContent, empties: document.querySelectorAll('#libGroups .lib-empty').length })`);
+  assert(/No resources match/.test(emptyState.foot) && emptyState.empties === 4, `Library empty state missing: ${JSON.stringify(emptyState)}`);
+  await evaluate(`(() => { const i = document.querySelector('#libSearch'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await evaluate(`(() => { const b = document.querySelector('[data-lf="status"][data-v="disconnected"]'); b.click(); })()`);
+  const disconnectedOnly = await evaluate(`({ rows: [...document.querySelectorAll('#libGroups .lib-row')].length,
+    names: [...document.querySelectorAll('#libGroups .lib-row-name')].map((n) => n.textContent.trim()),
+    usable: [...document.querySelectorAll('#libGroups .lib-row[data-res]')].length })`);
+  assert(disconnectedOnly.rows === 3 && disconnectedOnly.usable === 0, `Disconnected filter wrong: ${JSON.stringify(disconnectedOnly)}`);
+  await evaluate(`document.querySelector('[data-lf="status"][data-v="all"]').click()`);
+
+  /* freeform keyboard placement from the library: Enter arms, arrows move, Enter drops */
+  await evaluate(`document.querySelector('[data-res="r-tool-bus"]').focus()`);
+  await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
+  const armedPlace = await evaluate(`({ placing: !!wiring.placing, ctx: document.querySelector('#wireContext').textContent })`);
+  assert(armedPlace.placing && /Placing Team Bus/.test(armedPlace.ctx), `Library Enter did not arm freeform placement: ${JSON.stringify(armedPlace)}`);
+  await key('ArrowRight', { code: 'ArrowRight', virtualKeyCode: 39 });
+  await key('ArrowDown', { code: 'ArrowDown', virtualKeyCode: 40 });
+  await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
+  const placed = await evaluate(`({ n: wiring.nodes.length, last: wiring.nodes[wiring.nodes.length - 1], focus: document.activeElement?.dataset?.wnode || document.activeElement?.dataset?.node })`);
+  assert(placed.n === 9 && placed.last.ref === 'r-tool-bus' && (placed.focus === placed.last.id), `Keyboard placement did not drop at the ghost position with focus: ${JSON.stringify(placed)}`);
+
+  /* unusable resource: refused with explanation, nothing placed */
+  const refusedPlace = await evaluate(`({ ok: !!placeResource('r-skill-sql', 400, 400), notice: document.querySelector('#wireNotice').textContent })`);
+  assert(!refusedPlace.ok && /Disconnected|can't be placed/.test(refusedPlace.notice), `Disconnected resource was placeable or unexplained: ${JSON.stringify(refusedPlace)}`);
+
+  /* typed wiring by keyboard: select codex, W arms, Tab cycles with narration, Enter commits */
+  await evaluate(`selectWire('wa3')`);
+  await key('w', { code: 'KeyW', virtualKeyCode: 87 });
+  const armedWire = await evaluate(`({ armed: !!wiring.armed, from: wiring.armed?.from })`);
+  assert(armedWire.armed && armedWire.from === 'wa3', `W did not arm wiring: ${JSON.stringify(armedWire)}`);
+  const narrated = await evaluate(`document.querySelector('#wireContext').textContent`);
+  assert(/Wiring from codex/.test(narrated), `Wiring arm was not reflected in the strip: ${narrated}`);
+  await key('Tab', { code: 'Tab', virtualKeyCode: 9 });
+  await key('Tab', { code: 'Tab', virtualKeyCode: 9 });
+  const cycled = await evaluate(`({ idx: wiring.armed.idx, name: wiring.nodes.find((n) => n.id === wiring.armed.candidates[wiring.armed.idx]).name })`);
+  assert(cycled.idx === 2, `Tab did not cycle candidates: ${JSON.stringify(cycled)}`);
+  await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
+  const wiredKb = await evaluate(`({ edges: wiring.edges.map((e) => e.from + '>' + e.to), selected: wiring.selected, announce: document.querySelector('#liveRegion').textContent })`);
+  assert(wiredKb.edges.includes('wa3>wa2'), `Keyboard wiring did not create the handoff edge: ${JSON.stringify(wiredKb)}`);
+  assert(/hands off to/.test(wiredKb.announce), `Commit did not announce the typed relation: ${wiredKb.announce}`);
+
+  /* invalid connections are refused non-destructively, with the reason */
+  const inv1 = await evaluate(`tryConnect('wp1', 'wr1')`);
+  const inv2 = await evaluate(`tryConnect('ws1', 'wa2')`);
+  const inv3 = await evaluate(`tryConnect('wa1', 'wa1')`);
+  const invState = await evaluate(`({ edges: wiring.edges.length, notice: document.querySelector('#wireNotice').textContent, visible: !document.querySelector('#wireNotice').hidden })`);
+  assert(invState.edges === 5 && invState.visible && inv1 === null && inv2 === null && inv3 === null, `Invalid connections were not refused cleanly: ${JSON.stringify(invState)}`);
+  assert(/prompt \/ goal wires to the agent/.test(invState.notice) || /never originate/.test(invState.notice) || /cannot connect to itself/.test(invState.notice), `Refusal explanation missing: ${invState.notice}`);
+
+  /* edge selection, rewire, endpoint re-aim data path, remove */
+  await evaluate(`selectWire('we2', 'edge')`);
+  const edgeSel = await evaluate(`({ sel: wiring.selected, dots: document.querySelectorAll('#wireGroup .wire-end').length, rx: document.querySelectorAll('#edgeLabels .rx').length })`);
+  assert(edgeSel.sel.type === 'edge' && edgeSel.dots === 2 && edgeSel.rx === 1, `Edge selection did not expose endpoints + removal: ${JSON.stringify(edgeSel)}`);
+  await key('r', { code: 'KeyR', virtualKeyCode: 82 });
+  for (let i = 0; i < 10; i += 1) {
+    const t = await evaluate(`wiring.armed ? wiring.armed.candidates[wiring.armed.idx] : null`);
+    if (t === 'wa3') break;
+    await key('Tab', { code: 'Tab', virtualKeyCode: 9 });
+  }
+  await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
+  const rewired = await evaluate(`({ edges: wiring.edges.map((e) => e.from + '>' + e.to), selected: wiring.selected })`);
+  assert(rewired.edges.includes('wa1>wa3'), `R + Enter did not rewire the edge target: ${JSON.stringify(rewired)}`);
+  await key('Delete', { code: 'Delete', virtualKeyCode: 46 });
+  const afterDelete = await evaluate(`({ n: wiring.edges.length })`);
+  assert(afterDelete.n === 4, `Delete did not remove the selected edge: ${JSON.stringify(afterDelete)}`);
+
+  /* node drag by pointer moves the node freely and re-anchors its edges.
+     Real CDP mouse input: synthetic PointerEvents do not honour pointer
+     capture, and the product behaviour under test IS capture. */
+  const dragFrom = await evaluate(`(() => {
+    const el = document.querySelector('[data-wnode="wa2"], [data-node="wa2"]');
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`);
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: dragFrom.x, y: dragFrom.y, button: 'left', clickCount: 1 });
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: dragFrom.x + 120, y: dragFrom.y + 70, button: 'left', buttons: 1, clickCount: 1 });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: dragFrom.x + 120, y: dragFrom.y + 70, button: 'left', clickCount: 1 });
+  await sleep(120);
+  const drag = await evaluate(`(() => {
+    const n = wiring.nodes.find((x) => x.id === 'wa2');
+    return { x: n.x, y: n.y, origX: 470, origY: 452, selected: wiring.selected };
+  })()`);
+  assert(drag.x > drag.origX && drag.y > drag.origY && drag.selected && drag.selected.id === 'wa2', `Pointer drag did not move the node freely: ${JSON.stringify(drag)}`);
+
+  /* planned vs observed: replay is inert and labelled; live projects on a timer */
+  const plannedBefore = await evaluate(`wiring.edges.map((e) => e.from + '>' + e.to).join(',')`);
+  await evaluate(`wireReplay()`);
+  const replay = await evaluate(`({
+    badge: document.querySelector('#wireBadge').textContent,
+    obs: wiring.observed.length,
+    liveEdges: document.querySelectorAll('#provGroup .prov-live').length,
+    planned: wiring.edges.length,
+    plannedUnchanged: wiring.edges.map((e) => e.from + '>' + e.to).join(',')
+  })`);
+  assert(/Replay/.test(replay.badge) && replay.obs === 3 && replay.liveEdges === 0, `Replay is not inert/labelled: ${JSON.stringify(replay)}`);
+  assert(replay.planned === 4 && replay.plannedUnchanged === plannedBefore, `Replay mutated the planned graph: ${JSON.stringify(replay)}`);
+  await evaluate(`go('wiring'); null`);
+  await sleep(5200);
+  const live = await evaluate(`({ obs: wiring.observed.length, live: wiring.live, weft: document.querySelector('#cntWeft').textContent })`);
+  assert(live.obs === 3 && live.weft === '×3', `Live provenance did not project automatically: ${JSON.stringify(live)}`);
+
+  /* status system: running agent breathes blue while live, freezes on done */
+  await navigate('wiring,dark');
+  await sleep(2200);
+  const statusSystem = await evaluate(`(() => {
+    const a = document.querySelector('[data-node="wa1"]');
+    const css = getComputedStyle(a);
+    return { cls: a.className, animation: css.animationName, border: css.borderColor };
+  })()`);
+  assert(/st-running/.test(statusSystem.cls) && statusSystem.animation !== 'none', `Running agent lost the breathing border: ${JSON.stringify(statusSystem)}`);
+  await evaluate(`document.documentElement.dataset.motion = 'reduce'; null`);
+  const reducedWire = await evaluate(`(() => {
+    const a = document.querySelector('[data-node="wa1"]');
+    const css = getComputedStyle(a);
+    return { animation: css.animationName, width: css.borderWidth };
+  })()`);
+  assert(reducedWire.animation === 'none' && reducedWire.width === '2px', `Reduced-motion wiring border not static: ${JSON.stringify(reducedWire)}`);
+  await evaluate(`delete document.documentElement.dataset.motion; null`);
+
+  /* both themes render the wiring screen; narrow stays read-only and clean */
+  for (const theme of ['dark', 'light']) {
+    await navigate(`wiring,${theme}`);
+    const themed = await evaluate(`({ theme: document.documentElement.dataset.theme,
+      ground: getComputedStyle(document.querySelector('#stage')).backgroundColor,
+      strip: !document.querySelector('#wireStrip').hidden,
+      nodes: document.querySelectorAll('#nodes [data-wnode], #nodes [data-node]').length })`);
+    assert(themed.nodes >= 8, `${theme} wiring lost nodes: ${JSON.stringify(themed)}`);
+    await viewport(390, 844);
+    await evaluate(`fit()`);   /* the product's own resize handler */
+    const narrowWire = await evaluate(`({ layout: document.documentElement.dataset.layout,
+      overflow: document.querySelector('#stage').scrollWidth - document.querySelector('#stage').clientWidth,
+      strip: getComputedStyle(document.querySelector('#wireStrip')).display,
+      cards: document.querySelectorAll('#nodes > *').length })`);
+    assert(narrowWire.layout === 'narrow' && narrowWire.overflow <= 1 && narrowWire.strip === 'none', `${theme} narrow wiring overflows: ${JSON.stringify(narrowWire)}`);
+    await viewport(1600, 1000);
+  }
+
   assert(runtimeErrors.length === 0, `Standalone emitted runtime exceptions: ${JSON.stringify(runtimeErrors)}`);
   assert(requests.every((url) => url.startsWith('file:') || url.startsWith('data:')), `Standalone attempted a network request: ${JSON.stringify(requests)}`);
 
-  console.log('TNG-119 + TNG-121 verification passed: causal graph, editable pipeline (drag + keyboard), interaction, overflow bounds, themes, narrow layout, reduced motion, retry retention, and offline loading');
+  assert(runtimeErrors.length === 0, `Standalone emitted runtime exceptions: ${JSON.stringify(runtimeErrors)}`);
+  assert(requests.every((url) => url.startsWith('file:') || url.startsWith('data:')), `Standalone attempted a network request: ${JSON.stringify(requests)}`);
+
+  console.log('TNG-119 + TNG-121 + TNG-123 verification passed: causal graph, editable pipeline, freeform placement + typed wiring (drag + keyboard), capability library states, planned-vs-observed separation, interaction, overflow bounds, themes, narrow layout, reduced motion, replay, retry retention, and offline loading');
 } finally {
   if (socket) socket.close();
   await new Promise((resolveExit) => {
