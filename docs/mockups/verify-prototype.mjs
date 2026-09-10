@@ -426,14 +426,44 @@ try {
   assert(elsewhere.hintedTitles === elsewhere.usable && elsewhere.hintedAria === elsewhere.usable,
     `Library rows on the canvas screen do not point at the Freeform wiring tab: ${JSON.stringify(elsewhere)}`);
 
-  /* Enter must not silently no-op on a row that cannot arm here — it should
-     narrate where dragging actually works, via the same #liveRegion channel
-     every other keyboard flow in this prototype already uses. */
+  /* Activating a row here must not merely *narrate* a refusal. announce()
+     writes to #liveRegion, which is .visually-hidden — so a sighted mouse
+     operator sees nothing, which is exactly how "I still cannot drag the
+     agent from the library" survived cd5e162. Assert the VISIBLE
+     post-condition instead: the stage really switched to wiring and a
+     placement ghost is on the canvas. A live-region-only assertion cannot
+     observe this class of defect and must not be the whole test. */
   await evaluate(`document.querySelector('#libGroups .lib-row[data-res]').focus()`);
   await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
-  const elsewhereEnter = await evaluate(`({ region: document.querySelector('#liveRegion').textContent, placing: !!wiring.placing })`);
-  assert(/Freeform wiring/.test(elsewhereEnter.region) && !elsewhereEnter.placing,
-    `Enter on a canvas-screen library row did not explain the Freeform wiring tab: ${JSON.stringify(elsewhereEnter)}`);
+  const elsewhereEnter = await evaluate(`({
+    region: document.querySelector('#liveRegion').textContent,
+    screen: document.querySelector('#stage').dataset.screen,
+    placing: !!wiring.placing,
+    ghosts: document.querySelectorAll('#edgeLabels .wire-ghost').length
+  })`);
+  assert(elsewhereEnter.screen === 'wiring' && elsewhereEnter.placing && elsewhereEnter.ghosts === 1,
+    `Enter on a canvas-screen library row did not route to wiring and arm placement: ${JSON.stringify(elsewhereEnter)}`);
+  assert(/Freeform wiring/.test(elsewhereEnter.region),
+    `Routing from the canvas screen was not narrated to assistive tech: ${JSON.stringify(elsewhereEnter)}`);
+
+  /* The board reviews with a mouse at full width, and that is the path
+     cd5e162 left silent: the click handler returned at its max-width:767px
+     guard before reaching any feedback at all. Prove click works at 1600px
+     on the canvas screen, not just Enter. */
+  await navigate('canvas,dark');
+  const elsewhereClick = await evaluate(`(() => {
+    const before = document.querySelector('#stage').dataset.screen;
+    document.querySelector('#libGroups .lib-row[data-res]').click();
+    return {
+      before,
+      screen: document.querySelector('#stage').dataset.screen,
+      placing: !!wiring.placing,
+      ghosts: document.querySelectorAll('#edgeLabels .wire-ghost').length
+    };
+  })()`);
+  assert(elsewhereClick.before === 'canvas' && elsewhereClick.screen === 'wiring'
+    && elsewhereClick.placing && elsewhereClick.ghosts === 1,
+    `Desktop click on a canvas-screen library row did not place anything — the board's exact path: ${JSON.stringify(elsewhereClick)}`);
 
   /* =====================================================================
      TNG-122 — freeform placement, typed wiring, capability library,
@@ -790,7 +820,7 @@ try {
   assert(runtimeErrors.length === 0, `Standalone emitted runtime exceptions: ${JSON.stringify(runtimeErrors)}`);
   assert(requests.every((url) => url.startsWith('file:') || url.startsWith('data:')), `Standalone attempted a network request: ${JSON.stringify(requests)}`);
 
-  console.log('TNG-119 + TNG-121 + TNG-122 + TNG-124 + TNG-125 + TNG-127 verification passed: causal graph, editable pipeline, freeform placement + typed wiring (pointer, keyboard, narrow tap), resting grab affordance scoped to the Freeform wiring screen (honest elsewhere, with a live-region hint on Enter), drag-not-selection invariant (proxy — see verify-webkit.swift for the WebKit proof), armed-source row + cancel with focus return, capability library states, planned-vs-observed separation, interaction, overflow bounds, themes, narrow relationship flow, reduced motion, replay, retry retention, and offline loading');
+  console.log('TNG-119 + TNG-121 + TNG-122 + TNG-124 + TNG-125 + TNG-127 verification passed: causal graph, editable pipeline, freeform placement + typed wiring (pointer, keyboard, narrow tap), resting grab affordance scoped to the Freeform wiring screen (elsewhere the row stays a button and routes to wiring + arms placement, by click at desktop width and by Enter), drag-not-selection invariant (proxy — see verify-webkit.swift for the WebKit proof), armed-source row + cancel with focus return, capability library states, planned-vs-observed separation, interaction, overflow bounds, themes, narrow relationship flow, reduced motion, replay, retry retention, and offline loading');
 } finally {
   if (socket) socket.close();
   await new Promise((resolveExit) => {

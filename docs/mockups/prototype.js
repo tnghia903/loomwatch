@@ -2520,6 +2520,27 @@ function armPlaceFromLibrary(resId) {
   announce(`${r.name} armed for placement. Arrow keys move the ghost, Enter drops it, Escape cancels.`);
 }
 
+/* TNG-87 follow-up to cd5e162. Scoping the *drag* affordance to `wiring` was
+   right, but the fallback it left on every other screen was `announce()` —
+   and `#liveRegion` is `.visually-hidden`, so a sighted mouse operator got
+   nothing at all where the board's rejection screenshot was taken. Declining
+   is the wrong response anyway: the intent is unambiguous and exactly one
+   surface can serve it, so route there and arm rather than naming a tab and
+   making the operator go find it. */
+function activateLibRow(resId) {
+  const routed = stage.dataset.screen !== 'wiring';
+  if (routed) go('wiring');
+  /* second activation of an already-armed row is the commit gesture */
+  else if (wiring.placing && wiring.placing.ref === resId) { commitPlace(); return; }
+  armPlaceFromLibrary(resId);
+  /* armPlaceFromLibrary announced already; supersede it so the screen change
+     reaches AT too — the sighted operator sees it in the stage itself. */
+  if (routed && wiring.placing) {
+    announce(`Opened the Freeform wiring tab. ${resById(resId).name} armed for placement. `
+      + 'Arrow keys move the ghost, Enter drops it, Escape cancels.');
+  }
+}
+
 function commitPlace() {
   const p = wiring.placing;
   wiring.placing = null;
@@ -2726,22 +2747,19 @@ function renderLibrary() {
     row.addEventListener('keydown', (e) => activateKey(e, () => {
       /* the document-level handler would double-fire (arm, then commit) */
       e.stopPropagation();
-      if (stage.dataset.screen !== 'wiring') {
-        announce(`${resById(row.dataset.res).name} can only be placed from the Freeform wiring tab.`);
-        return;
-      }
-      if (wiring.placing && wiring.placing.ref === row.dataset.res) { commitPlace(); return; }
-      armPlaceFromLibrary(row.dataset.res);
+      activateLibRow(row.dataset.res);
     })));
   host.querySelectorAll('.lib-row[data-res]').forEach((row) =>
     row.addEventListener('click', () => {
-      if (!window.matchMedia('(max-width: 767px)').matches) return;
-      if (stage.dataset.screen !== 'wiring') {
-        announce(`${resById(row.dataset.res).name} can only be placed from the Freeform wiring tab.`);
-        return;
-      }
-      if (wiring.placing && wiring.placing.ref === row.dataset.res) commitPlace();
-      else armPlaceFromLibrary(row.dataset.res);
+      /* On `wiring` at desktop widths the row is a real drag source, so click
+         has to stay inert or it would fight dragstart; the narrow layout has
+         no drag, which is why click is the placement path there. Off `wiring`
+         nothing is draggable (see libRowHTML), so there is no conflict and
+         click is live at every width — that is the path the board actually
+         used, and the width guard used to swallow it silently. */
+      if (stage.dataset.screen === 'wiring'
+          && !window.matchMedia('(max-width: 767px)').matches) return;
+      activateLibRow(row.dataset.res);
     }));
   host.querySelectorAll('.lib-row-sub').forEach(middleTruncate);
   updateLibScrollFade();
@@ -2778,9 +2796,11 @@ function libRowHTML(r, wiringScreen) {
   const draggableHere = usable && wiringScreen;
   const dragHint = draggableHere
     ? 'Press Enter to arm placement on the freeform canvas.'
-    : (usable ? 'Open the Freeform wiring tab to drag this onto the canvas.' : 'Not usable in this workspace.');
+    : (usable
+        ? 'Press Enter to open the Freeform wiring tab and arm placement.'
+        : 'Not usable in this workspace.');
   return `<div class="lib-row ${usable ? '' : 'unavailable'}${usable && !wiringScreen ? ' lib-row-elsewhere' : ''}${arming ? ' lib-row-arming' : ''}" role="button" ${usable ? `${draggableHere ? 'draggable="true" ' : ''}data-res="${r.id}"` : 'aria-disabled="true"'}
-      title="${escapeMarkup(r.kind === 'agent' ? 'Wires to: prompt/goal, agents, skills, tools, knowledge, response' : 'Wires to agents only — use direction')}${draggableHere ? '' : escapeMarkup(usable ? ' — open the Freeform wiring tab to drag this onto the canvas.' : '')}"
+      title="${escapeMarkup(r.kind === 'agent' ? 'Wires to: prompt/goal, agents, skills, tools, knowledge, response' : 'Wires to agents only — use direction')}${draggableHere ? '' : escapeMarkup(usable ? ' — click to open the Freeform wiring tab and place it.' : '')}"
       tabindex="0"
       aria-label="${KIND_WORD[r.kind]} ${escapeMarkup(r.name)}, ${st.word}${wired ? `, ${wired} ${wired === 1 ? 'wire' : 'wires'} on canvas` : ''}${arming ? ', armed for placement' : ''}. ${dragHint}">
     ${r.kind === 'agent'
