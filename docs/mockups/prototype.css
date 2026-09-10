@@ -356,7 +356,8 @@ html, body {
   height: var(--lw-chip-h);
   padding: 0 var(--sp-3) 0 var(--sp-4);
   display: flex; align-items: center; gap: var(--sp-3);
-  cursor: pointer;
+  /* no cursor here: the live controls are the children (#chipOpen, #chipAction),
+     so a hand on the chip's own padding was a few pixels of dead promise */
   overflow: hidden;
   /* NB: no `position: relative` here — an id selector would out-specify
      `.panel { position: absolute }` and drop the chip into normal flow.
@@ -680,6 +681,12 @@ html, body {
 #edges { position: absolute; inset: 0; z-index: 20; pointer-events: none; }
 #edgeLabels { position: absolute; inset: 0; z-index: 25; pointer-events: none; }
 
+/* The canvas zoom (§7.1) transforms these five content layers and nothing else.
+   The origin has to be the stage's own, not each layer's centre: paintView(),
+   fitView() and stagePoint() treat the zoom as a plain affine map, and the CSS
+   default of `50% 50%` silently adds a translation to every one of them. */
+#edges, #edgeLabels, #nodes, #provEdges, #overlay { transform-origin: 0 0; }
+
 .warp {                                    /* configured: structure */
   fill: none;
   stroke: var(--lw-edge-warp);
@@ -728,7 +735,19 @@ html, body {
 /* ---------------------------------------------------------------------------
    LAYER LEGEND — §6.7. Conditional chrome: only while observed edges exist.
    --------------------------------------------------------------------------- */
-#legend { width: 148px; padding: var(--sp-3); display: flex; flex-direction: column; gap: 6px; }
+/* Clear of the library, not on top of it. #library is full height, so a panel
+   pinned bottom-left landed squarely on its footer — two panels' text drawn over
+   each other in the bottom-left corner of the screen the board reviews. The
+   legend follows the library's width as it collapses. */
+#legend {
+  width: 148px; padding: var(--sp-3);
+  display: flex; flex-direction: column; gap: 6px;
+  left: calc(var(--lw-panel-inset) + var(--lw-library-w) + var(--sp-3));
+  transition: left var(--t-move) var(--ease-out);
+}
+#stage.lib-collapsed #legend {
+  left: calc(var(--lw-panel-inset) + var(--lw-library-rail-w) + var(--sp-3));
+}
 .legend-row {
   display: flex; align-items: center; gap: var(--sp-2);
   padding: var(--sp-1) var(--sp-2);
@@ -748,13 +767,44 @@ html, body {
 /* ---------------------------------------------------------------------------
    MODE PILL — CANVAS_SPEC §8.1, UX_REDESIGN §8
    --------------------------------------------------------------------------- */
+/* A real <button> since TNG-131: it had the hand cursor of a control and the
+   markup of a caption, so pressing it — which §8.1 says opens the popover that
+   explains the whole document — did nothing at all. */
 #modepill {
   height: 36px;
   border-radius: var(--r-full);
   padding: 0 var(--sp-2) 0 var(--sp-4);
   display: flex; align-items: center; gap: var(--sp-3);
   cursor: pointer;
+  font: inherit; color: inherit; text-align: left;
 }
+#modepill[aria-expanded="true"] { border-color: var(--lw-node-ring); }
+
+/* the §8.1 popover */
+#modePop .mp-body { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+#modePop code { font: inherit; font-family: var(--font-mono); color: var(--color-ink); }
+#modePop .mp-tools { color: var(--color-ink-3); }
+#modePop .mp-order { list-style: none; display: flex; flex-direction: column; gap: var(--sp-2); }
+#modePop .mp-order li { display: flex; align-items: center; gap: var(--sp-3); }
+#modePop .mp-step {
+  flex: none; width: 16px; height: 16px; border-radius: var(--r-full);
+  display: grid; place-items: center;
+  background: var(--color-accent-tint); color: var(--color-ink-2);
+}
+#modePop .mp-head { color: var(--color-ink-3); letter-spacing: .04em; text-transform: uppercase; }
+#modePop .mp-head.alert { color: var(--lw-edge-anomaly); }
+#modePop .mp-anom, #modePop .mp-guards {
+  padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2);
+}
+#modePop .mp-field { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+#modePop .mp-field input {
+  width: 92px; height: 26px; padding: 0 var(--sp-2);
+  background: var(--color-ground); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--r-sm);
+  font: 500 12px/1 var(--font-mono); text-align: right;
+}
+#modePop .mp-field input:focus-visible { outline: 2px solid var(--lw-node-ring); outline-offset: 1px; }
+#modePop .mp-note { color: var(--color-ink-3); }
 #modepill .glyph { color: var(--color-accent); display: grid; place-items: center; }
 #stage.mode-team #modepill .glyph { color: var(--color-ink-3); }
 #modepill .label { color: var(--color-ink); }
@@ -789,6 +839,16 @@ html, body {
   transition: opacity var(--t-quick) var(--ease-out);
 }
 #viewctl:hover, #viewctl:focus-within { opacity: 1; }
+/* the level, between the two buttons that change it — and the explanation for
+   why zoom out stops responding at 25% (§7.1's range) */
+#viewctl .zoomlvl {
+  min-width: 38px;
+  text-align: center;
+  color: var(--color-ink-3);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+#viewctl .iconbtn:disabled { opacity: .35; cursor: default; }
 /* while the inspector is open the cluster slides clear of it */
 #stage.inspecting #viewctl {
   right: calc(var(--lw-inspector-w) + var(--lw-panel-inset) + var(--sp-3));
@@ -1649,7 +1709,10 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
     opacity: 1;
     z-index: 90;
   }
-  #viewctl .iconbtn:not(#themeBtn) { display: none; }
+  /* the narrow layout keeps only the theme toggle in this cluster, and the
+     44 px box has room for exactly that — the zoom readout goes with the zoom
+     buttons, or it pushes the toggle off the right edge of the viewport */
+  #viewctl .iconbtn:not(#themeBtn), #viewctl .zoomlvl { display: none; }
   #viewctl .iconbtn { width: 44px; height: 44px; }
   #viewctl #themeBtn {
     color: var(--color-ink);

@@ -26,6 +26,8 @@ to assert a particular behaviour.
 
 ## Result
 
+*(As first filed — see “Resolution” at the end for the current state.)*
+
 **27 of 34 reachable affordances answer a press. Five do not.** The live majority is what
 makes the five findings rather than detector artifacts — a probe blind to this page's
 responses would have flagged all 34.
@@ -87,9 +89,31 @@ therefore shows a hand and does nothing. The dead region is only a few pixels wi
 is cosmetic next to the two above — the fix is to move the cursor declaration onto the
 children, or make the container's whole box delegate to `#chipOpen`.
 
-## What was not changed
+## Resolution — all five are fixed
 
-Nothing under `docs/mockups/` that the standalone is built from. A board card is pending on
-`6e87d28`, and changing the artifact mid-review is how earlier rounds lost their approval
-target. This sweep adds a probe and this document only; `prototype-standalone.html` still
-hashes to `e47054cb…`, byte-identical to the attachment under review.
+The sweep above was filed against a frozen artifact. That freeze ended when the board's
+2026-09-10T11:12 comment superseded the pending card, and all five were fixed in the round
+that followed. The same probe now reports **31 of 33 live, none dead** (33 rather than 34
+because the mode pill is now one `<button>` instead of a `<div>` wrapping a live child).
+
+| Finding | Fix |
+|---|---|
+| 1 — view controls | Zoom in/out/fit implemented per §7.1: range 0.25–2.0, `⌘+`/`⌘−`/`F`/`⌘0`, a level readout, buttons that disable at the ends. The zoom moves the five content layers and leaves the chrome alone. |
+| 2 — mode pill | `#modepill` is a real `<button>` and opens the §8.1 popover: the mode's execution semantics, the resolved pipeline order, the join-node note, the named anomaly behind the `⚠ 1` badge, and editable `guards`/`budget`. |
+| 3 — chip padding | `cursor: pointer` moved off `#chip` onto its live children. |
+
+Two things the sweep could not see were found while fixing them, and both were on the same
+screen:
+
+- **The three canvas nodes could not be moved at all** — 0 of 3 under a real
+  press-drag-release. The sweep scores a node live because pressing one selects it, which is
+  precisely the blind spot documented in `webkit-probe-canvas-node-drag.js`: "did anything
+  happen?" cannot catch a control that answers the wrong gesture.
+- **The legend was drawn on top of the library's footer.** `#library` is full height and
+  `#legend` was pinned bottom-left, so two panels' text overlapped in the corner of the
+  reviewed screen. No affordance was dead, so no press-based probe would ever have reported
+  it.
+
+Both are now gated: `webkit-probe-canvas-node-drag.js` asserts movement and edge tracking on
+every graph surface, and `webkit-probe-canvas-view-controls.js` asserts what the new controls
+actually do rather than that they respond.

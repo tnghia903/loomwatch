@@ -513,9 +513,66 @@ because the point is to clear controls rather than assert a behaviour. The live 
 printed alongside the failures: if a run flags everything, the detector is broken, not the
 page.
 
-Current state: 27 of 34 answer a press. The five that do not are written up in
-`TNG87_AFFORDANCE_SWEEP.md` — the view controls have no handler at all, and the mode pill's
-CANVAS_SPEC §8.1 popover is absent behind a hand cursor.
+Current state: **31 of 33 answer a press, none dead.** The five that did not are fixed and
+written up in `TNG87_AFFORDANCE_SWEEP.md`.
+
+### Promised behaviour, not mere liveness — run these two as well
+
+The sweep clears controls that answer nothing. It cannot catch a control that answers the
+*wrong* gesture, and it cannot catch a wrong answer. Both of those shipped past it:
+
+```
+swift docs/mockups/verify-webkit.swift docs/mockups/prototype-standalone.html \
+  --eval docs/mockups/webkit-probe-canvas-node-drag.js
+swift docs/mockups/verify-webkit.swift docs/mockups/prototype-standalone.html \
+  --eval docs/mockups/webkit-probe-canvas-view-controls.js
+```
+
+`canvas-node-drag` presses, drags and releases every node on `canvas` **and** `wiring`, and
+asserts the node moved in its model and that its edges followed *while the pointer was
+down*. A node is a `<button>`, so pressing it selects it and the sweep scores it live — that
+blind spot is how "I cannot move these 3 items" reached the board on a screen every gate
+called clean. The two surfaces are each other's counterfactual, and the probe also pins the
+graph's at-rest geometry so a fix to the edges cannot silently redraw the reviewed picture.
+
+`canvas-view-controls` asserts what the new controls *do*: the graph scales and the chrome
+does not, the §7.1 range clamps at both ends, a drag at a zoom other than 1.0 still lands
+under the pointer, Fit frames a deliberately scattered graph inside the space the panels
+leave free, and the §8.1 mode popover explains the mode it is actually in.
+
+### TNG-90 state gate — the twelve named states, asserted on the screens that show them
+
+```
+node docs/mockups/verify-tng90-states.mjs
+```
+
+TNG-90 requires twelve run and provenance states to be *demonstrated*. The gates above cannot
+see whether a reviewer can reach one: a state can be complete in the data tables and invisible
+on every screen, and a grep for its label passes either way, because the label is in the
+source. That is exactly how `dirty / Save & run` shipped missing — `COMPOSER.dirty` holds the
+string, nothing ever renders it, and "Save & run" greps three hits.
+
+So each check resolves a state through the screen a reviewer opens and asserts the promised
+content there. Comparative claims carry their counterfactual, because an assertion that cannot
+fail is not a gate: dirty is asserted against clean, the transport gap against the finished
+run, and one-hop expansion against the graph not exploding (six categories survive, exactly
+one opens).
+
+Three traps this probe already fell into and now documents, so nobody re-reports them:
+
+- the answer is `.rt-response`. Measuring `.rt-body` reads the **prompt**, scores the response
+  at 67 characters, and calls a healthy screen broken.
+- the prototype keeps **hidden specimens** of the other terminal strips in the DOM, so
+  `.rt-strip.halt` presence is not visibility — the cancelled strip sits on every run screen
+  with `offsetParent === null`. Filter on layout.
+- on `trace` the six category chips are **deliberately** replaced by a breadcrumb, because
+  `run.openEnt` is set and showing both would be two hops on screen at once
+  (`prototype.js`, the `if (run.openEnt) return;` guard in the category loop). Gate the depth
+  the screen is actually in.
+
+A run started from a dirty document is **asynchronous** — §1.4 requires the write to land
+first — so anything asserting a run must wait for it to be created rather than read the next
+tick. Freezing the timers immediately freezes the *save*, before any run story exists.
 
 ### TNG-115 remediation — 26 focused browser assertions, all passing
 

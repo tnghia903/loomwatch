@@ -299,7 +299,9 @@ const escapeMarkup = (value) => String(value).replace(/[&<>"']/g, (char) => ({
 })[char]);
 const stage = $('#stage');
 let state = { screen: 'canvas', theme: 'dark', graph: 'pipeline',
-              solo: 'both', selected: null, lib: false, motion: true, popFocus: null };
+              solo: 'both', selected: null, lib: false, motion: true, popFocus: null,
+              /* canvas zoom/pan — view state, never document state (§7.1) */
+              view: { z: 1, tx: 0, ty: 0 } };
 
 function markerFor(e) {
   if (e.layer === 'warp') return ' marker-end="url(#mWarp)"';
@@ -1654,7 +1656,7 @@ const SEEDS = {
    =========================================================================== */
 const CANVAS_PARTS = ['library', 'chip', 'modepill', 'viewctl', 'legend', 'edges', 'edgeLabels', 'nodes'];
 const ALL = [...CANVAS_PARTS, 'inspector', 'firstrun', 'states', 'system',
-             'switcherPop', 'palette', 'problemsPop',
+             'switcherPop', 'palette', 'problemsPop', 'modePop',
              'composer', 'overlay', 'provEdges', 'history', 'activityPanel',
              'palettePanel'];
 /* On run screens the mode pill is absorbed into the composer (TNG89 §1), so
@@ -2568,10 +2570,17 @@ let wireDrag = null;
 let libDragRef = null;
 let suppressClick = false;
 
+/* Content coordinates, which is what every caller wants: the stage's own fit
+   scale and the canvas zoom are both divided back out here, so a drag lands
+   under the pointer at any zoom instead of running away from it. */
 function stagePoint(clientX, clientY) {
   const r = stage.getBoundingClientRect();
   const s = r.width / 1600 || 1;
-  return { x: Math.round((clientX - r.left) / s), y: Math.round((clientY - r.top) / s) };
+  const v = state.view;
+  return {
+    x: Math.round(((clientX - r.left) / s - v.tx) / v.z),
+    y: Math.round(((clientY - r.top) / s - v.ty) / v.z)
+  };
 }
 function stageCoords(e) { return stagePoint(e.clientX, e.clientY); }
 function nodeAtPoint(e) {
@@ -3368,6 +3377,10 @@ function go(key) {
   else { clearWireTick(); wireDrag = null; wireTempD = null; }
   state.lib = !!s.libCollapsed;
   stage.classList.toggle('lib-collapsed', state.lib);
+  /* zoom is per-screen view state: each prototype screen is its own still, and
+     carrying a 40% zoom onto the next tab would look like a broken layout */
+  state.view = { z: 1, tx: 0, ty: 0 };
+  paintView();
   state.selected = null;
   $('#inspector').hidden = true;
   stage.classList.remove('inspecting');
@@ -3471,6 +3484,140 @@ function paintSolo() {
   if (state.solo === 'observed') { f.classList.add('soloed'); w.classList.add('dimmed'); }
 }
 
+/* ---------------------------------------------------------------------------
+   ZOOM AND FIT — CANVAS_SPEC §7.1. View state, never document state.
+
+   These three buttons shipped through four review rounds with a title, an icon
+   and no handler of any kind, sitting bottom-right on the screen every rejection
+   came from, next to a theme toggle that does work. §7.1 lists them as a
+   first-class input for both operations, so they were a spec gap, not an
+   unimplemented nicety.
+
+   Zoom moves the *content* layers and leaves the chrome alone: an app window
+   whose panels grow when you zoom the graph is not zooming, it is scaling a
+   screenshot. Everything the operator can place or drag lives in these five.
+   --------------------------------------------------------------------------- */
+const VIEW_LAYERS = ['#edges', '#edgeLabels', '#nodes', '#provEdges', '#overlay'];
+const ZOOM_MIN = 0.25, ZOOM_MAX = 2;                    /* §7.1 zoom range */
+const ZOOM_STEPS = [0.25, 0.4, 0.55, 0.7, 0.85, 1, 1.25, 1.5, 1.75, 2];
+const FIT_PAD = 64;                                     /* §7.1 fit padding */
+
+/* The shortcuts are only claimed on a screen that has a canvas — the view
+   controls are hidden on the documentation boards, and taking ⌘+ there would be
+   stealing the browser's zoom from a reviewer reading a spec page. */
+function canZoom() {
+  const vc = $('#viewctl');
+  return !!vc && !vc.hidden && document.documentElement.dataset.layout !== 'narrow';
+}
+
+function paintView() {
+  const v = state.view;
+  const identity = v.z === 1 && !v.tx && !v.ty;
+  VIEW_LAYERS.forEach((sel) => {
+    const el = $(sel);
+    if (el) el.style.transform = identity ? '' : `translate(${v.tx}px, ${v.ty}px) scale(${v.z})`;
+  });
+  const pct = Math.round(v.z * 100) + '%';
+  const zo = $('#zoomOut'), zi = $('#zoomIn'), fv = $('#fitBtn');
+  if (zo) { zo.disabled = v.z <= ZOOM_MIN + 1e-6; zo.setAttribute('aria-label', `Zoom out, currently ${pct}`); }
+  if (zi) { zi.disabled = v.z >= ZOOM_MAX - 1e-6; zi.setAttribute('aria-label', `Zoom in, currently ${pct}`); }
+  if (fv) fv.setAttribute('aria-label', `Fit view, currently ${pct}`);
+  const readout = $('#zoomLevel');
+  if (readout) readout.textContent = pct;
+}
+
+/* Anchor the zoom on the middle of the working area rather than the origin, so
+   the thing the operator was looking at is the thing that grows. */
+function zoomTo(z, anchor) {
+  const v = state.view;
+  const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+  const a = anchor || { x: 800, y: 500 };
+  const content = { x: (a.x - v.tx) / v.z, y: (a.y - v.ty) / v.z };
+  state.view = { z: next, tx: a.x - content.x * next, ty: a.y - content.y * next };
+  paintView();
+  announce(`Zoom ${Math.round(next * 100)} percent.`);
+}
+function zoomStep(dir) {
+  const v = state.view.z;
+  const next = dir > 0
+    ? (ZOOM_STEPS.find((s) => s > v + 1e-6) || ZOOM_MAX)
+    : ([...ZOOM_STEPS].reverse().find((s) => s < v - 1e-6) || ZOOM_MIN);
+  zoomTo(next);
+}
+
+/* The rectangle the chrome leaves free, measured rather than assumed: the
+   library collapses, the bottom panel is the mode pill on one screen and the
+   wire strip on another, and a fit that ignores them tucks nodes under a panel. */
+function workRect() {
+  const sr = stage.getBoundingClientRect();
+  const s = sr.width / 1600 || 1;
+  const box = (sel) => {
+    const el = $(sel);
+    if (!el || el.hidden || !el.getClientRects().length) return null;
+    const r = el.getBoundingClientRect();
+    return { x: (r.left - sr.left) / s, y: (r.top - sr.top) / s, w: r.width / s, h: r.height / s };
+  };
+  const lib = box('#library');
+  const top = box('#chip');
+  const bottom = box('#modepill') || box('#wireStrip');
+  const left = (lib ? lib.x + lib.w : 0) + FIT_PAD;
+  const top0 = (top ? top.y + top.h : 0) + FIT_PAD;
+  const bottom0 = (bottom ? bottom.y : 1000) - FIT_PAD;
+  return {
+    x: left, y: top0,
+    w: Math.max(240, 1600 - FIT_PAD - left),
+    h: Math.max(240, bottom0 - top0)
+  };
+}
+
+/* offsetLeft/offsetTop, not getBoundingClientRect: both layers are inset:0 in the
+   stage, so offsets are already content coordinates and — unlike client rects —
+   they are not themselves affected by the zoom we are about to compute. */
+function contentBBox() {
+  const els = [...document.querySelectorAll('#nodes .node'), ...document.querySelectorAll('#overlay .obs-card')]
+    .filter((el) => el.offsetParent && el.offsetWidth);
+  if (!els.length) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  els.forEach((el) => {
+    x0 = Math.min(x0, el.offsetLeft); y0 = Math.min(y0, el.offsetTop);
+    x1 = Math.max(x1, el.offsetLeft + el.offsetWidth);
+    y1 = Math.max(y1, el.offsetTop + el.offsetHeight);
+  });
+  return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+}
+
+function fitView() {
+  const b = contentBBox();
+  if (!b) return;
+  const vp = workRect();
+  /* "capped at zoom 1.0" (§7.1): fit brings scattered nodes back into view, it
+     does not magnify a small graph into a wall of two-inch text. */
+  const z = Math.max(ZOOM_MIN, Math.min(1, vp.w / b.w, vp.h / b.h));
+  state.view = {
+    z,
+    tx: vp.x + (vp.w - b.w * z) / 2 - b.x * z,
+    ty: vp.y + (vp.h - b.h * z) / 2 - b.y * z
+  };
+  paintView();
+  announce(`Fit view — ${Math.round(z * 100)} percent, all ${document.querySelectorAll('#nodes .node').length} nodes in frame.`);
+}
+
+/* ⌘0 — §7.1: back to 1.0, centred on the entrypoint. */
+function resetView() {
+  const entry = $('#nodes .node.entry') || $('#nodes .node');
+  state.view = { z: 1, tx: 0, ty: 0 };
+  if (entry) {
+    const vp = workRect();
+    state.view = {
+      z: 1,
+      tx: vp.x + vp.w / 2 - (entry.offsetLeft + entry.offsetWidth / 2),
+      ty: vp.y + vp.h / 2 - (entry.offsetTop + entry.offsetHeight / 2)
+    };
+  }
+  paintView();
+  announce('Zoom reset to 100 percent, centred on the entry point.');
+}
+
 function toggleLibrary() { state.lib = !state.lib; stage.classList.toggle('lib-collapsed', state.lib); }
 function rememberPopFocus(trigger) {
   const candidate = trigger || document.activeElement;
@@ -3484,10 +3631,114 @@ function openSwitcher(trigger) {
   focusAfterPaint('#switcherPop input');
 }
 function openProblems(trigger) { rememberPopFocus(trigger); closePops(false); $('#problemsPop').hidden = false; focusAfterPaint('#problemsPop button'); }
+
+/* ---------------------------------------------------------------------------
+   THE MODE POPOVER — CANVAS_SPEC §8.1.
+
+   The pill has carried a hand cursor across every review round while containing
+   nothing clickable, and a red `⚠ 1` badge with no way to find out what the one
+   anomaly was. §8.1 gives the pill a popover and calls it "the only place
+   execution semantics are explained"; this is that popover.
+
+   Guards and budget are team-level fields with no other home in the UI, so §8.1
+   puts their edit affordance here. They are real inputs rather than a button
+   captioned "Edit", because a control that opens nothing is the defect this
+   whole round is about.
+   --------------------------------------------------------------------------- */
+const BUS_TOOLS = ['roster', 'dispatch', 'ask', 'handoff', 'report', 'escalate'];
+/* both default to 8 when absent from the file — TEAM_CONFIG.md */
+const teamExec = { depth: 8, concurrent: 8, budget: '25.00' };
+
+function modeAnomalies(g) {
+  return (g.labels || []).filter((l) => l.alert);
+}
+
+function modePopHTML() {
+  const g = GRAPHS[state.graph] || GRAPHS.pipeline;
+  const entry = g.nodes.find((n) => n.entry) || g.nodes[0];
+  const steps = g.nodes.filter((n) => n.step).sort((a, b) => a.step - b.step);
+  const warp = g.edges.filter((e) => e.layer === 'warp' && e.to);
+  const joins = steps.filter((n) => warp.filter((e) => e.to === n.id).length > 1);
+  const anomalies = modeAnomalies(g);
+  const word = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six'][steps.length] || String(steps.length);
+
+  let html = '<div class="mp-body">';
+
+  if (g.mode === 'team') {
+    html += `<p class="t-body">
+      <code>edges</code> is empty, so <code>${escapeMarkup(entry.idText || entry.id)}</code> receives the goal
+      and decides who else to involve. All six Team Bus tools are available.</p>
+      <p class="t-meta mp-tools">${BUS_TOOLS.map((t) => `<code>${t}</code>`).join(' · ')}</p>`;
+  } else {
+    html += `<p class="t-body">
+      ${word} step${steps.length === 1 ? '' : 's'} run in the order you drew.
+      <code>dispatch</code> and <code>handoff</code> are withdrawn; the backend sequences the run.</p>
+      <ol class="mp-order">${steps.map((n) =>
+        `<li><span class="mp-step t-micro">${n.step}</span><span class="t-body-m">${escapeMarkup(n.name)}</span></li>`).join('')}</ol>
+      <p class="t-meta">${joins.length
+        ? joins.map((n) => `<code>${escapeMarkup(n.idText || n.id)}</code> receives replies from `
+            + warp.filter((e) => e.to === n.id)
+                .map((e) => `<code>${escapeMarkup((g.nodes.find((x) => x.id === e.from) || {}).idText || e.from)}</code>`)
+                .join(' and ') + ', in that order.').join(' ')
+        : 'No join node — every step has exactly one predecessor.'}</p>`;
+  }
+
+  if (anomalies.length) {
+    html += `<div class="pop-sep"></div>
+      <div class="mp-anom">
+        <div class="mp-head t-micro alert">${anomalies.length} anomal${anomalies.length === 1 ? 'y' : 'ies'}</div>
+        ${anomalies.map((a) => `<p class="t-meta">${escapeMarkup(a.title || 'Observed activity with no configured counterpart.')}</p>`).join('')}
+      </div>`;
+  }
+
+  /* §8.1 puts these here in team mode; they are team-level in both, and hiding
+     the budget on a pipeline would leave it with nowhere to be edited at all. */
+  html += `<div class="pop-sep"></div>
+    <div class="mp-guards">
+      <div class="mp-head t-micro">Guards</div>
+      <label class="mp-field"><span class="t-meta">Max dispatch depth</span>
+        <input type="number" min="1" max="64" value="${teamExec.depth}" aria-label="Max dispatch depth"
+               oninput="setGuard('depth', this.value)"></label>
+      <label class="mp-field"><span class="t-meta">Max concurrent dispatches</span>
+        <input type="number" min="1" max="64" value="${teamExec.concurrent}" aria-label="Max concurrent dispatches"
+               oninput="setGuard('concurrent', this.value)"></label>
+      <label class="mp-field"><span class="t-meta">Team budget</span>
+        <input type="text" inputmode="decimal" value="$ ${teamExec.budget}" aria-label="Team budget"
+               oninput="setGuard('budget', this.value)"></label>
+      <p class="t-meta mp-note" id="mpGuardNote">Both guards default to <code>8</code> when absent from the file.
+        Writes <code>guards:</code> and <code>budget:</code> on save.</p>
+    </div>
+  </div>`;
+  return html;
+}
+
+function setGuard(field, value) {
+  teamExec[field] = field === 'budget' ? String(value).replace(/[^0-9.]/g, '') : (parseInt(value, 10) || 1);
+  const note = $('#mpGuardNote');
+  if (note) {
+    note.innerHTML = `<code>guards: maxDispatchDepth ${teamExec.depth} · maxConcurrentDispatches ${teamExec.concurrent}</code>`
+      + ` · <code>budget: $${teamExec.budget || '0'}</code> — unsaved.`;
+  }
+  renderChip('dirty');
+}
+
+function openModePop(trigger) {
+  rememberPopFocus(trigger);
+  closePops(false);
+  $('#modePop').innerHTML = modePopHTML();
+  $('#modePop').hidden = false;
+  $('#modepill').setAttribute('aria-expanded', 'true');
+  focusAfterPaint('#modePop input');
+}
+function toggleModePop(trigger) {
+  if (!$('#modePop').hidden) return closePops();
+  openModePop(trigger);
+}
 function openPalette(trigger) { rememberPopFocus(trigger); closePops(false); $('#palette').hidden = false; $('#paletteInput').focus(); }
 function closePops(restore = true) {
-  ['switcherPop', 'palette', 'problemsPop', 'history'].forEach((i) => { const el = $('#' + i); if (el) el.hidden = true; });
+  ['switcherPop', 'palette', 'problemsPop', 'history', 'modePop'].forEach((i) => { const el = $('#' + i); if (el) el.hidden = true; });
   $('#chipOpen').setAttribute('aria-expanded', 'false');
+  $('#modepill').setAttribute('aria-expanded', 'false');
   if (restore && state.popFocus && state.popFocus.isConnected) state.popFocus.focus({ preventScroll: true });
   if (restore) state.popFocus = null;
 }
@@ -3650,12 +3901,17 @@ document.addEventListener('keydown', (e) => {
   if (meta && e.key.toLowerCase() === 'k') { e.preventDefault(); return openPalette(); }
   if (meta && e.key.toLowerCase() === 'p') { e.preventDefault(); return openSwitcher(); }
   if (meta && e.key === '\\') { e.preventDefault(); return toggleLibrary(); }
+  /* §7.1. Only claimed where there is a canvas to zoom, so the browser's own
+     ⌘+/⌘− still works on the documentation screens. */
+  if (meta && canZoom() && (e.key === '=' || e.key === '+')) { e.preventDefault(); return zoomStep(1); }
+  if (meta && canZoom() && (e.key === '-' || e.key === '_')) { e.preventDefault(); return zoomStep(-1); }
+  if (meta && canZoom() && e.key === '0') { e.preventDefault(); return resetView(); }
   if (e.key === 'Escape') {
     /* Esc order: dismiss popover → cancel placement → wiring unwind → deselect → close inspector (§11, TNG-121, TNG-123) */
     if (!$('#activityPanel').hidden) return closeActivity();
     if (armed) return cancelArm();
     if (stage.dataset.screen === 'wiring' && wiringKey(e)) return;
-    const open = ['switcherPop', 'palette', 'problemsPop', 'history'].some((i) => { const el = $('#' + i); return el && !el.hidden; });
+    const open = ['switcherPop', 'palette', 'problemsPop', 'history', 'modePop'].some((i) => { const el = $('#' + i); return el && !el.hidden; });
     if (open) return closePops();
     if (state.selected) return selectNode(null);
     if (stage.classList.contains('workspace') && run.openEnt) return toggleEnt(null);
@@ -3671,6 +3927,7 @@ document.addEventListener('keydown', (e) => {
   if (typing) return;
   if (stage.dataset.screen === 'wiring' && wiringKey(e)) return;
   if (e.key.toLowerCase() === 'l') return cycleSolo();
+  if (e.key.toLowerCase() === 'f' && canZoom()) { e.preventDefault(); return fitView(); }
   if (e.key === '?') return $('#notesBtn').click();
   if (e.key === 'F8') { e.preventDefault(); return openProblems(); }
   if (/^[1-9]$/.test(e.key)) return go(ORDER[+e.key - 1]);
@@ -3703,6 +3960,10 @@ function fit() {
   if (narrow) {
     stage.style.transform = 'none';
     stage.style.marginRight = '0';
+    /* the narrow layout reflows to a column; a canvas zoom has nothing to act on
+       and would only push content out of the flow */
+    state.view = { z: 1, tx: 0, ty: 0 };
+    paintView();
     return;
   }
   const pad = 32;

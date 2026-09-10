@@ -385,7 +385,9 @@
        (`edges: []` → team), never a toggle. The run slot stays reserved
        and disabled: running a team arrives in a later phase (§14).
        ================================================================= -->
-  <div class="panel bottom cx e1" id="modepill">
+  <button type="button" class="panel bottom cx e1" id="modepill"
+          aria-haspopup="dialog" aria-expanded="false" aria-controls="modePop"
+          title="What this mode means for execution" onclick="toggleModePop(this)">
     <span class="glyph" id="modeGlyph"></span>
     <span class="label t-body-m" id="modeLabel">Pipeline · 3 steps</span>
     <span class="anomaly t-micro" id="modeAnomaly">
@@ -395,7 +397,17 @@
     <span class="runslot" title="Running a team arrives in a later phase.">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4l12 8-12 8z"/></svg>
     </span>
-  </div>
+  </button>
+
+  <!-- =================================================================
+       MODE POPOVER — §8.1. "The only place execution semantics are
+       explained", and disclosed rather than resident. Content is written
+       by renderModePop() because it differs per mode, and because the
+       anomaly count on the pill is unreadable until something says what
+       the anomaly was.
+       ================================================================= -->
+  <div class="pop e2" id="modePop" role="dialog" aria-label="What this mode means"
+       style="left:50%;bottom:76px;transform:translateX(-50%);width:412px" hidden></div>
 
   <!-- =================================================================
         WIRE STRIP — TNG-123. Bottom-centre on the freeform canvas screen,
@@ -421,9 +433,10 @@
        §11). The glyph names the DESTINATION, not the current state.
        ================================================================= -->
   <div class="panel right bottom e1" id="viewctl" aria-label="View controls">
-    <button class="iconbtn" title="Zoom out (⌘−)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12h14"/></svg></button>
-    <button class="iconbtn" title="Zoom in (⌘+)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg></button>
-    <button class="iconbtn" title="Fit view (F)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 3H5a2 2 0 0 0-2 2v4M15 3h4a2 2 0 0 1 2 2v4M21 15v4a2 2 0 0 1-2 2h-4M3 15v4a2 2 0 0 0 2 2h4"/></svg></button>
+    <button class="iconbtn" id="zoomOut" type="button" title="Zoom out (⌘−)" onclick="zoomStep(-1)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12h14"/></svg></button>
+    <span class="zoomlvl t-mono-sm" id="zoomLevel" title="Zoom level — ⌘0 resets to 100% on the entry point">100%</span>
+    <button class="iconbtn" id="zoomIn" type="button" title="Zoom in (⌘+)" onclick="zoomStep(1)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button class="iconbtn" id="fitBtn" type="button" title="Fit view (F)" onclick="fitView()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 3H5a2 2 0 0 0-2 2v4M15 3h4a2 2 0 0 1 2 2v4M21 15v4a2 2 0 0 1-2 2h-4M3 15v4a2 2 0 0 0 2 2h4"/></svg></button>
     <button class="iconbtn" id="themeBtn" onclick="toggleTheme()"><span class="sysdot"></span></button>
   </div>
 

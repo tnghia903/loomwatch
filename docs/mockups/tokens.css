@@ -182,7 +182,7 @@
   --lw-library-rail-w:   48px;
   --lw-inspector-w:      320px;
   --lw-chip-h:           44px;
-  --lw-viewctl-w:        168px;
+  --lw-viewctl-w:        212px;   /* 4 × 36 icon + the zoom readout (§7.1) */
 
   /* space — 4px base, eight steps only */
   --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
