@@ -545,10 +545,10 @@ PROVENANCE
 Escalated or owned elsewhere; **not** decided here:
 
 1. **Cancellation.** `CONTRACT §3.2` places pause, resume, mid-run steering and cancellation
-   outside the contract, and `ARCHITECTURE §6` defers writes to running execution. So there
-   is **no Stop control** in this design, and the composer's action is start-only. If the
-   board wants a stop, it is an `ARCHITECTURE §6` amendment plus a contract change — not a
-   button.
+   outside the contract, and `ARCHITECTURE §6` defers writes to running execution. TNG-119
+   requires the prototype to preserve a clickable cancelled/retry path, so Stop is a
+   design-state demonstration only. Production still requires an `ARCHITECTURE §6`
+   amendment plus an authenticated cancel command and terminal event.
 2. **`runs:evidence` authorization UX.** `[ Show events ]` is absent without the scope
    rather than present-and-failing. How a principal *obtains* the scope is not a canvas
    concern.
@@ -556,8 +556,8 @@ Escalated or owned elsewhere; **not** decided here:
    only commits to remaining usable at it via one-hop expansion and filters.
 4. **Which capture adapters exist at launch.** The design renders `unavailable` with a
    reason honestly for every category, so it is correct whether zero or six adapters ship.
-   `skills` in particular has no adapter today and will read **Not captured** — by design,
-   not as a defect.
+   The demo's `release-evidence` skill node assumes an explicit accepted `used_skill` event;
+   without such an adapter/event, the category reads **Not captured** rather than inferring use.
 5. **Notification content for run completion** — phase 05, `CANVAS_SPEC §14`.
 
 ---
@@ -647,7 +647,7 @@ Agent A ────────────────────────
 ```
 
 The same renderer then projects `knowledge search`, `repository`, `external source`,
-`file`, and sanitized `command` activity. Cards share geometry, but always show kind,
+recorded `skill`, `file`, and sanitized `command` activity. Cards share geometry, but always show kind,
 ordinal, event time, status, and owner. A multi-agent handoff changes the origin of later
 edges: Agent A owns Notion/search/repository/source; Agent B owns file/command. Reordering
 the viewport never changes event order.
@@ -690,11 +690,13 @@ Assumptions:
    updates state rather than duplicating.
 3. Search, file, repository, and external locations arrive as source subtypes within the
    existing provenance entity vocabulary unless a future contract explicitly adds kinds.
-4. Command text and output are sanitized before delivery; the UI does not become a secret
+4. Skill use arrives only as an accepted observable activity event with a stable skill ID;
+   prompt text, installation, or filesystem presence alone never becomes a skill node.
+5. Command text and output are sanitized before delivery; the UI does not become a secret
    scrubber. Output is bounded/paged and remains collapsed by default.
-5. Replay consumes the persisted projected graph and ordered timestamps; it never calls the
+6. Replay consumes the persisted projected graph and ordered timestamps; it never calls the
    tool, command, source, or agent again.
-6. Transport `offline` is independent of task/run state. The last known task remains visible
+7. Transport `offline` is independent of task/run state. The last known task remains visible
    with an `OFFLINE` qualifier and watermark until recovery/backfill.
 
 ### 11.5 Additional acceptance failures
@@ -714,8 +716,8 @@ The run workspace becomes one source-ordered Command / Inspect column:
 
 ```text
 document + theme
-configured agent tasks
-lifecycle → goal → observed activity → response
+Prompt → Run branch → lead Agent A → Agent A evidence
+→ delegated Agent B → Agent B evidence → Output / response
 coverage → filters → summaries → selected evidence
 viewport-docked composer
 ```
@@ -737,3 +739,121 @@ Additional acceptance failures:
     core action smaller than 44 px, or hides theme switching. **Fail.**
 22. Narrow mode loses submission, response/provenance selection, filtering, automatic
     Agent A → Notion evidence, or cancel/retry state coverage. **Fail.**
+
+---
+
+## 12. TNG-119 revision — prompt-to-output is the primary graph narrative
+
+This section supersedes any earlier composition that positioned Goal and Response as a
+sidecar to the configured team. It revises the design prototype and documentation only; it
+does not implement or authorize a production component, endpoint, event, or schema change.
+
+### 12.1 Information hierarchy
+
+The canvas first reads as one causal sentence:
+
+```text
+Prompt / user request ─starts─► Run 01 ─assigns lead─► Agent A
+Agent A ─delegates review─► Agent B ─responds with─► Output / response
+Run 01 ─completes as───────────────────────────────► Output / response
+
+Agent A ─invoked tool─► Notion
+Agent A ─searched / read / consulted / used─► its evidence
+Agent B ─read / ran──────────────────────────► its evidence
+```
+
+The durable Prompt is first and the terminal Output is last. Lifecycle summary and chrome
+support that story. Provenance summaries, details, and filters are tertiary: opening or
+filtering them never removes or reorders the causal spine.
+
+### 12.2 Node vocabulary
+
+| Visible node | Meaning | Required visible content |
+|---|---|---|
+| **Prompt · user request** | exact submitted input | verbatim text and `Original kept`; survives all terminal states and retry |
+| **Run NN** | one immutable attempt | attempt number, state, live/replay, retry parent when present |
+| **Agent A · lead** | initiating task owner | owner, task title, queued/starting/running/streaming/done/error/cancelled/offline word |
+| **Agent B · responder** | delegated owner and canonical responder | same task contract plus incoming delegation |
+| **Evidence** | observed tool, command, knowledge search, file, repository, source, or skill activity | exact owner, relation, order, time, status, and capture quality in detail |
+| **Output / response** | streaming or terminal result | producing agent, result state, retained partial/error/cancel content, provenance disclosure |
+| **Previous branch** | retained retry ancestor | prior run/state and accumulated evidence list; never merges with the next attempt |
+
+`Goal` remains contract terminology; this surface visibly types the node **Prompt · user
+request** to make origin and durability legible without contract knowledge.
+
+### 12.3 Edge meanings and direction
+
+Every arrow points from cause/owner to effect. Visible names are `starts`, `assigns lead`,
+`delegates review`, `invoked tool`, `searched knowledge`, `read repository`, `consulted
+source`, `used skill`, `read file`, `ran command`, `responds with`, `completes as`, and
+`retry preserves`. Prompt never points directly to Output. Every evidence edge starts at
+the exact producing agent. Completed/replayed provenance is neutral; only work happening
+now may use the animated blue live stroke.
+
+### 12.4 Ordering, retention, live, and replay
+
+1. Place Prompt, attempt, lead, delegated agents, and Output in causal order.
+2. Under each agent, sort evidence by accepted event `seq`; layout may wrap, but ordinal and
+   time never change.
+3. The demo first projects **Agent A → Notion · invoked tool**, then knowledge search,
+   repository, external source, explicit skill, Agent B file, and Agent B command evidence.
+4. Terminal, partial, failed, and cancelled states freeze the Prompt, spine, accepted
+   evidence, and available response content.
+5. Retry snapshots the prior run plus accumulated evidence and creates the distinguishable
+   next `Run NN`. Branches never merge.
+6. Replay renders the same retained IDs, order, timestamps, branch lineage, and ownership
+   without animation, calls, or re-execution.
+7. Filtering affects detail/summary results only, never Prompt, run, agents, owner edges, or
+   Output.
+
+Live mode steps through queued → starting → running/streaming → terminal. Motion is limited
+to the current blue agent perimeter, live evidence edge, and streaming underline. Reduced
+motion replaces these with a static 2 px blue perimeter and static dashed live edge.
+Reconnection remains transport state and cannot create, cancel, or advance a run.
+
+### 12.5 Accessibility and theme tokens
+
+Agent and evidence cards are native buttons. Enter and Space match click; Space never
+scrolls. Output is a focusable article with button semantics only when it expands
+provenance. `aria-expanded` mirrors Response, category, entity, and previous-branch state.
+Esc unwinds the deepest disclosure and restores focus to its trigger. At 390 px, CSS/DOM
+order follows the same causal sentence, every primary target is at least 44 px, and edge
+geometry disappears only where relationship words remain on cards.
+
+Both Quarry Light and Obsidian & Gilt consume the existing semantic/component tokens. Blue
+is live only; `ok`, `alert`, and `halt` carry success, error, cancellation/offline with
+glyphs and words. Gold/bronze remains scarce emphasis/focus and does not decorate every
+terminal or edge. No new product hex values are introduced.
+
+### 12.6 Backend/schema and rationale assumptions
+
+- `Run NN`, `Agent A/B`, and relationship text are presentation labels over stable Prompt,
+  Run, agent, response, and provenance IDs.
+- Ownership requires `runId`, `agentId`, task/event IDs, monotonic `seq`, timestamp,
+  activity kind/status, sanitized label/subtype, and capture status before projection. The
+  client never infers ownership from names, prompt prose, or arrival adjacency.
+- Search, file, repository, and external location remain source subtypes unless the contract
+  adds kinds. A skill node requires an accepted observable `used_skill` event; installation,
+  filesystem presence, or prose mention alone is not use.
+- Output producer identity must be delivered or mapped from the canonical final agent; it
+  may not be inferred from answer prose.
+- Retry requires a new run ID plus `retryOfRunId` (or equivalent lineage) and retained prior
+  projection. Sequential numbers are display labels, not identifiers.
+- Cancel is demonstrated because TNG-119 requires cancelled/retry paths, but the current
+  contract does not authorize it. Production needs an authenticated cancel command and
+  terminal event; closing a connection is not cancellation.
+- None of this changes `team.schema.yaml`, writes runtime nodes to YAML, or amends the frozen
+  WebSocket schema.
+
+The UI may expose concise recorded/derived rationale summaries, citations, sanitized tool
+or command evidence, and capture gaps. It never requests, stores, labels, or reveals hidden
+chain-of-thought, and never materializes evidence from prose alone.
+
+Additional acceptance failures:
+
+23. The first durable runtime node is not visibly Prompt, Goal, or User request. **Fail.**
+24. Named direction cannot be followed Prompt → run → lead → delegation → evidence → responder → Output. **Fail.**
+25. Expansion or filtering removes the causal spine. **Fail.**
+26. Terminal/cancel/error/retry loses original input or accepted evidence. **Fail.**
+27. Retry overwrites the prior branch. **Fail.**
+28. Any required evidence type lacks exact producer ownership, order, time, or state. **Fail.**

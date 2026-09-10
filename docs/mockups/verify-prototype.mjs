@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Focused TNG-115 verifier for the generated standalone candidate.
+/* Focused TNG-119 verifier for the generated standalone candidate.
    Drives real keyboard events through headless Chrome; no project install or
    network is required. Set CHROME_BIN when Chrome is not in a standard path. */
 
@@ -18,7 +18,7 @@ const chromeBin = process.env.CHROME_BIN || (
     : 'google-chrome'
 );
 const scratch = process.env.PAPERCLIP_RUN_SCRATCH_DIR || tmpdir();
-const profile = await mkdtemp(resolve(scratch, 'loomwatch-tng115-'));
+const profile = await mkdtemp(resolve(scratch, 'loomwatch-tng119-'));
 
 const port = await new Promise((resolvePort, reject) => {
   const server = createServer();
@@ -39,6 +39,8 @@ const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)
 let socket;
 let nextId = 0;
 const pending = new Map();
+const requests = [];
+const runtimeErrors = [];
 
 async function endpoint(path) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -63,7 +65,12 @@ async function connect() {
   });
   socket.addEventListener('message', ({ data }) => {
     const message = JSON.parse(data);
-    if (!message.id || !pending.has(message.id)) return;
+    if (!message.id) {
+      if (message.method === 'Network.requestWillBeSent') requests.push(message.params.request.url);
+      if (message.method === 'Runtime.exceptionThrown') runtimeErrors.push(message.params.exceptionDetails.text);
+      return;
+    }
+    if (!pending.has(message.id)) return;
     const { resolve: resolveCall, reject } = pending.get(message.id);
     pending.delete(message.id);
     if (message.error) reject(new Error(message.error.message));
@@ -71,6 +78,7 @@ async function connect() {
   });
   await send('Page.enable');
   await send('Runtime.enable');
+  await send('Network.enable');
 }
 
 function send(method, params = {}) {
@@ -121,6 +129,28 @@ try {
   await navigate('answered,dark');
   const answeredReady = await evaluate("({href:location.href, screen:document.querySelector('#stage')?.dataset.screen, nodes:document.querySelectorAll('[data-node]').length, overlay:document.querySelector('#overlay')?.childElementCount})");
   assert(answeredReady.nodes > 0, `Answered screen did not render nodes: ${JSON.stringify(answeredReady)}`);
+  const causalStory = await evaluate(`(() => {
+    const overlay = document.querySelector('#overlay');
+    const labels = [...overlay.querySelectorAll('.story-label')].map((node) => node.textContent.trim());
+    return {
+      prompt: overlay.querySelector('.story-prompt')?.textContent,
+      run: overlay.querySelector('.run-node')?.textContent,
+      agentA: overlay.querySelector('.story-agent-a')?.textContent,
+      agentB: overlay.querySelector('.story-agent-b')?.textContent,
+      output: overlay.querySelector('.story-output')?.textContent,
+      evidence: overlay.querySelectorAll('.story-evidence').length,
+      evidenceText: [...overlay.querySelectorAll('.story-evidence')].map((node) => node.textContent).join(' '),
+      notion: overlay.querySelector('[data-activity="la1"]')?.textContent,
+      storyEdges: document.querySelectorAll('#provGroup .story-edge').length,
+      labels
+    };
+  })()`);
+  assert(/Prompt · user request/.test(causalStory.prompt) && /Original kept/.test(causalStory.prompt), `Durable Prompt node is missing: ${JSON.stringify(causalStory)}`);
+  assert(/Run 01/.test(causalStory.run) && /Initiating branch/.test(causalStory.run), `Explicit initiating Run node is missing: ${JSON.stringify(causalStory)}`);
+  assert(/Agent A · lead/.test(causalStory.agentA) && /Agent B · responder/.test(causalStory.agentB), `Lead/responder ownership is missing: ${JSON.stringify(causalStory)}`);
+  assert(/Output \/ response · Agent B/.test(causalStory.output), `Explicit terminal output ownership is missing: ${JSON.stringify(causalStory)}`);
+  assert(causalStory.evidence === 7 && /Notion/.test(causalStory.notion) && /knowledge search/.test(causalStory.evidenceText) && /repository/.test(causalStory.evidenceText) && /external source/.test(causalStory.evidenceText) && /release-evidence/.test(causalStory.evidenceText) && /file/.test(causalStory.evidenceText) && /sanitized command/.test(causalStory.evidenceText) && causalStory.storyEdges >= 5, `Agent-owned evidence path is incomplete: ${JSON.stringify(causalStory)}`);
+  assert(causalStory.labels.some((label) => /starts/.test(label)) && causalStory.labels.some((label) => /assigns lead/.test(label)) && causalStory.labels.some((label) => /delegates review/.test(label)) && causalStory.labels.some((label) => /responds with/.test(label)), `Named directional story edges are incomplete: ${JSON.stringify(causalStory)}`);
   await evaluate("document.querySelector('[data-node=\"n1\"]').focus()");
   await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
   const nodeOpened = await evaluate("({hidden:document.querySelector('#inspector').hidden, active:document.activeElement.outerHTML.slice(0,160), selected:document.querySelector('[data-node=\"n1\"]')?.getAttribute('aria-expanded')})");
@@ -130,6 +160,9 @@ try {
   assert(nodeClosed.hidden && /data-node=/.test(nodeClosed.active), `Node inspector dismissal did not restore focus: ${JSON.stringify(nodeClosed)}`);
 
   await navigate('running,dark');
+  await evaluate("document.documentElement.dataset.motion = 'reduce'");
+  const reducedLive = await evaluate("(() => { const node = document.querySelector('.story-agent-a'); const css = getComputedStyle(node); return {animation:css.animationName, border:css.borderWidth, label:node.textContent}; })()");
+  assert(reducedLive.animation === 'none' && reducedLive.border === '2px' && /RUNNING|STREAMING/.test(reducedLive.label), `Reduced-motion running state lost its static blue treatment: ${JSON.stringify(reducedLive)}`);
   await evaluate("document.querySelector('[data-activity=\"la1\"]').focus(); document.querySelector('#stage').scrollTop = 0");
   await key(' ', { code: 'Space', virtualKeyCode: 32 });
   assert(await evaluate("!document.querySelector('#activityPanel').hidden && document.activeElement.id === 'activityClose' && document.querySelector('#stage').scrollTop === 0"), 'Space did not inspect live activity without scrolling');
@@ -153,9 +186,16 @@ try {
   await key(' ', { code: 'Space', virtualKeyCode: 32 });
   assert(await evaluate("document.querySelector('[data-filter-cat=\"skills\"]').getAttribute('aria-pressed') === 'false' && document.activeElement.dataset.filterCat === 'skills'"), 'Filter state/focus did not survive rerender');
 
+  await navigate('answered,dark');
+  await evaluate("[...document.querySelectorAll('#compAct button')].find((button) => /Retry/.test(button.textContent)).click()");
+  const retryBranch = await evaluate("({run:document.querySelector('.run-node')?.textContent, prior:document.querySelector('#priorBranch')?.textContent, prompt:document.querySelector('.story-prompt')?.textContent, expanded:document.querySelector('#priorBranch')?.getAttribute('aria-expanded')})");
+  assert(/Run 02/.test(retryBranch.run) && /Previous branch · Run 01/.test(retryBranch.prior) && /evidence kept/.test(retryBranch.prior) && /Review the ACP spine/.test(retryBranch.prompt), `Retry did not preserve input/evidence in a distinguishable branch: ${JSON.stringify(retryBranch)}`);
+  await evaluate("clearTimers()");
+
   await viewport(390, 844);
   for (const theme of ['dark', 'light']) {
     await navigate(`answered,${theme}`);
+    await evaluate("SEEDS.answered(); paintRun()");
     const narrow = await evaluate(`(() => {
       const stage = document.querySelector('#stage');
       const response = document.querySelector('#runtimeResponse');
@@ -169,6 +209,8 @@ try {
         theme: document.documentElement.dataset.theme,
         transform: getComputedStyle(stage).transform,
         responseFont: getComputedStyle(response.querySelector('.rr-body')).fontSize,
+        responseClass: response.querySelector('.rr-body').className,
+        responseText: response.querySelector('.rr-body').textContent.slice(0, 40),
         themeTarget: themeButton.getBoundingClientRect().height,
         themeDisplay: getComputedStyle(themeButton).display,
         themeParentDisplay: getComputedStyle(themeButton.parentElement).display,
@@ -184,7 +226,7 @@ try {
     })()`);
     assert(narrow.layout === 'narrow' && narrow.theme === theme, `${theme} narrow mode did not initialize`);
     assert(narrow.transform === 'none', `${theme} narrow mode still scales the stage`);
-    assert(narrow.responseFont === '14px', `${theme} narrow response text was scaled`);
+    assert(narrow.responseFont === '14px', `${theme} narrow response text was scaled: ${JSON.stringify(narrow)}`);
     assert(narrow.themeTarget >= 44 && narrow.themeDisplay !== 'none' && narrow.themeParentDisplay !== 'none' && narrow.themeTop >= 82 && narrow.themeRight <= 390 && narrow.themeHit === 'themeBtn', `${theme} narrow theme control is not visible/reachable: ${JSON.stringify(narrow)}`);
     assert(narrow.composerWidth <= narrow.stageWidth && narrow.overflow <= 1, `${theme} narrow composition overflows horizontally`);
     assert(narrow.composerBottom <= narrow.viewportHeight && narrow.composerBottom >= narrow.viewportHeight - 16, `${theme} narrow composer is not viewport-docked`);
@@ -199,7 +241,10 @@ try {
   await evaluate("[...document.querySelectorAll('#compAct button')].find((button) => button.textContent.trim() === 'Stop').click()");
   assert(await evaluate("/Cancelled/.test(document.querySelector('#runtimeResponse').textContent) && [...document.querySelectorAll('#compAct button')].some((button) => /Retry/.test(button.textContent))"), 'Narrow cancel/retry state did not remain available');
 
-  console.log('TNG-115 verification: 26 assertions passed');
+  assert(runtimeErrors.length === 0, `Standalone emitted runtime exceptions: ${JSON.stringify(runtimeErrors)}`);
+  assert(requests.every((url) => url.startsWith('file:') || url.startsWith('data:')), `Standalone attempted a network request: ${JSON.stringify(requests)}`);
+
+  console.log('TNG-119 verification passed: causal graph, interaction, themes, narrow layout, reduced motion, retry retention, and offline loading');
 } finally {
   if (socket) socket.close();
   await new Promise((resolveExit) => {

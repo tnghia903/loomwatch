@@ -18,6 +18,22 @@ Nothing below requires a change to `schemas/team.schema.yaml` or the frozen WebS
 schema; the two places where a design wants something the backend does not have are flagged
 in §17 as escalations, not designed around.
 
+## TNG-119 approval-candidate revision
+
+The runtime canvas is now composed as a **Monitor** surface whose first read is the complete
+causal sentence: **Prompt / user request → Run → lead Agent A → delegated Agent B → each
+agent's evidence → Output / response**. Named directional edges carry `starts`, `assigns
+lead`, `delegates review`, evidence relations, `responds with`, and `completes as`. The
+Prompt, attempt, agents, accumulated evidence, and terminal Output remain visible while the
+reviewer expands/collapses provenance or changes filters. Retry keeps the original Prompt,
+retains a prior-branch evidence summary, and creates a distinct next run attempt.
+
+This revision changes only the design prototype and documentation. The complete information
+hierarchy, node vocabulary, edge semantics, ordering/retention rules, live-versus-replay
+behavior, keyboard/focus contract, token discipline, rationale boundary, and explicit
+backend/schema assumptions are normative in
+[`TNG89_INTERACTION.md §12`](TNG89_INTERACTION.md#12-tng-119-revision--prompt-to-output-is-the-primary-graph-narrative).
+
 ---
 
 ## 0. The eleven changes, and why each one

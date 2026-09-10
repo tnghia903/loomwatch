@@ -3,6 +3,32 @@
 The reviewable output of the "Obsidian & Gilt" redesign. No design tool the rest of the
 team cannot open.
 
+## TNG-119 revision — prompt-to-output is the canvas story
+
+Screens 8–11 now read left-to-right as one inspectable causal graph:
+
+```text
+Prompt / user request → Run 01 → Agent A · lead → Agent B · responder → Output / response
+                               ↘ agent-owned evidence ↗
+```
+
+Every arrow is directional and named. Submitting the Notion example steps through queued,
+starting, running/streaming, delegation, seven accepted evidence events, the final responder,
+and terminal output. The first event is visibly **Agent A → Notion · invoked tool**; the same
+projection then materializes knowledge search, repository, external source, explicit skill,
+file, and command evidence from its exact owner. Completion freezes the whole path. Opening
+the Output reveals provenance and filters without replacing the path.
+
+Cancelled, partial, failed, and retry rendering retain the exact Prompt and accepted evidence.
+Retry creates `Run 02 · Retry of Run 01` plus a separately inspectable previous-branch card;
+it never overwrites the original attempt. At 390 px the coordinate edges yield to the same
+source-ordered sentence, with relationship words retained on cards.
+
+Normative details and backend boundaries:
+[`../TNG89_INTERACTION.md §12`](../TNG89_INTERACTION.md#12-tng-119-revision--prompt-to-output-is-the-primary-graph-narrative).
+This is still a prototype/documentation deliverable only; no production UI, API, event, or
+schema implementation is included.
+
 ## TNG-115 revision — keyboard and narrow-layout remediation
 
 The approval candidate now treats the run workspace as a **Command / Inspect** surface at
@@ -33,8 +59,8 @@ Keyboard behavior is now executable rather than merely labelled:
 
 The narrow interaction pass covers prompt submission, automatic Agent A → Notion activity,
 activity inspection, terminal-response activation, provenance expand/collapse, filtering,
-theme switching, and the existing stop/cancel/retry state demonstration. Desktop geometry
-and all TNG-113 live ownership behavior remain unchanged.
+theme switching, and the existing stop/cancel/retry state demonstration. TNG-119 re-composes
+desktop runtime geometry around the causal spine; all TNG-113 live ownership behavior remains.
 
 ## TNG-113 revision — operational provenance
 
@@ -43,7 +69,8 @@ UI or backend. Submit the prefilled Notion example on **Composer**: Agent A move
 `QUEUED → STARTING → RUNNING/STREAMING → DONE`, its node receives a breathing blue border,
 and ordered evidence automatically materializes with direct owner edges. The first event is
 the explicit **Agent A → Notion** example; knowledge search, repository, external source,
-Agent B file activity, and Agent B command activity follow through the same renderer.
+recorded skill use, Agent B file activity, and Agent B command activity follow through the
+same renderer.
 
 Every live state keeps a glyph and visible word. `Motion: reduced` replaces the breathing
 border with a static 2 px blue perimeter. Gold remains reserved for product emphasis,
@@ -129,12 +156,25 @@ exact screen and theme — `prototype-standalone.html#team,light`.
 | 5 | `switcher` | Document switcher | How do you see, switch and write the file? |
 | 6 | `palette` | Command palette | ⌘K as the whole menu. |
 | 7 | `problems` | Validation | Incomplete vs. invalid, and how you get to the cause. |
-| 8 | `compose` | Composer | How does a goal get from the operator to the team? |
-| 9 | `running` | Live response | Current agent tasks, blue execution perimeter, and automatic Agent A/B evidence ownership. |
-| 10 | `answered` | Provenance | A `partial` answer, semantic error treatment, and six coverage summaries. |
-| 11 | `trace` | Expanded trace | Direct agent → evidence ownership, ordering/time/status, details, and all four evidence-quality states. |
+| 8 | `compose` | Composer | Start with a prompt and submit the concrete Notion example. |
+| 9 | `running` | Causal run | Prompt → Run → lead/delegation → live agent-owned evidence → streaming Output. |
+| 10 | `answered` | Durable path + provenance | The entire partial path remains while six coverage summaries and filters open. |
+| 11 | `trace` | Expanded trace | The complete prompt-to-output spine plus direct evidence ownership, details, and capture quality. |
 | 12 | `states` | State matrix | Loading, failure, read-only, conflict, empty. |
 | 13 | `system` | Design system | Tokens, type, elevation, status, edge layers, every node state. |
+
+### TNG-119 acceptance matrix
+
+| AC | Prototype evidence | Automated verification |
+|---|---|---|
+| 1 | Durable `Prompt · user request`, `Run 01`, and named `starts` / `assigns lead` arrows | required nodes/labels and directed SVG paths |
+| 2 | Timed queued → starting → agent/evidence → responder → terminal sequence | lifecycle transitions and seven ordered evidence cards |
+| 3 | Agent A/B ownership plus queued/running/streaming/done/error/cancelled; blue live perimeter | visible state words, semantic classes, reduced-motion computed style |
+| 4 | Notion tool, knowledge search, repository, source, skill, file, command | exact card labels/relations and Agent A → Notion edge |
+| 5 | Explicit Output / response with producer/run edges; retained partial/cancel/retry branch | terminal path, prior branch, evidence count, run numbering |
+| 6 | Submit, inspect, expand/collapse, filter, retry | real keyboard/click events and focus restoration |
+| 7 | [`TNG89_INTERACTION.md §12`](../TNG89_INTERACTION.md#12-tng-119-revision--prompt-to-output-is-the-primary-graph-narrative) | documentation phrase/section checks |
+| 8 | Both themes, keyboard, reduced motion, 390 px, offline standalone | headless Chrome plus external-reference scan |
 
 ### Controls
 

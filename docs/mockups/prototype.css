@@ -1080,6 +1080,35 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
 .rt-head .spacer { flex: 1; }
 .rt-body { color: var(--color-ink); }
 
+/* TNG-119: the runtime overlay is a causal story, not a loose set of cards.
+   Prompt and run are durable anchors; semantic status colours remain reserved
+   for lifecycle, while the story itself uses the neutral provenance stroke. */
+.story-prompt {
+  min-height: 112px;
+  background: var(--color-panel-solid);
+  border-width: 1.5px;
+}
+.story-prompt .prompt-lock { color: var(--color-ok); text-transform: none; letter-spacing: 0; }
+.run-node {
+  min-height: 78px;
+  justify-content: center;
+  background: var(--color-live-tint);
+}
+.run-node .run-meta { color: var(--color-ink-2); }
+.story-edge { stroke-width: 1.5px; stroke-opacity: .82; }
+.story-label { color: var(--color-ink-2); }
+.story-output { border-width: 1.5px; }
+.prior-branch {
+  position: absolute; left: var(--x); top: var(--y);
+  width: 680px; min-height: 62px; padding: 10px 12px;
+  border: 1px dashed var(--color-halt); border-radius: var(--r-md);
+  background: var(--color-panel-solid); color: var(--color-ink-2);
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  text-align: left; cursor: pointer;
+}
+.prior-branch .prior-evidence { color: var(--color-ink-3); text-wrap: pretty; }
+.prior-edge { stroke: var(--color-halt); stroke-dasharray: 3 4; }
+
 /* the Response is the one runtime node that is OPAQUE: it is the thing being
    read, and e2's law forbids tinting text the operator reads carefully. */
 .rt-response {
@@ -1322,7 +1351,7 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
 .cite { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
 
 /* filters gain agent / status / time (addendum §5) */
-#filters { width: 210px; max-height: 400px; overflow-y: auto; }
+#filters { width: 210px; max-height: 200px; overflow-y: auto; }
 #filters .fgroup { display: flex; flex-direction: column; gap: 5px; }
 #filters .fhead { color: var(--color-ink-3); margin-top: var(--sp-2); }
 .seg { display: flex; gap: 3px; }
@@ -1372,6 +1401,7 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
 .activity-ent .ae-order { color: var(--color-ink-3); }
 .activity-ent .ae-main { display: flex; align-items: center; gap: 6px; color: var(--color-ink); }
 .activity-ent .ae-sub { display: flex; align-items: center; gap: 5px; color: var(--color-ink-2); white-space: nowrap; }
+.activity-ent .ae-detail { color: var(--color-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .life-strip {
   position: absolute; left: var(--x); top: var(--y);
@@ -1537,6 +1567,24 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
     transform: none !important;
   }
   #overlay > .prov-label { display: none; }
+  #overlay > .life-strip { order: 1; }
+  #overlay > .story-prompt { order: 2; }
+  #overlay > .run-node { order: 3; }
+  #overlay > .story-agent-a { order: 4; }
+  #overlay > .story-evidence-researcher { order: 5; }
+  #overlay > .story-agent-b { order: 6; }
+  #overlay > .story-evidence-reviewer { order: 7; }
+  #overlay > .story-output { order: 8; }
+  #overlay > .prior-branch { order: 9; }
+  #overlay > #provHead { order: 10; }
+  #overlay > #filters { order: 11; }
+  #overlay > .rt-chip { order: 12; }
+  #overlay > .ent, #overlay > .prov-empty { order: 13; }
+  #overlay > .btn-back { order: 14; }
+  #overlay > .node {
+    min-height: 132px;
+  }
+  #overlay > .node .handle, #overlay > .node .step { display: none; }
   #overlay .life-strip {
     min-height: 56px;
     flex-wrap: wrap;
@@ -1550,12 +1598,11 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
   #overlay #provHead { min-height: 44px; flex-wrap: wrap; }
   #overlay #filters {
     max-height: none;
-    order: 6;
     padding: 14px;
   }
-  #overlay .rt-chip { order: 7; height: 72px; }
-  #overlay .ent { order: 8; min-height: 88px; }
-  #overlay .btn-back { order: 9; min-height: 44px; }
+  #overlay .rt-chip { height: 72px; }
+  #overlay .ent { min-height: 88px; }
+  #overlay .btn-back { min-height: 44px; }
 
   #composer {
     grid-area: composer;

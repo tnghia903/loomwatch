@@ -578,21 +578,21 @@
         <p class="t-meta" style="color:var(--color-ink-3)">An agent task can be <b>done</b> while the run is still <b>running</b>; a run can <b>succeed</b> while its durable result is <b>done</b>. Every state below keeps a glyph and visible word when colour and motion disappear.</p>
         <div id="lifecycleMatrix" class="life-matrix"></div>
 
-        <h3 class="sys-h t-title" style="margin-top:var(--sp-4)">Cancelled — <span style="color:var(--color-alert)">needs a board ruling</span></h3>
-        <p class="t-meta" style="color:var(--color-ink-3)">The addendum asks for a <code class="t-mono-sm">cancelled</code> state and a cancel control. <code class="t-mono-sm">RUN_PROVENANCE_CONTRACT §3.2</code> places cancellation <b style="color:var(--color-ink)">outside</b> the contract and lists only six run states; <code class="t-mono-sm">ARCHITECTURE §6</code> defers writes to running execution. Both surfaces below are therefore rendered <b style="color:var(--color-ink)">gated</b> — drawn so the board can rule on something concrete, not approved by default. See <code class="t-mono-sm">TNG89_INTERACTION.md §8.1</code>.</p>
+        <h3 class="sys-h t-title" style="margin-top:var(--sp-4)">Cancelled — input and evidence survive</h3>
+        <p class="t-meta" style="color:var(--color-ink-3)">The prototype includes the board-requested <code class="t-mono-sm">cancelled</code> and retry states. Cancellation uses <code class="t-mono-sm">halt</code>, preserves the durable Prompt and every accepted evidence event, and offers Retry as a new branch. Production support remains an explicit backend extension because <code class="t-mono-sm">RUN_PROVENANCE_CONTRACT §3.2</code> does not yet define cancellation; see <code class="t-mono-sm">TNG89_INTERACTION.md §12.6</code>.</p>
         <div style="display:flex;gap:var(--sp-6);flex-wrap:wrap;align-items:flex-start">
           <div class="e1" style="width:400px;padding:0;overflow:hidden;border-radius:var(--r-lg)">
             <div class="rr-head t-body-m" style="display:flex;align-items:center;gap:8px;padding:12px 12px 8px 16px">
               <svg width="12" height="12" viewBox="0 0 12 12" style="color:var(--color-halt)"><rect x="2.2" y="2.2" width="7.6" height="7.6" rx="1.2" fill="currentColor"/></svg>
               <span>Cancelled — partial answer kept.</span>
             </div>
-            <div class="rr-sub t-micro" style="padding:0 16px 12px;color:var(--color-ink-3);border-bottom:1px solid var(--color-hairline)">Response · researcher</div>
+            <div class="rr-sub t-micro" style="padding:0 16px 12px;color:var(--color-ink-3);border-bottom:1px solid var(--color-hairline)">Output / response · Agent B</div>
             <div class="t-body" style="padding:16px;color:var(--color-ink)">ACP negotiates capabilities during the initialize handshake: the client advertises what it supports…</div>
-            <div class="rt-strip halt t-meta gated"><span>Cancelled by the operator. Partial answer kept.</span><span class="wm">stopReason: cancelled</span></div>
+            <div class="rt-strip halt t-meta"><span>Cancelled by the operator. Partial answer kept.</span><span class="wm">stopReason: cancelled</span></div>
           </div>
           <div style="display:flex;flex-direction:column;gap:var(--sp-3)">
-            <button class="btn btn-danger gated" style="width:120px">Stop</button>
-            <span class="t-meta" style="color:var(--color-ink-3);max-width:280px">If the ruling is “no cancel”, both disappear and nothing else in the design changes — the run slot stays start-only.</span>
+            <button class="btn btn-danger" style="width:120px">Stop</button>
+            <span class="t-meta" style="color:var(--color-ink-3);max-width:280px">Prototype behavior only: the current backend contract must add an authorized cancel command and terminal event before production implementation.</span>
           </div>
         </div>
 
@@ -604,8 +604,8 @@
           </div>
           <div style="position:relative;width:400px">
             <div class="prov-empty t-meta" style="--x:0;--y:0;position:relative">
-              <b class="t-body-m" style="color:var(--color-ink-2)">Nothing captured for skills.</b>
-              <span>No skill-use adapter is installed. Presence of a skill in a prompt or on disk is not use, so LoomWatch will not claim it.</span>
+              <b class="t-body-m" style="color:var(--color-ink-2)">No skill matched this filter.</b>
+              <span>The demo records <code class="t-mono-sm">release-evidence</code> from an accepted skill event. Prompt or filesystem presence alone is never treated as use.</span>
             </div>
           </div>
         </div>
