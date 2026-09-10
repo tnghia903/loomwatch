@@ -472,6 +472,58 @@ try {
   assert(restingGrab.unusableWithDots === 0, `Unusable rows advertise a drag they would refuse: ${JSON.stringify(restingGrab)}`);
   assert(restingGrab.draggable, `Rows carrying a grab handle are not actually draggable: ${JSON.stringify(restingGrab)}`);
 
+  /* TNG-127: a visible, draggable handle is still not a drag if the browser
+     decides the gesture was a text selection. In WebKit, pressing on selectable
+     text inside a draggable="true" element starts a selection and the drag never
+     arms — which is what the board hit ("It is highlighting the texts instead").
+     Chromium prefers the drag, so this harness cannot reproduce the failure by
+     gesture; it asserts the *invariant* that prevents it instead.
+
+     One trap worth recording: a computed-style check on the draggable rows
+     themselves proves nothing here. Chromium's UA stylesheet already forces
+     user-select: none on [draggable="true"] and its descendants, so those
+     elements report "none" even with every author rule deleted — measured, not
+     assumed. WebKit has no such UA rule, which is the whole bug. So the checks
+     below deliberately target what is genuinely author-driven: the shell and
+     the non-draggable canvas labels (both verified to fail without the fix),
+     plus the declaration itself via CSSOM and the shipped bytes. */
+  const selectability = await evaluate(`(() => {
+    const sel = (el) => getComputedStyle(el).webkitUserSelect || getComputedStyle(el).userSelect;
+    const optIns = ['.rr-body', '.ent-out', '.story-prompt .rt-body', '.cite', '.input', 'input', 'textarea']
+      .flatMap((q) => [...document.querySelectorAll('#stage ' + q)]);
+    let declared = null;
+    for (const sheet of document.styleSheets) {
+      for (const rule of sheet.cssRules || []) {
+        if (rule.selectorText === '#stage' && rule.style.getPropertyValue('user-select')) {
+          declared = rule.style.getPropertyValue('user-select');
+        }
+      }
+    }
+    return {
+      stage: sel(document.querySelector('#stage')),
+      declared,
+      prefixedInBytes: document.documentElement.outerHTML.includes('-webkit-user-select: none'),
+      libraryText: [...document.querySelectorAll('#libGroups .lib-row-name, #libGroups .lib-row-sub')]
+        .filter((n) => sel(n) !== 'none').length,
+      nodeLabels: [...document.querySelectorAll('#nodes .w-top, #nodes .n-title')].filter((n) => sel(n) !== 'none').length,
+      optIns: optIns.length,
+      lockedOptIns: optIns.filter((el) => sel(el) === 'none').length };
+  })()`);
+  assert(selectability.stage === 'none',
+    `App shell is text-selectable, so a drag smears a selection across it instead of dragging: ${JSON.stringify(selectability)}`);
+  assert(selectability.declared === 'none',
+    `No author rule locks selection on #stage — Chromium's UA sheet would hide this, WebKit will not: ${JSON.stringify(selectability)}`);
+  assert(selectability.prefixedInBytes,
+    `The -webkit-user-select fallback was stripped from the shipped bytes: ${JSON.stringify(selectability)}`);
+  assert(selectability.libraryText === 0,
+    `Library row text is selectable, so pressing a row label starts a selection: ${JSON.stringify(selectability)}`);
+  assert(selectability.nodeLabels === 0,
+    `Canvas node labels are selectable, so dragging a node smears a selection: ${JSON.stringify(selectability)}`);
+  /* The inverse: locking the shell must not cost the user the ability to copy
+     the answer, command output, their own prompt, or to edit a field at all. */
+  assert(selectability.optIns > 0 && selectability.lockedOptIns === 0,
+    `Real content lost its selectability — the answer/output/fields cannot be copied: ${JSON.stringify(selectability)}`);
+
   /* freeform keyboard placement from the library: Enter arms, arrows move, Enter drops */
   await evaluate(`document.querySelector('[data-res="r-tool-bus"]').focus()`);
   await key('Enter', { code: 'Enter', virtualKeyCode: 13 });

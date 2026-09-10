@@ -47,6 +47,38 @@ html, body {
   /* the theme cross-fade — DESIGN_LANGUAGE §9 */
   transition: background-color var(--t-move) var(--ease-out),
               color var(--t-move) var(--ease-out);
+  /* TNG-127: LoomWatch is a direct-manipulation canvas, not a document, and
+     until now every pixel of it was text-selectable. The board's rejection —
+     "I still cannot drag the agent from the library. It is highlighting the
+     texts instead" — is exactly that: in WebKit, pressing on selectable text
+     inside a draggable="true" element starts a *selection*, and the drag
+     never arms. Chromium resolves the same ambiguity in favour of the drag,
+     which is why five self-checks and a byte-level verifier all passed while
+     the gesture stayed broken in Safari. The same ambiguity smears selection
+     across node labels during a canvas node drag (see the rejection
+     screenshot), so the rule belongs on the shell, not on .lib-row alone.
+     Genuine content opts back in below — never remove those. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The narrow set of surfaces that really are content: the model's answer,
+   sanitized command output, the user's own prompt, citations, and anything
+   typed into. Selection is how these get copied out, so they stay selectable
+   even though their container is not. Form controls matter most — in WebKit
+   `user-select: none` inherits into <input>/<textarea> and makes the field
+   unable to select its own text. */
+#stage .rr-body,
+#stage .rr-body code,
+#stage .ent-out,
+#stage .story-prompt .rt-body,
+#stage .cite,
+#stage .input,
+#stage input,
+#stage textarea,
+#stage [contenteditable] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* dot grid — UX_REDESIGN §7: gap 16, size 1, ground-dot */
