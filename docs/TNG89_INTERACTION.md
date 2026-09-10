@@ -946,3 +946,140 @@ Additional acceptance failures:
     theme. **Fail.**
 33. Placement silently succeeds past the stated bound, or mutates a replayed/finished
     branch. **Fail.**
+
+---
+
+## 14. TNG-122 revision — freeform capability composer
+
+TNG-122 supersedes §13's fixed insertion lane as the recommended composition model. The
+standalone prototype adds a dedicated **Freeform wiring** screen where the prompt/goal is
+the origin, response/output is terminal, and authorized workspace agents and capabilities
+can be placed anywhere and joined by typed, editable planned edges. Runtime provenance
+continues to project automatically as a separate immutable layer.
+
+The complete interaction sequence, relationship matrix, library disclosure/permission
+rules, keyboard equivalents, narrow behavior, and backend/schema assumptions are normative
+in [`TNG122_FREEFORM_CAPABILITY_COMPOSER.md`](TNG122_FREEFORM_CAPABILITY_COMPOSER.md).
+Nothing in this revision implements or authorizes production UI/backend work, changes
+`team.schema.yaml`, amends the frozen WebSocket schema, grants a permission, or exposes
+hidden reasoning.
+
+Additional acceptance failures:
+
+34. Placement is restricted to a lane or slot rather than an arbitrary valid coordinate.
+    **Fail.**
+35. Any pointer placement, movement, connection, reconnection, selection, or removal action
+    lacks a keyboard and live-region equivalent. **Fail.**
+36. A refused or cancelled connection destroys or rewrites the previous graph. **Fail.**
+37. The Library exposes globally hidden/unauthorized resource identity, omits counts or
+    state reasons, or represents a disconnected resource as usable. **Fail.**
+38. Planned capability wiring is visually or semantically indistinguishable from accepted
+    runtime evidence, or planned intent fabricates a tool/skill/source event. **Fail.**
+
+---
+
+## 14. TNG-123 revision — freeform placement, typed wiring, and the capability library
+
+This section revises the design prototype and documentation only. It does not implement or
+authorize a production component, endpoint, event, or schema change. It runs alongside §12/§13:
+the run screens keep their slot pipeline; the freeform canvas is the separate free-arrangement
+surface the board asked for (screen 5, deep link `#wiring,<theme>`).
+
+### 14.1 The capability library
+
+The left library becomes the capability library: **Agents, Skills, Tools & connectors, Knowledge
+sources** — every resource available and authorized in the current workspace, in four collapsible
+groups with per-group `shown/total` counts. Each row carries a state badge, a wired-count badge
+(live, on the wiring screen), and a compatibility cue in words. Controls: a search field, a
+category filter row, and a state filter (`Any state / Available / Needs approval /
+Disconnected`), plus a footer that states `N of M resources match · K usable here` and — when the
+workspace hides resources by policy — `n hidden by workspace policy`. A globally hidden resource
+is never rendered as a row; the footer counts it, so the boundary is stated without advertising
+what cannot be used. A search that matches nothing renders the honest empty state in every group.
+
+Rows that are **not usable** (not installed, disconnected) remain visible with their reason,
+render greyed, and cannot be dragged or keyboard-placed. Rows that need run-time approval
+(`Needs approval`) are usable: placing and wiring them works, and the resulting edge carries a
+`needs approval` badge.
+
+### 14.2 Free placement
+
+Pointer: dragging a usable row shows a drop ghost that follows the pointer over the canvas;
+releasing places the node exactly there (clamped to the stage). Nodes drag anywhere; edges
+re-anchor while the pointer moves. Keyboard: `Enter` on a row arms a placement ghost,
+`←→↑↓` move it (`Shift` = 32 px steps), `Enter` drops, `Esc` cancels and restores focus to the
+row. Arrow keys nudge a selected node by the same steps. A live region (the TNG-121 channel)
+narrates arm / move / drop / cancel, and the wire strip states the armed placement.
+
+### 14.3 Typed wiring
+
+The only valid connections are the board-named relationships:
+
+```text
+prompt/goal → agent (assigns goal)      agent → agent (hands off to)
+agent → skill (uses)                    agent → tool/connector (invokes)
+agent → knowledge source (consults)     agent / evidence → response/output (responds with)
+```
+
+Pointer: drag a node's right handle onto a target — candidate targets light up valid (accent
+ring) or refused (dashed alert ring) while the temp edge follows the pointer. Keyboard: select a
+node, press `W` — `Tab` cycles every other node as a candidate, each announced with its validity
+or its refusal reason, `Enter` commits, `Esc` cancels. Selected edges expose two endpoint dots
+(drag to re-aim either end), `R` arms a rewire of the target, and `Delete` removes.
+
+### 14.4 Non-destructive refusals
+
+A connection without a rule — resource → agent, response → anything, prompt → non-agent, a
+duplicate, or a self-loop — is refused: an explanation appears in the wire strip, the strip
+shakes once (static under reduced motion), the live region reads the refusal, and **nothing is
+created or changed**. Skills, tools and knowledge sources state the general rule in their own
+refusal: they are used by agents and never originate a connection.
+
+### 14.5 Planned vs observed — two layers, never merged
+
+Grey solid edges with named relation labels are the **planned graph**: user-authored, editable,
+document state. Blue dashed edges, gold shuttle travel on the planned handoff edge, and the
+evidence cards are **observed provenance**: projected automatically from live run events on a
+timer, never authored, never written to the file. The selected planned edge turns accent with
+its relation word highlighted; observed evidence keeps the recorded ordinal, owner, relation,
+and time. The wire strip shows `Planned n · Observed ×k` so the two counts are readable without
+the legend (the bottom-left legend would sit under the library on this screen, so the strip
+carries the counts instead — same layer rule, different chrome position).
+
+### 14.6 Status, replay, themes
+
+The run-state system is unchanged: the blue breathing border appears only while the lead agent
+is actively executing, and the reduced-motion equivalent is the static 2 px blue perimeter;
+completion freezes the path to `succeeded`. `Replay observed run` re-renders all three evidence
+events inertly and labelled **Replay** — no shuttle, no live edges, no re-execution — while the
+planned graph stays untouched and editable. Both themes, the 390 px composition (read-only
+column: nodes, evidence, no strip/legend/viewctl), overflow bounds, and the greyscale rules of
+§16 apply unchanged.
+
+### 14.7 Backend/schema assumptions — design only, not implemented
+
+- Free placement and typed wiring imply a **graph document model** for team files (nodes with
+  free coordinates, typed edges) that `team.schema.yaml` does not have today; the current
+  pipeline/team modes remain the only executable shapes.
+- Edge typing and per-edge permission badges assume the run planner can consume declared
+  `uses/invokes/consults` relations and gate approval-requiring resources at run time; no such
+  planner contract exists yet.
+- The library assumes a workspace capability catalogue endpoint (agents, skills, connectors,
+  knowledge sources with status and authorization) — `GET /api/harnesses` covers agents only.
+- Hidden-by-policy resources assume a policy filter in that catalogue; the footer count is a
+  design placeholder for it.
+- None of this amends `RUN_PROVENANCE_CONTRACT`, the frozen WebSocket schema, or any shipped
+  endpoint; the prototype fabricates nothing that the run screens did not already show.
+
+Additional acceptance failures:
+
+34. A library row for a resource that is not available or not authorized renders as if usable,
+    or a hidden resource is listed. **Fail.**
+35. Free placement snaps to fixed slots, or a dropped node lands anywhere other than the drop
+    point (pointer) or the ghost position (keyboard). **Fail.**
+36. An invalid connection is drawn anyway, silently dropped without an explanation, or its
+    refusal changes existing nodes or edges. **Fail.**
+37. Wiring, rewiring, or removal has no keyboard equivalent, or candidate cycling does not
+    announce each candidate's validity. **Fail.**
+38. Observed provenance renders as planned wiring (or vice versa), replay re-executes or moves,
+    or the observed projection does not arrive automatically from run events. **Fail.**

@@ -1,7 +1,57 @@
 # LoomWatch — TNG-87 design artifacts
 
+## TNG-122 revision — freeform capability composer
+
+Open **Freeform wiring** in `prototype-standalone.html`. The fixed insertion lane is no
+longer the editing model: authorized workspace Agents, Skills, Tools / Connectors, and
+Knowledge Sources can be dragged to arbitrary canvas coordinates, moved, and connected
+through typed handles. Planned edges can be selected, retargeted, or removed; refused
+pairs explain the rule without changing the graph. `Enter`/arrow keys place library rows;
+`W`, `Tab`, `Enter`, `Esc`, `E`, `R`, and `Delete` provide the equivalent wiring path.
+
+The library demonstrates search, type/state filters, per-group and overall counts,
+collapsed categories, empty results, permission-required and disconnected resources,
+compatibility guidance, and a privacy-safe hidden-resource total. Runtime activity still
+arrives automatically on the distinct observed layer; replay never re-executes.
+
+Normative interaction and backend/schema assumptions are in
+[`../TNG122_FREEFORM_CAPABILITY_COMPOSER.md`](../TNG122_FREEFORM_CAPABILITY_COMPOSER.md).
+The focused verifier covers free placement, edge editing, invalid refusal, keyboard parity,
+library states, both themes, 1600×1000 and 390 px, reduced motion, replay, regressions, and
+offline loading.
+
 The reviewable output of the "Obsidian & Gilt" redesign. No design tool the rest of the
 team cannot open.
+
+## TNG-123 revision — freeform placement, typed wiring, capability library
+
+The board asked for free placement and wiring, so screen 5 (**Freeform wiring**,
+`#wiring,<theme>`) is a free canvas: **agents, skills, tools/connectors and knowledge sources
+drag from the library to any point on the ground**, nodes move freely, and edges are typed.
+The library is now the **capability library** — four collapsible groups (Agents, Skills, Tools
+& connectors, Knowledge sources) listing everything available and authorized in the workspace,
+with search, category and state filters, per-group counts, a match/usable footer, state and
+wired badges, compatibility cues on every usable row, and honest states for the rest:
+`Needs approval` rows are usable and badge their edges; `Disconnected` / `Not installed` rows
+state their reason and cannot be dragged; policy-hidden resources are counted in the footer,
+never listed.
+
+Wiring is typed: `assigns goal`, `hands off to`, `uses`, `invokes`, `consults`,
+`responds with` — nothing else connects. Pointer (drag a node's right handle onto a target)
+and keyboard (`W` arms, `Tab` cycles candidates with announced validity, `Enter` commits,
+`Esc` cancels; `R` rewires a selected edge, `Delete` removes, endpoint dots re-aim by drag)
+are equivalents. Invalid connections are refused **non-destructively**: the wire strip
+(bottom-centre) explains, the strip shakes once, nothing is created. Grey solid edges are your
+planned wiring; blue edges + gold shuttle + evidence cards are observed provenance projected
+automatically from live run events — the two layers stay visually and behaviourally distinct,
+and `Replay observed run` is inert and labelled. The blue breathing border appears only while
+the run is active (reduced motion: static 2 px blue); both themes, the 390 px read-only
+composition, and the overflow bounds hold.
+
+Spec: [`../TNG89_INTERACTION.md §14`](../TNG89_INTERACTION.md#14-tng-123-revision--freeform-placement-typed-wiring-and-the-capability-library)
+(including §14.7 backend assumptions, design-only). Verified by
+`node docs/mockups/verify-prototype.mjs`, which now also drives placement, wiring,
+refusals, library filters, replay, reduced motion, both themes and 390 px on the wiring screen.
 
 ## TNG-121 revision — editable live pipeline + overflow repair
 
@@ -129,7 +179,7 @@ artifact cannot silently regain an external dependency.
 |---|---|
 | `tokens.css` | **Normative.** The three-tier token layer, both themes. Liftable almost verbatim into `ui/src/index.css`. |
 | `prototype.css` | Component styles built strictly on `tokens.css`. Every rule cites the spec section it implements. |
-| `prototype.html` · `prototype.js` | The clickable prototype — **thirteen** screens, both themes. |
+| `prototype.html` · `prototype.js` | The clickable prototype — **fourteen** screens, both themes. |
 | `build-standalone.mjs` | Emits `prototype-standalone.html` from the four files above. |
 
 Review the *design* from the single file. Read the *sources* when you want to see which
@@ -175,15 +225,16 @@ exact screen and theme — `prototype-standalone.html#team,light`.
 | 2 | `canvas` | Canvas · pipeline | The default working state. Dirty document, two edge layers, one anomaly. |
 | 3 | `inspector` | Inspector | How is an Agent edited? |
 | 4 | `team` | Canvas · team + live | The observed layer in full voice — all three weft kinds. |
-| 5 | `switcher` | Document switcher | How do you see, switch and write the file? |
-| 6 | `palette` | Command palette | ⌘K as the whole menu. |
-| 7 | `problems` | Validation | Incomplete vs. invalid, and how you get to the cause. |
-| 8 | `compose` | Composer | Start with a prompt and submit the concrete Notion example. |
-| 9 | `running` | Causal run | Prompt → Run → lead/delegation → live agent-owned evidence → streaming Output. |
-| 10 | `answered` | Durable path + provenance | The entire partial path remains while six coverage summaries and filters open. |
-| 11 | `trace` | Expanded trace | The complete prompt-to-output spine plus direct evidence ownership, details, and capture quality. |
-| 12 | `states` | State matrix | Loading, failure, read-only, conflict, empty. |
-| 13 | `system` | Design system | Tokens, type, elevation, status, edge layers, every node state. |
+| 5 | `wiring` | Freeform wiring | Place anything anywhere, wire it with typed edges (TNG-123). |
+| 6 | `switcher` | Document switcher | How do you see, switch and write the file? |
+| 7 | `palette` | Command palette | ⌘K as the whole menu. |
+| 8 | `problems` | Validation | Incomplete vs. invalid, and how you get to the cause. |
+| 9 | `compose` | Composer | Start with a prompt and submit the concrete Notion example. |
+| 10 | `running` | Causal run | Prompt → Run → lead/delegation → live agent-owned evidence → streaming Output. |
+| 11 | `answered` | Durable path + provenance | The entire partial path remains while six coverage summaries and filters open. |
+| 12 | `trace` | Expanded trace | The complete prompt-to-output spine plus direct evidence ownership, details, and capture quality. |
+| 13 | `states` | State matrix | Loading, failure, read-only, conflict, empty. |
+| 14 | `system` | Design system | Tokens, type, elevation, status, edge layers, every node state. |
 
 ### TNG-119 acceptance matrix
 
@@ -205,7 +256,7 @@ neutral values and never touches a token, so it cannot be confused with the desi
 
 | Key | Does |
 |---|---|
-| `1`–`9` `0` `Q` `W` `E` | screens 1–13, in the table order above |
+| `1`–`9` `0` `Q` `W` `E` `R` | screens 1–14, in the table order above |
 | `⌘⇧L` | **the theme toggle** — the feature the board asked for |
 | `⌘S` | the ledger sweep (the save-to-disk moment) |
 | `L` | cycle edge-layer solo: both → configured → observed → both |
