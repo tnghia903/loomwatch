@@ -581,6 +581,9 @@ try {
       const stage = document.querySelector('#stage');
       const library = document.querySelector('#library');
       const strip = document.querySelector('#wireStrip');
+      const themeButton = document.querySelector('#themeBtn');
+      const themeRect = themeButton.getBoundingClientRect();
+      const themeHit = document.elementFromPoint(themeRect.left + themeRect.width / 2, themeRect.top + themeRect.height / 2);
       const kinds = wiring.nodes.map((n) => n.kind);
       return { layout: document.documentElement.dataset.layout,
         overflow: stage.scrollWidth - stage.clientWidth,
@@ -589,13 +592,15 @@ try {
         strip: getComputedStyle(strip).display,
         relations: [...document.querySelectorAll('#nodes .wire-narrow-rel')].filter((n) => getComputedStyle(n).display !== 'none').map((n) => n.textContent.trim()),
         first: kinds[0], last: kinds[kinds.length - 1],
-        themeTarget: document.querySelector('#themeBtn').getBoundingClientRect().height,
+        themeTarget: themeRect.height, themeRight: themeRect.right,
+        themeDisplay: getComputedStyle(themeButton).display,
+        themeHit: themeHit?.closest('button')?.id || themeHit?.id || '',
         cards: document.querySelectorAll('#nodes > *').length };
     })()`);
     assert(narrowWire.layout === 'narrow' && narrowWire.overflow <= 1, `${theme} narrow wiring overflows: ${JSON.stringify(narrowWire)}`);
     assert(narrowWire.library === 'flex' && narrowWire.libraryHeight >= 240 && narrowWire.strip === 'flex', `${theme} narrow discovery/connection controls disappeared: ${JSON.stringify(narrowWire)}`);
     assert(narrowWire.relations.length >= 8 && narrowWire.relations.every(Boolean) && narrowWire.first === 'prompt' && narrowWire.last === 'response', `${theme} narrow relationship reading order is incomplete: ${JSON.stringify(narrowWire)}`);
-    assert(narrowWire.themeTarget >= 44, `${theme} narrow theme toggle is not reachable: ${JSON.stringify(narrowWire)}`);
+    assert(narrowWire.themeTarget >= 44 && narrowWire.themeRight <= 390 && narrowWire.themeDisplay !== 'none' && narrowWire.themeHit === 'themeBtn', `${theme} narrow theme toggle is not reachable: ${JSON.stringify(narrowWire)}`);
     if (theme === 'dark') {
       const tapPlacement = await evaluate(`(() => {
         const before = wiring.nodes.length;
