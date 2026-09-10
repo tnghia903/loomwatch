@@ -11,6 +11,11 @@ Prompt-to-run, live response landing, and the expandable provenance graph, expre
   Where this document and the contract disagree, **the contract wins** and this document is
   the bug.
 - **Prototype:** [`mockups/prototype.html`](mockups/prototype.html) screens 10–13.
+- **Pending §13 — read before starting TNG-121:**
+  [`TNG121_EDITABLE_PIPELINE.md`](TNG121_EDITABLE_PIPELINE.md) specs the editable live
+  pipeline (drag/keyboard agent insertion) and the node + history overflow fixes that answer
+  the 2026-09-10 board rejection. It is drafted to be folded in here as §13; do not maintain
+  two normative specs.
 - **Status:** design only. No production UI code. Gate B must be accepted before
   implementation (TNG-89A).
 
