@@ -1,125 +1,105 @@
 # TNG-127 library drag starts a text selection in WebKit — focused self-check
 
+Artifact revision: `76cd2a4` (fix landed in `25e9545`, proof added in `76cd2a4`)
 Artifact: `docs/mockups/prototype-standalone.html`
-(size / SHA-256 / commit recorded in the publishing comment on TNG-87, taken from the
-committed bytes rather than from this run's working tree)
+Exact size: **598,128 bytes**
+SHA-256: `ea9a305617c94c84be9f9ae377f3f5416f5ddad8f7e96148defeec5e59e6e194`
+
+Verified against the commit, not against the working tree: `git show HEAD:docs/mockups/prototype-standalone.html`
+hashes to the value above, matches the file on disk byte-for-byte, and `node build-standalone.mjs`
+reproduces that same hash from source. The committed bytes contain the fix (`-webkit-user-select: none`
+present in the shipped standalone, not merely in `prototype.css`).
 
 ## Result
 
-**PASS** — `node docs/mockups/verify-prototype.mjs`, full suite clean, with five new
-assertions. Every one of them was confirmed to **fail** against the pre-fix stylesheet
-before being accepted, so this is a checked regression rather than a decorative one.
+**PASS**, on two engines.
+
+- `node docs/mockups/verify-prototype.mjs` — full suite clean (headless Chrome).
+- `/tmp/verify-webkit docs/mockups/prototype-standalone.html` — 6/6 (real WKWebView).
 
 ## What this responds to
 
-Board rejection on TNG-87, 2026-09-10 05:33Z, with a screenshot:
+Third rejection about dragging, and the first to name the mechanism: *"I still cannot drag the
+agent from the library. It is highlighting the texts instead."*
 
-> I still cannot drag the agent from the library. It is highlighting the texts instead!
+The prototype declared `user-select` nowhere. Library rows are `draggable="true"` and carry
+selectable text spans; in WebKit, pressing on selectable text inside a draggable element
+resolves the gesture as a text selection and the drag never arms. TNG-124 and TNG-125 both
+read the complaint as *discoverability* and fixed real problems — neither was this one. A
+visible grab handle on a row that cannot be dragged is still a rejection.
 
-That is the sixth rejection on the library, and the third specifically about not being able
-to drag. TNG-124 and TNG-125 both read the complaint as *discoverability* — rows too short,
-no scroll affordance, grab handle only on hover — and fixed real problems each time. None of
-them was the problem. The handle was visible; the gesture still did not work.
+## Why five self-checks certified a gesture that did not work
 
-## Root cause
+`verify-prototype.mjs` drives headless Chrome only, and **Chromium's UA stylesheet already
+forces `user-select: none` on `[draggable="true"]` and its descendants**. So the library rows
+reported `none` under test even when no author rule existed anywhere in the codebase. The
+harness was reading Chromium's UA sheet and scoring it as our fix. WebKit has no such rule,
+which is the entire bug. Every green check was true and irrelevant.
 
-The prototype declared `user-select` **nowhere**. Zero occurrences across `prototype.css`,
-`tokens.css`, `prototype.html`, and the shipped standalone.
+This is the finding worth keeping: the gate was not merely incomplete, it was *structurally
+incapable* of observing the defect, and it returned green with full confidence five times.
 
-Library rows are `draggable="true"` and contain three selectable text spans
-(`.lib-row-name`, `.lib-row-sub`, `.lib-row-meta`). In WebKit, pressing on selectable text
-inside a draggable element resolves the gesture as a **text selection**, and the drag never
-arms. Chromium resolves the same ambiguity in favour of the drag.
+## What I added on top of the fix
 
-The screenshot is a direct fingerprint of this: the selection anchors inside the `opencode`
-row — highlighting the name and the `/opt/homebre…bin/opencode` path — and then runs forward
-through DOM order across `LIBRARY`, `AGENTS`, the filter chips, and every canvas node label
-(`Protocol Researcher`, `Spec Reviewer`, `Doc Author`, the model chips, the costs). That is a
-drag-select sweeping the document, which is only possible if the press never became a drag.
+The CSS fix (`#stage { user-select: none }` plus a narrow content opt-in) was landed by the
+concurrently-running TNG-87 session in `25e9545` while this run was in flight. It was correct,
+and I verified rather than redid it. But it had been checked the same Chrome-only way as the
+five self-checks that missed the bug — so the fix was still resting on an unproven claim about
+an engine nothing in this repo had ever run.
 
-## Why five consecutive self-checks passed on a broken gesture
+### 1. A WebKit proof — `docs/mockups/verify-webkit.swift`
 
-This is the part worth keeping, because it is a hole in the method rather than in the CSS.
+Loads the shipped standalone into a real `WKWebView` (the engine Safari uses) and probes twice.
+Uses only the macOS command-line tools — no Safari automation, no admin enablement, no package
+install. Playwright has no WebKit build here and `safaridriver` remote automation is disabled
+and needs admin, so both of those paths were dead ends; a `WKWebView` host binary was not.
 
-`verify-prototype.mjs` drives **headless Chrome only**. Two independent things follow:
-
-1. Chromium prefers the drag over the selection, so the failure cannot be reproduced by
-   gesture in this harness at all.
-2. Chromium's **UA stylesheet already forces `user-select: none` on `[draggable="true"]` and
-   its descendants**. Measured, not assumed — a minimal probe with no author CSS reports
-   `none` on both the draggable element and its text children.
-
-So the broken state was invisible twice over, and the byte-level greps that the Chief
-Secretary used to check the previous two candidates were greps for the *handle*, which was
-genuinely there. Everything anyone checked was true. The gesture was still broken.
-
-Point 2 also disqualifies the obvious regression check: asserting that draggable rows compute
-`user-select: none` would have passed against the broken build. That assertion was written,
-measured, found vacuous, and replaced — see below.
-
-## The fix
-
-`#stage` — the app shell — now declares `user-select: none` / `-webkit-user-select: none`.
-
-Scoped to the shell rather than to `.lib-row` deliberately. LoomWatch is a
-direct-manipulation canvas, not a document, and the screenshot shows the same defect on the
-canvas: the selection smeared across node labels, which means dragging a *node* had the same
-ambiguity. Fixing only the library row would have left that.
-
-A narrow set of surfaces opts back in with `user-select: text`, because selection is how they
-get copied out:
-
-| Surface | Why it stays selectable |
-|---|---|
-| `.rr-body`, `.rr-body code` | the model's answer — the main thing a user copies |
-| `.ent-out` | sanitized command output (TNG-87 addendum §4 requires it be inspectable) |
-| `.story-prompt .rt-body` | the user's own prompt |
-| `.cite` | citation labels and locations |
-| `.input`, `input`, `textarea`, `[contenteditable]` | **load-bearing** — in WebKit `user-select: none` inherits into form controls and leaves the field unable to select its own text |
-
-The form-control row is the one that would have quietly broken the composer and the ⌘K
-palette, so it is asserted, not just written.
-
-## New assertions, and proof each one has teeth
-
-Added to `verify-prototype.mjs` beside the existing TNG-125 grab-affordance block. Each was
-run against the pre-fix stylesheet (`git show HEAD:docs/mockups/prototype.css`, rebuilt) to
-confirm it fails, then against the fix to confirm it passes.
-
-| Assertion | Pre-fix value | Post-fix |
+| check | as shipped | rule defeated |
 |---|---|---|
-| `#stage` computes `user-select: none` | `auto` — **fails** | `none` |
-| an author rule on `#stage` declares it (CSSOM) | `null` — **fails** | `none` |
-| `-webkit-user-select: none` survives into the shipped bytes | `false` — **fails** | `true` |
-| library row text not selectable | `8` selectable — **fails** | `0` |
-| canvas node labels not selectable | `5` selectable — **fails** | `0` |
-| content opt-ins still selectable | `13` opt-ins, `0` locked | unchanged |
+| `#stage` computed `user-select` | `none` | `text` |
+| library row labels selectable | **0 / 30** | **30 / 30** |
+| canvas node labels selectable | **0 / 6** | — |
+| content opt-ins wrongly locked | **0 / 13** | — |
 
-The CSSOM assertion exists specifically because a computed-style check cannot distinguish an
-author rule from Chromium's UA rule. Reading the declaration off the stylesheet can, and that
-declaration is the thing WebKit actually needs.
+Pass B is the point. It is the counterfactual headless Chrome *physically cannot produce*:
+defeat the author rule and the library labels go selectable again, which proves WebKit has no
+UA fallback and the rule is load-bearing rather than decorative. Delete the rule later and
+pass A fails; lean on a UA sheet only Chromium has and pass B fails.
 
-The bytes assertion exists because the `-webkit-` alias is collapsed by Chromium's CSSOM
-(`cssText` normalises to the unprefixed form), so the prefix can only be checked in the
-shipped text. It is belt-and-braces for older WebKit; current Safari takes the unprefixed
-property.
+The fourth row is the inverse guarantee: locking the shell must not cost the user the ability
+to copy the model's answer, command output, their own prompt, or to edit a field. All 13
+opt-ins stay selectable in WebKit.
 
-## Honest limitation
+### 2. Repaired a check that could never have failed
 
-**The gesture itself was not re-tested in WebKit.** No WebKit engine is available in this
-environment: the Playwright cache holds Chromium only, and `safaridriver` needs an admin
-`--enable` plus Safari's Allow Remote Automation, which is an interactive gate this run
-should not force.
+The Chrome harness asserted over `'#nodes .w-top, #nodes .n-title'`. `.n-title` exists nowhere
+in the codebase and `.w-top` only renders in the wiring view — so that `querySelectorAll`
+matched **zero elements** in the probed view and the assertion was vacuously true, against
+exactly the surface the rejection screenshot showed the selection smearing across. Caught it
+because the WebKit harness reported `nodeLabelTotal: 0`.
 
-So what is proven here is the *invariant* that removes the ambiguity, verified to be absent
-before and present after, plus the fact that `user-select: none` on the drag source is the
-established remedy for this exact WebKit behaviour. What is **not** proven by automation is
-the board successfully dragging a row in Safari. Given the history on this issue, that
-distinction should be stated rather than smoothed over: the next confirmation should be
-treated as confirmed by the board's own gesture, not by this document.
+Now targets `.node-name, .node-top, .w-name, .w-top` (6 real elements), and both the library
+and node-label checks assert their totals non-zero, so a rename cannot quietly turn them back
+into no-ops. Same vacuity guard is built into the WebKit harness.
 
-## Scope
+## What is *not* proven
 
-Design-only. Two files changed under `docs/mockups/` (`prototype.css`, `verify-prototype.mjs`)
-plus the rebuilt standalone. No production UI, backend, or schema changes. TNG-89
-implementation remains gated.
+Stated plainly, because overclaiming is how this ticket happened.
+
+- The harness proves the **computed-style invariant** in WebKit and proves the rule is
+  load-bearing. It does **not** synthesize a real mouse-press-and-drag in WebKit and confirm a
+  drop completes. The invariant is the documented cause of the failure, but it is one step
+  removed from the gesture itself.
+- `WKWebView` is the same engine as Safari, not the same browser. Safari's own chrome,
+  extensions, and UA differences are out of scope here.
+- Residual risk is therefore: if Safari's drag arming depends on something beyond selection
+  eligibility, this would still pass. Confirming the actual gesture needs a human on Safari —
+  which is the board's review.
+
+## Working-tree note
+
+This ran concurrently with the TNG-87 session in a shared workspace. That session committed
+`prototype.css` and the standalone at 05:42Z mid-run; the checks here were re-run against the
+committed result and my changes were confirmed additive (`git diff` touched only
+`verify-prototype.mjs`, `README.md`, and the new `verify-webkit.swift`). Nothing was clobbered
+in either direction.
