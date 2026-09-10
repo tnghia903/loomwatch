@@ -242,19 +242,39 @@ try {
   check('queued — the document was written before the run was created',
     queued.chipL2 !== '3 lines differ', `chip still ${JSON.stringify(queued.chipL2)}`);
 
+  /* `.rt-live, .streaming, [data-state="running"]` matched nothing anywhere in
+     this prototype, and the check `||`-ed it with a body-text regex — so the
+     dead selector cost nothing and the gate reduced to "the word Running
+     appears somewhere", which is also true on `compose`, where no run is in
+     flight. The surface that actually reports the phase is `.run-meta`, and it
+     says a different word on each of these three screens, so it can fail. */
+  /* `innerText` falls back to `textContent` on an element that is not being
+     rendered, so reading `.run-meta` directly is a presence check wearing a
+     visibility costume — hiding the strip leaves its text readable to the
+     probe. Every read of the phase surface goes through this. */
+  const shownMeta = `(() => {
+    const el = document.querySelector('.run-meta');
+    return el && el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+      ? el.innerText.trim() : '';
+  })()`;
+  const runMeta = `({
+    meta: ${shownMeta},
+    phase: typeof run !== 'undefined' ? run.phase : null,
+    text: document.body.innerText
+  })`;
   await navigate('running');
-  const streaming = await evaluate(`({
-    response: document.body.innerText,
-    live: !!document.querySelector('.rt-live, .streaming, [data-state="running"]')
-      || /Running|Streaming/i.test(document.body.innerText)
-  })`);
+  const streaming = await evaluate(runMeta);
   check('streaming — live screen reports the run in flight',
-    streaming.live && /Running|Streaming/i.test(streaming.response));
+    /·\s*running\b/i.test(streaming.meta) && streaming.phase === 'running',
+    `run-meta=${JSON.stringify(streaming.meta)} phase=${streaming.phase}`);
 
   await navigate('trace');
-  const complete = await evaluate(`({ text: document.body.innerText })`);
+  const complete = await evaluate(runMeta);
   check('complete — finished run reports its duration',
-    /Answered in/i.test(complete.text));
+    /Answered in\s+\S/i.test(complete.text), 'no duration followed "Answered in"');
+  check('complete — the finished screen reports succeeded, not running (counterfactual)',
+    /·\s*succeeded\b/i.test(complete.meta) && !/·\s*running\b/i.test(complete.meta),
+    `run-meta=${JSON.stringify(complete.meta)}`);
 
   /* ---------------------------------------------------------------------
      4. Partial failure — content retained, error verbatim, never hidden.
@@ -290,14 +310,18 @@ try {
   const gapLive = await evaluate(`({
     halt: ${visibleHalt}.length,
     haltText: ${visibleHalt}.map((el) => el.innerText).join(' ~ '),
+    meta: ${shownMeta},
     text: document.body.innerText
   })`);
   check('reconnect — live screen carries a visible transport gap strip',
     gapLive.halt === 1, `visible halt strips = ${gapLive.halt}`);
   check('reconnect — the gap names its watermark rather than saying only "reconnecting"',
     /seq\s*\d+/i.test(gapLive.haltText), JSON.stringify(gapLive.haltText));
+  /* The point of this one is that the gap strip does not overwrite the run's
+     own phase, so read the phase surface — a body-text regex would be carried
+     by the gap strip's own wording. */
   check('reconnect — run indicator still reports the run, not the transport',
-    /Running|Streaming/i.test(gapLive.text));
+    /·\s*running\b/i.test(gapLive.meta), `run-meta=${JSON.stringify(gapLive.meta)}`);
   await navigate('trace');
   const gapDone = await evaluate(`${visibleHalt}.length`);
   check('reconnect — finished run shows no gap strip (counterfactual)',
@@ -385,30 +409,72 @@ try {
   /* ---------------------------------------------------------------------
      8. Evidence quality — four capture states, three channels each,
      redaction with no reveal affordance (ADR 0005 §7 fails closed).
+
+     `querySelectorAll('.cap-*')` is not a measurement of this screen. The
+     prototype ships a hidden specimen gallery (`#states.board`, `display:
+     none`, inside `#stage`) holding two copies of every capture card, so a
+     DOM-wide count reads 2/2/2/2 on *every* screen — including `team`, which
+     has no evidence on it at all. Counting that way passed while only one of
+     the four states was on screen, and would keep passing if the trace screen
+     rendered nothing.
+
+     What a reviewer can actually reach: `recorded` is on the trace screen at
+     rest, and the other three ride on entities in specific categories, one
+     hop away — `commands` carries derived, `tools` carries unavailable,
+     `sources` carries redacted. So drive each hop and assert the state
+     becomes *visibly rendered*, not merely present.
      --------------------------------------------------------------------- */
-  const capture = await evaluate(`(() => {
-    const text = document.body.innerText;
-    const cls = (c) => document.querySelectorAll('.cap-' + c).length;
-    const redacted = [...document.querySelectorAll('.cap-redacted')];
-    const revealish = redacted.some((el) =>
-      /reveal|show bytes|request access|unlock|view source/i.test(el.innerText));
-    const unavailable = [...document.querySelectorAll('.cap-unavailable')];
+  const visibleCaps = `(() => {
+    const shown = (el) => el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+    const of = (c) => [...document.querySelectorAll('.cap-' + c)].filter(shown);
     return {
-      recorded: cls('recorded'), derived: cls('derived'),
-      redacted: cls('redacted'), unavailable: cls('unavailable'),
-      revealish,
-      unavailableStatesReason: unavailable.every((el) => el.innerText.trim().length > 20),
-      words: ['Recorded', 'Derived', 'Redacted', 'Not captured', 'Unavailable']
-        .filter((w) => text.includes(w))
+      recorded: of('recorded').length, derived: of('derived').length,
+      redacted: of('redacted').length, unavailable: of('unavailable').length,
+      redactedText: of('redacted').map((el) => el.innerText),
+      unavailableText: of('unavailable').map((el) => el.innerText)
     };
-  })()`);
-  check('capture gap — all four capture states render on the trace screen',
-    capture.recorded > 0 && capture.derived > 0 && capture.redacted > 0 && capture.unavailable > 0,
-    JSON.stringify(capture));
-  check('redaction — no hover-to-reveal or request-access affordance',
-    capture.revealish === false);
+  })()`;
+
+  await navigate('trace');
+  const capRest = await evaluate(visibleCaps);
+  check('capture gap — the trace screen shows recorded evidence at rest',
+    capRest.recorded > 0, JSON.stringify(capRest));
+
+  /* The counterfactual that makes the three hops below a gate: a screen with
+     no evidence on it must score zero. The old DOM-wide count scored 2/2/2/2
+     here, which is why it could not fail. */
+  await navigate('team');
+  const capNone = await evaluate(visibleCaps);
+  check('capture gap — a screen with no evidence shows no capture cards (counterfactual)',
+    capNone.recorded === 0 && capNone.derived === 0
+      && capNone.redacted === 0 && capNone.unavailable === 0,
+    JSON.stringify(capNone));
+
+  const capHops = { derived: 'commands', unavailable: 'tools', redacted: 'sources' };
+  const capSeen = {};
+  for (const [state, category] of Object.entries(capHops)) {
+    await navigate('answered');
+    capSeen[state] = await evaluate(
+      `(() => { toggleCat(${JSON.stringify(category)}); return ${visibleCaps}; })()`);
+    check(`capture gap — ${state} evidence renders one hop into ${category}`,
+      capSeen[state][state] > 0,
+      `${category} showed ${JSON.stringify(capSeen[state])}`);
+  }
+
+  /* ADR 0005 §7 fails closed, so this asks the redacted cards a reviewer can
+     see whether any of them offers a way through. `.some()` over an empty list
+     is `false`, so the population is asserted first — otherwise the check
+     passes loudest exactly when redaction has vanished from the screen. */
+  const redactedShown = capSeen.redacted.redactedText;
+  check('redaction — no hover-to-reveal or request-access affordance on a visible redacted card',
+    redactedShown.length > 0
+      && !redactedShown.some((t) => /reveal|show bytes|request access|unlock|view source/i.test(t)),
+    `${redactedShown.length} visible redacted cards: ${JSON.stringify(redactedShown)}`);
+
+  const unavailableShown = capSeen.unavailable.unavailableText;
   check('capture gap — unavailable evidence states a reason',
-    capture.unavailableStatesReason, 'an unavailable card carried no reason text');
+    unavailableShown.length > 0 && unavailableShown.every((t) => t.trim().length > 20),
+    `${unavailableShown.length} visible unavailable cards: ${JSON.stringify(unavailableShown)}`);
 
   /* ---------------------------------------------------------------------
      9. Both themes resolve on the run screens specifically. The TNG-87 gate
@@ -451,11 +517,15 @@ try {
       return cs.animationName !== 'none' && cs.animationDuration !== '0s'
         && cs.animationIterationCount === 'infinite';
     });
-    return { infinite: moving.length, still: /Running|Streaming/i.test(document.body.innerText) };
+    return { infinite: moving.length, meta: ${shownMeta} };
   })()`);
   check('reduced motion — no infinite animation survives on the live screen',
     motion.infinite === 0, `${motion.infinite} elements still loop`);
-  check('reduced motion — the live state is still legible without motion', motion.still);
+  /* "Legible without motion" means the phase is still stated in words once the
+     breathing border is gone — which is the phase surface, not any occurrence
+     of the word "running" in the page's prose. */
+  check('reduced motion — the live state is still legible without motion',
+    /·\s*running\b/i.test(motion.meta), `run-meta=${JSON.stringify(motion.meta)}`);
   await send('Emulation.setEmulatedMedia', { features: [] });
 
   check('no uncaught runtime errors across the TNG-90 screens',
