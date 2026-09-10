@@ -981,25 +981,27 @@ render greyed, and cannot be dragged or keyboard-placed. Rows that need run-time
 Pointer: dragging a usable row shows a drop ghost that follows the pointer over the canvas;
 releasing places the node exactly there (clamped to the stage). Nodes drag anywhere; edges
 re-anchor while the pointer moves. Keyboard: `Enter` on a row arms a placement ghost,
-`←→↑↓` move it (`Shift` = 32 px steps), `Enter` drops, `Esc` cancels and restores focus to the
-row. Arrow keys nudge a selected node by the same steps. A live region (the TNG-121 channel)
-narrates arm / move / drop / cancel, and the wire strip states the armed placement.
+`←→↑↓` move it in 16 px steps (`Shift` = 64 px), `Enter` drops, `Esc` cancels and restores
+focus to the row. Arrow keys nudge a selected node by the same steps. On the 390 px reading
+column, tapping a row arms it and tapping it again commits at the next open reading-order
+position. A live region narrates arm / move / drop / cancel, and the wire strip states the
+armed placement.
 
 ### 14.3 Typed wiring
 
 The only valid connections are the board-named relationships:
 
 ```text
-prompt/goal → agent (assigns goal)      agent → agent (hands off to)
-agent → skill (uses)                    agent → tool/connector (invokes)
-agent → knowledge source (consults)     agent / evidence → response/output (responds with)
+prompt/goal → agent (starts)            agent → agent (hands off)
+agent → skill (uses skill)              agent → tool/connector (invokes)
+agent → knowledge source (reads)        agent / evidence → response/output (produces)
 ```
 
 Pointer: drag a node's right handle onto a target — candidate targets light up valid (accent
 ring) or refused (dashed alert ring) while the temp edge follows the pointer. Keyboard: select a
 node, press `W` — `Tab` cycles every other node as a candidate, each announced with its validity
-or its refusal reason, `Enter` commits, `Esc` cancels. Selected edges expose two endpoint dots
-(drag to re-aim either end), `R` arms a rewire of the target, and `Delete` removes.
+or its refusal reason, `Enter` commits, `Esc` cancels. A selected edge exposes its target endpoint
+for pointer re-aiming; `R` provides the same target-rewire path by keyboard, and `Delete` removes.
 
 ### 14.4 Non-destructive refusals
 
@@ -1026,9 +1028,11 @@ The run-state system is unchanged: the blue breathing border appears only while 
 is actively executing, and the reduced-motion equivalent is the static 2 px blue perimeter;
 completion freezes the path to `succeeded`. `Replay observed run` re-renders all three evidence
 events inertly and labelled **Replay** — no shuttle, no live edges, no re-execution — while the
-planned graph stays untouched and editable. Both themes, the 390 px composition (read-only
-column: nodes, evidence, no strip/legend/viewctl), overflow bounds, and the greyscale rules of
-§16 apply unchanged.
+planned graph stays untouched and editable. In the 390 px composition, the capability Library
+becomes a bounded drawer in the source-ordered column; tap/keyboard placement, the connection
+strip, a 44 px theme control, and explicit relationship sentences remain available while SVG
+geometry and the legend yield. Prompt stays first and Response / output stays last. Both themes,
+overflow bounds, and the greyscale rules of §16 apply unchanged.
 
 ### 14.7 Backend/schema assumptions — design only, not implemented
 
@@ -1036,7 +1040,7 @@ column: nodes, evidence, no strip/legend/viewctl), overflow bounds, and the grey
   free coordinates, typed edges) that `team.schema.yaml` does not have today; the current
   pipeline/team modes remain the only executable shapes.
 - Edge typing and per-edge permission badges assume the run planner can consume declared
-  `uses/invokes/consults` relations and gate approval-requiring resources at run time; no such
+  `uses skill` / `invokes` / `reads` relations and gate approval-requiring resources at run time; no such
   planner contract exists yet.
 - The library assumes a workspace capability catalogue endpoint (agents, skills, connectors,
   knowledge sources with status and authorization) — `GET /api/harnesses` covers agents only.
@@ -1057,3 +1061,5 @@ Additional acceptance failures:
     announce each candidate's validity. **Fail.**
 38. Observed provenance renders as planned wiring (or vice versa), replay re-executes or moves,
     or the observed projection does not arrive automatically from run events. **Fail.**
+39. The 390 px composition removes capability discovery/placement, omits relationship words,
+    loses the prompt-first/output-last order, hides the theme control, or overflows. **Fail.**

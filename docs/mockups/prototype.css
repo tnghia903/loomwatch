@@ -2039,8 +2039,11 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
 #stage.wiring-armed .wnode:not(.cand-ok):not(.cand-bad):not(.kbd) { opacity: .5; }
 
 /* wiring handles: always visible on the freeform canvas, crosshair cursor */
-#stage.wiring-mode .node .handle { opacity: .9; background: var(--lw-handle-live); cursor: crosshair; }
-#stage.wiring-mode .node .handle:hover { width: 12px; height: 12px; }
+#stage.wiring-mode .node .handle,
+#stage.wiring-mode .wres .handle { opacity: .9; background: var(--lw-handle-live); cursor: crosshair; }
+#stage.wiring-mode .node .handle:hover,
+#stage.wiring-mode .wres .handle:hover { width: 12px; height: 12px; }
+.wire-narrow-rel { display: none; }
 
 /* ---------------------------------------------------------------------------
    WIRED EDGES — planned edges are the warp layer, selectable. The hit path
@@ -2143,12 +2146,47 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
 [data-motion="reduce"] #stage.wire-refused .ws-notice { animation: none !important; }
 
 /* ---------------------------------------------------------------------------
-   NARROW (≤ 767 px) — placement and wiring are desktop precision
-   interactions (the TNG-121 rule again). The column stays a readable,
-   read-only sequence: nodes in source order, observed evidence, composer.
+   NARROW (≤ 767 px) — the coordinate graph becomes a readable Operate
+   column. The catalogue stays reachable; tap/keyboard placement survives;
+   relationship sentences replace edge geometry.
    --------------------------------------------------------------------------- */
 @media (max-width: 767px) {
-  #wireStrip, #stage.wiring-mode #legend, #stage.wiring-mode #viewctl { display: none !important; }
+  #stage.wiring-mode {
+    grid-template-rows: auto auto auto auto auto !important;
+    grid-template-areas: "chip" "library" "nodes" "overlay" "wire" !important;
+    padding-bottom: 28px !important;
+  }
+  #stage.wiring-mode #library {
+    grid-area: library;
+    display: flex !important;
+    position: relative;
+    inset: auto;
+    left: auto; top: auto;
+    width: 100%;
+    height: min(52vh, 440px);
+    max-height: 440px;
+    transform: none;
+    z-index: 20;
+  }
+  #stage.wiring-mode #library .lib-head button { min-height: 44px; }
+  #stage.wiring-mode #library .lib-row { min-height: 44px; }
+  #stage.wiring-mode #legend { display: none !important; }
+  #stage.wiring-mode #wireStrip {
+    grid-area: wire;
+    display: flex !important;
+    position: sticky;
+    inset: auto;
+    left: auto; top: auto; bottom: 8px;
+    width: 100%;
+    max-width: none;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    z-index: 60;
+  }
+  #stage.wiring-mode #wireStrip .ws-main { min-width: 0; flex-basis: calc(100% - 36px); }
+  #stage.wiring-mode #wireStrip .ws-connections { max-width: 100%; }
+  #stage.wiring-mode #wireStrip .ws-sep { display: none; }
+  #stage.wiring-mode #wireStrip #wireReplayBtn { min-height: 44px; }
   #nodes > .wres, #nodes > .wnode {
     position: relative;
     inset: auto;
@@ -2158,6 +2196,16 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
     min-height: 84px;
   }
   #nodes > .wnode.node { position: relative; left: auto; top: auto; width: 100%; }
+  #stage.wiring-mode #nodes .wire-narrow-rel {
+    display: block;
+    margin: 6px -14px -10px -17px;
+    padding: 7px 14px 8px 17px;
+    border-top: 1px solid var(--color-hairline);
+    color: var(--color-ink-2);
+    overflow-wrap: anywhere;
+  }
+  #stage.wiring-mode #nodes .wres .wire-narrow-rel { margin: 6px -12px -8px; padding: 7px 12px 8px; }
+  #stage.wiring-mode #nodes > .wnode .handle { display: none; }
   #stage.wiring-mode #overlay > .activity-ent { order: 44; }
   #stage.wiring-mode #overlay > .prov-label { display: none; }
 }

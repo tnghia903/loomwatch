@@ -1816,8 +1816,8 @@ const resUsable = (r) => r.status === 'available' || r.status === 'permission';
    and nothing else changes (non-destructive).
    --------------------------------------------------------------------------- */
 const WIRE_RULES = {
-  prompt:    { agent: 'assigns goal' },
-  agent:     { agent: 'hands off to', skill: 'uses', tool: 'invokes', knowledge: 'consults', response: 'responds with' },
+  prompt:    { agent: 'starts' },
+  agent:     { agent: 'hands off', skill: 'uses skill', tool: 'invokes', knowledge: 'reads', response: 'produces' },
   skill:     {}, tool: {}, knowledge: {}, response: {}
 };
 const wireRule = (fromKind, toKind) => (WIRE_RULES[fromKind] || {})[toKind];
@@ -1858,21 +1858,23 @@ const wnode = (id) => wiring.nodes.find((n) => n.id === id);
 
 function seedWiring() {
   wiring.nodes = [
-    { id: 'wp1', kind: 'prompt', ref: null, x: 64, y: 88, name: 'Prompt · goal',
+    { id: 'wp1', kind: 'prompt', ref: null, x: 348, y: 88, name: 'Prompt · goal',
       sub: 'Find how ACP negotiates capabilities, and what that means for our permission handling.' },
-    { id: 'wa1', kind: 'agent', ref: 'r-res', x: 64, y: 300, name: 'Researcher' },
-    { id: 'wa2', kind: 'agent', ref: 'r-rev', x: 470, y: 452, name: 'Reviewer' },
-    { id: 'wa3', kind: 'agent', ref: 'r-codex', x: 64, y: 620, name: 'codex' },
-    { id: 'wr1', kind: 'response', ref: null, x: 1228, y: 452, name: 'Response · output', sub: 'Answer with cited sources.' },
-    { id: 'ws1', kind: 'skill', ref: 'r-skill-rel', x: 470, y: 216, name: 'release-evidence' },
-    { id: 'wt1', kind: 'tool', ref: 'r-tool-notion', x: 1180, y: 200, name: 'Notion' },
-    { id: 'wk1', kind: 'knowledge', ref: 'r-know-acp', x: 1180, y: 320, name: 'ACP spec corpus' }
+    { id: 'wa1', kind: 'agent', ref: 'r-res', x: 348, y: 300, name: 'Researcher' },
+    { id: 'wa2', kind: 'agent', ref: 'r-rev', x: 684, y: 452, name: 'Reviewer' },
+    { id: 'wa3', kind: 'agent', ref: 'r-codex', x: 348, y: 620, name: 'codex' },
+    { id: 'ws1', kind: 'skill', ref: 'r-skill-rel', x: 684, y: 196, name: 'release-evidence' },
+    { id: 'wt1', kind: 'tool', ref: 'r-tool-notion', x: 1016, y: 196, name: 'Notion' },
+    { id: 'wk1', kind: 'knowledge', ref: 'r-know-acp', x: 1016, y: 316, name: 'ACP spec corpus' },
+    { id: 'wr1', kind: 'response', ref: null, x: 1292, y: 452, name: 'Response · output', sub: 'Answer with cited sources.' }
   ];
   wiring.edges = [
     { id: 'we1', from: 'wp1', to: 'wa1' },
     { id: 'we2', from: 'wa1', to: 'wa2' },
     { id: 'we3', from: 'wa2', to: 'wr1' },
-    { id: 'we4', from: 'wa1', to: 'ws1' }
+    { id: 'we4', from: 'wa1', to: 'ws1' },
+    { id: 'we5', from: 'wa1', to: 'wt1' },
+    { id: 'we6', from: 'wa1', to: 'wk1' }
   ];
   wiring.selected = null;
   wiring.armed = null;
@@ -2004,6 +2006,7 @@ function wireNodeHTML(n) {
         aria-label="Prompt / goal node. ${escapeMarkup(n.sub)} Wires onward to an agent.">
       <span class="w-top t-micro">${entGlyph('prompt', 14)} Prompt · goal</span>
       <span class="w-sub t-body">${escapeMarkup(n.sub)}</span>
+      <span class="handle r" aria-hidden="true"></span>
     </button>`;
   }
   if (n.kind === 'response') {
@@ -2057,13 +2060,13 @@ function repaintEdges() {
     btn.addEventListener('click', (e) => { e.stopPropagation(); removeEdge(btn.dataset.rmedge); });
   });
 
-  /* endpoint handles on the selected edge + the origin dot while armed */
+  /* The selected edge exposes its target endpoint. Keyboard R performs the
+     same retarget action, so pointer and keyboard reconnect semantics match. */
   let g = '';
   if (wiring.selected && wiring.selected.type === 'edge') {
     const e = wiring.edges.find((x) => x.id === wiring.selected.id);
     if (e) {
-      const a = wireAnchor(wnode(e.from), 'r'), b = wireAnchor(wnode(e.to), 'l');
-      g += `<circle class="wire-end" data-wend="${e.id}|from" cx="${a.x}" cy="${a.y}" r="5"><title>Re-aim the start of this edge</title></circle>`;
+      const b = wireAnchor(wnode(e.to), 'l');
       g += `<circle class="wire-end" data-wend="${e.id}|to" cx="${b.x}" cy="${b.y}" r="5"><title>Re-aim the end of this edge</title></circle>`;
     }
   }
@@ -2092,6 +2095,18 @@ function paintWiring() {
 
   $('#nodes').innerHTML = wiring.nodes.map((n) => wireNodeHTML(n)).join('');
   $('#nodes').querySelectorAll('[data-wnode], [data-node]').forEach(bindWireNode);
+  $('#nodes').querySelectorAll('[data-wnode], [data-node]').forEach((el) => {
+    const n = wnode(el.dataset.wnode || el.dataset.node);
+    const relations = wiring.edges.filter((e) => e.from === n.id || e.to === n.id).map((e) => {
+      const a = wnode(e.from), b = wnode(e.to);
+      return e.from === n.id
+        ? `${wireRule(a.kind, b.kind)} → ${b.name}`
+        : `${a.name} → ${wireRule(a.kind, b.kind)}`;
+    });
+    el.insertAdjacentHTML('beforeend', `<span class="wire-narrow-rel t-meta">${relations.length
+      ? escapeMarkup(relations.join(' · '))
+      : 'No planned relationships'}</span>`);
+  });
 
   repaintEdges();
 
@@ -2231,6 +2246,14 @@ function deleteWireSelected() {
   if (wiring.selected.type === 'edge') return removeEdge(wiring.selected.id);
   const n = wnode(wiring.selected.id);
   if (!n) return;
+  if (n.kind === 'prompt' || n.kind === 'response') {
+    const reason = n.kind === 'prompt'
+      ? 'Prompt / goal is the graph origin and cannot be removed.'
+      : 'Response / output is the terminal result and cannot be removed.';
+    setWireNotice(reason);
+    announce(reason);
+    return;
+  }
   const removed = wiring.edges.filter((e) => e.from === n.id || e.to === n.id).length;
   wiring.nodes = wiring.nodes.filter((x) => x.id !== n.id);
   wiring.edges = wiring.edges.filter((e) => e.from !== n.id && e.to !== n.id);
@@ -2596,7 +2619,7 @@ function wiringKey(e) {
   if ((e.key === 'Enter' || e.key === ' ') && wiring.placing) { e.preventDefault(); commitPlace(); return true; }
   if (wiring.placing && /^Arrow/.test(e.key)) {
     e.preventDefault();
-    const step = e.shiftKey ? 32 : 8;
+    const step = e.shiftKey ? 64 : 16;
     const r = resById(wiring.placing.ref);
     const s = r.kind === 'agent' ? WIRE_SIZES.agent : WIRE_SIZES.res;
     if (e.key === 'ArrowLeft') wiring.placing.x = Math.max(0, wiring.placing.x - step);
@@ -2609,7 +2632,7 @@ function wiringKey(e) {
   if (!wiring.selected) return false;
   if (/^Arrow/.test(e.key) && wiring.selected.type === 'node') {
     e.preventDefault();
-    const step = e.shiftKey ? 32 : 8;
+    const step = e.shiftKey ? 64 : 16;
     nudgeSelected(
       e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0,
       e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0);
@@ -2699,6 +2722,12 @@ function renderLibrary() {
       if (wiring.placing && wiring.placing.ref === row.dataset.res) { commitPlace(); return; }
       armPlaceFromLibrary(row.dataset.res, row);
     })));
+  host.querySelectorAll('.lib-row[data-res]').forEach((row) =>
+    row.addEventListener('click', () => {
+      if (stage.dataset.screen !== 'wiring' || !window.matchMedia('(max-width: 767px)').matches) return;
+      if (wiring.placing && wiring.placing.ref === row.dataset.res) commitPlace();
+      else armPlaceFromLibrary(row.dataset.res, row);
+    }));
   host.querySelectorAll('.lib-row-sub').forEach(middleTruncate);
 }
 
@@ -2716,7 +2745,7 @@ function libRowHTML(r, wiringScreen) {
   const compat = usable
     ? (r.kind === 'agent' ? 'wires: goal, agents, skills, tools, knowledge, output' : 'wires to agents · use direction only')
     : `${st.word} — not placeable`;
-  return `<div class="lib-row ${usable ? '' : 'unavailable'}" ${usable ? `draggable="true" data-res="${r.id}"` : 'aria-disabled="true"'}
+  return `<div class="lib-row ${usable ? '' : 'unavailable'}" role="button" ${usable ? `draggable="true" data-res="${r.id}"` : 'aria-disabled="true"'}
       title="${escapeMarkup(r.kind === 'agent' ? 'Wires to: prompt/goal, agents, skills, tools, knowledge, response' : 'Wires to agents only — use direction')}"
       tabindex="0"
       aria-label="${KIND_WORD[r.kind]} ${escapeMarkup(r.name)}, ${st.word}${wired ? `, ${wired} ${wired === 1 ? 'wire' : 'wires'} on canvas` : ''}. ${usable ? 'Press Enter to arm placement on the freeform canvas.' : 'Not usable in this workspace.'}">
@@ -2770,9 +2799,9 @@ function bindLibrary() {
 }
 
 /* ---------------------------------------------------------------------------
-   SCREEN — Freeform wiring. Desktop composition (placement and wiring are
-   precision interactions, like TNG-121 placement); below 768 px the column
-   stays read-only, consistent with the narrow rules.
+   SCREEN — Freeform wiring. Desktop uses direct manipulation; below 768 px
+   the same catalogue, placement, selection, and relationship content is
+   reprioritized into a readable column rather than removed.
    --------------------------------------------------------------------------- */
 const WIRE_PARTS = ['library', 'chip', 'viewctl', 'legend', 'edges', 'edgeLabels',
                     'nodes', 'overlay', 'provEdges', 'wireStrip'];
@@ -2788,12 +2817,12 @@ SCREENS.wiring = {
     <li>Unusable resources are <b>visible but honest</b>: <code>Disconnected</code> / <code>Not installed</code> rows state their reason, render greyed, and cannot be dragged or placed. Two policy-hidden resources are counted in the footer, never shown as rows.</li>
     <li><code>Needs approval</code> resources are placeable and wireable; edges to them carry a <b>needs approval</b> badge.</li></ul>
     <h4>Placement (§14.2)</h4><ul>
-    <li>Pointer: drag a row — a ghost follows the pointer over the canvas; drop places the node exactly there. Keyboard: <kbd>Enter</kbd> on a row arms a ghost, <kbd>←→↑↓</kbd> move it (Shift = 32 px), <kbd>Enter</kbd> drops, <kbd>Esc</kbd> cancels back to the row.</li>
+    <li>Pointer: drag a row — a ghost follows the pointer over the canvas; drop places the node exactly there. Keyboard: <kbd>Enter</kbd> on a row arms a ghost, <kbd>←→↑↓</kbd> move it by 16 px (Shift = 64 px), <kbd>Enter</kbd> drops, <kbd>Esc</kbd> cancels back to the row. At narrow widths, tapping the same armed row commits at the next open reading-order position.</li>
     <li>Nodes drag anywhere; edges re-anchor live. Arrows nudge the selected node.</li></ul>
     <h4>Typed wiring (§14.3–14.4)</h4><ul>
     <li>Drag a node's right handle onto a target, or select a node and press <kbd>W</kbd>: Tab cycles candidates — each announces valid or refused with the reason — <kbd>Enter</kbd> commits, <kbd>Esc</kbd> cancels.</li>
-    <li>The six board-named relationships are the only valid edges: <code>assigns goal</code>, <code>hands off to</code>, <code>uses</code>, <code>invokes</code>, <code>consults</code>, <code>responds with</code>. Everything else is refused with a non-destructive explanation in the strip; nothing is created.</li>
-    <li>Click an edge to select it: <kbd>R</kbd> rewires its target, endpoint dots re-aim by drag, <kbd>Delete</kbd> removes, the selected edge's × removes it.</li></ul>
+    <li>The six board-named relationships are the only valid edges: <code>starts</code>, <code>hands off</code>, <code>uses skill</code>, <code>invokes</code>, <code>reads</code>, <code>produces</code>. Everything else is refused with a non-destructive explanation in the strip; nothing is created.</li>
+    <li>Click an edge to select it: <kbd>R</kbd> rewires its target, the target endpoint re-aims by drag, <kbd>Delete</kbd> removes, and the selected edge's × removes it.</li></ul>
     <h4>Planned vs observed (§14.6)</h4><ul>
     <li>Grey solid edges are <b>your planned wiring</b> (the configured warp layer). Blue edges + gold shuttle are <b>observed provenance</b>, projected automatically from live run events on a timer — never authored, never written to the file.</li>
     <li>The blue breathing border appears <b>only while the run is active</b>; completion freezes it (reduced motion: static 2 px blue). <b>Replay observed run</b> re-renders the evidence inertly and labelled Replay — it never re-executes.</li></ul>`

@@ -36,17 +36,18 @@ wired badges, compatibility cues on every usable row, and honest states for the 
 state their reason and cannot be dragged; policy-hidden resources are counted in the footer,
 never listed.
 
-Wiring is typed: `assigns goal`, `hands off to`, `uses`, `invokes`, `consults`,
-`responds with` — nothing else connects. Pointer (drag a node's right handle onto a target)
+Wiring is typed: `starts`, `hands off`, `uses skill`, `invokes`, `reads`,
+`produces` — nothing else connects. Pointer (drag a node's right handle onto a target)
 and keyboard (`W` arms, `Tab` cycles candidates with announced validity, `Enter` commits,
-`Esc` cancels; `R` rewires a selected edge, `Delete` removes, endpoint dots re-aim by drag)
+`Esc` cancels; `R` rewires a selected edge, `Delete` removes, the target endpoint re-aims by drag)
 are equivalents. Invalid connections are refused **non-destructively**: the wire strip
 (bottom-centre) explains, the strip shakes once, nothing is created. Grey solid edges are your
 planned wiring; blue edges + gold shuttle + evidence cards are observed provenance projected
 automatically from live run events — the two layers stay visually and behaviourally distinct,
 and `Replay observed run` is inert and labelled. The blue breathing border appears only while
-the run is active (reduced motion: static 2 px blue); both themes, the 390 px read-only
-composition, and the overflow bounds hold.
+the run is active (reduced motion: static 2 px blue). At 390 px the Library becomes a bounded
+drawer; tap/keyboard placement, explicit relationship sentences, the connection strip, and the
+theme toggle remain available in a prompt-first/output-last column without horizontal overflow.
 
 Spec: [`../TNG89_INTERACTION.md §14`](../TNG89_INTERACTION.md#14-tng-122--tng-123-revision--freeform-placement-typed-wiring-and-the-capability-library)
 (including §14.7 backend assumptions, design-only). Verified by
@@ -225,7 +226,7 @@ exact screen and theme — `prototype-standalone.html#team,light`.
 | 2 | `canvas` | Canvas · pipeline | The default working state. Dirty document, two edge layers, one anomaly. |
 | 3 | `inspector` | Inspector | How is an Agent edited? |
 | 4 | `team` | Canvas · team + live | The observed layer in full voice — all three weft kinds. |
-| 5 | `wiring` | Freeform wiring | Place anything anywhere, wire it with typed edges (TNG-123). |
+| 5 | `wiring` | Freeform wiring | Place workspace capabilities anywhere and wire them with typed edges (TNG-122/TNG-123). |
 | 6 | `switcher` | Document switcher | How do you see, switch and write the file? |
 | 7 | `palette` | Command palette | ⌘K as the whole menu. |
 | 8 | `problems` | Validation | Incomplete vs. invalid, and how you get to the cause. |

@@ -397,7 +397,7 @@ try {
   await key('Escape', { code: 'Escape', virtualKeyCode: 27 });
 
   /* =====================================================================
-     TNG-123 — freeform placement, typed wiring, capability library,
+     TNG-122 — freeform placement, typed wiring, capability library,
      keyboard parity, planned-vs-observed separation, themes, narrow.
      ===================================================================== */
   await viewport(1600, 1000);
@@ -412,8 +412,21 @@ try {
     strip: !!document.querySelector('#wireStrip'),
     counts: document.querySelector('#wireCounts')?.textContent
   }))()`);
-  assert(wireReady.screen === 'wiring' && wireReady.planned === 4, `Wiring screen did not initialize: ${JSON.stringify(wireReady)}`);
-  assert(wireReady.strip && /Planned 4/.test(wireReady.counts), `Wire strip missing or wrong counts: ${JSON.stringify(wireReady)}`);
+  assert(wireReady.screen === 'wiring' && wireReady.planned === 6, `Wiring screen did not initialize: ${JSON.stringify(wireReady)}`);
+  assert(wireReady.strip && /Planned 6/.test(wireReady.counts), `Wire strip missing or wrong counts: ${JSON.stringify(wireReady)}`);
+  const desktopComposition = await evaluate(`(() => {
+    const lib = document.querySelector('#library').getBoundingClientRect();
+    const prompt = document.querySelector('[data-wnode="wp1"]').getBoundingClientRect();
+    const lead = document.querySelector('[data-node="wa1"]').getBoundingClientRect();
+    const labels = [...document.querySelectorAll('#edgeLabels .rel-word')].map((n) => n.textContent.trim());
+    return { libRight: lib.right, promptLeft: prompt.left, leadLeft: lead.left, labels,
+      promptHandle: document.querySelectorAll('[data-wnode="wp1"] .handle.r').length };
+  })()`);
+  assert(desktopComposition.promptLeft > desktopComposition.libRight && desktopComposition.leadLeft > desktopComposition.libRight,
+    `Library obscures the prompt-to-output origin: ${JSON.stringify(desktopComposition)}`);
+  for (const relation of ['starts', 'hands off', 'uses skill', 'invokes', 'reads', 'produces'])
+    assert(desktopComposition.labels.includes(relation), `Seed graph does not demonstrate ${relation}: ${JSON.stringify(desktopComposition.labels)}`);
+  assert(desktopComposition.promptHandle === 1, `Prompt origin has no pointer wiring handle: ${JSON.stringify(desktopComposition)}`);
   /* expand every collapsed group, then the full catalogue is in the DOM */
   await evaluate(`RES_GROUPS.forEach((g) => { g.collapsed = false; }); renderLibrary();`);
   const expanded = await evaluate(`({ rows: document.querySelectorAll('#libGroups .lib-row').length,
@@ -466,20 +479,27 @@ try {
   await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
   const wiredKb = await evaluate(`({ edges: wiring.edges.map((e) => e.from + '>' + e.to), selected: wiring.selected, announce: document.querySelector('#liveRegion').textContent })`);
   assert(wiredKb.edges.includes('wa3>wa2'), `Keyboard wiring did not create the handoff edge: ${JSON.stringify(wiredKb)}`);
-  assert(/hands off to/.test(wiredKb.announce), `Commit did not announce the typed relation: ${wiredKb.announce}`);
+  assert(/hands off/.test(wiredKb.announce), `Commit did not announce the typed relation: ${wiredKb.announce}`);
 
   /* invalid connections are refused non-destructively, with the reason */
   const inv1 = await evaluate(`tryConnect('wp1', 'wr1')`);
   const inv2 = await evaluate(`tryConnect('ws1', 'wa2')`);
   const inv3 = await evaluate(`tryConnect('wa1', 'wa1')`);
   const invState = await evaluate(`({ edges: wiring.edges.length, notice: document.querySelector('#wireNotice').textContent, visible: !document.querySelector('#wireNotice').hidden })`);
-  assert(invState.edges === 5 && invState.visible && inv1 === null && inv2 === null && inv3 === null, `Invalid connections were not refused cleanly: ${JSON.stringify(invState)}`);
+  assert(invState.edges === 7 && invState.visible && inv1 === null && inv2 === null && inv3 === null, `Invalid connections were not refused cleanly: ${JSON.stringify(invState)}`);
   assert(/prompt \/ goal wires to the agent/.test(invState.notice) || /never originate/.test(invState.notice) || /cannot connect to itself/.test(invState.notice), `Refusal explanation missing: ${invState.notice}`);
+
+  /* graph origin and terminal are structural anchors, not removable cards */
+  const anchorCount = await evaluate(`wiring.nodes.length`);
+  await evaluate(`selectWire('wp1')`);
+  await key('Delete', { code: 'Delete', virtualKeyCode: 46 });
+  const keptOrigin = await evaluate(`({ n: wiring.nodes.length, notice: document.querySelector('#wireNotice').textContent })`);
+  assert(keptOrigin.n === anchorCount && /graph origin/.test(keptOrigin.notice), `Prompt origin was removed or refusal was missing: ${JSON.stringify(keptOrigin)}`);
 
   /* edge selection, rewire, endpoint re-aim data path, remove */
   await evaluate(`selectWire('we2', 'edge')`);
   const edgeSel = await evaluate(`({ sel: wiring.selected, dots: document.querySelectorAll('#wireGroup .wire-end').length, rx: document.querySelectorAll('#edgeLabels .rx').length })`);
-  assert(edgeSel.sel.type === 'edge' && edgeSel.dots === 2 && edgeSel.rx === 1, `Edge selection did not expose endpoints + removal: ${JSON.stringify(edgeSel)}`);
+  assert(edgeSel.sel.type === 'edge' && edgeSel.dots === 1 && edgeSel.rx === 1, `Edge selection did not expose target reconnect + removal: ${JSON.stringify(edgeSel)}`);
   await key('r', { code: 'KeyR', virtualKeyCode: 82 });
   for (let i = 0; i < 10; i += 1) {
     const t = await evaluate(`wiring.armed ? wiring.armed.candidates[wiring.armed.idx] : null`);
@@ -491,7 +511,7 @@ try {
   assert(rewired.edges.includes('wa1>wa3'), `R + Enter did not rewire the edge target: ${JSON.stringify(rewired)}`);
   await key('Delete', { code: 'Delete', virtualKeyCode: 46 });
   const afterDelete = await evaluate(`({ n: wiring.edges.length })`);
-  assert(afterDelete.n === 4, `Delete did not remove the selected edge: ${JSON.stringify(afterDelete)}`);
+  assert(afterDelete.n === 6, `Delete did not remove the selected edge: ${JSON.stringify(afterDelete)}`);
 
   /* node drag by pointer moves the node freely and re-anchors its edges.
      Real CDP mouse input: synthetic PointerEvents do not honour pointer
@@ -507,7 +527,7 @@ try {
   await sleep(120);
   const drag = await evaluate(`(() => {
     const n = wiring.nodes.find((x) => x.id === 'wa2');
-    return { x: n.x, y: n.y, origX: 470, origY: 452, selected: wiring.selected };
+    return { x: n.x, y: n.y, origX: 684, origY: 452, selected: wiring.selected };
   })()`);
   assert(drag.x > drag.origX && drag.y > drag.origY && drag.selected && drag.selected.id === 'wa2', `Pointer drag did not move the node freely: ${JSON.stringify(drag)}`);
 
@@ -522,7 +542,7 @@ try {
     plannedUnchanged: wiring.edges.map((e) => e.from + '>' + e.to).join(',')
   })`);
   assert(/Replay/.test(replay.badge) && replay.obs === 3 && replay.liveEdges === 0, `Replay is not inert/labelled: ${JSON.stringify(replay)}`);
-  assert(replay.planned === 4 && replay.plannedUnchanged === plannedBefore, `Replay mutated the planned graph: ${JSON.stringify(replay)}`);
+  assert(replay.planned === 6 && replay.plannedUnchanged === plannedBefore, `Replay mutated the planned graph: ${JSON.stringify(replay)}`);
   await evaluate(`go('wiring'); null`);
   await sleep(5200);
   const live = await evaluate(`({ obs: wiring.observed.length, live: wiring.live, weft: document.querySelector('#cntWeft').textContent })`);
@@ -546,7 +566,8 @@ try {
   assert(reducedWire.animation === 'none' && reducedWire.width === '2px', `Reduced-motion wiring border not static: ${JSON.stringify(reducedWire)}`);
   await evaluate(`delete document.documentElement.dataset.motion; null`);
 
-  /* both themes render the wiring screen; narrow stays read-only and clean */
+  /* both themes render the wiring screen; narrow retains discovery,
+     tap/keyboard placement, relationship text, and the theme control. */
   for (const theme of ['dark', 'light']) {
     await navigate(`wiring,${theme}`);
     const themed = await evaluate(`({ theme: document.documentElement.dataset.theme,
@@ -556,11 +577,35 @@ try {
     assert(themed.nodes >= 8, `${theme} wiring lost nodes: ${JSON.stringify(themed)}`);
     await viewport(390, 844);
     await evaluate(`fit()`);   /* the product's own resize handler */
-    const narrowWire = await evaluate(`({ layout: document.documentElement.dataset.layout,
-      overflow: document.querySelector('#stage').scrollWidth - document.querySelector('#stage').clientWidth,
-      strip: getComputedStyle(document.querySelector('#wireStrip')).display,
-      cards: document.querySelectorAll('#nodes > *').length })`);
-    assert(narrowWire.layout === 'narrow' && narrowWire.overflow <= 1 && narrowWire.strip === 'none', `${theme} narrow wiring overflows: ${JSON.stringify(narrowWire)}`);
+    const narrowWire = await evaluate(`(() => {
+      const stage = document.querySelector('#stage');
+      const library = document.querySelector('#library');
+      const strip = document.querySelector('#wireStrip');
+      const kinds = wiring.nodes.map((n) => n.kind);
+      return { layout: document.documentElement.dataset.layout,
+        overflow: stage.scrollWidth - stage.clientWidth,
+        library: getComputedStyle(library).display,
+        libraryHeight: library.getBoundingClientRect().height,
+        strip: getComputedStyle(strip).display,
+        relations: [...document.querySelectorAll('#nodes .wire-narrow-rel')].filter((n) => getComputedStyle(n).display !== 'none').map((n) => n.textContent.trim()),
+        first: kinds[0], last: kinds[kinds.length - 1],
+        themeTarget: document.querySelector('#themeBtn').getBoundingClientRect().height,
+        cards: document.querySelectorAll('#nodes > *').length };
+    })()`);
+    assert(narrowWire.layout === 'narrow' && narrowWire.overflow <= 1, `${theme} narrow wiring overflows: ${JSON.stringify(narrowWire)}`);
+    assert(narrowWire.library === 'flex' && narrowWire.libraryHeight >= 240 && narrowWire.strip === 'flex', `${theme} narrow discovery/connection controls disappeared: ${JSON.stringify(narrowWire)}`);
+    assert(narrowWire.relations.length >= 8 && narrowWire.relations.every(Boolean) && narrowWire.first === 'prompt' && narrowWire.last === 'response', `${theme} narrow relationship reading order is incomplete: ${JSON.stringify(narrowWire)}`);
+    assert(narrowWire.themeTarget >= 44, `${theme} narrow theme toggle is not reachable: ${JSON.stringify(narrowWire)}`);
+    if (theme === 'dark') {
+      const tapPlacement = await evaluate(`(() => {
+        const before = wiring.nodes.length;
+        document.querySelector('[data-res="r-skill-cite"]').click();
+        const armed = !!wiring.placing;
+        document.querySelector('[data-res="r-skill-cite"]').click();
+        return { before, after: wiring.nodes.length, armed, placed: wiring.nodes[wiring.nodes.length - 1].ref };
+      })()`);
+      assert(tapPlacement.armed && tapPlacement.after === tapPlacement.before + 1 && tapPlacement.placed === 'r-skill-cite', `Narrow tap placement failed: ${JSON.stringify(tapPlacement)}`);
+    }
     await viewport(1600, 1000);
   }
 
@@ -570,7 +615,7 @@ try {
   assert(runtimeErrors.length === 0, `Standalone emitted runtime exceptions: ${JSON.stringify(runtimeErrors)}`);
   assert(requests.every((url) => url.startsWith('file:') || url.startsWith('data:')), `Standalone attempted a network request: ${JSON.stringify(requests)}`);
 
-  console.log('TNG-119 + TNG-121 + TNG-123 verification passed: causal graph, editable pipeline, freeform placement + typed wiring (drag + keyboard), capability library states, planned-vs-observed separation, interaction, overflow bounds, themes, narrow layout, reduced motion, replay, retry retention, and offline loading');
+  console.log('TNG-119 + TNG-121 + TNG-122 verification passed: causal graph, editable pipeline, freeform placement + typed wiring (pointer, keyboard, narrow tap), capability library states, planned-vs-observed separation, interaction, overflow bounds, themes, narrow relationship flow, reduced motion, replay, retry retention, and offline loading');
 } finally {
   if (socket) socket.close();
   await new Promise((resolveExit) => {
