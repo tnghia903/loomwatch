@@ -494,6 +494,29 @@ fails; lean on a UA sheet that only Chromium has and pass B fails.
 Uses only the macOS command-line tools (Swift + WebKit). No Safari automation, no admin
 enablement, no package install.
 
+### Affordance sweep — run this before any candidate goes to the board
+
+The gate above proves a *named* fix. It cannot tell you about the control the board presses
+next, and that is what four rounds were actually lost to: each rejection was closed
+correctly, and each following round found the next silent control on the same screen.
+
+```
+swift docs/mockups/verify-webkit.swift \
+  docs/mockups/prototype-standalone.html \
+  --eval docs/mockups/webkit-probe-canvas-affordances.js
+```
+
+This enumerates every reachable affordance on the default `canvas` screen — the only screen
+the board reviews — and asks each one the reviewer's question: *I pressed it, did anything
+happen?* Any change to the serialized document, screen, node model, focus, or scroll counts,
+because the point is to clear controls rather than assert a behaviour. The live count is
+printed alongside the failures: if a run flags everything, the detector is broken, not the
+page.
+
+Current state: 27 of 34 answer a press. The five that do not are written up in
+`TNG87_AFFORDANCE_SWEEP.md` — the view controls have no handler at all, and the mode pill's
+CANVAS_SPEC §8.1 popover is absent behind a hand cursor.
+
 ### TNG-115 remediation — 26 focused browser assertions, all passing
 
 Run `node docs/mockups/verify-prototype.mjs`. The verifier launches headless Chrome with
