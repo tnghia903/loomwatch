@@ -2,7 +2,7 @@
 
 Revision 1 · 2026-09-06 · **frozen per [ARCHITECTURE.md §7](ARCHITECTURE.md#7-build-phases)**
 
-This document freezes the message schema `loomwatchd` pushes to the macOS app over
+This document freezes the message schema `loomwatchd` pushes to the web UI over
 WebSocket at the end of Phase 03, incorporating the TNG-42 Phase 03 review (its wire
 findings landed as TNG-45 and TNG-46). Phase 04 (Canvas) and Phase 05 (Watch & alert)
 build against it; any change requires a new ADR under `docs/decisions/`.
