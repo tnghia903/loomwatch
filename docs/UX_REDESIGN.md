@@ -34,6 +34,46 @@ behavior, keyboard/focus contract, token discipline, rationale boundary, and exp
 backend/schema assumptions are normative in
 [`TNG89_INTERACTION.md §12`](TNG89_INTERACTION.md#12-tng-119-revision--prompt-to-output-is-the-primary-graph-narrative).
 
+## TNG-121 revision — the live pipeline is editable, and nothing overflows
+
+Board rejection feedback on TNG-87 named two gaps: the composed pipeline could not be
+modified inside the live-canvas story, and node/history content overflowed its cards.
+Both are addressed in the prototype only.
+
+**Editable pipeline.** A new **Available team** panel (top right, 340 px) lists five
+placeable agents — three detected harnesses and the two role presets. A row is a drag
+*and* keyboard source:
+
+- **Pointer:** dragging a row renders dashed **drop slots between every consecutive pair
+  of pipeline steps** (never at the ends — the prototype pins lead and responder).
+  Hovering a slot flips it to a solid accent "valid drop" state; dropping inserts the
+  agent there.
+- **Keyboard:** `Enter` on a row arms placement (the row gains an accent treatment and
+  the slots appear, focus moves to slot 0). `Tab` between slots, `Enter` inserts,
+  `Esc` cancels and restores focus to the row. A polite live region announces arm,
+  insert, cancel, and removal.
+- **The graph updates, not the copy:** the inserted step takes the next step number, both
+  `delegates review` edges re-anchor to it, evidence re-anchors under its new owner
+  position, and the composer chip recomputes `Pipeline · N steps`. Focus lands on the
+  inserted node; the inspector's Delete button removes that step.
+- **Bounds:** three steps maximum in the demo (the causal story stops being legible past
+  that); the palette reports `Pipeline full` and placement is refused (announced, not
+  silent). Inserted presets are valid; raw harness rows are `incomplete` until given a
+  role/model, exactly like a Library drop.
+- **Scope:** insertion mutates the in-memory document only. It never writes runtime nodes
+  to the team file, never rewrites finished/replayed branches, and saving is still `⌘S`.
+  Backend assumptions are listed in `TNG89_INTERACTION.md §13.6` and are **not**
+  implemented.
+
+**Overflow repair.** Every runtime card is bounded: the durable Prompt grows to 132 px
+then scrolls internally; the response header ellipsizes before it can push its Live/Replay
+badge out; evidence-card lines truncate inside the 180 px card; the lifecycle strip wraps;
+the prior-branch card scrolls internally; run-history rows clip long goals and the list
+scrolls. Expanded provenance moved from free absolute positions (which overflowed the
+1000 px stage to y ≈ 1046 with an entity open) into a **bounded tray** that anchors above
+the stage floor, scrolls internally, and carries `Back to response` in its header. At 390 px
+the tray becomes a full-width block in the reading column.
+
 ---
 
 ## 0. The eleven changes, and why each one

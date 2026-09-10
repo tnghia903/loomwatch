@@ -368,6 +368,15 @@ function selectNode(id) {
   $('#iRole').value = a.role;
   $('#iModel').value = a.model;
   $('#cEntry').classList.toggle('on', !!a.entry);
+  /* TNG-121: only pipeline steps inserted this session can be removed; the
+     story anchors (lead, responder) are fixed in the prototype. */
+  const ispDelete = $('#ispDelete');
+  if (ispDelete) {
+    ispDelete.disabled = !a.inserted;
+    ispDelete.title = a.inserted ? 'Remove this step from the live pipeline'
+      : 'The prototype pins the lead and responder steps.';
+    ispDelete.onclick = () => { if (AGENTS[id] && AGENTS[id].inserted) removeSelectedAgent(); };
+  }
   if (stage.classList.contains('workspace')) {
     const liveAgent = agentExecutionNodes().find((n) => n.id === id);
     if (liveAgent) $('#ispStatus').innerHTML = statusSVG(liveAgent.status) + ' ' + liveAgent.taskState.toLowerCase() + ' · ' + liveAgent.task;
@@ -713,6 +722,144 @@ const run = {
 };
 const FILTERS = { cats: new Set(CATS.map((c) => c[0])), agent: 'all', status: 'all', time: 'all' };
 
+/* ---------------------------------------------------------------------------
+   TNG-121 — THE LIVE PIPELINE IS EDITABLE.
+   `pipeline` is the ordered agent list of the live story. The Available-team
+   palette (a drag *and* keyboard source) inserts an agent into a drop slot
+   between two existing steps; the prompt then flows through the inserted
+   agent and onward to the existing tool/evidence/output path. Insertion and
+   removal mutate the in-memory document only — nothing here writes runtime
+   nodes to the team file, rewrites a finished branch, or re-runs evidence
+   the run did not observe. Backend assumptions live in TNG89 §13.6.
+   --------------------------------------------------------------------------- */
+let pipeline = ['n1', 'n2'];
+let insSeq = 0;
+const MAX_PIPELINE = 3;      /* demo bound: three steps keep the causal story legible */
+const PALETTE_SOURCES = {
+  opencode:   { name: 'opencode',  role: '', roleHint: 'Add a role',
+                model: '', harness: 'Oc', glyph: 'flask',   preset: false },
+  claude:     { name: 'claude',    role: '', roleHint: 'Add a role',
+                model: '', harness: 'C',  glyph: 'scanEye', preset: false },
+  codex:      { name: 'codex',     role: '', roleHint: 'Add a role',
+                model: '', harness: 'Cx', glyph: 'penLine', preset: false },
+  reviewer:   { name: 'Reviewer',   role: 'Review against TEAM_CONFIG',
+                model: 'anthropic/claude-opus-4-6', harness: 'C', glyph: 'scanEye', preset: true },
+  researcher: { name: 'Researcher', role: 'Collect corroborating sources',
+                model: 'kimi-for-coding/k3-256k',   harness: 'Oc', glyph: 'telescope', preset: true }
+};
+let armed = null;            /* keyboard placement: { source, trigger }       */
+let dragSource = null;       /* pointer placement: source mid-drag            */
+
+const agentTops = () => pipeline.map((_, i) => 210 + i * (pipeline.length > 2 ? 216 : 300));
+const placementAllowed = () =>
+  stage.classList.contains('workspace') && run.mode === 'live' && pipeline.length < MAX_PIPELINE;
+
+const announce = (text) => {
+  const el = $('#liveRegion');
+  if (el) el.textContent = text;
+};
+
+function resetPipeline() {
+  pipeline.forEach((id) => { if (AGENTS[id] && AGENTS[id].inserted) delete AGENTS[id]; });
+  pipeline = ['n1', 'n2'];
+  armed = null;
+  dragSource = null;
+}
+
+function insertAgent(index, source, via) {
+  if (!stage.classList.contains('workspace') || run.mode !== 'live') return;
+  if (pipeline.length >= MAX_PIPELINE) return;
+  insSeq += 1;
+  const id = 'ins' + insSeq;
+  AGENTS[id] = { id, name: source.name, role: source.role, model: source.model,
+    harness: source.harness, cost: '$0.00', pct: 0, status: 'idle', glyph: source.glyph,
+    idText: source.name.toLowerCase(), limit: '$ 2.00',
+    valid: source.preset ? undefined : 'incomplete', inserted: true };
+  pipeline.splice(Math.min(Math.max(index, 1), pipeline.length), 0, id);
+  armed = null;
+  dragSource = null;
+  paintRun();
+  announce(`${source.name} inserted into the pipeline. The prompt now flows through it to the output.`);
+  focusAfterPaint(`[data-node="${id}"]`);
+}
+
+function removeSelectedAgent() {
+  const id = state.selected;
+  const a = AGENTS[id];
+  if (!a || !a.inserted) return;
+  const idx = pipeline.indexOf(id);
+  pipeline.splice(idx, 1);
+  delete AGENTS[id];
+  const focusId = pipeline[Math.min(idx, pipeline.length - 1)];
+  state.selected = null;
+  $('#inspector').hidden = true;
+  stage.classList.remove('inspecting');
+  paintRun();
+  announce(`${a.name} removed from the pipeline.`);
+  focusAfterPaint(`[data-node="${focusId}"]`);
+}
+
+function armPlacement(row) {
+  if (!placementAllowed()) {
+    announce('Placement is unavailable: the pipeline already has its maximum of three steps.');
+    return;
+  }
+  const source = PALETTE_SOURCES[row.dataset.palette];
+  armed = { source, trigger: row };
+  paintRun();
+  announce(`${source.name} armed for placement. Tab to a highlighted slot, press Enter to insert, Escape to cancel.`);
+  focusAfterPaint('[data-slot="0"]');
+}
+
+function cancelArm() {
+  const trigger = armed && armed.trigger;
+  armed = null;
+  paintRun();
+  announce('Placement cancelled.');
+  if (trigger && trigger.isConnected) trigger.focus({ preventScroll: true });
+}
+
+function bindFlowSlot(el) {
+  const insertFrom = (source) => {
+    if (!source) return;
+    insertAgent(+el.dataset.slot + 1, source);
+  };
+  el.addEventListener('click', () => insertFrom(armed ? armed.source : null));
+  el.addEventListener('keydown', (e) => activateKey(e, () => insertFrom(armed ? armed.source : null)));
+  el.addEventListener('dragover', (e) => {
+    if (!dragSource) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    el.classList.add('drop-ok');
+  });
+  el.addEventListener('dragleave', () => el.classList.remove('drop-ok'));
+  el.addEventListener('drop', (e) => {
+    if (!dragSource) return;
+    e.preventDefault();
+    insertFrom(dragSource);
+  });
+}
+
+function bindPalettePanel() {
+  document.querySelectorAll('#palettePanel [data-palette]').forEach((row) => {
+    row.addEventListener('dragstart', (e) => {
+      if (!placementAllowed()) { e.preventDefault(); return; }
+      armed = null;
+      dragSource = PALETTE_SOURCES[row.dataset.palette];
+      e.dataTransfer.setData('text/plain', row.dataset.palette);
+      e.dataTransfer.effectAllowed = 'copy';
+      stage.classList.add('pipeline-dragging');
+      paintRun();
+    });
+    row.addEventListener('dragend', () => {
+      dragSource = null;
+      stage.classList.remove('pipeline-dragging');
+      paintRun();
+    });
+    row.addEventListener('keydown', (e) => activateKey(e, () => armPlacement(row)));
+  });
+}
+
 /* A multi-agent trace: researcher hands off to reviewer, so `delegated_to`
    and `participated` both appear (addendum: "at least one multi-agent trace"). */
 const TRACE = {
@@ -813,40 +960,43 @@ function filtered(cat) {
 }
 
 function agentExecutionNodes() {
-  const baseA = { ...AGENTS.n1, x: 520, y: 210, step: 1, storyClass: 'story-agent-a', taskOwner: 'Agent A · lead' };
-  const baseB = { ...AGENTS.n2, x: 520, y: 510, step: 2, storyClass: 'story-agent-b', taskOwner: 'Agent B · responder' };
-  if (run.phase === 'idle') return [
-    { ...baseA, status: 'idle', taskState: 'READY', task: 'Awaiting a task' },
-    { ...baseB, status: 'idle', taskState: 'READY', task: 'Awaiting a task' }
-  ];
-  if (run.phase === 'queued') return [
-    { ...baseA, status: 'idle', taskState: 'QUEUED', task: 'Collect workspace evidence' },
-    { ...baseB, status: 'idle', taskState: 'QUEUED', task: 'Review evidence bundle' }
-  ];
-  if (run.phase === 'starting') return [
-    { ...baseA, status: 'starting', taskState: 'STARTING', task: 'Connect to Notion' },
-    { ...baseB, status: 'idle', taskState: 'QUEUED', task: 'Review evidence bundle' }
-  ];
-  if (run.phase === 'running') return [
-    run.eventCount >= 6
-      ? { ...baseA, status: 'succeeded', taskState: 'DONE', task: 'Evidence packet handed off' }
-      : { ...baseA, status: 'running', taskState: run.eventCount >= 2 ? 'STREAMING' : 'RUNNING', task: run.eventCount ? 'Search launch evidence' : 'Call Notion workspace' },
-    run.eventCount >= 6
-      ? { ...baseB, status: 'running', taskState: 'RUNNING', task: 'Validate repository findings' }
-      : { ...baseB, status: 'waiting', taskState: 'QUEUED', task: 'Waiting for Agent A handoff' }
-  ];
-  if (run.phase === 'partial' || run.phase === 'failed') return [
-    { ...baseA, status: 'succeeded', taskState: 'DONE', task: 'Evidence packet handed off' },
-    { ...baseB, status: 'failed', taskState: 'ERROR', task: 'Validation stopped at test failure' }
-  ];
-  if (run.phase === 'cancelled') return [
-    { ...baseA, status: 'stopped', taskState: 'CANCELLED', task: 'Evidence collection stopped' },
-    { ...baseB, status: 'stopped', taskState: 'CANCELLED', task: 'Review never completed' }
-  ];
-  return [
-    { ...baseA, status: 'succeeded', taskState: 'DONE', task: 'Evidence packet handed off' },
-    { ...baseB, status: 'succeeded', taskState: 'DONE', task: 'Validation report completed' }
-  ];
+  const tops = agentTops();
+  const roleFor = (i) => i === 0 ? 'Agent A · lead'
+    : i === pipeline.length - 1 ? 'Agent B · responder' : 'Agent · relay';
+  const clsFor = (i) => i === 0 ? 'story-agent-a'
+    : i === pipeline.length - 1 ? 'story-agent-b' : 'story-agent-mid';
+  return pipeline.map((id, i) => {
+    const base = { ...AGENTS[id], x: 520, y: tops[i], step: i + 1,
+      storyClass: clsFor(i), taskOwner: roleFor(i) };
+    if (run.phase === 'idle') return { ...base, status: 'idle', taskState: 'READY', task: 'Awaiting a task' };
+    if (run.phase === 'queued') return { ...base, status: 'idle', taskState: 'QUEUED',
+      task: i === 0 ? 'Collect workspace evidence' : i === pipeline.length - 1 ? 'Review evidence bundle' : 'Relay the evidence packet' };
+    if (run.phase === 'starting') return { ...base, status: i === 0 ? 'starting' : 'idle',
+      taskState: i === 0 ? 'STARTING' : 'QUEUED',
+      task: i === 0 ? 'Connect to Notion' : 'Waiting for the run to start' };
+    if (run.phase === 'running') {
+      if (i === 0) return run.eventCount >= 6
+        ? { ...base, status: 'succeeded', taskState: 'DONE', task: 'Evidence packet handed off' }
+        : { ...base, status: 'running', taskState: run.eventCount >= 2 ? 'STREAMING' : 'RUNNING',
+            task: run.eventCount ? 'Search launch evidence' : 'Call Notion workspace' };
+      if (i === pipeline.length - 1) return run.eventCount >= 6
+        ? { ...base, status: 'running', taskState: 'RUNNING', task: 'Validate repository findings' }
+        : { ...base, status: 'waiting', taskState: 'QUEUED', task: 'Waiting for the upstream handoff' };
+      return run.eventCount >= 6
+        ? { ...base, status: 'succeeded', taskState: 'DONE', task: 'Packet forwarded to the responder' }
+        : run.eventCount >= 5
+          ? { ...base, status: 'running', taskState: 'RUNNING', task: 'Correlating upstream sources' }
+          : { ...base, status: 'waiting', taskState: 'QUEUED', task: 'Waiting for the upstream handoff' };
+    }
+    if (run.phase === 'partial' || run.phase === 'failed') return { ...base,
+      status: i === pipeline.length - 1 ? 'failed' : 'succeeded',
+      taskState: i === pipeline.length - 1 ? 'ERROR' : 'DONE',
+      task: i === pipeline.length - 1 ? 'Validation stopped at test failure' : i === 0 ? 'Evidence packet handed off' : 'Packet forwarded to the responder' };
+    if (run.phase === 'cancelled') return { ...base, status: 'stopped', taskState: 'CANCELLED',
+      task: i === 0 ? 'Evidence collection stopped' : i === pipeline.length - 1 ? 'Review never completed' : 'Cancelled before the handoff' };
+    return { ...base, status: 'succeeded', taskState: 'DONE',
+      task: i === 0 ? 'Evidence packet handed off' : i === pipeline.length - 1 ? 'Validation report completed' : 'Packet forwarded to the responder' };
+  });
 }
 
 function renderAgentExecution() {
@@ -856,7 +1006,11 @@ function renderAgentExecution() {
   host.querySelectorAll('[data-node]').forEach(bindNodeControl);
 }
 
-const agentOrigin = (agent) => agent === 'reviewer' ? { x: 796, y: 572 } : { x: 796, y: 272 };
+function agentOrigin(agent) {
+  const tops = agentTops();
+  const idx = agent === 'reviewer' ? pipeline.length - 1 : 0;
+  return { x: 796, y: tops[idx] + 62 };
+}
 const ownerLabel = (agent) => agent === 'reviewer' ? 'Agent B' : 'Agent A';
 
 /* ---------------------------------------------------------------------------
@@ -1066,16 +1220,27 @@ function entCard(e, x, y, open) {
   </button>`;
 }
 
+/* evidence cards anchor relative to their owning agent's node top, so the
+   path re-anchors when the pipeline is edited (TNG-121). x stays per-event. */
+const EVENT_DY = { la1: -22, la2: -22, la3: 62, la4: 62, la5: 146, la6: 52, la7: 52 };
+
 function paintRun() {
   const ov = $('#overlay'), pe = $('#provGroup');
   if (!ov || !stage.classList.contains('workspace')) return;
   let h = '', ed = '';
   const live = run.mode === 'live';
   const agents = agentExecutionNodes();
+  const tops = agentTops();
+  const topOf = (agentKey) => tops[agentKey === 'reviewer' ? pipeline.length - 1 : 0];
   $('#nodes').innerHTML = '';
   $('#edgeGroup').innerHTML = '';
   $('#edgeLabels').innerHTML = '';
   $('#legend').hidden = true;
+
+  /* the mode chip reports the edited pipeline, not a stale constant */
+  $('#compModeLabel').textContent = 'Pipeline · ' + agents.length + ' steps';
+  const ppCount = $('#ppCount');
+  if (ppCount) ppCount.textContent = placementAllowed() ? '5 available' : 'Pipeline full';
 
   /* composer reflects the phase; Stop preserves state, Retry branches */
   const busy = !isTerminal() && run.phase !== 'idle';
@@ -1099,7 +1264,20 @@ function paintRun() {
       : 'Connection loss never starts, restarts or cancels a run.';
   }
 
-  if (run.phase === 'idle') { ov.innerHTML = ''; pe.innerHTML = ''; return; }
+  /* TNG-121: the editable pipeline is visible before the first prompt. The
+     Prompt / Run / Output story appears on submit; the agent steps — and the
+     drop slots between them — exist from the moment the workspace opens. */
+  if (run.phase === 'idle') {
+    const agentHTML = agents.map((n) => nodeHTML({ ...n, selected: n.id === state.selected })).join('');
+    let slots = '';
+    if (armed || dragSource) {
+      for (let i = 0; i < pipeline.length - 1; i += 1) slots += slotHTML(i, tops);
+    }
+    ov.innerHTML = agentHTML + slots;
+    pe.innerHTML = '';
+    bindOverlay(ov);
+    return;
+  }
 
   const life = lifecycleForRun();
   h += `<div class="life-strip e1" style="--x:80px;--y:34px;width:680px" aria-label="Lifecycle summary">
@@ -1127,30 +1305,36 @@ function paintRun() {
   h += `<span class="prov-label story-label t-micro" style="left:620px;top:188px">assigns lead</span>`;
 
   h += nodeHTML({ ...agents[0], selected: agents[0].id === state.selected });
-  ed += `<path class="prov story-edge" d="M658 334 L658 510" marker-end="url(#mProv)"/>`;
-  h += `<span class="prov-label story-label t-micro" style="left:658px;top:420px">delegates review</span>`;
 
   /* Live activity is projected immediately from ordered events. Every card
      has a direct agent-owned edge; no response/category indirection is needed
-     to answer who performed it. */
+     to answer who performed it. Evidence y anchors to the owning agent's node,
+     so a pipeline edit re-anchors the path with it (TNG-121). */
   const activity = LIVE_ACTIVITY.slice(0, run.eventCount);
-  activity.filter((e) => e.agent === 'researcher').forEach((e) => {
+
+  /* every consecutive pair is a named, directional delegation edge; an
+     inserted step re-numbers visibly and the prompt flows through it */
+  for (let i = 0; i < agents.length; i += 1) {
+    if (i > 0) h += nodeHTML({ ...agents[i], selected: agents[i].id === state.selected });
+    if (i < agents.length - 1) {
+      const y0 = tops[i] + 124, y1 = tops[i + 1];
+      ed += `<path class="prov story-edge" d="M658 ${y0} L658 ${y1}" marker-end="url(#mProv)"/>`;
+      h += `<span class="prov-label story-label t-micro" style="left:658px;top:${Math.round((y0 + y1) / 2)}px">delegates review</span>`;
+    }
+    const evs = i === 0 ? activity.filter((e0) => e0.agent === 'researcher')
+      : i === agents.length - 1 ? activity.filter((e0) => e0.agent === 'reviewer')
+      : [];
+    evs.forEach((e0) => {
+      const e = { ...e0, y: topOf(e0.agent) + EVENT_DY[e0.id] };
       h += activityCard(e, e.order === run.eventCount);
       const from = agentOrigin(e.agent);
       const ty = e.y + 34;
       const edgeLive = live && run.phase === 'running';
       ed += `<path class="prov ${edgeLive ? 'prov-live' : ''}" d="M${from.x} ${from.y} C ${from.x + 28} ${from.y} ${e.x - 28} ${ty} ${e.x} ${ty}" marker-end="url(#${edgeLive ? 'mLive' : 'mProv'})"/>`;
-      if (e.order === 1) h += `<span class="prov-label prov-live-label t-micro" style="left:930px;top:174px">Agent A → Notion · invoked tool</span>`;
-  });
-
-  h += nodeHTML({ ...agents[1], selected: agents[1].id === state.selected });
-  activity.filter((e) => e.agent === 'reviewer').forEach((e) => {
-    h += activityCard(e, e.order === run.eventCount);
-    const from = agentOrigin(e.agent), ty = e.y + 34;
-    const edgeLive = live && run.phase === 'running';
-    ed += `<path class="prov ${edgeLive ? 'prov-live' : ''}" d="M${from.x} ${from.y} C ${from.x + 28} ${from.y} ${e.x - 28} ${ty} ${e.x} ${ty}" marker-end="url(#${edgeLive ? 'mLive' : 'mProv'})"/>`;
-    if (e.order === 6) h += `<span class="prov-label prov-live-label t-micro" style="left:930px;top:548px">Agent B → file · read</span>`;
-  });
+      if (e.order === 1) h += `<span class="prov-label prov-live-label t-micro" style="left:930px;top:${tops[0] - 36}px">Agent A → Notion · invoked tool</span>`;
+      if (e.order === 6) h += `<span class="prov-label prov-live-label t-micro" style="left:930px;top:${tops[pipeline.length - 1] + 38}px">Agent B → file · read</span>`;
+    });
+  }
 
   /* Explicit terminal output, with both producing-agent and run edges. */
   const p = RPHASE[run.phase];
@@ -1187,36 +1371,52 @@ function paintRun() {
     ${run.phase === 'cancelled' ? `<div class="rt-strip halt t-meta">
         <span>Cancelled by the operator. Partial answer kept.</span><span class="wm">stopReason: cancelled</span></div>` : ''}
   </article>`;
-  ed += `<path class="prov story-edge" d="M796 572 C 930 572 1100 500 1230 500" marker-end="url(#mProv)"/>`;
+  const lastTop = tops[pipeline.length - 1];
+  ed += `<path class="prov story-edge" d="M796 ${lastTop + 62} C 930 ${lastTop + 62} 1100 500 1230 500" marker-end="url(#mProv)"/>`;
   h += `<span class="prov-label story-label t-micro" style="left:1030px;top:520px">responds with</span>`;
   ed += `<path class="prov story-edge" d="M700 132 C 980 92 1395 140 1395 420" marker-end="url(#mProv)"/>`;
   h += `<span class="prov-label story-label t-micro" style="left:1040px;top:110px">Run ${String(run.attempt).padStart(2, '0')} · completes as</span>`;
 
+  /* drop slots — visible only while a placement is armed or a row is being
+     dragged, so the graph never advertises handles it does not have */
+  if (live && (armed || dragSource)) {
+    for (let i = 0; i < pipeline.length - 1; i += 1) h += slotHTML(i, tops);
+  }
+
   if (run.previous.length) {
     const prior = run.previous[run.previous.length - 1];
-    h += `<button type="button" id="priorBranch" class="prior-branch e1" style="--x:80px;--y:700px"
+    h += `<button type="button" id="priorBranch" class="prior-branch e1" style="--x:1230px;--y:700px;width:330px"
         onclick="togglePriorBranch()" aria-expanded="${run.priorOpen}"
         aria-label="Previous Run ${prior.attempt}, ${prior.phase}, ${prior.evidence.length} accumulated evidence items kept">
       <span class="t-micro">Previous branch · Run ${String(prior.attempt).padStart(2, '0')}</span>
       <span class="t-body-m">${prior.phase} · ${prior.evidence.length} evidence kept</span>
       ${run.priorOpen ? `<span class="prior-evidence t-meta">${prior.evidence.map((e) => `#${String(e.order).padStart(2, '0')} ${escapeMarkup(e.name)}`).join(' · ') || 'No evidence had arrived'}</span>` : ''}
     </button>`;
-    ed += `<path class="prov prior-edge" d="M585 174 C 430 420 350 610 260 700" marker-end="url(#mProv)"/>`;
-    h += `<span class="prov-label t-micro" style="left:410px;top:560px">retry preserves</span>`;
+    ed += `<path class="prov prior-edge" d="M585 174 C 900 300 1395 420 1395 700" marker-end="url(#mProv)"/>`;
+    h += `<span class="prov-label t-micro" style="left:1180px;top:452px">retry preserves</span>`;
   }
 
+  /* Provenance renders inside a bounded tray (TNG-121 overflow rule): the
+     tray occupies a reserved band above the stage floor, never pushes past
+     it, and scrolls internally when summaries, entities and filters exceed
+     the band. Relationship words stay on the cards. */
   if (run.selected) {
-    const respBottom = 680;
-    const headY = 704, rowY = CATS.map(() => 744);
-    const storyCatPos = CATS.map((_, i) => [80 + i * 200, 744]);
+    const trayTop = Math.max(700, tops[pipeline.length - 1] + 124 + 16);
+    const trayH = 992 - trayTop;
     const gaps = CATS.filter((c) => COVER[c[0]] !== 'complete').map((c) => c[0]);
-    h += `<div id="provHead" class="t-body-m" style="--x:80px;--y:${headY}px;width:680px">
-      ${covSVG('partial')} Partial capture
-      <span class="gaps t-meta">— ${gaps.slice(0, 2).join(' and ')} incomplete</span></div>`;
+    h += `<div id="provTray" style="--x:80px;--y:${trayTop}px;width:1140px;height:${trayH}px"
+        aria-label="Provenance summaries, entities and filters">
+      <div id="provHead" class="t-body-m">
+        ${covSVG('partial')} Partial capture
+        <span class="gaps t-meta">— ${gaps.slice(0, 2).join(' and ')} incomplete</span>
+        <span class="spacer"></span>
+        <button class="btn btn-back" onclick="backToResponse()">← Back to response</button>
+      </div>
+      <div class="tray-cols">
+        <div class="tray-main">`;
 
     if (run.openEnt) {
-      h += `<div class="t-body-m" style="position:absolute;left:812px;top:${headY + 34}px;
-              display:flex;align-items:center;gap:8px;color:var(--color-ink-3)">
+      h += `<div class="tray-crumb t-body-m">
         <button class="link" onclick="backToResponse()">Response</button> ›
         <button class="link" onclick="toggleEnt(null)">${run.open}</button> ›
         <span style="color:var(--color-ink)">detail</span></div>`;
@@ -1225,8 +1425,8 @@ function paintRun() {
       if (run.openEnt) return;
       if (!FILTERS.cats.has(name)) return;
       const list = filtered(name), cov = COVER[name];
-      const x = storyCatPos[i][0], y = rowY[i], open = run.open === name;
-      h += `<button type="button" class="rt-chip ${open ? 'open' : ''}" style="--x:${x}px;--y:${y}px"
+      const open = run.open === name;
+      h += `<button type="button" class="rt-chip ${open ? 'open' : ''}"
           data-category="${name}"
           onclick="toggleCat('${name}')" onkeydown="activateKey(event, () => toggleCat('${name}'))"
           aria-expanded="${open}"
@@ -1234,16 +1434,13 @@ function paintRun() {
         <span class="c-top t-micro">${entGlyph(kind, 13)} ${name}
           <span class="n t-mono-sm">${list.length || '—'}</span></span>
         <span class="c-cov t-meta">${covSVG(cov)} ${COVERAGE[cov].word}</span></button>`;
-      ed += `<path class="prov" d="M1395 ${respBottom} C 1395 ${y - 18} ${x + 95} ${y - 18} ${x + 95} ${y}" marker-end="url(#mProv)"/>`;
     });
 
     if (run.open) {
       const list = filtered(run.open);
-      const entY = run.openEnt ? headY + 74 : rowY[5] + 100;
-      /* the breadcrumb already states the relationship when an entity is open */
-      if (!run.openEnt) h += `<span class="prov-label t-micro" style="left:1012px;top:${entY - 18}px">${EDGE_OF_CAT[run.open]}</span>`;
+      if (!run.openEnt) h += `<div class="tray-cat-label t-micro">${run.open} · ${EDGE_OF_CAT[run.open]}</div>`;
       if (!list.length) {
-        h += `<div class="prov-empty t-meta" style="--x:812px;--y:${entY}px">
+        h += `<div class="prov-empty t-meta">
           <b class="t-body-m" style="color:var(--color-ink-2)">Nothing captured for ${run.open}.</b>
           <span>${run.open === 'skills'
             ? 'No recorded skill activity matched the current filters. Prompt or filesystem presence alone is never treated as use.'
@@ -1251,26 +1448,17 @@ function paintRun() {
       } else if (run.openEnt) {
         /* progressive disclosure: expanding one entity focuses it (addendum §5) */
         const e = list.find((x) => x.id === run.openEnt) || list[0];
-        h += entCard(e, 812, entY, true);
-        const from = agentOrigin(e.agent);
-        ed += `<path class="prov" d="M${from.x} ${from.y} C 520 ${from.y} 700 ${entY + 30} 812 ${entY + 30}" marker-end="url(#mProv)"/>`;
-        h += `<span class="prov-label t-micro" style="left:590px;top:${(from.y + entY + 30) / 2}px">${ownerLabel(e.agent)} · ${EDGE_OF_CAT[run.open]} · #${String(e.order || 0).padStart(2, '0')}</span>`;
-        h += `<button class="btn" style="position:absolute;left:1012px;top:${entY}px"
-                onclick="toggleEnt('${e.id}')">← all ${run.open}</button>`;
+        h += `<div class="tray-crumb t-micro">${ownerLabel(e.agent)} · ${EDGE_OF_CAT[run.open]} · #${String(e.order || 0).padStart(2, '0')}</div>`;
+        h += entCard(e, 0, 0, true);
+        h += `<button class="btn" onclick="toggleEnt('${e.id}')">← all ${run.open}</button>`;
       } else {
-        list.forEach((e, j) => {
-          const ex = 812 + (j % 2) * 200, ey = entY + Math.floor(j / 2) * 112;
-          h += entCard(e, ex, ey, false);
-          const from = agentOrigin(e.agent);
-          ed += `<path class="prov" d="M${from.x} ${from.y} C 540 ${from.y} 690 ${ey + 30} ${ex} ${ey + 30}" marker-end="url(#mProv)"/>`;
-        });
+        list.forEach((e) => { h += entCard(e, 0, 0, false); });
       }
-      h += `<button class="btn btn-back" style="--x:1230px;--y:${entY}px;position:absolute"
-              onclick="backToResponse()">← Back to response</button>`;
     }
 
+    h += `</div>`;
     /* filters — artifact type, agent, status, time (addendum §5) */
-    h += `<div id="filters" class="e1" style="--x:1320px;--y:${headY - 6}px">
+    h += `<div id="filters" class="e1">
       <span class="t-micro" style="color:var(--color-ink-3)">Artifact type</span>
       ${CATS.map(([n]) => `<button class="filt t-meta ${FILTERS.cats.has(n) ? 'on' : ''}"
           data-filter-cat="${n}" aria-pressed="${FILTERS.cats.has(n)}"
@@ -1280,18 +1468,36 @@ function paintRun() {
         `<button data-filter="agent:${a}" aria-pressed="${FILTERS.agent === a}" class="${FILTERS.agent === a ? 'on' : ''}" onclick="setFilter('agent','${a}')">${a === 'all' ? 'All' : a.slice(0, 8)}</button>`).join('')}</span>
       <span class="fhead t-micro">Status</span>
       <span class="seg">${['all', 'succeeded', 'failed'].map((a) =>
-        `<button data-filter="status:${a}" aria-pressed="${FILTERS.status === a}" class="${FILTERS.status === a ? 'on' : ''}" onclick="setFilter('status','${a}')">${a === 'all' ? 'All' : a === 'succeeded' ? 'OK' : 'Failed'}</button>`).join('')}</span>
+        `<button data-filter="status:${a}" aria-pressed="${FILTERS.status === a}" class="${FILTERS.status === a ? 'on' : ''}" onclick="setFilter('status','${a}')">${a === 'all' ? 'OK' : 'Failed'}</button>`).join('')}</span>
       <span class="fhead t-micro">Time</span>
       <span class="seg">${['all', 'first10'].map((a) =>
         `<button data-filter="time:${a}" aria-pressed="${FILTERS.time === a}" class="${FILTERS.time === a ? 'on' : ''}" onclick="setFilter('time','${a}')">${a === 'all' ? 'Whole run' : 'First 10s'}</button>`).join('')}</span>
       <span class="pop-sep" style="margin:6px 0"></span>
       <span class="t-meta" style="color:var(--color-ink-3)">Filters are view state. They never re-run the projector.</span>
+    </div>
+      </div>
     </div>`;
+    ed += `<path class="prov story-edge" d="M1395 620 C 1395 ${trayTop - 22} 700 ${trayTop - 22} 700 ${trayTop}" marker-end="url(#mProv)"/>`;
+    h += `<span class="prov-label story-label t-micro" style="left:940px;top:${trayTop - 22}px">provenance</span>`;
   }
 
   ov.innerHTML = h;
   pe.innerHTML = ed;
+  bindOverlay(ov);
+}
+function slotHTML(i, tops) {
+  const source = (armed && armed.source) || dragSource;
+  const name = source ? source.name : '';
+  return `<button type="button" class="flow-slot" data-slot="${i}"
+      style="--x:520px;--y:${Math.round(tops[i] + 124 + (tops[i + 1] - tops[i] - 124) / 2 - 20)}px;order:${44 + i * 5}"
+      aria-label="Insert ${escapeMarkup(name)} between step ${i + 1} and ${i + 2}">
+    <span class="fs-glyph" aria-hidden="true">↓</span>
+    <span class="t-meta">Insert <b>${escapeMarkup(name)}</b> between step ${i + 1} and ${i + 2}</span>
+  </button>`;
+}
+function bindOverlay(ov) {
   ov.querySelectorAll('[data-node]').forEach(bindNodeControl);
+  ov.querySelectorAll('[data-slot]').forEach(bindFlowSlot);
   ov.querySelectorAll('.ent .e-name').forEach(middleTruncate);
 }
 function toggleFilterCat(n) {
@@ -1338,11 +1544,13 @@ const SEEDS = {
 const CANVAS_PARTS = ['library', 'chip', 'modepill', 'viewctl', 'legend', 'edges', 'edgeLabels', 'nodes'];
 const ALL = [...CANVAS_PARTS, 'inspector', 'firstrun', 'states', 'system',
              'switcherPop', 'palette', 'problemsPop',
-             'composer', 'overlay', 'provEdges', 'history', 'activityPanel'];
+             'composer', 'overlay', 'provEdges', 'history', 'activityPanel',
+             'palettePanel'];
 /* On run screens the mode pill is absorbed into the composer (TNG89 §1), so
-   `modepill` is deliberately absent from this list. */
+   `modepill` is deliberately absent from this list. The Available-team panel
+   makes the pipeline editable on every live workspace screen (TNG-121). */
 const RUN_PARTS = ['library', 'chip', 'viewctl', 'legend', 'edges', 'edgeLabels',
-                   'nodes', 'composer', 'overlay', 'provEdges'];
+                   'nodes', 'composer', 'overlay', 'provEdges', 'palettePanel'];
 
 const SCREENS = {
   'first-run': {
@@ -1595,6 +1803,7 @@ function go(key) {
   stage.classList.toggle('workspace', !!s.seed);
   if (s.seed) {
     clearTimers();
+    resetPipeline();
     SEEDS[s.seed]();
     renderComposer(s.composer || 'empty');
     paintRun();
@@ -1880,8 +2089,9 @@ document.addEventListener('keydown', (e) => {
   if (meta && e.key.toLowerCase() === 'p') { e.preventDefault(); return openSwitcher(); }
   if (meta && e.key === '\\') { e.preventDefault(); return toggleLibrary(); }
   if (e.key === 'Escape') {
-    /* Esc order: dismiss popover → deselect → close inspector (§11) */
+    /* Esc order: dismiss popover → cancel placement → deselect → close inspector (§11, TNG-121) */
     if (!$('#activityPanel').hidden) return closeActivity();
+    if (armed) return cancelArm();
     const open = ['switcherPop', 'palette', 'problemsPop', 'history'].some((i) => { const el = $('#' + i); return el && !el.hidden; });
     if (open) return closePops();
     if (state.selected) return selectNode(null);
@@ -1951,6 +2161,7 @@ const wanted = hash.find((h) => ORDER.includes(h));
 paintTheme();
 paintDots();
 paintSolo();
+bindPalettePanel();
 go(wanted || 'canvas');
 truncateAll();
 fit();

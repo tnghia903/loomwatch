@@ -104,9 +104,74 @@
   </div>
 
   <!-- =================================================================
-       RUN HISTORY — addendum §2, "how the user reopens prior runs".
-       Selecting a run loads it in REPLAY: same picture, no motion.
-       ================================================================= -->
+        AVAILABLE TEAM — TNG-121. The pipeline is editable while it is
+        live: a row drags into a drop slot between two agents, or arms
+        with Enter for the keyboard path (Tab to a slot, Enter inserts,
+        Esc cancels). Insertion updates the in-memory document only —
+        it never writes runtime nodes to the team file, and saving is
+        still ⌘S (TNG89 §13.6).
+        ================================================================= -->
+  <section class="panel right top e1" id="palettePanel" aria-label="Available team">
+    <header class="pp-head">
+      <span class="t-micro">Available team</span>
+      <span class="t-meta pp-count" id="ppCount">5 available</span>
+    </header>
+    <div class="pp-rows">
+      <button type="button" class="lib-row pp-row" draggable="true" data-palette="opencode"
+              aria-label="Place opencode agent into the pipeline">
+        <span class="monogram">Oc</span>
+        <span class="lib-row-text">
+          <span class="lib-row-name t-body-m">opencode</span>
+          <span class="lib-row-sub t-mono-sm">detected harness</span>
+        </span>
+        <span class="drag-dots t-body" aria-hidden="true">⠿</span>
+      </button>
+      <button type="button" class="lib-row pp-row" draggable="true" data-palette="claude"
+              aria-label="Place claude agent into the pipeline">
+        <span class="monogram">C</span>
+        <span class="lib-row-text">
+          <span class="lib-row-name t-body-m">claude</span>
+          <span class="lib-row-sub t-mono-sm">detected harness</span>
+        </span>
+        <span class="drag-dots t-body" aria-hidden="true">⠿</span>
+      </button>
+      <button type="button" class="lib-row pp-row" draggable="true" data-palette="codex"
+              aria-label="Place codex agent into the pipeline">
+        <span class="monogram">Cx</span>
+        <span class="lib-row-text">
+          <span class="lib-row-name t-body-m">codex</span>
+          <span class="lib-row-sub t-mono-sm">detected harness</span>
+        </span>
+        <span class="drag-dots t-body" aria-hidden="true">⠿</span>
+      </button>
+      <button type="button" class="lib-row pp-row" draggable="true" data-palette="reviewer"
+              aria-label="Place Reviewer preset into the pipeline">
+        <span class="monogram">·</span>
+        <span class="lib-row-text">
+          <span class="lib-row-name t-body-m">Reviewer</span>
+          <span class="lib-row-sub t-meta">claude · opus · $3.00 cap</span>
+        </span>
+        <span class="drag-dots t-body" aria-hidden="true">⠿</span>
+      </button>
+      <button type="button" class="lib-row pp-row" draggable="true" data-palette="researcher"
+              aria-label="Place Researcher preset into the pipeline">
+        <span class="monogram">·</span>
+        <span class="lib-row-text">
+          <span class="lib-row-name t-body-m">Researcher</span>
+          <span class="lib-row-sub t-meta">opencode · $5.00 cap</span>
+        </span>
+        <span class="drag-dots t-body" aria-hidden="true">⠿</span>
+      </button>
+    </div>
+    <p class="pp-hint t-meta">Drag a row into a pipeline slot — or press
+      <kbd>Enter</kbd> to arm placement, <kbd>Tab</kbd> to a highlighted slot,
+      <kbd>Enter</kbd> to insert, <kbd>Esc</kbd> to cancel.</p>
+  </section>
+
+  <!-- =================================================================
+        RUN HISTORY — addendum §2, "how the user reopens prior runs".
+        Selecting a run loads it in REPLAY: same picture, no motion.
+        ================================================================= -->
   <div class="pop e2" id="history" style="bottom:96px;left:50%;transform:translateX(-50%)" hidden>
     <div class="pop-search">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
@@ -300,7 +365,7 @@
 
     <footer class="insp-foot">
       <button class="btn" style="border:0">Save as preset</button>
-      <button class="btn btn-danger" style="border:0">Delete</button>
+      <button class="btn btn-danger" style="border:0" id="ispDelete">Delete</button>
     </footer>
   </aside>
 
@@ -748,6 +813,10 @@
 
     </div>
   </div>
+
+  <!-- TNG-121 — placement announcements for the editable pipeline.
+       Screen-reader output for arm / insert / cancel / remove. -->
+  <div id="liveRegion" class="visually-hidden" role="status" aria-live="polite"></div>
 
   <div id="sweep"></div>
 

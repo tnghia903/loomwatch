@@ -3,6 +3,28 @@
 The reviewable output of the "Obsidian & Gilt" redesign. No design tool the rest of the
 team cannot open.
 
+## TNG-121 revision — editable live pipeline + overflow repair
+
+The live pipeline is now **editable inside the story**. The **Available team** panel (top
+right) lists five placeable agents. Drag a row between two pipeline steps — dashed drop
+slots appear between consecutive steps, hover shows a solid accent valid-drop state, drop
+inserts the agent. Keyboard path: `Enter` on a row arms placement (slots appear, focus
+jumps to the first slot), `Tab` between slots, `Enter` inserts, `Esc` cancels with focus
+restored; a live region narrates arm/insert/cancel/remove. The inserted step takes the
+next step number, both `delegates review` edges re-anchor through it (the prompt visibly
+flows through it to the output), evidence re-anchors to its owner, and the composer chip
+recomputes `Pipeline · N steps`. Focus lands on the inserted node; its inspector Delete
+button removes it. The demo bounds the pipeline at three steps (`Pipeline full` beyond
+that). Insertion mutates the in-memory document only — never the team file, a finished
+branch, or a replay; the backend assumptions are design-only and listed in
+[`../TNG89_INTERACTION.md §13.6`](../TNG89_INTERACTION.md#136-backendschema-assumptions--design-only-not-implemented).
+
+Overflow repair: every runtime card is bounded (Prompt scrolls internally at 132 px,
+response header ellipsizes, evidence lines truncate, lifecycle strip wraps, prior-branch
+and run-history lists scroll), and expanded provenance renders in a **bounded tray**
+anchored above the stage floor that scrolls internally instead of painting past the stage.
+Verified at 1600 × 1000 and 390 px in both Quarry Light and Obsidian & Gilt.
+
 ## TNG-119 revision — prompt-to-output is the canvas story
 
 Screens 8–11 now read left-to-right as one inspectable causal graph:

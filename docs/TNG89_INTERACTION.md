@@ -862,3 +862,87 @@ Additional acceptance failures:
 26. Terminal/cancel/error/retry loses original input or accepted evidence. **Fail.**
 27. Retry overwrites the prior branch. **Fail.**
 28. Any required evidence type lacks exact producer ownership, order, time, or state. **Fail.**
+
+---
+
+## 13. TNG-121 revision — the live pipeline is editable; bounded node and history UI
+
+This section revises the design prototype and documentation only. It does not implement or
+authorize a production component, endpoint, event, or schema change.
+
+### 13.1 The Available-team panel
+
+A 340 px `e1` panel, top right, lists five placeable agents: three detected harnesses
+(`opencode`, `claude`, `codex`) and the two role presets (`Reviewer`, `Researcher`). It
+appears on every live workspace screen, is hidden while the inspector or activity panel
+owns the right edge, and is absent below 768 px (placement is a desktop composition
+interaction; the narrow column stays read-only). A row is a drag source **and** a keyboard
+source; clicking it does nothing.
+
+### 13.2 Drop slots and the pointer path
+
+While a palette row is mid-drag, dashed **drop slots render between every consecutive pair
+of pipeline steps** — never before the lead or after the responder, because the prototype
+pins those two anchors. Hovering a slot switches it to a solid accent border plus tint
+(the unambiguous valid-drop state); releasing inserts the agent at that index.
+
+### 13.3 The keyboard path
+
+`Enter` on a palette row **arms** placement: the row gains an accent treatment, the slots
+appear, and focus moves to the first slot. `Tab` cycles slots, `Enter` inserts at the
+focused slot, `Esc` cancels and restores focus to the row. `Enter` on a slot without an
+armed source is a no-op. A `role="status"` live region announces armed / inserted /
+cancelled / removed, so the pointer-only action has a first-class keyboard-and-screen-reader
+equivalent.
+
+### 13.4 The graph is the feedback
+
+Insertion is visible in the story itself, not only in prose: the inserted step takes the
+next step number, both adjacent `delegates review` edges re-anchor to it (the prompt
+therefore flows *through* it), evidence cards re-anchor under their owning agent's new
+position, the composer chip recomputes `Pipeline · N steps`, and the slot labels and
+pipeline step badges renumber. Focus moves to the inserted node; its inspector Delete
+button (enabled only for steps inserted this session) removes it and restores focus to the
+nearest surviving step. The demo bounds the pipeline at three steps; further placement is
+refused with an announcement and the palette reports `Pipeline full`.
+
+### 13.5 Overflow repair
+
+- Durable Prompt: grows to a 132 px body, then scrolls internally; text wraps anywhere.
+- Response header: the phase line ellipsizes before the Live/Replay badge can be pushed out.
+- Evidence cards: every line truncates (ellipsis) inside the 180 px card; no collisions.
+- Lifecycle strip wraps; prior-branch card scrolls internally at 284 px.
+- Run history: rows clip long goals; the list scrolls inside the popover.
+- Expanded provenance renders in a **bounded tray** anchored above the stage floor
+  (`top ≥ 700`, height to the stage edge), scrolling internally — it can no longer paint
+  past the stage or under the composer. `Back to response` lives in the tray header.
+- Narrow (≤ 767 px): the tray joins the reading column at full width; nothing scales.
+
+### 13.6 Backend/schema assumptions — design only, not implemented
+
+- Editing the live pipeline implies a **run-time team revision** operation: the client
+  needs an authorized `updateTeamConfiguration`-class command that produces a new immutable
+  revision of the executed team (same lineage rules as `retryOfRunId`, i.e. a
+  `revisionOf`/`supersedes` reference) — the current contract has no such command.
+- Inserted agents need to be **spawnable mid-run**: ownership projection requires the same
+  `runId`/`agentId`/`seq` fields for a step added after run start; nothing in
+  `RUN_PROVENANCE_CONTRACT` today assigns a task to an agent that joined mid-run.
+- Evidence produced by an inserted step must arrive as ordinary accepted events; the UI
+  never fabricates evidence for a step that has not yet emitted any (an inserted step
+  renders `idle/QUEUED` until its first accepted event).
+- The bounded three-step limit is a **prototype legibility bound**, not a contract limit.
+- None of this changes `team.schema.yaml`, writes runtime nodes to YAML, or amends the
+  frozen WebSocket schema.
+
+Additional acceptance failures:
+
+29. A palette row can be dragged but no between-step drop target appears, or the valid-drop
+    state is ambiguous. **Fail.**
+30. Insertion updates explanatory copy but the graph (edges, step numbers, evidence
+    anchoring, `Pipeline · N steps`) does not change. **Fail.**
+31. The drag action has no keyboard equivalent, or arming/cancelling loses focus. **Fail.**
+32. Any node, response, evidence, prior-branch, or history content paints outside its card
+    or the stage, or collides with other chrome, at 1600 × 1000 or 390 px, in either
+    theme. **Fail.**
+33. Placement silently succeeds past the stated bound, or mutates a replayed/finished
+    branch. **Fail.**

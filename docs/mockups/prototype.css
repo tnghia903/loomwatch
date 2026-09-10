@@ -1568,19 +1568,19 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
   }
   #overlay > .prov-label { display: none; }
   #overlay > .life-strip { order: 1; }
-  #overlay > .story-prompt { order: 2; }
-  #overlay > .run-node { order: 3; }
-  #overlay > .story-agent-a { order: 4; }
-  #overlay > .story-evidence-researcher { order: 5; }
-  #overlay > .story-agent-b { order: 6; }
-  #overlay > .story-evidence-reviewer { order: 7; }
-  #overlay > .story-output { order: 8; }
-  #overlay > .prior-branch { order: 9; }
-  #overlay > #provHead { order: 10; }
-  #overlay > #filters { order: 11; }
-  #overlay > .rt-chip { order: 12; }
-  #overlay > .ent, #overlay > .prov-empty { order: 13; }
-  #overlay > .btn-back { order: 14; }
+  #overlay > .story-prompt { order: 10; }
+  #overlay > .run-node { order: 20; }
+  #overlay > .story-agent-a { order: 30; }
+  #overlay > .story-evidence-researcher { order: 40; }
+  #overlay > .story-agent-mid { order: 45; }
+  #overlay > .story-agent-b { order: 50; }
+  #overlay > .story-evidence-reviewer { order: 60; }
+  #overlay > .story-output { order: 70; }
+  #overlay > .prior-branch { order: 80; }
+  #overlay > #provTray { order: 90; }
+  #overlay > .rt-chip { order: 100; }
+  #overlay > .ent, #overlay > .prov-empty { order: 110; }
+  #overlay > .btn-back { order: 120; }
   #overlay > .node {
     min-height: 132px;
   }
@@ -1708,4 +1708,207 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
   #firstrun { padding: 24px 18px; }
   .fr-stack { max-width: 100%; }
   .fr-foot { left: 18px; right: 18px; }
+}
+
+/* ===========================================================================
+   TNG-121 — editable live pipeline + overflow remediation
+   =========================================================================== */
+
+/* screen-reader-only announcement channel for pipeline placement */
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   AVAILABLE TEAM — TNG-121. 340 px palette, top-right. Hidden while an
+   inspector or activity panel owns the right edge. Rows are drag sources
+   AND keyboard arms (Enter); clicking a row never inserts by itself.
+   --------------------------------------------------------------------------- */
+#palettePanel {
+  width: 340px;
+  max-height: calc(100% - 40px);
+  padding: var(--sp-4);
+  display: flex; flex-direction: column; gap: var(--sp-3);
+  overflow-y: auto;
+}
+#stage.inspecting #palettePanel,
+#stage.activity-inspecting #palettePanel { display: none; }
+.pp-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2);
+}
+.pp-head .t-micro { color: var(--color-ink-3); }
+.pp-count { color: var(--color-ink-2); }
+.pp-rows { display: flex; flex-direction: column; gap: 6px; }
+/* pp rows are <button>s: reset the UA chrome the library's <div>s never hit */
+.pp-row { width: 100%; text-align: left; background: none; font: inherit; color: inherit; }
+.pp-row:active { cursor: grabbing; }
+.pp-row[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.pp-row.armed { border-color: var(--color-accent); background: var(--color-accent-tint); }
+.pp-hint { color: var(--color-ink-3); overflow-wrap: anywhere; }
+.pp-hint kbd {
+  font: 500 10px/1 var(--font-mono);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-xs);
+  padding: 1px 4px;
+  color: var(--color-ink-2);
+}
+
+/* drop slots between pipeline steps. Dormant DOM does not exist; the slots
+   render only while a placement is armed or a row is mid-drag, so a valid
+   drop state is unambiguous and never decorative. */
+.flow-slot {
+  position: absolute;
+  left: var(--x); top: var(--y);
+  width: 276px; height: 40px;
+  display: flex; align-items: center; justify-content: center; gap: var(--sp-2);
+  border: 1.5px dashed color-mix(in srgb, var(--color-accent) 55%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--color-accent-tint) 60%, transparent);
+  color: var(--color-ink-2);
+  cursor: pointer;
+  font: inherit;
+  text-align: center;
+  z-index: 34;
+}
+.flow-slot > * { min-width: 0; }
+.flow-slot b { color: var(--color-ink); }
+.flow-slot .fs-glyph { color: var(--color-accent); flex: none; }
+.flow-slot.drop-ok {
+  border-style: solid;
+  border-color: var(--color-accent);
+  background: var(--color-accent-tint);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+#stage.pipeline-dragging .canvas-ground { opacity: .6; }
+#stage.pipeline-dragging .flow-slot { background: var(--color-accent-tint); }
+
+/* ---------------------------------------------------------------------------
+   PROVENANCE TRAY — TNG-121. The expanded provenance band is bounded: it
+   never pushes past the stage floor, and scrolls internally when its content
+   exceeds the reserved band (the old absolute composition overflowed to
+   y ≈ 1046 on a 1000 px stage).
+   --------------------------------------------------------------------------- */
+#provTray {
+  position: absolute; left: var(--x); top: var(--y);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--color-ground) 82%, transparent);
+  overflow: hidden;
+}
+#provTray #provHead {
+  position: static; width: auto;
+  display: flex; align-items: center; gap: var(--sp-2);
+}
+#provTray #provHead .spacer { flex: 1; }
+#provTray .tray-cols {
+  display: flex; gap: var(--sp-3);
+  min-height: 0; flex: 1;
+}
+#provTray .tray-main {
+  flex: 1; min-width: 0;
+  display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3);
+  align-content: flex-start;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+#provTray .rt-chip, #provTray .ent, #provTray .prov-empty,
+#provTray .btn-back, #provTray .tray-crumb, #provTray .tray-cat-label {
+  position: static;
+}
+#provTray .rt-chip { width: 190px; flex: none; }
+#provTray .ent { width: 190px; flex: none; }
+#provTray .prov-empty { width: 400px; max-width: 100%; position: static; }
+#provTray .tray-crumb { display: flex; align-items: center; gap: 6px; width: 100%; color: var(--color-ink-3); }
+#provTray .tray-cat-label { width: 100%; color: var(--color-ink-3); letter-spacing: .07em; text-transform: uppercase; }
+#provTray #filters {
+  position: static; width: 210px; flex: none;
+  max-height: none; overflow-y: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   OVERFLOW REMEDIATION — TNG-121. Bounded cards, truncation everywhere a
+   string can outgrow its box, in both themes at any width.
+   --------------------------------------------------------------------------- */
+
+/* the durable Prompt can be an arbitrarily long typed goal: it grows to a
+   bound, then scrolls internally (bounded internal scroll, §3.2) */
+.story-prompt .rt-body {
+  max-height: 132px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* the response header never pushes its Live/Replay badge out of the card */
+.rt-response .rr-head > span:first-of-type {
+  min-width: 0; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* evidence cards: every line truncates inside the 180 px card */
+.activity-ent .ae-main {
+  display: block;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.activity-ent .ae-main svg { vertical-align: -3px; margin-right: 6px; }
+.activity-ent .ae-sub {
+  display: block;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.activity-ent .ae-sub svg { vertical-align: -2px; margin-right: 5px; }
+
+/* the lifecycle strip wraps instead of clipping its fourth cell */
+.life-strip { flex-wrap: wrap; }
+
+/* the prior-branch card is bounded and scrolls internally when the retained
+   evidence list is long */
+.prior-branch { max-height: 284px; overflow-y: auto; }
+
+/* run history — the historical-run UI. Long goals ellipsize; the list scrolls
+   instead of pushing the popover past the stage. */
+#history .pop-list { max-height: 320px; overflow-y: auto; }
+#history .pop-row .goal {
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* placement announcements never paint */
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* narrow composition adjustments for the editable pipeline */
+@media (max-width: 767px) {
+  /* placement is a desktop composition interaction; the palette and its slots
+     yield to the read-only column at narrow widths */
+  #palettePanel { display: none !important; }
+  #overlay > .flow-slot { display: none !important; }
+  #provTray {
+    position: relative !important;
+    inset: auto !important;
+    left: auto !important; top: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none;
+    overflow: visible;
+    transform: none !important;
+  }
+  #provTray .tray-cols { flex-direction: column; }
+  #provTray #filters { width: 100%; }
+  #provTray .rt-chip, #provTray .ent { width: 100%; }
+  #provTray .prov-empty { width: 100%; }
+  .story-prompt .rt-body { max-height: 180px; }
 }

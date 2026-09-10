@@ -104,9 +104,18 @@ async function viewport(width, height) {
 }
 
 async function navigate(hash) {
-  await send('Page.navigate', { url: `${pathToFileURL(artifact).href}#${hash}` });
+  const key = hash.split(',')[0];
+  const url = `${pathToFileURL(artifact).href}#${hash}`;
+  await send('Page.navigate', { url });
+  // Same-URL navigation fires no hashchange (and the app reloads on
+  // hashchange), so force a reload when the document is already there.
+  const alreadyThere = await evaluate(`location.href.endsWith(${JSON.stringify('#' + hash)})`).catch(() => false);
+  if (alreadyThere) await send('Page.reload');
   for (let attempt = 0; attempt < 80; attempt += 1) {
-    if (await evaluate("document.readyState === 'complete' && !!document.querySelector('#stage[data-screen]')")) break;
+    const ready = await evaluate(`document.readyState === 'complete'
+      && document.querySelector('#stage')?.dataset.screen === ${JSON.stringify(key)}`)
+      .catch(() => false);
+    if (ready) break;
     await sleep(50);
   }
   await sleep(80);
@@ -244,7 +253,142 @@ try {
   assert(runtimeErrors.length === 0, `Standalone emitted runtime exceptions: ${JSON.stringify(runtimeErrors)}`);
   assert(requests.every((url) => url.startsWith('file:') || url.startsWith('data:')), `Standalone attempted a network request: ${JSON.stringify(requests)}`);
 
-  console.log('TNG-119 verification passed: causal graph, interaction, themes, narrow layout, reduced motion, retry retention, and offline loading');
+  /* =====================================================================
+     TNG-121 — editable live pipeline: palette drag + keyboard placement,
+     valid-drop state, focus behavior, bounded overflow, both themes.
+     ===================================================================== */
+  await viewport(1600, 1000);
+  await navigate('compose,dark');
+  const paletteReady = await evaluate(`(() => ({
+    panel: !document.querySelector('#palettePanel')?.hidden,
+    rows: document.querySelectorAll('#palettePanel [data-palette]').length,
+    nodes: document.querySelectorAll('#overlay [data-node]').length,
+    count: document.querySelector('#ppCount')?.textContent
+  }))()`);
+  assert(paletteReady.rows === 5 && paletteReady.nodes === 2 && paletteReady.count === '5 available',
+    `Available-team palette did not initialize over the live pipeline: ${JSON.stringify(paletteReady)}`);
+
+  // Pointer path: real dragstart → dragover → drop wiring, with a real DataTransfer.
+  const dropResult = await evaluate(`(() => {
+    const row = document.querySelector('[data-palette="reviewer"]');
+    const dt = new DataTransfer();
+    row.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const slot = document.querySelector('[data-slot="0"]');
+    const armedVisible = !!slot;
+    slot.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const validState = slot.classList.contains('drop-ok');
+    slot.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    row.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const nodes = [...document.querySelectorAll('#overlay [data-node]')].map((n) => n.dataset.node);
+    return { armedVisible, validState, nodes, label: document.querySelector('#compModeLabel')?.textContent };
+  })()`);
+  assert(dropResult.armedVisible && dropResult.validState, `Drag did not show an unambiguous slot with a valid-drop state: ${JSON.stringify(dropResult)}`);
+  assert(dropResult.nodes.length === 3 && /Pipeline · 3 steps/.test(dropResult.label),
+    `Drop did not insert the agent and update the graph: ${JSON.stringify(dropResult)}`);
+  await sleep(120);
+  const dropFocus = await evaluate(`(() => ({ nodes: [...document.querySelectorAll('#overlay [data-node]')].map((n) => n.dataset.node),
+    focus: document.activeElement?.dataset?.node }))()`);
+  assert(dropFocus.nodes[1]?.startsWith('ins') && dropFocus.focus === dropFocus.nodes[1],
+    `Inserted agent did not land in the flow and take focus: ${JSON.stringify(dropFocus)}`);
+  const flowIntact = await evaluate(`(() => {
+    document.querySelector('#compInput').value = 'Find out how ACP negotiates capabilities.';
+    submitRun();
+    clearTimers();
+    const labels = [...document.querySelectorAll('.story-label, .prov-label')].map((l) => l.textContent.trim());
+    const agentCards = [...document.querySelectorAll('#overlay [data-node]')].map((n) => n.textContent);
+    return { delegates: labels.filter((t) => t === 'delegates review').length,
+             responder: agentCards[agentCards.length - 1] || '' };
+  })()`);
+  assert(flowIntact.delegates === 2 && /Agent B · responder/.test(flowIntact.responder),
+    `Prompt-to-output flow does not pass through the inserted agent: ${JSON.stringify(flowIntact)}`);
+
+  // Keyboard path: arm from the palette, Tab between slots, Esc cancels with focus restore.
+  await navigate('compose,dark');
+  await evaluate("document.querySelector('[data-palette=\"opencode\"]').focus()");
+  await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
+  const armedState = await evaluate(`(() => ({
+    slots: document.querySelectorAll('#overlay [data-slot]').length,
+    focus: document.activeElement?.dataset?.slot,
+    label: document.querySelector('[data-slot="0"]')?.getAttribute('aria-label')
+  }))()`);
+  assert(armedState.slots === 1 && armedState.focus === '0' && /Insert opencode/.test(armedState.label),
+    `Enter did not arm placement with a focused slot: ${JSON.stringify(armedState)}`);
+  await key('Escape', { code: 'Escape', virtualKeyCode: 27 });
+  const cancelled = await evaluate(`(() => ({ slots: document.querySelectorAll('#overlay [data-slot]').length,
+    focus: document.activeElement?.dataset?.palette }))()`);
+  assert(cancelled.slots === 0 && cancelled.focus === 'opencode', `Esc did not cancel placement and restore focus: ${JSON.stringify(cancelled)}`);
+  await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
+  await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
+  const kbInsert = await evaluate(`(() => ({
+    nodes: [...document.querySelectorAll('#overlay [data-node]')].map((n) => n.dataset.node),
+    focus: document.activeElement?.dataset?.node,
+    announce: document.querySelector('#liveRegion')?.textContent
+  }))()`);
+  assert(kbInsert.nodes.length === 3 && kbInsert.focus === kbInsert.nodes[1],
+    `Keyboard slot activation did not insert and focus the new step: ${JSON.stringify(kbInsert)}`);
+
+  // Overflow probes — desktop, both themes: bounded cards, no page overflow,
+  // no collisions between the provenance tray, prior branch and palette.
+  for (const theme of ['dark', 'light']) {
+    await navigate(`answered,${theme}`);
+    // The answered seed already has provenance expanded (run.selected).
+    await evaluate("SEEDS.answered(); paintRun()");
+    const bounded = await evaluate(`(() => {
+      const stage = document.querySelector('#stage');
+      const tray = document.querySelector('#provTray');
+      const prior = document.querySelector('#priorBranch');
+      const prompt = document.querySelector('.story-prompt');
+      const resp = document.querySelector('#runtimeResponse');
+      const palette = document.querySelector('#palettePanel');
+      const overlaps = (a, b) => a && b && !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
+      const clipped = [...document.querySelectorAll('.activity-ent, .rt-response .rr-head, .story-prompt .rt-head')]
+        .filter((el) => el.scrollWidth > el.clientWidth + 1).length;
+      return {
+        stageOverflowX: stage.scrollWidth - stage.clientWidth,
+        stageBottom: stage.getBoundingClientRect().bottom,
+        trayRect: tray ? { top: tray.getBoundingClientRect().top, bottom: tray.getBoundingClientRect().bottom, height: tray.getBoundingClientRect().height } : null,
+        priorRect: prior ? { top: prior.getBoundingClientRect().top, bottom: prior.getBoundingClientRect().bottom, left: prior.getBoundingClientRect().left } : null,
+        priorTrayOverlap: overlaps(prior?.getBoundingClientRect(), tray?.getBoundingClientRect()),
+        paletteRespOverlap: overlaps(palette?.getBoundingClientRect(), resp.getBoundingClientRect()),
+        promptBounded: prompt.querySelector('.rt-body').scrollHeight <= prompt.querySelector('.rt-body').clientHeight + 2 || prompt.querySelector('.rt-body').clientHeight <= 132,
+        clipped
+      };
+    })()`);
+    assert(bounded.stageOverflowX <= 1 && bounded.clipped === 0,
+      `${theme} desktop has overflowing node text: ${JSON.stringify(bounded)}`);
+    assert(bounded.trayRect && bounded.trayRect.bottom <= bounded.stageBottom && bounded.trayRect.top >= 0 && !bounded.priorTrayOverlap,
+      `${theme} desktop provenance tray overflows the stage or collides with the prior branch: ${JSON.stringify(bounded)}`);
+    assert(!bounded.paletteRespOverlap, `${theme} desktop palette overlaps the response card: ${JSON.stringify(bounded)}`);
+
+    // Narrow: tray stays in the column, no horizontal overflow, theme reachable.
+    await viewport(390, 844);
+    await navigate(`answered,${theme}`);
+    await evaluate("SEEDS.answered(); paintRun()");
+    const narrowTray = await evaluate(`(() => {
+      const stage = document.querySelector('#stage');
+      const tray = document.querySelector('#provTray');
+      return { layout: document.documentElement.dataset.layout,
+        overflow: stage.scrollWidth - stage.clientWidth,
+        trayWidth: tray?.getBoundingClientRect().width,
+        stageWidth: stage.clientWidth };
+    })()`);
+    assert(narrowTray.layout === 'narrow' && narrowTray.overflow <= 1 && narrowTray.trayWidth <= 390,
+      `${theme} narrow provenance tray overflows the column: ${JSON.stringify(narrowTray)}`);
+    await viewport(1600, 1000);
+  }
+
+  // Historical-run UI: rows clip long goals inside the popover; replay stays locked.
+  await navigate('answered,dark');
+  await evaluate("openHistory()");
+  const histOverflow = await evaluate(`[...document.querySelectorAll('#history .pop-row')]
+    .filter((el) => el.scrollWidth > el.clientWidth + 1).length`);
+  assert(histOverflow === 0, `Run history rows overflow their rows: ${histOverflow}`);
+  await key('Escape', { code: 'Escape', virtualKeyCode: 27 });
+
+  assert(runtimeErrors.length === 0, `Standalone emitted runtime exceptions: ${JSON.stringify(runtimeErrors)}`);
+  assert(requests.every((url) => url.startsWith('file:') || url.startsWith('data:')), `Standalone attempted a network request: ${JSON.stringify(requests)}`);
+
+  console.log('TNG-119 + TNG-121 verification passed: causal graph, editable pipeline (drag + keyboard), interaction, overflow bounds, themes, narrow layout, reduced motion, retry retention, and offline loading');
 } finally {
   if (socket) socket.close();
   await new Promise((resolveExit) => {
