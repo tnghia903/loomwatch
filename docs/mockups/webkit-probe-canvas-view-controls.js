@@ -22,8 +22,9 @@
  *              screenshot cannot show.
  *   FIT      — §7.1: 64 px padding, capped at 1.0. Asserted against nodes deliberately
  *              scattered first, so a Fit that does nothing cannot pass.
- *   MODE POP — §8.1: opens, explains the mode it is actually in, names the anomaly the
- *              pill counts, and carries the guards/budget fields that have no other home.
+ *   MODE POP — §8.1: opens, explains the mode it is actually in, lists the resolved order
+ *              in the order it actually runs, names the anomaly the pill counts, and
+ *              carries the guards/budget fields that have no other home.
  */
 (function () {
   var out = [];
@@ -170,8 +171,25 @@
   ok(pill.getAttribute('aria-expanded') === 'true', 'and says so to assistive tech');
   ok(/Three steps run in the order you drew/.test(text), 'it explains the mode it is actually in');
   ok(/dispatch/.test(text) && /handoff/.test(text), 'and which tools are withdrawn in that mode');
-  ok(pop.querySelectorAll('.mp-order li').length === 3, 'the resolved order is listed',
-    pop.querySelectorAll('.mp-order li').length + ' steps');
+  /* Three <li> elements is not three steps *in order*: a popover rendering 3, 1, 2
+     satisfies a count, and §8.1 asks for "the resolved order" — the order is the claim.
+     So read the list's own text and assert the model's step sequence appears in
+     ascending position. Scoped to .mp-order rather than #modePop, because the anomaly
+     sentence further down legitimately names the same agents in the order the run took
+     ("dispatch observed from researcher to author … skipped reviewer"), which is exactly
+     the order the configured list does not have — scoring the popover as one flat string
+     reports a correct list as out of order. Matched on n.name, which is what the list
+     renders and what a reader sees. */
+  var orderEl = pop.querySelector('.mp-order');
+  var orderText = orderEl ? (orderEl.textContent || '').replace(/\s+/g, ' ') : '';
+  var steps = GRAPHS[state.graph].nodes
+    .filter(function (n) { return n.step; })
+    .sort(function (a, b) { return a.step - b.step; });
+  var positions = steps.map(function (n) { return orderText.indexOf(n.name); });
+  ok(steps.length > 0 && positions.every(function (p) { return p >= 0; }),
+    'the resolved order is listed', steps.map(function (n) { return n.name; }).join(' → '));
+  ok(steps.length > 0 && positions.every(function (p, i) { return p >= 0 && (i === 0 || p > positions[i - 1]); }),
+    'and names them in the order they run, not an arbitrary one', JSON.stringify(positions));
   ok(/skipped reviewer/i.test(text), 'the anomaly the pill counts is finally named');
   ok(pop.querySelectorAll('.mp-guards input').length === 3, 'guards and budget are editable here',
     pop.querySelectorAll('.mp-guards input').length + ' fields');
