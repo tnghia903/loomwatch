@@ -476,6 +476,12 @@ html, body {
   transition: border-color var(--t-instant) var(--ease-out),
               box-shadow var(--t-quick) var(--ease-out);
 }
+/* A grab cursor is a promise, so it is applied by the code that binds the drag
+   (bindNodeControl / bindWireNode) rather than by screen: #nodes is also the host
+   for the run screens' read-only agent nodes, and those do not move. */
+.node.movable { cursor: grab; }
+.node.movable.dragging { cursor: grabbing; }
+
 .node:hover { border-color: var(--lw-node-border-hover); box-shadow: var(--e1-shadow); }
 .node:hover .handle { width: 12px; height: 12px; background: var(--lw-handle-live); }
 

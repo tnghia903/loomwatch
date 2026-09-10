@@ -181,15 +181,45 @@ const POS = {
   n1: { x: 348, y: 200 }, n2: { x: 640, y: 390 },
   n3: { x: 940, y: 580 }, n4: { x: 940, y: 220 }
 };
-/* handles sit at mid-height: n1 R(624,248) · n2 L(640,438) R(916,438)
-   n3 L(940,628) · n4 L(940,268) */
-const P_N1_N2 = 'M624 248 C 664 248 600 438 640 438';
-const P_N2_N3 = 'M916 438 C 956 438 900 628 940 628';
-const P_N1_N4 = 'M624 248 C 720 248 850 268 940 268';
-const P_N2_N4 = 'M916 438 C 950 438 906 268 940 268';
-/* the anomaly takes a deliberately wider arc, clearing n2 entirely, because
-   "this run skipped a step" should not be mistaken for the step it skipped */
-const P_SKIP  = 'M624 248 C 830 190 1070 380 940 628';
+const NODE_W = 276, NODE_H = 96;
+
+/* Edges used to be five hand-authored `d` strings pinned to the coordinates the
+   nodes happened to start at (`M624 248 C 664 248 600 438 640 438`, …). That is
+   what made this screen's nodes immovable: nothing on it could move without the
+   graph coming apart, so nothing was allowed to move. Now an edge names its two
+   nodes and keeps the control-point *offsets* its authored curve had, so:
+     · at rest every path is the byte-identical curve that was reviewed, and
+     · the same offsets carry the curve when a node is dragged.
+   Handles sit at mid-height on the left/right edges, which is why the graph
+   reads left-to-right (CANVAS_SPEC §8.2). */
+function nodeAnchor(id, side) {
+  const p = POS[id];
+  return { x: side === 'l' ? p.x : p.x + NODE_W, y: p.y + NODE_H / 2 };
+}
+function edgePoints(e) {
+  const a = nodeAnchor(e.from, e.fromSide || 'r');
+  const b = nodeAnchor(e.to, e.toSide || 'l');
+  const c1 = e.c1 || [40, 0], c2 = e.c2 || [-40, 0];
+  return [a, { x: a.x + c1[0], y: a.y + c1[1] }, { x: b.x + c2[0], y: b.y + c2[1] }, b];
+}
+/* The run screens are stills of a run in progress, not a document being edited:
+   their nodes sit at their own coordinates and their edges stay literal. Only a
+   graph that declares `movable` is wired to POS. */
+function edgePath(e) {
+  if (e.d) return e.d;
+  const [a, p1, p2, b] = edgePoints(e);
+  return `M${a.x} ${a.y} C ${p1.x} ${p1.y} ${p2.x} ${p2.y} ${b.x} ${b.y}`;
+}
+/* A badge belongs on the edge it counts, not at a coordinate that used to be on
+   it: at t = ½ a cubic is ⅛(P₀ + 3P₁ + 3P₂ + P₃), which reproduces every
+   authored label position exactly and keeps it on the curve while it moves. */
+function edgeMid(e) {
+  const [a, p1, p2, b] = edgePoints(e);
+  return {
+    x: Math.round((a.x + 3 * p1.x + 3 * p2.x + b.x) / 8),
+    y: Math.round((a.y + 3 * p1.y + 3 * p2.y + b.y) / 8)
+  };
+}
 
 /* Three graphs, one document. Note what pipeline mode implies for the weft:
    a coincident observed edge becomes a shuttle on the configured path, and a
@@ -198,22 +228,25 @@ const P_SKIP  = 'M624 248 C 830 190 1070 380 940 628';
 const GRAPHS = {
   pipeline: {
     mode: 'pipeline',
+    movable: true,        /* the team document — its nodes are POS-backed and draggable */
     nodes: [
       { ...AGENTS.n1, ...POS.n1, step: 1 },
       { ...AGENTS.n2, ...POS.n2, step: 2 },
       { ...AGENTS.n3, ...POS.n3, step: 3 }
     ],
     edges: [
-      { layer: 'warp', d: P_N1_N2 },
-      { layer: 'warp', d: P_N2_N3 },
-      { layer: 'shuttle', d: P_N1_N2 },
-      { layer: 'shuttle', d: P_N2_N3 },
-      { layer: 'weft', kind: 'anomaly', d: P_SKIP }
+      { layer: 'warp', from: 'n1', to: 'n2' },
+      { layer: 'warp', from: 'n2', to: 'n3' },
+      { layer: 'shuttle', from: 'n1', to: 'n2' },
+      { layer: 'shuttle', from: 'n2', to: 'n3' },
+      /* the anomaly takes a deliberately wider arc, clearing n2 entirely, because
+         "this run skipped a step" should not be mistaken for the step it skipped */
+      { layer: 'weft', kind: 'anomaly', from: 'n1', to: 'n3', c1: [206, -58], c2: [130, -248] }
     ],
     labels: [
-      { x: 632, y: 343, text: '×3', title: '3 dispatch events observed along this configured edge' },
-      { x: 928, y: 533, text: '×1', title: '1 handoff observed along this configured edge' },
-      { x: 908, y: 323, text: '⚠', alert: true,
+      { edge: 0, text: '×3', title: '3 dispatch events observed along this configured edge' },
+      { edge: 1, text: '×1', title: '1 handoff observed along this configured edge' },
+      { edge: 4, text: '⚠', alert: true,
         title: 'Anomaly — dispatch observed from researcher to author with no configured counterpart. The run skipped reviewer.' }
     ],
     counts: { warp: '2', weft: '×5' },
@@ -221,6 +254,7 @@ const GRAPHS = {
   },
   team: {
     mode: 'team',
+    movable: true,        /* the team document — its nodes are POS-backed and draggable */
     nodes: [
       { ...AGENTS.n1, ...POS.n1 },
       { ...AGENTS.n2, ...POS.n2 },
@@ -228,10 +262,10 @@ const GRAPHS = {
       { ...AGENTS.n4, ...POS.n4 }
     ],
     edges: [
-      { layer: 'weft', kind: 'dispatch', d: P_N1_N2 },
-      { layer: 'weft', kind: 'ask', d: P_N1_N4 },
-      { layer: 'weft', kind: 'handoff', d: P_N2_N3 },
-      { layer: 'weft', kind: 'dispatch aged', d: P_N2_N4 }
+      { layer: 'weft', kind: 'dispatch', from: 'n1', to: 'n2' },
+      { layer: 'weft', kind: 'ask', from: 'n1', to: 'n4', c1: [96, 0], c2: [-90, 0] },
+      { layer: 'weft', kind: 'handoff', from: 'n2', to: 'n3' },
+      { layer: 'weft', kind: 'dispatch aged', from: 'n2', to: 'n4', c1: [34, 0], c2: [-34, 0] }
     ],
     labels: [],
     counts: { warp: '0', weft: '×7' },
@@ -239,6 +273,7 @@ const GRAPHS = {
   },
   problems: {
     mode: 'pipeline',
+    movable: true,        /* the team document — its nodes are POS-backed and draggable */
     nodes: [
       { ...AGENTS.n1, ...POS.n1, step: 1, status: 'idle' },
       { ...AGENTS.n2, ...POS.n2, step: 2, status: 'idle' },
@@ -246,8 +281,8 @@ const GRAPHS = {
       { ...AGENTS.n4, ...POS.n4, status: 'idle', valid: 'incomplete' }
     ],
     edges: [
-      { layer: 'warp', d: P_N1_N2 },
-      { layer: 'warp', d: P_N2_N3 }
+      { layer: 'warp', from: 'n1', to: 'n2' },
+      { layer: 'warp', from: 'n2', to: 'n3' }
     ],
     labels: [],
     counts: { warp: '2', weft: '×0' },
@@ -275,24 +310,40 @@ function markerFor(e) {
   return ' marker-end="url(#mWeft)"';
 }
 
-function renderGraph(name) {
-  const g = GRAPHS[name];
-  state.graph = name;
-
+/* Edges and badges only — the counterpart of repaintEdges()/repaintProv() on the
+   wiring screen. Cheap enough to run on every pointermove (five paths and three
+   badges), and it deliberately leaves #nodes alone: re-rendering the node under
+   the pointer mid-drag would destroy the element holding pointer capture. */
+function repaintGraphEdges() {
+  const g = GRAPHS[state.graph];
+  if (!g) return;
   $('#edgeGroup').innerHTML = g.edges.map((e) => {
     const cls = e.layer === 'warp' ? 'warp'
       : e.layer === 'shuttle' ? 'shuttle'
       : 'weft ' + e.kind;
-    return `<path class="${cls}" d="${e.d}"${markerFor(e)}/>`;
+    return `<path class="${cls}" d="${edgePath(e)}"${markerFor(e)}/>`;
   }).join('');
 
-  $('#edgeLabels').innerHTML = g.labels.map((l) =>
-    `<span class="edge-label edge-badge t-micro ${l.alert ? 'alert' : ''}"
-           style="left:${l.x}px;top:${l.y}px" title="${l.title || ''}">${l.text}</span>`).join('');
+  $('#edgeLabels').innerHTML = g.labels.map((l) => {
+    const m = l.edge == null ? { x: l.x, y: l.y } : edgeMid(g.edges[l.edge]);
+    return `<span class="edge-label edge-badge t-micro ${l.alert ? 'alert' : ''}"
+           style="left:${m.x}px;top:${m.y}px" title="${l.title || ''}">${l.text}</span>`;
+  }).join('');
+}
 
+function renderGraph(name) {
+  const g = GRAPHS[name];
+  state.graph = name;
+
+  repaintGraphEdges();
+
+  /* On a movable graph POS is the live model: spread it over the authored node
+     here rather than at definition time, so a node the operator has moved stays
+     where they put it across a re-render and across screens. It is one document. */
   $('#nodes').innerHTML = g.nodes
-    .map((n) => nodeHTML({ ...n, selected: n.id === state.selected })).join('');
-  $('#nodes').querySelectorAll('[data-node]').forEach(bindNodeControl);
+    .map((n) => nodeHTML({ ...n, ...(g.movable ? POS[n.id] : null), selected: n.id === state.selected }))
+    .join('');
+  $('#nodes').querySelectorAll('[data-node]').forEach((el) => bindNodeControl(el, !!g.movable));
 
   stage.classList.toggle('mode-pipeline', g.mode === 'pipeline');
   stage.classList.toggle('mode-team', g.mode === 'team');
@@ -318,9 +369,67 @@ function activateKey(event, action) {
   action();
 }
 
-function bindNodeControl(el) {
-  el.addEventListener('click', () => selectNode(el.dataset.node));
-  el.addEventListener('keydown', (event) => activateKey(event, () => selectNode(el.dataset.node)));
+/* Press-drag-release on the graph screens. The nodes on the *wiring* screen have
+   answered this gesture for several rounds; these — the three the prototype boots
+   showing — never did. They took a click and nothing else, so the first thing a
+   reviewer tries on a canvas ("can I move this?") failed on the first screen they
+   see. CANVAS_SPEC §7.2 makes moving a node first-class; pipeline mode only adds a
+   step badge from pipeline_order() (§9), it does not derive layout. */
+let graphDrag = null;
+
+function bindNodeControl(el, movable) {
+  const id = el.dataset.node;
+  if (!movable || !POS[id]) {
+    el.addEventListener('click', () => selectNode(id));
+    el.addEventListener('keydown', (event) => activateKey(event, () => selectNode(id)));
+    return;
+  }
+  el.classList.add('movable');
+
+  el.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    graphDrag = { id, start: stageCoords(event), orig: { ...POS[id] }, moved: false };
+    try { el.setPointerCapture(event.pointerId); } catch (err) { /* prototype: capture is best-effort */ }
+    event.preventDefault();
+  });
+
+  el.addEventListener('pointermove', (event) => {
+    if (!graphDrag || graphDrag.id !== id) return;
+    const c = stageCoords(event);
+    if (!graphDrag.moved && Math.abs(c.x - graphDrag.start.x) + Math.abs(c.y - graphDrag.start.y) < 5) return;
+    graphDrag.moved = true;
+    POS[id] = {
+      x: Math.max(0, Math.min(graphDrag.orig.x + (c.x - graphDrag.start.x), 1600 - NODE_W)),
+      y: Math.max(0, Math.min(graphDrag.orig.y + (c.y - graphDrag.start.y), 1000 - NODE_H))
+    };
+    el.classList.add('dragging');
+    el.style.setProperty('--x', POS[id].x + 'px');
+    el.style.setProperty('--y', POS[id].y + 'px');
+    /* every frame, not on release: an edge that catches up only when you let go
+       is the "their edge does not follow the node" the board reported */
+    repaintGraphEdges();
+  });
+
+  const finish = () => {
+    if (!graphDrag || graphDrag.id !== id) return;
+    const moved = graphDrag.moved;
+    graphDrag = null;
+    el.classList.remove('dragging');
+    if (!moved) return;
+    const at = POS[id];
+    /* Re-render rather than leave the inline --x/--y in place: it puts the moved
+       node back under the model, and replacing the element means the click the UA
+       synthesizes after the drag lands on a detached node instead of opening the
+       inspector on drop. */
+    renderGraph(state.graph);
+    const n = GRAPHS[state.graph].nodes.find((x) => x.id === id);
+    announce(`${n ? n.name : 'Node'} moved to ${at.x}, ${at.y}. Its edges followed.`);
+  };
+  el.addEventListener('pointerup', finish);
+  el.addEventListener('pointercancel', finish);
+
+  el.addEventListener('click', () => selectNode(id));
+  el.addEventListener('keydown', (event) => activateKey(event, () => selectNode(id)));
 }
 
 function renderChip(s) {
@@ -2483,6 +2592,7 @@ function markCandidate(tgt, src, ignoreId) {
 
 function bindWireNode(el) {
   const id = el.dataset.wnode || el.dataset.node;
+  el.classList.add('movable');
   el.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || e.target.closest('.handle')) return;
     const n = wnode(id);
