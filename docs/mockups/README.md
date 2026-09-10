@@ -23,7 +23,7 @@ offline loading.
 The reviewable output of the "Obsidian & Gilt" redesign. No design tool the rest of the
 team cannot open.
 
-## TNG-123 revision — freeform placement, typed wiring, capability library
+## Prototype implementation notes — freeform placement and typed wiring
 
 The board asked for free placement and wiring, so screen 5 (**Freeform wiring**,
 `#wiring,<theme>`) is a free canvas: **agents, skills, tools/connectors and knowledge sources
@@ -48,7 +48,7 @@ and `Replay observed run` is inert and labelled. The blue breathing border appea
 the run is active (reduced motion: static 2 px blue); both themes, the 390 px read-only
 composition, and the overflow bounds hold.
 
-Spec: [`../TNG89_INTERACTION.md §14`](../TNG89_INTERACTION.md#14-tng-123-revision--freeform-placement-typed-wiring-and-the-capability-library)
+Spec: [`../TNG89_INTERACTION.md §14`](../TNG89_INTERACTION.md#14-tng-122--tng-123-revision--freeform-placement-typed-wiring-and-the-capability-library)
 (including §14.7 backend assumptions, design-only). Verified by
 `node docs/mockups/verify-prototype.mjs`, which now also drives placement, wiring,
 refusals, library filters, replay, reduced motion, both themes and 390 px on the wiring screen.

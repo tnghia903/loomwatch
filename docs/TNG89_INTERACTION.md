@@ -949,41 +949,15 @@ Additional acceptance failures:
 
 ---
 
-## 14. TNG-122 revision — freeform capability composer
-
-TNG-122 supersedes §13's fixed insertion lane as the recommended composition model. The
-standalone prototype adds a dedicated **Freeform wiring** screen where the prompt/goal is
-the origin, response/output is terminal, and authorized workspace agents and capabilities
-can be placed anywhere and joined by typed, editable planned edges. Runtime provenance
-continues to project automatically as a separate immutable layer.
-
-The complete interaction sequence, relationship matrix, library disclosure/permission
-rules, keyboard equivalents, narrow behavior, and backend/schema assumptions are normative
-in [`TNG122_FREEFORM_CAPABILITY_COMPOSER.md`](TNG122_FREEFORM_CAPABILITY_COMPOSER.md).
-Nothing in this revision implements or authorizes production UI/backend work, changes
-`team.schema.yaml`, amends the frozen WebSocket schema, grants a permission, or exposes
-hidden reasoning.
-
-Additional acceptance failures:
-
-34. Placement is restricted to a lane or slot rather than an arbitrary valid coordinate.
-    **Fail.**
-35. Any pointer placement, movement, connection, reconnection, selection, or removal action
-    lacks a keyboard and live-region equivalent. **Fail.**
-36. A refused or cancelled connection destroys or rewrites the previous graph. **Fail.**
-37. The Library exposes globally hidden/unauthorized resource identity, omits counts or
-    state reasons, or represents a disconnected resource as usable. **Fail.**
-38. Planned capability wiring is visually or semantically indistinguishable from accepted
-    runtime evidence, or planned intent fabricates a tool/skill/source event. **Fail.**
-
----
-
-## 14. TNG-123 revision — freeform placement, typed wiring, and the capability library
+## 14. TNG-122 / TNG-123 revision — freeform placement, typed wiring, and the capability library
 
 This section revises the design prototype and documentation only. It does not implement or
 authorize a production component, endpoint, event, or schema change. It runs alongside §12/§13:
 the run screens keep their slot pipeline; the freeform canvas is the separate free-arrangement
 surface the board asked for (screen 5, deep link `#wiring,<theme>`).
+
+The fuller product recommendation, including permission boundaries and persistence options,
+is in [`TNG122_FREEFORM_CAPABILITY_COMPOSER.md`](TNG122_FREEFORM_CAPABILITY_COMPOSER.md).
 
 ### 14.1 The capability library
 
