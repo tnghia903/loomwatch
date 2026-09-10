@@ -156,9 +156,11 @@ html, body {
   border-radius: var(--r-sm);
   cursor: grab;
   border: 1px solid transparent;
-  transition: background-color var(--t-instant) var(--ease-out);
+  transition: background-color var(--t-instant) var(--ease-out),
+              border-color var(--t-instant) var(--ease-out);
 }
 .lib-row:hover { background: var(--color-accent-tint); }
+.lib-row:active { cursor: grabbing; }
 .lib-row:hover .drag-dots { opacity: .6; }
 .lib-row .drag-dots {
   margin-left: auto;
@@ -168,8 +170,32 @@ html, body {
   letter-spacing: -1px;
 }
 .lib-row.unavailable { opacity: .5; cursor: default; }
+/* the row actually being HTML5-dragged — a visible hole where it left,
+   distinct from :hover so the drag source reads as "in flight." */
+.lib-row.dragging { opacity: .35; border-style: dashed; }
 
-/* harness monogram — DESIGN_LANGUAGE §12: monochrome, never vendor art */
+/* TNG-124: the capability-library row (#library) carries a third text
+   line — .lib-row-meta, the state/wired badges — that the shared 40px
+   .lib-row box was never sized for: measured 49.5px of content in a
+   36.96px rendered box, with only a 6px row gap, so rows visually
+   overflowed and crowded the row below. The Available-team palette
+   (#palettePanel, TNG-121) reuses .lib-row too but only ever shows two
+   lines and fits the shared 40px fine, so the taller card treatment is
+   scoped to #library specifically rather than changed on .lib-row itself. */
+#library .lib-row {
+  height: auto;
+  min-height: 44px;
+  padding: var(--sp-2) var(--sp-3);
+  background: color-mix(in srgb, var(--color-panel-solid) 38%, transparent);
+  border-color: var(--color-hairline);
+}
+#library .lib-row:hover { border-color: var(--color-accent-dim); }
+#library .lib-row.unavailable { background: transparent; }
+
+/* harness monogram — DESIGN_LANGUAGE §12: monochrome, never vendor art.
+   Square = agent (a process with an identity); circular = capability
+   (skill/tool/knowledge — see .monogram.res). Shape, not colour, carries
+   the distinction so it survives the greyscale proof. */
 .monogram {
   width: 20px; height: 20px;
   flex: none;
@@ -179,7 +205,9 @@ html, body {
   color: var(--color-ink-2);
   font: 600 10px/1 var(--font-mono);
 }
-.lib-row-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.monogram.res { border-radius: var(--r-full); color: var(--color-ink-3); }
+.lib-row:hover .monogram.res { color: var(--color-ink-2); }
+.lib-row-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .lib-row-name {
   color: var(--color-ink);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1953,8 +1981,46 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
 }
 .lfilt:hover { background: var(--color-accent-tint); color: var(--color-ink); }
 .lfilt.on { background: var(--color-accent-tint); color: var(--color-ink); border-color: var(--color-accent-dim); }
-.lib-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-4); padding-right: 2px; }
-.lib-foot { flex: none; display: flex; flex-direction: column; gap: 2px; padding-top: var(--sp-2); border-top: 1px solid var(--color-hairline); }
+
+/* TNG-124: the catalogue (up to 20 rows across 4 groups) is reliably
+   taller than the panel — .lib-scroll already clipped and scrolled
+   correctly, but on a trackpad Mac the overlay scrollbar is invisible at
+   rest, so a reviewer who never scrolled saw a shorter list than exists
+   and read the missing rows as "can't drag this." A persistent thin
+   thumb plus a real (scroll-position-driven, not decorative) edge fade
+   make "there is more" visible before the pointer ever moves. */
+.lib-scroll {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  padding-right: 6px; margin-right: -4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-3) transparent;
+  transition: mask-image var(--t-quick) var(--ease-out);
+}
+.lib-scroll::-webkit-scrollbar { width: 6px; }
+.lib-scroll::-webkit-scrollbar-track { background: transparent; }
+.lib-scroll::-webkit-scrollbar-thumb { background: var(--color-hairline); border-radius: var(--r-full); }
+.lib-scroll:hover::-webkit-scrollbar-thumb,
+.lib-scroll:focus-within::-webkit-scrollbar-thumb { background: var(--color-ink-3); }
+.lib-scroll.can-scroll-up {
+  mask-image: linear-gradient(to bottom, transparent, black 20px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 20px);
+}
+.lib-scroll.can-scroll-down {
+  mask-image: linear-gradient(to top, transparent, black 20px);
+  -webkit-mask-image: linear-gradient(to top, transparent, black 20px);
+}
+.lib-scroll.can-scroll-up.can-scroll-down {
+  mask-image: linear-gradient(to bottom, transparent, black 20px, black calc(100% - 20px), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 20px, black calc(100% - 20px), transparent);
+}
+@media (prefers-reduced-motion: reduce) { .lib-scroll { transition: none; } }
+
+.lib-foot {
+  flex: none; display: flex; flex-direction: column; gap: 3px;
+  padding: var(--sp-2) var(--sp-1) 0;
+  border-top: 1px solid var(--color-hairline);
+}
 .lib-foot .t-meta { color: var(--color-ink-3); }
 .lib-foot-hidden { color: var(--color-ink-3) !important; }
 
@@ -1966,7 +2032,19 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
   text-align: left;
 }
 .lib-chev:hover { color: var(--color-ink); }
-.lib-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); color: var(--color-ink-3); padding: 0 var(--sp-1) var(--sp-1); }
+.lib-group-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  color: var(--color-ink-3); padding: var(--sp-1) var(--sp-1) var(--sp-2);
+}
+.lib-group + .lib-group { border-top: 1px solid var(--color-hairline); padding-top: var(--sp-3); }
+/* group row count — a small pill instead of bare digits, so four stacked
+   groups read as sections with a fact each, not a wall of grey text. */
+.lib-group-head > .t-meta {
+  display: inline-flex; flex: none; align-items: center; justify-content: center;
+  min-width: 22px; height: 16px; padding: 0 6px;
+  border-radius: var(--r-full); background: var(--color-hairline);
+  color: var(--color-ink-3); font: 500 10px/16px var(--font-mono);
+}
 
 /* row badges — state, permission, wired. Shape+word, greyscale-safe. */
 .lbadge {

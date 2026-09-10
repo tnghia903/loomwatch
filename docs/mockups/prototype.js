@@ -2501,15 +2501,22 @@ function bindWireStage() {
    arrows nudge the selected node. Selected edge: R arms a rewire; Delete
    removes. A live region narrates each step (TNG-121's channel, reused).
    --------------------------------------------------------------------------- */
-function armPlaceFromLibrary(resId, row) {
+function armPlaceFromLibrary(resId) {
   const r = resById(resId);
   if (!resUsable(r)) {
     setWireNotice(`${r.name} can't be placed: ${RES_STATE[r.status].word.toLowerCase()} — ${r.sub}.`);
     announce(`${r.name} is not usable: ${r.sub}.`);
     return;
   }
-  wiring.placing = { ref: resId, x: 620, y: 380, trigger: row || null };
+  wiring.placing = { ref: resId, x: 620, y: 380 };
   paintWiring();
+  /* re-render so the source row itself shows the armed treatment
+     (.lib-row-arming) — the ghost alone doesn't say which row it came
+     from once a list has 20 similar-looking rows. renderLibrary() replaces
+     the row node, so focus is re-attached to its data-res replacement
+     rather than assumed to survive the rebuild. */
+  renderLibrary();
+  focusAfterPaint(`.lib-row[data-res="${resId}"]`);
   announce(`${r.name} armed for placement. Arrow keys move the ghost, Enter drops it, Escape cancels.`);
 }
 
@@ -2519,7 +2526,7 @@ function commitPlace() {
   if (!p) return;
   const n = placeResource(p.ref, p.x, p.y);
   if (n) focusAfterPaint(`[data-wnode="${n.id}"]`);
-  else if (p.trigger && p.trigger.isConnected) p.trigger.focus({ preventScroll: true });
+  else { renderLibrary(); focusAfterPaint(`.lib-row[data-res="${p.ref}"]`); }
 }
 
 function armWire(fromId, mode, edgeId) {
@@ -2598,11 +2605,12 @@ function wiringKey(e) {
   if (e.key === 'Escape') {
     if (wiring.armed) { wiring.armed = null; clearCandClasses(); paintWiring(); announce('Wiring cancelled.'); return true; }
     if (wiring.placing) {
-      const t = wiring.placing.trigger;
+      const ref = wiring.placing.ref;
       wiring.placing = null;
       paintWiring();
+      renderLibrary();
       announce('Placement cancelled.');
-      if (t && t.isConnected) t.focus({ preventScroll: true });
+      focusAfterPaint(`.lib-row[data-res="${ref}"]`);
       return true;
     }
     if (wiring.selected && wiring.selected.type === 'edge') {
@@ -2720,15 +2728,16 @@ function renderLibrary() {
       /* the document-level handler would double-fire (arm, then commit) */
       e.stopPropagation();
       if (wiring.placing && wiring.placing.ref === row.dataset.res) { commitPlace(); return; }
-      armPlaceFromLibrary(row.dataset.res, row);
+      armPlaceFromLibrary(row.dataset.res);
     })));
   host.querySelectorAll('.lib-row[data-res]').forEach((row) =>
     row.addEventListener('click', () => {
       if (stage.dataset.screen !== 'wiring' || !window.matchMedia('(max-width: 767px)').matches) return;
       if (wiring.placing && wiring.placing.ref === row.dataset.res) commitPlace();
-      else armPlaceFromLibrary(row.dataset.res, row);
+      else armPlaceFromLibrary(row.dataset.res);
     }));
   host.querySelectorAll('.lib-row-sub').forEach(middleTruncate);
+  updateLibScrollFade();
 }
 
 function libRowHTML(r, wiringScreen) {
@@ -2740,15 +2749,21 @@ function libRowHTML(r, wiringScreen) {
       wired += wiring.edges.filter((e) => e.from === n.id || e.to === n.id).length;
     });
   }
-  const badge = `<span class="lbadge ${st.cls}">${st.word}</span>`;
+  /* "Available" is the common case (13 of 20 seeded rows); badging it on
+     every row buried the three states that actually need attention. Only
+     the exceptions — needs approval, disconnected, unavailable — earn a
+     badge now; available rows read clean, with the compat line as the
+     one thing left to scan. */
+  const badge = st.cls === 'st-available' ? '' : `<span class="lbadge ${st.cls}">${st.word}</span>`;
   const wiredBadge = wiringScreen && wired ? `<span class="lbadge wired">${wired} wired</span>` : '';
   const compat = usable
     ? (r.kind === 'agent' ? 'wires: goal, agents, skills, tools, knowledge, output' : 'wires to agents · use direction only')
-    : `${st.word} — not placeable`;
-  return `<div class="lib-row ${usable ? '' : 'unavailable'}" role="button" ${usable ? `draggable="true" data-res="${r.id}"` : 'aria-disabled="true"'}
+    : 'Not placeable in this workspace';
+  const arming = wiring.placing && wiring.placing.ref === r.id;
+  return `<div class="lib-row ${usable ? '' : 'unavailable'}${arming ? ' lib-row-arming' : ''}" role="button" ${usable ? `draggable="true" data-res="${r.id}"` : 'aria-disabled="true"'}
       title="${escapeMarkup(r.kind === 'agent' ? 'Wires to: prompt/goal, agents, skills, tools, knowledge, response' : 'Wires to agents only — use direction')}"
       tabindex="0"
-      aria-label="${KIND_WORD[r.kind]} ${escapeMarkup(r.name)}, ${st.word}${wired ? `, ${wired} ${wired === 1 ? 'wire' : 'wires'} on canvas` : ''}. ${usable ? 'Press Enter to arm placement on the freeform canvas.' : 'Not usable in this workspace.'}">
+      aria-label="${KIND_WORD[r.kind]} ${escapeMarkup(r.name)}, ${st.word}${wired ? `, ${wired} ${wired === 1 ? 'wire' : 'wires'} on canvas` : ''}${arming ? ', armed for placement' : ''}. ${usable ? 'Press Enter to arm placement on the freeform canvas.' : 'Not usable in this workspace.'}">
     ${r.kind === 'agent'
       ? `<span class="monogram">${r.harness || '·'}</span>`
       : `<span class="monogram res">${entGlyph(r.kind === 'knowledge' ? 'source' : r.kind, 11)}</span>`}
@@ -2762,6 +2777,7 @@ function libRowHTML(r, wiringScreen) {
 }
 
 function bindLibrary() {
+  const host = $('#libGroups');
   const search = $('#libSearch');
   if (search) search.addEventListener('input', () => { libView.q = search.value; renderLibrary(); });
   const applyFilters = () => {
@@ -2791,11 +2807,26 @@ function bindLibrary() {
     e.dataTransfer.setData('text/plain', r.id);
     e.dataTransfer.effectAllowed = 'copy';
     stage.classList.add('lib-dragging');
+    row.classList.add('dragging');
   });
   document.addEventListener('dragend', () => {
     libDragRef = null;
     stage.classList.remove('lib-dragging');
+    host.querySelectorAll('.lib-row.dragging').forEach((r) => r.classList.remove('dragging'));
   });
+
+  /* TNG-124: a real, scroll-position-driven fade + a persistent thumb, so
+     "there are more resources below" is visible before the pointer moves —
+     see the .lib-scroll rules in prototype.css for why this exists. */
+  host.addEventListener('scroll', updateLibScrollFade);
+  window.addEventListener('resize', updateLibScrollFade);
+}
+
+function updateLibScrollFade() {
+  const el = $('#libGroups');
+  if (!el) return;
+  el.classList.toggle('can-scroll-up', el.scrollTop > 1);
+  el.classList.toggle('can-scroll-down', el.scrollTop + el.clientHeight < el.scrollHeight - 1);
 }
 
 /* ---------------------------------------------------------------------------

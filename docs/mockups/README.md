@@ -1,5 +1,52 @@
 # LoomWatch — TNG-87 design artifacts
 
+## TNG-124 revision — capability library polish and reachability fix
+
+The board rejected the TNG-122/123 candidate a second time: "recheck the library UI, I
+don't feel it is aesthetic enough. Also, I cannot drag and drop everything in the library
+sidebar." Both complaints traced to the same panel, and both had a concrete, measured cause
+— this was not a subjective repaint.
+
+**Root cause 1 — rows overflowed their own box.** `.lib-row` was a fixed `height: 40px`,
+sized for the original two-line palette row (name + path). TNG-122/123 added a third line
+— `.lib-row-meta`, the state/wired badges — without widening the box: measured in headless
+Chrome, the three-line stack needs **49.5 px** inside a **36.96 px** rendered row with only a
+**6 px** gap to the next row. Every capability row was quietly bleeding into the row below it.
+That is what read as "not aesthetic": the library was never intentionally styled at this
+density, it was clipping. Fixed by giving `#library .lib-row` (scoped there, not the shared
+`.lib-row` class the TNG-121 Available-team palette also uses — that panel's two-line rows
+already fit 40 px and stay unchanged) a `min-height: 44px` card with real vertical padding.
+
+**Root cause 2 — the scroll affordance was invisible, not broken.** The catalogue is up to
+20 resources across 4 groups; the panel physically fits roughly 8 rows. `.lib-scroll` already
+had `overflow-y: auto` and *every* row — agent, skill, tool, knowledge — was already
+draggable in the underlying code (verified directly: real native HTML5 drag simulated via
+Chrome DevTools Protocol `Input.dispatchDragEvent`, not a synthetic in-page `DragEvent`,
+successfully placed a skill, two tools, two knowledge sources and an agent onto the canvas
+once each row was scrolled into view). The failure was discoverability: macOS's overlay
+scrollbar is invisible at rest, so a reviewer who never scrolled saw a shorter list than
+exists and reasonably concluded the rest "can't be dragged." Fixed with a persistent thin
+scrollbar thumb (`scrollbar-color` + `::-webkit-scrollbar`) and a real, scroll-position-driven
+edge fade (`.can-scroll-up` / `.can-scroll-down`, toggled on scroll/resize/render by
+`updateLibScrollFade()` — never a static decoration, so it never lies about a fully-visible
+list). Confirmed still true from a cold load: even with **Tools & connectors** collapsed (its
+default state), `scrollHeight` (1455) already exceeds `clientHeight` (614) — the affordance
+gap existed before any group was ever expanded.
+
+**Aesthetic pass, same panel.** Rows are now bordered cards (`border: 1px solid
+var(--color-hairline)`, tinted background) instead of borderless text sitting on the ground;
+resource monograms are circular (`.monogram.res`) against agents' square monograms, so kind
+is legible by shape before you read the label; group headers gained a pill-style count and a
+hairline divider between sections; a `.lib-row.dragging` state (opacity + dashed border) marks
+the row actually in flight during a drag, distinct from `:hover`. Filter chips, search field,
+and the footer status line are unchanged in structure — only the row/group scaffolding around
+them was under-built.
+
+Nothing here changes backend or schema assumptions — `TNG89_INTERACTION.md §14.7` and
+`TNG122_FREEFORM_CAPABILITY_COMPOSER.md` stand as written. This is a CSS/JS visual and
+interaction fix inside the existing capability-library data model and wiring rules; no new
+node type, edge type, or endpoint is introduced. Self-check: `docs/mockups/TNG124_SELF_CHECK.md`.
+
 ## TNG-122 revision — freeform capability composer
 
 Open **Freeform wiring** in `prototype-standalone.html`. The fixed insertion lane is no
