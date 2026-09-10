@@ -450,6 +450,28 @@ try {
   assert(disconnectedOnly.rows === 3 && disconnectedOnly.usable === 0, `Disconnected filter wrong: ${JSON.stringify(disconnectedOnly)}`);
   await evaluate(`document.querySelector('[data-lf="status"][data-v="all"]').click()`);
 
+  /* TNG-125: the grab affordance is a resting fact, not a hover reveal. The
+     rejection this baseline answers was literally "I cannot drag and drop
+     everything in the library sidebar", so a handle that only exists under the
+     pointer does not count — and on touch it never appears at all. */
+  const restingGrab = await evaluate(`(() => {
+    const usable = [...document.querySelectorAll('#libGroups .lib-row[data-res]')];
+    const unusable = [...document.querySelectorAll('#libGroups .lib-row.unavailable')];
+    const dots = usable.map((r) => r.querySelector('.drag-dots')).filter(Boolean);
+    return { usable: usable.length, withDots: dots.length,
+      unusableWithDots: unusable.filter((r) => r.querySelector('.drag-dots')).length,
+      opacity: dots.length ? Number(getComputedStyle(dots[0]).opacity) : 0,
+      draggable: usable.every((r) => r.getAttribute('draggable') === 'true') };
+  })()`);
+  assert(restingGrab.usable === 16 && restingGrab.withDots === restingGrab.usable,
+    `Not every draggable library row carries a grab handle: ${JSON.stringify(restingGrab)}`);
+  /* .75 on ink-3 was measured at 3.26:1 (dark) / 3.24:1 (light) against the
+     composited row fill — the 3:1 non-text floor with a little headroom. Any
+     drop below .75 puts the resting affordance back under the bar. */
+  assert(restingGrab.opacity >= 0.75, `Grab handle is not legible at rest: ${JSON.stringify(restingGrab)}`);
+  assert(restingGrab.unusableWithDots === 0, `Unusable rows advertise a drag they would refuse: ${JSON.stringify(restingGrab)}`);
+  assert(restingGrab.draggable, `Rows carrying a grab handle are not actually draggable: ${JSON.stringify(restingGrab)}`);
+
   /* freeform keyboard placement from the library: Enter arms, arrows move, Enter drops */
   await evaluate(`document.querySelector('[data-res="r-tool-bus"]').focus()`);
   await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
@@ -460,6 +482,49 @@ try {
   await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
   const placed = await evaluate(`({ n: wiring.nodes.length, last: wiring.nodes[wiring.nodes.length - 1], focus: document.activeElement?.dataset?.wnode || document.activeElement?.dataset?.node })`);
   assert(placed.n === 9 && placed.last.ref === 'r-tool-bus' && (placed.focus === placed.last.id), `Keyboard placement did not drop at the ghost position with focus: ${JSON.stringify(placed)}`);
+
+  /* TNG-125: the remaining legs of that path — the armed row must say it is the
+     source (a ghost alone cannot, with 20 similar rows), and Escape must cancel
+     and hand focus back to the row it was armed from. No dead affordances: the
+     .lib-row-arming style is asserted as *computed*, because scoped under
+     #library the unscoped form would lose on specificity and render nothing. */
+  const armSource = await evaluate(`(() => {
+    const row = document.querySelector('#libGroups .lib-row[data-res]');
+    row.focus();
+    return row.dataset.res;
+  })()`);
+  await key('Enter', { code: 'Enter', virtualKeyCode: 13 });
+  const armingStyle = await evaluate(`(() => {
+    const armed = document.querySelector('#libGroups .lib-row.lib-row-arming');
+    const plain = [...document.querySelectorAll('#libGroups .lib-row[data-res]')]
+      .find((n) => !n.classList.contains('lib-row-arming'));
+    if (!armed || !plain) return { armed: !!armed, plain: !!plain };
+    const a = getComputedStyle(armed);
+    const p = getComputedStyle(plain);
+    return { armed: true, plain: true, res: armed.dataset.res,
+      border: a.borderTopColor, plainBorder: p.borderTopColor,
+      shadow: a.boxShadow, plainShadow: p.boxShadow,
+      bg: a.backgroundColor, plainBg: p.backgroundColor,
+      label: armed.getAttribute('aria-label') };
+  })()`);
+  assert(armingStyle.armed && armingStyle.plain, `Arming did not mark its library source row: ${JSON.stringify(armingStyle)}`);
+  assert(armingStyle.res === armSource, `Arming marked the wrong library row: ${JSON.stringify(armingStyle)}`);
+  assert(armingStyle.border !== armingStyle.plainBorder && armingStyle.bg !== armingStyle.plainBg,
+    `Armed library row is not visually distinct from a resting row: ${JSON.stringify(armingStyle)}`);
+  assert(/inset/.test(armingStyle.shadow) && !/inset/.test(armingStyle.plainShadow),
+    `Armed library row lost its status rail: ${JSON.stringify(armingStyle)}`);
+  assert(/armed for placement/.test(armingStyle.label), `Armed row does not announce its state: ${JSON.stringify(armingStyle)}`);
+  await key('Escape', { code: 'Escape', virtualKeyCode: 27 });
+  const placementCancelled = await evaluate(`({ placing: !!wiring.placing,
+    arming: document.querySelectorAll('#libGroups .lib-row.lib-row-arming').length,
+    focus: document.activeElement?.dataset?.res,
+    nodes: wiring.nodes.length })`);
+  assert(!placementCancelled.placing && placementCancelled.arming === 0, `Escape did not cancel the armed placement: ${JSON.stringify(placementCancelled)}`);
+  assert(placementCancelled.focus === armSource, `Escape did not return focus to the source row: ${JSON.stringify(placementCancelled)}`);
+  assert(placementCancelled.nodes === 9, `Cancelled placement still dropped a node: ${JSON.stringify(placementCancelled)}`);
+  /* cancel deliberately parks focus on the library row, so hand the suite back
+     the canvas focus it had before this block or the next Enter re-arms here */
+  await evaluate(`document.querySelector('[data-wnode="${placed.last.id}"]').focus()`);
 
   /* unusable resource: refused with explanation, nothing placed */
   const refusedPlace = await evaluate(`({ ok: !!placeResource('r-skill-sql', 400, 400), notice: document.querySelector('#wireNotice').textContent })`);
@@ -620,7 +685,7 @@ try {
   assert(runtimeErrors.length === 0, `Standalone emitted runtime exceptions: ${JSON.stringify(runtimeErrors)}`);
   assert(requests.every((url) => url.startsWith('file:') || url.startsWith('data:')), `Standalone attempted a network request: ${JSON.stringify(requests)}`);
 
-  console.log('TNG-119 + TNG-121 + TNG-122 verification passed: causal graph, editable pipeline, freeform placement + typed wiring (pointer, keyboard, narrow tap), capability library states, planned-vs-observed separation, interaction, overflow bounds, themes, narrow relationship flow, reduced motion, replay, retry retention, and offline loading');
+  console.log('TNG-119 + TNG-121 + TNG-122 + TNG-124 + TNG-125 verification passed: causal graph, editable pipeline, freeform placement + typed wiring (pointer, keyboard, narrow tap), resting grab affordance, armed-source row + cancel with focus return, capability library states, planned-vs-observed separation, interaction, overflow bounds, themes, narrow relationship flow, reduced motion, replay, retry retention, and offline loading');
 } finally {
   if (socket) socket.close();
   await new Promise((resolveExit) => {

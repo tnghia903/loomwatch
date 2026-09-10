@@ -161,11 +161,21 @@ html, body {
 }
 .lib-row:hover { background: var(--color-accent-tint); }
 .lib-row:active { cursor: grabbing; }
-.lib-row:hover .drag-dots { opacity: .6; }
+.lib-row:hover .drag-dots { opacity: 1; }
 .lib-row .drag-dots {
   margin-left: auto;
   color: var(--color-ink-3);
-  opacity: 0;
+  /* TNG-125: grabbable is a resting fact, not a hover reveal. The rejection
+     was literally "I cannot drag and drop everything in the library sidebar",
+     and a handle that only exists under the pointer cannot answer that — on
+     touch it never appears at all. Measured against the composited row fill:
+     .75 on ink-3 gives 3.26:1 in dark and 3.24:1 in light, which clears the
+     3:1 non-text floor (WCAG 1.4.11) that a resting affordance has to clear
+     to count as one — .7 measured 2.99/2.94 and did not. Hover then steps to
+     the full 4.90:1 / 5.44:1, so the pointer still gets its confirmation.
+     Only usable rows emit the dots (libRowHTML), so this never advertises a
+     drag that would be refused. */
+  opacity: .75;
   transition: opacity var(--t-instant) var(--ease-out);
   letter-spacing: -1px;
 }
@@ -191,6 +201,28 @@ html, body {
 }
 #library .lib-row:hover { border-color: var(--color-accent-dim); }
 #library .lib-row.unavailable { background: transparent; }
+
+/* TNG-125: the row a keyboard placement was armed from (armPlaceFromLibrary
+   sets wiring.placing; libRowHTML echoes .lib-row-arming). The behaviour has
+   shipped since TNG-124 — arm, arrow-move, Enter to drop, Esc to cancel with
+   focus returned here — but the source row had no resting treatment, so with
+   20 similar rows the ghost on canvas never said which row it came from.
+
+   Scoped under #library on purpose: an unscoped .lib-row.lib-row-arming (0,2,0)
+   loses to #library .lib-row (1,1,0) above, so the state would compute to
+   nothing in the only place it is ever emitted.
+
+   Solid accent border deliberately rhymes with #stage.wiring-placing
+   .wire-ghost, which goes solid for exactly the same moment; the 3px inset
+   accent rail is DESIGN_LANGUAGE §12's status rail at full value (same idiom
+   as .bar.halt / .rt-strip.alert) so the armed row survives greyscale on
+   position rather than hue, and stays distinct from :hover, which only moves
+   the border to accent-dim. */
+#library .lib-row.lib-row-arming {
+  border-color: var(--color-accent);
+  background: var(--color-accent-tint);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
 
 /* harness monogram — DESIGN_LANGUAGE §12: monochrome, never vendor art.
    Square = agent (a process with an identity); circular = capability
