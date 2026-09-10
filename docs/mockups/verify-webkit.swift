@@ -30,6 +30,10 @@
 //
 // `--eval <file.js>` evaluates a script against the loaded page and prints the
 // result instead of asserting — for surveying the DOM when selectors drift.
+//
+// `--shot <out.png>` writes a PNG of the loaded page, after `--eval` has run if
+// both are given. The board reviews in Safari, so a picture offered as evidence
+// should come out of the engine they are looking at rather than out of Chrome.
 
 import Cocoa
 import WebKit
@@ -39,7 +43,25 @@ guard argv.count > 1 else {
     FileHandle.standardError.write("usage: verify-webkit <path-to-html> [--eval <file.js>]\n".data(using: .utf8)!)
     exit(2)
 }
-let target = URL(fileURLWithPath: argv[1]).standardizedFileURL
+// A `#fragment` on the path is passed through to the page, so a snapshot can
+// select its screen and theme at load — e.g. `…/prototype-standalone.html#wiring,light`.
+//
+// This matters more than it looks. An offscreen WKWebView rasterizes the stage
+// as one large tile, and a theme changed *after* load by script repaints the
+// panels in the snapshot while the canvas ground comes back from the stale tile
+// — a light-mode screenshot with a near-black canvas, which reads as a broken
+// theme and is not one (the DOM measures `#stage` at the correct light value
+// throughout). Choosing the theme in the fragment means it is correct at first
+// paint and there is no repaint to miss.
+let rawTarget = argv[1]
+let fragment = rawTarget.firstIndex(of: "#").map { String(rawTarget[rawTarget.index(after: $0)...]) }
+let filePart = fragment == nil ? rawTarget : String(rawTarget[..<rawTarget.firstIndex(of: "#")!])
+var target = URL(fileURLWithPath: filePart).standardizedFileURL
+if let fragment = fragment,
+   var parts = URLComponents(url: target, resolvingAgainstBaseURL: false) {
+    parts.fragment = fragment
+    if let withFragment = parts.url { target = withFragment }
+}
 
 var evalScript: String?
 if let i = argv.firstIndex(of: "--eval"), i + 1 < argv.count {
@@ -49,6 +71,9 @@ if let i = argv.firstIndex(of: "--eval"), i + 1 < argv.count {
         exit(2)
     }
 }
+
+var shotPath: String?
+if let i = argv.firstIndex(of: "--shot"), i + 1 < argv.count { shotPath = argv[i + 1] }
 
 // Drag surfaces: the app shell, the library row labels the board pressed on,
 // and the canvas node labels the rejection screenshot showed selection smearing
@@ -91,11 +116,14 @@ final class Probe: NSObject, WKNavigationDelegate {
     var shipped: String?
     var defeated: String?
     var evaluated: String?
+    var shotWritten: String?
     private let webView: WKWebView
     private let custom: String?
+    private let shot: String?
 
-    init(custom: String?) {
+    init(custom: String?, shot: String?) {
         self.custom = custom
+        self.shot = shot
         // Layout has to be real: a zero-sized frame can short-circuit style resolution.
         webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1600, height: 1000),
                             configuration: WKWebViewConfiguration())
@@ -104,6 +132,12 @@ final class Probe: NSObject, WKNavigationDelegate {
     }
 
     func run(_ url: URL) {
+        // loadFileURL drops the fragment, so a fragment target goes through
+        // loadSimulatedRequest with the file read in directly.
+        if url.fragment != nil, let html = try? String(contentsOf: url, encoding: .utf8) {
+            webView.loadHTMLString(html, baseURL: url)
+            return
+        }
         webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
     }
 
@@ -115,6 +149,29 @@ final class Probe: NSObject, WKNavigationDelegate {
         failure = "provisional navigation failed: \(error.localizedDescription)"; done = true
     }
 
+    /* Settle before the snapshot, generously. #stage cross-fades its background
+       and colour on a theme change, and getComputedStyle — or a camera — during
+       that transition returns the *interpolated* value. A 0.6s wait caught the
+       cross-fade mid-flight and produced a light-theme screenshot with a
+       near-black canvas, which reads as a broken theme and is not one. */
+    private func capture(_ wv: WKWebView) {
+        guard let path = shot else { done = true; return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            wv.takeSnapshot(with: nil) { image, error in
+                defer { self.done = true }
+                if let error = error { self.failure = "snapshot failed: \(error.localizedDescription)"; return }
+                guard let image = image,
+                      let tiff = image.tiffRepresentation,
+                      let rep = NSBitmapImageRep(data: tiff),
+                      let png = rep.representation(using: .png, properties: [:]) else {
+                    self.failure = "snapshot produced no image"; return
+                }
+                do { try png.write(to: URL(fileURLWithPath: path)); self.shotWritten = path }
+                catch { self.failure = "could not write \(path): \(error.localizedDescription)" }
+            }
+        }
+    }
+
     func webView(_ wv: WKWebView, didFinish nav: WKNavigation!) {
         // Let the prototype's own boot scripts build the library and canvas.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -122,10 +179,11 @@ final class Probe: NSObject, WKNavigationDelegate {
                 wv.evaluateJavaScript(custom) { result, error in
                     if let error = error { self.failure = "eval failed: \(error.localizedDescription)" }
                     else { self.evaluated = String(describing: result ?? "null") }
-                    self.done = true
+                    if self.shot != nil { self.capture(wv) } else { self.done = true }
                 }
                 return
             }
+            if self.shot != nil { self.capture(wv); return }
             wv.evaluateJavaScript(probeJS) { result, error in
                 if let error = error {
                     self.failure = "pass A failed: \(error.localizedDescription)"; self.done = true; return
@@ -151,7 +209,7 @@ final class Probe: NSObject, WKNavigationDelegate {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
-let probe = Probe(custom: evalScript)
+let probe = Probe(custom: evalScript, shot: shotPath)
 probe.run(target)
 
 let deadline = Date().addingTimeInterval(45)
@@ -164,8 +222,9 @@ if let failure = probe.failure {
     exit(1)
 }
 
-if evalScript != nil {
-    print(probe.evaluated ?? "null")
+if evalScript != nil || shotPath != nil {
+    if let out = probe.evaluated { print(out) }
+    if let written = probe.shotWritten { print("wrote \(written)") }
     exit(0)
 }
 

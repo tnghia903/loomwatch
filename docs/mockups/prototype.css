@@ -2319,6 +2319,20 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
 #stage.wiring-mode #overlay > * { pointer-events: auto; }
 #stage.wiring-mode .prov-label { pointer-events: none; }
 
+/* On the wiring screen an evidence card is placeable like every other thing on
+   the coordinate graph, so it says so with the same cursor the nodes use. The
+   rule is scoped here on purpose: on the run screens the identical card opens
+   the activity panel and does not move, and a grab cursor there would promise a
+   gesture that surface does not serve. */
+#stage.wiring-mode .obs-card { cursor: grab; }
+#stage.wiring-mode .obs-card:active,
+#stage.wiring-mode .obs-card.dragging { cursor: grabbing; }
+#stage.wiring-mode .obs-card.dragging { z-index: 34; opacity: .92; box-shadow: var(--e2-shadow); }
+#stage.wiring-mode .obs-card.sel {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
 /* reduced motion: candidate pulse and refusal shake hold their static state */
 @media (prefers-reduced-motion: reduce) {
   #stage.wire-refused .ws-notice { animation: none !important; }
@@ -2388,4 +2402,7 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
   #stage.wiring-mode #nodes > .wnode .handle { display: none; }
   #stage.wiring-mode #overlay > .activity-ent { order: 44; }
   #stage.wiring-mode #overlay > .prov-label { display: none; }
+  /* the column replaces the coordinate graph, so there is nowhere to place a
+     card to — drop the grab cursor rather than advertise a dead gesture */
+  #stage.wiring-mode .obs-card { cursor: pointer; }
 }

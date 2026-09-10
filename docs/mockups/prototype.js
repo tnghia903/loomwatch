@@ -1848,11 +1848,13 @@ const wiring = {
   placing: null,           /* keyboard placement ghost { ref, x, y } (top-left) */
   live: 'live',
   observed: [],            /* projected evidence, in event order */
+  obsMoved: {},            /* observed cards the operator has carried, by event id */
   obsTimer: null,
   notice: null,
   seq: 100                 /* id counter starts past the seeded ids */
 };
-const WIRE_SIZES = { agent: { w: 276, h: 96 }, prompt: { w: 272, h: 92 }, response: { w: 264, h: 88 }, res: { w: 216, h: 76 } };
+const WIRE_SIZES = { agent: { w: 276, h: 96 }, prompt: { w: 272, h: 92 }, response: { w: 264, h: 88 },
+                     res: { w: 216, h: 76 }, obs: { w: 180, h: 76 } };
 const nodeSize = (n) => (n.kind === 'agent' ? WIRE_SIZES.agent : n.kind === 'prompt' ? WIRE_SIZES.prompt : n.kind === 'response' ? WIRE_SIZES.response : WIRE_SIZES.res);
 const wnode = (id) => wiring.nodes.find((n) => n.id === id);
 
@@ -1900,7 +1902,9 @@ function startObserve() {
   wiring.obsTimer = setTimeout(function tick() {
     wiring.obsTimer = null;
     if (stage.dataset.screen !== 'wiring' || wiring.live !== 'live') return;
-    wiring.observed.push(WIRE_OBSERVED[wiring.observed.length]);
+    const next = WIRE_OBSERVED[wiring.observed.length];
+    if (!next) return;                 /* nothing left to project — never push undefined */
+    wiring.observed.push(next);
     const e = wiring.observed[wiring.observed.length - 1];
     paintWiring();
     announce(`Observed event ${wiring.observed.length} of ${WIRE_OBSERVED.length}: ${ownerA()} ${WIRE_REL[e.id]} ${e.name}. Projected from a live run event — the planned graph is unchanged.`);
@@ -1913,6 +1917,7 @@ function initWiring() {
   seedWiring();
   wiring.live = 'live';
   wiring.observed = [];
+  wiring.obsMoved = {};
   wiring.notice = null;
   startObserve();
   paintWiring();
@@ -2086,6 +2091,143 @@ function bindWireHit(path) {
   path.addEventListener('click', (e) => { e.stopPropagation(); selectWire(id, 'edge'); });
 }
 
+/* Where an observed card actually sits: the slot the projection put it in,
+   unless the operator has carried it somewhere else. Moving an evidence card
+   is a view preference — it never edits the event, which is a record of what
+   the run did and is not the operator's to author. */
+function obsPos(e) { return wiring.obsMoved[e.id] || { x: e.x, y: e.y }; }
+
+/* The observed layer's geometry, recomputed from wherever its endpoints are
+   *now*. Split out of paintWiring() for two reasons:
+     1. it has to run during a drag, and paintWiring() rewrites #nodes and
+        #overlay wholesale — which tears the dragged element out from under the
+        pointer and ends the gesture;
+     2. every anchor is optional here. wa1 and wr1 are ordinary nodes the
+        operator can delete, and the previous inline version dereferenced them
+        unguarded: deleting the researcher while evidence was on screen threw
+        inside paintWiring and left the screen frozen half-repainted. */
+function provPathsHTML() {
+  const live = wiring.live === 'live';
+  const done = wiring.observed.length >= WIRE_OBSERVED.length;
+  const p = live && !done ? 'prov-live' : '';
+  const marker = `url(#${p ? 'mLive' : 'mProv'})`;
+  const a1 = wnode('wa1'), a2 = wnode('wa2'), r1 = wnode('wr1');
+  let d = '';
+  if (a1) {
+    const ax = a1.x + WIRE_SIZES.agent.w, ay = a1.y + 48;
+    wiring.observed.forEach((e) => {
+      const c = obsPos(e), ty = c.y + 30;
+      d += `<path class="prov ${p}" d="M${ax} ${ay} C ${ax + 60} ${ay} ${c.x - 44} ${ty} ${c.x} ${ty}" marker-end="${marker}"/>`;
+    });
+  }
+  if (wiring.observed.length && r1) {
+    const c = obsPos(wiring.observed[wiring.observed.length - 1]);
+    d += `<path class="prov ${p}" d="M${c.x + WIRE_SIZES.obs.w} ${c.y + 38} C ${c.x + 250} ${c.y + 38} ${r1.x - 70} ${r1.y + 20} ${r1.x} ${r1.y + 20}" marker-end="${marker}"/>`;
+  }
+  if (wiring.observed.length >= 2 && a1 && a2 && !done) d += `<path class="shuttle" d="${wirePathD(a1, a2)}"/>`;
+  return d;
+}
+
+/* Cheap enough to run on every pointermove: it writes one SVG group and moves
+   two labels, and touches neither the nodes nor the cards. This is what makes
+   an observed edge follow its node during the drag instead of catching up on
+   release. */
+function repaintProv() {
+  $('#provGroup').innerHTML = provPathsHTML();
+  const a1 = wnode('wa1'), a2 = wnode('wa2'), r1 = wnode('wr1');
+
+  /* Sit on the middle of the edge being named, not at a fixed offset from the
+     card. Once the card is placeable, a fixed offset walks off the stage as
+     soon as the card is carried to the right-hand side. */
+  const label = $('#provEvidenceLabel');
+  if (label && wiring.observed.length) {
+    const c = obsPos(wiring.observed[wiring.observed.length - 1]);
+    const from = { x: c.x + WIRE_SIZES.obs.w, y: c.y + 38 };
+    const to = r1 ? { x: r1.x, y: r1.y + 20 } : { x: from.x + 240, y: from.y };
+    label.style.left = Math.round((from.x + to.x) / 2) + 'px';
+    label.style.top = Math.round((from.y + to.y) / 2) + 'px';
+    label.hidden = !r1;
+  }
+  const badge = $('#provDispatchBadge');
+  if (badge && a1 && a2) {
+    const m = wireMid(a1, a2);
+    badge.style.left = m.x + 'px';
+    badge.style.top = (m.y - 18) + 'px';
+  }
+}
+
+/* The same press-drag-release the planned nodes answer. The cluster sits in a
+   different layer from #nodes, and until now that layer was inert: the cards
+   carried a hand cursor and a click that only spoke to the live region, so a
+   mouse operator pressing one saw nothing move. */
+function bindObsCard(el) {
+  const id = el.dataset.wobs;
+  const ev = () => wiring.observed.find((e) => e.id === id);
+  let drag = null;
+
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const c = stageCoords(e);
+    drag = { start: c, orig: obsPos(ev()), moved: false };
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* prototype: capture is best-effort */ }
+    e.preventDefault();
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const c = stageCoords(e);
+    if (!drag.moved && Math.abs(c.x - drag.start.x) + Math.abs(c.y - drag.start.y) < 5) return;
+    drag.moved = true;
+    const s = WIRE_SIZES.obs;
+    wiring.obsMoved[id] = {
+      x: Math.max(0, Math.min(drag.orig.x + (c.x - drag.start.x), 1600 - s.w)),
+      y: Math.max(0, Math.min(drag.orig.y + (c.y - drag.start.y), 1000 - s.h))
+    };
+    el.classList.add('dragging');
+    el.style.setProperty('--x', wiring.obsMoved[id].x + 'px');
+    el.style.setProperty('--y', wiring.obsMoved[id].y + 'px');
+    repaintProv();
+  });
+  const finish = () => {
+    if (!drag) return;
+    const moved = drag.moved;
+    drag = null;
+    el.classList.remove('dragging');
+    if (!moved) return;
+    /* No suppressClick here: paintWiring() replaces this element, so the click
+       the UA would synthesize never reaches the listener below. Setting the
+       shared flag instead would leave it armed to swallow an unrelated click
+       somewhere else on the screen. */
+    wiring.selected = { type: 'obs', id };
+    paintWiring();
+    announce(`${ev().name} moved to ${wiring.obsMoved[id].x}, ${wiring.obsMoved[id].y}. `
+      + 'Its observed edges followed. The recorded event is unchanged — only where it is drawn.');
+  };
+  el.addEventListener('pointerup', finish);
+  el.addEventListener('pointercancel', finish);
+  el.addEventListener('click', () => {
+    if (suppressClick) { suppressClick = false; return; }
+    wiring.selected = { type: 'obs', id };
+    paintWiring();
+    announce(el.getAttribute('aria-label'));
+  });
+}
+
+/* Keyboard parity with nudgeSelected(): pointer and keyboard place an evidence
+   card the same way, so the gesture is not mouse-only. */
+function nudgeObs(dx, dy) {
+  const id = wiring.selected.id;
+  const e = wiring.observed.find((x) => x.id === id);
+  if (!e) return;
+  const s = WIRE_SIZES.obs;
+  const c = obsPos(e);
+  wiring.obsMoved[id] = {
+    x: Math.max(0, Math.min(c.x + dx, 1600 - s.w)),
+    y: Math.max(0, Math.min(c.y + dy, 1000 - s.h))
+  };
+  paintWiring();
+  focusAfterPaint(`[data-wobs="${id}"]`);
+}
+
 function paintWiring() {
   if (stage.dataset.screen !== 'wiring') return;
   const live = wiring.live === 'live';
@@ -2112,41 +2254,34 @@ function paintWiring() {
 
   /* observed provenance cluster — blue edges, evidence chips, shuttle on the
      planned handoff edge while live; always separate from the planned warp */
-  let prov = '', ov = '';
-  const a1 = wnode('wa1'), a2 = wnode('wa2'), r1 = wnode('wr1');
+  let ov = '';
+  const a1 = wnode('wa1'), a2 = wnode('wa2');
   wiring.observed.forEach((e, i) => {
     const newest = live && !done && i === wiring.observed.length - 1;
-    ov += `<button type="button" class="activity-ent ${newest ? 'st-running' : 'st-succeeded'}"
-        data-wobs="${e.id}" style="--x:${e.x}px;--y:${e.y}px"
-        aria-label="Observed event ${i + 1} of ${WIRE_OBSERVED.length}: ${ownerA()} ${WIRE_REL[e.id]} ${escapeMarkup(e.name)}, ${e.t}${live && !done ? ', projected live' : ', replay'}">
+    const c = obsPos(e);
+    const sel = wiring.selected && wiring.selected.type === 'obs' && wiring.selected.id === e.id;
+    ov += `<button type="button" class="activity-ent obs-card ${newest ? 'st-running' : 'st-succeeded'} ${sel ? 'sel' : ''}"
+        data-wobs="${e.id}" style="--x:${c.x}px;--y:${c.y}px"
+        aria-label="Observed event ${i + 1} of ${WIRE_OBSERVED.length}: ${ownerA()} ${WIRE_REL[e.id]} ${escapeMarkup(e.name)}, ${e.t}${live && !done ? ', projected live' : ', replay'}. Drag to place it, or select it and use the arrow keys.">
       <span class="ae-order t-micro">#${String(i + 1).padStart(2, '0')} · ${e.t}${live ? '' : ' · replay'}</span>
       <span class="ae-main t-body-m">${entGlyph(e.kind, 13)} ${escapeMarkup(e.name)}</span>
       <span class="ae-sub t-meta">${statusSVG(newest ? 'running' : 'succeeded')} ${newest ? 'RUNNING' : 'SUCCEEDED'} · ${ownerA()} ${WIRE_REL[e.id]}</span>
       <span class="ae-detail t-mono-sm">${escapeMarkup(e.sub)}</span>
     </button>`;
-    const ty = e.y + 30;
-    const p = live && !done ? 'prov-live' : '';
-    prov += `<path class="prov ${p}" d="M${a1.x + WIRE_SIZES.agent.w} ${a1.y + 48} C ${a1.x + WIRE_SIZES.agent.w + 60} ${a1.y + 48} ${e.x - 44} ${ty} ${e.x} ${ty}" marker-end="url(#${p ? 'mLive' : 'mProv'})"/>`;
   });
+  /* Both floating labels are emitted without coordinates: repaintProv() below
+     places them, and is the only thing that ever does — so a label cannot drift
+     out of step with the edge it names during a drag. */
   if (wiring.observed.length) {
-    const last = wiring.observed[wiring.observed.length - 1];
-    const p = live && !done ? 'prov-live' : '';
-    prov += `<path class="prov ${p}" d="M${last.x + WIRE_SIZES.res.w} ${last.y + 38} C ${last.x + 250} ${last.y + 38} ${r1.x - 70} ${r1.y + 20} ${r1.x} ${r1.y + 20}" marker-end="url(#${p ? 'mLive' : 'mProv'})"/>`;
-    ov += `<span class="prov-label t-micro" style="left:${last.x + 320}px;top:${last.y + 30}px">evidence → response</span>`;
+    ov += `<span class="prov-label t-micro" id="provEvidenceLabel">evidence → response</span>`;
   }
   if (wiring.observed.length >= 2 && a1 && a2) {
-    if (!done) prov += `<path class="shuttle" d="${wirePathD(a1, a2)}"/>`;
-    const m = wireMid(a1, a2);
-    ov += `<span class="edge-label edge-badge t-micro" style="left:${m.x}px;top:${m.y - 18}px"
+    ov += `<span class="edge-label edge-badge t-micro" id="provDispatchBadge"
         title="Dispatch events observed along this planned edge">×${wiring.observed.length}</span>`;
   }
-  $('#provGroup').innerHTML = prov;
   $('#overlay').innerHTML = ov;
-  $('#overlay').querySelectorAll('[data-wobs]').forEach((c) => {
-    const say = () => announce(c.getAttribute('aria-label'));
-    c.addEventListener('click', say);
-    c.addEventListener('keydown', (e) => activateKey(e, say));
-  });
+  $('#overlay').querySelectorAll('[data-wobs]').forEach(bindObsCard);
+  repaintProv();
 
   /* ghost for keyboard placement */
   if (wiring.placing) {
@@ -2184,8 +2319,11 @@ function paintWireStrip() {
     ctx.textContent = `Placing ${resById(wiring.placing.ref).name} — arrow keys move, Enter drops, Esc cancels.`;
   } else if (n) {
     ctx.textContent = `${n.name} selected — Delete removes it and its edges. W starts a wire from it; E cycles its edges.`;
+  } else if (wiring.selected && wiring.selected.type === 'obs') {
+    const ob = wiring.observed.find((x) => x.id === wiring.selected.id);
+    ctx.textContent = `${ob ? ob.name : 'Evidence'} selected — observed evidence. Drag it or use the arrow keys to place it; its edges follow. It cannot be removed or rewired.`;
   } else {
-    ctx.textContent = 'Drag from the Library to place · drag a node’s right handle onto a target to wire · W wire · E edges · R rewire · Del remove';
+    ctx.textContent = 'Drag from the Library to place · drag a node or an evidence card to move it · drag a node’s right handle onto a target to wire · W wire · E edges · R rewire · Del remove';
   }
 
   const notice = $('#wireNotice');
@@ -2366,6 +2504,11 @@ function bindWireNode(el) {
     el.style.setProperty('--x', n.x + 'px');
     el.style.setProperty('--y', n.y + 'px');
     repaintEdges();
+    /* The observed layer hangs off these same nodes — the researcher's edges
+       start at wa1, the evidence → response edge lands on wr1. Repainting only
+       the planned edges here is what left the blue lines behind while the node
+       moved under the pointer. */
+    repaintProv();
   });
   const finish = () => {
     if (!wireDrag || wireDrag.kind !== 'node' || wireDrag.id !== id) return;
@@ -2660,13 +2803,28 @@ function wiringKey(e) {
     return true;
   }
   if (!wiring.selected) return false;
-  if (/^Arrow/.test(e.key) && wiring.selected.type === 'node') {
+  if (/^Arrow/.test(e.key) && (wiring.selected.type === 'node' || wiring.selected.type === 'obs')) {
     e.preventDefault();
     const step = e.shiftKey ? 64 : 16;
-    nudgeSelected(
-      e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0,
-      e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0);
+    const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+    const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+    if (wiring.selected.type === 'obs') nudgeObs(dx, dy); else nudgeSelected(dx, dy);
     return true;
+  }
+  /* An observed card is a record, not a document object: it can be placed, but
+     it cannot be deleted or wired. Say so rather than doing nothing — and never
+     fall through to the planned-graph handlers, which would look this id up in
+     wiring.nodes, find nothing, and either no-op silently or throw. */
+  if (wiring.selected.type === 'obs') {
+    if (e.key === 'Delete' || e.key === 'Backspace' || /^[wer]$/.test(e.key.toLowerCase())) {
+      e.preventDefault();
+      const why = 'Observed evidence records what the run did. It can be moved, but not removed or rewired — '
+        + 'edit the planned graph instead.';
+      setWireNotice(why);
+      announce(why);
+      return true;
+    }
+    return false;
   }
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteWireSelected(); return true; }
   const k = e.key.toLowerCase();
