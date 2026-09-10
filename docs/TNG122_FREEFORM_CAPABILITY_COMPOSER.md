@@ -23,7 +23,9 @@ turning the library into an inventory leak.
 
 ## 2. Composition and progressive disclosure
 
-The desktop composition is an **Explore** surface with a secondary **Configure** mode:
+The desktop composition is primarily an **Operate** surface: direct placement, selection,
+wiring, and correction are the dominant jobs. Capability discovery is a secondary **Explore**
+mode, while the connection strip and inspector provide focused **Command / Inspect** behavior:
 
 - a 320 px collapsible Library at left: search, one category filter, one state filter, category
   disclosure rows with visible/total counts, then draggable results;

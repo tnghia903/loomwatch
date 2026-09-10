@@ -14,9 +14,9 @@ delta is folded into CANVAS_SPEC as revision 2** and this file is deleted.
 
 **Scope guard.** Configuration only. No mid-run execution control — approving, pausing or
 commenting on a running agent stays deferred by ARCHITECTURE §6 and is not designed here.
-Nothing below requires a change to `schemas/team.schema.yaml` or the frozen WebSocket
-schema; the two places where a design wants something the backend does not have are flagged
-in §17 as escalations, not designed around.
+The original redesign below does not require a change to `schemas/team.schema.yaml` or the
+frozen WebSocket schema; later approval-candidate revisions may state explicit design-only
+backend/schema assumptions. Those assumptions are not authorization to implement them.
 
 ## TNG-119 approval-candidate revision
 
@@ -73,6 +73,31 @@ scrolls. Expanded provenance moved from free absolute positions (which overflowe
 1000 px stage to y ≈ 1046 with an entity open) into a **bounded tray** that anchors above
 the stage floor, scrolls internally, and carries `Back to response` in its header. At 390 px
 the tray becomes a full-width block in the reading column.
+
+## TNG-122 revision — freeform capability composer supersedes fixed insertion
+
+The TNG-121 between-step insertion lane is no longer the approval candidate. The canvas is now
+primarily an **Operate** surface: users place workspace-authorized resources at arbitrary
+coordinates, move them, and create, select, atomically retarget, or remove typed planned edges.
+Capability discovery is a secondary **Explore** mode in a searchable, filterable, collapsible
+Library; the selected-object strip and inspector provide **Command / Inspect** behavior.
+
+The Library's first-class draggable types are Agents, Skills, Tools / Connectors, and Knowledge
+Sources. It shows only the current workspace's safely discoverable inventory, including explicit
+disconnected or permission-required states only where that metadata itself is authorized. Globally
+hidden and unauthorized inventory is omitted. Prompt / goal remains the graph origin and Response /
+output remains terminal.
+
+Planned wiring is editable intent and cannot claim that a capability ran. Actual calls, commands,
+searches, files, repositories, knowledge access, skills, handoffs, and output ownership continue to
+project automatically from accepted runtime events as immutable observed evidence. The full typed
+relationship matrix, pointer and keyboard interactions, refusal behavior, permissions model,
+narrow-layout reading order, and design-only backend/schema assumptions are normative in
+[`TNG122_FREEFORM_CAPABILITY_COMPOSER.md`](TNG122_FREEFORM_CAPABILITY_COMPOSER.md).
+
+This revision does not amend `team.schema.yaml`, grant permissions, add endpoints, or change the
+frozen WebSocket contract. Production persistence and validation require deliberate backend/schema
+ownership and review after the DESIGN-FIRST gate.
 
 ---
 
