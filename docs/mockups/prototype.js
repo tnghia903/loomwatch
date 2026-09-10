@@ -2321,11 +2321,12 @@ let wireDrag = null;
 let libDragRef = null;
 let suppressClick = false;
 
-function stageCoords(e) {
+function stagePoint(clientX, clientY) {
   const r = stage.getBoundingClientRect();
   const s = r.width / 1600 || 1;
-  return { x: Math.round((e.clientX - r.left) / s), y: Math.round((e.clientY - r.top) / s) };
+  return { x: Math.round((clientX - r.left) / s), y: Math.round((clientY - r.top) / s) };
 }
+function stageCoords(e) { return stagePoint(e.clientX, e.clientY); }
 function nodeAtPoint(e) {
   const el = document.elementFromPoint(e.clientX, e.clientY);
   const host = el && el.closest('[data-wnode], [data-node]');
@@ -2751,12 +2752,16 @@ function renderLibrary() {
     })));
   host.querySelectorAll('.lib-row[data-res]').forEach((row) =>
     row.addEventListener('click', () => {
+      /* a completed pointer carry already placed (or deliberately declined to
+         place) this row — one gesture, one outcome */
+      if (suppressLibClick) { suppressLibClick = false; return; }
       /* On `wiring` at desktop widths the row is a real drag source, so click
          has to stay inert or it would fight dragstart; the narrow layout has
          no drag, which is why click is the placement path there. Off `wiring`
-         nothing is draggable (see libRowHTML), so there is no conflict and
-         click is live at every width — that is the path the board actually
-         used, and the width guard used to swallow it silently. */
+         nothing is natively draggable (see libRowHTML), so there is no
+         conflict and click is live at every width — that is the path the
+         board actually used, and the width guard used to swallow it
+         silently. */
       if (stage.dataset.screen === 'wiring'
           && !window.matchMedia('(max-width: 767px)').matches) return;
       activateLibRow(row.dataset.res);
@@ -2785,22 +2790,24 @@ function libRowHTML(r, wiringScreen) {
     ? (r.kind === 'agent' ? 'wires: goal, agents, skills, tools, knowledge, output' : 'wires to agents · use direction only')
     : 'Not placeable in this workspace';
   const arming = wiring.placing && wiring.placing.ref === r.id;
-  /* TNG-127 follow-up: draggable="true", the grab cursor and the drag-dots
-     handle used to render on every screen the library appears on, but
-     dragstart/dragover/drop and Enter-to-arm are only wired on the Freeform
-     wiring screen (stage.dataset.screen === 'wiring'). The board's rejection
-     screenshot was taken on the default canvas screen, where the row looked
-     draggable and silently wasn't. Scope the look of the affordance to where
-     it actually works; elsewhere the row stays focusable and names the tab
-     that does. */
-  const draggableHere = usable && wiringScreen;
-  const dragHint = draggableHere
-    ? 'Press Enter to arm placement on the freeform canvas.'
-    : (usable
-        ? 'Press Enter to open the Freeform wiring tab and arm placement.'
-        : 'Not usable in this workspace.');
-  return `<div class="lib-row ${usable ? '' : 'unavailable'}${usable && !wiringScreen ? ' lib-row-elsewhere' : ''}${arming ? ' lib-row-arming' : ''}" role="button" ${usable ? `${draggableHere ? 'draggable="true" ' : ''}data-res="${r.id}"` : 'aria-disabled="true"'}
-      title="${escapeMarkup(r.kind === 'agent' ? 'Wires to: prompt/goal, agents, skills, tools, knowledge, response' : 'Wires to agents only — use direction')}${draggableHere ? '' : escapeMarkup(usable ? ' — click to open the Freeform wiring tab and place it.' : '')}"
+  /* Two mechanisms, deliberately scoped differently.
+
+     `draggable="true"` is the HTML5 drag source, and dragover/drop are only
+     wired on `wiring` — so the attribute stays scoped there (cd5e162: off
+     `wiring` it advertised a drag the UA would refuse). The pointer carry
+     (bindLibraryCarry) has no such limit and serves the gesture on every
+     screen the library appears on, so the *look* of grabbability — the grab
+     cursor and the drag-dots handle — is correct everywhere a usable row
+     renders, and withholding it is what left the board's screen looking
+     inert. Look follows the carry; the attribute follows the drop wiring. */
+  const nativeDrag = usable && wiringScreen;
+  const dragHint = usable
+    ? (wiringScreen
+        ? 'Drag it onto the canvas, or press Enter to arm placement.'
+        : 'Drag it onto the canvas, or press Enter, to place it on the Freeform wiring canvas.')
+    : 'Not usable in this workspace.';
+  return `<div class="lib-row ${usable ? '' : 'unavailable'}${usable && !wiringScreen ? ' lib-row-elsewhere' : ''}${arming ? ' lib-row-arming' : ''}" role="button" ${usable ? `${nativeDrag ? 'draggable="true" ' : ''}data-res="${r.id}"` : 'aria-disabled="true"'}
+      title="${escapeMarkup(r.kind === 'agent' ? 'Wires to: prompt/goal, agents, skills, tools, knowledge, response' : 'Wires to agents only — use direction')}${nativeDrag ? '' : escapeMarkup(usable ? ' — drag it onto the canvas, or click, to place it on the Freeform wiring canvas.' : '')}"
       tabindex="0"
       aria-label="${KIND_WORD[r.kind]} ${escapeMarkup(r.name)}, ${st.word}${wired ? `, ${wired} ${wired === 1 ? 'wire' : 'wires'} on canvas` : ''}${arming ? ', armed for placement' : ''}. ${dragHint}">
     ${r.kind === 'agent'
@@ -2811,7 +2818,7 @@ function libRowHTML(r, wiringScreen) {
       <span class="lib-row-sub t-mono-sm">${escapeMarkup(r.sub)}</span>
       <span class="lib-row-meta t-meta">${badge}${wiredBadge}<span class="lib-row-compat">${escapeMarkup(compat)}</span></span>
     </span>
-    ${draggableHere ? '<span class="drag-dots t-body" aria-hidden="true">⠿</span>' : ''}
+    ${usable ? '<span class="drag-dots t-body" aria-hidden="true">⠿</span>' : ''}
   </div>`;
 }
 
@@ -2839,6 +2846,9 @@ function bindLibrary() {
   document.addEventListener('dragstart', (e) => {
     const row = e.target.closest && e.target.closest('#library .lib-row[data-res]');
     if (!row) return;
+    /* the native drag supersedes the pointer carry that started on the same
+       press — otherwise both would place a node from one gesture */
+    cancelLibCarry();
     if (stage.dataset.screen !== 'wiring') { e.preventDefault(); return; }
     const r = resById(row.dataset.res);
     if (!resUsable(r)) { e.preventDefault(); return; }
@@ -2854,11 +2864,138 @@ function bindLibrary() {
     host.querySelectorAll('.lib-row.dragging').forEach((r) => r.classList.remove('dragging'));
   });
 
+  bindLibraryCarry();
+
   /* TNG-124: a real, scroll-position-driven fade + a persistent thumb, so
      "there are more resources below" is visible before the pointer moves —
      see the .lib-scroll rules in prototype.css for why this exists. */
   host.addEventListener('scroll', updateLibScrollFade);
   window.addEventListener('resize', updateLibScrollFade);
+}
+
+/* ---------------------------------------------------------------------------
+   LIBRARY CARRY — press a row, move, release on the canvas.
+
+   Round four on "I cannot drag the agent from the library." The three earlier
+   fixes each answered something adjacent to the sentence and were each
+   verified by calling .click() on a row:
+
+     25e9545  locked selection so WebKit stops highlighting instead of dragging
+     cd5e162  removed the drag *look* from screens where dragstart is refused
+     8f0c3b4  routed a *click* on those screens to the wiring tab
+
+   A click is not a drag. `click` is dispatched on the nearest common inclusive
+   ancestor of the mousedown and mouseup targets, so pressing a row and
+   releasing over the canvas fires click on #stage — the row's own listener
+   never runs. Measured in WKWebView at boot on `canvas`, the screen every
+   rejection was filed from: 0 rows with draggable="true" (so the UA cannot
+   raise dragstart either) and the click landing on DIV#stage. Both mechanisms
+   were dead at once, which is why a suite green on click, keyboard, and
+   drag-on-`wiring` still shipped a no-op gesture.
+
+   So the gesture gets its own implementation, on ordinary pointer events,
+   live on every screen the library appears on. Off `wiring` a release over the
+   canvas routes to the freeform surface and drops the node where it was
+   released — the same destination 8f0c3b4 chose for the click, reached by the
+   gesture the board actually performs. Native HTML5 drag stays as-is on
+   `wiring` and takes precedence when it starts (see the dragstart handler).
+
+   The side benefit is testability: PointerEvents are dispatchable from script,
+   so this path is provable in both engines without trusted input, which
+   dragstart is not.
+   --------------------------------------------------------------------------- */
+const LIB_CARRY_SLOP = 6;   /* px before a press counts as a drag, not a click */
+let libCarry = null;
+let suppressLibClick = false;
+
+function bindLibraryCarry() {
+  document.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    /* Touch is deliberately excluded: a vertical drag inside the library is
+       how the list is scrolled, and a carry that armed on it would hang a
+       ghost off every scroll. The narrow layout already places by tap
+       (activateLibRow), which is the gesture that surface actually wants. */
+    if (e.pointerType === 'touch') return;
+    const row = e.target.closest && e.target.closest('#library .lib-row[data-res]');
+    if (!row) return;
+    const r = resById(row.dataset.res);
+    if (!r || !resUsable(r)) return;
+    libCarry = { ref: r.id, row, x0: e.clientX, y0: e.clientY, live: false };
+  });
+
+  document.addEventListener('pointermove', (e) => {
+    if (!libCarry) return;
+    if (!libCarry.live) {
+      if (Math.hypot(e.clientX - libCarry.x0, e.clientY - libCarry.y0) < LIB_CARRY_SLOP) return;
+      libCarry.live = true;
+      libCarry.row.classList.add('dragging');
+      stage.classList.add('lib-dragging');
+      const r = resById(libCarry.ref);
+      libCarry.ghost = document.createElement('div');
+      libCarry.ghost.className = 'lib-carry t-body-m';
+      libCarry.ghost.setAttribute('aria-hidden', 'true');
+      libCarry.ghost.textContent = r.name;
+      document.body.appendChild(libCarry.ghost);
+      announce(`Carrying ${r.name}. Release over the canvas to place it.`);
+    }
+    libCarry.ghost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 10}px)`;
+    libCarry.ghost.classList.toggle('over-canvas', overCanvasDrop(e.clientX, e.clientY));
+  });
+
+  document.addEventListener('pointerup', (e) => dropLibCarry(e));
+  document.addEventListener('pointercancel', () => cancelLibCarry());
+  /* a release outside the window never reports a pointerup on the document */
+  window.addEventListener('blur', () => cancelLibCarry());
+}
+
+/* The drop zone is the stage minus the library it came from. The carry ghost
+   is pointer-events:none, so it never hit-tests as its own target. */
+function overCanvasDrop(clientX, clientY) {
+  const el = document.elementFromPoint(clientX, clientY);
+  if (!el || !stage.contains(el)) return false;
+  return !el.closest('#library');
+}
+
+function cancelLibCarry() {
+  const c = libCarry;
+  libCarry = null;
+  if (!c) return;
+  if (c.ghost) c.ghost.remove();
+  c.row.classList.remove('dragging');
+  stage.classList.remove('lib-dragging');
+  return c;
+}
+
+function dropLibCarry(e) {
+  const c = libCarry;
+  if (!c) return;
+  const live = c.live;
+  cancelLibCarry();
+  /* under the slop threshold this was a click, and the row's click handler
+     owns it (activateLibRow) — do not consume it */
+  if (!live) return;
+  /* a drag that ends back inside its own row is the same non-gesture, so let
+     the click through rather than reporting a cancelled placement */
+  if (c.row.contains(document.elementFromPoint(e.clientX, e.clientY))) return;
+  suppressLibClick = true;
+  const r = resById(c.ref);
+  if (!overCanvasDrop(e.clientX, e.clientY)) {
+    announce(`${r.name} was not placed — release over the canvas to place it.`);
+    return;
+  }
+  /* map before the screen change: #stage keeps its box, so the release point
+     means the same canvas coordinate either side of go('wiring') */
+  const p = stagePoint(e.clientX, e.clientY);
+  const routed = stage.dataset.screen !== 'wiring';
+  if (routed) go('wiring');
+  const s = r.kind === 'agent' ? WIRE_SIZES.agent : WIRE_SIZES.res;
+  const n = placeResource(c.ref, p.x - s.w / 2, p.y - s.h / 2);
+  if (!n) return;
+  focusAfterPaint(`[data-wnode="${n.id}"]`);
+  if (routed) {
+    announce(`Opened the Freeform wiring tab and placed ${r.name} where you released it. `
+      + 'Drag its right handle onto a target to wire it, or select it and press W.');
+  }
 }
 
 function updateLibScrollFade() {
@@ -2970,6 +3107,13 @@ function go(key) {
   if (s.show.includes('legend') && GRAPHS[s.graph] && !GRAPHS[s.graph].legend) {
     $('#legend').hidden = true;
   }
+
+  /* The library markup encodes the current screen (draggable="true" is only
+     correct on `wiring`), but nothing re-rendered it on navigation: measured
+     in WKWebView, go('wiring') then go('canvas') left all 12 rows still
+     carrying draggable="true", so cd5e162's scoping held exactly until the
+     operator changed tabs once. Re-render with the screen. */
+  if (!$('#library').hidden) renderLibrary();
 
   document.querySelectorAll('#tabs button').forEach((b) =>
     b.setAttribute('aria-current', String(b.dataset.k === key)));

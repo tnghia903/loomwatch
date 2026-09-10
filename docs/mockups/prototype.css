@@ -212,15 +212,47 @@ html, body {
   letter-spacing: -1px;
 }
 .lib-row.unavailable { opacity: .5; cursor: default; }
-/* Usable but not on the Freeform wiring screen — the only screen dragstart/
-   dragover/drop are wired to, so libRowHTML withholds the grab cursor and the
-   drag-dots handle here. It is still a button: activating it routes to the
-   wiring tab and arms placement (activateLibRow), so the pointer says
-   "clickable" rather than promising a drag the row cannot start. */
-.lib-row.lib-row-elsewhere { cursor: pointer; }
-/* the row actually being HTML5-dragged — a visible hole where it left,
-   distinct from :hover so the drag source reads as "in flight." */
+/* Usable but not on the Freeform wiring screen. cd5e162 dropped this row to
+   cursor:pointer because HTML5 dragstart is refused here; the pointer carry
+   (bindLibraryCarry) now serves the gesture on every screen, so grab is the
+   honest cursor and the rule is back to inheriting it. The class stays as the
+   hook for the routing treatment — releasing here lands the node on the
+   freeform canvas rather than on this screen. */
+/* the row in flight — a visible hole where it left, distinct from :hover.
+   Set by both drag paths: the native dragstart handler and the carry. */
 .lib-row.dragging { opacity: .35; border-style: dashed; }
+
+/* The carry ghost. The native HTML5 drag renders its own drag image; the
+   pointer carry has none, and "nothing appears to happen" is the exact
+   complaint this whole path exists to answer — so the label follows the
+   pointer, and confirms the drop is live once it is over the canvas.
+   pointer-events:none keeps it out of elementFromPoint, which is what
+   decides whether a release counts as a drop. */
+.lib-carry {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 90;
+  pointer-events: none;
+  max-width: 260px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 6px var(--sp-3);
+  border-radius: var(--r-sm);
+  border: 1px dashed var(--color-accent-dim);
+  background: var(--color-panel-solid);
+  color: var(--color-ink);
+  box-shadow: var(--e2-shadow);
+  opacity: .92;
+}
+/* the drop is live where the release would actually land a node — the same
+   solid-border promotion .wire-ghost uses for the armed keyboard placement */
+.lib-carry.over-canvas {
+  border-color: var(--color-accent);
+  border-style: solid;
+  background: var(--color-accent-tint);
+}
 
 /* TNG-124: the capability-library row (#library) carries a third text
    line — .lib-row-meta, the state/wired badges — that the shared 40px

@@ -138,6 +138,17 @@ async function key(key, { code = key, modifiers = 0, virtualKeyCode = 0 } = {}) 
   await sleep(60);
 }
 
+/* Real input, not a synthesized DOM event: `click` and `pointerdown` sent by
+   Input.dispatchMouseEvent go through the same path a hand does, including
+   which element the UA decides a click belongs to after a press-and-drag. */
+async function mouse(type, x, y) {
+  await send('Input.dispatchMouseEvent', {
+    type, x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1,
+    buttons: type === 'mouseReleased' ? 0 : 1
+  });
+  await sleep(60);
+}
+
 function assert(value, message) {
   if (!value) throw new Error(message);
 }
@@ -397,11 +408,13 @@ try {
   await key('Escape', { code: 'Escape', virtualKeyCode: 27 });
 
   /* =====================================================================
-     TNG-127 follow-up — a visible, un-selectable grab handle is still a
-     false affordance if dragstart/dragover/drop only exist on the Freeform
-     wiring screen. The board's rejection screenshot was taken on the
-     default canvas screen ("Pipeline · 3 steps"), not wiring, so the row
-     there must not look draggable — it must say where dragging works.
+     The board's rejection screenshot was taken on the default canvas screen
+     ("Pipeline · 3 steps"), not wiring. cd5e162 answered that by removing
+     the drag *look* there, since dragstart/dragover/drop only exist on
+     wiring; the pointer carry (bindLibraryCarry) removes the premise by
+     serving the gesture on every screen. So the row must look grabbable
+     here again — while draggable="true", the HTML5 source the drop wiring
+     is scoped to, must still be withheld.
      Runs before the wiring section below so it doesn't disturb the
      cumulative wiring/placement state that section builds up.
      ===================================================================== */
@@ -415,16 +428,72 @@ try {
       draggableCount: usable.filter((r) => r.getAttribute('draggable') === 'true').length,
       dotsCount: usable.filter((r) => r.querySelector('.drag-dots')).length,
       grabCursors: usable.filter((r) => getComputedStyle(r).cursor === 'grab').length,
-      hintedTitles: usable.filter((r) => /Freeform wiring/.test(r.getAttribute('title') || '')).length,
-      hintedAria: usable.filter((r) => /Freeform wiring/.test(r.getAttribute('aria-label') || '')).length
+      hintedTitles: usable.filter((r) => /drag it onto the canvas/i.test(r.getAttribute('title') || '')).length,
+      hintedAria: usable.filter((r) => /Drag it onto the canvas/.test(r.getAttribute('aria-label') || '')).length
     };
   })()`);
   assert(elsewhere.screen === 'canvas' && elsewhere.usable > 0, `Canvas screen did not render library rows: ${JSON.stringify(elsewhere)}`);
-  assert(elsewhere.draggableCount === 0, `Library rows still claim draggable="true" on the canvas screen, where dragstart is refused: ${JSON.stringify(elsewhere)}`);
-  assert(elsewhere.dotsCount === 0, `Library rows still show a grab handle on the canvas screen, where the drag never arms: ${JSON.stringify(elsewhere)}`);
-  assert(elsewhere.grabCursors === 0, `Library rows still show a grab cursor on the canvas screen: ${JSON.stringify(elsewhere)}`);
+  assert(elsewhere.draggableCount === 0, `Library rows claim draggable="true" on the canvas screen, where dragover/drop are not wired: ${JSON.stringify(elsewhere)}`);
+  assert(elsewhere.dotsCount === elsewhere.usable, `Usable library rows lack the grab handle on the canvas screen, where the carry does work: ${JSON.stringify(elsewhere)}`);
+  assert(elsewhere.grabCursors === elsewhere.usable, `Usable library rows lack the grab cursor on the canvas screen: ${JSON.stringify(elsewhere)}`);
   assert(elsewhere.hintedTitles === elsewhere.usable && elsewhere.hintedAria === elsewhere.usable,
-    `Library rows on the canvas screen do not point at the Freeform wiring tab: ${JSON.stringify(elsewhere)}`);
+    `Library rows on the canvas screen do not offer the drag in their title/aria-label: ${JSON.stringify(elsewhere)}`);
+
+  /* The gesture itself, on the screen it was reported from. A click is not a
+     drag: `click` goes to the nearest common inclusive ancestor of the
+     mousedown and mouseup targets, so pressing a row and releasing over the
+     canvas never reaches the row's own click handler. Drive press → move →
+     release through CDP's real input pipeline and assert a node landed. */
+  const rowBox = await evaluate(`(() => {
+    const row = document.querySelector('#libGroups .lib-row[data-res]');
+    const r = row.getBoundingClientRect();
+    const s = document.querySelector('#stage').getBoundingClientRect();
+    const l = document.querySelector('#library').getBoundingClientRect();
+    return JSON.stringify({ ref: row.dataset.res,
+      fx: r.left + r.width / 2, fy: r.top + r.height / 2,
+      tx: (l.right + s.right) / 2, ty: s.top + s.height / 2 });
+  })()`);
+  const box = JSON.parse(rowBox);
+  /* The expected landing spot, computed before the drop. Counting nodes
+     before/after would prove nothing: routing to wiring runs initWiring(),
+     which reseeds the graph, so the count moves whether or not anything was
+     placed. Ask whether the row that was dragged is now a node at the point
+     where it was released. */
+  const expected = JSON.parse(await evaluate(`(() => {
+    const r = RESOURCES.find((x) => x.id === ${JSON.stringify(box.ref)});
+    const s = r.kind === 'agent' ? WIRE_SIZES.agent : WIRE_SIZES.res;
+    const p = stagePoint(${box.tx}, ${box.ty});
+    return JSON.stringify({ x: p.x - s.w / 2, y: p.y - s.h / 2 });
+  })()`));
+  await mouse('mousePressed', box.fx, box.fy);
+  await mouse('mouseMoved', (box.fx + box.tx) / 2, (box.fy + box.ty) / 2);
+  await mouse('mouseMoved', box.tx, box.ty);
+  await mouse('mouseReleased', box.tx, box.ty);
+  const dropped = await evaluate(`({
+    screen: document.querySelector('#stage').dataset.screen,
+    landed: wiring.nodes.filter((n) => n.ref === ${JSON.stringify(box.ref)}
+      && Math.abs(n.x - ${expected.x}) <= 2 && Math.abs(n.y - ${expected.y}) <= 2).length,
+    carryGhosts: document.querySelectorAll('.lib-carry').length
+  })`);
+  assert(dropped.screen === 'wiring',
+    `Dragging a library row off the canvas screen did not route to the freeform surface: ${JSON.stringify(dropped)}`);
+  assert(dropped.landed === 1,
+    `Press-drag-release from the library did not land ${box.ref} at the release point — the board's exact gesture: ${JSON.stringify(dropped)} (expected ${JSON.stringify(expected)})`);
+  assert(dropped.carryGhosts === 0, `The carry ghost outlived the drop: ${JSON.stringify(dropped)}`);
+
+  /* Navigating must not leave the affordance describing the previous screen:
+     go('wiring') then back used to leave every row still carrying
+     draggable="true", so cd5e162's scoping survived exactly one tab change. */
+  await navigate('canvas,dark');
+  await evaluate("go('wiring')");
+  await evaluate("go('canvas')");
+  const afterNav = await evaluate(`(() => {
+    const usable = [...document.querySelectorAll('#libGroups .lib-row[data-res]')];
+    return { screen: document.querySelector('#stage').dataset.screen, usable: usable.length,
+      draggableCount: usable.filter((r) => r.getAttribute('draggable') === 'true').length };
+  })()`);
+  assert(afterNav.usable > 0 && afterNav.draggableCount === 0,
+    `Library rows kept the wiring screen's draggable="true" after navigating back to canvas: ${JSON.stringify(afterNav)}`);
 
   /* Activating a row here must not merely *narrate* a refusal. announce()
      writes to #liveRegion, which is .visually-hidden — so a sighted mouse
@@ -820,7 +889,7 @@ try {
   assert(runtimeErrors.length === 0, `Standalone emitted runtime exceptions: ${JSON.stringify(runtimeErrors)}`);
   assert(requests.every((url) => url.startsWith('file:') || url.startsWith('data:')), `Standalone attempted a network request: ${JSON.stringify(requests)}`);
 
-  console.log('TNG-119 + TNG-121 + TNG-122 + TNG-124 + TNG-125 + TNG-127 verification passed: causal graph, editable pipeline, freeform placement + typed wiring (pointer, keyboard, narrow tap), resting grab affordance scoped to the Freeform wiring screen (elsewhere the row stays a button and routes to wiring + arms placement, by click at desktop width and by Enter), drag-not-selection invariant (proxy — see verify-webkit.swift for the WebKit proof), armed-source row + cancel with focus return, capability library states, planned-vs-observed separation, interaction, overflow bounds, themes, narrow relationship flow, reduced motion, replay, retry retention, and offline loading');
+  console.log('TNG-119 + TNG-121 + TNG-122 + TNG-124 + TNG-125 + TNG-127 verification passed: causal graph, editable pipeline, freeform placement + typed wiring (pointer, keyboard, narrow tap), press-drag-release from the library placing the dragged row at the release point on the default canvas screen (pointer carry; the affordance re-renders with the screen and HTML5 draggable stays scoped to where drop is wired), resting grab affordance, routing by click and by Enter, drag-not-selection invariant (proxy — see verify-webkit.swift for the WebKit proof), armed-source row + cancel with focus return, capability library states, planned-vs-observed separation, interaction, overflow bounds, themes, narrow relationship flow, reduced motion, replay, retry retention, and offline loading');
 } finally {
   if (socket) socket.close();
   await new Promise((resolveExit) => {
