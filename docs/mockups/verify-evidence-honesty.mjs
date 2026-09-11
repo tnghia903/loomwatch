@@ -5,14 +5,32 @@
 //
 // Asserts the CONTRACTS, not the current state: exits non-zero while the gaps
 // recorded in docs/mockups/TNG90_IMPLEMENTATION_CONFORMANCE.md §7 are open, zero
-// once they are closed, and 2 if a selector drifted — so a lost anchor can never
-// read as a failure it did not observe.
+// once they are closed, and 2 if the gate cannot answer at all — a drifted selector
+// or an absent `ui/` input — so neither can ever read as a failure it did not observe.
 //
 //   node docs/mockups/verify-evidence-honesty.mjs
 
 import { readFileSync } from 'node:fs'
 
-const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
+// This gate measures the *implementation*, so its inputs live in `ui/` and are outside the
+// `docs/` tree a Gate B pin extracts. Run against an extracted pin it cannot answer, and it
+// says so (exit 2) rather than raising — an unreadable stack trace in a reviewer's terminal
+// is indistinguishable from a real conformance failure.
+const read = (path) => {
+  try {
+    return readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err
+    console.error(`CANNOT RUN — the shipped input is missing:
+    ${path}
+    (production source, NOT part of a pinned \`docs/\` artifact)
+
+This gate measures the shipped implementation against the approved design, so it needs
+the \`ui/\` tree and only answers from a full repo checkout. It is not a statement about
+the pinned artifact, and this is not a conformance failure.`)
+    process.exit(2)
+  }
+}
 
 const PANEL = 'ui/src/components/run/ProvenancePanel.tsx'
 // TNG-173: the level lookup and the §5.2 coverage sentence moved out of the panel into a

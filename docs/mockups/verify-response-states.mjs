@@ -7,8 +7,8 @@
 //
 // Asserts the CONTRACTS, not the current state: exits non-zero while the gaps
 // recorded in docs/mockups/TNG90_IMPLEMENTATION_CONFORMANCE.md §8 are open, zero
-// once they are closed, and 2 if a selector drifted — so a lost anchor can never
-// read as a failure it did not observe.
+// once they are closed, and 2 if the gate cannot answer at all — a drifted selector
+// or an absent `ui/` input — so neither can ever read as a failure it did not observe.
 //
 //   node docs/mockups/verify-response-states.mjs
 //
@@ -20,7 +20,25 @@ import { readFileSync } from 'node:fs'
 const ROOT = process.env.LOOMWATCH_ROOT
   ? new URL(`file://${process.env.LOOMWATCH_ROOT.replace(/\/?$/, '/')}`)
   : new URL('../../', import.meta.url)
-const read = (path) => readFileSync(new URL(path, ROOT), 'utf8')
+// This gate measures the *implementation*, so its inputs live in `ui/` and are outside the
+// `docs/` tree a Gate B pin extracts. Run against an extracted pin it cannot answer, and it
+// says so (exit 2) rather than raising — an unreadable stack trace in a reviewer's terminal
+// is indistinguishable from a real conformance failure.
+const read = (path) => {
+  try {
+    return readFileSync(new URL(path, ROOT), 'utf8')
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err
+    console.error(`CANNOT RUN — the shipped input is missing:
+    ${path}
+    (production source, NOT part of a pinned \`docs/\` artifact)
+
+This gate measures the shipped implementation against the approved design, so it needs
+the \`ui/\` tree and only answers from a full repo checkout. It is not a statement about
+the pinned artifact, and this is not a conformance failure.`)
+    process.exit(2)
+  }
+}
 
 const WORKSPACE = 'ui/src/components/Workspace.tsx'
 const NODES = 'ui/src/components/run/StoryNodes.tsx'
@@ -117,9 +135,18 @@ check(
 // D5: the `[ Reuse ]` affordance §3.4 names. The prompt text does survive on the Prompt node
 // (§12.2 `Original kept`), so this is a missing route, not lost data — but the node the
 // operator is looking at when a run fails offers them nothing to do.
+// A comment is not an affordance, and neither is a destructured identifier. This check was
+// `/Reuse/i.test(outputCard)` — a bare word over the raw region — and it could not fail:
+// delete the whole `[ Reuse ]` button and it still matched `reusePrompt` from
+// `useCanvasActions()` on line 87 and the prose comment directly above this one. Proven by
+// removing the element and watching D5 report PASS on an affordance the operator no longer
+// has. So: strip comments, then require the element itself, carrying the visible label.
+const outputCardCode = outputCard.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+const reuseButton = (outputCardCode.match(/<button\b[\s\S]*?<\/button>/g) ?? [])
+  .find((element) => /\[\s*Reuse\s*\]/.test(element))
 check(
   'D5', '§3.4 failed offers [ Reuse ]', `${NODES} OutputNodeCard`,
-  /Reuse/i.test(outputCard),
+  Boolean(reuseButton),
   'no Reuse action exists anywhere in ui/src; the failed response node is a dead end',
 )
 

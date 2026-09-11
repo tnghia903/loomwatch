@@ -9,7 +9,8 @@
 //
 // Asserts the CONTRACTS, not the current state: this exits non-zero while the gaps
 // recorded in docs/mockups/TNG90_IMPLEMENTATION_CONFORMANCE.md §9 are open, and exits
-// zero once they are closed.
+// zero once they are closed. Exit 2 means the gate could not answer at all — an absent
+// `ui/` input — so it can never read as a failure it did not observe.
 //
 //   node docs/mockups/verify-narrow-conformance.mjs
 //
@@ -21,7 +22,25 @@
 
 import { readFileSync } from 'node:fs'
 
-const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
+// This gate measures the *implementation*, so its inputs live in `ui/` and are outside the
+// `docs/` tree a Gate B pin extracts. Run against an extracted pin it cannot answer, and it
+// says so (exit 2) rather than raising — an unreadable stack trace in a reviewer's terminal
+// is indistinguishable from a real conformance failure.
+const read = (path) => {
+  try {
+    return readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err
+    console.error(`CANNOT RUN — the shipped input is missing:
+    ${path}
+    (production source, NOT part of a pinned \`docs/\` artifact)
+
+This gate measures the shipped implementation against the approved design, so it needs
+the \`ui/\` tree and only answers from a full repo checkout. It is not a statement about
+the pinned artifact, and this is not a conformance failure.`)
+    process.exit(2)
+  }
+}
 
 const WORKSPACE = 'ui/src/components/Workspace.tsx'
 const COLUMN = 'ui/src/components/run/RunColumn.tsx'

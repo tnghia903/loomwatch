@@ -534,6 +534,18 @@ Verification: `node docs/mockups/verify-response-states.mjs` exits `0` — `6/6`
 suite is green (145 tests, including the new `projectRun` §4 classification cases and an
 `OutputNodeCard` D4/D5 regression test), `tsc -b && vite build` and `oxlint` clean.
 
+**D5 was a false pass until 2026-09-11, and the `6/6` above rests on the corrected
+version.** The check was `/Reuse/i.test(outputCard)` — a bare, case-insensitive word over
+the whole anchored region. Deleting the entire `[ Reuse ]` button still left it matching
+two things that are not affordances: the destructured `reusePrompt` from
+`useCanvasActions()` (`StoryNodes.tsx:87`) and the probe's own explanatory comment four
+lines above the check. Demonstrated by removing the element and watching D5 report `PASS`
+on a control the operator no longer had. It now strips comments from the region and
+requires a `<button>` element carrying the visible `[ Reuse ]` label; the same deletion
+now yields `FAIL D5 … 5/6, exit 1`, and the intact tree still reads `6/6`. The contract
+was genuinely met the whole time — what was broken was the instrument, which is worse,
+because it was the evidence cited for closing §8.
+
 ### 8.2 Deliberately not counted as defects
 
 - **`partial` still consults `crash?.message`.** The archived crash event's payload
@@ -749,8 +761,14 @@ git show HEAD:docs/mockups/prototype-standalone.html | shasum -a 256
 # and the standalone is a build product — it must rebuild to the same bytes
 node docs/mockups/build-standalone.mjs && shasum -a 256 docs/mockups/prototype-standalone.html
 
+# §6–§9 are IMPLEMENTATION gates: like the token gate above, they read `ui/` and are not
+# part of the docs/ tree a Gate B pin extracts. Run them from a full checkout. Against an
+# extracted pin each now exits 2 naming the absent input, rather than raising ENOENT — a
+# traceback on a card asking for approval is indistinguishable from a finding against the
+# artifact, and all four used to produce one. Exit 2 = cannot answer; it is never a verdict.
+
 # §6 — accessibility contracts. Exits 1 while any of A1–A5 is open, 0 when all are closed,
-# and 2 if a selector has drifted (so a lost anchor can never read as a real failure).
+# and 2 if the gate cannot answer (a drifted selector, or an absent ui/ input).
 node docs/mockups/verify-a11y-conformance.mjs
 
 # §7 — evidence-quality contracts. Same exit convention, B1–B5.
