@@ -15,11 +15,16 @@ import { readFileSync } from 'node:fs'
 const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
 
 const PANEL = 'ui/src/components/run/ProvenancePanel.tsx'
+// TNG-173: the level lookup and the §5.2 coverage sentence moved out of the panel into a
+// module the narrow RunColumn shares, so the two surfaces cannot state different coverage
+// for the same run. B3's subject moved with it.
+const COVERAGE = 'ui/src/components/run/coverage.ts'
 const NODES = 'ui/src/components/run/StoryNodes.tsx'
 const COLUMN = 'ui/src/components/run/RunColumn.tsx'
 const EVENTS = 'ui/src/lib/watch/events.ts'
 
 const panel = read(PANEL)
+const coverageModule = read(COVERAGE)
 const nodes = read(NODES)
 const column = read(COLUMN)
 const events = read(EVENTS)
@@ -84,12 +89,16 @@ check(
 // unprojectable events, and the §10 projection_limit override), and the panel reads the
 // published level instead of inventing one from a count. Neither half alone would keep
 // the header honest.
-const coverageFor = anchor('coverageFor', panel.match(/function coverageFor\([\s\S]*?\n\}/))
+const coverageFor = anchor('coverageFor', coverageModule.match(/function coverageFor\([\s\S]*?\n\}/))
 const coverageBuild = anchor('projection coverage block', events.match(/coverage: \{[\s\S]*?\n {4}\},/))
+// Both surfaces must go through it. A second reader that derived its own level would put the
+// overclaim back, just on a screen size nobody audits.
+const panelReadsLevel = /coverageSummary\(|coverageFor\(/.test(panel)
+const columnReadsLevel = /coverageSummary\(|coverageFor\(/.test(column)
 check(
-  'B3', '§5.2 the level is carried by the projection, and partial is reachable', `${EVENTS} coverage block + ${PANEL} coverageFor`,
-  /'partial'/.test(coverageBuild) && /\.level/.test(coverageFor) && !/> ?0/.test(coverageFor),
-  "the projection must publish a per-category level with a reachable 'partial', and the panel must read it — coverageFor inventing a level from a count is the overclaim §5.2 forbids",
+  'B3', '§5.2 the level is carried by the projection, and partial is reachable', `${EVENTS} coverage block + ${COVERAGE} coverageFor`,
+  /'partial'/.test(coverageBuild) && /\.level/.test(coverageFor) && !/> ?0/.test(coverageFor) && panelReadsLevel && columnReadsLevel,
+  "the projection must publish a per-category level with a reachable 'partial', and every surface that states coverage must read it — a level invented from a count is the overclaim §5.2 forbids",
 )
 
 // CONTRACT §12, agents row: complete "when every spawned agent has identity and terminal

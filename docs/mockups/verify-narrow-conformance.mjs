@@ -89,9 +89,13 @@ anchor('ProvenancePanel coverage header', panel.match(/Complete capture|Partial 
 //        → viewport-docked composer
 // "Selected evidence" is met — RunColumn renders the activity entities and ActivityPanel is
 // the overlay sheet. The three stages before it have no counterpart in the column at all.
-const columnHasCoverage = /coverage|Complete capture|Partial capture|CoverageGlyph/i.test(column)
-const columnHasFilters = /filter/i.test(column)
-const columnHasSummaries = /summar|ProvenancePanel|zone-head/i.test(column)
+const columnHasCoverage = /coverageSummary\(|Complete capture|Partial capture|CoverageGlyph/.test(column)
+// `filter` as a bare word matched `classes.filter(Boolean)` — a false pass, and the mirror of
+// the stuck-at-fail this file is careful to avoid: it would have scored the filters stage as
+// present against a column that had never had one. The contract is a filter *control* — a
+// toggle the operator can press whose state the column reads back.
+const columnHasFilters = /aria-pressed=/.test(column) && /filter-chip|Filter the evidence|run-prov-filters/i.test(column)
+const columnHasSummaries = /CATEGORIES\.map|summar|ProvenancePanel|zone-head/i.test(column)
 check(
   'N1', '§11.6 narrow source order', `${COLUMN} run-column`,
   columnHasCoverage && columnHasFilters && columnHasSummaries,
@@ -104,7 +108,10 @@ check(
 // the ReactFlow canvas the narrow branch replaces. So below 768 px the panel, its six
 // grouped summaries (§4.1) and its filters (§4.4) cannot be reached by pointer, by the
 // command palette, or by a shortcut.
-const columnOpensProvenance = /toggleProvenance/.test(column)
+// Bound to a control, not merely named. A bare `toggleProvenance` identifier passes for a
+// column that destructures it from context and wires it to nothing — which is a column below
+// 768 px with no route into provenance, the exact state this contract exists to reject.
+const columnOpensProvenance = /on(?:Click|KeyDown|KeyUp|Press|Select)\w*=\{[\s\S]{0,60}?toggleProvenance/.test(column)
 const paletteOpensProvenance = /provenance/i.test(actionsBlock)
 check(
   'N2', '§11.6 failure 22 — provenance/filtering survive', `${COLUMN} · ${WORKSPACE} actions · ${PANEL}`,
@@ -180,8 +187,14 @@ check(
 // rendering of the §5 honesty layer (the coverage header, the per-category level) lives in
 // ProvenancePanel — which N2 shows cannot be opened at this width. So below 768 px the
 // honesty layer has no visible expression at all, on the card or anywhere else.
-const cardFace = anchor('RunColumn evidence card face', column.match(/<span className="ae-sub t-meta">[\s\S]*?<\/span>/))
-const captureOnFace = /\.capture/.test(cardFace) || /className="ae-cap/.test(column)
+//
+// Spelling-independent: take the whole evidence card, strip the accessible name — the one
+// place `capture` was already reaching — and ask whether anything is left. An earlier draft
+// matched a literal `className="ae-cap`, which would have failed a correct fix that composed
+// the class or named the element anything else.
+const cardBlock = anchor('RunColumn evidence card', column.match(/<button key=\{item\.id\}[\s\S]*?<\/button>/))
+const cardFace = cardBlock.replace(/aria-label=\{`[^`]*`\}/g, '')
+const captureOnFace = /capture/i.test(cardFace)
 const captureInActivitySheet = /capture/i.test(activity)
 check(
   'N4', '§11.6 cards state capture quality', `${COLUMN} ae-sub · ${ACTIVITY}`,

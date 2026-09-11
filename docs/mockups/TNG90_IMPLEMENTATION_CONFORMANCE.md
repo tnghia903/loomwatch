@@ -14,12 +14,13 @@
   the hour (TNG-158), B3/B4/B5 since (TNG-162), and the entity-level `capture` seam (B1) —
   the one defect that had outlived all three children — closed by TNG-170 (§7.4). **Not
   conformant on the response layer** (§8) — six §3.3–3.4 contracts were unmet, all six
-  closed by TNG-166. **Not conformant on the narrow layer** (§9) — four §11.6 contracts are
-  unmet below 768 px, and all four are open.
-- **§9 is the layer still open.** `verify-narrow-conformance.mjs` exits `1`; the other three
-  probes exit `0`. The four §9 contracts are owned by **TNG-173** (§9.3). None of them
-  blocks Gate B, which governs the design (§5), not this implementation — but they are
-  disclosed on the card rather than hidden behind a green summary.
+  closed by TNG-166. **Not conformant on the narrow layer** (§9) — four §11.6 contracts were
+  unmet below 768 px, all four closed by TNG-173.
+- **No layer is open.** All four probes exit `0`. §9's contracts were the last, owned by
+  **TNG-173** (§9.4) and closed 2026-09-11; N3 additionally carries a rendered measurement in
+  WebKit at 375 px (§9.2), which is the confirmation its declared-height probe cannot give.
+  None of them ever blocked Gate B, which governs the design (§5), not this implementation —
+  but they were disclosed on the card rather than hidden behind a green summary.
 - **Four sections are historical.** §6, §7, §8 and §9 record contracts and reasoning, and
   their verdicts are the state at the moment of observation. The probes are the only current
   answer — run them; do not read a count off this page.
@@ -544,88 +545,133 @@ suite is green (145 tests, including the new `projectRun` §4 classification cas
   kept." reflects the operator's own action back at them; it is not a daemon error being
   paraphrased.
 
-## 9. Narrow and responsive behaviour — FAIL, four contracts unmet below 768 px
+## 9. Narrow and responsive behaviour — PASS, all four contracts closed (TNG-173)
 
-§11.6 is the last TNG-89A acceptance clause never checked against an implementation.
+§11.6 was the last TNG-89A acceptance clause never checked against an implementation.
 AC #3 asks for *"light and black+gold dark themes, reduced motion, keyboard path, and
 responsive behavior."* Themes are §1, reduced motion is §3, the keyboard path is §6.
-Below 768 px is this section — and nothing had ever looked at it.
+Below 768 px is this section — and nothing had ever looked at it. It read `0/4` when first
+audited; **TNG-173 closed all four**, and the gate now reads `4/4`.
 
 `node docs/mockups/verify-narrow-conformance.mjs` reads production source and stylesheets
 under the same discipline as §§6–8: every rule anchored to a line a reviewer can open,
 `exit 2` if a selector drifts so a lost anchor can never read as a real failure.
 
-### 9.1 The four contracts
+### 9.1 The four contracts, and what closed each
 
-- **N1 — the narrow column is missing three of its five stages.** §11.6 fixes the source
+- **N1 — the narrow column was missing three of its five stages.** §11.6 fixes the source
   order: *"… Output / response → coverage → filters → summaries → selected evidence →
-  viewport-docked composer."* `RunColumn.tsx` renders the last of those and none of the
-  first three — zero occurrences of coverage, filters or summaries in the file. Selected
-  evidence is met (the column renders the activity entities, and `ActivityPanel` is the
-  overlay sheet §11.6 asks for). The three provenance stages before it have no counterpart
-  in the column at all.
-- **N2 — below 768 px the provenance panel cannot be opened. Failure 22.** `ProvenancePanel`
-  renders only while `provenanceOpen` (`Workspace.tsx:821`), and the one control that sets
-  it true is the Response node's toggle (`StoryNodes.tsx:87-88`) — which lives inside the
-  ReactFlow canvas that the narrow branch *replaces*. `toggleProvenance` appears nowhere in
-  `RunColumn.tsx`, and the command palette's action list carries no provenance entry. So
-  §4.1's six grouped summaries and §4.4's filters are unreachable at this width by pointer,
-  by palette, and by shortcut. Failure 22 names this outcome in as many words: *"Narrow mode
-  loses response/provenance selection, filtering… Fail."*
-- **N3 — the core actions are 28 and 32 px, not 44. Failure 21.** The core actions here are
-  the composer's Run / Save & run / Stop / Retry / New run (`.btn`, declared `height: 28px`),
-  the run-history opener and the theme toggle (`.iconbtn`, `32px`), and the mode chip
-  (`min-height: 32px`, pinned inside the narrow block itself). None of the three
-  `@media (max-width: 767px)` blocks lifts any of them. §11.6: *"The composition keeps
-  authored text sizes and 44 px targets."* These are **declared** values, not rendered
-  measurements — a declared 28 px cannot render as 44, so the failure is real without a
-  layout pass, while a rendered check would be the stronger confirmation of a fix.
-- **N4 — capture quality is spoken but never shown.** §11.6 concedes the edge geometry and
+  viewport-docked composer."* `RunColumn.tsx` rendered the last of those and none of the
+  first three. **Closed:** a `.run-prov` section now follows the response in exactly that
+  order — the §5.2 coverage sentence, the §4.4 filters, then §4.1's six fixed-order
+  summaries. The overlay `ProvenancePanel` stays the one detail surface (§4.4: *"one detail
+  surface in the product, not two"*), so the column states, filters and routes but never
+  re-lists entities.
+- **N2 — below 768 px the provenance panel could not be opened. Failure 22.**
+  `ProvenancePanel` renders only while `provenanceOpen`, and its one writer was the Response
+  node's toggle — inside the ReactFlow canvas that the narrow branch *replaces*. So §4.1's
+  summaries and §4.4's filters were unreachable by pointer, by palette, and by shortcut.
+  **Closed:** each of the six summaries opens the panel, and so does an explicit
+  `[ Open full provenance ]`. Filtering no longer depends on the panel at all — it is in the
+  column, as view state (§6.7), and it governs the evidence the run shows.
+- **N3 — the core actions were 28 and 32 px, not 44. Failure 21.** The composer's Run /
+  Save & run / Stop / Retry / New run (`.btn`, `height: 28px`), the run-history opener and
+  theme toggle (`.iconbtn`, `32px`), and the mode chip (`min-height: 32px`, pinned inside a
+  narrow block). None of the three `@media (max-width: 767px)` blocks lifted any of them.
+  **Closed:** the narrow blocks lift `.btn`, `.iconbtn` and `.mode-chip` together, rather
+  than by an ever-growing list of exceptions. `.pop-inline .btn` is restated because its
+  24 px rule outranks `.btn` on **specificity**, not on source order — which is the one thing
+  the declared-height probe cannot see, and the reason this contract also has a rendered
+  confirmation (§9.2).
+- **N4 — capture quality was spoken but never shown.** §11.6 concedes the edge geometry and
   the library at this width, but not what they carried: *"cards continue to state owner,
-  event order/time, status, capture quality, and relationship."* Owner, order/time, status
-  and relationship are all on the face of the narrow card. Capture quality is not —
-  `item.capture` reaches the accessible name only, and `ActivityPanel.tsx` (the overlay
-  inspector, the other place §11.6 would accept it) contains the word zero times. Every
-  *visible* rendering of the §5 honesty layer lives in `ProvenancePanel`, which N2 shows
-  cannot be opened here. Below 768 px the honesty layer has no visible expression anywhere.
+  event order/time, status, capture quality, and relationship."* The first four were on the
+  card face; `item.capture` reached the accessible name only, and every *visible* rendering
+  of the §5 honesty layer lived in `ProvenancePanel`, which N2 showed could not be opened.
+  **Closed:** the card face carries the capture word (§5.1's *"the word is never omitted to
+  save space"*), and the run's coverage sentence is now stated in the column itself.
 
-**Confirmed in both directions.** The gate reads `0/4` against the tree and `4/4` against a
-scratch mirror of the same six files with the minimal shape of each fix applied, so none of
-the four is stuck-at-fail. That exercise earned its keep: N3's first draft took the
-*smallest* height any narrow rule declared for a selector, and `.mode-chip` is already pinned
-to `32px` inside a narrow block — so it would have kept reporting `32px` against a stylesheet
-someone had correctly fixed, telling an implementer their real fix had not worked. It now
-reads the last declaration in cascade order (`app.css` then `runtime.css`, which is
-`index.css`'s import order), and names specificity as the thing it still cannot see.
+**One honesty statement, not two.** The §5.2 sentence, the six categories and their empty
+reasons moved to `ui/src/components/run/coverage.ts`, shared by the panel and the column.
+Two independently built sentences could disagree, and a column reading "Complete capture"
+over a panel that names gaps is the one failure §5 exists to prevent.
 
-### 9.2 Deliberately not counted as defects
+**A filtered view must never be able to look like a capture gap.** The summaries report the
+projector's counts and levels whatever the filters are set to, and a filter that empties the
+list says so — *"No evidence matches these filters. 2 entities were captured for this run."*
+with its own way back. An emptied list that read as an empty run would be exactly the §5.1
+confusion the honesty layer exists to prevent.
+
+### 9.2 Confirmed in both directions, and then rendered
+
+The gate read `0/4` against the tree and `4/4` against a scratch mirror of the same six files
+with the minimal shape of each fix applied. Re-run after the fix, each contract was reverted
+in that mirror one at a time and **each failed**, so none of the four is stuck-at-pass.
+
+That exercise earned its keep twice, and both were false passes this file would otherwise
+have shipped:
+
+- **N2 matched a bare `toggleProvenance` identifier.** With the entire provenance section
+  deleted, N2 still passed — the destructure at the top of the component was enough. It now
+  requires the callback to be *bound to a control*, which is what "a reachable control opens
+  the panel" actually means.
+- **N1's filters leg matched `classes.filter(Boolean)`.** A bare `/filter/i` scored the
+  filters stage as present against a column that had never had one. It now requires a filter
+  control — a toggle the operator can press whose state the column reads back.
+
+N3 additionally has the rendered confirmation its own header asked for. The declared-height
+probe cannot see specificity; `docs/mockups/webkit-probe-narrow-targets.js` measures
+`getBoundingClientRect().height` in WebKit against the **built** CSS bundle at 375 px:
+
+```
+iframe viewport = 375px · narrow rules apply: true
+PASS  composer Run (.btn.btn-primary) rendered 44.0px      PASS  theme toggle (.iconbtn) rendered 44.0px
+PASS  composer Stop (.btn) rendered 44.0px                 PASS  Open full provenance (.btn) rendered 44.0px
+PASS  run history (.iconbtn) rendered 44.0px               PASS  popover Retry (.pop-inline .btn) rendered 44.0px
+PASS  mode chip (.mode-chip) rendered 44.0px               PASS  filter chip (.filter-chip) rendered 44.0px
+PASS  summary row (.prov-sum) rendered 44.0px
+```
+
+Against the same bundle with the four narrow rules reverted, those rows read 28 / 32 / 24 /
+42 px — the probe can produce its own failure, which is the only thing that makes it evidence.
+Two constraints shaped it and both are load-bearing: `verify-webkit.swift`'s window is
+1600 px, so the measurement happens inside a 375 px iframe; and a `file://` iframe is
+cross-origin in WebKit, so the fixture is written into `about:blank` to stay same-origin.
+
+`ui/src/components/run/RunColumn.test.tsx` covers what neither probe can see, since both are
+static: the coverage sentence built through the real `projectRun`, §11.6's source order, the
+provenance route firing, the capture word on the card face, the filter narrowing the evidence
+while the summaries hold the projector's counts, and the emptied-by-filter message.
+
+### 9.3 Deliberately not counted as defects
 
 - **No whole-stage scaling.** Failure 21's first clause is met: the narrow branch swaps the
   coordinate canvas for a source-ordered scrolling `.run-column`, rather than shrinking the
   1600 × 1000 stage with a transform. This is the part §11.6 cared most about and it is
   right.
-- **Theme switching is not hidden.** Failure 21's last clause is met — the theme toggle is
-  present and reachable at this width. It is merely undersized, which is counted once under
-  N3 rather than twice.
+- **Theme switching was never hidden.** Failure 21's last clause was always met — the theme
+  toggle is present and reachable at this width. It was merely undersized, counted once
+  under N3 rather than twice.
 - **The composer is not clipped.** It reflows (`flex-wrap`, the input taking its own row)
   and stays viewport-docked; only `.comp-note`, a hint line and not an action, is hidden.
 - **Failures 19 and 20 are §6's**, not this section's, and TNG-158 closed them.
 
-### 9.3 Owner — TNG-173, and why it is one issue and not four
+### 9.4 Owner — TNG-173, and why it was one issue and not four
 
-All four contracts are owned by **TNG-173** (Web UI Engineer), filed as a child of TNG-90 so
-that closing the parent cannot quietly orphan them, and explicitly *not* blocking it.
+All four contracts were owned by **TNG-173**, filed as a child of TNG-90 so that closing the
+parent could not quietly orphan them, and explicitly *not* blocking it. Closed 2026-09-11.
 
-N1, N2 and N4 are one defect seen from three sides: the provenance layer has no narrow
-route. Give the column a way to open the panel and N2 closes; the stages N1 wants and the
-capture quality N4 wants are then reachable, though each still needs its own placement
-decision. N3 is independent — a stylesheet gap that touches none of the others. They are
-filed together because splitting them would hand three agents the same first edit.
+N1, N2 and N4 were one defect seen from three sides: the provenance layer had no narrow
+route. Giving the column a way in closed N2; the stages N1 wanted and the capture quality N4
+wanted then became placeable, each still needing its own placement decision. N3 was
+independent — a stylesheet gap touching none of the others. They were filed together because
+splitting them would have handed three agents the same first edit, and that held: one section
+and one narrow CSS block closed three of the four.
 
-Scope: **implementation only.** These are production-UI defects, and TNG-90 is design and
-prototype work — the fix is not mine to write. The prototype itself is not implicated:
-§11.6 was authored from it, and `#compose`/`#running`/`#answered`/`#trace`/`#unanswered`
-are not what fails here.
+Scope: **implementation only**, as filed. The prototype is not implicated and was not
+touched — §11.6 was authored from it, and `#compose`/`#running`/`#answered`/`#trace`/
+`#unanswered` were never what failed here. TNG-90's Gate B governs the design, not this
+implementation, and was never blocked by this section.
 
 ## How to reproduce
 
@@ -662,8 +708,21 @@ node docs/mockups/verify-evidence-honesty.mjs
 node docs/mockups/verify-response-states.mjs
 
 # §9 — narrow/responsive contracts below 768 px. Same exit convention, N1–N4.
-# This one currently exits 1: all four are open. See §9.3 for the owning issue.
+# Exits 0 (4/4) since TNG-173. See §9.4 for the owning issue.
 node docs/mockups/verify-narrow-conformance.mjs
+
+# §9.2 — N3's rendered confirmation, the one the declared-height probe cannot give.
+# Measures the BUILT bundle in WebKit at 375 px, so a 44 px rule that loses the
+# cascade to a more specific one is caught even while N3 passes.
+(cd ui && npm run build)
+node docs/mockups/build-narrow-fixture.mjs
+swiftc -O docs/mockups/verify-webkit.swift -o /tmp/verify-webkit
+/tmp/verify-webkit /tmp/loomwatch-narrow/host.html \
+  --eval-async docs/mockups/webkit-probe-narrow-targets.js
+
+# §9 behaviour — what both probes are static for: the route firing, the filter
+# narrowing evidence while the summaries hold the projector's counts.
+(cd ui && npx vitest run src/components/run/RunColumn.test.tsx)
 
 # §7.1 — the three channels §5.1 requires, counted in production
 grep -c 'cap-' ui/src/styles/*.css          # 0 0 0 — no border treatment ships (TNG-89F's)
