@@ -7,10 +7,17 @@
   (`docs/mockups/tokens.css`)
 - **Subject:** the prompt-to-output workspace described by
   `docs/decisions/0009-prompt-to-output-workspace-shipped.md` (uncommitted working tree)
-- **Verdict:** **conformant** on the design-system layer. One documentation gap (§4 below).
+- **Verdict:** **conformant** on the design-system layer (§§1–3), with one documentation gap
+  in the vocabulary (§4). **Not conformant on the accessibility layer** — five §6 contracts
+  are unmet on surfaces that ship today (§6).
 
 This checks the implementation's *claims* against the approved design. It does not review
 code quality, and it does not touch the Gate B artifact — see §5.
+
+**Revision history.** §§1–5 were written 2026-09-11 and published at commit `818dbef`; §6 was
+added the same day, after the token pass, when the interaction layer — a TNG-89A acceptance
+criterion that had never been checked against an implementation — was audited. §6 reads only
+production source and adds no bytes to the pinned prototype; §5 still holds.
 
 ## 1. Design tokens — PASS, zero drift
 
@@ -121,6 +128,77 @@ same path at `83b4a49`. The gap in §4 is between the spec and an implementation
 does not cover; amending §4.2 now would invalidate a pinned artifact to fix a documentation
 gap, which is the wrong trade while the card is pending.
 
+## 6. Accessibility — FAIL, five contracts unmet on surfaces that ship today
+
+§§1–4 checked the design-*system* layer. This section checks the interaction layer:
+`docs/TNG89_INTERACTION.md` §6 (focus order, live regions, accessible names), which
+TNG-89A lists as an acceptance criterion and which had never been checked against an
+implementation. Every rule is asserted by `docs/mockups/verify-a11y-conformance.mjs`,
+which exits non-zero while these are open and zero once they are closed.
+
+| ID | Spec | Surface | Result |
+|---|---|---|---|
+| A1 | §6.4 entity name | `ProvenancePanel` entity row | **FAIL** |
+| A2 | §6.4 summary chip name | `ProvenancePanel` zone-head | **FAIL** |
+| A3 | §6.1 summaries in tab order | `ProvenancePanel` zone-head | **FAIL** |
+| A4 | §6.3 preflight is assertive | `Workspace.politeAnnouncement` | **FAIL** |
+| A5 | §6.3 no message is dropped | `Workspace.politeAnnouncement` | **FAIL** |
+
+### 6.1 Accessible names (A1, A2)
+
+§6.4 fixes an entity's name as `"<kind>: <name>, <capture word>"`. The panel's entity
+rows (`ProvenancePanel.tsx:78`) carry no `aria-label`, so the name is computed from child
+text — and the one child that could carry kind or status is a `StatusGlyph`, which is
+`aria-hidden` (`glyphs.tsx:86`). A screen reader hears `"Fetch page #04 · 12.3s"`: no
+kind, no capture word. The two channels §5.1 requires the word for — telling `recorded`
+from `derived` from `redacted` from `unavailable` — are both unavailable non-visually,
+which is the exact failure §5.1 exists to prevent.
+
+The canvas `EvidenceNodeCard` does better (`StoryNodes.tsx:56`) and names kind, owner and
+status. It still omits the capture word, but it is not the regression the panel is: the
+panel ships the same entities with strictly less information.
+
+A2 is minor and recorded for completeness — the summary announces `"tools 4 complete"`,
+dropping the contract's `entities` noun, so the count is spoken with no unit.
+
+### 6.2 Tab order (A3)
+
+§6.1 position 4 puts *"the six summaries in fixed order"* in the tab sequence. They are
+rendered as plain `<div class="zone-head">` (`ProvenancePanel.tsx:65`) and cannot take
+focus, so those six positions do not exist. The entity rows beneath them *are* buttons, so
+keyboard users reach the leaves without ever reaching the grouping that explains them.
+
+### 6.3 Live regions (A4, A5)
+
+Two distinct defects, both in `Workspace.tsx:616-625`.
+
+**A4 — wrong channel.** §6.3 lists preflight blockers as **assertive**. The blocker
+(`documentChipState === 'invalid'`, the "N things to fix before this team can run" state
+built at `Workspace.tsx:489`) is published only on the polite region at line 622.
+
+**A5 — the queue drops messages.** `politeAnnouncement` is a list of candidate messages
+resolved with `.find(Boolean)`, so **at most one is ever announced**, and the rest are
+discarded rather than queued. `statusAnnouncement` sits second in that list and holds
+agent task-state churn for 3 s at a time (`Workspace.tsx:474-475`). During a live run it
+is therefore almost always truthy, and it silently preempts everything below it: save
+state, the validation blocker, disk notices and start errors. The four things an operator
+most needs to hear are the four the implementation is most likely to swallow.
+
+`startError` survives only because it has a second, independent `role="alert"` bar
+(`Workspace.tsx:723`). Nothing else below `statusAnnouncement` has that backstop.
+
+### 6.4 Deliberately not counted as defects
+
+- **§6.2's synchronized `role="tree"` outline is absent** (no `role="tree"`, no `⌘⌥O`, no
+  ⌘K route). §6.2 attributes it to `TNG-89F`, which is open and `blocked`. Out of scope
+  for the shipped workspace, not a regression against it.
+- **§4.1's one-hop canvas expansion** is likewise `TNG-89F`'s. What ships is a flat panel
+  listing every entity per category at once. Correct as an interim surface; A1–A3 are
+  scored against that panel as it actually ships, not against the canvas it will become.
+- **Response name wording.** §6.4 specifies `"Response from <agent>, <run state>"`;
+  shipped is `"Output response from <agent>, <phase>"` (`StoryNodes.tsx:82`). Both facts
+  the contract requires are present. Wording variance, not a defect.
+
 ## How to reproduce
 
 ```sh
@@ -140,4 +218,8 @@ sed -n '9,16p' ui/src/components/run/ProvenancePanel.tsx
 # §5 — artifact still matches the pinned commit
 shasum -a 256 docs/mockups/prototype-standalone.html
 git show 83b4a49:docs/mockups/prototype-standalone.html | shasum -a 256
+
+# §6 — accessibility contracts. Exits 1 while any of A1–A5 is open, 0 when all are closed,
+# and 2 if a selector has drifted (so a lost anchor can never read as a real failure).
+node docs/mockups/verify-a11y-conformance.mjs
 ```
