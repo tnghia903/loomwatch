@@ -70,22 +70,25 @@ check(
 )
 
 // --- §5.2 Coverage, and the word "complete" --------------------------------------------------
-// CONTRACT §12: "Each category publishes level: complete|partial|unavailable". The panel
-// does not read a published level — it invents one from a count, and the expression has
-// no `partial` branch at all. §10 (projection_limit) and §11 (malformed event) both say
-// coverage becomes partial; neither outcome is representable in the shipped UI.
+// CONTRACT §12: "Each category publishes level: complete|partial|unavailable". TNG-162
+// re-anchored B3 when it closed the gap: the fix is not a wider ternary in the panel but
+// a level carried by the projection, so the probe now asserts both halves — the projector
+// derives the level (with `partial` reachable: non-terminal agents, unpaired calls,
+// unprojectable events, and the §10 projection_limit override), and the panel reads the
+// published level instead of inventing one from a count. Neither half alone would keep
+// the header honest.
 const coverageFor = anchor('coverageFor', panel.match(/function coverageFor\([\s\S]*?\n\}/))
+const coverageBuild = anchor('projection coverage block', events.match(/coverage: \{[\s\S]*?\n {4}\},/))
 check(
-  'B3', '§5.2 partial is reachable', `${PANEL} coverageFor`,
-  /'partial'/.test(coverageFor),
-  "coverageFor returns 'complete' when count > 0 and 'unavailable' otherwise; 'partial' is unreachable, so the half-dot and the gap clause that render it are dead code",
+  'B3', '§5.2 the level is carried by the projection, and partial is reachable', `${EVENTS} coverage block + ${PANEL} coverageFor`,
+  /'partial'/.test(coverageBuild) && /\.level/.test(coverageFor) && !/> ?0/.test(coverageFor),
+  "the projection must publish a per-category level with a reachable 'partial', and the panel must read it — coverageFor inventing a level from a count is the overclaim §5.2 forbids",
 )
 
 // CONTRACT §12, agents row: complete "when every spawned agent has identity and terminal
-// evidence". `count > 0` makes a run complete for agents the instant one is spawned —
-// including mid-run, before any agent has stopped. The terminal facts are already
-// projected (ProjectedAgent.exitCode / .stopReason); the coverage path does not read them.
-const coverageBuild = anchor('projection coverage block', events.match(/coverage: \{[\s\S]*?\n {4}\},/))
+// evidence". The coverage block now consults the projected terminal facts (exitCode and
+// the terminal statuses) instead of the headcount, so a run whose agents are all still
+// working reads `partial`, not `complete`.
 check(
   'B4', 'CONTRACT §12 agents complete only on terminal evidence', `${EVENTS} coverage.agents`,
   /exitCode|stopReason/.test(coverageBuild),

@@ -9,6 +9,15 @@
 // contract is expressed in a rendered path, not merely present somewhere.
 //
 //   node docs/mockups/verify-a11y-conformance.mjs
+//
+// TNG-158 re-anchoring — the contracts are unchanged; these selectors moved with the fix:
+//   A2/A3 zone-head — the summaries moved from plain <div>s to disclosure <button>s
+//     (§6.1 tab order), so the probe reads the button's opening tag instead of the div's.
+//   A4/A5 politeAnnouncement — the `.find(Boolean)` first-match list was replaced by
+//     slot-diffed candidate arrays feeding a FIFO queue hook (§6.3), so the probes now
+//     anchor the candidate arrays, the queue hook and its wiring.
+//   A1 additionally asserts the §6.4 entity name (kind, name, capture word) on both
+//     surfaces that render the entity control — the panel row and the canvas card.
 
 import { readFileSync } from 'node:fs'
 
@@ -16,9 +25,15 @@ const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), '
 
 const PANEL = 'ui/src/components/run/ProvenancePanel.tsx'
 const WORKSPACE = 'ui/src/components/Workspace.tsx'
+const STORY = 'ui/src/components/run/StoryNodes.tsx'
+const COLUMN = 'ui/src/components/run/RunColumn.tsx'
+const QUEUE = 'ui/src/lib/useAnnouncementQueue.ts'
 
 const panel = read(PANEL)
 const workspace = read(WORKSPACE)
+const story = read(STORY)
+const column = read(COLUMN)
+const queue = read(QUEUE)
 
 const results = []
 const check = (id, spec, where, pass, detail) => results.push({ id, spec, where, pass, detail })
@@ -35,53 +50,62 @@ function anchor(name, match) {
 }
 
 // --- §6.4 Accessible names -----------------------------------------------------------------
-// Entity — "<kind>: <name>, <capture word>" + the reason when `unavailable`.
-// The panel's entity rows are the entity control that ships today. Their accessible
-// name is computed from child text (name + ordinal + offset); the status glyph is
-// aria-hidden, so neither kind nor capture word reaches the accessibility tree.
+// Entity — "<kind>: <name>, <capture word>" + the reason when `unavailable` (the panel
+// renders the reason sentence for an unavailable category, where there are no rows to
+// name). Asserted on every surface that renders the entity control: the panel row (A1's
+// original anchor), the canvas EvidenceNodeCard and its RunColumn variant. The panel's
+// capture word is the `captureWord` constant; the cards inline `recorded`.
+const captureWord = anchor('ProvenancePanel capture word', panel.match(/const captureWord = 'recorded'/))
 const entityRow = anchor('ProvenancePanel entity row', panel.match(/<button type="button" className="pop-row"[^>]*>/))
+const evidenceCard = anchor('StoryNodes EvidenceNodeCard label', story.match(/aria-label=\{`Inspect \$\{evidence\.kind\}: \$\{evidence\.name\}, recorded,/))
+const columnCard = anchor('RunColumn evidence card label', column.match(/aria-label=\{`Inspect \$\{item\.kind\}: \$\{item\.name\}, recorded,/))
 check(
-  'A1', '§6.4 entity name', `${PANEL} entity row`,
-  /aria-label=/.test(entityRow),
-  'entity row button has no aria-label; name falls back to "<name> #NN · <offset>" — no kind, no capture word',
+  'A1', '§6.4 entity name', `${PANEL} entity row · ${STORY} EvidenceNodeCard · ${COLUMN} evidence card`,
+  /aria-label=\{\`\$\{item\.kind\}: \$\{item\.name\}, \$\{captureWord\}\`\}/.test(entityRow) && Boolean(captureWord) && Boolean(evidenceCard) && Boolean(columnCard),
+  'entity names must read "<kind>: <name>, <capture word>" — a kind, a name or the capture word is missing from the accessibility tree on the panel row, the canvas card or its RunColumn variant',
 )
 
 // Summary chip — "<category>, <n> entities, <coverage word>".
-const zoneHead = anchor('ProvenancePanel zone-head', panel.match(/<div className="zone-head t-micro">[\s\S]{0,400}?<\/div>/))
+const zoneHead = anchor('ProvenancePanel zone-head', panel.match(/<button type="button" className="zone-head toggle t-micro"[^>]*>/))
 check(
   'A2', '§6.4 summary chip name', `${PANEL} zone-head`,
-  /entit(y|ies)/.test(zoneHead),
-  'summary reads "<category> <n> <coverage>" — the contract\'s "entities" noun is absent, so a count with no unit is announced',
+  /aria-label=\{\`\$\{category\.label\}, \$\{count\} \$\{count === 1 \? 'entity' : 'entities'\}, \$\{coverageWord\(level\)\}\`\}/.test(zoneHead),
+  'summary chip name must read "<category>, <n> entities, <coverage word>" — a count without its unit or coverage word is announced instead',
 )
 
 // --- §6.1 Tab order ------------------------------------------------------------------------
-// "...filters → the six summaries in fixed order → expanded entities". A summary
-// rendered as a plain <div> cannot take focus and so cannot occupy a tab position.
+// "...filters → the six summaries in fixed order → expanded entities". A non-focusable
+// element cannot occupy a tab position, and §6.1 requires `aria-expanded` to track every
+// provenance disclosure.
 check(
   'A3', '§6.1 summaries focusable', `${PANEL} zone-head`,
-  /<button/.test(zoneHead),
-  'the six summaries are non-focusable <div>s; they cannot occupy the tab positions §6.1 assigns them',
+  /<button/.test(zoneHead) && /aria-expanded=/.test(zoneHead),
+  'the six summaries must be focusable disclosure buttons whose `aria-expanded` tracks the open state',
 )
 
 // --- §6.3 Live regions ---------------------------------------------------------------------
 // Assertive: `failed`, `partial`, preflight blockers, and the stale-revision conflict.
-// The preflight blocker ("N things to fix before this team can run") is announced
-// only through the polite queue.
-const politeList = anchor('Workspace politeAnnouncement', workspace.match(/const politeAnnouncement = \[[\s\S]*?\]\s*\.find\(Boolean\)[^\n]*/))
+// The preflight blocker ("N things to fix before this team can run") must be announced
+// on the assertive channel, never through the polite queue.
+const politeCandidates = anchor('Workspace politeCandidates', workspace.match(/const politeCandidates = \[[\s\S]*?\n\s*\]/))
+const assertiveCandidates = anchor('Workspace assertiveCandidates', workspace.match(/const assertiveCandidates = \[[\s\S]*?\n\s*\]/))
 check(
-  'A4', '§6.3 preflight is assertive', `${WORKSPACE} politeAnnouncement`,
-  !/documentChipState === 'invalid'/.test(politeList),
-  'the preflight blocker (documentChipState === "invalid") sits on the polite channel; §6.3 lists preflight blockers as assertive',
+  'A4', '§6.3 preflight is assertive', `${WORKSPACE} assertiveCandidates`,
+  !/documentChipState === 'invalid'/.test(politeCandidates) && /documentChipState === 'invalid'/.test(assertiveCandidates),
+  'the preflight blocker (documentChipState === "invalid") must be published on the assertive candidates, not on the polite queue',
 )
 
-// A polite region built with `.find(Boolean)` announces at most ONE message per
-// render. Everything below the first truthy entry is silently dropped — and
-// `statusAnnouncement` (agent task-state churn, refreshed for 3 s at a time during a
-// run) sits second, above save state, validation, disk notices and start errors.
+// A polite region built with `.find(Boolean)` announces at most ONE message per render.
+// Everything below the first truthy entry is silently dropped — and `statusAnnouncement`
+// (agent task-state churn, refreshed for 3 s at a time during a run) sits second, above
+// save state, validation, disk notices and start errors. The contract is a real FIFO
+// queue wired to every candidate, drained in order.
+const queueHook = anchor('useAnnouncementQueue hook', queue.match(/export function useAnnouncementQueue[\s\S]*?\n\}/))
+const politeWiring = anchor('Workspace polite queue wiring', workspace.match(/const \[politeAnnouncement, enqueuePolite\] = useAnnouncementQueue\(\)/))
 check(
-  'A5', '§6.3 no message is dropped', `${WORKSPACE} politeAnnouncement`,
-  !/\.find\(Boolean\)/.test(politeList),
-  'polite queue collapses N pending messages to the first truthy one; during a live run statusAnnouncement preempts save, validation and disk announcements for 3 s at a time',
+  'A5', '§6.3 no message is dropped', `${QUEUE} · ${WORKSPACE} politeCandidates`,
+  Boolean(politeWiring) && /pending\.current\.push\(/.test(queueHook) && /pending\.current\.shift\(\)/.test(queueHook) && /enqueuePolite\(message\)/.test(workspace) && !/\.find\(Boolean\)/.test(workspace),
+  'the polite channel must drain a FIFO queue fed by every candidate message; a `.find(Boolean)` first-match drops all but one',
 )
 
 // --- report --------------------------------------------------------------------------------

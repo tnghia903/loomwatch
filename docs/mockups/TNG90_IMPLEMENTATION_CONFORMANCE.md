@@ -11,12 +11,16 @@
   in the vocabulary (§4). **Not conformant on the accessibility layer** — five §6 contracts
   were unmet on surfaces that ship today (§6) — all five have since been closed by TNG-158.
   **Not conformant on the honesty layer** (§7) — five contracts were unmet; three closed
-  within the hour, and two remain: the graph can still declare *"Complete capture"* of a run
-  it has not finished observing, because the panel derives its own coverage instead of
-  reading the honest one the projector now publishes.
-- **Two sections are historical.** §6 and §7 record contracts and reasoning, and their
-  verdicts are the state at the moment of observation. `verify-a11y-conformance.mjs` (`5/5`)
-  and `verify-evidence-honesty.mjs` (`3/5`) are the current answer.
+  within the hour and a fourth since, leaving the entity-level `capture` seam (B1) open and
+  now owned by its own issue `2b9a0e34` (§7.2). **Not conformant on the response layer**
+  (§8) — six §3.3–3.4 contracts were unmet, all six closed by TNG-166.
+- **B1 is the one conformance defect still open.** All three TNG-90 children are done and
+  `verify-evidence-honesty.mjs` still exits `1`; it does not block Gate B, which governs the
+  design (§5), not this implementation.
+- **Three sections are historical.** §6, §7 and §8 record contracts and reasoning, and
+  their verdicts are the state at the moment of observation. `verify-a11y-conformance.mjs`
+  (`5/5`), `verify-evidence-honesty.mjs` (`4/5`, B1 open) and
+  `verify-response-states.mjs` (`6/6`) are the current answer.
 
 This checks the implementation's *claims* against the approved design. It does not review
 code quality, and it does not touch the Gate B artifact — see §5.
@@ -26,6 +30,9 @@ added the same day, after the token pass, when the interaction layer — a TNG-8
 criterion that had never been checked against an implementation — was audited. §7 followed,
 covering the one remaining layer TNG-89A puts an acceptance criterion on: evidence quality.
 §§6–7 read only production source and add no bytes to the pinned prototype; §5 still holds.
+§8 was audited by the same probe discipline at `72c0ca4` — six §3.4 contracts on the
+response node, all open — and closed the same day by TNG-166; its backend half (the daemon
+emitting the code the strip now carries) is TNG-168's.
 
 ## 1. Design tokens — PASS, zero drift
 
@@ -207,7 +214,7 @@ most needs to hear are the four the implementation is most likely to swallow.
   shipped is `"Output response from <agent>, <phase>"` (`StoryNodes.tsx:82`). Both facts
   the contract requires are present. Wording variance, not a defect.
 
-## 7. Evidence quality — FAIL as audited; three of five closed the same day
+## 7. Evidence quality — FAIL as audited; four of five closed, B1 open and re-owned
 
 §6 checked whether provenance can be *heard*. This section checks whether it tells the
 truth. The subject is `docs/TNG89_INTERACTION.md` §5 — the section the spec itself calls
@@ -229,8 +236,9 @@ implementation. Every rule below is asserted by `docs/mockups/verify-evidence-ho
 > being written: TNG-158 landed and closed B2, then TNG-162 landed and closed B4 and B5,
 > going further than asked and publishing a real per-category `level` with stable reason
 > codes (`unpaired_calls`, `agents_awaiting_terminal_evidence`, `unprojectable_events`)
-> rather than patching the two counts. As of this commit the gate reads **3/5**, with B1 and
-> B3 open. Anything here that reads as a verdict is the state at the moment it was observed;
+> rather than patching the two counts. B3 has since closed as well, leaving exactly B1 — run
+> the gate for the number; this note deliberately no longer carries one, having been wrong
+> twice. Anything here that reads as a verdict is the state at the moment it was observed;
 > `node docs/mockups/verify-evidence-honesty.mjs` is the only current answer. The prose below
 > is kept in the present tense of its observation because the *contract* and the reasoning
 > are what this document is for, and those do not expire when a fix lands. Where a first
@@ -343,18 +351,38 @@ The good news is that the gap is small in code: B4 and B5 are satisfiable today 
 the projector already has. B1 and B3 need the level and `capture` to be carried, which is
 where this stops being the UI's decision alone.
 
-**Filed, and mostly closed.** B2 was `TNG-158`'s; the ruling on what the capture word may
+**Filed, and closed.** B2 was `TNG-158`'s; the ruling on what the capture word may
 honestly say is in that issue's `a1-capture-word-ruling` document. B3/B4/B5 are `TNG-162`,
-which closed B4 and B5 within the hour by doing the harder correct thing — the projector now
-publishes `level` + `reason` + `observed` per category instead of a count, which is what
-CONTRACT §12 actually asks for.
+which closed all three by doing the harder correct thing — the projector now publishes
+`level` + `reason` + `observed` per category instead of a count (`CategoryCoverage` in
+`events.ts`), which is what CONTRACT §12 actually asks for:
 
-**B3 is what is left of §7.2**, and it is now a one-sided gap rather than a design question:
-the projector publishes an honest level and `ProvenancePanel.coverageFor` still derives its
-own from `coverage[key] > 0`. The panel needs to read what it is being told. **B1** is the
-same seam on the entity axis — `capture` on `Evidence` rather than a word hardcoded at three
-call sites — and is worth taking in the same pass, since the projector is now already in the
-business of publishing epistemic quality.
+- **B4** — agents read `complete` only when every spawned agent has terminal evidence
+  (`exitCode`, or a crashed/handed-off/stopped end); an agent still working reads
+  `partial` with reason `agents_awaiting_terminal_evidence`. The headcount survives only
+  as `observed`.
+- **B5** — `openCalls` is no longer stripped at the projection boundary: it is published
+  per agent, and tools read `complete` only when every call is paired or terminally
+  failed (`unpaired_calls`), with a skipped archived update forcing `partial`
+  (`unprojectable_events`, §11). A call deduped as a bus echo (§4.5) is dedup, not loss.
+- **B3** — `partial` is reachable and the panel reads it: `coverageFor` returns
+  `projection.coverage[key].level` and never invents a level from a count, and the
+  projector leaves one seam where a daemon-published level (`§10 projection_limit`,
+  `RunContext.publishedCoverage`) overrides the derived one. The gate's B3 check was
+  re-anchored for this shape — it now asserts both halves (the level is carried, and the
+  panel reads it) and is stronger than the original, which only asked for a `'partial'`
+  literal in the panel.
+
+**B1 is the remaining seam**, on the entity axis — `capture` on `Evidence` rather than a
+word hardcoded at three call sites. The gate reads `4/5` with exactly B1 outstanding.
+
+**B1 now has its own issue** (`2b9a0e34`), because it had stopped having an owner. It was
+recorded above as `TNG-158`'s, and TNG-158 closed correctly on its own five accessibility
+contracts without it — leaving B1 real, failing, and assigned to a closed issue. All three
+TNG-90 children (TNG-158, TNG-162, TNG-166) are now done and `verify-evidence-honesty.mjs`
+still exits `1`, so the gap is not a scheduling artifact that the next child would have
+swept up. The scope boundary from §7.1 carries over: the new issue owns the **projection
+field only**; the border and glyph channels stay `TNG-89F`'s.
 
 ### 7.3 Deliberately not counted as defects
 
@@ -377,6 +405,85 @@ business of publishing epistemic quality.
   captured"*; shipped is *"Partial capture — nothing captured for skills and commands."*
   Both name the gaps in full with no truncation, which is what the contract requires.
   Wording variance, not a defect.
+
+## 8. The response node — FAIL as audited; all six closed by TNG-166
+
+§§6–7 checked what the operator hears and what the evidence admits to. This section
+checks the answer itself: `docs/TNG89_INTERACTION.md` §3.3–3.4 (the response node —
+`partial` and `failed`), `docs/UX_REDESIGN.md` §16 (never paraphrase a daemon error) and
+`docs/RUN_PROVENANCE_CONTRACT.md` §3 (terminal metadata carries a stable machine-readable
+error code). Every rule is asserted by `docs/mockups/verify-response-states.mjs`, same
+exit convention as §§6–7.
+
+| ID | Spec | Surface | Result |
+|---|---|---|---|
+| D1 | §3.4 / CONTRACT §3 — the error code is carried, not invented | `client.ts` `RunRecord` · `Workspace.tsx` strip | **FAIL** |
+| D2 | §3.4 — no code the daemon did not emit | `Workspace.tsx` strip watermark | **FAIL** |
+| D3 | §3.4 / UX_REDESIGN §16 — the message slot is verbatim or explicitly absent | `Workspace.tsx` strip message | **FAIL** |
+| D4 | §3.4 — `failed` renders as the strip, not a pending body | `StoryNodes.tsx` `OutputNodeCard` | **FAIL** |
+| D5 | §3.4 — `failed` offers `[ Reuse ]` | `StoryNodes.tsx` `OutputNodeCard` | **FAIL** |
+| D6 | §3.4 — a run with no canonical response is named, not called a crash | `events.ts` phase ladder · `Workspace.tsx` strip | **FAIL** |
+
+Two independent shortcuts met on the one case the spec singles out by name.
+
+**The strip's code was invented.** `RunRecord` carried `error` (prose) and `exitCode` and
+no code field at all, so the watermark — rendered at `var(--font-mono)`, the typography of
+a machine fact — was chosen client-side by whether a *prose string* happened to be
+non-empty. A clean run with no error string was labelled `process_crashed`, the spec's own
+example token for a crashed process, though nothing had crashed.
+
+**The no-answer case was folded into `partial`.** The ladder's last rung was
+`phase = responseText ? 'succeeded' : 'partial'`, so a run where every agent finished
+cleanly and none was the canonical responder — `error` null, no crash — rendered
+*"The run did not complete normally."* + `process_crashed`: the one terminal state §3.4
+asks to be named in plain language was the one described as a crash.
+
+### 8.1 What closed them (TNG-166)
+
+- **D1/D2 — the strip no longer manufactures a code** (`Workspace.tsx:340-348`). The
+  watermark resolves `record.errorCode ?? record.stopReason ?? projection.errorCode ??
+  exit N`, and when the daemon reported none of these it renders `no code reported` —
+  the honest absence, never a plausible token. `RunRecord` models `errorCode` /
+  `stopReason` (`client.ts:28-31`), optional until the daemon emits them; the backend half
+  — `RunRecord` gains `error_code`/`stop_reason` set at `mark_failed`, with
+  `missing_canonical_response` as one stable code per CONTRACT §4 — is [TNG-168]'s, and
+  the strip needs nothing further when it lands.
+- **D3 — the message slot is verbatim or says it is absent.** The two manufactured
+  sentences are gone. When the daemon said nothing, the strip says
+  *"No error message was reported."* The one exception is §3.4's own prescription: the
+  `missing_canonical_response` strip gets *"The run finished but no agent produced an
+  answer."* — the spec's words for the UI's own observation, not a paraphrase of a daemon
+  error.
+- **D4/D5 — the failed node is the strip plus `[ Reuse ]`** (`StoryNodes.tsx:100-115`):
+  the "yet" placeholder is gated to phases that can still answer, a terminally failed run
+  renders no body, the accessible name stops crediting a producer that produced none
+  (*"Output, Run failed."*), and `[ Reuse ]` copies the run's original prompt back into
+  the composer (§3.2's own definition; the prompt survives on the Prompt node per §12.2,
+  so this is a route, not lost data). `RunColumn.tsx:35` mirrors the same treatment at
+  phone widths, where the response card is duplicated.
+- **D6 — the ladder names the terminal no-answer run.** `events.ts:548-566` classifies
+  terminal-with-no-canonical-response as `failed` (`missing_canonical_response`) instead
+  of `partial` — gated on `context.evidenceComplete` (a terminal registry record with
+  every archived event delivered, or a run the daemon no longer knows) *and* the cut
+  reaching the end of what was delivered, so a quiet moment between two archived events,
+  or a replay scrubbed short of the end, is never read as terminal. The projection
+  publishes the classification as `errorCode` (`events.ts:603`); the strip displays it
+  with §3.4's sentence.
+
+Verification: `node docs/mockups/verify-response-states.mjs` exits `0` — `6/6`. The UI
+suite is green (145 tests, including the new `projectRun` §4 classification cases and an
+`OutputNodeCard` D4/D5 regression test), `tsc -b && vite build` and `oxlint` clean.
+
+### 8.2 Deliberately not counted as defects
+
+- **`partial` still consults `crash?.message`.** The archived crash event's payload
+  message is the daemon's own words, verbatim — exactly what the slot is for. Only the
+  *manufactured* fallbacks were removed.
+- **`exit N` remains a watermark when the daemon reports no code** for a genuinely failed
+  run. `exit 137` is a machine fact that names itself; it is not an invented code.
+- **The cancelled strip keeps its prose.** "Cancelled by the operator. Partial answer
+  kept." reflects the operator's own action back at them; it is not a daemon error being
+  paraphrased.
 
 ## How to reproduce
 
@@ -404,6 +511,9 @@ node docs/mockups/verify-a11y-conformance.mjs
 
 # §7 — evidence-quality contracts. Same exit convention, B1–B5.
 node docs/mockups/verify-evidence-honesty.mjs
+
+# §8 — response-node contracts. Same exit convention, D1–D6.
+node docs/mockups/verify-response-states.mjs
 
 # §7.1 — the three channels §5.1 requires, counted in production
 grep -c 'cap-' ui/src/styles/*.css          # 0 0 0 — no border treatment ships
