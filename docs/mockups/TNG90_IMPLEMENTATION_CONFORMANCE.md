@@ -466,6 +466,49 @@ first time since the audit (the a11y gate stays `5/5`; the UI suite, `tsc -b` an
 boundary carried over: a field on the projection is their precondition, not their
 replacement.
 
+### 7.5 The gate itself, mutation-audited — two of five checks could not fail
+
+Gate B card `0e52ed0c` cites this probe's `5/5` as the proof B1 closed. `4ddd2d0` had
+already found one check in a sibling gate (D5, §3.4 `[ Reuse ]`) that could not fail on
+the defect it named, and swept the siblings for the same weakness by running them against
+a comment-stripped copy of `ui/`. **That sweep was half the class and could not have found
+what follows.** It proves a check does not *depend* on prose in a tree where the feature is
+present; it says nothing about whether the check can fail once the feature is *gone* and
+the prose stays. D5 itself would have survived it — its bare `/Reuse/i` also matched the
+live identifier `reusePrompt`.
+
+So each contract was defeated one at a time, in a scratch copy, and the check that owns it
+had to turn `FAIL`: `python3 docs/mockups/mutate-evidence-honesty.py`. Two of the five
+could not.
+
+- **B3 — the overclaim §5.2 forbids read `PASS`.** The surface-reader halves were
+  `/coverageSummary\(|coverageFor\(/` over the raw file. Comment out
+  `const level = coverageFor(category.key, projection)`, derive the level from
+  `items.length` instead, and the gate stayed `5/5, exit 0` — it had matched the call
+  inside the comment. This is D5's class exactly, one gate over. The alternation was the
+  wider of the two holes: `coverageSummary` is §4.1's whole-run chip, so a surface could
+  keep the chip honest while inventing every per-category level beside it and the check
+  could not tell the two apart. Now: stripped source, and `coverageFor(` itself.
+- **B5 — `tools` reading `complete` with calls still open read `PASS`.** The whole
+  assertion was `!/openCalls: _/` on the agents mapping: the absence of one discard
+  spelling. Delete the `unpairedCalls > 0 → partial` branch from the tools row — the exact
+  defect B5's detail text describes — and it passed, because the spelling it watched was
+  still absent; the defect had simply moved one expression away. **An absence check only
+  covers the one shape somebody already thought of.** The contract is now asserted where
+  it is decided, in three halves that fail independently: the tools row consults
+  `unpairedCalls`, that count is derived from the projector's `openCalls` rather than a
+  standing zero, and it still survives the projection boundary.
+
+B1, B2 and B4 detected their defects unchanged. Nine mutations now run, including the
+three evasions the strengthened checks must also catch (`M7`–`M9`), each keeping the token
+the weaker check watched for while breaking the contract anyway; all nine are detected by
+the owning check. The intact tree still reads `5/5, exit 0`, and against an extracted pin
+the gate still exits `2` — `4ddd2d0`'s refusal is intact.
+
+**Neither defect was in the implementation.** B3's and B5's contracts were met in the
+shipped code throughout; the instruments were broken — which is worse, since these were
+the evidence cited for B1's closure on a pending approval card.
+
 ## 8. The response node — FAIL as audited; all six closed by TNG-166
 
 §§6–7 checked what the operator hears and what the evidence admits to. This section
@@ -773,6 +816,12 @@ node docs/mockups/verify-a11y-conformance.mjs
 
 # §7 — evidence-quality contracts. Same exit convention, B1–B5.
 node docs/mockups/verify-evidence-honesty.mjs
+
+# §7.5 — and the audit of that gate itself: defeat each contract one at a time and require
+# the owning check to turn FAIL. A check that has never failed is not evidence; this found
+# two (B3, B5) that could not. Exit 0 = every contract detectable, 1 = a check cannot fail,
+# 2 = the harness could not run. It mutates only a scratch copy; `ui/` is never written.
+python3 docs/mockups/mutate-evidence-honesty.py
 
 # §8 — response-node contracts. Same exit convention, D1–D6.
 node docs/mockups/verify-response-states.mjs

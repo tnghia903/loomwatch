@@ -58,6 +58,11 @@ function anchor(name, match) {
   return match[0]
 }
 
+// Prose is not an implementation. A commented-out call still contains the call, so any check
+// that looks for a token rather than a construct must read stripped source — the D5 class that
+// `4ddd2d0` found in verify-response-states.mjs, and that B3 below was an instance of.
+const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+
 // --- §5.1 Capture states ---------------------------------------------------------------------
 // The contract (§8.1) makes `capture` a property of an entity: recorded / derived /
 // redacted / unavailable. Interaction §5.1 then requires all four on three channels
@@ -111,8 +116,18 @@ const coverageFor = anchor('coverageFor', coverageModule.match(/function coverag
 const coverageBuild = anchor('projection coverage block', events.match(/coverage: \{[\s\S]*?\n {4}\},/))
 // Both surfaces must go through it. A second reader that derived its own level would put the
 // overclaim back, just on a screen size nobody audits.
-const panelReadsLevel = /coverageSummary\(|coverageFor\(/.test(panel)
-const columnReadsLevel = /coverageSummary\(|coverageFor\(/.test(column)
+//
+// This pair was `/coverageSummary\(|coverageFor\(/` over the raw file, and it could not fail.
+// Comment out `const level = coverageFor(...)`, derive the level from `items.length` instead,
+// and B3 still matched the call inside the comment — the gate read 5/5 on the exact overclaim
+// §5.2 forbids. Two changes: read stripped source, and require `coverageFor(` itself rather
+// than accepting `coverageSummary(`. The alternation was the wider hole of the two, because
+// `coverageSummary` is §4.1's whole-run chip: a surface can keep the chip honest while
+// inventing every per-category level beside it, and the old check could not tell them apart.
+// `coverageFor` is the per-category level reader, which is what §5.2 is about, and both
+// shipped surfaces already call it.
+const panelReadsLevel = /coverageFor\(/.test(code(panel))
+const columnReadsLevel = /coverageFor\(/.test(code(column))
 check(
   'B3', '§5.2 the level is carried by the projection, and partial is reachable', `${EVENTS} coverage block + ${COVERAGE} coverageFor`,
   /'partial'/.test(coverageBuild) && /\.level/.test(coverageFor) && !/> ?0/.test(coverageFor) && panelReadsLevel && columnReadsLevel,
@@ -132,11 +147,24 @@ check(
 // CONTRACT §12, tools row: complete when "every call is paired or terminally failed".
 // The projector tracks unpaired calls as `openCalls` and then strips that field at the
 // projection boundary, so the one fact that decides tools coverage is computed and thrown away.
+//
+// B5 asserted that and nothing else: `!/openCalls: _/` on the agents mapping — the absence of
+// one discard spelling. It could not fail on the defect its own text names. Delete the
+// `unpairedCalls > 0 → partial` branch from the tools row, so tools reads `complete` with calls
+// still open, and B5 reported PASS: the spelling it watches was still absent, because the
+// defect had moved one expression away. An absence check only ever covers the one shape
+// somebody already thought of.
+//
+// So the contract is asserted where it is decided, in three halves that fail independently:
+// the tools row must consult unpaired calls, `unpairedCalls` must be counted from the tracked
+// `openCalls` rather than be a standing zero, and the count must still survive the boundary.
 const agentsExit = anchor('projection agents mapping', events.match(/agents: list\.map\(\(\{[^}]*\}\) =>[^\n]*/))
+const toolsRow = anchor('coverage.tools row', events.match(/tools: category\('tools',[\s\S]*?\}\),/))
+const unpairedDecl = anchor('unpairedCalls declaration', events.match(/const unpairedCalls = [\s\S]*?(?=\n {2}const )/))
 check(
-  'B5', 'CONTRACT §12 tools complete only when calls are paired', `${EVENTS} projection boundary`,
-  !/openCalls: _/.test(agentsExit),
-  'openCalls is computed per agent and discarded when the projection is returned; an unpaired tool call therefore counts toward `complete` for tools',
+  'B5', 'CONTRACT §12 tools complete only when calls are paired', `${EVENTS} coverage.tools + unpairedCalls + projection boundary`,
+  /\bunpairedCalls\b/.test(code(toolsRow)) && /\bopenCalls\b/.test(code(unpairedDecl)) && !/openCalls: _/.test(agentsExit),
+  'the tools row must branch on unpaired calls, counted from the projector\'s own openCalls and still carried across the projection boundary; drop any one and an unpaired tool call counts toward `complete` for tools',
 )
 
 // --- report ----------------------------------------------------------------------------------
