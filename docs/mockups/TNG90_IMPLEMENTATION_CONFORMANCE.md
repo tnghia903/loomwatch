@@ -15,15 +15,19 @@
   the one defect that had outlived all three children — closed by TNG-170 (§7.4). **Not
   conformant on the response layer** (§8) — six §3.3–3.4 contracts were unmet, all six
   closed by TNG-166. **Not conformant on the narrow layer** (§9) — four §11.6 contracts were
-  unmet below 768 px, all four closed by TNG-173.
-- **No layer is open.** All four probes exit `0`. §9's contracts were the last, owned by
-  **TNG-173** (§9.4) and closed 2026-09-11; N3 additionally carries a rendered measurement in
-  WebKit at 375 px (§9.2), which is the confirmation its declared-height probe cannot give.
-  None of them ever blocked Gate B, which governs the design (§5), not this implementation —
-  but they were disclosed on the card rather than hidden behind a green summary.
+  unmet below 768 px, all four closed by TNG-173. **Not conformant on the composer layer**
+  (§10, audited 2026-09-12) — **eight of thirteen §1 contracts are open**, including three
+  the spec spends its prose defending: the two-step legibility of `Save & run`, one start key
+  per attempt, and the revision the run actually executes.
+- **One layer is open: §10, the prompt composer.** Its probe exits `1` at **5/13**; §§6–9 all
+  exit `0`. §1 was the last section never checked against an implementation — §§6–9 each took
+  a TNG-89A acceptance clause, and this one took the section the spec opens with. No layer
+  here has ever blocked Gate B, which governs the design (§5), not this implementation — and
+  §10 adds no bytes to the pinned prototype, so the pending card's hash is unchanged by it.
+  They are disclosed rather than hidden behind a green summary.
 - **Four sections are historical.** §6, §7, §8 and §9 record contracts and reasoning, and
-  their verdicts are the state at the moment of observation. The probes are the only current
-  answer — run them; do not read a count off this page.
+  their verdicts are the state at the moment of observation. **§10 is current.** The probes
+  are the only current answer — run them; do not read a count off this page.
 
 This checks the implementation's *claims* against the approved design. It does not review
 code quality, and it does not touch the Gate B artifact — see §5.
@@ -38,7 +42,10 @@ response node, all open — and closed the same day by TNG-166; its backend half
 emitting the code the strip now carries) is TNG-168's. §9 followed, on the one TNG-89A
 acceptance clause left unchecked: responsive behaviour below 768 px. Unlike §§6–8 it is
 *not* bytes-neutral on the prototype — §8's finding sent a thirteenth screen into the
-artifact, which is why §5 now opens by saying so.
+artifact, which is why §5 now opens by saying so. §10 was audited 2026-09-12 on the prompt
+composer (§1), the one section of the interaction spec no probe had ever read; it is
+bytes-neutral on the prototype, and unlike §§6–9 its gate was mutation-audited **before**
+publication rather than after a false green (§10.5).
 
 ## 1. Design tokens — PASS, zero drift
 
@@ -777,6 +784,121 @@ The denominator guard (T2a) is the matching protection in the other direction: u
 `provenance` defeat, T2b alone still read "0/17 undersized" and only T2a's floor caught that
 the probe had lost two-thirds of its specimens.
 
+## 10. The prompt composer — FAIL as audited, 8 of 13 contracts open (2026-09-12)
+
+§1 of the interaction spec is the surface every run starts at, and it was the **last layer
+never checked against an implementation** — §§6–9 each took an acceptance clause; this one
+took the section the spec opens with. `node docs/mockups/verify-composer-conformance.mjs`
+reads production source under the same discipline as §§6–9: every rule anchored to a line a
+reviewer can open, `exit 2` if a selector drifts, so a lost anchor can never read as a real
+failure. It reads **5/13**.
+
+Three of the eight are ordinary geometry and wording. Five are not: they are the clauses
+§1 spends its prose defending — the two-step legibility of `Save & run`, one start key per
+attempt, and the revision the run actually executes.
+
+### 10.1 The eight open contracts
+
+- **C1 — `⌘↵` does not submit from anywhere. §1.2.** The spec's first keyboard row reads
+  *"submit — from anywhere in the app, including a focused canvas."* The only binding is on
+  the composer's own `textarea` (`Composer.tsx:57`). Worse than absent: the global handler's
+  `Enter` branch (`Workspace.tsx:779`) never tests the modifier, so `⌘↵` **on a focused
+  canvas with an agent selected dispatches `loomwatch:rename-agent`** — the app answers the
+  submit shortcut by offering to rename something. The command palette advertises `⌘↵` for
+  *"Run the team…"* and only focuses the field (`:698`).
+- **C2 — `Esc` does not collapse the composer. §1.2.** *"blur and collapse to one line, text
+  preserved."* The height is written by an effect keyed on `[value]` alone
+  (`Composer.tsx:46–51`), so nothing recomputes it on blur. Text is preserved — correct —
+  but a grown composer stays grown, keeping the canvas occluded after the operator has
+  explicitly dismissed it.
+- **C3 — the input grows to six lines, not five. §1.1.** `max-height: 120px` against the
+  rule's own `14px/20px` (`runtime.css:27–31`), matched by `Math.min(120, …)`. The approved
+  value is 5 lines = 100 px. The gate derives `5 × line-height` from the same rule rather
+  than hard-coding 100, so a type-scale change cannot turn this green by accident.
+- **C4 / C5 — the pipeline-terminal blocker identifies nothing. §1.3.** One spec row, two
+  promises, each independently fixable, so each is its own check. The approved line names the
+  offenders — *"This one has two: `author`, `qa`"* — and `[ Show on canvas ]` **selects
+  both**. Shipped: *"A pipeline needs exactly one final agent — 2 found."*, and the action is
+  `flow.fitView` (`Workspace.tsx:688`), which frames the whole canvas and selects nothing. On
+  a team of twenty the operator is told a count and handed a route that identifies the two
+  offending agents no better than the count did.
+- **C6 — a clean document reports a save that never happens. §1.4/§1.6.** `starting` (the
+  run-creation flag) and `pendingPrompt` (the save flag) both return `{ kind: 'saving' }`
+  (`Workspace.tsx:684`). So starting a run on a **clean** file puts *"Saving
+  research-team.yaml — the run is created against the revision this write returns."* under
+  the button while no write is occurring, and §1.6's `Starting…` is unreachable. §1.4 asks
+  for these two labels by name and says why: *"so the two steps stay legible as two steps."*
+  The implementation collapses them into the one that is false.
+- **C7 — there is no start key. §1.6.** *"`⌘↵` generates one start key and holds it for the
+  life of the attempt… A connection loss during submit **never** retries blind: the client
+  re-`GET`s by start key."* `startRun` posts `{ teamPath, prompt }` (`runs/client.ts:86–95`)
+  — no key in body or headers. The in-flight guard is real but is state, not identity: on a
+  thrown fetch `launch`'s `catch` sets an error and leaves the prompt in the field with `Run`
+  enabled, so **the operator's natural re-press is exactly the blind retry this clause
+  forbids**, and the daemon has no key to collapse the duplicate against.
+- **C9 — nothing pins the bytes the run executes. §1.4/§1.5.** §1.4 specifies the pair:
+  conditional `PUT` (which ships — C8 passes), *"then `POST /api/runs` with
+  `expectedRevision` = the revision the PUT returned."* The field does not exist in
+  `runs/client.ts`, in `submit()`, or in `runs.rs`. A disk write landing between the save and
+  the start is executed silently, and §1.5's *"No run is created"* has nothing to fire on.
+  This is the one case §1.4 opens by naming: *"The operator must never be able to think they
+  ran what is on screen when they ran what is on disk."* Like §8/D1 it needs a daemon-side
+  field, so it carries a backend half (cf. TNG-166 → TNG-168).
+
+### 10.2 The five that pass, and why they are in the gate
+
+A gate whose every row is red cannot show that its selectors still bind, and three of these
+guard rules that a plausible fix to a red row would break.
+
+- **C8** — the `PUT` half of `Save & run` is conditional (`If-Match`). C9's fix must not
+  regress it.
+- **C10** — *the narrow block keeps the composer.* §1.1's own table says *"Below 768 |
+  composer hidden"*, and that row is **superseded** by §11.6, whose acceptance failure 22
+  reads *"Narrow mode loses submission… **Fail.**"* Hiding the composer below 768 px would
+  satisfy the older row by failing the newer one. The supersession is encoded here so it is
+  enforced rather than recalled — this is the row a future reading of §1.1 is most likely to
+  "fix" backwards.
+- **C11** — §1.7: no model picker, temperature, agent selector or attachments have appeared
+  in the composer.
+- **C12** — §1.4's *"no 'run without saving'"*: `submit()` saves a dirty document and starts
+  nothing if the save fails.
+- **C13** — §1.5's *"the prompt is held until the run id comes back."* The clear happens only
+  after `startRun` resolves. §1.5 calls losing a typed goal *unforgivable*; C13 is the row
+  that would catch it.
+
+### 10.3 Sequencing, and who owns this
+
+§1 is design-layer work on an implementation that already shipped, exactly like §§6–9. It
+reads only production source and adds **no bytes to the pinned prototype**, so §5 still
+holds and the pending Gate B card is unaffected — the hash is unchanged by this section.
+
+The owner is the **Web UI Engineer**, who is in `error` (`opencode_local` out of OpenRouter
+credits, last heartbeat 2026-09-11T16:28Z). That is the fleet-funding problem already in
+front of the board on TNG-136/TNG-98, not a separate blocker: the contracts are recorded and
+re-runnable, and they will still be true whenever an owner can act.
+
+### 10.4 What this section deliberately does not file
+
+- **The entrypoint preflight row.** §1.3 lists *"team mode, no entrypoint"* as its own
+  blocker with its own line. The implementation folds it into the generic problems branch —
+  `entrypointProblem` is the first entry `reviewProblems` returns (`problems.ts:49`), so an
+  entry-point-less team *is* blocked, with `[ Review ]` naming it in the popover. Different
+  route, same guarantee, and consolidating two blockers onto one surface is a design call the
+  spec does not forbid. Not a defect.
+- **The `⌘⇧↵` label.** §1.2 and §1.4 give `Save & run` the shortcut `⌘⇧↵`; the button renders
+  `⌘↵`. Both key combinations already submit (`event.key === 'Enter'` is unchanged by
+  `shiftKey`), so this is a label that under-promises, not a broken binding — too small to
+  spend an owner's turn on while C1–C9 are open.
+
+### 10.5 The gate's own audit
+
+`python3 docs/mockups/mutate-composer-conformance.py` proves every row detectable **in both
+directions**: apply all eight fixes → 13/13; revert each one → exactly the owning row turns
+red; defeat each of the five that pass today → exactly that row turns red. 13/13 detectable.
+This is §7.5's discipline applied at authoring time rather than after a false green: §7.5
+found two checks (B3, B5) that could not fail, and §9 later found a D5 in the same state.
+`ui/` is never written — the harness mutates a scratch copy only.
+
 ## How to reproduce
 
 ```sh
@@ -844,6 +966,15 @@ swiftc -O docs/mockups/verify-webkit.swift -o /tmp/verify-webkit
 # §9 behaviour — what both probes are static for: the route firing, the filter
 # narrowing evidence while the summaries hold the projector's counts.
 (cd ui && npx vitest run src/components/run/RunColumn.test.tsx)
+
+# §10 — prompt-composer contracts, §1.1–§1.7 as revised by §11.6. Same exit convention,
+# C1–C13. Exits 1 (5/13) until the eight open rows close; see §10.3 for the owner.
+node docs/mockups/verify-composer-conformance.mjs
+
+# §10.5 — and the audit of THAT gate, in both directions: apply all eight fixes (13/13),
+# revert each one (exactly its row reddens), then defeat each of the five rows that pass
+# today (exactly that row reddens). Exit 0 = all thirteen detectable. Scratch copy only.
+python3 docs/mockups/mutate-composer-conformance.py
 
 # §9.5 — the same §11.6 contracts against the PROTOTYPE, the artifact Gate B pins.
 # Needs no ui/ build: it reads the pinned standalone and prints its sha256, so the
