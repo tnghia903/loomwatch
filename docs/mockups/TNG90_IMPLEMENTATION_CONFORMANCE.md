@@ -673,6 +673,53 @@ touched — §11.6 was authored from it, and `#compose`/`#running`/`#answered`/`
 `#unanswered` were never what failed here. TNG-90's Gate B governs the design, not this
 implementation, and was never blocked by this section.
 
+### 9.5 The prototype side, now measured rather than assumed — PASS 15/15
+
+§9.4's "the prototype is not implicated" was the right call, but until now it was an
+*inference*: §11.6 was authored from the prototype, so the prototype was presumed to satisfy
+it. Nothing had measured that. Every §11.6 instrument reads production — the N1–N4 gate reads
+`RunColumn.tsx` and the app stylesheets, and `webkit-probe-narrow-targets.js` measures the
+built `ui/` bundle. The artifact **Gate B actually pins** had never been opened below 768 px.
+
+That gap mattered more than a normal untested claim, because §11.6 is written as a statement
+about the prototype ("Below 768 px *the prototype* stops fitting the entire 1600 × 1000 stage
+with a transform"). A board approving the prototype on the strength of §9 would have been
+reading a green count earned entirely by a different artifact.
+
+It now holds on both sides. `webkit-probe-prototype-narrow.js` drives the pinned standalone
+at 375 px in WebKit — the engine the board reviews in — and reads **15/15**:
+
+- **T1** the measuring conditions: the narrow media query matches, and `transform: none` is in
+  force so the stage's ~0.92× design scale cannot skew a 44 px reading into a 40.6 px "defect".
+- **T2** failure 21: **0 of 48** visible core actions across `#compose #running #answered
+  #trace` render below 44 px. The prototype's narrow block lifts `.btn`, `.iconbtn`, `.filt`
+  and `.seg button` together — which is the rule production was missing, not one it broke.
+- **T3** failure 21: theme switching is reachable *and* switches (`dark → light`).
+- **T4** failure 21: the composer is not clipped, and the column has no horizontal overflow.
+- **T5** failure 22: provenance survives — 8 visible provenance elements, 11 expanders, and
+  one-hop expansion verified on both an evidence entity and an agent node.
+
+**Proven in both directions.** `--defeat targets|provenance|theme` re-injects the pre-fix
+shape of each contract, and each defeat fails the checks that own it: `targets` reads the
+mode chip, Save & run, Run history and the theme toggle back at 28 px — the exact production
+defect N3 found; `provenance` empties the narrow column; `theme` hides the toggle.
+
+**Two false readings this probe produced before it was trustworthy**, both recorded because
+the next person to touch it will hit them:
+
+- Its first draft looked for `.ent` and `.ent [aria-expanded]`. The narrow column renders
+  `.activity-ent`, a different class token, and those entities *are* the expanders rather than
+  containing one. It reported "0 visible expanders" against a prototype with eleven.
+- Activating a node repaints `#overlay` wholesale, so the clicked element is detached
+  (`isConnected === false`) and keeps its pre-click attributes forever. Read through the held
+  reference, the one-hop check reported `false → false` on an expansion that worked. It
+  re-queries after the click now, and prints the detached flag so the trap stays visible.
+
+Both were false *negatives* — they would have sent the board a defect that did not exist.
+The denominator guard (T2a) is the matching protection in the other direction: under the
+`provenance` defeat, T2b alone still read "0/17 undersized" and only T2a's floor caught that
+the probe had lost two-thirds of its specimens.
+
 ## How to reproduce
 
 ```sh
@@ -723,6 +770,19 @@ swiftc -O docs/mockups/verify-webkit.swift -o /tmp/verify-webkit
 # §9 behaviour — what both probes are static for: the route firing, the filter
 # narrowing evidence while the summaries hold the projector's counts.
 (cd ui && npx vitest run src/components/run/RunColumn.test.tsx)
+
+# §9.5 — the same §11.6 contracts against the PROTOTYPE, the artifact Gate B pins.
+# Needs no ui/ build: it reads the pinned standalone and prints its sha256, so the
+# bytes measured can be checked against the bytes the card names. 15/15.
+swiftc -O docs/mockups/verify-webkit.swift -o /tmp/verify-webkit
+F=$(node docs/mockups/build-prototype-narrow-fixture.mjs | awk '/^fixture:/{print $2}')
+/tmp/verify-webkit "$F" --eval-async docs/mockups/webkit-probe-prototype-narrow.js
+
+# ...and the counterfactual: each defeat MUST fail the checks that own it.
+for d in targets provenance theme; do
+  F=$(node docs/mockups/build-prototype-narrow-fixture.mjs --defeat $d | awk '/^fixture:/{print $2}')
+  /tmp/verify-webkit "$F" --eval-async docs/mockups/webkit-probe-prototype-narrow.js
+done
 
 # §7.1 — the three channels §5.1 requires, counted in production
 grep -c 'cap-' ui/src/styles/*.css          # 0 0 0 — no border treatment ships (TNG-89F's)
