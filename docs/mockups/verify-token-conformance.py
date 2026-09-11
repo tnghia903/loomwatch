@@ -11,6 +11,11 @@ token or value drift; extras are reported but do not fail, since the app legitim
 shell metrics and Tailwind plumbing a static prototype has no need for.
 
     python3 docs/mockups/verify-token-conformance.py
+
+Run it from a full repo checkout. This gate measures the *implementation*, so one of its two
+inputs lives in `ui/` and is outside the `docs/` tree a Gate B pin extracts. Run against an
+extracted pin it cannot answer, and it says so (exit 2) rather than raising — an unreadable
+stack trace in a reviewer's terminal is indistinguishable from a real drift failure.
 """
 
 import collections
@@ -79,7 +84,36 @@ def check_primitives():
     return body
 
 
+def check_inputs():
+    """Refuse legibly when an input is absent, naming which side is missing and why.
+
+    The Gate B card lists this gate in a table headed "re-run against the pinned bytes."
+    It is the one row that cannot be: `SHIPPED` is production source, outside the `docs/`
+    tree `git archive <pin> docs` extracts. A reviewer working down that table from an
+    extracted pin used to get a `FileNotFoundError` traceback here, which reads exactly
+    like the gate finding something wrong with the artifact under review. It isn't — the
+    gate simply has nothing to measure there.
+    """
+    for label, path, why in (
+        ("approved", APPROVED, "the prototype tokens this gate measures against"),
+        ("shipped", SHIPPED, "production source, NOT part of a pinned `docs/` artifact"),
+    ):
+        if not path.exists():
+            print(f"CANNOT RUN — the {label} input is missing:\n    {path}\n    ({why})")
+            print(
+                "\nThis gate compares the shipped implementation against the approved "
+                "prototype tokens,\nso it needs both sides and only answers from a full repo "
+                "checkout. It is not a\nstatement about the pinned artifact, and this is not "
+                "a drift failure."
+            )
+            return False
+    return True
+
+
 def main():
+    if not check_inputs():
+        return 2
+
     approved, shipped = blocks(APPROVED), blocks(SHIPPED)
     failed = False
 

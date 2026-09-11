@@ -725,6 +725,11 @@ the probe had lost two-thirds of its specimens.
 ```sh
 # §1 and §2 — per-theme token diff, then the non-token primitives diff.
 # Exits non-zero on any missing token, value drift, or unexpected extra.
+# Run it from a full checkout: it reads ui/src/styles/tokens.css, which is production
+# source and is NOT inside the docs/ tree a Gate B pin extracts. Against an extracted pin
+# it exits 2 and says it cannot run — that is not a drift failure and not a finding
+# against the artifact. (Gate B's evidence table lists this row under "re-run against the
+# pinned bytes"; it is the one row that measures the implementation instead.)
 python3 docs/mockups/verify-token-conformance.py
 
 # §3 — reduced-motion coverage
