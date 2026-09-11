@@ -10,8 +10,13 @@
 - **Verdict:** **conformant** on the design-system layer (§§1–3), with one documentation gap
   in the vocabulary (§4). **Not conformant on the accessibility layer** — five §6 contracts
   were unmet on surfaces that ship today (§6) — all five have since been closed by TNG-158.
-  **Not conformant on the honesty layer** — four of five contracts are unmet, and the graph
-  can declare *"Complete capture"* of a run it has not finished observing (§7).
+  **Not conformant on the honesty layer** (§7) — five contracts were unmet; three closed
+  within the hour, and two remain: the graph can still declare *"Complete capture"* of a run
+  it has not finished observing, because the panel derives its own coverage instead of
+  reading the honest one the projector now publishes.
+- **Two sections are historical.** §6 and §7 record contracts and reasoning, and their
+  verdicts are the state at the moment of observation. `verify-a11y-conformance.mjs` (`5/5`)
+  and `verify-evidence-honesty.mjs` (`3/5`) are the current answer.
 
 This checks the implementation's *claims* against the approved design. It does not review
 code quality, and it does not touch the Gate B artifact — see §5.
@@ -131,7 +136,7 @@ same path at `83b4a49`. The gap in §4 is between the spec and an implementation
 does not cover; amending §4.2 now would invalidate a pinned artifact to fix a documentation
 gap, which is the wrong trade while the card is pending.
 
-## 6. Accessibility — FAIL, five contracts unmet on surfaces that ship today
+## 6. Accessibility — FAIL as audited; all five closed by TNG-158 the same day
 
 §§1–4 checked the design-*system* layer. This section checks the interaction layer:
 `docs/TNG89_INTERACTION.md` §6 (focus order, live regions, accessible names), which
@@ -202,7 +207,7 @@ most needs to hear are the four the implementation is most likely to swallow.
   shipped is `"Output response from <agent>, <phase>"` (`StoryNodes.tsx:82`). Both facts
   the contract requires are present. Wording variance, not a defect.
 
-## 7. Evidence quality — FAIL, the honesty layer is not built
+## 7. Evidence quality — FAIL as audited; three of five closed the same day
 
 §6 checked whether provenance can be *heard*. This section checks whether it tells the
 truth. The subject is `docs/TNG89_INTERACTION.md` §5 — the section the spec itself calls
@@ -216,15 +221,21 @@ implementation. Every rule below is asserted by `docs/mockups/verify-evidence-ho
 | B1 | §5.1 / CONTRACT §8.1 — `capture` is modelled | `events.ts` `interface Evidence` | **FAIL** |
 | B2 | §5.1 — the capture word is never omitted | panel row · `EvidenceNodeCard` · `RunColumn` | **PASS** (landed mid-audit) |
 | B3 | §5.2 — `partial` is reachable | `ProvenancePanel.coverageFor` | **FAIL** |
-| B4 | CONTRACT §12 — agents complete only on terminal evidence | `events.ts` `coverage.agents` | **FAIL** |
-| B5 | CONTRACT §12 — tools complete only when calls are paired | `events.ts` projection boundary | **FAIL** |
+| B4 | CONTRACT §12 — agents complete only on terminal evidence | `events.ts` `coverage.agents` | **PASS** (landed mid-audit) |
+| B5 | CONTRACT §12 — tools complete only when calls are paired | `events.ts` projection boundary | **PASS** (landed mid-audit) |
 
-> **Mid-audit change of state.** §7 was first written against the tree at commit `349207d`,
-> where all five failed. While it was being written, TNG-158 landed its accessibility fixes
-> in the same working tree and closed B2. The text below is stated as of **after** that
-> landing, and §7.1 records what changed and what it did not. The first draft of this
-> section claimed *"neither entity control carries a capture word"*; that was true when
-> observed and is no longer true. It has been corrected rather than left standing.
+> **The table above is a timestamp, not a scoreboard — run the gate.** §7 was written
+> against the tree at commit `349207d`, where all five failed. It was overtaken twice while
+> being written: TNG-158 landed and closed B2, then TNG-162 landed and closed B4 and B5,
+> going further than asked and publishing a real per-category `level` with stable reason
+> codes (`unpaired_calls`, `agents_awaiting_terminal_evidence`, `unprojectable_events`)
+> rather than patching the two counts. As of this commit the gate reads **3/5**, with B1 and
+> B3 open. Anything here that reads as a verdict is the state at the moment it was observed;
+> `node docs/mockups/verify-evidence-honesty.mjs` is the only current answer. The prose below
+> is kept in the present tense of its observation because the *contract* and the reasoning
+> are what this document is for, and those do not expire when a fix lands. Where a first
+> draft said something later made false — §7.1 claimed no entity control carried a capture
+> word — it has been corrected in place rather than left standing.
 
 ### 7.1 `capture` is announced but not modelled (B1, B2)
 
@@ -332,11 +343,18 @@ The good news is that the gap is small in code: B4 and B5 are satisfiable today 
 the projector already has. B1 and B3 need the level and `capture` to be carried, which is
 where this stops being the UI's decision alone.
 
-**Filed.** B2 was `TNG-158`'s and is closed; the ruling on what the capture word may
-honestly say is in that issue's `a1-capture-word-ruling` document. B3/B4/B5 are `TNG-162`.
-B1 is unowned — it is the modelling change that both of them work around, and it should be
-sequenced with whoever teaches the projector to publish a per-category level, since that is
-the same seam. The gate reads **1/5** today; `4/5` with only B1 open is TNG-162 done.
+**Filed, and mostly closed.** B2 was `TNG-158`'s; the ruling on what the capture word may
+honestly say is in that issue's `a1-capture-word-ruling` document. B3/B4/B5 are `TNG-162`,
+which closed B4 and B5 within the hour by doing the harder correct thing — the projector now
+publishes `level` + `reason` + `observed` per category instead of a count, which is what
+CONTRACT §12 actually asks for.
+
+**B3 is what is left of §7.2**, and it is now a one-sided gap rather than a design question:
+the projector publishes an honest level and `ProvenancePanel.coverageFor` still derives its
+own from `coverage[key] > 0`. The panel needs to read what it is being told. **B1** is the
+same seam on the entity axis — `capture` on `Evidence` rather than a word hardcoded at three
+call sites — and is worth taking in the same pass, since the projector is now already in the
+business of publishing epistemic quality.
 
 ### 7.3 Deliberately not counted as defects
 
