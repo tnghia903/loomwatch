@@ -1,5 +1,10 @@
 #!/usr/bin/env node
-/* TNG-90 acceptance probe — the twelve run/provenance states, asserted.
+/* TNG-90 acceptance probe — the thirteen run/provenance states, asserted.
+ *
+ * Twelve are the ones TNG-90's acceptance criteria name. The thirteenth is the
+ * finished-with-no-answer state (`missing_canonical_response`, §3.4), which
+ * TNG-166 forced into the prototype after the implementation invented a crash
+ * for it; §4b below owns it.
  *
  * Why this file exists alongside verify-prototype.mjs
  * ---------------------------------------------------
@@ -599,4 +604,4 @@ if (failures.length) {
   console.log('\nTNG-90 STATE GATE FAILED');
   process.exit(1);
 }
-console.log('\nTNG-90 STATE GATE OK — all twelve named states reachable and asserted');
+console.log('\nTNG-90 STATE GATE OK — all thirteen named states reachable and asserted');

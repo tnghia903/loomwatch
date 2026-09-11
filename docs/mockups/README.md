@@ -540,13 +540,16 @@ does not, the §7.1 range clamps at both ends, a drag at a zoom other than 1.0 s
 under the pointer, Fit frames a deliberately scattered graph inside the space the panels
 leave free, and the §8.1 mode popover explains the mode it is actually in.
 
-### TNG-90 state gate — the twelve named states, asserted on the screens that show them
+### TNG-90 state gate — the thirteen named states, asserted on the screens that show them
 
 ```
 node docs/mockups/verify-tng90-states.mjs
 ```
 
-TNG-90 requires twelve run and provenance states to be *demonstrated*. The gates above cannot
+TNG-90's acceptance criteria require twelve run and provenance states to be *demonstrated*; a
+thirteenth — finished-with-no-answer (`missing_canonical_response`, §3.4) — was added after
+TNG-166 found the implementation calling that outcome a crash, because a state the reference
+artifact never draws is a state an implementer has to invent. The gates above cannot
 see whether a reviewer can reach one: a state can be complete in the data tables and invisible
 on every screen, and a grep for its label passes either way, because the label is in the
 source. That is exactly how `dirty / Save & run` shipped missing — `COMPOSER.dirty` holds the

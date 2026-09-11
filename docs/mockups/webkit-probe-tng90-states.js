@@ -1,5 +1,9 @@
-/* WebKit probe — the twelve TNG-90 run/provenance states, in the engine the
+/* WebKit probe — the thirteen TNG-90 run/provenance states, in the engine the
  * board actually reviews in.
+ *
+ * Twelve are named by TNG-90's acceptance criteria; the thirteenth is
+ * finished-with-no-answer (`missing_canonical_response`, §3.4), added after
+ * TNG-166.
  *
  *   swiftc -O docs/mockups/verify-webkit.swift -o /tmp/verify-webkit
  *   /tmp/verify-webkit docs/mockups/prototype-standalone.html \
@@ -7,7 +11,7 @@
  *
  * Why this exists next to verify-tng90-states.mjs
  * -----------------------------------------------
- * That gate is the authority on these states and it passes 39/0. It drives
+ * That gate is the authority on these states and it passes 47/0. It drives
  * headless Chrome. Every board rejection on this prototype so far — the library
  * drag that started a text selection, the canvas nodes that would not move, the
  * view controls that answered nothing — was invisible to a Chrome gate and
@@ -458,6 +462,6 @@
 
   out.push(fails
     ? 'FAIL ' + fails + ' assertion(s) — the TNG-90 states do not hold in WebKit'
-    : 'PASS all twelve TNG-90 states hold in WebKit, the engine the board reviews in');
+    : 'PASS all thirteen TNG-90 states hold in WebKit, the engine the board reviews in');
   return out.join('\n');
 })()
