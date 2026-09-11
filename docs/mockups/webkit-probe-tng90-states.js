@@ -191,6 +191,48 @@
     'strip=' + !!strip + ' answerChars=' + answerChars);
   ok(/process_crashed/.test(stripText),
     'the daemon error is verbatim, with its stable code', JSON.stringify(stripText));
+  const agentStates = () => [...document.querySelectorAll('.node-task b')]
+    .filter(shown).map((el) => el.innerText.trim());
+  const partialAgents = agentStates();
+  /* Paired with the clean row asserted on `unanswered` below: this proves the
+     selector can see a failed agent, so `every(DONE)` there is an observation
+     rather than an empty NodeList quietly passing. */
+  ok(partialAgents.length > 0 && partialAgents.some((s) => /ERROR/i.test(s)),
+    'the crashed agent reports ERROR in the graph', JSON.stringify(partialAgents));
+  out.push('');
+
+  /* ---- 4b. Finished, no answer — §3.4's other failure shape ---------------
+     Added after TNG-166 caught the implementation reporting a clean run with
+     no answer as `process_crashed`. The spec always separated the two; the
+     prototype had only ever drawn the crash, so there was no rendered
+     reference to deviate from. */
+  out.push('NO ANSWER — §3.4, a run that finished clean and produced nothing');
+  go('unanswered');
+  const naStrip = [...document.querySelectorAll('.rt-strip.alert')].filter(shown);
+  const naStripText = naStrip.map((el) => el.innerText).join(' ~ ');
+  const naResponse = document.querySelector('.rt-response');
+  const naText = naResponse ? naResponse.innerText : '';
+  ok(/missing_canonical_response/.test(naStripText),
+    'the run reports missing_canonical_response', JSON.stringify(naStripText));
+  ok(!/process_crashed|crashed/i.test(naText),
+    'it is NOT reported as a crash (counterfactual)', JSON.stringify(naStripText));
+  const naBodies = [...document.querySelectorAll('.rt-response .rr-body')].filter(shown).length;
+  ok(naBodies === 0 && document.querySelectorAll('.rt-response .skel-bar').length === 0,
+    '§3.4: failed has no content, so the node is the strip', 'laid-out bodies=' + naBodies);
+  const naPlain = document.querySelector('.rt-response .rr-plain');
+  ok(!!naPlain && shown(naPlain) && /finished but no agent produced an answer/i.test(naPlain.innerText),
+    'the plain-language second line is on screen, below the verbatim code',
+    JSON.stringify(naPlain ? naPlain.innerText : ''));
+  const naActs = [...document.querySelectorAll('.rt-response .rr-acts button')]
+    .filter(shown).map((b) => b.innerText.trim());
+  ok(naActs.some((t) => /^Reuse$/i.test(t)), 'Reuse is offered as the action on the node',
+    JSON.stringify(naActs));
+  const naAgents = agentStates();
+  ok(naAgents.length > 0 && naAgents.every((s) => /DONE/i.test(s)),
+    'every agent exited clean, so the graph shows no error', JSON.stringify(naAgents));
+  ok([...document.querySelectorAll('.rt-chip')].filter(shown).length === 6,
+    'a run without an answer still reports its provenance',
+    'chips=' + [...document.querySelectorAll('.rt-chip')].filter(shown).length);
   out.push('');
 
   /* ---- 5. Reconnect — a transport gap that never rewrites run state -------

@@ -40,33 +40,40 @@ function anchor(name, match) {
 // redacted / unavailable. Interaction §5.1 then requires all four on three channels
 // (border, glyph, word), "and the word is never omitted to save space".
 //
-// B1 is the modelling contract, and it survives TNG-158. That issue landed the *word*
-// (B2) by hardcoding it: a module constant in the panel and a bare `recorded` literal
-// inside the template string of two other surfaces. The value is correct today — every
-// projected item is built from an accepted event — but it is asserted in three places
-// and typed in none, so the first `derived` or `redacted` entity makes two of those
-// three silently wrong with no compiler seam to catch it. Model it on the entity.
+// B1 — TNG-170 closed it; the check below is the re-anchored, stronger contract.
+// `capture` is modelled on the projection: the `Capture` type admits exactly CONTRACT
+// §8.1's four values, `interface Evidence` (and `ProjectedAgent`, whose agent rows on the
+// panel speak the same word) carries it, and the projector sets it from its one justified
+// invariant — every projected entity is built solely from accepted `RunEvent`s, which §8.1
+// defines as `recorded`. No code path emits `derived`, `redacted` or `unavailable` (the
+// last is a category-level fact, §5.1) and none is fabricated. The probe asserts both
+// halves — the field is on the entity, and the type names the four values — so a later
+// code path cannot start emitting a state the type has silently stopped admitting, and a
+// surface cannot regress to asserting the word locally: B2 now pins that too.
 const evidenceType = anchor('Evidence interface', events.match(/export interface Evidence \{[\s\S]*?\n\}/))
+const captureType = anchor('Capture type (CONTRACT §8.1 values)', events.match(/export type Capture = '[^\n]*/))
 check(
-  'B1', '§5.1 / CONTRACT §8.1 capture is modelled', `${EVENTS} interface Evidence`,
-  /\n\s*capture\b/.test(evidenceType),
-  'Evidence has no `capture` field; the word is hardcoded at three call sites instead, so CONTRACT §8.1\'s four states are unrepresentable and the one true value has no single source',
+  'B1', '§5.1 / CONTRACT §8.1 capture is modelled', `${EVENTS} type Capture + interface Evidence`,
+  /\n\s*capture\b/.test(evidenceType) && /'recorded'/.test(captureType) && /'derived'/.test(captureType) && /'redacted'/.test(captureType) && /'unavailable'/.test(captureType),
+  'Evidence must carry a `capture` field and `Capture` must admit exactly CONTRACT §8.1\'s four values — the word is then sourced from the projection, and §8.1\'s states stay representable',
 )
 
-// The word, on the three surfaces that render an entity control. Scoped to the controls
-// themselves — the panel's zone-head says "Not captured" about a *category*, which is
-// §5.2's coverage word and a different axis from an entity's capture state.
-// Case-insensitive: §5.1's table capitalizes the chip label, but inside an accessible
-// name ("tool: Fetch page #04, recorded") lowercase is the correct register, and §6.4's
-// format lowercases the kind beside it.
+// The word, on the three surfaces that render an entity control — read from the entity
+// rather than asserted locally. TNG-170 re-anchored B2 to this stronger contract: the
+// original shape (a capture-word literal at each surface) was exactly what let B1's
+// hardcoded constant go unnoticed, so the probe now pins each surface to interpolating
+// the entity's own `capture` field. The word's single source is the projector, and the
+// first genuinely `derived` or `redacted` entity flows through with no surface edit.
+// Scoped to the controls themselves — the panel's zone-head says "Not captured" about a
+// *category*, which is §5.2's coverage word and a different axis from an entity's capture
+// state.
 const entityRow = anchor('ProvenancePanel entity row', panel.match(/<button type="button" className="pop-row"[\s\S]*?<\/button>/))
 const evidenceCard = anchor('EvidenceNodeCard aria-label', nodes.match(/aria-label=\{`Inspect [^`]*`\}/))
 const columnCard = anchor('RunColumn evidence card aria-label', column.match(/aria-label=\{`Inspect [^`]*`\}/))
-const CAPTURE_WORD = /recorded|derived|redacted|not captured|captureWord/i
 check(
-  'B2', '§5.1 the word is never omitted', `${PANEL} entity row · ${NODES} EvidenceNodeCard · ${COLUMN} evidence card`,
-  [entityRow, evidenceCard, columnCard].every((source) => CAPTURE_WORD.test(source)),
-  'an entity control reaches the accessibility tree with no capture word, spending its one status channel on run status (succeeded/failed/running) — which answers a different question',
+  'B2', '§5.1 the word is never omitted, and its one source is the projection', `${PANEL} entity row · ${NODES} EvidenceNodeCard · ${COLUMN} evidence card`,
+  /aria-label=\{\`\$\{item\.kind\}: \$\{item\.name\}, \$\{item\.capture\}\`\}/.test(entityRow) && /,\s*\$\{evidence\.capture\},/.test(evidenceCard) && /,\s*\$\{item\.capture\},/.test(columnCard),
+  'each entity control must speak the capture word carried on the entity itself — a word asserted locally at the surface (constant or literal) is the defect B1 was: the first derived or redacted entity is silently mislabelled',
 )
 
 // --- §5.2 Coverage, and the word "complete" --------------------------------------------------

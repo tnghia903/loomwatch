@@ -10,17 +10,19 @@
 - **Verdict:** **conformant** on the design-system layer (§§1–3), with one documentation gap
   in the vocabulary (§4). **Not conformant on the accessibility layer** — five §6 contracts
   were unmet on surfaces that ship today (§6) — all five have since been closed by TNG-158.
-  **Not conformant on the honesty layer** (§7) — five contracts were unmet; three closed
-  within the hour and a fourth since, leaving the entity-level `capture` seam (B1) open and
-  now owned by its own issue `2b9a0e34` (§7.2). **Not conformant on the response layer**
-  (§8) — six §3.3–3.4 contracts were unmet, all six closed by TNG-166.
-- **B1 is the one conformance defect still open.** All three TNG-90 children are done and
-  `verify-evidence-honesty.mjs` still exits `1`; it does not block Gate B, which governs the
-  design (§5), not this implementation.
-- **Three sections are historical.** §6, §7 and §8 record contracts and reasoning, and
-  their verdicts are the state at the moment of observation. `verify-a11y-conformance.mjs`
-  (`5/5`), `verify-evidence-honesty.mjs` (`4/5`, B1 open) and
-  `verify-response-states.mjs` (`6/6`) are the current answer.
+  **Not conformant on the honesty layer** (§7) — five contracts were unmet; B2 closed within
+  the hour (TNG-158), B3/B4/B5 since (TNG-162), and the entity-level `capture` seam (B1) —
+  the one defect that had outlived all three children — closed by TNG-170 (§7.4). **Not
+  conformant on the response layer** (§8) — six §3.3–3.4 contracts were unmet, all six
+  closed by TNG-166. **Not conformant on the narrow layer** (§9) — four §11.6 contracts are
+  unmet below 768 px, and all four are open.
+- **§9 is the layer still open.** `verify-narrow-conformance.mjs` exits `1`; the other three
+  probes exit `0`. The four §9 contracts are owned by their own issue (§9.3). None of them
+  blocks Gate B, which governs the design (§5), not this implementation — but they are
+  disclosed on the card rather than hidden behind a green summary.
+- **Four sections are historical.** §6, §7, §8 and §9 record contracts and reasoning, and
+  their verdicts are the state at the moment of observation. The probes are the only current
+  answer — run them; do not read a count off this page.
 
 This checks the implementation's *claims* against the approved design. It does not review
 code quality, and it does not touch the Gate B artifact — see §5.
@@ -32,7 +34,10 @@ covering the one remaining layer TNG-89A puts an acceptance criterion on: eviden
 §§6–7 read only production source and add no bytes to the pinned prototype; §5 still holds.
 §8 was audited by the same probe discipline at `72c0ca4` — six §3.4 contracts on the
 response node, all open — and closed the same day by TNG-166; its backend half (the daemon
-emitting the code the strip now carries) is TNG-168's.
+emitting the code the strip now carries) is TNG-168's. §9 followed, on the one TNG-89A
+acceptance clause left unchecked: responsive behaviour below 768 px. Unlike §§6–8 it is
+*not* bytes-neutral on the prototype — §8's finding sent a thirteenth screen into the
+artifact, which is why §5 now opens by saying so.
 
 ## 1. Design tokens — PASS, zero drift
 
@@ -134,14 +139,27 @@ sub-kinds with their sizes and line contracts, and state the rollup explicitly.
 
 Tracked separately so it does not churn the pending Gate B artifact — see §5.
 
-## 5. What this does not touch
+## 5. What this touches — the artifact moved once, deliberately
 
-The Gate B confirmation card pinned to commit `83b4a49` is **unaffected and still valid**.
-`docs/mockups/prototype-standalone.html` on disk hashes
-`9b3391a603f8d81469d57beff9e83e96f0a31428346d7ab70166d603ba34e6e1`, byte-identical to the
-same path at `83b4a49`. The gap in §4 is between the spec and an implementation the card
-does not cover; amending §4.2 now would invalidate a pinned artifact to fix a documentation
-gap, which is the wrong trade while the card is pending.
+For §§1–4 and §§6–8 this held: those sections read only production source and added no bytes
+to the pinned prototype, so the Gate B card pinned to `83b4a49` stayed valid and reproducible
+against it. **§8 broke that, and it was right to.** TNG-166 found the implementation reporting
+a clean run that produced no answer as `process_crashed`. The spec had always separated the
+two (§3.4); the prototype had only ever *drawn* the crash. A state the reference artifact
+never draws is a state an implementer has to invent — so it got invented wrong. Fixing only
+the code would have left the artifact able to cause the same defect again.
+
+So the prototype gained a thirteenth screen, `#unanswered`, and
+`docs/TNG89_INTERACTION.md` §3.4 gained the paragraph it renders. The consequence is
+mechanical and must not be glossed: **`prototype-standalone.html` on disk is no longer the
+file at `83b4a49`.** It hashes `a339e26a…`, not the card's `9b3391a6…`. The pinned card is
+therefore not reproducible against the bytes a reviewer opens, and it under-describes the
+artifact by one screen. It was withdrawn and re-issued against the commit that carries this
+section rather than left pending — a card whose `shasum` step fails in the reviewer's own
+terminal is worse than no card.
+
+The §4 vocabulary gap is still not a reason to touch the artifact: that one is between the
+spec and an implementation the card does not cover.
 
 ## 6. Accessibility — FAIL as audited; all five closed by TNG-158 the same day
 
@@ -382,7 +400,8 @@ contracts without it — leaving B1 real, failing, and assigned to a closed issu
 TNG-90 children (TNG-158, TNG-162, TNG-166) are now done and `verify-evidence-honesty.mjs`
 still exits `1`, so the gap is not a scheduling artifact that the next child would have
 swept up. The scope boundary from §7.1 carries over: the new issue owns the **projection
-field only**; the border and glyph channels stay `TNG-89F`'s.
+field only**; the border and glyph channels stay `TNG-89F`'s. *(B1 has since closed —
+§7.4 records what closed it and how the probes were re-anchored.)*
 
 ### 7.3 Deliberately not counted as defects
 
@@ -405,6 +424,46 @@ field only**; the border and glyph channels stay `TNG-89F`'s.
   captured"*; shipped is *"Partial capture — nothing captured for skills and commands."*
   Both name the gaps in full with no truncation, which is what the contract requires.
   Wording variance, not a defect.
+
+### 7.4 What closed B1 (TNG-170)
+
+The projection now carries the field, and the word's single source moved from the
+surfaces to the projector:
+
+- **`capture` is modelled** (`events.ts`). `export type Capture = 'recorded' |
+  'derived' | 'redacted' | 'unavailable'` admits exactly §8.1's four values, and
+  `interface Evidence` carries it — as does `interface ProjectedAgent`, because §8.1 makes
+  `agent` an entity kind and the panel's agent rows speak the same word. The agent surface
+  is the one call site the old constant had that the issue's list of three did not name;
+  leaving it hardcoded would have recreated B1 one row over.
+- **The projector sets it from the one invariant it can justify.** The block comment at
+  the top of `projectRun` states the reasoning where it stays checkable: every projected
+  entity — agents and evidence alike — is built solely from accepted `RunEvent`s, which
+  §8.1 defines as exactly `recorded`, so `recorded` is the only value the projector sets.
+  No code path produces `derived` (nothing synthesises an entity from other entities'
+  evidence) or `redacted` (backend redaction is unimplemented, §7.3), and `unavailable`
+  stays a category-level fact published by coverage — the type admits all four, the
+  projector emits one, and fabricating any of the others is named in the comment as the
+  worse defect.
+- **No call site asserts a capture word.** The panel's `const captureWord = 'recorded'`
+  is gone: the panel rows read `item.capture` / `agent.capture`, and the canvas card
+  (`StoryNodes.tsx`) and its RunColumn variant read `evidence.capture` / `item.capture`.
+  A first genuinely `derived` or `redacted` entity is therefore named truthfully with no
+  surface edit — the compiler seam B1 lacked.
+
+**Re-anchored, not weakened.** B1's original selector was still live and passed with the
+field added; the probe was strengthened to also require the `Capture` type to name all
+four §8.1 values, so a later code path cannot start emitting a state the type has
+silently stopped admitting. B2 was re-anchored from "a capture-word literal is present"
+to "each surface interpolates the entity's own `capture` field" — the literal check was
+exactly what let the hardcoded constant go unnoticed. A1 (`verify-a11y-conformance.mjs`)
+was re-anchored the same way; the entity-name contract itself is unchanged.
+
+Verification: `node docs/mockups/verify-evidence-honesty.mjs` exits `0` — `5/5` for the
+first time since the audit (the a11y gate stays `5/5`; the UI suite, `tsc -b` and
+`oxlint` are clean). The border and glyph channels remain `TNG-89F`'s — §7.1's scope
+boundary carried over: a field on the projection is their precondition, not their
+replacement.
 
 ## 8. The response node — FAIL as audited; all six closed by TNG-166
 
@@ -485,6 +544,86 @@ suite is green (145 tests, including the new `projectRun` §4 classification cas
   kept." reflects the operator's own action back at them; it is not a daemon error being
   paraphrased.
 
+## 9. Narrow and responsive behaviour — FAIL, four contracts unmet below 768 px
+
+§11.6 is the last TNG-89A acceptance clause never checked against an implementation.
+AC #3 asks for *"light and black+gold dark themes, reduced motion, keyboard path, and
+responsive behavior."* Themes are §1, reduced motion is §3, the keyboard path is §6.
+Below 768 px is this section — and nothing had ever looked at it.
+
+`node docs/mockups/verify-narrow-conformance.mjs` reads production source and stylesheets
+under the same discipline as §§6–8: every rule anchored to a line a reviewer can open,
+`exit 2` if a selector drifts so a lost anchor can never read as a real failure.
+
+### 9.1 The four contracts
+
+- **N1 — the narrow column is missing three of its five stages.** §11.6 fixes the source
+  order: *"… Output / response → coverage → filters → summaries → selected evidence →
+  viewport-docked composer."* `RunColumn.tsx` renders the last of those and none of the
+  first three — zero occurrences of coverage, filters or summaries in the file. Selected
+  evidence is met (the column renders the activity entities, and `ActivityPanel` is the
+  overlay sheet §11.6 asks for). The three provenance stages before it have no counterpart
+  in the column at all.
+- **N2 — below 768 px the provenance panel cannot be opened. Failure 22.** `ProvenancePanel`
+  renders only while `provenanceOpen` (`Workspace.tsx:821`), and the one control that sets
+  it true is the Response node's toggle (`StoryNodes.tsx:87-88`) — which lives inside the
+  ReactFlow canvas that the narrow branch *replaces*. `toggleProvenance` appears nowhere in
+  `RunColumn.tsx`, and the command palette's action list carries no provenance entry. So
+  §4.1's six grouped summaries and §4.4's filters are unreachable at this width by pointer,
+  by palette, and by shortcut. Failure 22 names this outcome in as many words: *"Narrow mode
+  loses response/provenance selection, filtering… Fail."*
+- **N3 — the core actions are 28 and 32 px, not 44. Failure 21.** The core actions here are
+  the composer's Run / Save & run / Stop / Retry / New run (`.btn`, declared `height: 28px`),
+  the run-history opener and the theme toggle (`.iconbtn`, `32px`), and the mode chip
+  (`min-height: 32px`, pinned inside the narrow block itself). None of the three
+  `@media (max-width: 767px)` blocks lifts any of them. §11.6: *"The composition keeps
+  authored text sizes and 44 px targets."* These are **declared** values, not rendered
+  measurements — a declared 28 px cannot render as 44, so the failure is real without a
+  layout pass, while a rendered check would be the stronger confirmation of a fix.
+- **N4 — capture quality is spoken but never shown.** §11.6 concedes the edge geometry and
+  the library at this width, but not what they carried: *"cards continue to state owner,
+  event order/time, status, capture quality, and relationship."* Owner, order/time, status
+  and relationship are all on the face of the narrow card. Capture quality is not —
+  `item.capture` reaches the accessible name only, and `ActivityPanel.tsx` (the overlay
+  inspector, the other place §11.6 would accept it) contains the word zero times. Every
+  *visible* rendering of the §5 honesty layer lives in `ProvenancePanel`, which N2 shows
+  cannot be opened here. Below 768 px the honesty layer has no visible expression anywhere.
+
+**Confirmed in both directions.** The gate reads `0/4` against the tree and `4/4` against a
+scratch mirror of the same six files with the minimal shape of each fix applied, so none of
+the four is stuck-at-fail. That exercise earned its keep: N3's first draft took the
+*smallest* height any narrow rule declared for a selector, and `.mode-chip` is already pinned
+to `32px` inside a narrow block — so it would have kept reporting `32px` against a stylesheet
+someone had correctly fixed, telling an implementer their real fix had not worked. It now
+reads the last declaration in cascade order (`app.css` then `runtime.css`, which is
+`index.css`'s import order), and names specificity as the thing it still cannot see.
+
+### 9.2 Deliberately not counted as defects
+
+- **No whole-stage scaling.** Failure 21's first clause is met: the narrow branch swaps the
+  coordinate canvas for a source-ordered scrolling `.run-column`, rather than shrinking the
+  1600 × 1000 stage with a transform. This is the part §11.6 cared most about and it is
+  right.
+- **Theme switching is not hidden.** Failure 21's last clause is met — the theme toggle is
+  present and reachable at this width. It is merely undersized, which is counted once under
+  N3 rather than twice.
+- **The composer is not clipped.** It reflows (`flex-wrap`, the input taking its own row)
+  and stays viewport-docked; only `.comp-note`, a hint line and not an action, is hidden.
+- **Failures 19 and 20 are §6's**, not this section's, and TNG-158 closed them.
+
+### 9.3 Why this is one issue and not four
+
+N1, N2 and N4 are one defect seen from three sides: the provenance layer has no narrow
+route. Give the column a way to open the panel and N2 closes; the stages N1 wants and the
+capture quality N4 wants are then reachable, though each still needs its own placement
+decision. N3 is independent — a stylesheet gap that touches none of the others. They are
+filed together because splitting them would hand three agents the same first edit.
+
+Scope: **implementation only.** These are production-UI defects, and TNG-90 is design and
+prototype work — the fix is not mine to write. The prototype itself is not implicated:
+§11.6 was authored from it, and `#compose`/`#running`/`#answered`/`#trace`/`#unanswered`
+are not what fails here.
+
 ## How to reproduce
 
 ```sh
@@ -501,9 +640,13 @@ grep -n 'EntityKind =' ui/src/components/ui/glyphs.tsx
 grep -n 'EvidenceKind =' ui/src/lib/watch/events.ts
 sed -n '9,16p' ui/src/components/run/ProvenancePanel.tsx
 
-# §5 — artifact still matches the pinned commit
+# §5 — the artifact matches the commit the CURRENT Gate B card pins.
+# It no longer matches 83b4a49: §8 added the #unanswered screen. Both lines must agree,
+# and the right-hand commit is whichever one the pending card names.
 shasum -a 256 docs/mockups/prototype-standalone.html
-git show 83b4a49:docs/mockups/prototype-standalone.html | shasum -a 256
+git show HEAD:docs/mockups/prototype-standalone.html | shasum -a 256
+# and the standalone is a build product — it must rebuild to the same bytes
+node docs/mockups/build-standalone.mjs && shasum -a 256 docs/mockups/prototype-standalone.html
 
 # §6 — accessibility contracts. Exits 1 while any of A1–A5 is open, 0 when all are closed,
 # and 2 if a selector has drifted (so a lost anchor can never read as a real failure).
@@ -515,15 +658,20 @@ node docs/mockups/verify-evidence-honesty.mjs
 # §8 — response-node contracts. Same exit convention, D1–D6.
 node docs/mockups/verify-response-states.mjs
 
+# §9 — narrow/responsive contracts below 768 px. Same exit convention, N1–N4.
+# This one currently exits 1: all four are open. See §9.3 for the owning issue.
+node docs/mockups/verify-narrow-conformance.mjs
+
 # §7.1 — the three channels §5.1 requires, counted in production
-grep -c 'cap-' ui/src/styles/*.css          # 0 0 0 — no border treatment ships
-grep -n 'capture' ui/src/lib/watch/events.ts # no field on interface Evidence
+grep -c 'cap-' ui/src/styles/*.css          # 0 0 0 — no border treatment ships (TNG-89F's)
+grep -n 'Capture =' ui/src/lib/watch/events.ts # §8.1's four values, admitted by the type;
+                                               # the projector emits `recorded` (TNG-170)
 
 # §7.2 — coverage for agents is the headcount under another name
 sed -n '525,532p' ui/src/lib/watch/events.ts
 ```
 
-Both gates assert contracts rather than today's state, so a run that reports `5/5` is the
-signal that the section can be struck — not a signal that the probe drifted. Each check was
-also confirmed in the other direction: applying the minimal shape of its fix flips it to
-`PASS`, so none of the ten is stuck-at-fail.
+Every gate here asserts contracts rather than today's state, so a gate that goes green is
+the signal that its section can be struck — not a signal that the probe drifted. Each check
+was also confirmed in the other direction: applying the minimal shape of its fix flips it to
+`PASS`, so none of them is stuck-at-fail.

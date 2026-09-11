@@ -53,16 +53,22 @@ function anchor(name, match) {
 // Entity — "<kind>: <name>, <capture word>" + the reason when `unavailable` (the panel
 // renders the reason sentence for an unavailable category, where there are no rows to
 // name). Asserted on every surface that renders the entity control: the panel row (A1's
-// original anchor), the canvas EvidenceNodeCard and its RunColumn variant. The panel's
-// capture word is the `captureWord` constant; the cards inline `recorded`.
-const captureWord = anchor('ProvenancePanel capture word', panel.match(/const captureWord = 'recorded'/))
+// original anchor), the canvas EvidenceNodeCard and its RunColumn variant.
+//
+// TNG-170 re-anchoring — the contract is unchanged; these selectors moved with the fix:
+// the capture word stopped being asserted at the surface (a panel constant plus two
+// inline `recorded` literals) and is now carried by the entity itself — the projector
+// sets `capture` on the projection (CONTRACT §8.1's accepted-event invariant) and every
+// surface interpolates it. A stronger anchor than the constant it replaces: the word's
+// one source is the projection, so a first genuinely `derived` or `redacted` entity is
+// named truthfully with no surface edit, and a surface cannot regress to a local word.
 const entityRow = anchor('ProvenancePanel entity row', panel.match(/<button type="button" className="pop-row"[^>]*>/))
-const evidenceCard = anchor('StoryNodes EvidenceNodeCard label', story.match(/aria-label=\{`Inspect \$\{evidence\.kind\}: \$\{evidence\.name\}, recorded,/))
-const columnCard = anchor('RunColumn evidence card label', column.match(/aria-label=\{`Inspect \$\{item\.kind\}: \$\{item\.name\}, recorded,/))
+const evidenceCard = anchor('StoryNodes EvidenceNodeCard label', story.match(/aria-label=\{`Inspect \$\{evidence\.kind\}: \$\{evidence\.name\}, \$\{evidence\.capture\},/))
+const columnCard = anchor('RunColumn evidence card label', column.match(/aria-label=\{`Inspect \$\{item\.kind\}: \$\{item\.name\}, \$\{item\.capture\},/))
 check(
   'A1', '§6.4 entity name', `${PANEL} entity row · ${STORY} EvidenceNodeCard · ${COLUMN} evidence card`,
-  /aria-label=\{\`\$\{item\.kind\}: \$\{item\.name\}, \$\{captureWord\}\`\}/.test(entityRow) && Boolean(captureWord) && Boolean(evidenceCard) && Boolean(columnCard),
-  'entity names must read "<kind>: <name>, <capture word>" — a kind, a name or the capture word is missing from the accessibility tree on the panel row, the canvas card or its RunColumn variant',
+  /aria-label=\{\`\$\{item\.kind\}: \$\{item\.name\}, \$\{item\.capture\}\`\}/.test(entityRow) && Boolean(evidenceCard) && Boolean(columnCard),
+  'entity names must read "<kind>: <name>, <capture word>" — a kind, a name or the capture word (sourced from the entity\'s own `capture` field) is missing from the accessibility tree on the panel row, the canvas card or its RunColumn variant',
 )
 
 // Summary chip — "<category>, <n> entities, <coverage word>".

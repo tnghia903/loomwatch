@@ -317,6 +317,40 @@ something and needs to know not to trust all of it.
   `missing_canonical_response` gets the plain-language second line *"The run finished but no
   agent produced an answer."*
 
+```
+┌──────────────────────────────────────────┐
+│ ! Run failed.                     ⤢  ⋯   │
+│ RESPONSE · author                        │  no body — there is nothing to show
+│ ──────────────────────────────────────── │
+│ Run finished with no canonical response. │  alert strip, verbatim + code
+│   missing_canonical_response             │
+│ The run finished but no agent produced   │  plain-language line, additive
+│ an answer.                               │
+│ [ Reuse ]                                │
+└──────────────────────────────────────────┘
+```
+
+**`failed` is not a crash, and must never borrow a crash's vocabulary.** These are two
+different facts with two different stable codes: `process_crashed` says a process died;
+`missing_canonical_response` says every agent exited cleanly and none of them wrote the
+answer. Reusing the crash code for the second sends the operator hunting a dead process that
+never existed — the most expensive kind of wrong answer, because it is actionable and false.
+The agent row on this screen is deliberately **identical to a successful run**; the only
+difference in the whole view is the Response node, which is exactly why that node has to
+carry the distinction on its own.
+
+The plain-language line is **additive** — it sits below the verbatim message and its code,
+never instead of them. `§16`'s rule holds: LoomWatch explains a daemon error without
+paraphrasing it away.
+
+> Prototype: `#unanswered` (deep link `prototype-standalone.html#unanswered`, also
+> `#unanswered,light`). Added in response to `TNG-166`, which found the implementation
+> reporting a clean run with no answer as `process_crashed`. The rule above was already
+> written here; what was missing was a **rendered** reference for it, and a state the
+> prototype never draws is a state an implementer has to invent. Both gates now assert the
+> distinction with its counterfactual — see `verify-tng90-states.mjs` §4b and
+> `webkit-probe-tng90-states.js`.
+
 ---
 
 ## 4. Provenance

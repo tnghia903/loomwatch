@@ -294,6 +294,61 @@ try {
     `strip=${partial.strip} answerChars=${partial.answerChars}`);
   check('partial failure — the daemon error is verbatim, with its stable code',
     /process_crashed/.test(partial.stripText), JSON.stringify(partial.stripText));
+  /* Read the agent row here too. This is the paired half of the "no answer"
+     contract below: it proves the selector can *see* a failed agent, so the
+     clean row asserted on `unanswered` is a real observation and not an empty
+     NodeList quietly satisfying an `every()`. */
+  const agentStatesOf = `[...document.querySelectorAll('.node-task b')].map((el) => el.innerText.trim())`;
+  const partialAgents = await evaluate(agentStatesOf);
+  check('partial failure — the crashed agent reports ERROR in the graph',
+    partialAgents.length > 0 && partialAgents.some((s) => /ERROR/i.test(s)),
+    JSON.stringify(partialAgents));
+
+  /* ---------------------------------------------------------------------
+     4b. Finished, no answer — §3.4's OTHER failure shape.
+
+     This block exists because of TNG-166, which caught the implementation
+     reporting a clean run with no answer as `process_crashed`. The spec had
+     always separated the two; the prototype had only ever *drawn* the crash,
+     so there was no rendered reference to deviate from. The contracts below
+     are deliberately counterfactual — it is not enough that the right code
+     appears, the crash vocabulary must be absent from the same screen.
+     --------------------------------------------------------------------- */
+  await navigate('unanswered');
+  const visibleAlert = `[...document.querySelectorAll('.rt-strip.alert')]
+    .filter((el) => el.offsetParent !== null)`;
+  const noAnswer = await evaluate(`({
+    stripText: ${visibleAlert}.map((el) => el.innerText).join(' ~ '),
+    responseText: document.querySelector('.rt-response')?.innerText || '',
+    bodies: document.querySelectorAll('.rt-response .rr-body').length,
+    skeletons: document.querySelectorAll('.rt-response .skel-bar').length,
+    plain: document.querySelector('.rt-response .rr-plain')?.innerText || '',
+    actions: [...document.querySelectorAll('.rt-response .rr-acts button')]
+      .map((b) => b.innerText.trim()),
+    agentStates: ${agentStatesOf},
+    categories: document.querySelectorAll('.rt-chip').length
+  })`);
+  check('no answer — the run reports missing_canonical_response',
+    /missing_canonical_response/.test(noAnswer.stripText), JSON.stringify(noAnswer.stripText));
+  check('no answer — it is NOT reported as a crash (counterfactual)',
+    !/process_crashed|crashed/i.test(noAnswer.responseText), JSON.stringify(noAnswer.stripText));
+  check('no answer — §3.4: failed has no content, so the node is the strip',
+    noAnswer.bodies === 0 && noAnswer.skeletons === 0,
+    `bodies=${noAnswer.bodies} skeletons=${noAnswer.skeletons}`);
+  check('no answer — the plain-language second line is present and additive',
+    /finished but no agent produced an answer/i.test(noAnswer.plain)
+      && /missing_canonical_response/.test(noAnswer.stripText),
+    JSON.stringify(noAnswer.plain));
+  check('no answer — Reuse is offered as the action on the node',
+    noAnswer.actions.some((t) => /^Reuse$/i.test(t)), JSON.stringify(noAnswer.actions));
+  /* The heart of it: nothing crashed. If any agent reported ERROR here the
+     screen would be telling the operator to hunt a dead process that never
+     existed — the exact wrong answer TNG-166 found in the implementation. */
+  check('no answer — every agent exited clean, so the graph shows no error',
+    noAnswer.agentStates.length > 0 && noAnswer.agentStates.every((s) => /DONE/i.test(s)),
+    JSON.stringify(noAnswer.agentStates));
+  check('no answer — a run without an answer still reports its provenance',
+    noAnswer.categories === 6, `categories=${noAnswer.categories}`);
 
   /* ---------------------------------------------------------------------
      5. Reconnect — a transport gap that never rewrites the run state.

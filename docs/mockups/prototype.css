@@ -1393,6 +1393,20 @@ table.sys td b { color: var(--color-ink); font-weight: 500; }
 .rt-strip.alert { box-shadow: inset 3px 0 0 var(--color-alert); color: var(--color-ink-2); }
 .rt-strip .wm { font: 400 11px/15px var(--font-mono); color: var(--color-ink-2); flex: none; }
 
+/* `failed` — §3.4. No content exists, so the node IS the strip. The strip keeps
+   the daemon's verbatim message and stable code; the plain-language line below
+   is the design's, and is additive — it explains, it never replaces or
+   paraphrases what the daemon said. */
+.rt-response .rr-only { border-top: none; }
+.rt-response .rr-plain {
+  padding: 0 var(--sp-4) var(--sp-3) calc(var(--sp-4) + 3px);
+  color: var(--color-ink-3);
+}
+.rt-response .rr-acts {
+  display: flex; gap: var(--sp-2);
+  padding: 0 var(--sp-4) var(--sp-4);
+}
+
 /* ---------------------------------------------------------------------------
    PROVENANCE — summaries, entities, capture states (TNG89 §4, §5)
    --------------------------------------------------------------------------- */
