@@ -9,15 +9,18 @@
   `docs/decisions/0009-prompt-to-output-workspace-shipped.md` (uncommitted working tree)
 - **Verdict:** **conformant** on the design-system layer (§§1–3), with one documentation gap
   in the vocabulary (§4). **Not conformant on the accessibility layer** — five §6 contracts
-  are unmet on surfaces that ship today (§6).
+  were unmet on surfaces that ship today (§6) — all five have since been closed by TNG-158.
+  **Not conformant on the honesty layer** — four of five contracts are unmet, and the graph
+  can declare *"Complete capture"* of a run it has not finished observing (§7).
 
 This checks the implementation's *claims* against the approved design. It does not review
 code quality, and it does not touch the Gate B artifact — see §5.
 
 **Revision history.** §§1–5 were written 2026-09-11 and published at commit `818dbef`; §6 was
 added the same day, after the token pass, when the interaction layer — a TNG-89A acceptance
-criterion that had never been checked against an implementation — was audited. §6 reads only
-production source and adds no bytes to the pinned prototype; §5 still holds.
+criterion that had never been checked against an implementation — was audited. §7 followed,
+covering the one remaining layer TNG-89A puts an acceptance criterion on: evidence quality.
+§§6–7 read only production source and add no bytes to the pinned prototype; §5 still holds.
 
 ## 1. Design tokens — PASS, zero drift
 
@@ -199,6 +202,164 @@ most needs to hear are the four the implementation is most likely to swallow.
   shipped is `"Output response from <agent>, <phase>"` (`StoryNodes.tsx:82`). Both facts
   the contract requires are present. Wording variance, not a defect.
 
+## 7. Evidence quality — FAIL, the honesty layer is not built
+
+§6 checked whether provenance can be *heard*. This section checks whether it tells the
+truth. The subject is `docs/TNG89_INTERACTION.md` §5 — the section the spec itself calls
+*"the honesty layer"* — read against its two upstream authorities,
+`docs/RUN_PROVENANCE_CONTRACT.md` §8.1 (`capture`) and §12 (the capture-coverage matrix).
+TNG-89A lists §5 as an acceptance criterion. Like §6, it had never been checked against an
+implementation. Every rule below is asserted by `docs/mockups/verify-evidence-honesty.mjs`.
+
+| ID | Spec | Surface | Result |
+|---|---|---|---|
+| B1 | §5.1 / CONTRACT §8.1 — `capture` is modelled | `events.ts` `interface Evidence` | **FAIL** |
+| B2 | §5.1 — the capture word is never omitted | panel row · `EvidenceNodeCard` · `RunColumn` | **PASS** (landed mid-audit) |
+| B3 | §5.2 — `partial` is reachable | `ProvenancePanel.coverageFor` | **FAIL** |
+| B4 | CONTRACT §12 — agents complete only on terminal evidence | `events.ts` `coverage.agents` | **FAIL** |
+| B5 | CONTRACT §12 — tools complete only when calls are paired | `events.ts` projection boundary | **FAIL** |
+
+> **Mid-audit change of state.** §7 was first written against the tree at commit `349207d`,
+> where all five failed. While it was being written, TNG-158 landed its accessibility fixes
+> in the same working tree and closed B2. The text below is stated as of **after** that
+> landing, and §7.1 records what changed and what it did not. The first draft of this
+> section claimed *"neither entity control carries a capture word"*; that was true when
+> observed and is no longer true. It has been corrected rather than left standing.
+
+### 7.1 `capture` is announced but not modelled (B1, B2)
+
+CONTRACT §8.1 makes `capture` a property of every entity, with four values and an exact
+meaning each: `recorded` (explicit protocol or adapter evidence), `derived` (deterministic
+relationship from recorded evidence), `redacted` (evidence exists, public fields removed by
+policy), `unavailable` (not emitted, unsupported, malformed, or dropped by a declared
+limit). §5.1 then puts all four on three channels — border, glyph **and** word — and says
+the word *"is never omitted to save space."*
+
+Of those three channels, exactly one now exists.
+
+- **Word — present (B2).** TNG-158 put it in the accessibility tree on all three surfaces
+  that render an entity control: the panel row (`ProvenancePanel.tsx:98`), the canvas
+  `EvidenceNodeCard` (`StoryNodes.tsx:59`) and `RunColumn.tsx:68`. The word is `recorded`,
+  and it is the **correct** word: the projector's only input is an accepted `RunEvent`, and
+  CONTRACT §8.1 defines `recorded` as exactly *"explicit protocol or adapter evidence."*
+  The comment at `ProvenancePanel.tsx:42-45` states that reasoning, which is what makes it
+  checkable rather than assumed. This is the honesty layer's first working channel.
+- **Border — absent.** The approved prototype ships `.cap-recorded` / `.cap-derived` /
+  `.cap-redacted` (`docs/mockups/prototype.css:1437-1446`), including the diagonal hatch
+  that says *"there is something here you are not being shown."* `grep -c 'cap-'
+  ui/src/styles/*.css` is **0** across all three production stylesheets.
+- **Glyph — absent.** `StatusGlyph` on every surface renders *run* status: succeeded /
+  failed / running. That answers a different question — whether the tool call worked, not
+  whether LoomWatch saw it.
+
+**B1 is what remains, and TNG-158 sharpened it rather than closing it.** The word is now
+asserted in three places and typed in none: a module constant at `ProvenancePanel.tsx:46`,
+and a bare `recorded` literal inside the template string of `StoryNodes.tsx:59` and
+`RunColumn.tsx:68`. `interface Evidence` (`ui/src/lib/watch/events.ts:110`) still has no
+`capture` field, so CONTRACT §8.1's other three states are unrepresentable, and the first
+entity that is genuinely `derived` or `redacted` makes two of those three call sites
+silently wrong with no compiler seam to catch it. The value is right; the **shape** is the
+thing that will not survive redaction landing.
+
+Recorded as a *mild* defect, deliberately. Behaviourally the constant and the field are
+identical today, and the uniform value is honest — which is why the a11y contract could
+close ahead of the modelling one. The cost is latent, not live.
+
+§5.1 cites `TNG-89F` as the origin of the requirement, and the border and glyph treatments
+are fairly TNG-89F's to ship on the expandable canvas. B1 is not TNG-89F's: a field on the
+projection is the precondition for every surface, present and future, and it is also what
+would let §7.2's coverage stop guessing.
+
+**A note on how this was avoided.** TNG-158's implementer and this audit reached the same
+ruling independently and within the same hour — `recorded`, justified from the accepted-event
+invariant, with `unavailable` left at the category level and no code path emitting `derived`
+or `redacted`. That was the outcome worth protecting: a fabricated capture word would have
+been a worse defect than the silent one it replaced, because it would have put a false claim
+about evidence quality on the one surface whose entire job is not to make them.
+
+### 7.2 The graph can claim capture it has not achieved (B3, B4, B5)
+
+CONTRACT §12: *"Each category publishes `level: complete|partial|unavailable` … A
+graph-level 'complete' label is allowed only when every requested category is complete."*
+§5.2 restates it as the sentence that keeps the view honest.
+
+Production does not read a published level. `ProvenancePanel.coverageFor` (line 32)
+computes one:
+
+```ts
+return projection.coverage[key] > 0 ? 'complete' : 'unavailable'
+```
+
+Three defects follow from that one line.
+
+**B3 — `partial` is unreachable.** The expression has no `partial` branch, so the middle
+level never occurs. `CoverageGlyph`'s half-dot (`glyphs.tsx:133`) and the panel's
+`` `${listNames(labels)} partial` `` clause (line 47) are dead code: correct, reviewed, and
+unrenderable. The contract names two paths that must produce it — §10's `projection_limit`
+(*"coverage becomes partial"*) and §11's malformed event (*"graph skips it and coverage is
+partial"*). Both currently surface as `complete`, because the surviving evidence still
+counts above zero. A run that silently lost entities to a limit is indistinguishable from
+one that lost nothing.
+
+**B4 — a spawned agent is treated as a finished one.** §12's agents row is complete only
+*"when every spawned agent has identity and terminal evidence."* `coverage.agents` is
+`list.length` (`events.ts:530`) — byte-identical to `totals.agents` on line 527, which is
+the headcount. Coverage for agents *is* the headcount under another name. So agents reads
+`complete` from the first spawn, while every agent is still running. The terminal facts
+are already projected and one field away: `ProjectedAgent.exitCode` and `.stopReason`
+(`events.ts:102-103`) are never consulted by the coverage path.
+
+**B5 — an unpaired tool call counts as a captured one.** §12's tools row is complete only
+when *"every call is paired or terminally failed."* The projector does track unpaired
+calls — and then discards the field at the boundary:
+
+```ts
+agents: list.map(({ streaming: _s, thinking: _t, turnText: _x, openCalls: _o, handedOff: _h, ...agent }) => agent)
+```
+
+`openCalls` is computed per agent and stripped on the way out, so the single fact that
+decides tools coverage is produced and thrown away by the same function.
+
+**What this reads as on screen.** The header (`ProvenancePanel.tsx:55`) consults only the
+six derived levels; it never consults `projection.phase`. Its tooltip — *"Complete for
+what the adapters can observe"* — is the honest scoping sentence §5.2 asks for, attached
+to a label that has not earned it. Once a run has produced at least one item in each of
+the six categories, the panel says **"Complete capture"**, and it will say so while the
+run is still streaming, while calls sit unpaired, and after a trace limit has dropped
+entities. That is the precise overclaim §5.2 was written to forbid.
+
+The good news is that the gap is small in code: B4 and B5 are satisfiable today from facts
+the projector already has. B1 and B3 need the level and `capture` to be carried, which is
+where this stops being the UI's decision alone.
+
+**Filed.** B2 was `TNG-158`'s and is closed; the ruling on what the capture word may
+honestly say is in that issue's `a1-capture-word-ruling` document. B3/B4/B5 are `TNG-162`.
+B1 is unowned — it is the modelling change that both of them work around, and it should be
+sequenced with whoever teaches the projector to publish a per-category level, since that is
+the same seam. The gate reads **1/5** today; `4/5` with only B1 open is TNG-162 done.
+
+### 7.3 Deliberately not counted as defects
+
+- **The empty-category reasons are right, and they are the part that works.**
+  `EMPTY_REASONS` (`ProvenancePanel.tsx:20-27`) gives each category a real reason rather
+  than a restatement of its count — *"Commands appear only when the adapter reports an
+  `execute` tool kind"*, *"Prompt or filesystem presence alone is never treated as use."*
+  That is exactly §5.1's *"an honest boundary"* requirement, met. `unavailable` at the
+  **category** level is conformant; B1/B2 are about the **entity** level.
+- **No keyhole.** §5.1 forbids hover-to-reveal or "request access" on a redacted node.
+  Nothing in production offers one — trivially, since nothing is redacted, but the
+  affordance is also absent by construction. Recorded so a future implementation does not
+  reintroduce it.
+- **Backend redaction is unimplemented** (`grep -ri redact crates/loomwatch-backend/src`
+  is empty) against ADR 0005 §7's fail-closed policy. Real, but a backend contract gap,
+  not a design-conformance finding, and out of this audit's scope. It does mean `redacted`
+  genuinely cannot occur today — which is why B1's fix can ship honestly with a narrow
+  set of reachable values rather than waiting on the full four.
+- **Gap-clause wording.** §5.2's example reads *"Partial capture — skills and commands not
+  captured"*; shipped is *"Partial capture — nothing captured for skills and commands."*
+  Both name the gaps in full with no truncation, which is what the contract requires.
+  Wording variance, not a defect.
+
 ## How to reproduce
 
 ```sh
@@ -222,4 +383,19 @@ git show 83b4a49:docs/mockups/prototype-standalone.html | shasum -a 256
 # §6 — accessibility contracts. Exits 1 while any of A1–A5 is open, 0 when all are closed,
 # and 2 if a selector has drifted (so a lost anchor can never read as a real failure).
 node docs/mockups/verify-a11y-conformance.mjs
+
+# §7 — evidence-quality contracts. Same exit convention, B1–B5.
+node docs/mockups/verify-evidence-honesty.mjs
+
+# §7.1 — the three channels §5.1 requires, counted in production
+grep -c 'cap-' ui/src/styles/*.css          # 0 0 0 — no border treatment ships
+grep -n 'capture' ui/src/lib/watch/events.ts # no field on interface Evidence
+
+# §7.2 — coverage for agents is the headcount under another name
+sed -n '525,532p' ui/src/lib/watch/events.ts
 ```
+
+Both gates assert contracts rather than today's state, so a run that reports `5/5` is the
+signal that the section can be struck — not a signal that the probe drifted. Each check was
+also confirmed in the other direction: applying the minimal shape of its fix flips it to
+`PASS`, so none of the ten is stuck-at-fail.
