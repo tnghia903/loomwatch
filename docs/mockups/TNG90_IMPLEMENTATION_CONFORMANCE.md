@@ -17,7 +17,7 @@
   closed by TNG-166. **Not conformant on the narrow layer** (§9) — four §11.6 contracts are
   unmet below 768 px, and all four are open.
 - **§9 is the layer still open.** `verify-narrow-conformance.mjs` exits `1`; the other three
-  probes exit `0`. The four §9 contracts are owned by their own issue (§9.3). None of them
+  probes exit `0`. The four §9 contracts are owned by **TNG-173** (§9.3). None of them
   blocks Gate B, which governs the design (§5), not this implementation — but they are
   disclosed on the card rather than hidden behind a green summary.
 - **Four sections are historical.** §6, §7, §8 and §9 record contracts and reasoning, and
@@ -611,7 +611,10 @@ reads the last declaration in cascade order (`app.css` then `runtime.css`, which
   and stays viewport-docked; only `.comp-note`, a hint line and not an action, is hidden.
 - **Failures 19 and 20 are §6's**, not this section's, and TNG-158 closed them.
 
-### 9.3 Why this is one issue and not four
+### 9.3 Owner — TNG-173, and why it is one issue and not four
+
+All four contracts are owned by **TNG-173** (Web UI Engineer), filed as a child of TNG-90 so
+that closing the parent cannot quietly orphan them, and explicitly *not* blocking it.
 
 N1, N2 and N4 are one defect seen from three sides: the provenance layer has no narrow
 route. Give the column a way to open the panel and N2 closes; the stages N1 wants and the
