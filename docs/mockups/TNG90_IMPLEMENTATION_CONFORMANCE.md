@@ -233,7 +233,7 @@ most needs to hear are the four the implementation is most likely to swallow.
   shipped is `"Output response from <agent>, <phase>"` (`StoryNodes.tsx:82`). Both facts
   the contract requires are present. Wording variance, not a defect.
 
-## 7. Evidence quality — FAIL as audited; four of five closed, B1 open and re-owned
+## 7. Evidence quality — FAIL as audited; all five closed, B1 last by TNG-170
 
 §6 checked whether provenance can be *heard*. This section checks whether it tells the
 truth. The subject is `docs/TNG89_INTERACTION.md` §5 — the section the spec itself calls
@@ -255,9 +255,11 @@ implementation. Every rule below is asserted by `docs/mockups/verify-evidence-ho
 > being written: TNG-158 landed and closed B2, then TNG-162 landed and closed B4 and B5,
 > going further than asked and publishing a real per-category `level` with stable reason
 > codes (`unpaired_calls`, `agents_awaiting_terminal_evidence`, `unprojectable_events`)
-> rather than patching the two counts. B3 has since closed as well, leaving exactly B1 — run
-> the gate for the number; this note deliberately no longer carries one, having been wrong
-> twice. Anything here that reads as a verdict is the state at the moment it was observed;
+> rather than patching the two counts. B3 has since closed as well, and TNG-170 has since
+> closed B1 — so every row in the table above now reads PASS, and this note has been
+> overtaken a third time. Run the gate for the number; this note deliberately no longer
+> carries one, having now been wrong three times. Anything here that reads as a verdict is
+> the state at the moment it was observed;
 > `node docs/mockups/verify-evidence-honesty.mjs` is the only current answer. The prose below
 > is kept in the present tense of its observation because the *contract* and the reasoning
 > are what this document is for, and those do not expire when a fix lands. Where a first
