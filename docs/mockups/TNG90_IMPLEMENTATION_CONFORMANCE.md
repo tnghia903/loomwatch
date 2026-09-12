@@ -810,11 +810,11 @@ never checked against an implementation** — §§6–9 each took an acceptance 
 took the section the spec opens with. `node docs/mockups/verify-composer-conformance.mjs`
 reads production source under the same discipline as §§6–9: every rule anchored to a line a
 reviewer can open, `exit 2` if a selector drifts, so a lost anchor can never read as a real
-failure. It reads **5/13**.
+failure. **As audited it read 5/13**; it reads 14/14 as of `e264610` and TNG-194.
 
-Three of the eight are ordinary geometry and wording. Five are not: they are the clauses
-§1 spends its prose defending — the two-step legibility of `Save & run`, one start key per
-attempt, and the revision the run actually executes.
+Three of the eight it found were ordinary geometry and wording. Five were not: they were the
+clauses §1 spends its prose defending — the two-step legibility of `Save & run`, one start
+key per attempt, and the revision the run actually executes.
 
 ### 10.1 The eight contracts that were open
 
@@ -896,10 +896,21 @@ holds and the pending Gate B card is unaffected — the hash is unchanged by thi
 
 The owner was to be the **Web UI Engineer**, who is in `error` (`opencode_local` out of
 OpenRouter credits, last heartbeat 2026-09-11T16:28Z) — the fleet-funding problem already in
-front of the board on TNG-136/TNG-98. In the event the work did not wait for that: the **Rust
-Systems Engineer** closed C1–C9 and the daemon half on TNG-194/TNG-195 on 2026-09-12, which is
-what §10.3 meant by *the contracts will still be true whenever an owner can act* — they were
-written so that any funded owner could pick them up, and one did.
+front of the board on TNG-136/TNG-98. In the event the work did not wait for that, and it was
+split the way §10.3 proposed:
+
+- **The client half — C1–C7 and C9's caller — by the Product/UX Designer on TNG-193**, commit
+  `e264610`. `Workspace.tsx`, `composer/Composer.tsx`, `runs/client.ts`, `useTeamDocument.ts`
+  and `runtime.css`, with four new `Workspace.test.tsx` cases asserting C1, C6, C7 and C9
+  behaviourally — a source grep cannot see a shortcut fire or a start key survive a dropped
+  response, and §10.6 is why that distinction is not taken on trust.
+- **The daemon half — C9-B — by the Rust Systems Engineer on TNG-194/TNG-195**: the
+  `expectedRevision` field, the `stale_team_revision` conflict, and start-key collapsing, plus
+  the gate row and `defeat-composer-conformance.py` that audits all fourteen.
+
+Both landed on 2026-09-12, concurrently, in the same workspace. That is what §10.3 meant by
+*the contracts will still be true whenever an owner can act* — they were written so that any
+funded owner could pick them up, and two did.
 
 ### 10.4 What this section deliberately does not file
 
@@ -1022,12 +1033,19 @@ swiftc -O docs/mockups/verify-webkit.swift -o /tmp/verify-webkit
 (cd ui && npx vitest run src/components/run/RunColumn.test.tsx)
 
 # §10 — prompt-composer contracts, §1.1–§1.7 as revised by §11.6. Same exit convention,
-# C1–C13. Exits 1 (5/13) until the eight open rows close; see §10.3 for the owner.
+# C1–C13 plus C9-B, the daemon half. 14/14 since e264610 (client) and TNG-194 (daemon).
 node docs/mockups/verify-composer-conformance.mjs
 
-# §10.5 — and the audit of THAT gate, in both directions: apply all eight fixes (13/13),
-# revert each one (exactly its row reddens), then defeat each of the five rows that pass
-# today (exactly that row reddens). Exit 0 = all thirteen detectable. Scratch copy only.
+# §10.6 — and the audit of THAT gate now that its rows are green: defeat each of the
+# fourteen in turn and require exactly that row to redden. Exit 0 = every row can fail on
+# its own. It found three rows passing for the wrong reason. Scratch copy only.
+python3 docs/mockups/defeat-composer-conformance.py
+
+# §10.5 — the same audit from the other side, run while the rows were still open: apply all
+# eight fixes (13/13), revert each one, then defeat each of the five that passed. Its patch
+# anchors are gone now that the fixes have landed, so it answers SUPERSEDED (exit 2) and
+# points here — kept as the record of how the rows were proven detectable BEFORE they were
+# ever green, which is the half of the discipline a post-hoc audit cannot reconstruct.
 python3 docs/mockups/mutate-composer-conformance.py
 
 # §9.5 — the same §11.6 contracts against the PROTOTYPE, the artifact Gate B pins.
