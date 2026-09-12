@@ -627,6 +627,65 @@ The specimen gallery holding the capture cards is **`#system`** (`#capRow` and `
 not `#states`. Both are `.board`; the gate's own comment named the wrong one, and now names
 the right one.
 
+### TNG-90 counterfactual pass, second gate — 14 mutations, all 14 caught
+
+```
+node docs/mockups/defeat-prototype.mjs
+node docs/mockups/defeat-prototype.mjs --only 1,8        # a subset, by number
+node docs/mockups/defeat-prototype.mjs --no-control      # skip the unmutated control run
+```
+
+`verify-prototype.mjs` is the **second** of exactly two gates that read the artifact the board
+is being asked to approve, and the only evidence for it anywhere — on the Gate B card, and in
+the CEO's independent re-check — is the word *"pass"*. It is fail-fast: one `assert` throws and
+the run stops, so a green run prints a single sentence covering roughly sixty contracts and
+says nothing about which of them were exercised. Its sibling at least printed a count; this one
+printed a claim.
+
+So this reproduces, one at a time, fourteen regressions the gate claims to catch — the board's
+own press-drag-release landing the row somewhere other than the release point, the grab handle
+withheld off the wiring screen again, `draggable="true"` leaking onto screens with no drop
+wiring, the shell going text-selectable, the `-webkit-` fallback stripped from the shipped
+bytes, the answer losing its selectability, the running border animating under reduced motion,
+the narrow layout scaling the desktop stage, the one narrow view control pushed off the right
+edge, the touch floor dropping to 32 px, replay losing its label, a refusal that does not
+explain itself, a deletable prompt origin, and one remote image. Each requires the gate to go
+red **on that contract's own assertion message**. **14/14**, in under two minutes.
+
+Three verdicts, because "the gate went red" is not the same claim as "this contract caught it":
+
+- **DEFEATED** — red, and the message is the one this mutation targets.
+- **NOT CAUGHT** — green with the defect in place; the contract is decorative.
+- **WRONG CONTRACT** — red somewhere *earlier*. The gate stops at its first failure, so the
+  target assertion never ran, which is no evidence about the target. Counted as a failure.
+
+**Run 0 is an unmutated copy, and it has to come out green.** Fourteen reds prove nothing if
+the copy-pair harness reddens on its own; a red control exits 2 rather than reporting a score.
+The pinned artifact is never touched — each mutation is applied to a copy, in a scratch
+directory beside a copy of the gate, and the gate resolves its artifact relative to its own
+file, so the mutant is measured by the shipped probe, byte for byte, while
+`prototype-standalone.html` keeps its `a339e26a…` hash throughout.
+
+**What it found is where three contracts actually live** — the first draft of three mutations
+changed the file and changed nothing on screen, and each read as an uncaught defect rather than
+as a no-op:
+
+- `fit()`'s `stage.style.transform = 'none'` is belt to the CSS braces. The narrow `#stage` rule
+  carries `transform: none !important`, which outranks any inline value, so **the no-scale
+  contract is held in CSS** and mutating the JS line proves nothing about it.
+- `#viewctl .iconbtn { width: 44px; height: 44px }` is a restatement. The blanket
+  `.btn, .iconbtn, .filt, .seg button { min-height: 44px }` is what actually produces 44, and
+  `min-height` beats a smaller `height` — so **the touch floor needs both edits** to move at
+  all. That mutation is the only one here carrying an `edits` list.
+- the reduced-motion floor for a running node is the **specific** rule at (0,4,0), not the
+  blanket `[data-motion="reduce"] *`, which only caps duration and iteration count. An injected
+  `[data-motion="reduce"] .story-agent-a { … !important }` is (0,2,0) and loses to it — so the
+  "new surface escapes the floor" shape is not reproducible on this element, and the edit that
+  reproduces the regression is removing the rule that holds it.
+
+All three of those read as **NOT CAUGHT** before they were traced, which is what the verdict is
+for: the harness reports a no-op as an uncaught defect rather than quietly scoring it green.
+
 ### TNG-115 remediation — 26 focused browser assertions, all passing
 
 Run `node docs/mockups/verify-prototype.mjs`. The verifier launches headless Chrome with
