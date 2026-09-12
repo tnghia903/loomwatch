@@ -122,6 +122,18 @@ export async function startRun(teamPath: string, prompt: string, { startKey, exp
   return readRun<RunRecord>(response)
 }
 
+/**
+ * §1.6: "A connection loss during submit **never** retries blind: the client re-`GET`s by
+ * start key." Answers the run this key started, or `null` when the daemon has never seen it —
+ * which is the difference between a submit that was lost on the way back and one that never
+ * landed, and the only way the client can tell them apart.
+ */
+export async function findRunByStartKey(startKey: string, signal?: AbortSignal): Promise<RunRecord | null> {
+  const response = await fetch(`/api/runs?startKey=${encodeURIComponent(startKey)}`, { signal, cache: 'no-store' })
+  if (response.status === 404) return null
+  return readRun<RunRecord>(response)
+}
+
 export async function cancelRun(runId: string): Promise<RunRecord> {
   const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', cache: 'no-store' })
   return readRun<RunRecord>(response)
