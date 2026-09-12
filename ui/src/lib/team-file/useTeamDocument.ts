@@ -9,7 +9,7 @@ import { TeamFileModel, TeamFileParseError } from './document'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
 import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
-import type { AgentConfig, BudgetConfig, EdgeConfig, GuardsConfig, ScheduleConfig, SpawnConfig } from './types'
+import type { AgentConfig, BudgetConfig, EdgeConfig, GuardsConfig, SpawnConfig } from './types'
 import {
   compileTeamValidator,
   displayFieldProblems,
@@ -64,7 +64,7 @@ const EXTERNAL_CHANGE_MESSAGE =
 
 async function hashTeamYaml(yaml: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(yaml))
-  return 'sha256:' + Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 function sourceLineAtError(source: string, lineNumber: number): string | null {
@@ -167,7 +167,6 @@ function nodeFromAgent(
  * the configured teams root (§10.2).
  */
 export function useTeamDocument() {
-  const saveInFlightRef = useRef(false)
   const modelRef = useRef<TeamFileModel | null>(null)
   const loadedRevisionRef = useRef<string | null>(null)
   const [path, setPath] = useState<string | null>(null)
@@ -177,7 +176,6 @@ export function useTeamDocument() {
   const [entrypoint, setEntrypointState] = useState<string | null>(null)
   const [teamGuards, setTeamGuards] = useState<GuardsConfig | null>(null)
   const [teamBudget, setTeamBudget] = useState<BudgetConfig | null>(null)
-  const [teamSchedule, setTeamSchedule] = useState<ScheduleConfig | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('no-file')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [refusal, setRefusal] = useState<EdgeRefusal | null>(null)
@@ -194,19 +192,10 @@ export function useTeamDocument() {
   const [externalChange, setExternalChange] = useState<ExternalChange | null>(null)
   const [diskNotice, setDiskNotice] = useState<string | null>(null)
   const [yamlPreview, setYamlPreview] = useState('')
-  /** The bytes last read from or written to disk, so the chip can state a magnitude (§9.1). */
-  const [loadedYaml, setLoadedYaml] = useState<string | null>(null)
   const isNewRef = useRef(false)
   const undoRef = useRef<HistoryEntry[]>([])
   const redoRef = useRef<HistoryEntry[]>([])
   const [historyState, setHistoryState] = useState({ undo: 0, redo: 0 })
-
-  useEffect(() => {
-    if (!['new', 'dirty', 'invalid', 'conflict', 'saving', 'error'].includes(saveState)) return
-    const warnBeforeLeaving = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
-    window.addEventListener('beforeunload', warnBeforeLeaving)
-    return () => window.removeEventListener('beforeunload', warnBeforeLeaving)
-  }, [saveState])
 
   const resetHistory = useCallback(() => {
     undoRef.current = []
@@ -241,8 +230,6 @@ export function useTeamDocument() {
     setEntrypointState(snapshot.entrypoint || null)
     setTeamGuards(snapshot.guards ?? null)
     setTeamBudget(snapshot.budget ?? null)
-    setTeamSchedule(snapshot.schedule ?? null)
-    setTeamSchedule(snapshot.schedule ?? null)
     setNodes(
       snapshot.agents.map((agent) =>
         nodeFromAgent(agent, entry.positions[agent.id] ?? { x: 0, y: 0 }, agent.id === snapshot.entrypoint),
@@ -293,11 +280,8 @@ export function useTeamDocument() {
     setEntrypointState(null)
     setTeamGuards(null)
     setTeamBudget(null)
-    setTeamSchedule(null)
-    setTeamSchedule(null)
     setDocumentSnapshot(model.snapshot())
     setYamlPreview(model.toYaml())
-    setLoadedYaml(null)
     setSaveError(null)
     setReadOnlyReason(null)
     setFileGone(false)
@@ -311,6 +295,7 @@ export function useTeamDocument() {
   useEffect(() => {
     const requestedPath = new URLSearchParams(window.location.search).get('path')
     let cancelled = false
+    setSchemaLoading(true)
 
     async function load() {
       if (!requestedPath) {
@@ -327,12 +312,12 @@ export function useTeamDocument() {
       }
       let source: string | null = null
       try {
-        const [{ yaml, revision }, discovery] = await Promise.all([
+        const [{ yaml }, discovery] = await Promise.all([
           fetchTeamFile(requestedPath),
           requestedPath.startsWith('/') ? Promise.resolve(null) : fetchTeamsDiscovery(),
         ])
         source = yaml
-        const loadedRevision = revision ?? await hashTeamYaml(yaml)
+        const loadedRevision = await hashTeamYaml(yaml)
         if (cancelled) {
           return
         }
@@ -355,8 +340,6 @@ export function useTeamDocument() {
         setEntrypointState(snapshot.entrypoint)
         setTeamGuards(snapshot.guards ?? null)
         setTeamBudget(snapshot.budget ?? null)
-        setTeamSchedule(snapshot.schedule ?? null)
-        setTeamSchedule(snapshot.schedule ?? null)
         setNodes(
           agents.map((agent) =>
             nodeFromAgent(agent, positions[agent.id] ?? { x: 0, y: 0 }, agent.id === snapshot.entrypoint),
@@ -365,7 +348,6 @@ export function useTeamDocument() {
         setEdges(configured.map(edgeFromConfig))
         setDocumentSnapshot(snapshot)
         setYamlPreview(yaml)
-        setLoadedYaml(yaml)
         resetHistory()
         setFileGone(false)
         const schemaVersion = (snapshot as { schemaVersion?: unknown }).schemaVersion
@@ -408,7 +390,7 @@ export function useTeamDocument() {
   }, [resetHistory])
 
   const applyDiskYaml = useCallback(
-    async (yaml: string, notice?: string, revision?: string) => {
+    async (yaml: string, notice?: string) => {
       let model: TeamFileModel
       try {
         model = TeamFileModel.parse(yaml)
@@ -433,13 +415,11 @@ export function useTeamDocument() {
       )
       const currentPositions = new Map(nodes.map((node) => [node.id, node.position]))
       modelRef.current = model
-      loadedRevisionRef.current = revision ?? await hashTeamYaml(yaml)
+      loadedRevisionRef.current = await hashTeamYaml(yaml)
       isNewRef.current = false
       setEntrypointState(snapshot.entrypoint)
       setTeamGuards(snapshot.guards ?? null)
       setTeamBudget(snapshot.budget ?? null)
-      setTeamSchedule(snapshot.schedule ?? null)
-      setTeamSchedule(snapshot.schedule ?? null)
       setNodes(
         agents.map((agent) =>
           nodeFromAgent(
@@ -452,7 +432,6 @@ export function useTeamDocument() {
       setEdges(configured.map(edgeFromConfig))
       setDocumentSnapshot(snapshot)
       setYamlPreview(yaml)
-      setLoadedYaml(yaml)
       resetHistory()
       setExternalChange(null)
       setSaveError(null)
@@ -479,8 +458,8 @@ export function useTeamDocument() {
   const reloadFromDisk = useCallback(async () => {
     if (!path || isNewRef.current) return
     try {
-      const { yaml, revision } = await fetchTeamFile(path)
-      await applyDiskYaml(yaml, 'Reloaded from disk', revision)
+      const { yaml } = await fetchTeamFile(path)
+      await applyDiskYaml(yaml, 'Reloaded from disk')
     } catch (error) {
       if (error instanceof TeamFileApiError && error.status === 404) {
         const reason = 'File is gone. Save a copy to continue editing.'
@@ -495,46 +474,41 @@ export function useTeamDocument() {
     }
   }, [path, applyDiskYaml])
 
-  // §9.3: compare the loaded revision against disk and hand the difference to the conflict bar.
-  // Polled on focus (intentionally weak but honest, until the daemon has revision events), and
-  // called directly when `POST /api/runs` refuses a stale revision (§1.5).
-  const checkDiskRevision = useCallback(async () => {
-    const loadedRevision = loadedRevisionRef.current
-    if (!path || !loadedRevision || isNewRef.current) return
-    try {
-      const { yaml, revision } = await fetchTeamFile(path)
-      const diskRevision = revision ?? await hashTeamYaml(yaml)
-      if (diskRevision === loadedRevision) return
-      // §9.5: a read-only document cannot hold unsaved edits, so a changed disk revision is
-      // not a conflict — re-evaluate it like a clean canvas (§9.3), which re-classifies the
-      // new schemaVersion and may even lift the read-only state.
-      if (saveState === 'clean' || saveState === 'saved' || saveState === 'read-only') {
-        await applyDiskYaml(yaml, 'Reloaded from disk', revision)
-      } else {
-        setExternalChange({ diskYaml: yaml, diskRevision })
-        setSaveError(EXTERNAL_CHANGE_MESSAGE)
-        setSaveState('conflict')
-      }
-    } catch (error) {
-      if (error instanceof TeamFileApiError && error.status === 404) {
-        const reason = 'File is gone. Save a copy to continue editing.'
-        setReadOnlyReason(reason)
-        setFileGone(true)
-        setSaveError(reason)
-        setSaveState('read-only')
+  // §9.3's intentionally weak but honest focus polling until the daemon has revision events.
+  useEffect(() => {
+    async function checkForExternalChange() {
+      const loadedRevision = loadedRevisionRef.current
+      if (!path || !loadedRevision || isNewRef.current) return
+      try {
+        const { yaml } = await fetchTeamFile(path)
+        const diskRevision = await hashTeamYaml(yaml)
+        if (diskRevision === loadedRevision) return
+        // §9.5: a read-only document cannot hold unsaved edits, so a changed disk revision is
+        // not a conflict — re-evaluate it like a clean canvas (§9.3), which re-classifies the
+        // new schemaVersion and may even lift the read-only state.
+        if (saveState === 'clean' || saveState === 'saved' || saveState === 'read-only') {
+          await applyDiskYaml(yaml, 'Reloaded from disk')
+        } else {
+          setExternalChange({ diskYaml: yaml, diskRevision })
+          setSaveError(EXTERNAL_CHANGE_MESSAGE)
+          setSaveState('conflict')
+        }
+      } catch (error) {
+        if (error instanceof TeamFileApiError && error.status === 404) {
+          const reason = 'File is gone. Save a copy to continue editing.'
+          setReadOnlyReason(reason)
+          setFileGone(true)
+          setSaveError(reason)
+          setSaveState('read-only')
+        }
       }
     }
+    window.addEventListener('focus', checkForExternalChange)
+    return () => window.removeEventListener('focus', checkForExternalChange)
   }, [path, saveState, applyDiskYaml])
-
-  useEffect(() => {
-    const onFocus = () => void checkDiskRevision()
-    window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
-  }, [checkDiskRevision])
 
   const keepMine = useCallback(() => {
     if (!externalChange) return
-    isNewRef.current = false
     loadedRevisionRef.current = externalChange.diskRevision
     setExternalChange(null)
     setSaveError(null)
@@ -543,32 +517,30 @@ export function useTeamDocument() {
 
   const useDisk = useCallback(async () => {
     if (!externalChange) return
-    await applyDiskYaml(externalChange.diskYaml, undefined, externalChange.diskRevision)
+    await applyDiskYaml(externalChange.diskYaml)
   }, [externalChange, applyDiskYaml])
 
   const saveCopy = useCallback(async (requestedPath: string) => {
     const targetPath = requestedPath.trim()
-    if (!targetPath || !modelRef.current || saveInFlightRef.current) return false
-    saveInFlightRef.current = true
+    if (!targetPath || !modelRef.current) return false
     setSaveState('saving')
     try {
       const yaml = modelRef.current.toYaml()
+      const saved = await saveTeamFile(targetPath, yaml)
       let root = teamsRoot
-      if (!targetPath.startsWith('/') && !root) {
+      if (!saved.path.startsWith('/') && !root) {
         const discovery = await fetchTeamsDiscovery()
         root = discovery.root
         setTeamsRoot(root)
       }
-      const saved = await saveTeamFile(targetPath, yaml, null)
       const displayPath = root ? absoluteTeamPath(root, saved.path) : saved.path
-      loadedRevisionRef.current = saved.revision ?? await hashTeamYaml(yaml)
+      loadedRevisionRef.current = await hashTeamYaml(yaml)
       isNewRef.current = false
-      setLoadedYaml(yaml)
       setPath(displayPath)
       setReadOnlyReason(null)
       setFileGone(false)
       setSaveError(null)
-      setSaveState(modelRef.current.toYaml() === yaml ? 'saved' : 'dirty')
+      setSaveState('saved')
       window.history.replaceState({}, '', `/?path=${encodeURIComponent(displayPath)}`)
       window.setTimeout(() => setSaveState((current) => (current === 'saved' ? 'clean' : current)), 2000)
       return true
@@ -576,8 +548,6 @@ export function useTeamDocument() {
       setSaveError(error instanceof Error ? error.message : String(error))
       setSaveState('read-only')
       return false
-    } finally {
-      saveInFlightRef.current = false
     }
   }, [teamsRoot])
 
@@ -802,24 +772,6 @@ export function useTeamDocument() {
     [markDirty, captureHistory],
   )
 
-  const updateAgentWarnAt = useCallback(
-    (id: string, warnAtPercent: number) => {
-      captureHistory()
-      setNodes((current) =>
-        current.map((node) => {
-          if (node.id !== id) {
-            return node
-          }
-          const budget = { ...node.data.agent.budget, warnAtPercent }
-          modelRef.current?.setAgentField(id, 'budget', budget)
-          return { ...node, data: { ...node.data, agent: { ...node.data.agent, budget } } }
-        }),
-      )
-      markDirty()
-    },
-    [markDirty, captureHistory],
-  )
-
   const updateAgentAllowRecruiting = useCallback(
     (id: string, allowRecruiting: boolean) => {
       captureHistory()
@@ -873,16 +825,6 @@ export function useTeamDocument() {
         modelRef.current?.setTeamBudget(next)
         return next
       })
-      markDirty()
-    },
-    [markDirty, captureHistory],
-  )
-
-  const updateTeamSchedule = useCallback(
-    (schedule: ScheduleConfig) => {
-      captureHistory()
-      modelRef.current?.setSchedule(schedule)
-      setTeamSchedule(schedule)
       markDirty()
     },
     [markDirty, captureHistory],
@@ -1076,37 +1018,36 @@ export function useTeamDocument() {
       ? 'invalid'
       : saveState
 
-  const save = useCallback(async (): Promise<boolean> => {
+  const save = useCallback(async () => {
     // "Settles ... on ⌘S" (§5.4): an attempted save is itself what reveals a still-incomplete
     // field as an error, whether or not the save actually proceeds below.
     setAttemptedSave(true)
-    if (saveInFlightRef.current || !path || !modelRef.current || schemaLoading || readOnlyReason || entrypointProblem || (validation && !validation.valid)) {
-      return false
+    if (!path || !modelRef.current || schemaLoading || readOnlyReason || entrypointProblem || (validation && !validation.valid)) {
+      return
     }
-    saveInFlightRef.current = true
     setSaveState('saving')
     try {
       const loadedRevision = loadedRevisionRef.current
       const yaml = modelRef.current.toYaml()
+      const nextRevision = await hashTeamYaml(yaml)
       if (!isNewRef.current) {
         if (!loadedRevision) {
           throw new Error('Cannot verify whether the team file changed on disk.')
         }
         const disk = await fetchTeamFile(path)
-        const diskRevision = disk.revision ?? await hashTeamYaml(disk.yaml)
+        const diskRevision = await hashTeamYaml(disk.yaml)
         if (diskRevision !== loadedRevision) {
           setExternalChange({ diskYaml: disk.yaml, diskRevision })
           setSaveState('conflict')
           setSaveError(EXTERNAL_CHANGE_MESSAGE)
-          return false
+          return
         }
       }
 
       const wasNew = isNewRef.current
-      const saved = await saveTeamFile(path, yaml, wasNew ? null : loadedRevision)
-      loadedRevisionRef.current = saved.revision ?? await hashTeamYaml(yaml)
+      await saveTeamFile(path, yaml)
+      loadedRevisionRef.current = nextRevision
       isNewRef.current = false
-      setLoadedYaml(yaml)
       if (wasNew) {
         window.history.replaceState({}, '', `/?path=${encodeURIComponent(path)}`)
       }
@@ -1117,26 +1058,7 @@ export function useTeamDocument() {
       } else {
         setSaveState('dirty')
       }
-      return true
     } catch (error) {
-      if (error instanceof TeamFileApiError && error.status === 412) {
-        setSaveState('conflict')
-        setSaveError(EXTERNAL_CHANGE_MESSAGE)
-        try {
-          const disk = await fetchTeamFile(path)
-          setExternalChange({ diskYaml: disk.yaml, diskRevision: disk.revision ?? await hashTeamYaml(disk.yaml) })
-        } catch (diskError) {
-          if (diskError instanceof TeamFileApiError && diskError.status === 404) {
-            const reason = 'File is gone. Save a copy to continue editing.'
-            setExternalChange(null)
-            setReadOnlyReason(reason)
-            setFileGone(true)
-            setSaveError(reason)
-            setSaveState('read-only')
-          }
-        }
-        return false
-      }
       // §9.3: the backing file was deleted or renamed before this save reached disk. Like
       // reloadFromDisk and focus polling, keep the in-memory document, go read-only with a
       // File is gone reason, and leave Save a copy available instead of a generic error.
@@ -1146,13 +1068,10 @@ export function useTeamDocument() {
         setFileGone(true)
         setSaveError(reason)
         setSaveState('read-only')
-        return false
+        return
       }
       setSaveState('error')
       setSaveError(error instanceof TeamFileApiError ? error.message : String(error))
-      return false
-    } finally {
-      saveInFlightRef.current = false
     }
   }, [path, schemaLoading, readOnlyReason, entrypointProblem, validation])
 
@@ -1164,7 +1083,6 @@ export function useTeamDocument() {
     entrypointProblem,
     teamGuards,
     teamBudget,
-    teamSchedule,
     saveState,
     documentChipState,
     saveError,
@@ -1177,7 +1095,6 @@ export function useTeamDocument() {
     externalChange,
     diskNotice,
     yamlPreview,
-    loadedYaml,
     canUndo: historyState.undo > 0,
     canRedo: historyState.redo > 0,
     refusal,
@@ -1205,21 +1122,14 @@ export function useTeamDocument() {
     updateAgentModel,
     updateAgentCwd,
     updateAgentBudget,
-    updateAgentWarnAt,
     updateAgentAllowRecruiting,
     promoteEntrypoint,
     updateTeamGuards,
     updateTeamBudget,
-    updateTeamSchedule,
     touchField,
     dismissRefusal,
     keepLastEdgeRemoval,
     undoLastEdgeRemoval,
     save,
-    checkDiskRevision,
-    // §1.4: the revision the last load or save settled on. A function, not state: `submit()`
-    // reads it immediately after awaiting `save()`, where a captured value would still be the
-    // pre-save revision — and pinning the run to that is the race the field exists to close.
-    currentRevision: () => loadedRevisionRef.current,
   }
 }
