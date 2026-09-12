@@ -15,19 +15,22 @@
   the one defect that had outlived all three children — closed by TNG-170 (§7.4). **Not
   conformant on the response layer** (§8) — six §3.3–3.4 contracts were unmet, all six
   closed by TNG-166. **Not conformant on the narrow layer** (§9) — four §11.6 contracts were
-  unmet below 768 px, all four closed by TNG-173. **Not conformant on the composer layer**
-  (§10, audited 2026-09-12) — **eight of thirteen §1 contracts are open**, including three
+  unmet below 768 px, all four closed by TNG-173. **Composer layer: audited at 5/13 and
+  closed the same day** (§10, 2026-09-12) — eight §1 contracts were open, including the three
   the spec spends its prose defending: the two-step legibility of `Save & run`, one start key
-  per attempt, and the revision the run actually executes.
-- **One layer is open: §10, the prompt composer.** Its probe exits `1` at **5/13**; §§6–9 all
-  exit `0`. §1 was the last section never checked against an implementation — §§6–9 each took
-  a TNG-89A acceptance clause, and this one took the section the spec opens with. No layer
-  here has ever blocked Gate B, which governs the design (§5), not this implementation — and
-  §10 adds no bytes to the pinned prototype, so the pending card's hash is unchanged by it.
-  They are disclosed rather than hidden behind a green summary.
-- **Four sections are historical.** §6, §7, §8 and §9 record contracts and reasoning, and
-  their verdicts are the state at the moment of observation. **§10 is current.** The probes
-  are the only current answer — run them; do not read a count off this page.
+  per attempt, and the revision the run actually executes. All three now hold.
+- **No layer is open.** Every probe exits `0`; the composer gate reads **14/14**. §1 was the
+  last section never checked against an implementation — §§6–9 each took a TNG-89A acceptance
+  clause, and this one took the section the spec opens with. No layer here has ever blocked
+  Gate B, which governs the design (§5), not this implementation — and §10 adds no bytes to
+  the pinned prototype, so the pending card's hash is unchanged by it.
+- **Green is the weaker claim.** A gate whose rows all pass cannot show that its selectors
+  still bind, so each section's rows are proven individually defeatable rather than merely
+  green (§10.6 for the composer). Two composer rows were scoring against comment text and one
+  against the wrong leg of a disjunction; all three were found that way, not by reading counts.
+- **Five sections are historical.** §6, §7, §8, §9 and now §10 record contracts and reasoning,
+  and their verdicts are the state at the moment of observation. The probes are the only
+  current answer — run them; do not read a count off this page.
 
 This checks the implementation's *claims* against the approved design. It does not review
 code quality, and it does not touch the Gate B artifact — see §5.
@@ -784,7 +787,23 @@ The denominator guard (T2a) is the matching protection in the other direction: u
 `provenance` defeat, T2b alone still read "0/17 undersized" and only T2a's floor caught that
 the probe had lost two-thirds of its specimens.
 
-## 10. The prompt composer — FAIL as audited, 8 of 13 contracts open (2026-09-12)
+## 10. The prompt composer — PASS, 14/14 (closed 2026-09-12; audited as 5/13 the same day)
+
+> **Status, 2026-09-12 08:15 SGT.** All eight open contracts are closed and the gate reads
+> **14/14** — C1–C9 client-side and C9-B, the daemon half added with the field (TNG-193,
+> TNG-194, TNG-195). The subsections below are kept in the past tense they were written in:
+> they are the record of what was wrong, which is what makes the fix reviewable. §10.6 is the
+> part that matters now — it is the audit that the 14/14 is real, and it found and closed two
+> rows that were passing for the wrong reason.
+>
+> Verified this heartbeat, against the tree at 08:14 SGT:
+> `node docs/mockups/verify-composer-conformance.mjs` → 14/14 ·
+> `python3 docs/mockups/defeat-composer-conformance.py` → every row individually defeatable ·
+> `ui/` 173 tests in 26 files pass · `tsc -b` clean · the three new daemon tests
+> (`expected_revision_conflict_returns_a_stable_code_and_creates_no_run`,
+> `start_keys_collapse_duplicates_and_bind_to_the_exact_request_fingerprint`,
+> `a_start_key_can_be_recovered_by_get`) pass. The three `runs::` tests that fail need
+> `DATABASE_URL` and fail identically before this change — environment, not code.
 
 §1 of the interaction spec is the surface every run starts at, and it was the **last layer
 never checked against an implementation** — §§6–9 each took an acceptance clause; this one
@@ -797,7 +816,7 @@ Three of the eight are ordinary geometry and wording. Five are not: they are the
 §1 spends its prose defending — the two-step legibility of `Save & run`, one start key per
 attempt, and the revision the run actually executes.
 
-### 10.1 The eight open contracts
+### 10.1 The eight contracts that were open
 
 - **C1 — `⌘↵` does not submit from anywhere. §1.2.** The spec's first keyboard row reads
   *"submit — from anywhere in the app, including a focused canvas."* The only binding is on
@@ -838,12 +857,15 @@ attempt, and the revision the run actually executes.
   forbids**, and the daemon has no key to collapse the duplicate against.
 - **C9 — nothing pins the bytes the run executes. §1.4/§1.5.** §1.4 specifies the pair:
   conditional `PUT` (which ships — C8 passes), *"then `POST /api/runs` with
-  `expectedRevision` = the revision the PUT returned."* The field does not exist in
-  `runs/client.ts`, in `submit()`, or in `runs.rs`. A disk write landing between the save and
-  the start is executed silently, and §1.5's *"No run is created"* has nothing to fire on.
-  This is the one case §1.4 opens by naming: *"The operator must never be able to think they
-  ran what is on screen when they ran what is on disk."* Like §8/D1 it needs a daemon-side
-  field, so it carries a backend half (cf. TNG-166 → TNG-168).
+  `expectedRevision` = the revision the PUT returned."* The daemon half now ships (TNG-194):
+  `StartRunRequest` accepts an optional `expectedRevision`, `prepare_run()` compares it
+  against the SHA-256 of the current file bytes, and a mismatch answers `409` with a stable
+  `stale_team_revision` code and the authorized `currentTeamRevision`, creating no run
+  (`runs.rs:519`, `runs.rs:752–755`, `runs.rs:589–595`). The gate asserts this as row C9-B.
+  A disk write landing between the save and the start is now refused instead of executed
+  silently, giving §1.5's *"No run is created"* its enforcement point — the case §1.4 opens
+  by naming: *"The operator must never be able to think they ran what is on screen when they
+  ran what is on disk."*
 
 ### 10.2 The five that pass, and why they are in the gate
 
@@ -872,10 +894,12 @@ guard rules that a plausible fix to a red row would break.
 reads only production source and adds **no bytes to the pinned prototype**, so §5 still
 holds and the pending Gate B card is unaffected — the hash is unchanged by this section.
 
-The owner is the **Web UI Engineer**, who is in `error` (`opencode_local` out of OpenRouter
-credits, last heartbeat 2026-09-11T16:28Z). That is the fleet-funding problem already in
-front of the board on TNG-136/TNG-98, not a separate blocker: the contracts are recorded and
-re-runnable, and they will still be true whenever an owner can act.
+The owner was to be the **Web UI Engineer**, who is in `error` (`opencode_local` out of
+OpenRouter credits, last heartbeat 2026-09-11T16:28Z) — the fleet-funding problem already in
+front of the board on TNG-136/TNG-98. In the event the work did not wait for that: the **Rust
+Systems Engineer** closed C1–C9 and the daemon half on TNG-194/TNG-195 on 2026-09-12, which is
+what §10.3 meant by *the contracts will still be true whenever an owner can act* — they were
+written so that any funded owner could pick them up, and one did.
 
 ### 10.4 What this section deliberately does not file
 
@@ -890,14 +914,44 @@ re-runnable, and they will still be true whenever an owner can act.
   `shiftKey`), so this is a label that under-promises, not a broken binding — too small to
   spend an owner's turn on while C1–C9 are open.
 
-### 10.5 The gate's own audit
+### 10.5 The gate's own audit, before the fixes landed
 
-`python3 docs/mockups/mutate-composer-conformance.py` proves every row detectable **in both
+`python3 docs/mockups/mutate-composer-conformance.py` proved every row detectable **in both
 directions**: apply all eight fixes → 13/13; revert each one → exactly the owning row turns
 red; defeat each of the five that pass today → exactly that row turns red. 13/13 detectable.
 This is §7.5's discipline applied at authoring time rather than after a false green: §7.5
 found two checks (B3, B5) that could not fail, and §9 later found a D5 in the same state.
 `ui/` is never written — the harness mutates a scratch copy only.
+
+That harness is **spent**. Its patches apply the eight fixes, and the fixes have landed, so
+its anchors are gone and it now answers `CANNOT RUN`. That is the right answer to a question
+that is no longer open; §10.6 asks the one that is.
+
+### 10.6 The gate's audit after it went green
+
+A gate that has just gone green is the *least* trustworthy moment to read it: every row
+agrees with the tree, so nothing distinguishes a row that is satisfied from a row that cannot
+fail. `python3 docs/mockups/defeat-composer-conformance.py` runs the surviving direction —
+restore each recorded defect one at a time in a scratch copy, and require the failing set to
+grow by **exactly** that row. It takes its row list from the gate's own output, so a row added
+to the gate without a defeat here is reported rather than silently skipped.
+
+Run against the freshly-green tree it found **three rows that survived their own defect**:
+
+| Row | Why it could not fail | Fix |
+|---|---|---|
+| **C2** | The second leg read `/Escape/` against the composer's key handler — the claim that Escape is *handled*, not that it collapses anything. Deleting the focus-keyed height effect left the row green on an `Escape` branch that only blurs, which is the defect C2 records, verbatim. | Both legs now have to reach the height: `/Escape[\s\S]{0,200}style\.height/`. |
+| **C9** | `expectedRevision` was matched anywhere in `startRun()` + `submit()`. With the field stripped from the request body, the destructure and the `launch` call, the row stayed green on the **comment** above the call — the sentence explaining the contract. | Inputs are read comment-stripped. |
+| **C12** | `/if \(!saved\)[\s\S]{0,120}return/` matched the word *"returned"* in a comment two lines below a broken guard. | Inputs are read comment-stripped. |
+
+C9 and C12 are the same failure in two places, and it is the one this ledger has hit before
+(§7.5's B3, §9's D5): **a check that matches its own prose**. The rule now is that every input
+is read with comments stripped, so what the gate matches is what the program does. Whole-line
+`//` only — a trailing comment needs a tokenizer to remove safely (`"https://…"` appears
+mid-line in the Rust input), and no contract here is expressible in one.
+
+After both fixes: 14/14 green, and all 14 individually defeatable. `ui/` and `crates/` are
+never written — the harness mutates a scratch copy only.
 
 ## How to reproduce
 

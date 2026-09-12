@@ -14,9 +14,12 @@
 // Set LOOMWATCH_ROOT to run the same contracts against a patched copy of the tree;
 // that is how the counterfactual (every one of these can pass) was demonstrated.
 //
-// Five of the thirteen pass today. They are here on purpose: a gate whose every row
-// is red cannot show that its selectors still bind, and three of them (C8, C10, C11)
-// guard rules that a plausible "fix" to a red row would break.
+// Row C9-B is the daemon half: `POST /api/runs` accepts `expectedRevision` and refuses a
+// stale one by a stable code (TNG-194), so a run can actually be bound to the bytes the
+// save wrote. Fourteen of the fourteen rows pass today. Every row passing is recent — the
+// previously-red rows stay in place on purpose: a gate whose every row is green cannot
+// show that its selectors still bind, and C8, C10, C11 and C12 guard rules that a
+// plausible "fix" to a green row would break.
 
 import { readFileSync } from 'node:fs'
 
@@ -24,10 +27,11 @@ const ROOT = process.env.LOOMWATCH_ROOT
   ? new URL(`file://${process.env.LOOMWATCH_ROOT.replace(/\/?$/, '/')}`)
   : new URL('../../', import.meta.url)
 
-// This gate measures the *implementation*, so its inputs live in `ui/` and are outside the
-// `docs/` tree a Gate B pin extracts. Run against an extracted pin it cannot answer, and it
-// says so (exit 2) rather than raising — an unreadable stack trace in a reviewer's terminal
-// is indistinguishable from a real conformance failure.
+// This gate measures the *implementation*, so its inputs live in `ui/` (and the daemon row
+// C9-B reads `crates/loomwatch-backend/`) and are outside the `docs/` tree a Gate B pin
+// extracts. Run against an extracted pin it cannot answer, and it says so (exit 2) rather
+// than raising — an unreadable stack trace in a reviewer's terminal is indistinguishable
+// from a real conformance failure.
 const read = (path) => {
   try {
     return readFileSync(new URL(path, ROOT), 'utf8')
@@ -38,8 +42,8 @@ const read = (path) => {
     (production source, NOT part of a pinned \`docs/\` artifact)
 
 This gate measures the shipped implementation against the approved design, so it needs
-the \`ui/\` tree and only answers from a full repo checkout. It is not a statement about
-the pinned artifact, and this is not a conformance failure.`)
+the \`ui/\` and \`crates/\` trees and only answers from a full repo checkout. It is not a
+statement about the pinned artifact, and this is not a conformance failure.`)
     process.exit(2)
   }
 }
@@ -49,12 +53,27 @@ const WORKSPACE = 'ui/src/components/Workspace.tsx'
 const RUNTIME_CSS = 'ui/src/styles/runtime.css'
 const RUNS_CLIENT = 'ui/src/lib/runs/client.ts'
 const TEAM_CLIENT = 'ui/src/lib/team-file/client.ts'
+const RUNS_BACKEND = 'crates/loomwatch-backend/src/runs.rs'
 
-const composer = read(COMPOSER)
-const workspace = read(WORKSPACE)
-const css = read(RUNTIME_CSS)
-const runsClient = read(RUNS_CLIENT)
-const teamClient = read(TEAM_CLIENT)
+// A row has to be answered by the program, never by the prose sitting next to it.
+// `defeat-composer-conformance.py` (§10.6) restored each recorded defect one at a time and
+// found three rows that survived their own: C2 matched `focused` in the comment above the
+// height effect, C9 matched `expectedRevision` in the comment above the `launch` call, and
+// C12's `if (!saved) … return` proximity test matched the word "returned" in the comment two
+// lines below it. All three were green with the behaviour removed. So every input is read
+// with its comments stripped, and what the gate matches is what the program does.
+//
+// Whole-line `//` only. A trailing comment cannot be removed without a tokenizer — `//` also
+// appears mid-line inside string literals in the Rust input (`"https://…"`) — and no contract
+// here is expressible in a single trailing comment, so the conservative rule loses nothing.
+const code = (source) => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+
+const composer = code(read(COMPOSER))
+const workspace = code(read(WORKSPACE))
+const css = code(read(RUNTIME_CSS))
+const runsClient = code(read(RUNS_CLIENT))
+const teamClient = code(read(TEAM_CLIENT))
+const runsBackend = code(read(RUNS_BACKEND))
 
 const results = []
 const check = (id, spec, where, pass, detail) => results.push({ id, spec, where, pass, detail })
@@ -135,9 +154,15 @@ check(
 // "`Esc` — blur and collapse to one line, text preserved."
 // The height is written by an effect keyed on `[value]` only, so a composer grown to its cap
 // stays grown after Escape blurs it. Text is preserved (correct); the collapse never happens.
+//
+// Either mechanism closes this: a height effect that depends on focus, or an Escape branch
+// that resets the height itself. The second leg used to read `/Escape/` alone, which is the
+// weaker claim that the composer *handles* Escape — §10.6 defeated the first leg and the row
+// stayed green on an Escape branch that only blurs, which is the recorded defect exactly.
+// Both legs now have to reach the height.
 check(
   'C2', '§1.2 Esc collapses the grown composer back to one line', `${COMPOSER} auto-grow effect`,
-  /focused/.test(growth) || /Escape/.test(composerKeys),
+  /focused/.test(growth) || /Escape[\s\S]{0,200}style\.height/.test(composerKeys),
   'the auto-grow effect depends on `[value]` alone and nothing resets the height on blur, so Escape blurs the field and leaves the composer at its grown height',
 )
 
@@ -211,6 +236,15 @@ check(
   'C9', '§1.4/§1.5 the start half pins the revision the save returned', `${RUNS_CLIENT} startRun() · ${WORKSPACE} submit()`,
   /expectedRevision/.test(startRun + submit),
   'nothing binds the run to the bytes the PUT wrote, so a disk write landing between the save and the start is executed silently — the exact "ran what is on disk, not what is on screen" case §1.4 exists to prevent (needs a daemon-side field; cf. TNG-166/TNG-168)',
+)
+check(
+  'C9-B', '§1.4/§1.5 the daemon accepts `expectedRevision` and refuses a stale one by stable code', `${RUNS_BACKEND} StartRunRequest · prepare_run() · start_run()`,
+  /expected_revision: Option<String>/.test(runsBackend)
+    && /alias = "expectedTeamRevision"/.test(runsBackend)
+    && /StaleRevision \{ current: String \}/.test(runsBackend)
+    && /"code": STALE_TEAM_REVISION/.test(runsBackend)
+    && /"currentTeamRevision"/.test(runsBackend),
+  'the daemon does not yet honour an expected revision at start time, so the client cannot bind a run to the bytes the save wrote even after sending it (cf. TNG-166/TNG-168)',
 )
 
 // --- rows that pass today, and are here to stay passing ---------------------------------------

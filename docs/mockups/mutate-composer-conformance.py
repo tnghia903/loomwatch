@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""§10.5 — audit verify-composer-conformance.mjs itself.
+"""§10.5 — audit verify-composer-conformance.mjs itself, while its rows were still open.
+
+SPENT (2026-09-12). This harness works by applying the eight fixes to a scratch copy, and
+those fixes have landed (TNG-193/TNG-194/TNG-195), so its patch anchors no longer exist and
+it stops with a supersession notice instead of a result. It is kept because it is the record
+of how the thirteen rows were shown detectable *before* the tree could satisfy them.
+
+The question after a gate goes green is the other direction, and it has its own harness:
+
+    python3 docs/mockups/defeat-composer-conformance.py
 
 A check that has never failed is not evidence, and a check that has never *passed*
 is not a contract — it may simply be unsatisfiable, or anchored to something that
@@ -156,6 +165,19 @@ def run_gate(root):
 def main():
     if not GATE.exists():
         fail_harness(f'the gate is missing: {GATE}')
+    # The anchor this harness needs is the pre-fix source. Say so in those words: an
+    # "anchor lost" from a harness whose job is finished reads like drift in the gate,
+    # and a reviewer cannot tell the two apart from the message alone.
+    if 'Math.min(120, element.scrollHeight)' not in (REPO / INPUTS[0]).read_text():
+        print('SUPERSEDED — the eight fixes this harness applies have landed, so its patch '
+              'anchors are gone.\n'
+              '    This is not anchor drift and not a conformance failure: the question it '
+              'answers\n'
+              '    (can each open row be made to pass?) is closed. The question that is open '
+              'now is\n'
+              '    whether each green row can be made to FAIL:\n\n'
+              '        python3 docs/mockups/defeat-composer-conformance.py\n')
+        sys.exit(2)
     problems = []
     with tempfile.TemporaryDirectory(prefix='loomwatch-composer-mutate-') as tmp:
         tmp = pathlib.Path(tmp)
