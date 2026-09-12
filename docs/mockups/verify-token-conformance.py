@@ -12,6 +12,11 @@ legitimately add shell metrics and Tailwind plumbing a static prototype has no n
 but each one is declared here with the rule that consumes it, so a token invented in `ui/`
 and never reconciled with the design is a failure rather than a line of noise.
 
+The same applies to the non-token primitives — the type ramps, elevation, focus ring and
+media queries the two files share. They carry no token name for the drift check to catch, so
+they are diffed line-for-line against `RULED_PRIMITIVE_DIFF`, the three restructures §2 ruled
+intended. An undeclared differing line fails.
+
     python3 docs/mockups/verify-token-conformance.py
 
 Run it from a full repo checkout. This gate measures the *implementation*, so one of its two
@@ -44,6 +49,29 @@ ALLOWED_EXTRA = {
     # (runtime.css) and the right panel max-height (app.css). A static prototype, which has
     # no scrolling panel to clear, has no counterpart.
     "--lw-viewctl-clear",
+}
+
+# The non-token remainder of the two files differs in exactly three ruled places (§2 of
+# TNG90_IMPLEMENTATION_CONFORMANCE.md), which produce these nine diff lines. They are listed
+# line-for-line rather than counted: a count cannot tell nine expected lines from eight
+# expected plus one regression, which is precisely how `.e1` lost its `-webkit-backdrop-filter`
+# for two days while this section still read PASS (§1.1). Any differing line not named here is
+# an unreviewed change to a primitive every surface inherits, and fails.
+RULED_PRIMITIVE_DIFF = {
+    # §2.1 — light moved from `[data-theme="light"]` into Tailwind's `@theme` (ADR 0009
+    # decision 4). Not an implementer's liberty: the approved file's own header instructs it.
+    '-:root,': "§2.1 light tier moved into @theme",
+    '-[data-theme="light"] {': "§2.1 light tier moved into @theme",
+    "+@theme {": "§2.1 light tier moved into @theme",
+    "+  --color-*: initial;": "§2.1 clearing Tailwind's default palette",
+    "+}": "§2.1 light tier moved into @theme",
+    "+:root {": "§2.1 light tier moved into @theme",
+    # §2.2 — focus-visible widened to cover `textarea, select`. A correction in the spirit of
+    # §6.1: the composer is a `textarea` and would otherwise take no visible focus ring.
+    '-:where(button, [role="button"], a, input, [tabindex]):focus-visible {': "§2.2 focus ring widened",
+    '+:where(button, [role="button"], a, input, textarea, select, [tabindex]):focus-visible {': "§2.2 focus ring widened",
+    # §2.3 — the reduced-motion `--bloom` override is dropped; see §3.
+    '-[data-motion="reduce"] { --bloom: none; }': "§2.3 reduced-motion bloom, see §3",
 }
 
 
@@ -88,10 +116,30 @@ def check_primitives():
         )
     )
     body = [line for line in delta if line[:1] in "+-" and line[1:2] not in "+-"]
-    print(f"\nNon-token primitives: {len(body)} differing line(s)")
+    undeclared = [line for line in body if line not in RULED_PRIMITIVE_DIFF]
+    stale = [line for line in RULED_PRIMITIVE_DIFF if line not in body]
+
+    status = "FAIL" if undeclared else "PASS"
+    print(
+        f"\n{status} primitives: {len(body)} differing line(s), "
+        f"{len(body) - len(undeclared)} ruled, {len(undeclared)} undeclared"
+    )
     for line in delta:
         print("   ", line)
-    return body
+    for line in undeclared:
+        print(f"    UNDECLARED {line}")
+    if undeclared:
+        print(
+            "\nA primitive outside the three ruled places in §2 has changed. Every surface\n"
+            "inherits these, so review the line and either fix the implementation or add it\n"
+            "to RULED_PRIMITIVE_DIFF with the ruling that permits it."
+        )
+    # Convergence toward the approved file is never a conformance failure, but it does leave a
+    # declaration describing a difference that no longer exists — say so rather than gate on it.
+    for line in stale:
+        print(f"    STALE declaration, no longer in the diff: {line}")
+
+    return bool(undeclared)
 
 
 def check_inputs():
@@ -151,10 +199,11 @@ def main():
 
     print("\nToken conformance:", "FAILED" if failed else "clean — every approved token matches")
 
-    # Reported, never failed: the restructure below is what the approved file's own header
-    # tells an implementer to do ("swap the @theme { } wrapper back in for the light tier-2
-    # block"), so a diff here is expected and must be read, not gated.
-    check_primitives()
+    # The restructure below is what the approved file's own header tells an implementer to do
+    # ("swap the @theme { } wrapper back in for the light tier-2 block"), so the ruled lines are
+    # expected. Anything beyond them is not, and fails: primitives carry no token name for the
+    # drift check above to catch, so this is the only place a dropped one can be seen.
+    failed |= check_primitives()
     return 1 if failed else 0
 
 

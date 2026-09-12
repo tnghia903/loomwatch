@@ -51,7 +51,10 @@ bytes-neutral on the prototype, and unlike §§6–9 its gate was mutation-audit
 publication rather than after a false green (§10.5). §§1–2 were **re-measured 2026-09-12**
 and had gone red since publication: the implementation had grown two shell metrics the gate
 had never been told about, and had dropped an elevation primitive's WebKit prefix. Both are
-reconciled in §1.1 — the numbers in §1 and §2 below are the re-measured ones.
+reconciled in §1.1 — the numbers in §1 and §2 below are the re-measured ones. Auditing that
+fix then found a second defect in the gate itself (§1.3): reconciling §1.1 had left it unable
+to fail on a dropped primitive at all, so §2's nine lines are now enforced line-for-line
+rather than printed as a count.
 
 ## 1. Design tokens — PASS, zero drift
 
@@ -112,23 +115,52 @@ of the regression and not a symptom of something larger.
 ### 1.2 The widened allowlist, audited before it was trusted
 
 Adding names to `ALLOWED_EXTRA` is the one edit that can turn this gate green by blinding it,
-so the green above is not the evidence — these three counterfactuals are, each applied to
+so the green above is not the evidence — these counterfactuals are, each applied to
 `ui/src/styles/tokens.css` and reverted:
 
 | Mutation | Required | Observed |
 |---|---|---|
-| `--lw-chip-h: 44px` → `40px` | drift caught | `FAIL … drift=1`, `DRIFT --lw-chip-h`, both themes |
-| add `--lw-invented-x: 9px` | an undeclared extra still fails | `FAIL … unexpected-extra=1`, `EXTRA --lw-invented-x`, both themes |
-| re-drop `-webkit-backdrop-filter` | the §2 tripwire still moves | `Non-token primitives: 10 differing line(s)` |
+| `--lw-chip-h: 44px` → `40px` | drift caught | `FAIL … drift=1`, `DRIFT --lw-chip-h`, both themes — exit 1 |
+| add `--lw-invented-x: 9px` | an undeclared extra still fails | `FAIL … unexpected-extra=1`, `EXTRA --lw-invented-x`, both themes — exit 1 |
+| re-drop `-webkit-backdrop-filter` | the dropped primitive fails | `FAIL primitives: 10 differing line(s), 9 ruled, 1 undeclared` — exit 1 |
+| widen the focus ring to also match `summary` | a *ruled* line that moves still fails | `FAIL primitives: … 8 ruled, 1 undeclared` + `STALE declaration` — exit 1 |
 
 So the two new entries bought silence for exactly themselves: a value that moves, a token
 invented and never reconciled, and a primitive quietly dropped are each still caught.
+
+### 1.3 The third counterfactual did not hold when §1.2 was first written (2026-09-12)
+
+Run rather than read, the prefix row came back **exit 0**. `check_primitives()` was
+*reported, never failed* — by design, since the restructure §2 rules intended would otherwise
+be permanent red — so re-dropping the prefix moved a printed count from 9 to 10 and returned
+success. The row as first published required only that "the §2 tripwire still moves," which is
+what was observed; it is the acceptance criterion, that the re-dropped prefix **fail**, that
+was not met.
+
+This is worth stating plainly because the gap ran the wrong way. Before §1.1, the gate was red
+— but red for the two undeclared shell metrics, *not* for the prefix. Declaring them turned
+the only signal off: a second prefix drop would have exited 0 with the regression printed in
+prose above the summary, which is the one place a reviewer reading an exit code never looks.
+Fixing §1.1's finding had made the gate blind to the very defect class that produced it.
+
+The fix is to gate the primitive diff rather than print it. `RULED_PRIMITIVE_DIFF` now names
+the nine lines §2 ruled intended, **line-for-line rather than as a count**, and any differing
+line outside them fails. A count cannot distinguish nine expected lines from eight expected
+plus one regression — which is exactly how `.e1` went two days with a missing prefix while
+this section read PASS. The fourth counterfactual above is that distinction under test: it
+holds the total at nine and still fails, because the line that changed is not one of the nine.
+
+A ruled line that stops appearing is reported as `STALE` and does **not** fail. Convergence
+toward the approved file is not a conformance failure; it just leaves a declaration describing
+a difference that no longer exists.
 
 ## 2. Typography, elevation and focus primitives — PASS
 
 The non-token remainder of the two files (all ten `.t-*` type ramps, `.tnum`, `.e1`/`.e2`
 elevation, the focus-visible ring, the reduced-motion query) differs by **9 lines**, in
-three places — all three intended:
+three places — all three intended. Since 2026-09-12 these nine are declared in the gate as
+`RULED_PRIMITIVE_DIFF` and enforced line-for-line, so this section is now measured rather
+than read: a tenth line, or one of the nine changing shape, fails (§1.3). The three:
 
 1. The light selector changed from `:root, [data-theme="light"]` to `@theme` +
    `:root` (ADR 0009 decision 4). This is not an implementer's liberty: the approved
