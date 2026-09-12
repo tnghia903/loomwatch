@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DetectedHarness } from '../lib/harnesses'
 import type { AgentNode } from '../lib/library/nodeFromDrop'
 import type { CapabilityInventory } from '../lib/library/client'
-import { cancelRun, describeNextFire, isTerminalRun, newStartKey, RunApiError, runScheduleNow, scheduleForPath, STALE_TEAM_REVISION, startRun, useSchedules } from '../lib/runs/client'
+import { cancelRun, describeNextFire, findRunByStartKey, isTerminalRun, newStartKey, RunApiError, runScheduleNow, scheduleForPath, STALE_TEAM_REVISION, startRun, useSchedules } from '../lib/runs/client'
 import { ownerLabelFor } from '../lib/runs/graph'
 import type { EvidenceNode, MoreNode, OutputNode, PromptNode, RunNode, WeftEdge } from '../lib/runs/graph'
 import { causalOrder, storyLayout, STORY } from '../lib/runs/storyLayout'
@@ -193,7 +193,7 @@ export function Workspace({ harnesses, harnessesLoading, harnessesError, onRetry
     // prompt against this revision of this file, so a re-press after a lost response carries the
     // SAME key and the daemon answers with the run it already started (200) instead of starting a
     // second one. A connection loss during submit never retries blind.
-    const identity = `${doc.path} ${expectedRevision ?? ''} ${prompt}`
+    const identity = `${doc.path}\0${expectedRevision ?? ''}\0${prompt}`
     const attempt = startAttempt.current?.identity === identity ? startAttempt.current : { identity, key: newStartKey() }
     startAttempt.current = attempt
     setStarting(true)
@@ -208,6 +208,21 @@ export function Workspace({ harnesses, harnessesLoading, harnessesError, onRetry
       window.dispatchEvent(new Event('loomwatch:close-library'))
       void history.refresh()
     } catch (caught) {
+      // §1.6: a lost response is not a failed run, it is an unknown one — so ask the daemon what
+      // this start key did before reporting anything. A `RunApiError` is an answer and needs no
+      // recovery; anything else means none arrived, and a 404 here is the daemon saying the
+      // request never landed. Guessing either way is the blind retry the clause forbids.
+      const recovered = caught instanceof RunApiError ? null : await findRunByStartKey(attempt.key).catch(() => null)
+      if (recovered) {
+        startAttempt.current = null
+        if (parent) retryOf.set(recovered.runId, parent)
+        session.applyRecord(recovered)
+        showRun(recovered.runId)
+        setComposerText('')
+        window.dispatchEvent(new Event('loomwatch:close-library'))
+        void history.refresh()
+        return
+      }
       // §1.5: the file moved between the save and the start, so no run was created. Hand it to
       // the §9.3 conflict bar rather than reporting it as a failed start; the prompt stays put.
       if (caught instanceof RunApiError && caught.code === STALE_TEAM_REVISION) void doc.checkDiskRevision()

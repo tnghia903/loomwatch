@@ -217,6 +217,30 @@ describe('Workspace', () => {
     expect(startKeys[0]).toMatch(/\S/)
   })
 
+  // §1.6: "the client re-`GET`s by start key." The POST started a run and the answer was lost;
+  // the operator must end up in that run, not looking at an error for work that is under way.
+  it('recovers the run a lost submit actually started, by start key (§1.6)', async () => {
+    let posted: string | null = null
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/api/runs') && init?.method === 'POST') { posted = JSON.parse(String(init.body)).startKey; throw new TypeError('connection lost') }
+      if (url.includes('/api/runs?startKey=')) {
+        return posted && url.includes(encodeURIComponent(posted))
+          ? new Response(JSON.stringify({ ...runRecord, status: 'queued' }), { status: 200 })
+          : new Response(JSON.stringify({ error: 'no run exists for that start key' }), { status: 404 })
+      }
+      if (url.includes('/api/runs/run-1')) return new Response(JSON.stringify(runRecord), { status: 200 })
+      if (url.endsWith('/api/teams')) return new Response(JSON.stringify({ root: '/teams', files: ['demo.yaml'] }), { status: 200 })
+      return new Response(JSON.stringify({ error: `unexpected ${url}` }), { status: 404 })
+    }))
+    renderWorkspace()
+    fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Run ⌘/ }))
+    await waitFor(() => expect(screen.getByRole('application', { name: 'Run graph' })).toBeInTheDocument())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('What should the team do?')).toHaveValue('')
+  })
+
   // §1.5: "No run is created." The §9.3 conflict bar takes over and the typed goal survives.
   it('creates no run when the revision moved under the start, and keeps the prompt (§1.5)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
