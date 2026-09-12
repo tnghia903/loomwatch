@@ -32,6 +32,10 @@
   still bind, so each section's rows are proven individually defeatable rather than merely
   green (§10.6 for the composer). Two composer rows were scoring against comment text and one
   against the wrong leg of a disjunction; all three were found that way, not by reading counts.
+  **As of 2026-09-12 every gate here has a committed counterfactual.** The last one without was
+  §1's — the gate that had already gone blind twice — and its stand-in was a table in prose
+  that shipped with a row scored wrong. §1.4 replaces it with a harness, and defeats that
+  harness four ways before believing it.
 - **Six sections are historical.** §6, §7, §8, §9, §10 and now §11 record contracts and
   reasoning, and their verdicts are the state at the moment of observation. The probes are the
   only current answer — run them; do not read a count off this page.
@@ -61,7 +65,11 @@ to fail on a dropped primitive at all, so §2's nine lines are now enforced line
 rather than printed as a count. §11 was written 2026-09-12 from the TNG-201/TNG-203 record,
 which until then lived only in an issue document — **and its four gate files had never been
 committed**, so the evidence certifying that fix was the one gate suite of eight that a
-reviewer at a clean checkout could not run. They are tracked as of this revision.
+reviewer at a clean checkout could not run. They are tracked as of this revision. §1.4 then
+closed the last hole of the same shape from the other direction: with §13 committed, §1 became
+the only gate here with **no counterfactual at all** — the one gate that had already gone blind
+twice. `defeat-token-conformance.py` makes its counterfactual runnable, and §5.2 re-runs all
+eight against the pinned artifact now that two of them have changed since §5.1 measured them.
 
 ## 1. Design tokens — PASS, zero drift
 
@@ -160,6 +168,75 @@ holds the total at nine and still fails, because the line that changed is not on
 A ruled line that stops appearing is reported as `STALE` and does **not** fail. Convergence
 toward the approved file is not a conformance failure; it just leaves a declaration describing
 a difference that no longer exists.
+
+### 1.4 The counterfactual is now a committed harness, not a hand pass (2026-09-12)
+
+§1.2 and §1.3 together are an argument for distrusting this section's green, and the argument
+is stronger than either one alone:
+
+- §1.1 — the gate read **PASS for two days** while `.e1` was missing a primitive.
+- §1.3 — the **repair** for that left the gate unable to fail on a dropped primitive at all.
+- and §1.2 — the counterfactual table meant to catch exactly that was **published with a row
+  scored wrong**, because it was reasoned about rather than run.
+
+Three different failures, one shape: the gate was believed on the strength of its output. Every
+other gate in `docs/mockups/` already answers this with a harness that defeats it on purpose —
+`defeat-composer-conformance.py` (§10.6), `defeat-short-viewport.mjs` (§11.4),
+`verify-prototype.mjs`'s counterfactual pass. The gate with the worst record had none, and its
+counterfactual lived here as a table in prose, which is the format that let §1.2's row through.
+
+`defeat-token-conformance.py` makes it executable. It stages the gate and both its inputs into
+a scratch tree — the gate resolves its paths from `__file__`, so staging it beside staged
+inputs redirects it without editing it, and `ui/` is never written — then applies eight
+defects one at a time. Each is scored on **three** properties, not one:
+
+| | Mutation | Must redden | Must print |
+|---|---|---|---|
+| T1 | an approved token is dropped from `ui/` | `light`, `dark` | `MISSING --lw-obsidian-950` |
+| T2 | an approved token's value drifts | `light`, `dark` | `DRIFT   --lw-obsidian-950` |
+| T3 | an undeclared token appears in `ui/` | `light`, `dark` | `EXTRA   --lw-bogus-metric` |
+| T4 | a **dark-only** token drifts | `dark` **only** | `DRIFT   --color-ground` |
+| T5 | the **approved** side is edited instead | `light`, `dark` | `EXTRA   --lw-obsidian-950` |
+| P1 | §1.1 verbatim — `.e1` loses `-webkit-backdrop-filter` | `primitives` | `UNDECLARED -  -webkit-backdrop-filter…` |
+| P2 | a primitive's value changes | `primitives` | `UNDECLARED +  backdrop-filter: blur(12px);` |
+| P3 | an unreviewed primitive rule is added | `primitives` | `UNDECLARED +.lw-bogus-primitive…` |
+
+**8/8 detected, by exactly the check that owns them.** The third column is what a
+"did the exit code change?" harness skips, and it is the one that separates *the gate noticed
+this* from *the gate noticed something*. The second column is matched **exactly**, not as a
+subset: a token defect that also reddens `primitives` would mean the two halves are scoring
+each other's work, which is the entanglement §1.3 had to unpick. T4 and T5 exist for the two
+defects an inattentive gate passes — a dark regression masked by a correct light value, and a
+prototype quietly rewritten to match production instead of the other way round.
+
+Two things a mutation cannot reach are checked directly:
+
+- **Allowlist integrity.** `ALLOWED_EXTRA` is this gate's only widening seam, and §1.2 exists
+  because widening it is how the gate would be blinded. Its docstring promises each shell
+  metric "names the rule that consumes it" — that promise was prose. Now every entry must be
+  *declared* in `ui/` (a dead entry suppresses nothing today but silently pre-authorises that
+  token's return) and every `--lw-*` entry must be `var()`-consumed by a rule under `ui/src`.
+  All 7 pass; the three `--color-*` are Tailwind plumbing consumed as generated utilities, not
+  through `var()`, and are exempted by name rather than by accident.
+- **The refusal path.** Run against an extracted Gate B pin there is no `ui/` to read, and the
+  answer must be `CANNOT RUN` (exit 2) with **no traceback** — a stack trace in a reviewer's
+  terminal is indistinguishable from a finding against the artifact under review. Checked from
+  both sides, shipped-absent and approved-absent.
+
+**And the harness was itself defeated before being believed**, since a harness that has only
+ever printed green is the same trap one level up. Four blindings were applied to scratch copies
+of the gate; each must be caught, and caught *with the right diagnosis*:
+
+| Blinding applied to the gate | Harness verdict |
+|---|---|
+| `undeclared = []` — §1.3's blindness, restored | exit 1, **P1/P2/P3 survived** — named as survivors, with §1.1 quoted as why it matters |
+| add `--lw-bogus-metric` to `ALLOWED_EXTRA` — green a gate by widening the seam | exit 1, **T3 survived** *and* the new entry flagged as undeclared and unconsumed |
+| add a dead `--lw-never-declared` entry | exit 1, allowlist integrity flags it — mutations all still pass, so the finding is isolated |
+| delete the `check_inputs()` guard | exit 1, refusal path reads `exit=1 says-cannot-run=NO traceback=YES` |
+
+Against the real tree it exits 0. The rule this section leaves behind: **a counterfactual
+written as a table is a claim; a counterfactual written as a script is a check.** §1.2 was the
+former and had a wrong row in it for a day.
 
 ## 2. Typography, elevation and focus primitives — PASS
 
@@ -290,6 +367,47 @@ green, which is the whole reason to keep the two families apart when reporting t
 The rule this section already states, generalised: the pin is a claim about bytes *and* about
 what the gates say about those bytes. Only the first half is frozen by a hash. Re-run the
 second half before every publication, and before answering "is it still good?".
+
+### 5.2 Applying §5.1's own rule to §5.1 (2026-09-12, 15:15)
+
+§5.1 was written at `99a7374`. **Two gates changed after it**, which is precisely the situation
+it says invalidates a re-verification:
+
+- `6987836` un-blinded the token gate (§1.3) — the version §5.1 ran was the blind one.
+- `0afccee` committed the §13 short-viewport suite, which until then existed only in a working
+  tree, so it was the one gate of eight a reviewer at a clean checkout could not run at all.
+
+So §5.1's own table is stale by its own argument. All **eight** gates re-run at `HEAD`
+(`0afccee`), the artifact re-extracted from the pin rather than read off disk:
+
+| Gate | Reads | Result |
+|---|---|---|
+| `shasum -a 256` on the extracted pin | **the pinned artifact** | `a339e26a…` — identical at `968ce80`, `HEAD` and the working tree |
+| `verify-tng90-states.mjs` | **the pinned artifact** | **47 passed, 0 failed** |
+| `verify-prototype.mjs` | **the pinned artifact** | **pass** |
+| `verify-token-conformance.py` | working-tree `ui/` | clean, 0 drift · primitives 9/9 ruled |
+| `verify-composer-conformance.mjs` | working-tree `ui/` | 14/14 |
+| `verify-evidence-honesty.mjs` | working-tree `ui/` | 5/5 |
+| `verify-response-states.mjs` | working-tree `ui/` | 6/6 |
+| `verify-a11y-conformance.mjs` | working-tree `ui/` | 5/5 |
+| `verify-narrow-conformance.mjs` | working-tree `ui/` | 4/4 |
+| `verify-short-viewport.mjs` | working-tree `ui/` | 5/5 |
+
+`git log 968ce80..HEAD -- docs/mockups/prototype-standalone.html` is still empty. The top three
+rows are the only ones that speak to Gate B; the rest read uncommitted production source and
+are reported for completeness, not as evidence for the card.
+
+**Two things the pending card now states slightly stale, neither of them about the artifact.**
+Recorded here rather than fixed by re-issuing, because the ask has already been withdrawn and
+re-posted nine times and a tenth would cost the board its queue position to correct a label:
+
+1. Its table labels `1a641f5` as `HEAD`. `HEAD` is now `0afccee` — four commits later, all four
+   confined to `docs/mockups/` (`.md`, `.py`, `.mjs`, `.js`). The row's *claim* — 55 tracked
+   `ui/src` files, 0 `tsc` errors — is unchanged by them.
+2. Its gate table lists seven gates; there are now nine rows above. The two it omits are the
+   token gate (which was red when the card was written, and is the subject of §1.1–§1.4) and
+   the §13 suite (which was uncommitted when the card was written). Both are green. The card
+   understated the evidence; it did not overstate it.
 
 ## 6. Accessibility — FAIL as audited; all five closed by TNG-158 the same day
 
@@ -1186,6 +1304,15 @@ UI that the shipped workspace no longer renders.** TNG-201's defective rule neve
 # against the artifact. (Gate B's evidence table lists this row under "re-run against the
 # pinned bytes"; it is the one row that measures the implementation instead.)
 python3 docs/mockups/verify-token-conformance.py
+
+# §1.4 — and the audit of THAT gate, the one with the worst record here: it read PASS for two
+# days through a dropped primitive (§1.1), its repair left it unable to fail on one at all
+# (§1.3), and the prose counterfactual meant to catch that shipped with a row scored wrong
+# (§1.2). Eight defects, each of which must redden exactly the check that owns it AND print
+# the line naming it, plus the allowlist seam and the exit-2 refusal path. Exit 0 = the gate
+# can be made to fail on everything it claims to catch. Scratch copy only; `ui/` is never
+# written, and neither is the gate — it is staged beside staged inputs rather than edited.
+python3 docs/mockups/defeat-token-conformance.py
 
 # §1.1 — the WebKit half of the `-webkit-backdrop-filter` finding. The claim there is a
 # measurement, not a compatibility table: it says this engine honours the unprefixed
