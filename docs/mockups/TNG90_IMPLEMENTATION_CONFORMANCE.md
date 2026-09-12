@@ -229,6 +229,29 @@ terminal is worse than no card.
 The §4 vocabulary gap is still not a reason to touch the artifact: that one is between the
 spec and an implementation the card does not cover.
 
+### 5.1 Re-verified at publish time, not at pin time (2026-09-12)
+
+The card now pending names `968ce80` / `sha256 a339e26a…`, and it has stayed open across ten
+commits under `docs/mockups/`. None of them touched the artifact — they were gates, probes and
+write-ups — but several existed *specifically to fix checks that could not fail* (`575a96a`,
+`4ddd2d0`, `bc015db`, `a042dde`, `cd72d7d`). **A pin verified once by gates that have since
+been rewritten is not a verified pin.** So the current gates were re-run against the pinned
+bytes rather than the earlier pass being trusted:
+
+| Check | Result |
+|---|---|
+| `git show 968ce80:…/prototype-standalone.html \| shasum -a 256` | `a339e26a…` — and identical at `HEAD` and in the working tree |
+| `verify-tng90-states.mjs` (reads the artifact) | **47 passed, 0 failed** |
+| `verify-prototype.mjs` (reads the artifact) | green |
+
+The implementation gates are green too, but they are not Gate B's subject and a pass there is
+not evidence for the card — §1's gate was **red** at the same moment all of the above was
+green, which is the whole reason to keep the two families apart when reporting to the board.
+
+The rule this section already states, generalised: the pin is a claim about bytes *and* about
+what the gates say about those bytes. Only the first half is frozen by a hash. Re-run the
+second half before every publication, and before answering "is it still good?".
+
 ## 6. Accessibility — FAIL as audited; all five closed by TNG-158 the same day
 
 §§1–4 checked the design-*system* layer. This section checks the interaction layer:
