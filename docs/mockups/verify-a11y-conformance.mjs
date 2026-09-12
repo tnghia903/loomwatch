@@ -83,16 +83,32 @@ function anchor(name, match) {
 // one source is the projection, so a first genuinely `derived` or `redacted` entity is
 // named truthfully with no surface edit, and a surface cannot regress to a local word.
 const entityRow = anchor('ProvenancePanel entity row', panel.match(/<button type="button" className="pop-row"[^>]*>/))
-const evidenceCard = anchor('StoryNodes EvidenceNodeCard label', story.match(/aria-label=\{`Inspect \$\{evidence\.kind\}: \$\{evidence\.name\}, \$\{evidence\.capture\},/))
-const columnCard = anchor('RunColumn evidence card label', column.match(/aria-label=\{`Inspect \$\{item\.kind\}: \$\{item\.name\}, \$\{item\.capture\},/))
+// TNG-208 re-anchoring — the contracts are unchanged; two of the three surfaces were anchored on
+// the very string they were checking. `Boolean(evidenceCard) && Boolean(columnCard)` could not be
+// false: either the label matched, or `anchor()` had already exited 2. So dropping the capture
+// word from the canvas card or the narrow card — the regression TNG-170 exists to prevent — came
+// out of this gate as "re-anchor this probe", which reads to a reviewer as gate rot rather than
+// as a conformance failure. Proven as mutations 2 and 3 of `defeat-a11y-conformance.mjs`.
+//
+// The anchors are the *elements* now and the names are checked inside them, so a card that stops
+// carrying the capture word still anchors, and fails.
+const evidenceCard = anchor('StoryNodes EvidenceNodeCard', story.match(/export function EvidenceNodeCard[\s\S]*?\n\}/))
+const columnCard = anchor('RunColumn evidence card', column.match(/<button key=\{item\.id\}[\s\S]*?<\/button>/))
+const named = {
+  panel: /aria-label=\{\`\$\{item\.kind\}: \$\{item\.name\}, \$\{item\.capture\}\`\}/.test(entityRow),
+  canvas: /aria-label=\{\`Inspect \$\{evidence\.kind\}: \$\{evidence\.name\}, \$\{evidence\.capture\},/.test(evidenceCard),
+  column: /aria-label=\{\`Inspect \$\{item\.kind\}: \$\{item\.name\}, \$\{item\.capture\},/.test(columnCard),
+}
 check(
   'A1', '§6.4 entity name', `${PANEL} entity row · ${STORY} EvidenceNodeCard · ${COLUMN} evidence card`,
-  /aria-label=\{\`\$\{item\.kind\}: \$\{item\.name\}, \$\{item\.capture\}\`\}/.test(entityRow) && Boolean(evidenceCard) && Boolean(columnCard),
-  'entity names must read "<kind>: <name>, <capture word>" — a kind, a name or the capture word (sourced from the entity\'s own `capture` field) is missing from the accessibility tree on the panel row, the canvas card or its RunColumn variant',
+  named.panel && named.canvas && named.column,
+  `entity names must read "<kind>: <name>, <capture word>" — a kind, a name or the capture word (sourced from the entity's own \`capture\` field) is missing from the accessibility tree (panel row: ${named.panel}, canvas card: ${named.canvas}, narrow column card: ${named.column})`,
 )
 
 // Summary chip — "<category>, <n> entities, <coverage word>".
-const zoneHead = anchor('ProvenancePanel zone-head', panel.match(/<button type="button" className="zone-head toggle t-micro"[^>]*>/))
+// Anchored on the element by class, not by tag: A3 below asks whether the tag is a `<button>`,
+// and an anchor that required one meant the answer was always yes (see A3).
+const zoneHead = anchor('ProvenancePanel zone-head', panel.match(/<\w+[^>]*className="zone-head toggle t-micro"[^>]*>/))
 check(
   'A2', '§6.4 summary chip name', `${PANEL} zone-head`,
   /aria-label=\{\`\$\{category\.label\}, \$\{count\} \$\{count === 1 \? 'entity' : 'entities'\}, \$\{coverageWord\(level\)\}\`\}/.test(zoneHead),
@@ -103,10 +119,18 @@ check(
 // "...filters → the six summaries in fixed order → expanded entities". A non-focusable
 // element cannot occupy a tab position, and §6.1 requires `aria-expanded` to track every
 // provenance disclosure.
+//
+// TNG-208: the `/<button/` half could not fail. `zoneHead` was anchored on a selector that began
+// `<button type="button"`, so reverting the summaries to plain `<div>`s — the exact state TNG-158
+// fixed, and invisible on screen because the class, the label and the click handler all survive
+// it — exited 2 as a lost anchor instead of failing §6.1. Mutation 6 of
+// `defeat-a11y-conformance.mjs`. The anchor is tag-agnostic now, so the tag is a real question.
+const focusableTag = /^<button\b/.test(zoneHead)
+const tracksExpanded = /aria-expanded=/.test(zoneHead)
 check(
   'A3', '§6.1 summaries focusable', `${PANEL} zone-head`,
-  /<button/.test(zoneHead) && /aria-expanded=/.test(zoneHead),
-  'the six summaries must be focusable disclosure buttons whose `aria-expanded` tracks the open state',
+  focusableTag && tracksExpanded,
+  `the six summaries must be focusable disclosure buttons whose \`aria-expanded\` tracks the open state (button: ${focusableTag}, aria-expanded: ${tracksExpanded}); a div with a click handler is not in the tab order at all`,
 )
 
 // --- §6.3 Live regions ---------------------------------------------------------------------
@@ -126,12 +150,55 @@ check(
 // (agent task-state churn, refreshed for 3 s at a time during a run) sits second, above
 // save state, validation, disk notices and start errors. The contract is a real FIFO
 // queue wired to every candidate, drained in order.
+// TNG-208 found this the blindest of the five, in four separate ways, and all four share one
+// mistake: it checked that the file contained the *parts* of a queue rather than that no message
+// can be dropped. `defeat-a11y-conformance.mjs` mutations 9–12:
+//
+//   9.  `.find(Boolean)` restored — `politeWiring` was an `anchor()` on the exact binding it then
+//       tested with `Boolean(...)`, so removing the binding exited 2 instead of failing.
+//   10. a `break` in the effect loop — a perfect queue fed one message per render.
+//   11. `startError` deleted from the candidates — the queue drains fine, the message never
+//       arrives. The gate named `politeCandidates` in its own location string and never read it.
+//   12. `if (spoken.current) return` in front of the push — push and shift both still there, the
+//       hook still shaped like a queue, every message after the first dropped on the floor.
+//
+// So the contract is now read end to end, from the live region backwards: which binding feeds it,
+// whether that binding is the queue, whether the queue can refuse a message, and whether every
+// candidate §6.3 names is still in the array being drained.
 const queueHook = anchor('useAnnouncementQueue hook', queue.match(/export function useAnnouncementQueue[\s\S]*?\n\}/))
-const politeWiring = anchor('Workspace polite queue wiring', workspace.match(/const \[politeAnnouncement, enqueuePolite\] = useAnnouncementQueue\(\)/))
+const politeRegion = workspace.match(/<div aria-live="polite"[^>]*>\{(\w+)\}<\/div>/)
+anchor('Workspace polite live region', politeRegion)
+// Deliberately NOT an `anchor()`. The effect that feeds the queue is the mechanism under test, and
+// the way this contract is broken is by deleting it: restoring `.find(Boolean)` removes the effect
+// along with the binding, so anchoring here exited 2 on the one defect §6.3 was written against
+// (mutation 9). An absent effect is a conformance failure, not a drifted selector, and it reads as
+// one below. The surfaces either side of it — the live region and the candidate array — are still
+// anchored, so a genuine rename cannot be mistaken for this.
+const politeEffect = workspace.match(/const previous = priorPolite\.current[\s\S]*?\n\s*\}\)/)?.[0] ?? ''
+// The identifier the region actually renders, and the enqueue function bound alongside it. A
+// region fed by anything other than `useAnnouncementQueue` leaves this null, which is the failure.
+const queueBinding = new RegExp(`const \\[${politeRegion[1]}, (\\w+)\\] = useAnnouncementQueue\\(\\)`).exec(workspace)
+const enqueueName = queueBinding?.[1]
+// Nothing between entering `enqueue` and the push may decide not to enqueue. The one permitted
+// guard is the falsy-message check, which drops nothing an operator could have heard.
+const enqueueBody = anchor('useAnnouncementQueue enqueue callback', queueHook.match(/const enqueue = useCallback\([\s\S]*?pending\.current\.push\(/))
+const guardsBeforePush = [...enqueueBody.matchAll(/\breturn\b/g)].length
+// §6.3's polite channel, by name: agent status churn, save state, disk notices, start errors.
+// (Validation blockers are A4's — they belong on the assertive channel.)
+const POLITE_CANDIDATES = ['statusAnnouncement', "documentChipState === 'saving'", "documentChipState === 'saved'", "documentChipState === 'error'", 'diskNotice', 'startError']
+const dropped = POLITE_CANDIDATES.filter((candidate) => !politeCandidates.includes(candidate))
+const a5 = {
+  regionIsQueue: Boolean(queueBinding) && !/\.find\(Boolean\)/.test(workspace),
+  queueIsFifo: /pending\.current\.push\(/.test(queueHook) && /pending\.current\.shift\(\)/.test(queueHook),
+  queueTakesEveryMessage: guardsBeforePush === 1 && /if \(!message\) return/.test(enqueueBody),
+  effectFeedsEveryCandidate: Boolean(politeEffect) && Boolean(enqueueName) && new RegExp(`${enqueueName}\\(message\\)`).test(politeEffect)
+    && /index < politeCandidates\.length/.test(politeEffect) && !/\b(break|continue)\b/.test(politeEffect),
+  candidatesIntact: dropped.length === 0,
+}
 check(
-  'A5', '§6.3 no message is dropped', `${QUEUE} · ${WORKSPACE} politeCandidates`,
-  Boolean(politeWiring) && /pending\.current\.push\(/.test(queueHook) && /pending\.current\.shift\(\)/.test(queueHook) && /enqueuePolite\(message\)/.test(workspace) && !/\.find\(Boolean\)/.test(workspace),
-  'the polite channel must drain a FIFO queue fed by every candidate message; a `.find(Boolean)` first-match drops all but one',
+  'A5', '§6.3 no message is dropped', `${QUEUE} · ${WORKSPACE} politeCandidates · polite live region`,
+  Object.values(a5).every(Boolean),
+  `the polite channel must drain a FIFO queue fed by every candidate message — ${Object.entries(a5).filter(([, ok]) => !ok).map(([name]) => name).join(', ')} unmet${dropped.length ? `; missing candidates: ${dropped.join(', ')}` : ''}`,
 )
 
 // --- report --------------------------------------------------------------------------------

@@ -92,6 +92,15 @@ function narrowBlocks(css, label) {
 
 const narrowCss = [...narrowBlocks(appCss, APP_CSS), ...narrowBlocks(runtimeCss, RUNTIME_CSS)].join('\n')
 
+// A comment is not an implementation, and TNG-208 found three of this file's four contracts being
+// met by prose or by an import: N1's coverage stage scored the `CoverageGlyph` import and the
+// `coverage → filters → summaries` note above the section, N1's summaries stage scored the word
+// "summaries" wherever it appeared, and N4's capture quality scored the comment that explains why
+// capture quality is on the card. Every contract below reads comment-stripped source.
+const decomment = (source) => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+const columnCode = decomment(column)
+const activityCode = decomment(activity)
+
 // The branch that swaps the coordinate canvas for the reading column is the subject of
 // every contract below; if it moves, nothing here is measuring what it claims to.
 anchor('Workspace narrow branch', workspace.match(/\{runView && windowWidth < 768 \? \(/))
@@ -108,13 +117,24 @@ anchor('ProvenancePanel coverage header', panel.match(/Complete capture|Partial 
 //        → viewport-docked composer
 // "Selected evidence" is met — RunColumn renders the activity entities and ActivityPanel is
 // the overlay sheet. The three stages before it have no counterpart in the column at all.
-const columnHasCoverage = /coverageSummary\(|Complete capture|Partial capture|CoverageGlyph/.test(column)
+// Each stage is asserted by what it *renders*, not by a word that appears near it. The coverage
+// arm was `/coverageSummary\(|…|CoverageGlyph/`, which matched the glyph import on line 10 and the
+// `const coverage = coverageSummary(projection)` binding — both of which survive deleting the
+// stage itself, so the column could lose its coverage line entirely and score it as present
+// (mutation 1 of `defeat-narrow-conformance.mjs`). Binding-relative, so a rename of the local
+// cannot false-red it: whatever `coverageSummary()` is assigned to, its text has to reach JSX.
+const coverageBinding = columnCode.match(/const (\w+) = coverageSummary\(/)
+const columnHasCoverage = Boolean(coverageBinding) && new RegExp(`\\{${coverageBinding[1]}\\.text\\}`).test(columnCode)
 // `filter` as a bare word matched `classes.filter(Boolean)` — a false pass, and the mirror of
 // the stuck-at-fail this file is careful to avoid: it would have scored the filters stage as
 // present against a column that had never had one. The contract is a filter *control* — a
 // toggle the operator can press whose state the column reads back.
-const columnHasFilters = /aria-pressed=/.test(column) && /filter-chip|Filter the evidence|run-prov-filters/i.test(column)
-const columnHasSummaries = /CATEGORIES\.map|summar|ProvenancePanel|zone-head/i.test(column)
+const columnHasFilters = /aria-pressed=/.test(columnCode) && /filter-chip|Filter the evidence|run-prov-filters/i.test(columnCode)
+// `summar` matched "summaries" in three comments and in the `aria-label` of the list; `CATEGORIES
+// .map` matched the *filters'* own iteration, one stage above. Delete the whole summaries list and
+// all four alternatives still hit (mutation 2). What §4.1 asks for is per-category counts and
+// coverage words, from the projector rather than the filtered view — so that is what is asserted.
+const columnHasSummaries = /projection\.coverage\[category\.key\]/.test(columnCode) && /coverageWord\(level\)/.test(columnCode)
 check(
   'N1', '§11.6 narrow source order', `${COLUMN} run-column`,
   columnHasCoverage && columnHasFilters && columnHasSummaries,
@@ -130,8 +150,12 @@ check(
 // Bound to a control, not merely named. A bare `toggleProvenance` identifier passes for a
 // column that destructures it from context and wires it to nothing — which is a column below
 // 768 px with no route into provenance, the exact state this contract exists to reject.
-const columnOpensProvenance = /on(?:Click|KeyDown|KeyUp|Press|Select)\w*=\{[\s\S]{0,60}?toggleProvenance/.test(column)
-const paletteOpensProvenance = /provenance/i.test(actionsBlock)
+const columnOpensProvenance = /on(?:Click|KeyDown|KeyUp|Press|Select)\w*=\{[\s\S]{0,60}?toggleProvenance/.test(columnCode)
+// The palette arm had the defect the column arm was already fixed for, one level weaker: the bare
+// word `provenance` anywhere in the actions block. A TODO promising the route — the single most
+// likely thing to be sitting there at the moment the route is missing — scored as the route
+// (mutation 5). A command action is a `run:` that does something, so that is the test.
+const paletteOpensProvenance = /run: \(\) => [^\n]*(toggleProvenance|setProvenanceOpen)/.test(decomment(actionsBlock))
 check(
   'N2', '§11.6 failure 22 — provenance/filtering survive', `${COLUMN} · ${WORKSPACE} actions · ${PANEL}`,
   columnOpensProvenance || paletteOpensProvenance,
@@ -154,46 +178,68 @@ const baseBtn = Number(/height: (\d+)px/.exec(btnRule)[1])
 const baseIconbtn = Number(/height: (\d+)px/.exec(iconbtnRule)[1])
 
 /**
+ * Every narrow rule as `{ selectors, heights }`. CSS comments are stripped first, or their prose
+ * is read as a selector.
+ */
+const narrowRules = [...decomment(narrowCss).matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((rule) => ({
+  selectors: rule[1].split(',').map((selector) => selector.trim()).filter(Boolean),
+  heights: [...rule[2].matchAll(/(?:min-)?height:\s*(\d+)px/g)].map((size) => Number(size[1])),
+}))
+
+/**
  * The height a selector resolves to among the narrow rules, or null when none pins one.
  *
  * Last declaration wins, not the smallest. This matters, and an earlier draft of this probe
- * got it wrong: `.mode-chip` is already pinned to 32 px inside a narrow block, so a "take the
+ * got it wrong: `.mode-chip` was pinned to 32 px inside a narrow block, so a "take the
  * smallest" reading reports 32 px forever — including against a stylesheet someone has
  * correctly fixed by adding a later 44 px rule. That is a stuck-at-fail check, which is the
  * one defect a conformance gate may not have: it would tell an implementer their real fix
  * did not work.
  *
- * `narrowCss` is assembled app.css-then-runtime.css, which is the order `ui/src/index.css`
- * imports them, so source order here is cascade order. The assumption this cannot see is
- * specificity: it reads the last *matching* declaration, not the winning one. A fix that
- * loses the cascade to a more specific 32 px rule would be scored as a pass — so a rendered
- * measurement stays the stronger confirmation, as the header says.
+ * TNG-208: the *other* direction was worse. This matched the selector as a substring, so
+ * `.pop-inline .btn { height: 44px; }` — a button inside a popover, and not one of the core
+ * actions §11.6 names — was the last rule to match `.btn` and therefore the answer. Shrink every
+ * composer button to the 28 px pointer size and the gate read 44 and passed (mutation 6 of
+ * `defeat-narrow-conformance.mjs`): failure 21 shipped, scored clean, by the contract written to
+ * catch exactly it. So the subject of the rule has to be the selector itself.
  */
-function narrowPin(selectorSource) {
-  const rule = new RegExp(`${selectorSource}[^{}]*\\{([^}]*)\\}`, 'g')
+function narrowPin(selector) {
   let resolved = null
-  let hit
-  while ((hit = rule.exec(narrowCss)) !== null) {
-    for (const size of hit[1].matchAll(/(?:min-)?height:\s*(\d+)px/g)) {
-      resolved = Number(size[1])
-    }
+  for (const rule of narrowRules) {
+    if (!rule.selectors.includes(selector)) continue
+    for (const height of rule.heights) resolved = height
   }
   return resolved
 }
 
-const narrowBtn = narrowPin('\\.btn')
-const narrowIconbtn = narrowPin('\\.iconbtn')
-const narrowModeChip = narrowPin('\\.mode-chip')
 const resolved = {
-  'composer .btn (Run / Save & run / Stop / Retry / New run)': narrowBtn ?? baseBtn,
-  '.iconbtn (run history, theme toggle)': narrowIconbtn ?? baseIconbtn,
-  '.mode-chip': narrowModeChip ?? null,
+  'composer .btn (Run / Save & run / Stop / Retry / New run)': narrowPin('.btn') ?? baseBtn,
+  '.iconbtn (run history, theme toggle)': narrowPin('.iconbtn') ?? baseIconbtn,
+  '.mode-chip': narrowPin('.mode-chip') ?? null,
 }
 const undersized = Object.entries(resolved).filter(([, px]) => px !== null && px < 44)
+
+/**
+ * The second reading, and the one a later rule cannot hide: no narrow rule anywhere may declare a
+ * core action under the touch floor, whatever it is scoped to.
+ *
+ * `narrowPin` alone still cannot see `.lw-composer .mode-chip` — the chip's only narrow rule is
+ * descendant-scoped, so the resolved reading is `null` and the chip drops out of `undersized`
+ * entirely. This clause is monotone: a 32 px declaration stays visible however many 44 px rules
+ * follow it, so between them the two readings cover both the rule that governs and the rule that
+ * merely exists. Raising the offending declaration is the fix; adding a later one is not.
+ */
+const CORE_ACTION_CLASS = /\.(btn|iconbtn|mode-chip)\b/
+const underFloor = narrowRules.flatMap((rule) => rule.selectors
+  .filter((selector) => CORE_ACTION_CLASS.test(selector.split(/\s+/).pop() ?? ''))
+  .flatMap((selector) => rule.heights.filter((height) => height < 44).map((height) => `${selector}: ${height}px`)))
+
 check(
   'N3', '§11.6 failure 21 — 44 px targets', `${RUNTIME_CSS} · ${APP_CSS} @media (max-width: 767px)`,
-  undersized.length === 0,
-  `every core action must resolve to at least 44 px below 768 px; declared instead — ${undersized.map(([name, px]) => `${name}: ${px}px`).join(', ')}`,
+  undersized.length === 0 && underFloor.length === 0,
+  // The two readings answer different questions, so the failure says which one fired rather than
+  // pooling them into a list that reads as one measurement.
+  `every core action must resolve to at least 44 px below 768 px${undersized.length ? `; resolves to — ${undersized.map(([name, px]) => `${name}: ${px}px`).join(', ')}` : ''}${underFloor.length ? `; declared under the floor — ${underFloor.join(', ')}` : ''}`,
 )
 
 // --- N4 §11.6 — the cards carry what the lost geometry used to say --------------------------
@@ -211,10 +257,16 @@ check(
 // place `capture` was already reaching — and ask whether anything is left. An earlier draft
 // matched a literal `className="ae-cap`, which would have failed a correct fix that composed
 // the class or named the element anything else.
-const cardBlock = anchor('RunColumn evidence card', column.match(/<button key=\{item\.id\}[\s\S]*?<\/button>/))
+//
+// TNG-208: the strip-the-name-and-see-what-is-left reading was right, and it was reading the
+// comment directly above the `.ae-cap` span — the note explaining *why* capture quality is on the
+// card says the word three times. Delete the span and the card face still answered yes (mutation
+// 9). Comments come out with the accessible name now. The overlay arm is a rendered interpolation
+// for the same reason: "the inspector mentions capture somewhere in 400 lines" is not the claim.
+const cardBlock = anchor('RunColumn evidence card', columnCode.match(/<button key=\{item\.id\}[\s\S]*?<\/button>/))
 const cardFace = cardBlock.replace(/aria-label=\{`[^`]*`\}/g, '')
 const captureOnFace = /capture/i.test(cardFace)
-const captureInActivitySheet = /capture/i.test(activity)
+const captureInActivitySheet = /\{[^{}]*capture[^{}]*\}/i.test(activityCode)
 check(
   'N4', '§11.6 cards state capture quality', `${COLUMN} ae-sub · ${ACTIVITY}`,
   captureOnFace || captureInActivitySheet,

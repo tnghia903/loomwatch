@@ -686,6 +686,92 @@ as a no-op:
 All three of those read as **NOT CAUGHT** before they were traced, which is what the verdict is
 for: the harness reports a no-op as an uncaught defect rather than quietly scoring it green.
 
+### TNG-208 counterfactual pass, the three implementation gates — 32 mutations, all 32 caught
+
+```
+node docs/mockups/defeat-response-states.mjs      # 11 mutations against verify-response-states.mjs
+node docs/mockups/defeat-a11y-conformance.mjs     # 12 mutations against verify-a11y-conformance.mjs
+node docs/mockups/defeat-narrow-conformance.mjs   #  9 mutations against verify-narrow-conformance.mjs
+
+node docs/mockups/defeat-narrow-conformance.mjs --only 6,8   # a subset, by number
+node docs/mockups/defeat-narrow-conformance.mjs --no-control # skip the unmutated control run
+```
+
+The two gates above read the pinned artifact and were done first, because the board's ruling
+rests on them. These three read the working-tree `ui/` sources, so they are not evidence for
+Gate B — they are what will certify the production implementation the moment it starts, and all
+three printed N/N and had never printed anything else. `defeat-source-gate.mjs` is the shared
+runner; each of the three files is a mutation table over it. Nothing under `ui/` is ever written:
+every run stages a throwaway tree holding a copy of the gate and copies of just the files it
+reads, so the gate's own `../../<path>` resolution lands inside the copy.
+
+Same discipline as the artifact pass — a green control run 0, and the same three verdicts — plus
+a fourth that only a source gate can produce:
+
+- **ANCHOR LOST** — the mutation made the gate exit 2. Counted as a failure, and not a near-miss:
+  a reviewer running that gate is told to *re-anchor a probe*, which reads as gate rot and not as
+  a conformance failure, so a real regression leaves no red anywhere.
+
+**Eleven of the fifteen contracts could not fail.** Only D2, D5, A2 and A4 survived their own
+defect. What the sweep found, in the order it hurts:
+
+- **N3 scored a popover button in place of the composer's.** The touch-floor probe matched its
+  selector as a substring, so `.pop-inline .btn { height: 44px }` was the last narrow rule
+  matching `.btn` and therefore the answer. Shrink every core action — Run, Save & run, Stop,
+  Retry, New run — back to the 28 px pointer size and the gate read 44 px and passed. §11.6
+  failure 21 could have shipped, scored clean, by the one contract written to catch it. It is
+  now two readings: the winner among rules whose *subject* is the selector, and a monotone floor
+  that no later rule can hide — needed because the mode chip's only narrow rule is descendant-
+  scoped and drops out of the first reading entirely.
+- **D6 was met by a comment, twice over.** It searched `phaseLadder + strip` for
+  `missing_canonical_response` — and the ladder's own CONTRACT §4 comment contains that string,
+  so the ladder half was prose from the day it was written. The `||` then let either half carry
+  the whole contract: delete the strip's branch, or delete the ladder's classification, and the
+  gate stayed green for both.
+- **A5 was blind in four separate ways**, all one mistake — it checked for the *parts* of a queue
+  rather than for messages not being dropped. `politeWiring` was an `anchor()` on the exact
+  binding it then tested with `Boolean(...)`, so restoring `.find(Boolean)` exited 2 instead of
+  failing. A `break` in the effect loop passed. Deleting `startError` from the candidates passed —
+  the gate named `politeCandidates` in its own location string and never read it. And
+  `if (spoken.current) return` in front of the push passed with push and shift both still there.
+- **A1 and A3 turned regressions into gate rot.** Two of A1's three surfaces were anchored on the
+  very string they were checking, so `Boolean(evidenceCard) && Boolean(columnCard)` could not be
+  false. A3's `/<button/` could not be false either, because its anchor began `<button
+  type="button"`. Dropping the capture word from the canvas or narrow card, and reverting the
+  summaries to the plain `<div>`s TNG-158 fixed, all exited 2.
+- **D3 was a denylist of regressions already caught.** It knew the two paraphrases this repo had
+  shipped. A *third* invented sentence in the verbatim-message slot passed — and the third is the
+  one that has not been caught yet. Inverted to a closed allowlist of the two sentences §3.4
+  names, so adding to it is a spec change and reads like one.
+- **D1, D4, N1 and N2 scored bare words.** D1's strip half matched `errorCode` anywhere in the
+  strip, and the message ternary reads it to pick a sentence — so the watermark could show the
+  exit status instead of the daemon's code. D4 matched a phase word anywhere in the card, so a
+  refactor keeping `isFailed` for a CSS class while the body and the accessible name went
+  unconditional passed. N1's coverage arm matched the `CoverageGlyph` import; its summaries arm
+  matched `summar` in three comments and `CATEGORIES.map` in the *filters'* iteration one stage
+  above. N2's palette arm matched the bare word `provenance`, so a TODO promising the route that
+  had just been deleted scored as the route.
+
+**No allowlist was widened to green anything.** Every repair narrows: a bare word becomes a
+rendered value, a denylist becomes a closed allowlist, an anchor that could not be false becomes
+a check that can. Each of the three gates still reads N/N on the working tree, and the fix is
+proven by the mutation that was green before it and red after.
+
+**Two things the sweep taught about anchors**, both learned by getting them wrong here first:
+
+- **Never anchor on the string you are about to test.** It reduces the check to `true`, and the
+  failure mode is silent — the contract reads green forever, and the day it breaks the gate says
+  "re-anchor this probe". Anchor the *element* and check the value inside it.
+- **The mechanism under test cannot be an anchor either.** After A5's first repair, the polite
+  *effect* was anchored — and deleting that effect is precisely how the contract is broken, so
+  `.find(Boolean)` still exited 2. It is a check now; the stable surfaces either side of it (the
+  live region, the candidate array) stay anchored, so a genuine rename is still distinguishable.
+
+A mutation whose anchor does not appear the expected number of times exits 2 as a HARNESS ERROR
+rather than running, for the reason the artifact pass found the hard way: an edit that silently
+no-ops reads exactly like an uncaught defect. So does a gate that throws before printing a
+scoreboard, which is why that case is `GATE CRASHED` and not a pass.
+
 ### TNG-115 remediation — 26 focused browser assertions, all passing
 
 Run `node docs/mockups/verify-prototype.mjs`. The verifier launches headless Chrome with
