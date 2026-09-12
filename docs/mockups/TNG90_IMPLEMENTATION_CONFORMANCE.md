@@ -48,7 +48,10 @@ acceptance clause left unchecked: responsive behaviour below 768 px. Unlike §§
 artifact, which is why §5 now opens by saying so. §10 was audited 2026-09-12 on the prompt
 composer (§1), the one section of the interaction spec no probe had ever read; it is
 bytes-neutral on the prototype, and unlike §§6–9 its gate was mutation-audited **before**
-publication rather than after a false green (§10.5).
+publication rather than after a false green (§10.5). §§1–2 were **re-measured 2026-09-12**
+and had gone red since publication: the implementation had grown two shell metrics the gate
+had never been told about, and had dropped an elevation primitive's WebKit prefix. Both are
+reconciled in §1.1 — the numbers in §1 and §2 below are the re-measured ones.
 
 ## 1. Design tokens — PASS, zero drift
 
@@ -61,16 +64,65 @@ a `[data-theme="light"]` block into Tailwind's `@theme`, per ADR 0009 decision 4
 
 | Theme | Approved tokens | Missing | Value drift | Extra |
 |---|---|---|---|---|
-| Light | 107 | **0** | **0** | 5 |
-| Dark | 107 | **0** | **0** | 5 |
+| Light | 107 | **0** | **0** | 7 |
+| Dark | 107 | **0** | **0** | 7 |
 
 Every one of the 107 approved tokens resolves to a byte-identical value in both themes. The
-5 extras are not design tokens: `--color-black`, `--color-white`, `--color-transparent` are
+7 extras are not design tokens: `--color-black`, `--color-white`, `--color-transparent` are
 Tailwind's `@theme` plumbing (with `--color-*: initial` clearing its defaults), and
-`--lw-bottom-offset` / `--lw-composer-w` are app-shell layout metrics with no counterpart in
-a static prototype.
+`--lw-bottom-offset`, `--lw-composer-w`, `--lw-schedule-w` and `--lw-viewctl-clear` are
+app-shell layout metrics with no counterpart in a static prototype.
 
 The claim holds exactly.
+
+### 1.1 The two-day drift, and why it was not visible on the page (2026-09-12)
+
+Re-running the gate on 2026-09-12 returned **FAIL** on both themes, still at `missing=0
+drift=0` — nothing approved had moved. Three differences had appeared since publication, and
+none of them is the kind of failure the count in the table above can show:
+
+| Difference | Verdict | Disposition |
+|---|---|---|
+| extra `--lw-schedule-w: 360px` | not drift — an app-shell metric, consumed by `.lw-schedule-panel` (`app.css`) | declared in `ALLOWED_EXTRA` |
+| extra `--lw-viewctl-clear: calc(36px + var(--lw-panel-inset) + var(--sp-3))` | not drift — an app-shell metric from the §13 short-viewport work, consumed by `.lw-activity` (`runtime.css`) and the right panel `max-height` (`app.css`) | declared in `ALLOWED_EXTRA` |
+| `.e1` had lost `-webkit-backdrop-filter: blur(20px)` | **regression** against the approved primitive | line restored in `ui/src/styles/tokens.css` |
+
+The first two are the same category as the two metrics already listed — the gate failed them
+only because it had never been told they exist, which is the behaviour it is supposed to
+have. Each is now declared with *the rule that consumes it*, so an entry added to silence the
+gate rather than to describe the app is visible as an entry whose consumer cannot be found.
+
+The third is a real one, and worth being precise about how real. **It is not a visual defect
+on the engine the board reviews in.** Measured, rather than assumed, against the WebKit the
+board sees (`AppleWebKit/605.1.15`, via `verify-webkit.swift`): a rule carrying only the
+unprefixed `backdrop-filter: blur(20px)` computes to `blur(20px)` for *both* `backdropFilter`
+and `webkitBackdropFilter`, and `CSS.supports` answers true unprefixed. So the glass on `.e1`
+blurs in Safari today with or without the prefix. What the missing line costs is older
+WebKit — Safari before 18 and the iOS WKWebViews that track it, where unprefixed
+`backdrop-filter` is inert and `.e1` falls back to a flat translucent fill. The approved
+primitive carries both lines; production carried one; restoring it costs a line and nothing
+else, since engines that honour the unprefixed property resolve both to the same value.
+
+It also explains the §2 count. §2 was published at **9 differing lines in three places**, all
+three ruled intended. The 2026-09-12 run read **10 lines in four places** — the tenth being
+this dropped prefix, which no §2 ruling covered. With the line restored the diff is 9 lines
+in the same three settled places again, which is the check that the tenth line was the whole
+of the regression and not a symptom of something larger.
+
+### 1.2 The widened allowlist, audited before it was trusted
+
+Adding names to `ALLOWED_EXTRA` is the one edit that can turn this gate green by blinding it,
+so the green above is not the evidence — these three counterfactuals are, each applied to
+`ui/src/styles/tokens.css` and reverted:
+
+| Mutation | Required | Observed |
+|---|---|---|
+| `--lw-chip-h: 44px` → `40px` | drift caught | `FAIL … drift=1`, `DRIFT --lw-chip-h`, both themes |
+| add `--lw-invented-x: 9px` | an undeclared extra still fails | `FAIL … unexpected-extra=1`, `EXTRA --lw-invented-x`, both themes |
+| re-drop `-webkit-backdrop-filter` | the §2 tripwire still moves | `Non-token primitives: 10 differing line(s)` |
+
+So the two new entries bought silence for exactly themselves: a value that moves, a token
+invented and never reconciled, and a primitive quietly dropped are each still caught.
 
 ## 2. Typography, elevation and focus primitives — PASS
 
@@ -88,6 +140,11 @@ three places — all three intended:
 3. `[data-motion="reduce"] { --bloom: none; }` is dropped. Correct — see §3.
 
 Everything else, including all ten type ramps, matches byte for byte.
+
+This count went to **10 lines in four places** between publication and 2026-09-12 and is back
+to 9 — the fourth place was a dropped `-webkit-backdrop-filter` on `.e1`, restored; §1.1 has
+the measurement. Read the count as a tripwire, not as a score: the three places above are
+ruled, so *any* fourth is by definition something nobody has ruled on yet.
 
 ## 3. Reduced motion — PASS
 
@@ -975,6 +1032,25 @@ never written — the harness mutates a scratch copy only.
 # against the artifact. (Gate B's evidence table lists this row under "re-run against the
 # pinned bytes"; it is the one row that measures the implementation instead.)
 python3 docs/mockups/verify-token-conformance.py
+
+# §1.1 — the WebKit half of the `-webkit-backdrop-filter` finding. The claim there is a
+# measurement, not a compatibility table: it says this engine honours the unprefixed
+# property, which is why the restored line is parity for older WebKit rather than a fix
+# for a defect the board can see. Reproduce it on any page carrying `.e1` — a rule with
+# only `backdrop-filter` set must compute non-`none` for BOTH properties below.
+swift docs/mockups/verify-webkit.swift docs/mockups/prototype-standalone.html --eval /dev/stdin <<'JS'
+(() => {
+  const el = document.querySelector('.e1');
+  if (!el) return 'FAIL no .e1 on this page — cannot answer';
+  const cs = getComputedStyle(el);
+  return [
+    'engine            = ' + navigator.userAgent.match(/AppleWebKit\/[\d.]+/),
+    'supports unprefixed = ' + CSS.supports('backdrop-filter', 'blur(20px)'),
+    'backdropFilter       = ' + cs.backdropFilter,
+    'webkitBackdropFilter = ' + cs.webkitBackdropFilter,
+  ].join('\n');
+})()
+JS
 
 # §3 — reduced-motion coverage
 grep -rn 'infinite' ui/src/styles/*.css

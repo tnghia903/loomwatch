@@ -7,8 +7,10 @@ light lives: the prototype's `[data-theme="light"]` block became Tailwind's `@th
 
 A token is conformant when the value an author would resolve in a given theme is
 byte-identical (whitespace-normalised) to the approved one. Exits non-zero on any missing
-token or value drift; extras are reported but do not fail, since the app legitimately adds
-shell metrics and Tailwind plumbing a static prototype has no need for.
+token, any value drift, and any extra not named in `ALLOWED_EXTRA` below — the app does
+legitimately add shell metrics and Tailwind plumbing a static prototype has no need for,
+but each one is declared here with the rule that consumes it, so a token invented in `ui/`
+and never reconciled with the design is a failure rather than a line of noise.
 
     python3 docs/mockups/verify-token-conformance.py
 
@@ -28,12 +30,20 @@ APPROVED = ROOT / "docs/mockups/tokens.css"
 SHIPPED = ROOT / "ui/src/styles/tokens.css"
 
 # Not design tokens: Tailwind's `@theme` palette plumbing and app-shell layout metrics.
+# Each shell metric names the rule that consumes it, so an entry added to silence the gate
+# rather than to describe the app is visible as an entry whose consumer cannot be found.
 ALLOWED_EXTRA = {
     "--color-black",
     "--color-white",
     "--color-transparent",
     "--lw-bottom-offset",
     "--lw-composer-w",
+    # `.lw-schedule-panel` width (app.css) — the run-schedule panel has no prototype counterpart.
+    "--lw-schedule-w",
+    # The zoom bar never moves, so every right-docked panel stops above it: `.lw-activity`
+    # (runtime.css) and the right panel max-height (app.css). A static prototype, which has
+    # no scrolling panel to clear, has no counterpart.
+    "--lw-viewctl-clear",
 }
 
 
