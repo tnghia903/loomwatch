@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DetectedHarness } from '../lib/harnesses'
 import type { AgentNode } from '../lib/library/nodeFromDrop'
 import type { CapabilityInventory } from '../lib/library/client'
-import { cancelRun, describeNextFire, isTerminalRun, RunApiError, runScheduleNow, scheduleForPath, startRun, useSchedules } from '../lib/runs/client'
+import { cancelRun, describeNextFire, isTerminalRun, newStartKey, RunApiError, runScheduleNow, scheduleForPath, STALE_TEAM_REVISION, startRun, useSchedules } from '../lib/runs/client'
 import { ownerLabelFor } from '../lib/runs/graph'
 import type { EvidenceNode, MoreNode, OutputNode, PromptNode, RunNode, WeftEdge } from '../lib/runs/graph'
 import { causalOrder, storyLayout, STORY } from '../lib/runs/storyLayout'
@@ -143,6 +143,9 @@ export function Workspace({ harnesses, harnessesLoading, harnessesError, onRetry
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
+  // §1.6: the start key of the attempt in hand, surviving a failed POST so the re-press is the
+  // same attempt. Cleared once the daemon answers with a run id.
+  const startAttempt = useRef<{ identity: string; key: string } | null>(null)
   const [runPositions, setRunPositions] = useState<Record<string, { x: number; y: number }>>({})
   const [inspectedEvidenceId, setInspectedEvidenceId] = useState<string | null>(null)
   const [provenanceOpen, setProvenanceOpen] = useState(false)
@@ -184,12 +187,20 @@ export function Workspace({ harnesses, harnessesLoading, harnessesError, onRetry
   }, [])
 
   // ---- starting a run: there is no "run without saving" (TNG89 §1.4) ------------------
-  const launch = useCallback(async (prompt: string, parent?: string | null) => {
+  const launch = useCallback(async (prompt: string, parent?: string | null, expectedRevision: string | null = null) => {
     if (!doc.path) return
+    // §1.6: one start key per attempt, held for the life of the attempt. An attempt is this
+    // prompt against this revision of this file, so a re-press after a lost response carries the
+    // SAME key and the daemon answers with the run it already started (200) instead of starting a
+    // second one. A connection loss during submit never retries blind.
+    const identity = `${doc.path} ${expectedRevision ?? ''} ${prompt}`
+    const attempt = startAttempt.current?.identity === identity ? startAttempt.current : { identity, key: newStartKey() }
+    startAttempt.current = attempt
     setStarting(true)
     setStartError(null)
     try {
-      const created = await startRun(doc.path, prompt)
+      const created = await startRun(doc.path, prompt, { startKey: attempt.key, expectedRevision })
+      startAttempt.current = null
       if (parent) retryOf.set(created.runId, parent)
       session.applyRecord(created)
       showRun(created.runId)
@@ -197,15 +208,20 @@ export function Workspace({ harnesses, harnessesLoading, harnessesError, onRetry
       window.dispatchEvent(new Event('loomwatch:close-library'))
       void history.refresh()
     } catch (caught) {
+      // §1.5: the file moved between the save and the start, so no run was created. Hand it to
+      // the §9.3 conflict bar rather than reporting it as a failed start; the prompt stays put.
+      if (caught instanceof RunApiError && caught.code === STALE_TEAM_REVISION) void doc.checkDiskRevision()
       setStartError(caught instanceof RunApiError ? caught.message : String(caught))
     } finally {
       setStarting(false)
     }
-  }, [doc.path, history, retryOf, session, showRun])
+  }, [doc, history, retryOf, session, showRun])
 
   const submit = useCallback(async (promptOverride?: string) => {
     const prompt = (promptOverride ?? composerText).trim()
     if (!prompt || !doc.path) return
+    // §1.6: re-pressing while a start is in flight is a no-op, not a second run.
+    if (starting || pendingPrompt !== null) return
     const parent = activeRunId && isTerminalRun(record?.status) ? activeRunId : null
     // §1.4: there is no "run without saving" — the run executes an exact snapshot of the file.
     if (['dirty', 'new'].includes(doc.documentChipState)) {
@@ -214,8 +230,10 @@ export function Workspace({ harnesses, harnessesLoading, harnessesError, onRetry
       setPendingPrompt(null)
       if (!saved) { setStartError('The team file could not be saved, so no run was started.'); return }
     }
-    await launch(prompt, parent)
-  }, [composerText, doc, launch, activeRunId, record?.status])
+    // §1.4: the run is pinned to `expectedRevision` — the revision the PUT just returned, read
+    // after the await so it is the one this save landed and not the one loaded before it.
+    await launch(prompt, parent, doc.currentRevision())
+  }, [composerText, doc, launch, activeRunId, record?.status, starting, pendingPrompt])
 
   const stop = useCallback(async () => {
     if (!activeRunId) return
@@ -676,26 +694,37 @@ export function Workspace({ harnesses, harnessesLoading, harnessesError, onRetry
 
   // ---- composer state ---------------------------------------------------------------------
   const filename = doc.path?.split('/').pop() ?? 'team'
-  const terminals = doc.mode === 'pipeline' ? doc.nodes.filter((node) => !doc.edges.some((edge) => edge.source === node.id)).length : 1
+  // §1.3: the blocker names the offending agents, so the preflight keeps their ids, not a count.
+  const terminalIds = useMemo(
+    () => (doc.mode === 'pipeline' ? doc.nodes.filter((node) => !doc.edges.some((edge) => edge.source === node.id)).map((node) => node.id) : []),
+    [doc.mode, doc.nodes, doc.edges],
+  )
+  const terminals = doc.mode === 'pipeline' ? terminalIds.length : 1
   const composerState: ComposerState = useMemo(() => {
     if (history.unavailable) return { kind: 'unavailable', reason: history.unavailable }
     if (runView && !session.terminal && record) return { kind: 'busy', phase }
     if (runView && session.terminal) return { kind: 'terminal', phase }
-    if (starting || pendingPrompt !== null) return { kind: 'saving', filename }
+    // §1.4/§1.6: the save and the start are two steps and stay legible as two. `pendingPrompt`
+    // is the write; `starting` is the run creation, which on a clean document is the only step.
+    if (pendingPrompt !== null) return { kind: 'saving', filename }
+    if (starting) return { kind: 'starting' }
     if (!doc.path) return { kind: 'blocked', reason: 'Open or create a team first.' }
     if (doc.nodes.length === 0) return { kind: 'blocked', reason: 'Add an agent from the Library before running.' }
     if (!doc.isValid && problems.length > 0) return { kind: 'blocked', reason: `${problems.length} thing${problems.length === 1 ? '' : 's'} to fix before this team can run.`, action: { label: 'Review', run: () => setProblemsOpen(true) } }
-    if (doc.mode === 'pipeline' && terminals !== 1) return { kind: 'blocked', reason: `A pipeline needs exactly one final agent — ${terminals} found.`, action: { label: 'Show on canvas', run: () => void flow.fitView({ padding: 0.2, duration: 300 }) } }
+    if (doc.mode === 'pipeline' && terminals === 0) return { kind: 'blocked', reason: 'A pipeline run needs exactly one final agent. Every agent in this one hands off to another, so it has none.' }
+    if (doc.mode === 'pipeline' && terminals !== 1) return { kind: 'blocked', reason: `A pipeline run needs exactly one final agent. This one has ${terminals}: ${terminalIds.map((id) => nodeNames.get(id) ?? id).join(', ')}.`, action: { label: 'Show on canvas', run: () => { doc.onNodesChange(doc.nodes.map((node) => ({ id: node.id, type: 'select' as const, selected: terminalIds.includes(node.id) }))); void flow.fitView({ nodes: doc.nodes.filter((node) => terminalIds.includes(node.id)), padding: 0.35, maxZoom: 1, duration: 300 }) } } }
     if (doc.readOnlyReason) return { kind: 'blocked', reason: doc.readOnlyReason }
     if (doc.documentChipState === 'saving') return { kind: 'saving', filename }
     if (['dirty', 'new'].includes(doc.documentChipState)) return { kind: 'dirty', filename }
     return { kind: 'ready' }
-  }, [history.unavailable, runView, session.terminal, record, phase, starting, pendingPrompt, doc.path, doc.nodes.length, doc.isValid, problems.length, doc.mode, terminals, doc.readOnlyReason, doc.documentChipState, filename, flow])
+  }, [history.unavailable, runView, session.terminal, record, phase, starting, pendingPrompt, doc, problems.length, terminals, terminalIds, nodeNames, filename, flow])
 
   // ---- commands + keys ----------------------------------------------------------------------
   const toggleLibrary = useCallback(() => window.dispatchEvent(new Event('loomwatch:toggle-library')), [])
   const actions = useMemo<CommandAction[]>(() => [
-    { label: 'Run the team…', shortcut: '⌘↵', run: () => document.querySelector<HTMLTextAreaElement>('.lw-composer textarea')?.focus(), disabled: !doc.path },
+    // §1.2: the palette advertises ⌘↵, so it must do what ⌘↵ does. With nothing typed there is
+    // no goal to run yet, and focusing the field is the honest half of the promise.
+    { label: 'Run the team…', shortcut: '⌘↵', run: () => { if (composerText.trim()) void submit(); else document.querySelector<HTMLTextAreaElement>('.lw-composer textarea')?.focus() }, disabled: !doc.path },
     { label: 'Run history', run: () => setHistoryOpen(true) },
     ...(runView ? [{ label: 'Back to the team canvas', shortcut: 'Esc', run: closeRun }] : []),
     { label: 'Add agent…', run: toggleLibrary, disabled: !doc.path || !editable },
@@ -715,7 +744,7 @@ export function Workspace({ harnesses, harnessesLoading, harnessesError, onRetry
     { label: 'Copy file path', run: () => { if (doc.path) void navigator.clipboard?.writeText(doc.path) }, disabled: !doc.path },
     { label: 'Show YAML', run: () => setYamlOpen(true), disabled: !doc.path },
     { label: 'Connections…', run: () => window.location.assign('/connections') },
-  ], [doc, editable, flow, toggleLibrary, windowWidth, runView, closeRun, cycleProblem, problems.length, theme, notificationsOn, enableNotifications, layersVisible])
+  ], [doc, editable, flow, composerText, submit, toggleLibrary, windowWidth, runView, closeRun, cycleProblem, problems.length, theme, notificationsOn, enableNotifications, layersVisible])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -727,6 +756,14 @@ export function Workspace({ harnesses, harnessesLoading, harnessesError, onRetry
       if (mod && event.shiftKey && key === 'l') { event.preventDefault(); setSweeping(true); window.setTimeout(() => setSweeping(false), 340); setThemeMode(theme === 'dark' ? 'light' : 'dark'); return }
       if (mod && key === 'n') { event.preventDefault(); setNewName(''); if (doc.path) setNewTeamSheet(true); else setCreating(true); return }
       if (mod && key === 'p') { event.preventDefault(); setHistoryOpen((open) => !open); return }
+      // §1.2: ⌘↵ submits from anywhere in the app, including a focused canvas — above the
+      // `editingText` guard below, which would otherwise swallow it in every other field. The
+      // composer's own textarea binds it directly (there it also serves Retry and New run), so
+      // it is skipped here rather than submitted twice.
+      if (mod && event.key === 'Enter') {
+        if (!(event.target instanceof HTMLElement && event.target.closest('.lw-composer'))) { event.preventDefault(); void submit() }
+        return
+      }
       if (event.key === 'F8') { event.preventDefault(); cycleProblem(event.shiftKey ? -1 : 1); return }
       if (event.key === 'Escape') {
         if (pendingNodeDelete.length > 0) setPendingNodeDelete([])
@@ -792,7 +829,7 @@ export function Workspace({ harnesses, harnessesLoading, harnessesError, onRetry
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [doc, editable, flow, toggleLibrary, paletteOpen, yamlOpen, compareOpen, windowWidth, clearSelection, discardConfirm, pendingNodeDelete, requestNodeDelete, deleteNodes, historyOpen, modeOpen, problemsOpen, inspectedEvidenceId, provenanceOpen, selectedNodes.length, selectedEdges.length, runView, session, closeRun, theme, cycleProblem, layersVisible])
+  }, [doc, editable, flow, submit, toggleLibrary, paletteOpen, yamlOpen, compareOpen, windowWidth, clearSelection, discardConfirm, pendingNodeDelete, requestNodeDelete, deleteNodes, historyOpen, modeOpen, problemsOpen, inspectedEvidenceId, provenanceOpen, selectedNodes.length, selectedEdges.length, runView, session, closeRun, theme, cycleProblem, layersVisible])
 
   // §13: at tablet widths, allow either the Library sheet or the inspector, never both.
   useEffect(() => {
