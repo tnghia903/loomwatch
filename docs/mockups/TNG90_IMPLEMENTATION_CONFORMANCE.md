@@ -18,19 +18,23 @@
   unmet below 768 px, all four closed by TNG-173. **Composer layer: audited at 5/13 and
   closed the same day** (§10, 2026-09-12) — eight §1 contracts were open, including the three
   the spec spends its prose defending: the two-step legibility of `Save & run`, one start key
-  per attempt, and the revision the run actually executes. All three now hold.
-- **No layer is open.** Every probe exits `0`; the composer gate reads **14/14**. §1 was the
-  last section never checked against an implementation — §§6–9 each took a TNG-89A acceptance
+  per attempt, and the revision the run actually executes. All three now hold. **Short-viewport
+  layer: closed** (§11, 2026-09-12) — §13's clustering rule had shipped as a rule that deleted
+  the prompt input and the submit control below 600 px of height; fixed, and now measured
+  rendered as well as statically.
+- **No layer is open.** Every probe exits `0`; the composer gate reads **14/14** and the
+  short-viewport pair reads **5/5 static, 16/16 rendered**. §1 was the last section never
+  checked against an implementation — §§6–9 each took a TNG-89A acceptance
   clause, and this one took the section the spec opens with. No layer here has ever blocked
-  Gate B, which governs the design (§5), not this implementation — and §10 adds no bytes to
-  the pinned prototype, so the pending card's hash is unchanged by it.
+  Gate B, which governs the design (§5), not this implementation — and §§10–11 add no bytes to
+  the pinned prototype, so the pending card's hash is unchanged by them.
 - **Green is the weaker claim.** A gate whose rows all pass cannot show that its selectors
   still bind, so each section's rows are proven individually defeatable rather than merely
   green (§10.6 for the composer). Two composer rows were scoring against comment text and one
   against the wrong leg of a disjunction; all three were found that way, not by reading counts.
-- **Five sections are historical.** §6, §7, §8, §9 and now §10 record contracts and reasoning,
-  and their verdicts are the state at the moment of observation. The probes are the only
-  current answer — run them; do not read a count off this page.
+- **Six sections are historical.** §6, §7, §8, §9, §10 and now §11 record contracts and
+  reasoning, and their verdicts are the state at the moment of observation. The probes are the
+  only current answer — run them; do not read a count off this page.
 
 This checks the implementation's *claims* against the approved design. It does not review
 code quality, and it does not touch the Gate B artifact — see §5.
@@ -54,7 +58,10 @@ had never been told about, and had dropped an elevation primitive's WebKit prefi
 reconciled in §1.1 — the numbers in §1 and §2 below are the re-measured ones. Auditing that
 fix then found a second defect in the gate itself (§1.3): reconciling §1.1 had left it unable
 to fail on a dropped primitive at all, so §2's nine lines are now enforced line-for-line
-rather than printed as a count.
+rather than printed as a count. §11 was written 2026-09-12 from the TNG-201/TNG-203 record,
+which until then lived only in an issue document — **and its four gate files had never been
+committed**, so the evidence certifying that fix was the one gate suite of eight that a
+reviewer at a clean checkout could not run. They are tracked as of this revision.
 
 ## 1. Design tokens — PASS, zero drift
 
@@ -1076,6 +1083,98 @@ mid-line in the Rust input), and no contract here is expressible in one.
 After both fixes: 14/14 green, and all 14 individually defeatable. `ui/` and `crates/` are
 never written — the harness mutates a scratch copy only.
 
+## 11. Short viewport, height < 600 px — PASS, 5/5 static and 16/16 rendered (TNG-201, TNG-203)
+
+The §13 record lived only in an issue document until now. That is the gap this section closes:
+an issue document is not in the checkout a reviewer opens, and **its four gate files were never
+committed**, so the evidence certifying the fix did not exist on `main` while the other seven
+gate suites did. They are tracked as of this section. Nothing in them touches `ui/`.
+
+### 11.1 What went wrong
+
+`TNG89_INTERACTION` §13 authorises **clustering chrome** below 600 px of height. What shipped
+instead set `display: none` on `.comp-mid` and `.comp-act` — which hold, respectively, the
+prompt `textarea` (`Composer.tsx:126`) and the primary run action plus run history
+(`Composer.tsx:141`). Below 600 px the composer collapsed to a bare mode chip: **no way to type
+a goal, no way to submit.** It also hid `.mode-pop` while `.mode-chip` (`Composer.tsx:121`) kept
+advertising `aria-haspopup="dialog"` — a dead affordance with ARIA still claiming the state,
+the TNG-131 class.
+
+The misreading is worth recording because it was reasonable: §13 predates §9 delta 1, which
+moved the mode pill *into* the composer, so "merge the pill" silently became "delete the input."
+§11.6's failures 21 and 22 already score losing the composer or its submission as a Fail in the
+**width** direction; height is the same contract, and nothing said so.
+
+### 11.2 The fix, and the premise it had to disprove
+
+`ui/src/styles/runtime.css:222`. Prompt and action are kept and the band is shortened —
+`min-height` 56 → 44 px, `textarea` `max-height` 100 → 40 px (§1.1's five lines relaxed to two
+at this height, still scrolling). `.comp-note` stays visible: it carries the `role="alert"`
+preflight blocker (§6.3). `.lib-open .lw-viewctl` is pulled back into the composer's band,
+overriding the 768–1179 rule that would stack it as a second 68 px band — that is the actual
+§13 merge. Popovers are viewport-capped with `overflow: auto` rather than hidden.
+
+The hidden rule rested on *"it cannot fit."* Bounded, it fits at any height. The one thing the
+fix deliberately does **not** do is re-tighten the popover anchor to `inset + 52px` to buy those
+pixels: the composer band is ~57 px, not 44 px, whenever `.comp-note` carries the preflight
+blocker, and the tightened anchor opened the popovers *through* their own composer — measured at
+5 px of overlap. R9 is the contract that holds that line.
+
+### 11.3 Why the gate is two gates
+
+The original gap was found by a static grep, and **a static grep is also what scored the
+regression as fixed.** So the section is measured twice:
+
+| Gate | Reads | Result |
+|---|---|---|
+| `verify-short-viewport.mjs` — H1–H5 | `runtime.css` · `Composer.tsx` source | **5/5** |
+| `webkit-probe-short-viewport.js` — R0–R9 | the **built bundle** in WebKit, 5 frames | **16/16 `ok`, 0 `FAIL`** |
+| `defeat-short-viewport.mjs` | mutates a scratch copy of the built CSS | **8/8 mutations reddened** |
+
+H1–H5 assert that the rule exists, the prompt survives, the action survives, no control
+advertises a hidden popover, and the view controls actually merge. The gate strips CSS comments
+before matching, so its own prose cannot satisfy a probe — §10.6's C9/C12 failure.
+
+R0 is the frame check that makes the rest falsifiable: the probe renders a **599/601 pair** that
+straddles the boundary, so every rendered claim has a rule-off counterfactual beside it. R5 and
+R2 exist because `display: none` is not the only way to lose a control — a composer pushed
+off-viewport by `bottom`, or an action faded to `opacity: 0`, is invisible to the grep that H2
+and H3 run. R8 measures the **short AND narrow** intersection (667x375), where §11.6's 44 px
+target rule and §13's shortened band are in tension: it reads 44.0 px.
+
+### 11.4 The counterfactual pass
+
+Eight mutations, each appended to the built bundle so a later rule of equal specificity wins the
+cascade — `ui/` and the pinned artifact are never written:
+
+| Mutation | Contracts that reddened |
+|---|---|
+| TNG-201 verbatim — hide `.comp-mid` and `.comp-act` | R1, R2, R3 |
+| TNG-201 verbatim — hide the popovers under a chip that still advertises them | R4, R6 |
+| uncap the mode popover (the *"it cannot fit"* premise) | R6 |
+| re-tighten the popover anchor to `inset + 52px` | R9 |
+| un-merge the view controls back into a stacked band | R7 |
+| push the composer off-viewport by `bottom` | R5 |
+| fade the run action to `opacity: 0` | R2 |
+| undercut the 44 px target at the short **and** narrow intersection | R8 |
+
+The last three are the ones a static gate cannot reach at all. Reverting each fix individually
+in `runtime.css` produced the matching H-row FAIL, and deleting the block failed all five;
+`runtime.css` was restored byte-identical each time.
+
+### 11.5 What a clean checkout of `main` reports
+
+`ui/src/styles/runtime.css` is **untracked** — TNG-198's revert state, production UI held out of
+`main` ahead of Gate B. Run from a pin extraction or a clean `main` checkout,
+`verify-short-viewport.mjs` therefore exits **2**, naming `Composer.tsx` as the absent input and
+saying in its own output that this is *not* a conformance failure — the §6–§9 convention, and
+the reason this gate was written to it from the start. Exit 2 is never a verdict.
+
+`main`'s tracked `ui/src/index.css` carries its own `@media (max-height: 599px)` block, but it
+addresses `.react-flow__controls` and `.canvas-mode-control` — **selectors of the pre-rebuild
+UI that the shipped workspace no longer renders.** TNG-201's defective rule never reached
+`main`, and nothing here asks for it to be reverted there.
+
 ## How to reproduce
 
 ```sh
@@ -1191,6 +1290,25 @@ for d in targets provenance theme; do
   F=$(node docs/mockups/build-prototype-narrow-fixture.mjs --defeat $d | awk '/^fixture:/{print $2}')
   /tmp/verify-webkit "$F" --eval-async docs/mockups/webkit-probe-prototype-narrow.js
 done
+
+# §11 — short-viewport contracts, height < 600 px. Same exit convention, H1–H5.
+# Static half: source-level, no build needed.
+node docs/mockups/verify-short-viewport.mjs
+
+# §11.3 — the rendered half, which is the half that matters: `display: none` is not the
+# only way to lose a control, and the grep above cannot see a composer pushed off-viewport
+# or an action faded to opacity 0. Renders a 599/601 pair so every claim has a rule-off
+# counterfactual beside it. 16 ok, 0 FAIL.
+(cd ui && npm run build)
+node docs/mockups/build-short-viewport-fixture.mjs      # writes /tmp/loomwatch-short/host.html
+swiftc -O docs/mockups/verify-webkit.swift -o /tmp/verify-webkit
+/tmp/verify-webkit /tmp/loomwatch-short/host.html \
+  --eval-async docs/mockups/webkit-probe-short-viewport.js
+
+# §11.4 — and the counterfactual, starting from TNG-201's rule verbatim. Exit 0 = every
+# mutation produced the failure the probe promises (8/8). Mutations are APPENDED to a
+# scratch copy of the built CSS, so `ui/` and the pinned artifact are never written.
+VERIFY_WEBKIT=/tmp/verify-webkit node docs/mockups/defeat-short-viewport.mjs
 
 # §7.1 — the three channels §5.1 requires, counted in production
 grep -c 'cap-' ui/src/styles/*.css          # 0 0 0 — no border treatment ships (TNG-89F's)
