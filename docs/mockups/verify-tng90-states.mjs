@@ -471,12 +471,12 @@ try {
      redaction with no reveal affordance (ADR 0005 §7 fails closed).
 
      `querySelectorAll('.cap-*')` is not a measurement of this screen. The
-     prototype ships a hidden specimen gallery (`#states.board`, `display:
-     none`, inside `#stage`) holding two copies of every capture card, so a
-     DOM-wide count reads 2/2/2/2 on *every* screen — including `team`, which
-     has no evidence on it at all. Counting that way passed while only one of
-     the four states was on screen, and would keep passing if the trace screen
-     rendered nothing.
+     prototype ships a hidden specimen gallery — `#system.board`, hidden by the
+     screen router, whose `#capRow` and `#capGrey` hold two copies of every
+     capture card — so a DOM-wide count reads 2/2/2/2 on *every* screen,
+     including `team`, which has no evidence on it at all. Counting that way
+     passed while only one of the four states was on screen, and would keep
+     passing if the trace screen rendered nothing.
 
      What a reviewer can actually reach: `recorded` is on the trace screen at
      rest, and the other three ride on entities in specific categories, one
@@ -491,7 +491,13 @@ try {
       recorded: of('recorded').length, derived: of('derived').length,
       redacted: of('redacted').length, unavailable: of('unavailable').length,
       redactedText: of('redacted').map((el) => el.innerText),
-      unavailableText: of('unavailable').map((el) => el.innerText)
+      unavailableText: of('unavailable').map((el) => el.innerText),
+      /* The reason is its own span on the card (\`.e-sub.t-meta\` — \`e.sub\` next to it is
+         \`.t-mono-sm\`), so read it directly. Measuring the whole card instead is what made
+         the "states a reason" check below unable to fail: a card with the reason deleted
+         still carries name, kind, owner and capture word, and was 61 characters. */
+      unavailableWhy: of('unavailable')
+        .map((el) => el.querySelector('.e-sub.t-meta')?.innerText ?? '')
     };
   })()`;
 
@@ -531,10 +537,13 @@ try {
       && !redactedShown.some((t) => /reveal|show bytes|request access|unlock|view source/i.test(t)),
     `${redactedShown.length} visible redacted cards: ${JSON.stringify(redactedShown)}`);
 
+  /* Population first, same as redaction above: `.every()` over an empty list is `true`, so
+     this would otherwise pass loudest exactly when `unavailable` has left the screen. */
   const unavailableShown = capSeen.unavailable.unavailableText;
+  const unavailableWhy = capSeen.unavailable.unavailableWhy;
   check('capture gap — unavailable evidence states a reason',
-    unavailableShown.length > 0 && unavailableShown.every((t) => t.trim().length > 20),
-    `${unavailableShown.length} visible unavailable cards: ${JSON.stringify(unavailableShown)}`);
+    unavailableShown.length > 0 && unavailableWhy.every((t) => t.trim().length > 20),
+    `${unavailableShown.length} visible unavailable cards, reasons: ${JSON.stringify(unavailableWhy)}`);
 
   /* ---------------------------------------------------------------------
      9. Both themes resolve on the run screens specifically. The TNG-87 gate

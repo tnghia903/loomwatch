@@ -577,6 +577,56 @@ A run started from a dirty document is **asynchronous** — §1.4 requires the w
 first — so anything asserting a run must wait for it to be created rather than read the next
 tick. Freezing the timers immediately freezes the *save*, before any run story exists.
 
+### TNG-90 counterfactual pass — 12 mutations, all 12 caught
+
+```
+node docs/mockups/defeat-tng90-states.mjs
+node docs/mockups/defeat-tng90-states.mjs --only 3,12     # a subset, by number
+```
+
+`verify-tng90-states.mjs` is one of exactly two gates that read the artifact the board is
+being asked to approve, and it had only ever printed `47 passed, 0 failed`. That number is
+equally consistent with *"the artifact holds thirteen states"* and *"the probe stopped
+looking"* — a distinction two gates in this repo have already failed (TNG-203, TNG-205),
+both of which went blind while staying green. The load-bearing one had no counterfactual at
+all.
+
+So this reproduces, one at a time, twelve regressions the gate claims to catch — the
+thirteenth state reporting `process_crashed` again, the chip frozen on clean, a bare `Run`
+on a dirty document, an expansion that opens the wrong category, five categories instead of
+six, categories re-sorted by count, a reveal affordance on a redacted card, the transport
+gap strip dropped, both themes resolving to one ground, an infinite animation surviving
+reduced motion, the specimen gallery shipping visible, and the reason deleted from an
+unavailable card. Each requires its own named check to go red. **12/12.**
+
+The pinned artifact is never touched: each mutation is applied to a copy, in a scratch
+directory beside a copy of the gate, and the gate resolves its artifact relative to its own
+file — so the mutant is measured by the shipped probe, byte for byte, while
+`prototype-standalone.html` keeps its `a339e26a…` hash throughout.
+
+**It found one blind contract, in the gate.** `capture gap — unavailable evidence states a
+reason` measured the whole card's `innerText` at `length > 20`. Delete the reason and the
+card still carries name, kind, owner and capture word — 61 characters — so the check passed
+with the thing it names absent. It now reads the reason's own span (`.e-sub.t-meta`; the
+`e.sub` beside it is `.t-mono-sm`), and the same mutation reddens it. The gate still scores
+47/0 on the pinned artifact.
+
+Three mutations that changed the file and changed nothing on screen — each of which reads as
+an *uncaught defect* rather than as a no-op, which is why the harness treats a missing anchor
+as a harness error and exits 2:
+
+- editing `COMPOSER.dirty.act` does not change the composer. The screen router calls
+  `renderComposer()` and then `paintRun()`, and `paintRun()` rewrites `#compAct` from its own
+  `dirtyIdle` branch. This is the same dead table entry noted above — mutate the render.
+- deleting `hidden` from the specimen board lasts until the first paint; the router re-sets
+  `hidden` on every panel it is not showing.
+- relaxing `.board[hidden] { display: none }` loses the cascade to the blanket
+  `[hidden] { display: none !important }` the prototype carries for its id-level rules.
+
+The specimen gallery holding the capture cards is **`#system`** (`#capRow` and `#capGrey`),
+not `#states`. Both are `.board`; the gate's own comment named the wrong one, and now names
+the right one.
+
 ### TNG-115 remediation — 26 focused browser assertions, all passing
 
 Run `node docs/mockups/verify-prototype.mjs`. The verifier launches headless Chrome with
