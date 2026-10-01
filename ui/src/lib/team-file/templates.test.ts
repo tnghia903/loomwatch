@@ -52,4 +52,13 @@ describe('team templates', () => {
     const ranked = rankHarnesses([harness('hermes'), harness('gemini'), harness('codex'), harness('pi', { acpAvailable: false }), harness('claude')])
     expect(ranked.map((item) => item.id)).toEqual(['claude', 'codex', 'gemini', 'hermes'])
   })
+
+  it('skips an app the daemon last saw fail to start, and keeps one it has not checked yet', () => {
+    const ranked = rankHarnesses([
+      harness('gemini', { health: 'error', healthReason: 'Gemini: sign-in or version problem — run "gemini" in Terminal to fix' }),
+      harness('codex'),
+      harness('claude', { health: 'ok' }),
+    ])
+    expect(ranked.map((item) => item.id)).toEqual(['claude', 'codex'])
+  })
 })

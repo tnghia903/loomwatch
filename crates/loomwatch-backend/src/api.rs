@@ -1,10 +1,12 @@
 //! REST surface consumed by the `LoomWatch` web UI.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use axum::extract::{Path as AxumPath, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode, header, uri::Authority};
@@ -41,6 +43,31 @@ struct ApiState {
     /// counted", never "zero" (see `capabilities::MemorySourceRef::kept`).
     archive: Option<crate::archive::EventArchive>,
     host_runner: Option<crate::host_runner::ClientConfig>,
+    /// The last model-discovery outcome per harness id, written by `GET
+    /// /api/harnesses/{id}/models` and only read by `GET /api/harnesses` — so the list reports
+    /// what a real ACP handshake last said without ever spawning one itself.
+    harness_health: Arc<Mutex<HashMap<String, HealthRecord>>>,
+}
+
+/// How long a model-discovery outcome is reported on `GET /api/harnesses`.
+///
+/// The outcome is an observation, not a property of the install: an operator who signs in or
+/// upgrades fixes an `error` without `LoomWatch` seeing it, and the UI stops offering a failing app
+/// for new teams, so nothing else would ask it again. Past this age the harness reads as unchecked.
+const HARNESS_HEALTH_TTL: Duration = Duration::from_mins(10);
+
+/// Longest harness error kept as `healthDetail`. Vendor errors can embed whole JSON-RPC bodies;
+/// the head names the problem, and the full text is still in the models endpoint's own error.
+const HEALTH_DETAIL_MAX_CHARS: usize = 500;
+
+/// One model-discovery outcome, kept against the exact process it came from.
+#[derive(Debug, Clone)]
+struct HealthRecord {
+    executable_path: String,
+    spawn: HarnessSpawn,
+    checked_at: Instant,
+    /// The harness's own error, or `None` when discovery succeeded.
+    error: Option<String>,
 }
 
 /// How a harness is reached over ACP, when it can be reached at all.
@@ -187,7 +214,26 @@ pub struct DetectedHarness {
     /// exactly when `acp_available` is false.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unavailable_reason: Option<String>,
+    /// What the last model discovery for this harness found, within [`HARNESS_HEALTH_TTL`].
+    /// Absent when nothing has asked recently: being on `PATH` is not proof a harness can start
+    /// (it can be signed out, or too old for its own service), and listing never spawns one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health: Option<HarnessHealth>,
+    /// Why `health` is `error`, in words the UI can print verbatim.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health_reason: Option<String>,
+    /// The harness's own error behind `health_reason`, truncated to [`HEALTH_DETAIL_MAX_CHARS`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health_detail: Option<String>,
     pub spawn: HarnessSpawn,
+}
+
+/// Outcome of the last ACP handshake `LoomWatch` made with a harness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HarnessHealth {
+    Ok,
+    Error,
 }
 
 /// `GET /api/harnesses`: what was found, and where it was looked for.
@@ -376,6 +422,7 @@ fn router_with(
         home_dir: crate::capabilities::configured_home(),
         archive,
         host_runner,
+        harness_health: Arc::default(),
     };
     Ok(Router::new()
         .route("/api/harnesses", get(get_harnesses))
@@ -445,7 +492,57 @@ async fn harness_report(state: &ApiState) -> HarnessReport {
             }
         }
     }
+    let health = state
+        .harness_health
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    apply_harness_health(&mut report.harnesses, &health, Instant::now());
     report
+}
+
+/// Annotate `harnesses` with the discovery outcomes in `records` that still describe them.
+///
+/// An outcome applies only to the same executable and spawn descriptor it was observed on — a
+/// reinstall elsewhere, or an ACP bridge appearing in place of the `npx` fallback, is a different
+/// process whose health nobody has seen — and only until [`HARNESS_HEALTH_TTL`] has passed.
+fn apply_harness_health(
+    harnesses: &mut [DetectedHarness],
+    records: &HashMap<String, HealthRecord>,
+    now: Instant,
+) {
+    for harness in harnesses.iter_mut().filter(|harness| harness.acp_available) {
+        let Some(record) = records.get(&harness.id) else {
+            continue;
+        };
+        if record.executable_path != harness.executable_path
+            || record.spawn != harness.spawn
+            || now.saturating_duration_since(record.checked_at) >= HARNESS_HEALTH_TTL
+        {
+            continue;
+        }
+        match &record.error {
+            None => harness.health = Some(HarnessHealth::Ok),
+            Some(detail) => {
+                // Discovery is initialize + session/new against the harness's own account, so a
+                // failure there is, in practice, sign-in or a CLI its service no longer accepts.
+                // The exact message rides along in `health_detail`.
+                harness.health = Some(HarnessHealth::Error);
+                harness.health_reason = Some(format!(
+                    "{}: sign-in or version problem — run \"{}\" in Terminal to fix",
+                    harness.name, harness.command
+                ));
+                harness.health_detail = Some(detail.clone());
+            }
+        }
+    }
+}
+
+fn health_detail(error: &anyhow::Error) -> String {
+    let detail = format!("{error:#}");
+    match detail.char_indices().nth(HEALTH_DETAIL_MAX_CHARS) {
+        Some((cut, _)) => format!("{}…", &detail[..cut]),
+        None => detail,
+    }
 }
 
 async fn get_harnesses(State(state): State<ApiState>) -> Json<HarnessReport> {
@@ -481,11 +578,25 @@ async fn get_harness_models(
         );
     let spec = ProcessSpec {
         cmd,
-        args: harness.spawn.args,
+        args: harness.spawn.args.clone(),
         env: std::collections::BTreeMap::new(),
         cwd: state.teams_root.clone(),
     };
-    let catalog = discover_models(&spec).await.map_err(|error| {
+    let discovered = discover_models(&spec).await;
+    state
+        .harness_health
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(
+            harness.id.clone(),
+            HealthRecord {
+                executable_path: harness.executable_path.clone(),
+                spawn: harness.spawn.clone(),
+                checked_at: Instant::now(),
+                error: discovered.as_ref().err().map(health_detail),
+            },
+        );
+    let catalog = discovered.map_err(|error| {
         ApiError::new(
             StatusCode::BAD_GATEWAY,
             format!("failed to load models from {}: {error:#}", harness.name),
@@ -1299,6 +1410,9 @@ fn detected(
         executable_path: executable.to_string_lossy().into_owned(),
         acp_available,
         unavailable_reason,
+        health: None,
+        health_reason: None,
+        health_detail: None,
         spawn: HarnessSpawn {
             cmd: command.to_owned(),
             args: args.iter().map(|arg| (*arg).to_owned()).collect(),
@@ -1813,6 +1927,187 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
                     {"id": "provider/reasoning", "name": "Reasoning", "thinkingEfforts": []}
                 ]
             })
+        );
+    }
+
+    /// The fake `gemini` from the field report: it initializes, then refuses `session/new` the way
+    /// Gemini Code Assist refuses a client it no longer supports. Every launch is counted, so a
+    /// test can prove the list itself never starts it.
+    const REFUSING_GEMINI: &str = r#"#!/bin/sh
+set -eu
+printf 'launch\n' >> "$0.launches"
+IFS= read -r _
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+IFS= read -r _
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"This client is no longer supported for Gemini Code Assist for individuals."}}'
+"#;
+
+    const ANSWERING_OPENCODE: &str = r#"#!/bin/sh
+set -eu
+IFS= read -r _
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+IFS= read -r _
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"catalog","configOptions":[{"id":"model","type":"select","options":[{"name":"Fast","value":"provider/fast"}]}]}}'
+IFS= read -r _
+printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
+"#;
+
+    async fn get_json(router: &Router, uri: &str) -> (StatusCode, Value) {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        (response.status(), response_json(response).await)
+    }
+
+    fn listed<'a>(report: &'a Value, id: &str) -> &'a Value {
+        report["harnesses"]
+            .as_array()
+            .expect("harness list")
+            .iter()
+            .find(|harness| harness["id"] == id)
+            .unwrap_or_else(|| panic!("{id} listed"))
+    }
+
+    /// Field report: `gemini` was on PATH, so the list said it was available and the UI offered
+    /// it as ready, while every model lookup failed. The list now carries what discovery last
+    /// saw — and only that: listing must not spawn anything to find out.
+    #[tokio::test]
+    async fn harness_list_reports_the_last_discovery_outcome_without_spawning() {
+        let directory = TempDirectory::new();
+        create_executable_with_contents(&directory.0, "gemini", REFUSING_GEMINI);
+        create_executable_with_contents(&directory.0, "opencode", ANSWERING_OPENCODE);
+        let search_path = std::env::join_paths([&directory.0]).expect("join search path");
+        let router = test_router_with_path(&directory.0, Some(search_path));
+        let launches = || {
+            fs::read_to_string(directory.0.join("gemini.launches"))
+                .map_or(0, |text| text.lines().count())
+        };
+
+        // Nothing has asked yet, so nothing is claimed either way.
+        let (status, before) = get_json(&router, "/api/harnesses").await;
+        assert_eq!(status, StatusCode::OK);
+        for id in ["gemini", "opencode"] {
+            let harness = listed(&before, id);
+            assert_eq!(harness["acpAvailable"], true);
+            assert!(harness.get("health").is_none(), "{id}: {harness}");
+            assert!(harness.get("healthReason").is_none(), "{id}: {harness}");
+        }
+        assert_eq!(launches(), 0, "listing harnesses spawned one");
+
+        let (status, refused) = get_json(&router, "/api/harnesses/gemini/models").await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert!(
+            refused["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("no longer supported")),
+            "{refused}"
+        );
+        let (status, _) = get_json(&router, "/api/harnesses/opencode/models").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(launches(), 1);
+
+        let (_, after) = get_json(&router, "/api/harnesses").await;
+        let gemini = listed(&after, "gemini");
+        assert_eq!(
+            gemini["acpAvailable"], true,
+            "health never rewrites acpAvailable"
+        );
+        assert_eq!(gemini["health"], "error");
+        assert_eq!(
+            gemini["healthReason"],
+            "Gemini: sign-in or version problem — run \"gemini\" in Terminal to fix"
+        );
+        let detail = gemini["healthDetail"].as_str().expect("health detail");
+        assert!(
+            detail.contains("ACP session/new failed during model discovery"),
+            "{detail}"
+        );
+        assert!(detail.contains("no longer supported"), "{detail}");
+        let opencode = listed(&after, "opencode");
+        assert_eq!(opencode["health"], "ok");
+        assert!(opencode.get("healthReason").is_none(), "{opencode}");
+        assert!(opencode.get("healthDetail").is_none(), "{opencode}");
+        assert_eq!(launches(), 1, "listing harnesses spawned one");
+    }
+
+    #[test]
+    fn harness_health_expires_and_never_outlives_the_process_it_was_seen_on() {
+        let harness = DetectedHarness {
+            id: "gemini".to_owned(),
+            name: "Gemini".to_owned(),
+            command: "gemini".to_owned(),
+            executable_path: "/opt/bin/gemini".to_owned(),
+            acp_available: true,
+            unavailable_reason: None,
+            health: None,
+            health_reason: None,
+            health_detail: None,
+            spawn: HarnessSpawn {
+                cmd: "gemini".to_owned(),
+                args: vec!["--acp".to_owned()],
+            },
+        };
+        let checked_at = Instant::now();
+        let records = HashMap::from([(
+            "gemini".to_owned(),
+            HealthRecord {
+                executable_path: harness.executable_path.clone(),
+                spawn: harness.spawn.clone(),
+                checked_at,
+                error: Some("ACP session/new failed during model discovery".to_owned()),
+            },
+        )]);
+        let health_at = |harness: &DetectedHarness, now: Instant| {
+            let mut harnesses = [harness.clone()];
+            apply_harness_health(&mut harnesses, &records, now);
+            harnesses[0].health
+        };
+
+        let fresh = checked_at + HARNESS_HEALTH_TTL.saturating_sub(Duration::from_secs(1));
+        assert_eq!(health_at(&harness, fresh), Some(HarnessHealth::Error));
+        // Past the TTL the operator may well have signed in; the harness reads as unchecked.
+        assert_eq!(health_at(&harness, checked_at + HARNESS_HEALTH_TTL), None);
+
+        let reinstalled = DetectedHarness {
+            executable_path: "/usr/local/bin/gemini".to_owned(),
+            ..harness.clone()
+        };
+        assert_eq!(health_at(&reinstalled, fresh), None);
+        let other_bridge = DetectedHarness {
+            spawn: HarnessSpawn {
+                cmd: "npx".to_owned(),
+                args: vec!["-y".to_owned(), "gemini-acp".to_owned()],
+            },
+            ..harness.clone()
+        };
+        assert_eq!(health_at(&other_bridge, fresh), None);
+        let no_bridge = DetectedHarness {
+            acp_available: false,
+            ..harness.clone()
+        };
+        assert_eq!(health_at(&no_bridge, fresh), None);
+    }
+
+    #[test]
+    fn health_detail_keeps_the_head_of_a_long_harness_error() {
+        let long = anyhow::anyhow!("é".repeat(HEALTH_DETAIL_MAX_CHARS + 10))
+            .context("ACP session/new failed during model discovery");
+        let detail = health_detail(&long);
+        assert_eq!(detail.chars().count(), HEALTH_DETAIL_MAX_CHARS + 1);
+        assert!(detail.starts_with("ACP session/new failed during model discovery: é"));
+        assert!(detail.ends_with('…'));
+        assert_eq!(
+            health_detail(&anyhow::anyhow!("short")),
+            "short",
+            "a short error is kept whole"
         );
     }
 

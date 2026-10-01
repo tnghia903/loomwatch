@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Box, Code2, GripVertical, PanelLeftClose, PanelLeftOpen, Plus, Puzzle, RefreshCw, Search, UserCheck, Wrench } from 'lucide-react'
+import { harnessProblem } from '../../lib/harnesses'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
 import type { LibraryProps } from './Library'
 import { CAPABILITY_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
@@ -16,7 +17,9 @@ export function ComponentPalette({ harnesses, capabilityInventory, capabilitiesL
     // Agents first: an AI app becomes an agent, and "You" is the review step that pauses the team
     // for the operator's approval — the same kind of card, so it belongs in the same group.
     { name: 'Agents', items: [
-      ...harnesses.map(h => ({ name: h.name, detail: h.acpAvailable === false ? h.unavailableReason ?? 'Unavailable' : 'AI agent', Icon: Code2, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: h.acpAvailable === false, payload: { group: 'detected', id: h.id, label: h.name, spawn: h.spawn } as object })),
+      // An app that last failed to start stays addable — the operator may have just fixed it, and
+      // placing it asks for its models again — but it says why it may not run instead of "AI agent".
+      ...harnesses.map(h => ({ name: h.name, detail: harnessProblem(h) ?? 'AI agent', Icon: Code2, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: h.acpAvailable === false, payload: { group: 'detected', id: h.id, label: h.name, spawn: h.spawn } as object })),
       { name: 'You (review step)', detail: 'Pause so you can approve the work', Icon: UserCheck, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: OPERATOR_SOURCE as object },
     ] },
     ...(['skills', 'tools', 'sources'] as const).map(key => ({ name: { skills: 'Skills', tools: 'Tools', sources: 'Knowledge' }[key], items: (capabilityInventory?.[key] ?? []).map(item => ({ name: item.name, detail: item.source, Icon: key === 'skills' ? Puzzle : key === 'tools' ? Wrench : Box, mime: CAPABILITY_DRAG_MIME, event: 'loomwatch:add-capability', disabled: false, payload: { kind: key === 'skills' ? 'skill' : key === 'tools' ? 'tool' : 'knowledge', name: item.name, source: item.source, ...(item.memory ? { memory: { team: item.memory.team, pack: item.memory.pack } } : {}) } })) })),

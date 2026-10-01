@@ -1,7 +1,7 @@
 import { ArrowRight, Check } from 'lucide-react'
 import { useId, useState } from 'react'
 
-import { fetchHarnessModels, type DetectedHarness } from '../../lib/harnesses'
+import { fetchHarnessModels, harnessProblem, type DetectedHarness } from '../../lib/harnesses'
 import { saveTeamFile } from '../../lib/team-file/client'
 import { rankHarnesses, TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath, type TeamTemplateId } from '../../lib/team-file/templates'
 
@@ -21,6 +21,9 @@ export interface NewTeamDialogProps {
  */
 export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose, openTeamUnsaved = false }: NewTeamDialogProps) {
   const ranked = rankHarnesses(harnesses)
+  // Left out of `ranked` because the daemon last saw them fail to start; named so the operator knows
+  // why an app they installed is not offered.
+  const failing = harnesses.filter((harness) => harness.acpAvailable !== false && harness.health === 'error')
   const [name, setName] = useState('')
   const [template, setTemplate] = useState<TeamTemplateId>(ranked.length > 0 ? 'single' : 'blank')
   const [harnessId, setHarnessId] = useState(ranked[0]?.id ?? '')
@@ -96,7 +99,13 @@ export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose
               <span className="hint t-meta">You can change each agent's app and model later in team setup.</span>
             </label>
           )}
-          {ranked.length === 0 && <p className="nt-note">No AI apps were found on this computer, so only an empty team is available. Install Claude Code, Codex or OpenCode and sign in to use the ready-made teams.</p>}
+          {ranked.length === 0 && failing.length === 0 && <p className="nt-note">No AI apps were found on this computer, so only an empty team is available. Install Claude Code, Codex or OpenCode and sign in to use the ready-made teams.</p>}
+          {ranked.length === 0 && failing.length > 0 && <p className="nt-note">None of your AI apps can start right now, so only an empty team is available.</p>}
+          {failing.length > 0 && (
+            <ul className="nt-note nt-problems" aria-label="Apps that need attention">
+              {failing.map((harness) => <li key={harness.id} title={harness.healthDetail}>{harnessProblem(harness)}</li>)}
+            </ul>
+          )}
           {openTeamUnsaved && <p className="nt-note warn">The open team has unsaved changes. Save it first, or they will be lost.</p>}
           {error && <p role="alert" className="nt-error">{error}</p>}
 

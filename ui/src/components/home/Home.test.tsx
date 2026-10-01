@@ -5,6 +5,8 @@ import type { DetectedHarness } from '../../lib/harnesses'
 import { Home } from './Home'
 
 const claude: DetectedHarness = { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/bin/claude', acpAvailable: true, spawn: { cmd: 'npx', args: ['-y', '@agentclientprotocol/claude-agent-acp'] } }
+const geminiReason = 'Gemini: sign-in or version problem — run "gemini" in Terminal to fix'
+const brokenGemini: DetectedHarness = { id: 'gemini', name: 'Gemini', command: 'gemini', executablePath: '/bin/gemini', acpAvailable: true, health: 'error', healthReason: geminiReason, healthDetail: 'ACP session/new failed during model discovery: This client is no longer supported', spawn: { cmd: 'gemini', args: ['--acp'] } }
 
 let assign: ReturnType<typeof vi.fn>
 let fetchMock: ReturnType<typeof vi.fn>
@@ -21,9 +23,9 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-function renderHome(harnesses: DetectedHarness[] = [claude], onCreateBlank = vi.fn()) {
-  render(<Home harnesses={harnesses} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onCreateBlank={onCreateBlank} onPalette={vi.fn()} />)
-  return { onCreateBlank }
+function renderHome(harnesses: DetectedHarness[] = [claude], onCreateBlank = vi.fn(), onRetryHarnesses = vi.fn()) {
+  render(<Home harnesses={harnesses} harnessesLoading={false} harnessesError={null} onRetryHarnesses={onRetryHarnesses} onCreateBlank={onCreateBlank} onPalette={vi.fn()} />)
+  return { onCreateBlank, onRetryHarnesses }
 }
 
 describe('Home', () => {
@@ -92,5 +94,40 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create team' }))
     expect(onCreateBlank).toHaveBeenCalledWith('Scratch', 'scratch.yaml')
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+  })
+
+  it('does not call an app that failed to start ready, and says how to fix it', async () => {
+    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
+    renderHome([claude, brokenGemini])
+    await screen.findByText(/No teams yet/)
+    expect(screen.getByText('Ready to use: Claude')).toBeInTheDocument()
+    const problem = within(screen.getByRole('list', { name: 'Apps that need attention' })).getByText(geminiReason)
+    // The harness's own words stay one hover away for whoever needs them.
+    expect(problem).toHaveAttribute('title', brokenGemini.healthDetail)
+  })
+
+  it('re-checks a failing app on request, then reloads the list', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === '/api/harnesses/gemini/models') return respond({ error: 'still signed out' }, 502)
+      return respond({ root: '/teams', files: [], teams: [] })
+    })
+    const { onRetryHarnesses } = renderHome([brokenGemini])
+    await screen.findByText(/No teams yet/)
+    expect(screen.getByText('None of your AI apps can start right now.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(onRetryHarnesses).toHaveBeenCalledTimes(1))
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/harnesses/gemini/models')).toBe(true)
+  })
+
+  it('never builds a template on an app that failed to start', async () => {
+    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
+    renderHome([brokenGemini])
+    await screen.findByText(/No teams yet/)
+    fireEvent.click(screen.getByRole('button', { name: 'New team' }))
+    const dialog = screen.getByRole('dialog', { name: 'Create a team' })
+    expect(within(dialog).getByRole('radio', { name: /One assistant/ })).toBeDisabled()
+    expect(within(dialog).getByRole('radio', { name: /Empty team/ })).toBeChecked()
+    expect(within(dialog).getByText(/None of your AI apps can start right now/)).toBeInTheDocument()
+    expect(within(dialog).getByText(geminiReason)).toBeInTheDocument()
   })
 })
