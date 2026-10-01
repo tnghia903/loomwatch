@@ -61,14 +61,17 @@ export interface ComposerProps {
   onReply?: (agentId: string) => void
   replySending?: boolean
   reviewContext?: { label: string; text: string }
+  /** Display names by agent id, so buttons say "Send back to Researcher", not an id. */
+  agentNames?: ReadonlyMap<string, string>
   note?: ReactNode
   children?: ReactNode
 }
 
 // TNG89 §1: 720 × 56, bottom-centre. It absorbs the mode pill: the pill explains how the
 // document will execute, and that fact is worth most at the moment you execute it.
-// ⌘↵ submits; ↵ inserts a newline — goals are prose. There is no "run without saving".
-export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, state, value, onChange, onSubmit, onStop, onRetry, onNewRun, onOpenMode, onOpenHistory, modeOpen, historyOpen, switchBanner, memoryCount = 0, memoryOpen = false, onOpenMemory, followUpStages = [], followUpTarget = null, onFollowUpTargetChange, onFollowUp, dirty = false, onAnswer, replyAgents = [], onReply, replySending = false, reviewContext, note, children }: ComposerProps) {
+// ↵ sends and ⇧↵ inserts a newline, the convention of every chat app an operator already uses;
+// ⌘↵ also sends. There is no "run without saving".
+export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, state, value, onChange, onSubmit, onStop, onRetry, onNewRun, onOpenMode, onOpenHistory, modeOpen, historyOpen, switchBanner, memoryCount = 0, memoryOpen = false, onOpenMemory, followUpStages = [], followUpTarget = null, onFollowUpTargetChange, onFollowUp, dirty = false, onAnswer, replyAgents = [], onReply, replySending = false, reviewContext, agentNames, note, children }: ComposerProps) {
   const textarea = useRef<HTMLTextAreaElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const [focused, setFocused] = useState(false)
@@ -101,7 +104,7 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
   }, [value, focused])
 
   const canSubmit = value.trim().length > 0 && (state.kind === 'ready' || state.kind === 'dirty')
-  const modeLabel = mode === 'pipeline' ? `Pipeline · ${stepCount} step${stepCount === 1 ? '' : 's'}` : 'Team · self-organizing'
+  const modeLabel = mode === 'pipeline' ? `${stepCount} step${stepCount === 1 ? '' : 's'} in order` : 'Lead agent delegates'
   // "When the Output arrives the composer does not go dark. It offers Follow up." Available only
   // on a terminal run, because a follow-up is a child of a run that is over.
   const canFollowUp = terminal && onFollowUp !== undefined
@@ -110,14 +113,19 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
     : null
 
   function onKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+    const modified = event.metaKey || event.ctrlKey
+    // A plain ↵ sends unless an IME is composing (Japanese, Vietnamese Telex…), where ↵ commits
+    // the candidate text instead; ⇧↵ and ⌥↵ fall through and insert a newline.
+    const plainEnter = event.key === 'Enter' && !modified && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229
+    if ((modified && event.key === 'Enter') || plainEnter) {
       event.preventDefault()
-      // ⌘↵ sends the follow-up when there is one to send: it is the primary action once the
+      // ↵ sends the follow-up when there is one to send: it is the primary action once the
       // composer is in follow-up mode, and Retry stays reachable by its own button.
       if (replyTo && !replySending && value.trim()) onReply?.(replyTo.id)
       else if (answering && !answering.sending && value.trim()) onAnswer?.()
       else if (canFollowUp && value.trim()) onFollowUp?.()
-      else if (terminal && !value.trim()) onRetry()
+      // Re-running with nothing typed is only ever deliberate: ⌘↵, never a stray ↵.
+      else if (terminal && !value.trim() && modified) onRetry()
       else if (terminal && value.trim()) onNewRun()
       else if (canSubmit) onSubmit()
     }
@@ -133,12 +141,16 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
   if (replyTo) {
     action = <>
       <button type="button" className="btn" onClick={() => setReplyTarget('')} disabled={replySending}>Cancel reply</button>
-      <button type="button" className="btn btn-primary" disabled={replySending || !value.trim()} onClick={() => onReply?.(replyTo.id)}>{replySending ? 'Sending…' : 'Reply'} <kbd>⌘↵</kbd></button>
+      <button type="button" className="btn btn-primary" disabled={replySending || !value.trim()} onClick={() => onReply?.(replyTo.id)}>{replySending ? 'Sending…' : 'Reply'} <kbd>↵</kbd></button>
     </>
   } else if (answering) {
+    // A review stop can be approved as it stands: requiring a typed comment before "Continue" made
+    // the most common answer — "looks good" — the hardest one to give. A question still needs one.
+    const review = answering.waiting.kind === 'review_stop'
+    const from = answering.waiting.handoverFrom
     action = <>
-      {answering.waiting.sendBackAvailable && answering.waiting.handoverFrom && <button type="button" className="btn" disabled={answering.sending || !value.trim()} onClick={() => onAnswer?.(answering.waiting.handoverFrom!)}>Send back to {answering.waiting.handoverFrom}</button>}
-      <button type="button" className="btn btn-primary" disabled={answering.sending || !value.trim()} onClick={() => onAnswer?.()}>{answering.sending ? 'Sending…' : answering.waiting.kind === 'review_stop' ? 'Continue' : 'Reply'} <kbd>⌘↵</kbd></button>
+      {answering.waiting.sendBackAvailable && from && <button type="button" className="btn" disabled={answering.sending || !value.trim()} title={value.trim() ? undefined : 'Type what should change first.'} onClick={() => onAnswer?.(from)}>Send back to {agentNames?.get(from) ?? from}</button>}
+      <button type="button" className="btn btn-primary" disabled={answering.sending || (!review && !value.trim())} onClick={() => onAnswer?.()}>{answering.sending ? 'Sending…' : review ? (value.trim() ? 'Continue' : 'Approve') : 'Reply'}{(!review || value.trim()) && <kbd>↵</kbd>}</button>
       <button type="button" className="btn btn-danger" onClick={onStop}>Stop</button>
     </>
   } else if (busy) {
@@ -149,9 +161,9 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
     </>
   } else if (terminal) {
     action = <>
-      <button type="button" className="btn" onClick={onRetry} title="Start a new run from the same prompt, from zero">Retry</button>
+      <button type="button" className="btn" onClick={onRetry} title="Run the original request again from scratch">Retry</button>
       {canFollowUp
-        ? <button type="button" className="btn btn-primary" onClick={() => onFollowUp?.()} disabled={!value.trim()} title={value.trim() ? undefined : 'Type what to change first.'}>{dirty ? 'Save & follow up' : 'Follow up'} <kbd>⌘↵</kbd></button>
+        ? <button type="button" className="btn btn-primary" onClick={() => onFollowUp?.()} disabled={!value.trim()} title={value.trim() ? undefined : 'Type what to change first.'}>{dirty ? 'Save & follow up' : 'Follow up'} <kbd>↵</kbd></button>
         : <button type="button" className="btn btn-primary" onClick={onNewRun} disabled={!value.trim()} title={value.trim() ? undefined : 'Type a new goal first.'}>New run</button>}
     </>
   } else if (state.kind === 'saving') {
@@ -161,26 +173,26 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
     // steps, and §1.4 requires they stay legible as two.
     action = <button type="button" className="btn" disabled>Starting…</button>
   } else if (state.kind === 'dirty') {
-    action = <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={!canSubmit}>Save &amp; run <kbd>⌘↵</kbd></button>
+    action = <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={!canSubmit}>Save &amp; run <kbd>↵</kbd></button>
   } else if (state.kind === 'blocked' || state.kind === 'unavailable') {
     action = <>
       {state.kind === 'blocked' && state.action && <button type="button" className="btn" onClick={state.action.run}>{state.action.label}</button>}
-      <button type="button" className="btn btn-primary" disabled title={state.reason}>Run <kbd>⌘↵</kbd></button>
+      <button type="button" className="btn btn-primary" disabled title={state.reason}>Run <kbd>↵</kbd></button>
     </>
   } else {
-    action = <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={!canSubmit} title={canSubmit ? undefined : 'Type what the team should do.'}>Run <kbd>⌘↵</kbd></button>
+    action = <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={!canSubmit} title={canSubmit ? undefined : 'Type what the team should do.'}>Run <kbd>↵</kbd></button>
   }
 
   let noteNode: ReactNode = note
   let noteClass = ''
   if (!noteNode) {
     if (replyTo) noteNode = `Reply to ${replyTo.name}. This is another turn in its current session.`
-    else if (answering) noteNode = answering.waiting.kind === 'review_stop' ? `Answering ${answering.waiting.name === 'You' ? 'You' : `You · ${answering.waiting.name}`}. Your answer goes to the next stage as direction from you, above its source material.` : answering.waiting.park === 'released' ? `Reply to ${answering.waiting.name}. Its session was released; your answer starts a new run from its checkpoint.` : `Reply to ${answering.waiting.name}. Your answer arrives as its next turn.`
+    else if (answering) noteNode = answering.waiting.kind === 'review_stop' ? 'Your turn: approve to let the team continue, or type what should change. Anything you type is passed on as your direction.' : answering.waiting.park === 'released' ? `Reply to ${answering.waiting.name}. Its session was released; your answer starts a new run from its checkpoint.` : `Reply to ${answering.waiting.name}. Your answer arrives as its next turn.`
     else if (busy) noteNode = 'Connection loss never starts, restarts or cancels a run.'
     // One line explaining the chosen target, because "from Writer" and "whole pipeline" cost
     // different amounts and the operator is choosing between them.
-    else if (canFollowUp && targetName) noteNode = `From ${targetName}: the earlier stages' handovers are reused as they were, and only ${targetName} onwards runs. Retry is the same prompt, from zero.`
-    else if (canFollowUp) noteNode = 'Whole pipeline: every stage runs again with this run\u2019s output in its packet. Retry is the same prompt, from zero.'
+    else if (canFollowUp && targetName) noteNode = `Starts again at ${targetName}, reusing what the earlier steps handed over. Retry runs the original request from scratch.`
+    else if (canFollowUp) noteNode = 'Runs every step again, building on this answer. Retry runs the original request from scratch.'
     else if (terminal) noteNode = 'Retry starts a new run from the same prompt. The prompt and any partial answer are kept.'
     else if (state.kind === 'saving') noteNode = `Saving ${state.filename} — the run is created against the revision this write returns.`
     else if (state.kind === 'starting') noteNode = 'Starting the run on that revision — the prompt is kept until the run id comes back.'
@@ -194,7 +206,7 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
       {children}
       <div ref={panel} className={`panel bottom cx e1 lw-composer ${compact && !answering && !replyTo ? 'prototype-composer' : ''} ${focused ? 'focused' : ''} ${switchBanner ? 'mode-switch' : ''} ${answering || replyTo || canFollowUp ? 'expanded-actions' : ''}`} role="group" aria-label="Prompt composer">
         {compact && <MessageSquare className="composer-message-icon" size={17} />}
-        <button type="button" className={`mode-chip t-body-m ${mode}`} onClick={onOpenMode} aria-haspopup="dialog" aria-expanded={modeOpen} title="How this team will execute">
+        <button type="button" className={`mode-chip t-body-m ${mode}`} onClick={onOpenMode} aria-haspopup="dialog" aria-expanded={modeOpen} title="How this team works through a request">
           <span className="glyph" aria-hidden="true">{mode === 'pipeline' ? <Workflow size={15} /> : <Asterisk size={15} />}</span>
           <span className="label">{modeLabel}</span>
           {anomalyCount > 0 && <span className="anomaly t-micro" title={`${anomalyCount} observed delegation${anomalyCount === 1 ? '' : 's'} with no configured counterpart`}>⚠ {anomalyCount}</span>}
@@ -212,16 +224,16 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
         {/* The follow-up target chooser, beside the chips that explain what the run is made of.
             Stages are listed in pipeline order; team mode has no order, so it gets one option. */}
         {canFollowUp && (
-          <label className="mode-chip t-body-m" title="How much of the pipeline the follow-up re-runs">
-            <span className="label">Follow up · to:</span>
+          <label className="mode-chip t-body-m" title="Which step the follow-up starts from">
+            <span className="label">Redo from:</span>
             <select
               aria-label="Follow up target"
               value={followUpTarget ?? ''}
               onChange={(event) => onFollowUpTargetChange?.(event.target.value || null)}
             >
-              <option value="">whole pipeline</option>
+              <option value="">the beginning</option>
               {followUpStages.map((stage) => (
-                <option key={stage.id} value={stage.id}>from {stage.name}</option>
+                <option key={stage.id} value={stage.id}>{stage.name}</option>
               ))}
             </select>
           </label>

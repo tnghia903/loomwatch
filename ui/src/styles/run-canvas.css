@@ -22,15 +22,15 @@
   margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--color-hairline);
   color: var(--color-ink-2); font: 400 10px/14px var(--font-sans); white-space: nowrap;
 }
-.build-node-task b { flex: none; color: var(--color-ink); font: 550 8px/14px var(--font-sans); letter-spacing: .065em; text-transform: uppercase; }
+.build-node-task b { flex: none; color: var(--color-ink); font: 600 10px/14px var(--font-sans); letter-spacing: .065em; text-transform: uppercase; }
 .build-node-task .task-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* TNG89 §15.2.3: folded evidence and "what it was given", on the card the operator placed. */
 .build-node-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; margin-top: 8px; }
-.build-node-chips .handover-chip, .build-node-chips .mem-chip { height: 18px; margin-top: 0; padding: 0 7px; font: 400 9px/18px var(--font-sans); }
+.build-node-chips .handover-chip, .build-node-chips .mem-chip { height: 18px; margin-top: 0; padding: 0 7px; font: 400 11px/18px var(--font-sans); }
 .build-node-chips .handover-chip svg { flex: none; }
 
-.build-node-meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 9px; color: var(--color-ink-3); font: 400 9px/13px var(--font-mono); }
+.build-node-meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 9px; color: var(--color-ink-3); font: 400 11px/14px var(--font-mono); }
 .build-node-meta .model { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .build-node-meta .cost { flex: none; color: var(--color-ink-2); }
 

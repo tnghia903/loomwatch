@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { AgentConfig } from '../team-file/types'
-import { buildAgentFromSource } from './createAgent'
+import { buildAgentFromSource, DEFAULT_AGENT_ROLE } from './createAgent'
 import type { LibrarySource } from './types'
 
 const harnessSource: LibrarySource = {
@@ -35,9 +35,9 @@ function agent(overrides: Partial<AgentConfig> = {}): AgentConfig {
 }
 
 describe('buildAgentFromSource', () => {
-  it('leaves role and model empty for a bare harness source', () => {
+  it('gives a bare harness source a general role and leaves the model for the catalog', () => {
     const result = buildAgentFromSource(harnessSource, [])
-    expect(result.role).toBe('')
+    expect(result.role).toBe(DEFAULT_AGENT_ROLE)
     expect(result.model).toBe('')
   })
 

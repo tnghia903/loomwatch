@@ -11,7 +11,7 @@ import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
 import type { AgentConfig, BriefEntryConfig, BudgetConfig, CapabilityRef, EdgeConfig, GuardsConfig, ScheduleConfig, SpawnConfig } from './types'
 import {
-  compileTeamValidator,
+  loadTeamValidator,
   displayFieldProblems,
   type AgentField,
   type DocumentProblem,
@@ -281,7 +281,7 @@ export function useTeamDocument() {
     })
   }, [])
 
-  const createNewDocument = useCallback((name: string) => {
+  const createNewDocument = useCallback((name: string, filePath?: string) => {
     const trimmed = name.trim()
     if (!trimmed) return
     const id = slugifyTeamName(trimmed)
@@ -289,13 +289,14 @@ export function useTeamDocument() {
     modelRef.current = model
     loadedRevisionRef.current = null
     isNewRef.current = true
-    setPath(`${id}.yaml`)
+    // The caller may pass a path that does not collide with an existing file; the default is the
+    // slug, which a save then refuses if that file already exists.
+    setPath(filePath ?? `${id}.yaml`)
     setNodes([])
     setEdges([])
     setEntrypointState(null)
     setTeamGuards(null)
     setTeamBudget(null)
-    setTeamSchedule(null)
     setTeamSchedule(null)
     setDocumentSnapshot(model.snapshot())
     setYamlPreview(model.toYaml())
@@ -318,7 +319,7 @@ export function useTeamDocument() {
       if (!requestedPath) {
         try {
           const schema = await fetchConfigSchema()
-          const nextValidator = compileTeamValidator(schema)
+          const nextValidator = await loadTeamValidator(schema)
           if (!cancelled) setValidator(() => nextValidator)
         } catch {
           // Client validation is a courtesy; the daemon still validates every PUT.
@@ -395,7 +396,7 @@ export function useTeamDocument() {
 
       try {
         const schema = await fetchConfigSchema()
-        const nextValidator = compileTeamValidator(schema)
+        const nextValidator = await loadTeamValidator(schema)
         if (!cancelled) setValidator(() => nextValidator)
       } catch {
         // Client validation is a courtesy; the daemon still validates every PUT.
@@ -1360,6 +1361,10 @@ export function useTeamDocument() {
      */
     memoryInherits: documentSnapshot?.memory?.inherits ?? [],
     responder: documentSnapshot?.responder ?? null,
+    /** The team's display `name`, for chrome that should not show a file path. */
+    teamName: documentSnapshot?.name?.trim() || null,
+    /** True until the daemon's schema is compiled; validity is unknown, not failed, meanwhile. */
+    checking: schemaLoading,
     saveState,
     documentChipState,
     saveError,

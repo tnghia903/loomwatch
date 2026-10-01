@@ -133,7 +133,7 @@ describe('Workspace', () => {
     expect(documentState.promoteResponder).toHaveBeenCalledWith('researcher')
     fireEvent.click(screen.getByRole('button', {name: 'Preview next run'}))
     expect(screen.getByRole('heading', {name: /New run/})).toBeInTheDocument()
-    expect(screen.getByText('This is where the chosen responder’s output will appear.')).toBeInTheDocument()
+    expect(screen.getByText('The team’s answer will appear here.')).toBeInTheDocument()
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', {name: 'Build'}))
     expect(screen.getByRole('application', {name: 'Team canvas'})).toBeInTheDocument()
@@ -194,8 +194,8 @@ describe('Workspace', () => {
     renderWorkspace()
     expect(screen.getByRole('application', { name: 'Team canvas' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /demo.yaml, .*open team switcher/ })).toBeInTheDocument()
-    expect(screen.getByText('Pipeline · 2 steps')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Run ⌘/ })).toBeDisabled()
+    expect(screen.getByText('2 steps in order')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Run ↵/ })).toBeDisabled()
     expect(screen.getByText('sequence from Researcher to Reviewer')).toBeInTheDocument()
   })
 
@@ -298,7 +298,7 @@ describe('Workspace', () => {
   it('starts a run from the composer and rewires the canvas into the prompt-to-output story', async () => {
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Run ⌘/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
     if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
     const post = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')!
     // §1.4/§1.6: the run is pinned to the revision on screen and carries one start key per attempt.
@@ -343,7 +343,7 @@ describe('Workspace', () => {
     }))
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Run ⌘/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
     expect(await screen.findByRole('button', { name: 'Starting…' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Saving…' })).not.toBeInTheDocument()
     expect(screen.queryByText(/Saving demo.yaml/)).not.toBeInTheDocument()
@@ -369,10 +369,10 @@ describe('Workspace', () => {
     }))
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Run ⌘/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('connection lost')
     expect(screen.getByLabelText('What should the team do?')).toHaveValue('Summarise the repo')
-    fireEvent.click(screen.getByRole('button', { name: /^Run ⌘/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
     await waitFor(() => expect(startKeys).toHaveLength(2))
     expect(startKeys[1]).toBe(startKeys[0])
     expect(startKeys[0]).toMatch(/\S/)
@@ -396,7 +396,7 @@ describe('Workspace', () => {
     }))
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Run ⌘/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
     if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByLabelText('What should the team do?')).toHaveValue('')
@@ -414,7 +414,7 @@ describe('Workspace', () => {
     }))
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Run ⌘/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('changed before the run could start')
     await waitFor(() => expect(documentState.checkDiskRevision).toHaveBeenCalled())
     expect(screen.queryByRole('application', { name: 'Run graph' })).not.toBeInTheDocument()
@@ -451,15 +451,15 @@ describe('Workspace', () => {
     // time, so the cards are a disclosure now — the count, its owner and the fan are what the
     // canvas offers first. Everything below this line is what §12 row 28 still requires of a
     // fanned card, unchanged.
-    const fan = await screen.findByRole('button', { name: '1 event from Agent A · lead; fan its evidence' })
+    const fan = await screen.findByRole('button', { name: '1 event from Researcher · lead; fan its evidence' })
     expect(fan).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByRole('button', { name: /Inspect command: \$ cargo test/ })).not.toBeInTheDocument()
     fireEvent.click(fan)
-    await waitFor(() => expect(screen.getByRole('button', { name: /Inspect command: \$ cargo test, recorded, Agent A · lead, succeeded, event 1/ })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: /Inspect command: \$ cargo test, recorded, Researcher · lead, succeeded, event 1/ })).toBeInTheDocument())
     expect(screen.getByRole('button', { name: /fold its evidence/ })).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByLabelText(/Researcher, Agent A · lead, DONE, Reply delivered/)).toBeInTheDocument()
-    expect(screen.getByLabelText(/Reviewer, Agent B · responder, STREAMING/)).toBeInTheDocument()
-    expect(screen.getByLabelText(/Output response from Agent B · responder, Streaming/)).toHaveTextContent('Looks good.')
+    expect(screen.getByLabelText(/Researcher, Researcher · lead, DONE, Reply delivered/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Reviewer, Reviewer · final answer, STREAMING/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Output response from Reviewer, Streaming/)).toHaveTextContent('Looks good.')
     expect(screen.getByLabelText(/Prompt, original user request/)).toHaveTextContent('Summarise the repo')
     expect(screen.getByLabelText(/Inspect command: \$ cargo test/)).not.toHaveClass('nodrag')
 
@@ -473,7 +473,7 @@ describe('Workspace', () => {
     expect(shell).not.toHaveClass('node-dragging')
 
     fireEvent.click(screen.getByRole('button', { name: /Inspect command: \$ cargo test, recorded/ }))
-    expect(screen.getByRole('complementary', { name: /cargo test/ })).toHaveTextContent('Agent A · lead')
+    expect(screen.getByRole('complementary', { name: /cargo test/ })).toHaveTextContent('Researcher · lead')
     fireEvent.click(screen.getByRole('button', { name: 'Close activity details' }))
     expect(screen.queryByRole('complementary', { name: /cargo test/ })).not.toBeInTheDocument()
   })
@@ -613,7 +613,7 @@ describe('Workspace', () => {
       expect(positionOf('Reviewer')).toBe('300x0')
 
       fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-      fireEvent.click(screen.getByRole('button', { name: /^Run ⌘/ }))
+      fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
       if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
 
       expect(positionOf('Researcher')).toBe('0x0')
@@ -626,7 +626,7 @@ describe('Workspace', () => {
       expect(nodeKinds(container).at(-1)).toBe('response')
 
       fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-      fireEvent.click(screen.getByRole('button', { name: /^Run ⌘/ }))
+      fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
       if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
 
       const kinds = nodeKinds(container)
@@ -674,7 +674,7 @@ describe('Workspace', () => {
       researcher.selected = true
       const view = renderWorkspace()
       try {
-        fireEvent.click(screen.getByRole('button', { name: 'Model & advanced settings' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Model and more settings' }))
         fireEvent.click(screen.getByRole('button', { name: /Produces the team output/ }))
         expect(documentState.promoteResponder).toHaveBeenCalledWith('researcher')
       } finally {
@@ -721,8 +721,8 @@ describe('Workspace', () => {
         event(5, 'tool_update', { callId: 'c2', status: 'completed' }, 'reviewer'),
       ]
       const { container } = renderWorkspace('run-1')
-      const lead = await screen.findByRole('button', { name: '1 event from Agent A · lead; fan its evidence' })
-      const responder = screen.getByRole('button', { name: '1 event from Agent B · responder; fan its evidence' })
+      const lead = await screen.findByRole('button', { name: '1 event from Researcher · lead; fan its evidence' })
+      const responder = screen.getByRole('button', { name: '1 event from Reviewer · final answer; fan its evidence' })
       // Folded is the default: the count is on the card and no evidence node is rendered.
       expect(container.querySelectorAll('[data-node="evidence"]')).toHaveLength(0)
 
@@ -730,12 +730,12 @@ describe('Workspace', () => {
       expect(container.querySelectorAll('[data-node="evidence"]')).toHaveLength(1)
       // Row 28 / §15.3: owner, ordinal, time and state are properties of the record, so they are
       // unchanged by being fanned.
-      expect(screen.getByRole('button', { name: 'Inspect command: $ cargo test, recorded, Agent A · lead, succeeded, event 1, 01.0s' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Inspect command: $ cargo test, recorded, Researcher · lead, succeeded, event 1, 01.0s' })).toBeInTheDocument()
 
       fireEvent.click(responder)
       expect(container.querySelectorAll('[data-node="evidence"]')).toHaveLength(1)
       expect(screen.queryByRole('button', { name: /cargo test/ })).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Inspect command: $ cargo clippy, recorded, Agent B · responder, succeeded, event 2, 04.0s' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Inspect command: $ cargo clippy, recorded, Reviewer · final answer, succeeded, event 2, 04.0s' })).toBeInTheDocument()
 
       // Esc folds the fan; it does not clear the run.
       fireEvent.keyDown(window, { key: 'Escape' })
@@ -960,7 +960,7 @@ it('organizes execution and resources without changing the team, and restores th
   composerLayoutState.nodes = [{ id: 'knowledge:source', kind: 'knowledge', name: 'source', source: 'local', position: { x: -400, y: -200 } }]
   composerLayoutState.edges = [{ from: 'researcher', to: 'knowledge:source' }]
   renderWorkspace()
-  fireEvent.click(screen.getByRole('button', { name: 'Workspace options' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
   const organize = await screen.findByRole('menuitem', { name: /^Organize$/ })
   await waitFor(() => expect(organize).toBeEnabled())
   fireEvent.click(organize)
@@ -973,7 +973,7 @@ it('organizes execution and resources without changing the team, and restores th
     expect(layout.nodes[0].position.x).toBe(positions.researcher.x)
     expect(layout.nodes[0].position.y).toBeGreaterThan(positions.researcher.y + 150)
   }, { timeout: 2000 })
-  fireEvent.click(screen.getByRole('button', { name: 'Workspace options' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
   fireEvent.click(screen.getByRole('menuitem', { name: 'Undo organize' }))
   expect(documentState.applyPositions).toHaveBeenLastCalledWith({ researcher: { x: 0, y: 0 }, reviewer: { x: 300, y: 0 } })
   expect(documentState.save).not.toHaveBeenCalled()
@@ -997,7 +997,7 @@ describe('the Full trace canvas and the Build canvas draw the same cards', () =>
     await waitFor(() => expect(agentCards()).toHaveLength(2))
     for (const card of agentCards()) expect(card).toContain('build-node')
     // The run's own facts are on that card, not on a card of Run's own.
-    expect(document.querySelector('.build-node.has-run .build-node-task')).toHaveTextContent('Agent A · lead')
+    expect(document.querySelector('.build-node.has-run .build-node-task')).toHaveTextContent('Researcher · lead')
     expect(document.querySelector('[data-node="capability"] > *')).toHaveClass('build-node')
     expect(document.querySelector('.lw-shell')).toHaveClass('build-graph')
   })
@@ -1040,7 +1040,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     renderWorkspace('run-1')
     fireEvent.click(await screen.findByRole('button', { name: /Fix in Build/ }))
     // Out of the run: Build is the only editing surface.
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Team setup' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^(Your team is ready|Finish setting up|Add your first agent)$/ })).toBeInTheDocument())
     // On the agent that did the asking, in its full settings, with the instructions focused.
     await waitFor(() => expect(screen.getByLabelText('Role and instructions')).toHaveFocus())
     // Inside the panel the operator is looking at — not floating behind the page chrome.
@@ -1164,7 +1164,7 @@ describe('switching workspace tab closes the node inspector', () => {
 
     // Closed, not merely hidden behind a selection that is still set.
     fireEvent.click(screen.getByRole('button', { name: 'Build' }))
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Team setup' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^(Your team is ready|Finish setting up|Add your first agent)$/ })).toBeInTheDocument())
     expect(nodePanel()).not.toBeInTheDocument()
     restore()
   })
@@ -1201,7 +1201,7 @@ describe('Connections entry point', () => {
     const assign = vi.fn()
     Object.defineProperty(window, 'location', { configurable: true, value: { href: real.href, pathname: real.pathname, search: real.search, assign } })
     renderWorkspace()
-    fireEvent.click(await screen.findByRole('button', { name: 'Workspace options' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Menu' }))
     const item = screen.getByRole('menuitem', { name: 'Connections…' })
     fireEvent.click(item)
     expect(assign).toHaveBeenCalledWith('/connections')

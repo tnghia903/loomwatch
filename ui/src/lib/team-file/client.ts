@@ -6,9 +6,32 @@ export interface TeamFilePayload {
   revision?: string
 }
 
+/** One discovered team as the picker shows it (backend `TeamSummary`). */
+export interface TeamSummary {
+  path: string
+  /** Absent when the file does not parse as a team; show the path instead. */
+  name?: string
+  agentCount: number
+  modifiedAt?: string
+}
+
 export interface TeamsDiscoveryPayload {
   root: string
   files: string[]
+  /** Added after `files`; an older daemon omits it, so readers fall back to `files`. */
+  teams?: TeamSummary[]
+}
+
+/** Summaries for every discovered file, synthesised from `files` when the daemon predates them. */
+export function teamSummaries(discovery: TeamsDiscoveryPayload): TeamSummary[] {
+  return discovery.teams ?? discovery.files.map((path) => ({ path, agentCount: 0 }))
+}
+
+/** "Review stop demo" for a named team, "research-team" for a file without a usable name. */
+export function teamDisplayName(team: Pick<TeamSummary, 'path' | 'name'>): string {
+  if (team.name) return team.name
+  const file = team.path.split('/').pop() ?? team.path
+  return file.replace(/\.ya?ml$/i, '')
 }
 
 export class TeamFileApiError extends Error {

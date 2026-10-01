@@ -121,9 +121,12 @@ export const RUN_PHASE_STATUS: Record<RunPhase, AgentStatus> = {
   queued: 'idle', starting: 'starting', running: 'running', succeeded: 'succeeded', partial: 'failed', failed: 'failed', cancelled: 'stopped',
 }
 
+/**
+ * Who did something in a run, as the operator named them: "Researcher · lead", "Writer · final
+ * answer". It used to be "Agent A · lead" / "Agent C · responder" — anonymous letters the operator
+ * had to map back to their own team, and "responder", a word nobody uses for "wrote the answer".
+ */
 export function ownerLabelFor(index: number, count: number, id: string, names: ReadonlyMap<string, string>): string {
-  const letter = String.fromCharCode(65 + Math.min(index, 25))
-  const role = index === 0 ? 'lead' : index === count - 1 && count > 1 ? 'responder' : 'helper'
-  const name = names.get(id) ?? id
-  return count > 1 ? `Agent ${letter} · ${role}` : `${name} · lead`
+  const role = index === 0 ? 'lead' : index === count - 1 && count > 1 ? 'final answer' : 'helper'
+  return `${names.get(id) ?? id} · ${role}`
 }

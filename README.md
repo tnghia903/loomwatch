@@ -203,37 +203,43 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 
 ## Try your first run
 
-The demo is a three-step workflow: **Researcher → You → Writer**. Its agents produce fixed
-responses so you can learn the interface without calling a model provider.
+Open LoomWatch and pick **Review stop demo** under **Your teams**. The demo is a three-step
+workflow: **Researcher → You → Writer**. Its agents produce fixed responses so you can learn the
+interface without calling a model provider.
 
-1. Type `Prepare a short getting-started guide for new users.` in the bottom composer.
-2. Click **Run**, or press **⌘ Enter**. If you edited the team, use **Save & run**.
-3. When the run says **Waiting for you**, open **What Researcher handed over**.
-4. Enter `Use the short guide and remove the detailed walkthrough.` and click
-   **Send back to researcher**. The researcher revises its handover and asks again.
-5. Enter `Approved. Write a short guide for new users.` and click **Continue**.
-6. Read the **Output** card. The demo writer echoes the direction it received, and the run
-   finishes as **Succeeded**.
+1. Click **Run team**, type `Prepare a short getting-started guide for new users.` in the box at
+   the bottom right, and press **Enter** (**Shift+Enter** adds a new line).
+2. When the team pauses for you, open **What Researcher handed over** to read it.
+3. To ask for changes, type `Use the short guide and remove the detailed walkthrough.` and click
+   **Send back to Researcher**. The researcher revises its work and asks again.
+4. Click **Approve** to let the team continue. You can also type a note first; it is passed on as
+   your direction.
+5. Read the **Team response**. The demo writer echoes the direction it received, and the run
+   finishes as **Finished**.
 
-Use the history button beside the composer to reopen a run. The replay slider lets you
+Use the history button beside the request box to reopen a run. The replay slider lets you
 inspect earlier events without running the agents again. To request another pass, type
-new instructions and choose **Follow up**; its target menu can start from a selected stage.
+new instructions and choose **Follow up**; **Redo from** can start again at a selected step.
 
 ## Run your own agents
 
-Once the demo works, create a new team using the team menu at the top of the canvas.
+1. Install and sign in to the AI app you want to use (Claude Code, Codex or OpenCode, for example)
+   in Terminal, and confirm it works on its own.
+2. Start LoomWatch from a terminal where that app is available. The bottom of the home screen
+   lists the AI apps it found.
+3. Click **New team**, give it a name and choose how it should start:
+   - **One assistant** — a single agent that does the whole task (recommended to begin with).
+   - **Researcher and writer** — one agent gathers facts, a second writes the result.
+   - **Research, your approval, then writing** — the team pauses so you can approve the research.
+   - **Empty team** — build it yourself from the library on the left.
 
-1. Install and authenticate your chosen agent app in Terminal. Confirm it works on its own
-   before using it through LoomWatch.
-2. Start LoomWatch from a terminal where that app is available. Open the **Library** to see
-   detected agents and any missing requirements.
-3. Drag an available agent onto the canvas. Select its card and fill in its role, a model
-   available to your account, its working directory, and its budget. The first agent becomes
-   the team's starting agent.
-4. Start with one agent and a small task. Add more agents when you want separate roles, such
-   as researcher, reviewer, and writer. Connect them in order for a pipeline, or leave them
-   unconnected to let the starting agent delegate when its integration supports Team Bus.
-5. Save the team inside your teams folder and use **Run** or **Save & run**.
+   Ready-made teams are saved straight away with your AI app's own default model, so you can
+   run them immediately.
+4. Click **Run team**, describe what you want in plain words, and press **Enter**.
+5. To customise, open **Build**: click **+** next to an AI app to add an agent, select a card to
+   edit its instructions, app and model, and drag from the dot on a card's right edge to the next
+   card to make them work in order. Add **You (review step)** wherever you want to approve work
+   before the team continues.
 
 LoomWatch connects to agent apps through ACP, a protocol for exchanging tasks and results.
 The Library recognizes these integrations:

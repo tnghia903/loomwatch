@@ -1,7 +1,7 @@
-import Markdown from 'react-markdown'
 import { CapabilityGraph } from './CapabilityGraph'
+import { Markdown } from '../ui/Markdown'
+import { preloadMarkdown } from '../ui/preloadMarkdown'
 import { SuppliedInstructions } from './SuppliedInstructions'
-import remarkGfm from 'remark-gfm'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown,
@@ -56,6 +56,12 @@ const ROUTE_SENTENCE: Record<'native' | 'inline' | 'blocked', string> = {
   blocked: 'Blocked — LoomWatch knows no project skill directory for this harness.',
 }
 
+/** Run phases as an operator would say them; the raw phase ids are daemon vocabulary. */
+const PHASE_WORDS: Partial<Record<string, string>> = {
+  queued: 'Queued', starting: 'Starting', running: 'Running', succeeded: 'Finished',
+  partial: 'Finished with gaps', failed: 'Failed', cancelled: 'Stopped',
+}
+
 /** Run is a reading surface. The saved team canvas remains the editing surface, and detailed
  * evidence still opens the existing inspector rather than maintaining a second raw log viewer. */
 export function DeliveryLane({
@@ -78,6 +84,8 @@ export function DeliveryLane({
   onHistory,
   focusAgentId = null,
 }: DeliveryLaneProps) {
+  // The answer is what this view exists for; fetch its renderer before the first token arrives.
+  useEffect(() => preloadMarkdown(), [])
   const [selectedId, setSelectedId] = useState<string | null>(output.producer)
   const [filter, setFilter] = useState<'all' | 'skill' | 'tool'>('all')
   const [query, setQuery] = useState('')
@@ -224,7 +232,7 @@ export function DeliveryLane({
             <h1>
               {planned ? 'New run' : `Run ${attempt}`}
               <span className={`delivery-status status-${phase}`}>
-                {planned ? 'Not started' : phase === 'succeeded' ? 'Execution finished' : phase === 'running' ? 'Running' : phase}
+                {planned ? 'Not started' : PHASE_WORDS[phase] ?? phase}
               </span>
               {output.text && !planned && <span className="delivery-review-state"><CircleDot size={14} />{reviewed ? 'Reviewed by you' : 'Review pending'}</span>}
             </h1>
@@ -241,7 +249,7 @@ export function DeliveryLane({
           <p className="selectable">
             {prompt ||
               (planned
-                ? 'Describe the result you want in the composer.'
+                ? 'Type your request in the box at the bottom right, then press Enter.'
                 : 'No original prompt was captured.')}
           </p>
         </article>
@@ -252,7 +260,7 @@ export function DeliveryLane({
           <span>
             {pipeline && linearPipeline
               ? `${agents.length} stages · 1 deliverable`
-              : 'Select an agent · inspect connections in Full trace'}
+              : 'Select an agent to see its work'}
           </span>
         </div>
         <div className="delivery-stages" role="list" aria-label="Team stages">
@@ -294,20 +302,15 @@ export function DeliveryLane({
                     </span>
                   </button>
                   <div className="delivery-agent-facts">
-                    <div><span>Harness</span><strong><Code2 size={15} />{snapshots.get(node.id)?.[0]?.harness ?? harnessLabels.get(node.id) ?? 'Not recorded'}</strong></div>
+                    <div><span>{agent.kind === 'operator' ? 'Done by' : 'AI app'}</span><strong><Code2 size={15} />{agent.kind === 'operator' ? 'You' : snapshots.get(node.id)?.[0]?.harness ?? harnessLabels.get(node.id) ?? 'Not recorded'}</strong></div>
                     <div><span>{planned ? 'Produces' : 'Contribution'}</span><strong>{node.id === output.producer ? 'Team output' : pipeline ? 'Stage handoff' : 'Agent response'}</strong></div>
                     {(evidenceByAgent.get(node.id) ?? []).some(item => item.kind === 'source') && <div><span>Sources</span><button className="delivery-link" onClick={() => setSourceAgent(node.id)}><FileText size={14} />{(evidenceByAgent.get(node.id) ?? []).filter(item => item.kind === 'source').length} sources <ArrowRight size={12} /></button></div>}
                   </div>
                   <div className="delivery-stage-meta">
                     <span>
-                      {snapshots.get(node.id)?.[0]?.harness ??
-                        harnessLabels.get(node.id) ??
-                        'Harness not recorded'}{' '}
-                      ·{' '}
-                      {projection.agents.find((item) => item.id === node.id)
-                        ?.model ??
-                        agent.model ??
-                        'Model not recorded'}
+                      {agent.kind === 'operator'
+                        ? 'Your review step'
+                        : `${snapshots.get(node.id)?.[0]?.harness ?? harnessLabels.get(node.id) ?? 'AI app not recorded'} · ${projection.agents.find((item) => item.id === node.id)?.model ?? agent.model ?? 'model not recorded'}`}
                     </span>
                     <span>{runtime?.eventCount ?? 0} events</span>
                   </div>
@@ -684,14 +687,14 @@ export function DeliveryLane({
           <div className="delivery-output-title"><h2>{output.text.match(/^#\s+(.+)$/m)?.[1] ?? 'Team response'}</h2><span className="delivery-output-badge">{reviewed ? 'Reviewed' : planned ? 'Planned' : outputState}</span></div>
           <p>
             {output.text
-              ? `Final responder: ${agents.find((node) => node.id === output.producer)?.data.agent.name ?? output.producerLabel}`
+              ? `Written by ${agents.find((node) => node.id === output.producer)?.data.agent.name ?? output.producerLabel}`
               : `Assigned to ${output.producerLabel}`}
           </p>
         </header>
         <div className="delivery-output-scroll">
           <p className="delivery-output-quality">
             {planned
-              ? 'This is where the chosen responder’s output will appear.'
+              ? 'The team’s answer will appear here.'
               : output.text
                 ? 'Review this response and its evidence before using it.'
                 : output.terminal
@@ -700,24 +703,7 @@ export function DeliveryLane({
           </p>
           {output.text && (
             <div className="delivery-response selectable">
-              <Markdown
-                remarkPlugins={[remarkGfm]}
-                skipHtml
-                components={{
-                  a: ({ children, href }) => (
-                    <a href={href} target="_blank" rel="noreferrer">
-                      {children}
-                    </a>
-                  ),
-                  img: ({ alt }) => (
-                    <span className="delivery-image-reference">
-                      [Image: {alt || 'reference'}]
-                    </span>
-                  ),
-                }}
-              >
-                {output.text}
-              </Markdown>
+              <Markdown>{output.text}</Markdown>
               {output.streaming && (
                 <span className="caret" aria-label="Streaming" />
               )}
@@ -728,14 +714,14 @@ export function DeliveryLane({
               <FileText size={36} />
               <h3>
                 {planned
-                  ? 'Start with the result'
+                  ? 'What should the team do?'
                   : output.terminal
                     ? 'No response produced'
                     : 'Waiting for the team'}
               </h3>
               <p>
                 {planned
-                  ? 'Enter a clear request. Your team’s work and skill receipts will appear alongside its response.'
+                  ? 'Say what you want done, in plain words. You will see each agent’s work as the team answers.'
                   : output.phaseText}
               </p>
               {output.terminal && (

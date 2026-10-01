@@ -3,7 +3,7 @@ import { LineCounter, parseDocument } from 'yaml'
 import type { EntrypointProblem } from './useTeamDocument'
 import type { AgentField, AgentFieldProblems, DocumentProblem } from './validation'
 
-const FIELD_LABELS: Record<AgentField, string> = { name: 'Name', role: 'Role', model: 'Model', cwd: 'Working directory', limitUsd: 'Budget' }
+const FIELD_LABELS: Record<AgentField, string> = { name: 'Name', role: 'Instructions', model: 'Model', cwd: 'Working folder', limitUsd: 'Budget' }
 
 /** The schedule editor writes these four; the rest it repairs on save (lib/team-file/schedule.ts),
  * so every message names the fix the operator can actually reach from the schedule panel. */
@@ -55,7 +55,10 @@ export function reviewProblems(entrypointProblem: EntrypointProblem | null, fiel
       title: `${agentNames.get(agentId) ?? agentId} · ${FIELD_LABELS[field]}`,
     }))).flat()
   return [
-    ...(entrypointProblem ? [{ message: entrypointProblem.message, yamlPath: ['entrypoint'], weight: 'error' as const, title: 'Team · Entry point' }] : []),
+    // An empty team is unfinished, not wrong: it is the state every new team starts in.
+    ...(entrypointProblem ? [entrypointProblem.candidates.length === 0
+      ? { message: 'Click + next to an AI app in the library on the left.', yamlPath: ['entrypoint'], weight: 'incomplete' as const, title: 'Add your first agent' }
+      : { message: 'Choose which agent receives your request first.', yamlPath: ['entrypoint'], weight: 'error' as const, title: 'Choose a starting agent' }] : []),
     ...fields,
     ...documentProblems.map((problem) => {
       const friendly = friendlyDocumentProblem(problem)

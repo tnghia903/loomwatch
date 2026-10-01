@@ -291,7 +291,7 @@
   top: 52%;
 }
 .delivery-edge-word {
-  font-size: 9px;
+  font-size:11px;
   color: var(--color-ink-3);
   display: block;
   margin: 0 0 5px 8px;
@@ -874,7 +874,7 @@
     left: -48px;
     top: calc(50% - 17px);
     width: 48px;
-    font-size: 9px;
+    font-size:11px;
     text-align: center;
     margin: 0;
   }
@@ -1080,3 +1080,6 @@
   margin: 0 0 12px;
   color: var(--color-ink-2);
 }
+
+/* The plain-text stand-in shown for the moment before the Markdown renderer chunk arrives. */
+.markdown-fallback { white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -25,14 +25,21 @@ function uniqueId(base: string, existingIds: ReadonlySet<string>): string {
 }
 
 /**
+ * What a freshly added agent is told to do until the operator writes something better. A blank role
+ * used to block the first run behind a "Required" field; a general instruction lets a one-agent
+ * team run straight away, and the inspector still opens on this field so it is the obvious edit.
+ */
+export const DEFAULT_AGENT_ROLE = 'Complete the request you are given. Work carefully, then reply with the finished result.'
+
+/**
  * Builds the agent a drop creates (docs/CANVAS_SPEC.md §4.5 step 4).
  *
- * `role` and `model` stay empty for a bare harness/endpoint source — deliberately, per §4.5:
- * "a role is the whole point of the node, and GET /api/harnesses advertises no models" — which
- * makes the document invalid until the operator fills them in. A preset source pre-fills both,
- * "the entire argument for presets." `budget.limitUsd` always follows the doc-inheritance rule
- * (last node created, else $5) regardless of source kind — a preset's own suggested budget is
- * display-only in the Library row, not written to the agent.
+ * `model` stays empty for a bare harness/endpoint source because GET /api/harnesses advertises no
+ * models; the workspace fills it with the harness's own default once that harness's catalog loads.
+ * `role` starts as [`DEFAULT_AGENT_ROLE`]. A preset source pre-fills both, "the entire argument for
+ * presets." `budget.limitUsd` always follows the doc-inheritance rule (last node created, else $5)
+ * regardless of source kind — a preset's own suggested budget is display-only in the Library row,
+ * not written to the agent.
  */
 export function buildAgentFromSource(
   source: LibrarySource,
@@ -46,7 +53,7 @@ export function buildAgentFromSource(
   return {
     id,
     name: source.label,
-    role: source.role ?? '',
+    role: source.role ?? DEFAULT_AGENT_ROLE,
     model: source.model ?? '',
     spawn: {
       cmd: source.spawn.cmd,

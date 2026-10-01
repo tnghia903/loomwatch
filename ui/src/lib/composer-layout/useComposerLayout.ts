@@ -56,7 +56,12 @@ export interface ComposerLayoutState {
  * docs/TNG122_FREEFORM_CAPABILITY_COMPOSER.md §9 calls losing unsaved planned work a blocking
  * failure. The team YAML keeps its explicit save semantics.
  */
-export function useComposerLayout(path: string | null, agentIds: readonly string[]): ComposerLayoutState {
+/**
+ * `persist` is false while the team file itself does not exist yet (a new, unsaved team): the
+ * sidecar sits next to the team file and the daemon refuses to write one for a file it cannot find.
+ * Edits made meanwhile are kept in memory and written by the first autosave after the team is saved.
+ */
+export function useComposerLayout(path: string | null, agentIds: readonly string[], persist = true): ComposerLayoutState {
   const [layout, setLayout] = useState<ComposerLayout>(EMPTY_LAYOUT)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -113,7 +118,7 @@ export function useComposerLayout(path: string | null, agentIds: readonly string
   }, [path])
 
   useEffect(() => {
-    if (!path || !dirty.current || loadedPath.current !== path) return
+    if (!path || !persist || !dirty.current || loadedPath.current !== path) return
     const timer = setTimeout(() => {
       dirty.current = false
       setSaving(true)
@@ -122,7 +127,7 @@ export function useComposerLayout(path: string | null, agentIds: readonly string
         .finally(() => setSaving(false))
     }, AUTOSAVE_MS)
     return () => clearTimeout(timer)
-  }, [layout, path])
+  }, [layout, path, persist])
 
   const edit = useCallback((next: (current: ComposerLayout) => ComposerLayout) => {
     dirty.current = true

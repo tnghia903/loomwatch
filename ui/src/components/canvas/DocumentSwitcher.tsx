@@ -1,7 +1,7 @@
 import { ChevronDown, Plus } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { fetchTeamsDiscovery } from '../../lib/team-file/client'
+import { fetchTeamsDiscovery, teamDisplayName, teamSummaries, type TeamSummary } from '../../lib/team-file/client'
 import { reviewProblems, shortenDirectory, type ReviewProblem } from '../../lib/team-file/problems'
 import type { EntrypointProblem, SaveState } from '../../lib/team-file/useTeamDocument'
 import type { AgentFieldProblems, DocumentProblem } from '../../lib/team-file/validation'
@@ -9,6 +9,8 @@ import { ChipDot, type ChipState } from '../ui/glyphs'
 
 export interface DocumentSwitcherProps {
   path: string | null
+  /** The team's display name; the chip leads with it and keeps the file name as detail. */
+  teamName?: string | null
   saveState: SaveState
   saveError: string | null
   linesDiffer: number
@@ -34,9 +36,9 @@ export interface DocumentSwitcherProps {
 // UX_REDESIGN §9.1: the canvas is a view over a file and the file is the truth. This chip is
 // the only place file state is expressed, and the only way to reach another file.
 export function DocumentSwitcher(props: DocumentSwitcherProps) {
-  const { path, saveState, saveError, linesDiffer, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onShowYaml, onNewTeam, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
+  const { path, teamName = null, saveState, saveError, linesDiffer, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onShowYaml, onNewTeam, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
   const [switcherOpen, setSwitcherOpen] = useState(false)
-  const [files, setFiles] = useState<string[] | null>(null)
+  const [files, setFiles] = useState<TeamSummary[] | null>(null)
   const [root, setRoot] = useState<string | null>(null)
   const [filesError, setFilesError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -52,7 +54,7 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   useEffect(() => {
     if (!switcherOpen) return
     let cancelled = false
-    fetchTeamsDiscovery().then((discovery) => { if (!cancelled) { setFiles(discovery.files); setRoot(discovery.root); setFilesError(null) } })
+    fetchTeamsDiscovery().then((discovery) => { if (!cancelled) { setFiles(teamSummaries(discovery)); setRoot(discovery.root); setFilesError(null) } })
       .catch((error: unknown) => { if (!cancelled) setFilesError(error instanceof Error ? error.message : String(error)) })
     return () => { cancelled = true }
   }, [switcherOpen])
@@ -72,26 +74,29 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   const dirty = ['dirty', 'invalid', 'conflict', 'new'].includes(saveState)
 
   let state: ChipState = 'clean'
-  let l1 = filename
-  let l2 = directory || 'teams'
+  let l1 = teamName ?? filename
+  let l2 = teamName ? filename : directory || 'teams'
   let action: React.ReactNode = null
   const primarySave = <button type="button" className="btn btn-primary" onClick={onSave} disabled={!isValid || editingDisabled} title={!isValid ? (errors[0]?.message ?? incomplete[0]?.message) : editingDisabled ? 'Editing needs a wider window' : undefined}>Save <kbd className="t-mono-sm" style={{ opacity: .8 }}>⌘S</kbd></button>
   const review = <button type="button" className="btn" onClick={() => { onProblemsOpenChange(!problemsOpen); setSwitcherOpen(false) }} aria-expanded={problemsOpen} aria-controls="problems-pop">Review</button>
 
-  if (fileGone) { state = 'failed'; l1 = 'File is gone'; l2 = filename; action = <button type="button" className="btn btn-primary" onClick={onSaveCopy}>Save a copy…</button> }
+  // The first line is always the team, so the operator never loses track of what is open; the
+  // second line carries whatever is true about it right now.
+  if (fileGone) { state = 'failed'; l2 = 'The file was moved or deleted'; action = <button type="button" className="btn btn-primary" onClick={onSaveCopy}>Save a copy…</button> }
   else if (saveState === 'read-only') { state = 'readonly'; l2 = readOnlyReason ?? 'Read-only' }
-  else if (saveState === 'saving') { state = 'saving'; l1 = 'Saving…'; l2 = 'writing to disk' }
-  else if (saveState === 'saved') { state = 'saved'; l1 = 'Saved'; l2 = filename }
-  else if (saveState === 'error') { state = 'failed'; l1 = "Couldn't save"; l2 = saveError ?? 'unknown error'; action = <button type="button" className="btn" onClick={onSave}>Retry</button> }
-  else if (saveState === 'conflict') { state = 'failed'; l2 = 'Changed on disk'; action = null }
-  else if (!isValid && errors.length > 0) { state = 'invalid'; l1 = scheduleErrors.length === errors.length ? 'Schedule needs attention' : `${errors.length} problem${errors.length === 1 ? '' : 's'}`; l2 = scheduleErrors.length === errors.length ? 'Fix the highlighted schedule on the canvas' : filename; action = review }
-  else if (!isValid && incomplete.length > 0) { state = 'incomplete'; l1 = `${incomplete.length} thing${incomplete.length === 1 ? '' : 's'} to finish`; l2 = filename; action = review }
+  else if (saveState === 'saving') { state = 'saving'; l2 = 'Saving…' }
+  else if (saveState === 'saved') { state = 'saved'; l2 = 'Saved' }
+  else if (saveState === 'error') { state = 'failed'; l2 = `Couldn't save: ${saveError ?? 'unknown error'}`; action = <button type="button" className="btn" onClick={onSave}>Retry</button> }
+  else if (saveState === 'conflict') { state = 'failed'; l2 = 'Changed outside LoomWatch'; action = null }
+  else if (!isValid && errors.length > 0) { state = 'invalid'; l2 = scheduleErrors.length === errors.length ? 'Schedule needs attention' : `${errors.length} problem${errors.length === 1 ? '' : 's'} to fix`; action = review }
+  else if (!isValid && incomplete.length > 0) { state = 'incomplete'; l2 = `${incomplete.length} thing${incomplete.length === 1 ? '' : 's'} to finish`; action = review }
   else if (saveState === 'new') { state = 'new'; l2 = 'Not saved yet'; action = primarySave }
-  else if (saveState === 'dirty') { state = 'dirty'; l2 = linesDiffer > 0 ? `${linesDiffer} line${linesDiffer === 1 ? '' : 's'} differ` : 'Unsaved changes'; action = primarySave }
+  else if (saveState === 'dirty') { state = 'dirty'; l2 = 'Unsaved changes'; action = primarySave }
   else if (editingDisabled) { l2 = 'Editing needs a wider window' }
 
   const ledger = saveState === 'saving' ? 'saving' : saveState === 'saved' ? 'saved' : saveState === 'error' ? 'failed' : ''
-  const matches = (files ?? []).filter((file) => file.toLowerCase().includes(query.toLowerCase()))
+  const needle = query.toLowerCase()
+  const matches = (files ?? []).filter((team) => teamDisplayName(team).toLowerCase().includes(needle) || team.path.toLowerCase().includes(needle))
   const isCurrent = (file: string) => (root ? `${root.replace(/\/+$/, '')}/${file}` : file) === path || file === path
 
   function switchTo(file: string) {
@@ -120,17 +125,18 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4.3-4.3" /></svg>
             <input autoFocus placeholder="Filter teams" aria-label="Filter teams" value={query} onChange={(event) => setQuery(event.target.value)} />
           </div>
-          <div className="pop-list" role="listbox" aria-label="Team files">
+          <div className="pop-list" role="listbox" aria-label="Your teams">
             {files === null && !filesError && <p className="pop-empty t-meta">Finding teams…</p>}
             {filesError && <p className="pop-empty t-meta" role="alert" style={{ color: 'var(--color-alert)' }}>{filesError}</p>}
-            {files !== null && matches.length === 0 && <p className="pop-empty t-meta">No team files match.</p>}
-            {matches.map((file) => {
+            {files !== null && matches.length === 0 && <p className="pop-empty t-meta">No team matches.</p>}
+            {matches.map((team) => {
+              const file = team.path
               const current = isCurrent(file)
               return (
                 <div key={file}>
                   <button type="button" role="option" aria-selected={current} className={`pop-row ${current ? 'current' : ''}`} onClick={() => !current && switchTo(file)}>
                     {current ? <ChipDot state={state} /> : <span style={{ width: 12 }} />}
-                    <span className={`name ${current ? 't-body-m' : 't-body'}`}>{file}</span>
+                    <span className={`name ${current ? 't-body-m' : 't-body'}`} title={file}>{current && teamName ? teamName : teamDisplayName(team)}</span>
                     {current && dirty && <span className="aside t-mono-sm">{linesDiffer > 0 ? `${linesDiffer} differ` : 'unsaved'}</span>}
                   </button>
                   {pendingSwitch === file && (

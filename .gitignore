@@ -9,3 +9,6 @@ node_modules/
 
 # build cache for docs/mockups/build-standalone.mjs (fetched woff2 subsets)
 docs/mockups/.font-cache/
+
+# pnpm content-addressable store, when pnpm is run with a local store-dir
+.pnpm-store/

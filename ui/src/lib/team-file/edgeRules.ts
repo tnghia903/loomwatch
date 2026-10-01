@@ -48,7 +48,7 @@ export function validateConfiguredEdge(
     return { message: `That would make a loop: ${from} → ${to} → ${from}. Pipelines run in one direction.` }
   }
   if (entrypointId !== null && to === entrypointId) {
-    return { message: `\`${to}\` is the entrypoint, so it can't have an incoming step.`, promote: from }
+    return { message: `${to} starts the team, so nothing can hand work to it.`, promote: from }
   }
   return null
 }
