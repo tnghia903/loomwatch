@@ -33,11 +33,9 @@ agents:
       env: {}
       cwd: .
     model: fake/offline
-    budget:
-      limitUsd: 0
 
-  # The stop. No spawn, no model, no budget: there is nothing to start, no model to select and
-  # nobody to bill. `name` defaults to "You" if you leave it out.
+  # The stop. No spawn, no model: there is nothing to start and no model to select. `name`
+  # defaults to "You" if you leave it out.
   - id: review
     kind: operator
     name: You
@@ -54,8 +52,6 @@ agents:
       env: {}
       cwd: .
     model: fake/offline
-    budget:
-      limitUsd: 0
 
 edges:
   - from: researcher

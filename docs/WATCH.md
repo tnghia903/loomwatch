@@ -34,7 +34,7 @@ without saving”). The canvas then shows:
   (attempt, state, elapsed) and named arrows `starts` / `assigns lead` / `responds with` /
   `completes as`;
 - each agent card with a live task row — `Agent A · lead · RUNNING · $ cargo test` — a blue
-  breathing perimeter while it executes, and its spend against its budget;
+  breathing perimeter while it executes;
 - one **evidence card per accepted event**: tool calls, commands, file reads and edits,
   searches, fetched sources, Team Bus delegations, permission requests and plans, each with
   owner, ordinal, elapsed time, status and relationship word. Click one for its input,
@@ -44,7 +44,7 @@ without saving”). The canvas then shows:
 - the **Output** card streaming the canonical responder's reply, with `Live` / `Replay`
   and the failure or cancellation strip when a run ends abnormally; **Show provenance**
   opens the six-category coverage summary;
-- a lifecycle strip under the document chip: lead task, run state, result, elapsed, spend,
+- a lifecycle strip under the document chip: lead task, run state, result, elapsed,
   and a scrubber (`←` / `→`) that replays any earlier event as a complete, byte-equivalent
   picture. Scrubbing never alters execution or YAML.
 
@@ -53,7 +53,7 @@ active archived sessions with their prompts; selecting one opens it in **replay*
 links use `?run=<id>`; the legacy `/watch?session=<id>` route redirects there. A run the
 daemon no longer remembers (restart) is read from the archive alone.
 
-Escalations, budget warnings, abnormal turn endings, crashes and rejected Team Bus calls
+Escalations, abnormal turn endings, crashes and rejected Team Bus calls
 collect in an **Attention** panel; browser notifications are offered only after an explicit
 permission action (⌘K → *Enable notifications*). Dismissing an alert affects this view only.
 Connection loss never starts, cancels, or restarts a team. Reconnect uses the last verified
@@ -295,6 +295,24 @@ minutes and only for the same executable and spawn descriptor; listing never spa
 an unchecked harness simply has no `health`. The UI keeps a harness with `health: error` out of new
 team templates, names it with its reason on Home and in the New team dialog, and re-runs the
 models handshake when the operator chooses "Check again".
+
+A team file can also name an app LoomWatch never offered — a team shared by someone who uses
+`acme-agent-cli`. `GET /api/commands?cmd=…&cmd=…` answers, for each distinct `spawn.cmd`, whether a
+run would start it, without executing anything: `found` (with `path`), `not_found`, `not_executable`
+(an absolute path that is not a program), `outside_path` (only in a per-user folder that harness
+detection searches but the daemon's own `PATH` lacks — the launchd case — with `path`), or
+`unchecked` (a relative path such as `./bin/agent`, which resolves against the agent's working
+folder at run time). A bare name is looked up on the daemon's own `PATH`, the one
+`AcpProcess::spawn` uses, so `npx`-bridged harnesses are judged like any other name. At most 64
+commands per request.
+
+Build asks about the open document rather than the saved file, because Run saves first; it asks
+again when the set of commands changes and when the window regains focus. An agent whose app cannot
+start is named on its card ("Helper’s app “acme-agent-cli” isn’t installed on this computer."), in
+the Build heading, as a *to finish* entry in the team's Review list, and on its planned stage in
+Run, which reads "Can’t start" instead of "Ready"; the composer's Run is blocked with that reason. The file is still valid and still saves. An agent that sets `PATH` in
+`spawn.env` is not checked, since the daemon cannot see that `PATH`; a failed check (an older
+daemon, a dropped connection) reports nothing rather than blocking a run.
 
 ## Installation
 

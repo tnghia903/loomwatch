@@ -3,8 +3,11 @@ import { MarkerType, type Edge, type Node } from '@xyflow/react'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { CAPABILITY_CARD, RELATION, type CapabilityEdgeConfig, type CapabilityNodeConfig } from '../../lib/composer-layout/types'
 import type { WaitingOn } from '../../lib/runs/client'
+import { plainRunError } from '../../lib/runs/errors'
+import { settleAfterRun } from '../../lib/runs/settle'
 import type { EvidenceNode, MoreNode, OutputNode, PromptNode, RunNode, WeftEdge } from '../../lib/runs/graph'
 import { DOCK, dockAnchors, fanEvidence } from '../../lib/runs/runOverlay'
+import { assignPorts } from '../../lib/canvas/ports'
 import type { useRunSession } from '../../lib/runs/useRunSession'
 import { SCHEDULE_CARD } from '../../lib/team-file/schedule'
 import type { AgentConfig, AgentStatus } from '../../lib/team-file/types'
@@ -30,7 +33,7 @@ export function capabilityEdgeId(from: string, to: string): string {
 }
 
 function syntheticAgent(id: string): AgentConfig {
-  return { id, name: id, role: 'Observed agent', spawn: { cmd: '', args: [], env: {}, cwd: '.' }, model: '', budget: { limitUsd: 0 } }
+  return { id, name: id, role: 'Observed agent', spawn: { cmd: '', args: [], env: {}, cwd: '.' }, model: '' }
 }
 
 /** Everything the canvas is drawn from. The builder reads nothing else, so this is its whole contract. */
@@ -110,7 +113,7 @@ interface GraphFrame {
  *
  * One builder, not a compose branch and a run branch. The same agent cards sit at the same
  * `doc.nodes` positions in every state and gain runtime facts — status rail, live perimeter,
- * task, cost, event count, the packet route — when a run is shown. The Prompt and Output nodes
+ * task, event count, the packet route — when a run is shown. The Prompt and Output nodes
  * are permanent and docked to the ends of the configured graph, which is what guarantees rows
  * 23/24/42 (Prompt first, Output last) now that no column computes it.
  *
@@ -133,7 +136,9 @@ export function buildCanvasGraph(input: CanvasGraphInput): { nodes: Node[]; edge
   addObservedDelegations(graph, input, frame)
   addCapabilityWiring(graph, input, frame)
   addOutput(graph, input, frame)
-  return { nodes, edges }
+  // Which side of each card a line meets is decided once, from where the cards are, for every
+  // edge alike (lib/canvas/ports.ts) — never by the section that created the edge.
+  return { nodes, edges: assignPorts(edges, nodes) }
 }
 
 /** Where the graph docks its two permanent anchors, and the lookups every section shares. */
@@ -197,8 +202,9 @@ function addPromptAndRun(graph: GraphAccumulator, input: CanvasGraphInput, frame
     const runId = activeRunId ?? ''
     const parent = retryOf.get(runId)
     const promptHeight = synthMeasurements.__prompt?.height ?? DOCK.promptH
+    // Centred under the Prompt, so "starts" drops straight down between them.
     const runPosition = overlayPositions.__run ?? {
-      ...docked.run,
+      x: docked.run.x + (DOCK.promptW - DOCK.runW) / 2,
       y: docked.prompt.y + Math.max(DOCK.runOffsetY, promptHeight + 32),
     }
     // §12.2 requires the attempt card to stay visible; §15 shrinks it into the Prompt's dock
@@ -217,7 +223,7 @@ function addPromptAndRun(graph: GraphAccumulator, input: CanvasGraphInput, frame
     addNode(run)
     edges.push({ id: '__prompt->__run', source: '__prompt', target: '__run', type: 'prov', markerEnd: PROV_MARKER, data: { label: 'starts', story: true }, selectable: false, focusable: false })
     const lead = leadId && (docNodeById.has(leadId) || helperPlacements[leadId]) ? leadId : entryId
-    if (lead) edges.push({ id: '__run->lead', source: '__run', sourceHandle: 'lead', target: lead, type: 'prov', markerEnd: PROV_MARKER, data: { label: 'assigns lead', story: true }, selectable: false, focusable: false })
+    if (lead) edges.push({ id: '__run->lead', source: '__run', target: lead, type: 'prov', markerEnd: PROV_MARKER, data: { label: 'assigns lead', story: true }, selectable: false, focusable: false })
   } else if (docked && entryId) {
     // Before a run the same arrow names the same configured relationship: this prompt starts here.
     edges.push({ id: '__prompt->entry', source: '__prompt', target: entryId, type: 'prov', markerEnd: PROV_MARKER, data: { label: 'starts', story: true }, selectable: false, focusable: false, ariaLabel: `starts from your prompt to ${nodeNames.get(entryId) ?? entryId}` })
@@ -227,13 +233,16 @@ function addPromptAndRun(graph: GraphAccumulator, input: CanvasGraphInput, frame
 /** The schedule card, docked above the Prompt, and the edge to the stage it starts. */
 function addSchedule(graph: GraphAccumulator, input: CanvasGraphInput, frame: GraphFrame) {
   const { addNode, edges } = graph
-  const { nodeNames, visibleSchedule, scheduleInvalid, scheduleEditorOpen, onOpenSchedule } = input
+  const { nodeNames, visibleSchedule, scheduleInvalid, scheduleEditorOpen, onOpenSchedule, runView, allWiringEdges } = input
   const { entryId, docked } = frame
   if (visibleSchedule && docked) {
+    // Build hides the Prompt unless something is wired to it, so the schedule takes the Prompt's
+    // slot: level with the stage it starts, which makes "starts" a straight line into the spine.
+    const promptShown = runView || allWiringEdges.some((edge) => edge.from === '__prompt')
     const scheduleNode: ScheduleNode = {
       id: '__schedule',
       type: 'schedule',
-      position: docked.schedule,
+      position: promptShown ? docked.schedule : { x: docked.prompt.x + DOCK.promptW - SCHEDULE_CARD.width, y: docked.prompt.y },
       initialWidth: SCHEDULE_CARD.width,
       initialHeight: SCHEDULE_CARD.height,
       draggable: false,
@@ -255,8 +264,9 @@ function addSchedule(graph: GraphAccumulator, input: CanvasGraphInput, frame: Gr
 /** The agents at the positions the operator arranged, carrying a run's projected state. */
 function addAgents(graph: GraphAccumulator, input: CanvasGraphInput, frame: GraphFrame) {
   const { addNode } = graph
-  const { runView, doc, session, phase, orderedAgentIds, ownerLabels, evidenceByAgent, leadId, live, waiting, helperPlacements, historicalPositions, fannedAgentId, packetAgentIds, givenNotes, focusComposer } = input
+  const { runView, doc, session, record, phase, orderedAgentIds, ownerLabels, evidenceByAgent, leadId, live, waiting, helperPlacements, historicalPositions, fannedAgentId, packetAgentIds, givenNotes, focusComposer } = input
   const { docNodeById, projectedById } = frame
+  const pipeline = (record?.mode ?? doc.mode) === 'pipeline'
   const agentIdsInOrder = runView ? orderedAgentIds : doc.nodes.map((node) => node.id)
   agentIdsInOrder.forEach((id) => {
     const docNode = docNodeById.get(id)
@@ -266,16 +276,20 @@ function addAgents(graph: GraphAccumulator, input: CanvasGraphInput, frame: Grap
     const base: AgentNode = docNode ?? { id, type: 'agent', position, selected: false, data: { label: agent.name, agent } }
     const label = ownerLabels.get(id) ?? id
     const projected = projectedById.get(id)
-    const costUsd = projected?.costUsd ?? null
     const eventCount = evidenceByAgent.get(id)?.length ?? 0
     const runtime = !runView
       ? undefined
       : projected
-        ? { status: projected.status, taskState: projected.taskState, task: projected.task, ownerLabel: label, costUsd, spentPct: costUsd !== null && (agent.budget?.limitUsd ?? 0) > 0 ? (costUsd / (agent.budget?.limitUsd ?? 0)) * 100 : null, live: live && (projected.status === 'running' || projected.status === 'starting'), busUnavailable: projected.busUnavailable, received: projected.received, eventCount, openCalls: projected.openCalls, fanned: fannedAgentId === id, hasPacket: packetAgentIds.has(id), givenNotes: givenNotes[id] ?? 0 }
-        : { status: 'idle' as AgentStatus, taskState: (phase === 'queued' || phase === 'starting' ? 'QUEUED' : 'READY') as TaskState, task: phase === 'queued' || phase === 'starting' ? 'Waiting for the run to start' : 'Awaiting a task', ownerLabel: label, costUsd: null, spentPct: null, live: false, eventCount, fanned: fannedAgentId === id, hasPacket: packetAgentIds.has(id), givenNotes: givenNotes[id] ?? 0 }
+        ? { status: projected.status, taskState: projected.taskState, task: projected.task, ownerLabel: label, live: live && (projected.status === 'running' || projected.status === 'starting'), watching: live, busUnavailable: projected.busUnavailable, received: projected.received, eventCount, openCalls: projected.openCalls, fanned: fannedAgentId === id, hasPacket: packetAgentIds.has(id), givenNotes: givenNotes[id] ?? 0 }
+        : { status: 'idle' as AgentStatus, taskState: (phase === 'queued' || phase === 'starting' ? 'QUEUED' : 'READY') as TaskState, task: phase === 'queued' || phase === 'starting' ? 'Waiting for the run to start' : 'Awaiting a task', ownerLabel: label, live: false, watching: live, eventCount, fanned: fannedAgentId === id, hasPacket: packetAgentIds.has(id), givenNotes: givenNotes[id] ?? 0 }
     if (runtime && session.cursor === null && waiting) {
       if (waiting.node === id) Object.assign(runtime, { status: 'waiting', taskState: 'WAITING', task: waiting.question, live: false })
       else if (waiting.handoverFrom === id) Object.assign(runtime, { status: 'succeeded', taskState: 'SUCCEEDED', task: 'Handover ready', live: false })
+    } else if (runtime && session.cursor === null) {
+      const index = orderedAgentIds.indexOf(id)
+      const laterStageStarted = pipeline && index >= 0 && orderedAgentIds.slice(index + 1).some((later) => projectedById.has(later))
+      const settled = settleAfterRun(runtime.status, { phase, operator: agent.kind === 'operator', laterStageStarted })
+      if (settled) Object.assign(runtime, settled, { live: false })
     }
     addNode({
       ...base,
@@ -292,7 +306,7 @@ function addAgents(graph: GraphAccumulator, input: CanvasGraphInput, frame: Grap
 /** The one agent's evidence the operator fanned open (§15.2.3). */
 function addEvidenceFan(graph: GraphAccumulator, input: CanvasGraphInput, frame: GraphFrame) {
   const { addNode, edges } = graph
-  const { runView, projection, ownerLabels, evidenceByAgent, live, overlayPositions, helperPlacements, historicalPositions, fannedAgentId, inspectedEvidenceId } = input
+  const { runView, projection, ownerLabels, evidenceByAgent, live, overlayPositions, helperPlacements, historicalPositions, fannedAgentId, inspectedEvidenceId, capabilityCards, allWiringEdges } = input
   const { docNodeById } = frame
   // Folded is the default: the count lives on the card, and only the agent the operator opened
   // renders cards, so React Flow draws the agents plus one cluster instead of every event.
@@ -300,7 +314,14 @@ function addEvidenceFan(graph: GraphAccumulator, input: CanvasGraphInput, frame:
     const anchor = historicalPositions?.[fannedAgentId] ?? docNodeById.get(fannedAgentId)?.position ?? helperPlacements[fannedAgentId]
     const ids = evidenceByAgent.get(fannedAgentId) ?? []
     if (anchor && ids.length > 0) {
-      const fan = fanEvidence(anchor, ids)
+      // Start the comb below this agent's own resources, so cards never sit on top of them.
+      const resourceBottom = Math.max(0, ...allWiringEdges
+        .filter((edge) => edge.from === fannedAgentId)
+        .map((edge) => capabilityCards.find((card) => card.id === edge.to))
+        .map((card) => (card ? historicalPositions?.[card.id] ?? card.position : null))
+        .filter((point): point is Point => Boolean(point) && (point as Point).y > anchor.y)
+        .map((point) => point.y + CAPABILITY_CARD.height - anchor.y + 32))
+      const fan = fanEvidence(anchor, ids, resourceBottom)
       projection.evidence.forEach((item) => {
         if (item.agentId !== fannedAgentId) return
         // Evidence folded into the "+N more" card has no slot and no node; the panel lists it.
@@ -375,8 +396,8 @@ function addObservedDelegations(graph: GraphAccumulator, input: CanvasGraphInput
 /** Capability and memory cards, and the wiring from the agents that use them. */
 function addCapabilityWiring(graph: GraphAccumulator, input: CanvasGraphInput, frame: GraphFrame) {
   const { addNode, edges } = graph
-  const { runView, nodeNames, historicalPositions, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, removeCapabilityCards, removeCapabilityEdge } = input
-  const { docNodeById, docked } = frame
+  const { nodeNames, historicalPositions, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, removeCapabilityCards, removeCapabilityEdge } = input
+  const { docked } = frame
   for (const capability of capabilityCards) {
     const wiredTo = allWiringEdges.filter((edge) => edge.to === capability.id).length
     const node: CapabilityNode = {
@@ -399,14 +420,10 @@ function addCapabilityWiring(graph: GraphAccumulator, input: CanvasGraphInput, f
     // an entrypoint to dock against; without it the edge would name a node that is not there.
     if (edge.from === '__prompt' && !docked) continue
     const owner = edge.from === '__prompt' ? 'the whole team' : nodeNames.get(edge.from) ?? edge.from
-    const ownerPosition = historicalPositions?.[edge.from] ?? docNodeById.get(edge.from)?.position
-    const capabilityPosition = historicalPositions?.[capability.id] ?? capability.position
-    const resourceLane = ownerPosition && Math.abs(capabilityPosition.x - ownerPosition.x) < 48 && capabilityPosition.y > ownerPosition.y + 150
     const id = capabilityEdgeId(edge.from, edge.to)
     edges.push({
       id,
       source: edge.from,
-      sourceHandle: resourceLane ? 'resources' : undefined,
       target: edge.to,
       type: 'prov',
       markerEnd: PLAN_MARKER,
@@ -414,7 +431,7 @@ function addCapabilityWiring(graph: GraphAccumulator, input: CanvasGraphInput, f
       data: {
         label: RELATION[capability.kind],
         story: false,
-        resource: !runView || Boolean(resourceLane),
+        resource: true,
         onRemove: editable ? () => removeCapabilityEdge(edge.from, edge.to) : undefined,
         removeLabel: `Remove connection: ${owner} ${RELATION[capability.kind]} ${capability.name}`,
       },
@@ -480,7 +497,7 @@ function addOutput(graph: GraphAccumulator, input: CanvasGraphInput, frame: Grap
     const strip = session.error && live ? { tone: 'halt' as const, message: `Live events reconnecting — answer shown to`, watermark: `seq ${session.lastSeq}` }
       : phase === 'partial' || phase === 'failed' ? {
           tone: 'alert' as const,
-          message: record?.error ?? crash?.message
+          message: (record?.error ? plainRunError(record.error, new Map(doc.nodes.map((node) => [node.id, { name: node.data.agent.name || node.id, command: node.data.agent.spawn?.cmd }]))) : null) ?? crash?.message
             ?? (phase === 'failed' && (record?.errorCode ?? record?.stopReason ?? projection.errorCode) === 'missing_canonical_response'
               ? 'The run finished but no agent produced an answer.'
               : 'No error message was reported.'),
@@ -504,6 +521,6 @@ function addOutput(graph: GraphAccumulator, input: CanvasGraphInput, frame: Grap
     }
     addNode(output)
     if (producer && (docNodeById.has(producer) || helperPlacements[producer])) edges.push({ id: '__responds', source: producer, target: '__output', type: 'prov', markerEnd: PROV_MARKER, data: { label: 'responds with', story: true }, selectable: false, focusable: false })
-    edges.push({ id: '__completes', source: '__run', target: '__output', targetHandle: 'run', type: 'prov', markerEnd: PROV_MARKER, data: { label: `Run ${String(attempt).padStart(2, '0')} · completes as`, story: true, arc: true }, selectable: false, focusable: false })
+    edges.push({ id: '__completes', source: '__run', target: '__output', type: 'prov', markerEnd: PROV_MARKER, data: { label: `Run ${String(attempt).padStart(2, '0')} · completes as`, story: true, arc: true }, selectable: false, focusable: false })
   }
 }

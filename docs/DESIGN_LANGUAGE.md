@@ -210,7 +210,7 @@ formula. The engineer does not need to re-derive them; the engineer needs to not
 | `accent` | `#E9C46A` | gold: lines, rings, text, glyphs, the weft | **11.98** | **11.10** |
 | `accent-fill` | `#D8A93C` | gold: the one filled primary action | **9.21** | 8.53 |
 | `accent-on-fill` | `#08080A` | label on `accent-fill` | — | **9.10** on fill |
-| `accent-dim` | `#8C7130` | aged weft, spent budget track | **4.31** | 3.99 |
+| `accent-dim` | `#8C7130` | aged weft | **4.31** | 3.99 |
 | `accent-tint` | `#1A1508` | gold-tinted fills (confirmed edge, hover row) | 1.16 | — |
 | `live` | `#6AB8FF` | running agent perimeter, streaming result, live evidence edge | **9.45** | **8.75** |
 | `live-dim` | `#2F7DD3` | secondary live stroke | **4.76** | **4.41** |
@@ -235,7 +235,7 @@ formula. The engineer does not need to re-derive them; the engineer needs to not
 | `accent` | `#8A6A16` | gold-as-bronze: lines, rings, text, the weft | **4.76** | **5.06** |
 | `accent-fill` | `#AD8A20` | brass: the one filled primary action | **3.08** | 3.26 |
 | `accent-on-fill` | `#17150F` | label on `accent-fill` | — | **5.59** on fill |
-| `accent-dim` | `#9C8440` | aged weft, spent budget track | **3.42** | 3.63 |
+| `accent-dim` | `#9C8440` | aged weft | **3.42** | 3.63 |
 | `accent-tint` | `#F5F0E4` | gold-tinted fills | 1.14 | — |
 | `live` | `#175CD3` | running agent perimeter, streaming result, live evidence edge | **5.64** | **5.99** |
 | `live-dim` | `#2F7DD3` | secondary live stroke | **3.96** | **4.20** |
@@ -271,9 +271,9 @@ Read this as law, not guidance. A reviewer can fail an implementation with it.
 
 | Meaning | Token | Where it appears |
 |---|---|---|
-| **Act here / selected** | `accent` / `accent-fill` | selection ring · keyboard focus · the one primary button · `entrypoint` ring · observed weft · unfinished validation · budget warning · pipeline step numbers |
+| **Act here / selected** | `accent` / `accent-fill` | selection ring · keyboard focus · the one primary button · `entrypoint` ring · observed weft · unfinished validation · pipeline step numbers |
 | **Executing now** | `live` / `live-dim` / `live-tint` | running/starting agent border and glyph · streaming result · newly materialized evidence edge |
-| **Wrong** | `alert` | `failed` · schema/semantic validation error · destructive confirm · observed anomaly · Team Bus guard refusal · budget exceeded · disk conflict bar · parse failure |
+| **Wrong** | `alert` | `failed` · schema/semantic validation error · destructive confirm · observed anomaly · Team Bus guard refusal · disk conflict bar · parse failure |
 | **Finished well** | `ok` | `succeeded` · "Saved" confirmation |
 | **Deliberately not running** | `halt` | `stopped` · read-only bar · unsupported `schemaVersion` |
 | **Structure** | `warp` | configured edges · dormant handles · ghost node outline |
@@ -333,7 +333,7 @@ touching their box.
 into the YAML file verbatim — agent `id`, `model`, `spawn.cmd`, `cwd`, env keys, paths — is
 mono. Prose is never mono.
 
-**Numerals.** `font-variant-numeric: tabular-nums` on every budget figure, count badge, step
+**Numerals.** `font-variant-numeric: tabular-nums` on every count badge, step
 number and duration, so numbers do not shift width as they change. This is one line of CSS
 and it is the difference between a live counter looking calm and looking broken.
 

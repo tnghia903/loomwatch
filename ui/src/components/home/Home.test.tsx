@@ -82,6 +82,38 @@ describe('Home', () => {
     expect(body.path).toBe('blog-writer-2.yaml')
     expect(body.yaml).toContain('model: sonnet')
     expect(body.yaml).toContain('name: Blog writer')
+    // Same name, own id: the Notebook is filed by id, so sharing one shared the first team's notes.
+    expect(body.yaml).toContain('id: blog-writer-2')
+  })
+
+  it('says a file cannot be opened instead of calling it a team that needs setup', async () => {
+    fetchMock.mockImplementation(() => respond({
+      root: '/teams',
+      files: ['broken.yaml', 'notes.yaml', 'draft.yaml'],
+      teams: [
+        { path: 'broken.yaml', agentCount: 0, problem: 'unreadable' },
+        { path: 'notes.yaml', agentCount: 0, problem: 'not_a_team' },
+        { path: 'draft.yaml', name: 'Draft', agentCount: 0 },
+      ],
+    }))
+    renderHome()
+    expect(await screen.findByRole('button', { name: /broken/ })).toHaveTextContent('Can’t be opened: not valid YAML')
+    expect(screen.getByRole('button', { name: /notes/ })).toHaveTextContent('Can’t be opened: not a team file')
+    expect(screen.getByRole('button', { name: /Draft/ })).toHaveTextContent('Needs setup')
+  })
+
+  it('says plainly when the server is down, and brings the teams back when it returns', async () => {
+    let up = false
+    fetchMock.mockImplementation(() => up
+      ? respond({ root: '/teams', files: ['a.yaml'], teams: [{ path: 'a.yaml', name: 'Research desk', agentCount: 1 }] })
+      : Promise.reject(new TypeError('Failed to fetch')))
+    renderHome()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Can’t reach the LoomWatch server')
+    expect(alert).not.toHaveTextContent('Failed to fetch')
+    up = true
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('button', { name: /Research desk/ })).toBeInTheDocument()
   })
 
   it('opens an empty team without touching the disk', async () => {

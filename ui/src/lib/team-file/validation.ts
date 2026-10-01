@@ -1,7 +1,7 @@
 // docs/CANVAS_SPEC.md §9.2: validate against the schema the daemon serves at
 // GET /api/config/schema, plus the TEAM_CONFIG.md semantic rules the schema cannot express.
 // §5.4 assigns every problem one of two weights — `incomplete` (copper, "unfinished") or
-// `error` (red, "wrong") — for the five fields the inspector actually edits.
+// `error` (red, "wrong") — for the four fields the inspector actually edits.
 
 import type Ajv2020 from 'ajv/dist/2020'
 import type { ErrorObject } from 'ajv'
@@ -15,7 +15,7 @@ export interface FieldProblem {
   message: string
 }
 
-export type AgentField = 'name' | 'role' | 'model' | 'cwd' | 'limitUsd'
+export type AgentField = 'name' | 'role' | 'model' | 'cwd'
 
 export type AgentFieldProblems = Partial<Record<AgentField, FieldProblem>>
 
@@ -83,14 +83,8 @@ function applySchemaError(
       setFieldProblem(fieldProblemsByAgent, agent.id, 'cwd', { weight: 'incomplete', message: 'Required' })
       return
     }
-    // budget.limitUsd is handled entirely by applySemanticRules — TEAM_CONFIG.md calls out
-    // finiteness as a rule the schema cannot express, and folding minimum/type in there too
-    // avoids two disagreeing messages for the same field.
-    if (subPath === 'budget/limitUsd') {
-      return
-    }
     // Other agent-scoped errors (id pattern, spawn.cmd pattern, etc.) have no inspector field
-    // today — TNG-55 scoped the inspector to name/role/model/cwd/budget — so surface them as a
+    // today — TNG-55 scoped the inspector to name/role/model/cwd — so surface them as a
     // document problem naming the agent rather than dropping them silently.
     documentProblems.push({ message: describeSchemaError(error, doc), agentId: agent.id, yamlPath })
     return
@@ -155,7 +149,6 @@ const PLACE_LABELS: Record<string, string> = {
   '/edges': 'The connections between steps',
   '/schedule': 'The schedule',
   '/memory': 'Team memory',
-  '/budget': 'The team budget',
   '/guards': 'The delegation limits',
   '/conversation': 'The conversation settings',
 }
@@ -275,7 +268,6 @@ function findCycle(edges: readonly EdgeEndpoints[]): EdgeEndpoints | null {
  */
 function applySemanticRules(
   doc: TeamDocument,
-  fieldProblemsByAgent: Map<string, AgentFieldProblems>,
   documentProblems: DocumentProblem[],
 ): void {
   // A half-written team may not have its lists yet; the schema errors already say so.
@@ -293,19 +285,6 @@ function applySemanticRules(
     if (agent.kind === 'operator') {
       if (agent.id === doc.entrypoint) documentProblems.push({ message: 'Your review step can\'t come first. Start the team with an agent.', agentId: agent.id })
       if (!edges.some((edge) => edge.layer === 'configured')) documentProblems.push({ message: 'Your review step needs agents before and after it. Connect the agents first.', agentId: agent.id })
-      continue
-    }
-    const limit = agent.budget?.limitUsd ?? NaN
-    if (!Number.isFinite(limit)) {
-      setFieldProblem(fieldProblemsByAgent, agent.id, 'limitUsd', {
-        weight: 'error',
-        message: 'Enter a number for the budget.',
-      })
-    } else if (limit < 0) {
-      setFieldProblem(fieldProblemsByAgent, agent.id, 'limitUsd', {
-        weight: 'error',
-        message: 'Budget must be zero or greater.',
-      })
     }
   }
 
@@ -317,18 +296,6 @@ function applySemanticRules(
       agentId: doc.entrypoint,
       yamlPath: ['entrypoint'],
     })
-  }
-
-  // The same `Budget` definition is used at team and agent scope. The inspector owns agent
-  // budgets, while the mode controls own the team budget, so leave a team-level failure as a
-  // document problem instead of incorrectly attaching it to an agent field.
-  if (doc.budget) {
-    const limit = doc.budget.limitUsd
-    if (!Number.isFinite(limit)) {
-      documentProblems.push({ message: 'Enter a number for the team budget.', yamlPath: ['budget', 'limitUsd'] })
-    } else if (limit < 0) {
-      documentProblems.push({ message: 'Team budget must be zero or greater.', yamlPath: ['budget', 'limitUsd'] })
-    }
   }
 
   const configured = edges.filter((edge): edge is EdgeConfig => edge.layer === 'configured')
@@ -399,7 +366,7 @@ export function compileTeamValidator(schema: object, Ajv: typeof Ajv2020): TeamV
     for (const error of validate.errors ?? []) {
       applySchemaError(doc, error, fieldProblemsByAgent, documentProblems)
     }
-    applySemanticRules(doc, fieldProblemsByAgent, documentProblems)
+    applySemanticRules(doc, documentProblems)
 
     const hasFieldErrors = Array.from(fieldProblemsByAgent.values()).some(
       (fields) => Object.keys(fields).length > 0,

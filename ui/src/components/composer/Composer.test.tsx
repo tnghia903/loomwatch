@@ -264,3 +264,34 @@ it('still requires words to answer an agent’s question', () => {
   )
   expect(screen.getByRole('button', { name: /^Reply/ })).toBeDisabled()
 })
+
+// The one-line composer on the run screen used to stay one line after the run ended, hiding
+// Retry, "Redo from" and Run history — every way the README tells people to go on from a result.
+it('brings back the full set of next steps once a run is over, even in the one-line layout', () => {
+  const onRetry = vi.fn()
+  render(
+    <Composer
+      compact mode="pipeline" stepCount={3} state={{ kind: 'terminal', phase: 'succeeded' }} value="" onChange={vi.fn()}
+      onSubmit={vi.fn()} onStop={vi.fn()} onRetry={onRetry} onNewRun={vi.fn()} onOpenMode={vi.fn()} onOpenHistory={vi.fn()}
+      modeOpen={false} historyOpen={false} onFollowUp={vi.fn()} followUpStages={[{ id: 'writer', name: 'Writer' }]}
+    />,
+  )
+  expect(screen.getByRole('group', { name: 'Prompt composer' })).not.toHaveClass('prototype-composer')
+  expect(screen.getByRole('button', { name: /Follow up/ })).toBeInTheDocument()
+  expect(screen.getByLabelText('Follow up target')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Run history' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(onRetry).toHaveBeenCalledOnce()
+})
+
+it('keeps the one-line layout for asking', () => {
+  render(
+    <Composer
+      compact mode="pipeline" stepCount={3} state={{ kind: 'ready' }} value="Plan a trip" onChange={vi.fn()}
+      onSubmit={vi.fn()} onStop={vi.fn()} onRetry={vi.fn()} onNewRun={vi.fn()} onOpenMode={vi.fn()} onOpenHistory={vi.fn()}
+      modeOpen={false} historyOpen={false}
+    />,
+  )
+  expect(screen.getByRole('group', { name: 'Prompt composer' })).toHaveClass('prototype-composer')
+  expect(screen.getByRole('button', { name: 'Run team' })).toBeEnabled()
+})

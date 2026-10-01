@@ -3,11 +3,15 @@ import { useId, useState } from 'react'
 
 import { fetchHarnessModels, harnessProblem, type DetectedHarness } from '../../lib/harnesses'
 import { saveTeamFile } from '../../lib/team-file/client'
+import { teamIdForPath } from '../../lib/team-file/useTeamDocument'
 import { rankHarnesses, TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath, type TeamTemplateId } from '../../lib/team-file/templates'
 
 export interface NewTeamDialogProps {
   harnesses: readonly DetectedHarness[]
-  /** Files already in the teams folder, so the new file never collides with one. */
+  /**
+   * Paths a new team must not take: files already in the teams folder, and where deleted teams
+   * used to live, whose run history and Notebook notes a new team there would inherit.
+   */
   existingPaths: readonly string[]
   onCreateBlank: (name: string, path: string) => void
   onClose: () => void
@@ -47,7 +51,7 @@ export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose
         const catalog = await fetchHarnessModels(harness.id)
         const model = catalog.currentModelId ?? catalog.models[0]?.id
         if (!model) { failures.push(`${harness.name} did not offer any models`); continue }
-        await saveTeamFile(path, templateTeamYaml(template, trimmed, harness, model), null)
+        await saveTeamFile(path, templateTeamYaml(template, trimmed, harness, model, new Date(), teamIdForPath(path)), null)
         window.location.assign(`/?path=${encodeURIComponent(path)}`)
         return
       } catch (caught) {
@@ -85,6 +89,15 @@ export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose
                       </span>
                     )}
                   </span>
+                  {option.example && (
+                    // Pick by outcome: what a finished run of this team hands back, marked as an example.
+                    <span className="nt-example" aria-label={`Example result: ${option.example.title}`}>
+                      <span className="nt-example-tag">Example result</span>
+                      <b>{option.example.title}</b>
+                      {option.example.lines.map((line) => <span key={line}>{line}</span>)}
+                      {option.example.note && <em>{option.example.note}</em>}
+                    </span>
+                  )}
                 </label>
               )
             })}
@@ -107,12 +120,17 @@ export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose
             </ul>
           )}
           {openTeamUnsaved && <p className="nt-note warn">The open team has unsaved changes. Save it first, or they will be lost.</p>}
-          {error && <p role="alert" className="nt-error">{error}</p>}
 
-          <div className="nt-acts">
-            <span role="status" className="nt-busy">{busy}</span>
-            <button type="button" className="btn" onClick={onClose} disabled={Boolean(busy)}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={!trimmed || Boolean(busy)}>{busy ? 'Creating…' : 'Create team'}</button>
+          {/* Pinned to the bottom of the dialog: four templates with example results are taller than
+              a laptop screen, and a Create button (or its progress and errors) scrolled out of view
+              reads as a dialog that does nothing. */}
+          <div className="nt-foot">
+            {error && <p role="alert" className="nt-error">{error}</p>}
+            <div className="nt-acts">
+              <span role="status" className="nt-busy">{busy}</span>
+              <button type="button" className="btn" onClick={onClose} disabled={Boolean(busy)}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={!trimmed || Boolean(busy)}>{busy ? 'Creating…' : 'Create team'}</button>
+            </div>
           </div>
         </form>
       </div>

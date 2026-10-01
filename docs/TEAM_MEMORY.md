@@ -109,7 +109,10 @@ looks.
 run will be made of. The count is honest about state: *2 brief* are pinned and will be supplied;
 *5 kept* are eligible, not promised. The panel is opaque (`e2`) because the operator reads it
 carefully. Empty state: "Give your team something to keep in mind." with **Write a note** and
-**Add a file**. Note files live under the team directory and are bounded by it.
+**Add a file**. Note files live under the team directory and are bounded by it. A note written in
+the panel is saved as `<team>.brief/<first-words>.md` beside the team file, so two teams kept in
+the same folder never write to the same note file. The entry joins the team when the team is
+saved; until then the panel lists it under **Not saved yet** with a **Save team** button.
 
 **During a run.** The Notebook is a feed the operator can correct without stopping anything.
 Groups appear only when they have content. A corrected entry keeps its history; a retired one

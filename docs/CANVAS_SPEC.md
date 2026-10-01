@@ -123,7 +123,7 @@ hue and role stay fixed.
 | `iris` | brand, live, observed, running, focus ring | `#5A45E8` | `#8B7BFF` |
 | `iris-soft` | observed `ask`, hover fills | `#8B7BFF` | `#B3A6FF` |
 | `iris-deep` | observed `handoff` | `#3A2BB8` | `#6E5CF0` |
-| `copper` | attention: anomaly, `waiting`, budget warning, conflict | `#B85C1E` | `#E8933F` |
+| `copper` | attention: anomaly, `waiting`, conflict | `#B85C1E` | `#E8933F` |
 | `green` | `succeeded` | `#1E7A4F` | `#46C08A` |
 | `red` | `failed`, destructive, validation error | `#C4342F` | `#F0605B` |
 | `slate` | `stopped` | `#6B6B76` | `#8A8A96` |
@@ -373,8 +373,8 @@ possible from the rail — the rail is a wayfinding affordance, not a compact li
    never the right one.
 4. **Defaults on drop.** `id` = slugified unique name (`reviewer`, `reviewer-2`) matching
    `$defs.Identifier`; `name` = harness/preset label; `spawn` copied verbatim from the
-   source row's `spawn` (`cmd`, `args`), plus `env: {}`, `cwd: "."`; `budget.limitUsd`
-   inherited from the last node created in this document, else `5`; `allowRecruiting: true`.
+   source row's `spawn` (`cmd`, `args`), plus `env: {}`, `cwd: "."`; `allowRecruiting: true`.
+   No `budget` (retired by ADR 0027).
    `status` is **never** written (TEAM_CONFIG.md: runtime-only).
 
    **Two fields are deliberately left empty: `role` and `model`.** Both are `required` with
@@ -405,7 +405,7 @@ centre on the nearest free grid cell.
 
 > **As built, 2026-09-16.** Both canvases now draw one card. Build and Run ("Full trace") render
 > the same `.build-node` agent card from [`BuildNodeCard.tsx`](../ui/src/components/canvas/BuildNodeCard.tsx);
-> a run layers its projected task state, spend and evidence routes under the identity row rather
+> a run layers its projected task state and evidence routes under the identity row rather
 > than substituting a card of its own. The `.node` anatomy specified below is no longer rendered on
 > either canvas. Everything it says about *what an agent card must state* still holds — only the
 > box it is stated in changed.
@@ -420,8 +420,8 @@ centre on the nearest free grid cell.
  │║     Research ACP behavior                        │   · status indicator (right)
  │║                                                  │   ← role (meta, ink-2, 1 line, truncate)
  │║ ──────────────────────────────────────────────── │
- │║  [Oc] kimi-for-coding/k3-256k            $5.00   │   ← monogram · model (mono/12, middle-
- └╨──────────────────────────────────────────────────┘        truncate) · budget (mono/12)
+ │║  [Oc] kimi-for-coding/k3-256k                    │   ← monogram · model (mono/12, middle-
+ └╨──────────────────────────────────────────────────┘        truncate)
   ▲
   3px status rail (full status colour, left edge, lg radius on the left corners only)
 ```
@@ -432,9 +432,6 @@ centre on the nearest free grid cell.
   which is also the only inline-editable hint besides the name.
 - **Meta row** is separated by a 1 px `hairline` inset 12 px. Model middle-truncates
   (`kimi-for-…/k3-256k`) because both ends carry meaning.
-- **Budget** shows `$` + `limitUsd` formatted to 2 dp. Phase 05 turns this into a 2 px
-  progress hairline under the meta row filled to `spent/limit`, copper past
-  `warnAtPercent`, red at the limit. Reserve the 4 px.
 - **Entrypoint marker:** the role glyph is wrapped in a 2 px `iris` ring and the node gains
   a `micro` `ENTRY` pill in the top-right, left of the status indicator. Exactly one node
   carries it (schema: `entrypoint` is required).
@@ -832,7 +829,7 @@ it is disclosed, not resident:
   involve. All six Team Bus tools are available." + a `Guards` summary
   (`maxDispatchDepth 8 · maxConcurrentDispatches 8` — both default to `8` when absent,
   TEAM_CONFIG.md) with an edit affordance for
-  `guards` and the team `budget` — these are team-level fields with no other home.
+  `guards` — a team-level field with no other home.
 - **Pipeline:** "Four steps run in the order you drew. `dispatch` and `handoff` are
   withdrawn; the backend sequences the run." + the resolved order as a numbered list, and a
   note on any join node ("`d` receives replies from `b` and `c`").
@@ -936,8 +933,7 @@ drifts from the daemon that will reject the save.
 
 Then the TEAM_CONFIG.md semantic rules the schema cannot express: unique agent ids;
 `entrypoint` names an agent in `agents`; in pipeline mode the entrypoint is a source with no
-incoming edge; no self-edges; no duplicate `from`/`to`; configured edges form a DAG; every
-`budget.limitUsd` finite. The problems popover lists each as `meta` text with the offending
+incoming edge; no self-edges; no duplicate `from`/`to`; configured edges form a DAG. The problems popover lists each as `meta` text with the offending
 node/edge name; clicking an entry selects and centres it on the canvas. `status` is never
 serialized.
 
@@ -1234,7 +1230,7 @@ Not specified here — they get their own document — but Phase 04 must leave r
   When open, the mode pill and view controls translate up by 72 px. Phase 04 must place
   both with a bottom offset variable, not a constant.
 - **Attention queue:** a 320 px `e1` panel below the document chip, top-centre, holding
-  `escalate` calls, guard refusals and budget warnings — each an entry with the agent,
+  `escalate` calls and guard refusals — each an entry with the agent,
   the verbatim reason, and a `Show on canvas` action. It replaces the `MenuBarExtra` the
   native design would have used. Collapsed to a `copper` count badge on the document chip
   when empty of unread items.
@@ -1244,7 +1240,6 @@ Not specified here — they get their own document — but Phase 04 must leave r
 - **Run affordance:** the mode pill's right end reserves a 36 px slot for the run control.
   Phase 04 renders it disabled with the tooltip "Running a team arrives in a later phase."
   It is reserved so the pill's geometry does not change later.
-- **Budget meter:** the 4 px under the node meta row (§5.1).
 
 ---
 

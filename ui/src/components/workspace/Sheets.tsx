@@ -79,6 +79,6 @@ export function SaveCopySheet({ onClose, onSave, error }: { onClose: () => void;
 }
 
 export function NewTeamSheet({ harnesses, openTeamUnsaved, onClose, onCreateBlank }: { harnesses: DetectedHarness[]; openTeamUnsaved: boolean; onClose: () => void; onCreateBlank: (name: string, path: string) => void }) {
-  const { teams } = useTeamList()
-  return <NewTeamDialog harnesses={harnesses} existingPaths={teams?.map((team) => team.path) ?? []} openTeamUnsaved={openTeamUnsaved} onCreateBlank={onCreateBlank} onClose={onClose} />
+  const { teams, trashed } = useTeamList()
+  return <NewTeamDialog harnesses={harnesses} existingPaths={[...(teams?.map((team) => team.path) ?? []), ...trashed]} openTeamUnsaved={openTeamUnsaved} onCreateBlank={onCreateBlank} onClose={onClose} />
 }

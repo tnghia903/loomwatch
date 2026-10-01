@@ -137,14 +137,16 @@ async fn main() -> Result<()> {
             let listener = tokio::net::TcpListener::bind(listen).await?;
             let address = listener.local_addr()?;
             println!("loomwatchd listening on http://{address}");
+            let registry = recovered_registry(archive.as_ref()).await;
             // The archive is handed to the REST router for exactly one reason: the capability
             // inventory's kept-note counts are rows, not files. Everything else it serves is disk.
+            // The registry is the run-control router's own, so deleting a team sees every run.
             let api = loomwatch_backend::api::router_with_archive(
                 teams_root.clone(),
                 allowed_hosts,
                 archive.clone(),
+                registry.clone(),
             )?;
-            let registry = recovered_registry(archive.as_ref()).await;
             let runs = loomwatch_backend::runs::router(
                 archive.clone(),
                 teams_root.clone(),

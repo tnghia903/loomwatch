@@ -144,12 +144,14 @@ describe('team files that omit keys the daemon defaults', () => {
     expect(messages(result).filter((message) => /“(args|env)”/.test(message))).toEqual([])
   })
 
-  it('reads a memory block without a brief as valid memory', async () => {
+  it('reads a memory block without a brief as no Brief entries', async () => {
     const { result } = open(MEMORY_WITHOUT_BRIEF)
     await opened(result, 1)
 
+    expect(result.current.briefPaths).toEqual([])
     expect(result.current.memoryInherits).toEqual([{ team: 'research' }])
-    expect(messages(result).filter((message) => /memory|brief/i.test(message))).toEqual([])
+    expect(result.current.documentProblems).toEqual([])
+    expect(result.current.documentChipState).toBe('clean')
   })
 
   it('opens a team without edges, and its agents can be connected and the connection undone', async () => {
@@ -159,12 +161,13 @@ describe('team files that omit keys the daemon defaults', () => {
     expect(result.current.edges).toEqual([])
     expect(result.current.mode).toBe('team')
     expect(result.current.memoryInherits).toEqual([{ team: 'research' }])
-    expect(messages(result)).toContainEqual(expect.stringContaining('missing “edges”'))
+    expect(result.current.briefPaths).toEqual([])
+    expect(messages(result)).toEqual([expect.stringContaining('missing “edges”')])
 
     act(() => result.current.onConnect({ source: 'researcher', target: 'writer', sourceHandle: null, targetHandle: null }))
     expect(result.current.edges.map((edge) => [edge.source, edge.target])).toEqual([['researcher', 'writer']])
     expect(result.current.yamlPreview).toMatch(/edges:\n\s+- from: researcher\n\s+to: writer/)
-    expect(messages(result).filter((message) => message.includes('edges'))).toEqual([])
+    expect(result.current.documentProblems).toEqual([])
 
     act(() => result.current.undo())
     expect(result.current.edges).toEqual([])

@@ -3,11 +3,16 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { relativeTime } from '../../lib/format'
 import { fetchHarnessModels, harnessProblem, isHarnessRunnable, type DetectedHarness } from '../../lib/harnesses'
-import { teamDisplayName, type TeamSummary } from '../../lib/team-file/client'
+import { teamDisplayName, type DeletedTeam, type TeamSummary } from '../../lib/team-file/client'
 import { openTeam, useTeamList } from '../../lib/team-file/useTeamList'
 import { useTheme } from '../../lib/theme'
 import { ChipDot, LoomMark } from '../ui/glyphs'
+import type { RunRecord } from '../../lib/runs/client'
+import { fabricFor } from '../../lib/story/fabric'
+import { TeamFabric } from './TeamFabric'
+import { DeleteTeamDialog } from './DeleteTeamDialog'
 import { NewTeamDialog } from './NewTeamDialog'
+import { TeamCardMenu } from './TeamCardMenu'
 
 export interface HomeProps {
   /** Something the operator must know before choosing a team, e.g. a link that did not open. */
@@ -19,11 +24,20 @@ export interface HomeProps {
   /** Open an unsaved, empty team at `path` (the "Empty team" choice). */
   onCreateBlank: (name: string, path: string) => void
   onPalette: () => void
+  /** Header actions owned by the workspace, e.g. the needs-you tray. */
+  topActions?: ReactNode
+  /** Every run the daemon knows, for each team card's run fabric. */
+  runs?: readonly RunRecord[]
   children?: ReactNode
 }
 
+const PROBLEM_LABEL: Record<NonNullable<TeamSummary['problem']>, string> = {
+  unreadable: 'Can’t be opened: not valid YAML',
+  not_a_team: 'Can’t be opened: not a team file',
+}
+
 function describeTeam(team: TeamSummary): string {
-  const parts = [team.agentCount > 0 ? `${team.agentCount} step${team.agentCount === 1 ? '' : 's'}` : 'Needs setup']
+  const parts = [team.problem ? PROBLEM_LABEL[team.problem] : team.agentCount > 0 ? `${team.agentCount} step${team.agentCount === 1 ? '' : 's'}` : 'Needs setup']
   if (team.modifiedAt) parts.push(`edited ${relativeTime(new Date(team.modifiedAt))}`)
   return parts.join(' · ')
 }
@@ -33,10 +47,12 @@ function describeTeam(team: TeamSummary): string {
  * one obvious way to start. It replaces a screen whose only paths were "New team" and a dialog
  * that asked for a YAML path relative to the daemon's teams directory.
  */
-export function Home({ notice = null, harnesses, harnessesLoading, harnessesError, onRetryHarnesses, onCreateBlank, onPalette, children }: HomeProps) {
+export function Home({ notice = null, harnesses, harnessesLoading, harnessesError, onRetryHarnesses, onCreateBlank, onPalette, topActions, runs = [], children }: HomeProps) {
   const { resolved, toggle } = useTheme()
-  const { teams, error } = useTeamList()
+  const { teams, trashed, error, retry: retryTeams, forget } = useTeamList()
   const [creating, setCreating] = useState(false)
+  const [deleting, setDeleting] = useState<TeamSummary | null>(null)
+  const [deleted, setDeleted] = useState<DeletedTeam | null>(null)
   const [query, setQuery] = useState('')
   const [rechecking, setRechecking] = useState(false)
   const runnable = harnesses.filter(isHarnessRunnable)
@@ -80,6 +96,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
       <header className="home-top">
         <span className="home-brand"><LoomMark width={46} height={20} /><span>LoomWatch</span></span>
         <span className="home-top-acts">
+          {topActions}
           <button type="button" className="iconbtn" onClick={onPalette} aria-label="Open the command palette" title="Commands (⌘K)"><Search size={15} aria-hidden="true" /></button>
           <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title="Theme (⌘⇧L)">{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
         </span>
@@ -107,7 +124,8 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
               <label className="home-filter"><Search size={14} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a team" aria-label="Find a team" /></label>
             )}
           </div>
-          {error && <p role="alert" className="home-empty alert">Couldn't list your teams: {error}</p>}
+          {deleted && <p role="status" className="home-empty">Deleted “{deleted.name ?? teamDisplayName(deleted)}”. Its files are in <code>{deleted.trash}</code> inside your teams folder.</p>}
+          {error && <p role="alert" className="home-empty alert">Couldn't list your teams. {error} <button type="button" className="link" onClick={retryTeams}>Try again</button></p>}
           {!error && teams === null && <p role="status" className="home-empty">Loading your teams…</p>}
           {!error && teams?.length === 0 && (
             <div className="home-empty">
@@ -117,16 +135,21 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
           )}
           {shown.length > 0 && (
             <ul className="home-grid">
-              {shown.map((team) => (
+              {shown.map((team) => {
+                const fabric = fabricFor(runs, team.path)
+                return (
                 <li key={team.path}>
-                  <button type="button" className="home-card" onClick={() => openTeam(team.path)}>
-                    <span className="home-card-name">{teamDisplayName(team)}</span>
+                  <button type="button" className={`home-card ${fabric.waiting ? 'waiting' : ''}`} onClick={() => openTeam(team.path)}>
+                    <span className="home-card-name">{teamDisplayName(team)}{fabric.waiting && <em className="home-card-waiting">Waiting for you</em>}</span>
                     <span className="home-card-meta">{describeTeam(team)}</span>
+                    <TeamFabric fabric={fabric} />
                     <span className="home-card-file t-mono-sm">{team.path}</span>
                     <ArrowRight className="home-card-go" size={16} aria-hidden="true" />
                   </button>
+                  <TeamCardMenu name={teamDisplayName(team)} onDelete={() => setDeleting(team)} />
                 </li>
-              ))}
+                )
+              })}
             </ul>
           )}
           {teams && teams.length > 0 && query && shown.length === 0 && <p className="home-empty">No team matches “{query}”.</p>}
@@ -147,9 +170,17 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
       {creating && (
         <NewTeamDialog
           harnesses={harnesses}
-          existingPaths={teams?.map((team) => team.path) ?? []}
+          existingPaths={[...(teams?.map((team) => team.path) ?? []), ...trashed]}
           onCreateBlank={onCreateBlank}
           onClose={() => setCreating(false)}
+        />
+      )}
+      {deleting && (
+        <DeleteTeamDialog
+          path={deleting.path}
+          name={teamDisplayName(deleting)}
+          onDeleted={(result) => { forget(result.path); setDeleted(result); setDeleting(null) }}
+          onClose={() => setDeleting(null)}
         />
       )}
       {children}

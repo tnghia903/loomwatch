@@ -267,6 +267,26 @@ describe('Delivery Lane', () => {
     expect(screen.getByText('Designer', {selector: '.delivery-receipt-owner'})).toBeInTheDocument()
     expect(screen.getByRole('heading', {name: 'Market report', level: 1})).toBeInTheDocument()
   })
+  it('puts a file the reply names in the output header, ready to open', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      path: '/teams/.loomwatch/demo/designer/report.docx', name: 'report.docx', exists: true, isDir: false, sizeBytes: 2048,
+      modifiedAt: null, kind: 'document', folder: '.loomwatch/demo/designer', openable: true,
+    })))))
+    const { container } = setup({
+      output: {
+        text: 'Done.\n\n**File:** `/teams/.loomwatch/demo/designer/report.docx`',
+        phase: 'succeeded', phaseText: 'Answered', producer: 'designer', producerLabel: 'Designer', mode: 'replay',
+        streaming: false, pending: false, strip: null, compact: false, expanded: false, terminal: true,
+      },
+    })
+    const files = screen.getByRole('group', { name: 'Files in this reply' })
+    expect(within(files).getByRole('button', { name: 'Open report.docx' })).toHaveTextContent('Open document')
+    expect(within(files).getByText('Report')).toBeInTheDocument()
+    // The file sits in the Designer's workspace, so the card credits the Designer by name.
+    expect(await within(files).findByText('Made by Designer · demo')).toBeInTheDocument()
+    expect(container.querySelector('.delivery-response .file-chip')).not.toBeNull()
+    vi.unstubAllGlobals()
+  })
   it('does not execute raw HTML or load embedded remote images in a report', () => {
     const { container } = setup({
       output: {
@@ -287,5 +307,32 @@ describe('Delivery Lane', () => {
     expect(container.querySelector('.delivery-response script')).toBeNull()
     expect(container.querySelector('.delivery-response img')).toBeNull()
     expect(screen.getByText('[Image: tracking]')).toBeInTheDocument()
+  })
+
+  // A planned stage used to read "Ready" even when its app was not on this computer, while the
+  // composer beneath it refused to run for exactly that reason.
+  describe('a planned stage whose app is not on this computer', () => {
+    const sentence = 'Designer’s app “acme-agent-cli” isn’t installed on this computer.'
+    const stage = () => document.getElementById('delivery-stage-designer') as HTMLElement
+
+    it('says it cannot start, and why', () => {
+      setup({ planned: true, appProblems: new Map([['designer', sentence]]) })
+      expect(within(stage()).getByText('Can’t start')).toHaveClass('delivery-status', 'status-failed')
+      expect(within(stage()).getByText(sentence)).toHaveClass('delivery-stage-problem')
+      expect(within(stage()).queryByText('Ready')).not.toBeInTheDocument()
+    })
+
+    it('is ready when its app is here', () => {
+      setup({ planned: true })
+      expect(within(stage()).getByText('Ready')).toBeInTheDocument()
+      expect(stage().querySelector('.delivery-stage-problem')).toBeNull()
+    })
+
+    // A run that happened has its own state; a pre-run check says nothing about it.
+    it('is not marked on a run that already happened', () => {
+      setup({ appProblems: new Map([['designer', sentence]]) })
+      expect(within(stage()).queryByText('Can’t start')).not.toBeInTheDocument()
+      expect(within(stage()).queryByText(sentence)).not.toBeInTheDocument()
+    })
   })
 })

@@ -79,8 +79,8 @@ payload shapes the JSON Schema leaves open and the Team Bus semantics on top.
 | `plan` | ACP plan update verbatim (`sessionUpdate`: `plan`/`plan_update`/`plan_removed`) | plan lifecycle |
 | `permission` | request: the `session/request_permission` params (incl. `options`); reply: `{outcome: {outcome, optionId?}}` | permission negotiation — LoomWatch answers `reject_once`, else `reject_always`, else `cancelled`; no targeted harness ever offers `reject_always` (see [ACP_SPINE.md](ACP_SPINE.md), TNG-47) |
 | `session_meta` | `{phase, …}` — see below | handshake and anomalies |
-| `usage` | `$defs.UsagePayload` — see §4.4 | harness updates and Team Bus budget warnings |
-| `turn_end` | `$defs.TurnEndPayload`: `{stopReason, usage?}`; `stopReason` ∈ `end_turn`/`max_tokens`/`max_turn_requests`/`refusal`/`cancelled` (default `end_turn` if the harness omits it) | one per turn; `usage.costUsd` is accounted toward budgets |
+| `usage` | `$defs.UsagePayload` — see §4.4 | harness usage updates, archived as evidence |
+| `turn_end` | `$defs.TurnEndPayload`: `{stopReason, usage?}`; `stopReason` ∈ `end_turn`/`max_tokens`/`max_turn_requests`/`refusal`/`cancelled` (default `end_turn` if the harness omits it) | one per turn; `usage` is archived as evidence |
 | `process` | `$defs.ProcessPayload`: `{phase, pid?, exitCode?, signal?, message?}`; `phase` ∈ `spawned`/`exited`/`crashed` (`stderr` is reserved in the schema, currently unused) | supervisor |
 
 `content` in message/thought events is the ACP ContentBlock, e.g.
@@ -150,32 +150,24 @@ Current messages (match on structure, not wording):
 - depth: `delegation depth 3 exceeds guards.maxDispatchDepth 2`
 - fan-out: `concurrent dispatch limit reached: guards.maxConcurrentDispatches 8`
 - cycle: `delegation cycle rejected: a -> b -> a`
-- agent budget: `agent:c budget exhausted: spent $1.000000 of $1.000000`
-- team budget: `team budget exhausted: spent $… of $…`
 - pipeline restriction: `dispatch is not available in pipeline mode; the backend drives
   node sequencing` (likewise `handoff`), and `agent "x" may not recruit helpers within
   its own pipeline step (allowRecruiting: false)`
 
-Budgets are **admission thresholds, not interruptions**: the bus refuses new
-delegations at the threshold but never stops the entrypoint or an in-flight turn, so
-observed spend may exceed a limit. Fan-out permits cover background
-`dispatch`/`handoff` only; synchronous `ask` calls never consume one.
+Fan-out permits cover background `dispatch`/`handoff` only; synchronous `ask` calls
+never consume one.
 
-### 4.4 Budget warnings
+### 4.4 Usage events
 
 `usage` payloads are discriminated (`$defs.UsagePayload`): harness updates carry
-`sessionUpdate: "usage_update"` (spend deltas as `costUsd`), while LoomWatch-local
-control-plane events carry `phase`. Today the only control-plane usage event is the
-budget warning:
+`sessionUpdate: "usage_update"` and are archived verbatim as evidence. LoomWatch does not
+read them as spend: dollar budgets were retired by
+[ADR 0027](decisions/0027-retire-cost-budgets.md), along with the `agent:<id>`/`team`
+"budget exhausted" refusals.
 
-```json
-{"phase":"budget_warning","scope":"agent:c","spentUsd":1.0,"limitUsd":1.0,"warnAtPercent":80}
-```
-
-`scope` is `team` or `agent:<id>` of the delegation target. Emitted at most once per
-scope per run, on the first delegation attempt at or past `warnAtPercent` of the
-limit; the limit itself is a hard refusal (§4.3). Spend is summed from
-harness-supplied `usage`/`turn_end` `costUsd` deltas.
+Runs archived before then can hold a LoomWatch-local `phase: "budget_warning"` event
+(`scope`, `spentUsd`, `limitUsd`, `warnAtPercent`). Nothing writes it any more and clients
+ignore it; the schema keeps it valid so old archives still replay.
 
 ### 4.5 Status and echoes
 

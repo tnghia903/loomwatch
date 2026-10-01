@@ -5,7 +5,7 @@ import type { AgentConfig } from './team-file/types'
 import { harnessIdForAgent, modelOptionsForAgent } from './models'
 
 function agent(model: string, cmd = 'npx', args = ['-y', '@agentclientprotocol/claude-agent-acp']): AgentConfig {
-  return { id: model || 'empty', name: 'Agent', role: 'Work', model, spawn: { cmd, args, env: {}, cwd: '.' }, budget: { limitUsd: 1 } }
+  return { id: model || 'empty', name: 'Agent', role: 'Work', model, spawn: { cmd, args, env: {}, cwd: '.' } }
 }
 
 describe('modelOptionsForAgent', () => {

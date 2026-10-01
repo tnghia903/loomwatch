@@ -1,14 +1,20 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Bot, Box, FileText, Inbox, Puzzle, Wrench, X } from 'lucide-react'
+import { useStore, type NodeProps } from '@xyflow/react'
+import { createElement } from 'react'
+import { Bot, Box, Circle, FileText, Inbox, Puzzle, Wrench, X } from 'lucide-react'
 import { KIND_LABEL } from '../../lib/composer-layout/types'
-import { formatUsd, middleTruncate } from '../../lib/format'
+import { middleTruncate } from '../../lib/format'
 import type { OutputNode } from '../../lib/runs/graph'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import type { AgentStatus } from '../../lib/team-file/types'
 import { monogramForSpawnCmd } from '../../lib/harnesses'
 import { StatusGlyph } from '../ui/glyphs'
 import { useCanvasActions } from './CanvasActionsContext'
+import { CardPorts } from './CardPorts'
 import type { CapabilityNode } from './capabilityNode'
+import { roleGlyph } from './roleGlyph'
+import { depthForZoom, storyLine } from '../../lib/story/depth'
+import { markState } from '../../lib/story/mark'
+import { AgentMark } from '../ui/AgentMark'
 
 function cx(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(' ')
@@ -21,29 +27,32 @@ const HARNESS_BY_MONOGRAM: Record<string, string> = { Cx: 'Codex', C: 'Claude Co
  *
  * The Run canvas ("Full trace") draws the same card rather than a second one — a run shows the
  * team the operator composed, so it must be recognisably the same object. What a run adds is
- * layered under the identity row: the projected task state, the spend, and the routes into this
+ * layered under the identity row: the projected task state and the routes into this
  * agent's evidence and its context packet. Nothing here is ever written back to the team file.
  */
 export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
   const { editable = true, stepById, inspectHandover, toggleEvidenceFan } = useCanvasActions()
   const { agent, runtime } = data
   const step = stepById.get(id)
+  // Semantic zoom: the extra Story and Trace content exists only at that depth, so nothing hidden
+  // is ever announced twice (lib/story/depth.ts).
+  const depth = useStore((store) => depthForZoom(store.transform[2]))
   const status: AgentStatus = data.waiting ? 'waiting' : runtime?.status ?? agent.status ?? 'idle'
 
-  // A review stop is a person, not a process: no harness, no model, no spend — a question and
+  // A review stop is a person, not a process: no harness, no model — a question and
   // the way to answer it (docs/TEAM_MEMORY.md "operator as a node").
   if (agent.kind === 'operator' || data.waiting) {
     return (
       <article className={cx('build-node kind-operator', `st-${status}`, selected && 'selected')} aria-label={`${agent.name}, ${data.waiting?.question ?? agent.role}`}>
-        <Handle type="target" position={Position.Left} isConnectable={editable} />
         {step && <span className="step" aria-hidden="true">{step.step}</span>}
         <div className="build-node-body">
           <div className="build-node-row">
-            <span className="build-node-icon"><StatusGlyph status={status} size={18} /></span>
+            <span className="build-node-icon mark-holder"><AgentMark id={agent.id} name="You" operator state={data.waiting ? 'waiting' : markState(runtime)} animate={runtime?.watching === true || Boolean(data.waiting)} /></span>
             <div>
               <span className="node-kind">You</span>
               <strong className="node-name">{agent.kind === 'operator' && agent.name !== 'You' ? `You · ${agent.name}` : agent.name}</strong>
               <small title={data.waiting?.question ?? agent.role}>{data.waiting?.question ?? agent.role}</small>
+              {depth === 'story' && <p className="depth-story-line">{storyLine(agent, data.waiting ? { status: 'waiting', task: '' } : runtime)}</p>}
             </div>
           </div>
           {data.waiting ? (
@@ -55,33 +64,33 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
             <span className="build-node-task"><span className="task-text">{status === 'succeeded' ? 'Decision received' : 'Pauses for your decision'}</span></span>
           )}
         </div>
-        <Handle type="source" position={Position.Right} isConnectable={editable} />
+        <CardPorts connectIn={editable} connectOut={editable} />
       </article>
     )
   }
 
   const monogram = monogramForSpawnCmd(agent.spawn?.cmd ?? '', agent.spawn?.args)
   const harness = typeof data.harnessLabel === 'string' ? data.harnessLabel : HARNESS_BY_MONOGRAM[monogram] ?? 'Harness'
-  const pct = runtime?.spentPct ?? null
-  const laneClass = pct !== null && pct >= 100 ? 'over' : pct !== null && pct >= (agent.budget?.warnAtPercent ?? 80) ? 'warn' : ''
-  const cost = runtime?.costUsd
   const eventCount = runtime?.eventCount ?? 0
   const givenNotes = runtime?.givenNotes ?? 0
+  // The job the instructions describe, when they name one; a generic agent keeps the robot.
+  const named = roleGlyph(`${agent.name} ${agent.role}`)
   return (
     <article
       className={cx('build-node kind-harness', runtime && 'has-run', runtime && `st-${status}`, selected && 'selected')}
       // While a run is shown the node wrapper already carries the run's own accessible name,
       // so labelling the card too would announce the same agent twice.
-      aria-label={runtime ? undefined : `${agent.name}, ${harness}, ${agent.role}`}
+      aria-label={runtime ? undefined : [agent.name, harness, agent.role, data.appProblem].filter(Boolean).join(', ')}
     >
-      <Handle type="target" position={Position.Left} isConnectable={editable} />
       {step && <span className="step" aria-hidden="true">{step.step}</span>}
       <div className="build-node-body">
         <div className="build-node-row">
-          <span className="build-node-icon"><Bot size={18} /></span>
-          <div><span className="node-kind">{harness}</span><strong className="node-name">{agent.name}</strong><small title={agent.role}>{agent.role || 'Select to set a role'}</small></div>
+          <span className="build-node-icon mark-holder"><AgentMark id={agent.id} name={agent.name} state={markState(runtime)} events={eventCount} animate={runtime?.watching === true} /><span className="mark-badge" aria-hidden="true">{createElement(named === Circle ? Bot : named, { size: 9 })}</span></span>
+          <div><span className="node-kind">{harness}</span><strong className="node-name">{agent.name}</strong><small title={agent.role}>{agent.role || 'Select to set a role'}</small>{depth === 'story' && <p className="depth-story-line">{storyLine(agent, runtime)}</p>}</div>
           {runtime && <StatusGlyph status={status} />}
         </div>
+        {/* Before a run, not during one: a run that could not start says so in its own error. */}
+        {data.appProblem && !runtime && <p className="build-node-app-problem">{data.appProblem}</p>}
         {runtime && (
           <>
             <span className="build-node-task"><b>{runtime.ownerLabel} · {runtime.taskState}</b><span className="task-text">{runtime.task}</span></span>
@@ -122,15 +131,23 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
             )}
             <span className="build-node-meta">
               <span className="model" dir="ltr">{agent.model ? middleTruncate(agent.model) : '—'}</span>
-              <span className="cost">{cost !== null && cost !== undefined ? `${formatUsd(cost)} / ${formatUsd(agent.budget?.limitUsd ?? 0)}` : formatUsd(agent.budget?.limitUsd ?? 0)}</span>
             </span>
-            <span className={cx('budget-lane', laneClass)} aria-hidden="true"><i style={{ width: `${Math.min(100, pct ?? 0)}%` }} /></span>
           </>
         )}
+        {/* Trace depth: what an expert checks, without opening the inspector. Hidden by CSS at the
+            other depths, so it is never announced twice. */}
+        {depth === 'trace' && <dl className="depth-trace-facts">
+          <dt>id</dt><dd>{agent.id}</dd>
+          <dt>model</dt><dd>{agent.model || 'app default'}</dd>
+          <dt>command</dt><dd>{[agent.spawn?.cmd, ...(agent.spawn?.args ?? [])].filter(Boolean).join(' ') || '—'}</dd>
+          <dt>folder</dt><dd>{agent.spawn?.cwd || '.'}</dd>
+          <dt>skills</dt><dd>{agent.capabilities?.map((capability) => capability.name).join(', ') || 'none'}</dd>
+          {runtime && <><dt>events</dt><dd>{eventCount}{runtime.openCalls ? ` · ${runtime.openCalls} still open` : ''}</dd></>}
+        </dl>}
       </div>
       {data.isEntrypoint && <span className="primary-chip">Start</span>}
-      <Handle type="source" position={Position.Right} isConnectable={editable} />
-      <Handle id="resources" type="source" position={Position.Right} isConnectable={editable} style={{ top: '72%' }} />
+      {/* Dragging down from an agent attaches a resource below it (lib/canvas/ports.ts). */}
+      <CardPorts connectIn={editable} connectOut={editable} connectDown={editable} />
       {Object.keys(data.fieldProblems ?? {}).length > 0 && <span className="build-node-issue" title={`Check settings for ${id}`}>Check settings</span>}
     </article>
   )
@@ -138,7 +155,7 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
 
 export function BuildOutputCard({ data, selected }: NodeProps<OutputNode>) {
   return <article className={`build-node kind-output planned ${selected ? 'selected' : ''}`} aria-label="Output, No run yet.">
-    <Handle type="target" position={Position.Left} isConnectable={data.configurable === true} />
+    <CardPorts output={false} connectIn={data.configurable === true} />
     <span className="build-node-icon"><FileText size={18} /></span>
     <div><span className="node-kind">Output</span><strong>{data.outputName || 'Team response'}</strong><small>{data.outputFormat || `Produced by ${data.producerLabel}`}</small></div>
     <span className="visually-hidden">{data.placeholder}</span>
@@ -148,7 +165,7 @@ export function BuildOutputCard({ data, selected }: NodeProps<OutputNode>) {
 export function BuildCapabilityCard({ data, selected }: NodeProps<CapabilityNode>) {
   const Icon = data.kind === 'skill' ? Puzzle : data.kind === 'tool' ? Wrench : Box
   return <article className={`build-node kind-${data.kind} ${selected ? 'selected' : ''}`} aria-label={`${data.name}, ${KIND_LABEL[data.kind].toLowerCase()} from ${data.source}, ${data.wiredTo ? `used by ${data.wiredTo} agent${data.wiredTo === 1 ? "" : "s"}` : 'not connected to an agent yet'}`}>
-    <Handle type="target" position={Position.Left} isConnectable={!data.readOnly} />
+    <CardPorts output={false} connectIn={!data.readOnly} />
     <span className="build-node-icon"><Icon size={18} /></span>
     <div><span className="node-kind">{data.kind}</span><strong>{data.name}</strong><small title={data.source}>{data.source}</small></div>
     {!data.readOnly && <button type="button" className="build-resource-remove nodrag" onClick={(event) => { event.stopPropagation(); data.onRemove?.() }} aria-label={`Remove ${data.name} from the canvas`}><X size={12} /></button>}

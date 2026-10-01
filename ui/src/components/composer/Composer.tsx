@@ -111,6 +111,10 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
   const targetName = followUpTarget
     ? followUpStages.find((stage) => stage.id === followUpTarget)?.name ?? followUpTarget
     : null
+  // The one-line composer is for asking. Once a run is over the operator has real choices —
+  // follow up, redo from a step, retry, reopen another run — so the full composer comes back
+  // with every one of them on screen, as the README promises, instead of a lone arrow.
+  const slim = compact && !answering && !replyTo && !canFollowUp
 
   function onKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     const modified = event.metaKey || event.ctrlKey
@@ -204,8 +208,8 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
   return (
     <>
       {children}
-      <div ref={panel} className={`panel bottom cx e1 lw-composer ${compact && !answering && !replyTo ? 'prototype-composer' : ''} ${focused ? 'focused' : ''} ${switchBanner ? 'mode-switch' : ''} ${answering || replyTo || canFollowUp ? 'expanded-actions' : ''}`} role="group" aria-label="Prompt composer">
-        {compact && <MessageSquare className="composer-message-icon" size={17} />}
+      <div ref={panel} className={`panel bottom cx e1 lw-composer ${slim ? 'prototype-composer' : ''} ${focused ? 'focused' : ''} ${switchBanner ? 'mode-switch' : ''} ${answering || replyTo || canFollowUp ? 'expanded-actions' : ''}`} role="group" aria-label="Prompt composer">
+        {slim && <MessageSquare className="composer-message-icon" size={17} />}
         <button type="button" className={`mode-chip t-body-m ${mode}`} onClick={onOpenMode} aria-haspopup="dialog" aria-expanded={modeOpen} title="How this team works through a request">
           <span className="glyph" aria-hidden="true">{mode === 'pipeline' ? <Workflow size={15} /> : <Asterisk size={15} />}</span>
           <span className="label">{modeLabel}</span>
@@ -263,7 +267,7 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
           {noteNode && <span className={`comp-note t-meta ${noteClass}`} role={noteClass === 'err' ? 'alert' : undefined}>{noteNode}</span>}
         </div>
         <div className="comp-act">
-          {compact && !busy && !answering && !replyTo && (state.kind === 'ready' || state.kind === 'dirty' || canFollowUp) ? <button type="button" className="iconbtn prototype-send" aria-label={canFollowUp ? 'Request revision' : 'Run team'} disabled={canFollowUp ? !value.trim() : !canSubmit} onClick={canFollowUp ? onFollowUp : onSubmit}><ArrowRight size={17} /></button> : action}
+          {slim && !busy && (state.kind === 'ready' || state.kind === 'dirty') ? <button type="button" className="iconbtn prototype-send" aria-label="Run team" disabled={!canSubmit} onClick={onSubmit}><ArrowRight size={17} /></button> : action}
           <button type="button" className="iconbtn" onClick={onOpenHistory} aria-haspopup="dialog" aria-expanded={historyOpen} title="Run history — reopen a previous run (replay)" aria-label="Run history"><History size={16} aria-hidden="true" /></button>
         </div>
       </div>

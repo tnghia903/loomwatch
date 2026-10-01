@@ -1,0 +1,26 @@
+{
+  "projectId": "bbeb2e23-afc8-43ee-be02-b0f126a5d00d",
+  "shape": "package",
+  "pkg": "@loomwatch/design-system",
+  "globalName": "LoomWatch",
+  "entry": "docs/design-system/src/index.ts",
+  "buildCmd": "sh docs/design-system/tools/sync.sh && node docs/design-system/tools/build-package.mjs",
+  "componentSrcMap": {
+    "AgentMark": "../../ui/src/components/ui/AgentMark.tsx",
+    "StatusGlyph": "../../ui/src/components/ui/glyphs.tsx",
+    "ChipDot": "../../ui/src/components/ui/glyphs.tsx",
+    "CoverageGlyph": "../../ui/src/components/ui/glyphs.tsx",
+    "EntityGlyph": "../../ui/src/components/ui/glyphs.tsx",
+    "LoomMark": "../../ui/src/components/ui/glyphs.tsx"
+  },
+  "cssEntry": "dist/loomwatch.css",
+  "extraFonts": [
+    "fonts/fonts.css",
+    "fonts/aliases.css"
+  ],
+  "docsDir": "docs",
+  "guidelinesGlob": [
+    "DESIGN.md"
+  ],
+  "readmeHeader": ".design-sync/conventions.md"
+}

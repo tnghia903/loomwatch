@@ -1,9 +1,11 @@
 /* Component anatomy copied from the selected interactive prototype. */
 .lw-shell { font-family:'Inter',sans-serif; --font-sans:'Inter',sans-serif; }
-.lw-shell .btn-primary { background:var(--gold); color:#151515; }
+.lw-shell .btn-primary { background:var(--gold); color:var(--color-accent-on-fill); }
 .delivery-review-state { display:flex; gap:8px; align-items:center; color:var(--gold); font-size:12px; font-weight:400; letter-spacing:0; border-left:1px solid var(--line); padding-left:13px; }
 .delivery-heading h1 { flex-wrap:wrap; }
-.delivery-heading .delivery-status { color:var(--success); font-size:12px; }
+/* Green is earned: only a finished run reads as success. The other phases keep delivery.css's colours. */
+.delivery-heading .delivery-status { font-size:12px; }
+.delivery-heading .delivery-status.status-succeeded { color:var(--success); }
 .delivery-output>footer { display:none; }
 .delivery-capabilities { position:relative; }
 .delivery-verification { display:block; padding:0 20px 12px; }
@@ -42,7 +44,9 @@
 .build-workspace .node-inspector { top:251px; max-height:calc(100dvh - 275px); overflow:auto; backdrop-filter:blur(18px); background:color-mix(in srgb,var(--surface) 94%,transparent); }
 .inspector-fields input,.inspector-fields select { border:1px solid var(--line); border-radius:5px; background:var(--surface-raised); color:var(--text); }
 @media(max-width:1100px) { .delivery-stages { gap:32px; } .prototype-handoff.delivery-handoff-arrow { top:-28px; left:50%; transform:translateX(-50%); } .prototype-handoff span,.prototype-handoff small { display:none; } }
-.lw-shell { --surface:var(--color-panel); --surface-raised:var(--color-panel-solid); --surface-hover:#1e2023; --graph-bg:#0c0e10; --line:var(--color-hairline); --line-soft:#25272a; --line-strong:#858078; --text:var(--color-ink); --muted:#b7b4ad; --quiet:#8b8b8c; --gold:#e4bc58; --gold-dim:#655735; --gold-tint:#332c1b; --success:#79bda0; }
+/* The prototype's vocabulary, derived from the semantic tokens so both themes come from one source
+   (these were obsidian literals, which left dark-ink text on dark cards in the light theme). */
+.lw-shell { --surface:var(--color-panel); --surface-raised:var(--color-panel-solid); --surface-hover:color-mix(in srgb, var(--color-ink) 6%, var(--color-panel-solid)); --graph-bg:var(--color-ground); --line:var(--color-hairline); --line-soft:var(--color-hairline); --line-strong:var(--color-ink-3); --text:var(--color-ink); --muted:var(--color-ink-2); --quiet:var(--color-ink-3); --gold:var(--color-accent); --gold-dim:color-mix(in srgb, var(--color-accent) 45%, transparent); --gold-tint:var(--color-accent-tint); --success:var(--color-ok); }
 .lw-shell .eyebrow { font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
 .lw-shell .icon-button { display:grid; place-items:center; background:transparent; border:0; color:var(--muted); padding:4px; cursor:pointer; }
 .build-workspace .node-palette { position:absolute; top:179px; bottom:0; left:0; width:210px; border-radius:0; }
@@ -70,7 +74,24 @@
 .prototype-workspace-menu>div button { display:block; width:100%; padding:10px; text-align:left; border:0; background:transparent; color:var(--text); font-size:12px; }
 .prototype-workspace-menu>div button:hover { background:var(--surface-hover); }
 .lw-shell .workspace-view-tabs button { display:flex; justify-content:center; align-items:center; gap:8px; }
-.lw-shell .workspace-chrome>div:has(.lw-chip) { position:absolute!important; left:180px; width:330px; }
+/* The team chip lives in the header's first column, after the brand, and can never be wider than
+   that column. Pinned at `left:180px; width:330px` it reached under the centred Run tab whenever
+   the window was narrower than ~1230px, and covered it. Placing the chip explicitly means the brand
+   and the tabs must be placed explicitly too, or auto-placement would push them a column right. */
+.lw-shell .workspace-chrome>.delivery-brand { grid-column:1; grid-row:1; justify-self:start; }
+.lw-shell .workspace-chrome>.workspace-view-tabs { grid-column:2; grid-row:1; }
+.lw-shell .workspace-chrome>div:has(.lw-chip) { grid-column:1; grid-row:1; justify-self:start; margin-left:152px; width:330px; max-width:calc(100% - 152px); min-width:0; }
+/* Below ~1180px that column is too narrow for the team name beside a Save or Review button, so the
+   header gives the chip room: slimmer tabs, a tighter gap after the brand, no chevron (the whole
+   chip opens the switcher). What still does not fit is truncated, and the chip's tooltip has it. */
+@media (min-width:768px) and (max-width:1180px) {
+  .lw-shell .workspace-view-tabs button { min-width:80px; }
+  .lw-shell .workspace-chrome>div:has(.lw-chip) { margin-left:140px; max-width:calc(100% - 140px); }
+  .lw-shell .workspace-chrome .lw-chip { padding:0 8px; }
+  .lw-shell .workspace-chrome .lw-chip .chev { display:none; }
+  /* Plain text lines: as flex containers they clipped mid-letter instead of ending in an ellipsis. */
+  .lw-shell .workspace-chrome .lw-chip :is(.chip-l1,.chip-l2) { display:block; }
+}
 .lw-shell .workspace-chrome .lw-chip { width:100%; min-width:0; background:transparent; border:0; box-shadow:none; padding:0 12px; }
 .lw-shell .workspace-chrome .chip-l1 { font-size:12px; color:var(--color-ink-3); }
 @media(max-width:767px) { .build-workspace .node-palette { width:170px; } .build-workspace .lw-canvas { left:170px; } .build-workspace .build-workspace-heading { padding:16px; } .build-workspace .build-workspace-actions .btn { height:32px; padding:0 8px; } }
@@ -95,10 +116,10 @@
 .palette-collapsed { grid-template-columns:1fr; }
 .palette-collapsed .node-palette { display:none; }
 .palette-collapsed .canvas-help { left:116px; }
-.build-node { width:220px; min-height:76px; display:flex; gap:11px; align-items:center; padding:12px 13px; border:1px solid var(--line); border-radius:7px; background:#151719; box-shadow:0 6px 18px #0003; position:relative; }
+.build-node { width:220px; min-height:76px; display:flex; gap:11px; align-items:center; padding:12px 13px; border:1px solid var(--line); border-radius:7px; background:var(--color-panel-solid); box-shadow:0 6px 18px #0003; position:relative; }
 .build-node.selected { border-color:var(--gold); box-shadow:0 0 0 1px var(--gold-dim),0 8px 24px #0005; }
-.build-node.kind-skill { border-color:#615333; }
-.build-node.kind-output { border-color:#3d725d; background:#141b18; }
+.build-node.kind-skill { border-color:var(--gold-dim); }
+.build-node.kind-output { border-color:color-mix(in srgb, var(--color-ok) 45%, transparent); background:color-mix(in srgb, var(--color-ok) 6%, var(--color-panel-solid)); }
 .build-node.kind-harness { width:235px; min-height:88px; }
 .build-node-icon { width:34px; height:34px; flex-shrink:0; display:grid; place-items:center; color:var(--muted); border:1px solid var(--line); border-radius:6px; background:var(--surface-raised); }
 .build-node.kind-skill .build-node-icon { color:var(--gold); }
@@ -118,7 +139,7 @@
 .canvas-legend span { display:flex; align-items:center; gap:5px; }
 .legend-line { width:17px; border-top:1px solid var(--muted); }
 .legend-line.dotted { border-top-style:dashed; }
-.node-inspector { position:absolute; z-index:6; right:16px; top:72px; width:280px; background:var(--surface); border:1px solid #4a4c51; border-radius:8px; box-shadow:0 14px 50px #0009; padding:15px; }
+.node-inspector { position:absolute; z-index:6; right:16px; top:72px; width:280px; background:var(--surface); border:1px solid color-mix(in srgb, var(--color-ink) 18%, transparent); border-radius:8px; box-shadow:0 14px 50px #0009; padding:15px; }
 .inspector-head { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; padding-bottom:13px; border-bottom:1px solid var(--line-soft); }
 .inspector-head strong { display:block; font-size:14px; margin-top:6px; font-weight:600; }
 .inspector-fields { display:grid; gap:12px; padding-top:14px; }
@@ -129,7 +150,7 @@
 .inspector-readonly { color:var(--muted); font-size:12px; line-height:1.6; padding-top:14px; }
 .inspector-readonly p { color:var(--quiet); margin-top:10px; }
 
-.capability-graph { height:282px; width:100%; } .capability-graph.whole-team { height:408px; } .react-flow { --xy-background-color:var(--graph-bg); --xy-edge-stroke:var(--line-strong); } .react-flow__handle { width:5px; height:5px; min-width:5px; min-height:5px; background:var(--line-strong); border:1px solid var(--graph-bg); } .graph-agent { display:flex; gap:11px; align-items:center; width:184px; min-height:60px; padding:12px; background:var(--surface); border:1px solid var(--line); border-radius:6px; } .graph-agent strong { font-size:12px; font-weight:550; } .graph-agent small { display:flex; align-items:center; gap:5px; color:var(--muted); font-size:10px; margin-top:7px; } .graph-node-icon { color:var(--muted); flex-shrink:0; display:grid; place-items:center; } .graph-capability { width:224px; min-height:64px; background:var(--surface); display:flex; gap:12px; align-items:center; padding:12px 13px; border:1px solid var(--line); border-radius:6px; text-align:left; } .graph-capability:hover { background:var(--surface-hover); border-color:var(--gold); } .graph-capability.skill { border-color:#655735; } .graph-capability.state-missing { border-color:var(--danger); border-style:dashed; } .graph-capability-copy { flex:1; min-width:0; } .graph-capability strong { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; color:var(--text); } .required-mini { font-size:10px; padding:2px 4px; color:var(--gold); background:var(--gold-tint); border-radius:3px; font-weight:450; } .graph-capability small { font-size:10px; margin-top:7px; display:flex; align-items:center; gap:5px; }
+.capability-graph { height:282px; width:100%; } .capability-graph.whole-team { height:408px; } .react-flow { --xy-background-color:var(--graph-bg); --xy-edge-stroke:var(--line-strong); } .react-flow__handle { width:5px; height:5px; min-width:5px; min-height:5px; background:var(--line-strong); border:1px solid var(--graph-bg); } .graph-agent { display:flex; gap:11px; align-items:center; width:184px; min-height:60px; padding:12px; background:var(--surface); border:1px solid var(--line); border-radius:6px; } .graph-agent strong { font-size:12px; font-weight:550; } .graph-agent small { display:flex; align-items:center; gap:5px; color:var(--muted); font-size:10px; margin-top:7px; } .graph-node-icon { color:var(--muted); flex-shrink:0; display:grid; place-items:center; } .graph-capability { width:224px; min-height:64px; background:var(--surface); display:flex; gap:12px; align-items:center; padding:12px 13px; border:1px solid var(--line); border-radius:6px; text-align:left; } .graph-capability:hover { background:var(--surface-hover); border-color:var(--gold); } .graph-capability.skill { border-color:var(--gold-dim); } .graph-capability.state-missing { border-color:var(--danger); border-style:dashed; } .graph-capability-copy { flex:1; min-width:0; } .graph-capability strong { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; color:var(--text); } .required-mini { font-size:10px; padding:2px 4px; color:var(--gold); background:var(--gold-tint); border-radius:3px; font-weight:450; } .graph-capability small { font-size:10px; margin-top:7px; display:flex; align-items:center; gap:5px; }
 
 /* Match the reference rhythm while allowing real stage names and evidence. */
 .delivery-shown .delivery-heading { height:115px; min-height:115px; padding:24px 0; }

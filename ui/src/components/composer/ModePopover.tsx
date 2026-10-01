@@ -1,6 +1,6 @@
 import { describeNextFire, type ScheduleEntry } from '../../lib/runs/client'
 import type { PipelineStep } from '../../lib/team-file/pipelineOrder'
-import type { BudgetConfig, GuardsConfig } from '../../lib/team-file/types'
+import type { GuardsConfig } from '../../lib/team-file/types'
 import type { ExecutionMode } from '../../lib/team-file/useTeamDocument'
 
 export interface ModePopoverProps {
@@ -9,11 +9,9 @@ export interface ModePopoverProps {
   nodeNames: ReadonlyMap<string, string>
   entrypointName: string | null
   guards: GuardsConfig | null
-  budget: BudgetConfig | null
   anomalies: { from: string; to: string; kind: string }[]
   readOnly: boolean
   onUpdateGuards: (field: keyof GuardsConfig, value: number) => void
-  onUpdateBudget: (limitUsd: number) => void
   onClose: () => void
   /** The team file's `schedule` block, as the daemon reports it; null when the team has none. */
   schedule?: ScheduleEntry | null
@@ -23,7 +21,7 @@ export interface ModePopoverProps {
 
 // CANVAS_SPEC §8.1: mode is a consequence of the file, never a toggle. This popover is the
 // only place execution semantics are explained, and it is disclosed rather than resident.
-export function ModePopover({ mode, steps, nodeNames, entrypointName, guards, budget, anomalies, readOnly, onUpdateGuards, onUpdateBudget, onClose, schedule, onRunRoutineNow, routineBusy }: ModePopoverProps) {
+export function ModePopover({ mode, steps, nodeNames, entrypointName, guards, anomalies, readOnly, onUpdateGuards, onClose, schedule, onRunRoutineNow, routineBusy }: ModePopoverProps) {
   return (
     <div className="pop e2 mode-pop" role="dialog" aria-label="What this mode means" onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}>
       <div className="mp-body t-body">
@@ -84,10 +82,6 @@ export function ModePopover({ mode, steps, nodeNames, entrypointName, guards, bu
         <label className="mp-field t-meta">Max concurrent dispatches
           <input type="number" min={1} value={guards?.maxConcurrentDispatches ?? 8} disabled={readOnly} onChange={(event) => onUpdateGuards('maxConcurrentDispatches', Number(event.target.value))} aria-label="Max concurrent dispatches" />
         </label>
-        <label className="mp-field t-meta">Team budget (USD)
-          <input type="number" min={0} step={0.01} value={budget?.limitUsd ?? ''} placeholder="No limit" disabled={readOnly} onChange={(event) => onUpdateBudget(Number(event.target.value))} aria-label="Team budget limit in USD" />
-        </label>
-        <span className="mp-note t-meta">Budgets are admission thresholds, not interruptions: the bus refuses new delegations at the threshold but never stops an in-flight turn.</span>
       </div>
     </div>
   )

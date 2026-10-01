@@ -3,6 +3,7 @@
 // Memory never rides the WebSocket. Updates arrive as invalidation hints on the existing event
 // stream and the panel reads back over REST, so docs/WEBSOCKET_SCHEMA.md stays frozen — see
 // docs/TEAM_MEMORY.md "One event stream".
+import { daemonFetch } from '../daemonFetch'
 
 /** Mirrors `backend::api::MemoryEntryView`. */
 export interface MemoryEntry {
@@ -168,7 +169,7 @@ async function failure(response: Response): Promise<MemoryApiError> {
 }
 
 export async function fetchMemory(teamPath: string): Promise<MemoryView> {
-  const response = await fetch(`/api/memory?path=${encodeURIComponent(teamPath)}`)
+  const response = await daemonFetch(`/api/memory?path=${encodeURIComponent(teamPath)}`)
   if (!response.ok) throw await failure(response)
   return (await response.json()) as MemoryView
 }
@@ -181,7 +182,7 @@ export async function fetchMemory(teamPath: string): Promise<MemoryView> {
  * preview — there is deliberately no second YAML writer in the daemon.
  */
 export async function writeMemoryFile(teamPath: string, file: string, body: string): Promise<MemoryEntry> {
-  const response = await fetch('/api/memory/file', {
+  const response = await daemonFetch('/api/memory/file', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path: teamPath, file, body }),
@@ -202,7 +203,7 @@ export async function fetchNotes(teamPath: string, filter: NoteQuery = {}): Prom
   if (filter.run) query.set('run', filter.run)
   if (filter.kind) query.set('kind', filter.kind)
   if (filter.state) query.set('state', filter.state)
-  const response = await fetch(`/api/memory/notes?${query.toString()}`)
+  const response = await daemonFetch(`/api/memory/notes?${query.toString()}`)
   if (!response.ok) throw await failure(response)
   return (await response.json()) as NotebookView
 }
@@ -216,7 +217,7 @@ export interface NoteQuery {
 /** Every revision of one note, oldest first. What "History" opens. */
 export async function fetchNoteHistory(teamPath: string, id: string): Promise<Note[]> {
   const query = new URLSearchParams({ team: teamPath })
-  const response = await fetch(`/api/memory/notes/${encodeURIComponent(id)}/history?${query.toString()}`)
+  const response = await daemonFetch(`/api/memory/notes/${encodeURIComponent(id)}/history?${query.toString()}`)
   if (!response.ok) throw await failure(response)
   return (await response.json()) as Note[]
 }
@@ -233,7 +234,7 @@ export async function reviseNote(
   action: 'keep' | 'correct' | 'retire',
   change: { revision?: number; title?: string; body?: string } = {},
 ): Promise<Note> {
-  const response = await fetch(`/api/memory/notes/${encodeURIComponent(id)}/${action}`, {
+  const response = await daemonFetch(`/api/memory/notes/${encodeURIComponent(id)}/${action}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ team: teamPath, ...change }),
@@ -244,7 +245,7 @@ export async function reviseNote(
 
 /** Export this team's Brief and kept notes as a pack folder under the teams root. */
 export async function exportPack(teamPath: string, name?: string): Promise<{ pack: string; notes: number; brief: number }> {
-  const response = await fetch('/api/memory/packs', {
+  const response = await daemonFetch('/api/memory/packs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ team: teamPath, action: 'export', name }),
@@ -256,18 +257,11 @@ export async function exportPack(teamPath: string, name?: string): Promise<{ pac
 /** Every stored packet for a run, or just one agent's. Empty for a run that supplied nothing. */
 export async function fetchRunContext(runId: string, agentId?: string): Promise<ContextPacket[]> {
   const query = agentId ? `?agent=${encodeURIComponent(agentId)}` : ''
-  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/context${query}`)
+  const response = await daemonFetch(`/api/runs/${encodeURIComponent(runId)}/context${query}`)
   if (!response.ok) throw await failure(response)
   return (await response.json()) as ContextPacket[]
 }
 
-/**
- * A file name for a note the operator types in the panel, derived from its first line.
- *
- * Deterministic and readable, because the path is what the team file will carry and what a diff
- * will show: "House constraints" becomes `brief/house-constraints.md`. A collision is the
- * caller's to resolve — `addBriefEntry` refuses a duplicate path rather than overwriting.
- */
 /**
  * `GET /api/runs/{id}/checkpoints?agent=` — where each of a run's stages stopped.
  *
@@ -276,25 +270,38 @@ export async function fetchRunContext(runId: string, agentId?: string): Promise<
  */
 export async function fetchRunCheckpoints(runId: string, agentId?: string): Promise<Checkpoint[]> {
   const query = agentId ? `?agent=${encodeURIComponent(agentId)}` : ''
-  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/checkpoints${query}`, {
+  const response = await daemonFetch(`/api/runs/${encodeURIComponent(runId)}/checkpoints${query}`, {
     cache: 'no-store',
   })
   if (!response.ok) throw await failure(response)
   return (await response.json()) as Checkpoint[]
 }
 
-export function briefFileNameFor(body: string, taken: readonly string[] = []): string {
+/**
+ * A file name for a note the operator types in the panel, derived from its first line.
+ *
+ * Deterministic and readable, because the path is what the team file will carry and what a diff
+ * will show: "House constraints" becomes `brief/house-constraints.md`. A collision is the
+ * caller's to resolve — `addBriefEntry` refuses a duplicate path rather than overwriting.
+ *
+ * `folder` should be the team's own (`<team>.brief`, as in `examples/team-memory.brief/`): teams
+ * kept in one folder share its directory, and a shared `brief/` let one team's "Style guide" note
+ * silently overwrite another team's file of the same name.
+ */
+export function briefFileNameFor(body: string, taken: readonly string[] = [], folder = 'brief'): string {
   const firstLine = body.split(/\r?\n/).find((line) => line.trim()) ?? 'note'
-  const slug = firstLine
+  const words = firstLine
     .replace(/^#+\s*/, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 48) || 'note'
-  let candidate = `brief/${slug}.md`
+  // Cut at a word boundary: the panel titles an entry with no heading from its file name, and
+  // "…prefer trains over fligh" reads as a typo the operator never made.
+  const slug = (words.length <= 48 ? words : words.slice(0, 49).replace(/-[^-]*$/, '').slice(0, 48)) || 'note'
+  let candidate = `${folder}/${slug}.md`
   let suffix = 2
   while (taken.includes(candidate)) {
-    candidate = `brief/${slug}-${suffix}.md`
+    candidate = `${folder}/${slug}-${suffix}.md`
     suffix += 1
   }
   return candidate

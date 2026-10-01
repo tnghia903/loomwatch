@@ -13,10 +13,7 @@ function monogramFor(harnessId: string): string {
 
 function subtitleFor(source: LibrarySource): string {
   if (source.kind === 'operator') return 'Review stop · your decision'
-  if (source.group === 'presets') {
-    const budget = source.budgetUsd !== undefined ? ` · $${source.budgetUsd.toFixed(2)} cap` : ''
-    return `${source.model ?? ''}${budget}`
-  }
+  if (source.group === 'presets') return source.model ?? ''
   return [source.spawn.cmd, ...source.spawn.args].join(' ')
 }
 

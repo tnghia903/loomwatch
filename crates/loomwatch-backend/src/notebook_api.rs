@@ -425,7 +425,7 @@ mod tests {
             std::fs::write(
                 root.join(name),
                 format!(
-                    "schemaVersion: 1\nid: {id}\nname: {id}\nentrypoint: a\nmemory:\n  notebook:\n    enabled: true\n    keep: {keep}\nagents:\n  - id: a\n    name: A\n    role: r\n    spawn:\n      cmd: /bin/sh\n      args: []\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\n",
+                    "schemaVersion: 1\nid: {id}\nname: {id}\nentrypoint: a\nmemory:\n  notebook:\n    enabled: true\n    keep: {keep}\nagents:\n  - id: a\n    name: A\n    role: r\n    spawn:\n      cmd: /bin/sh\n      args: []\n      cwd: .\n    model: m\n",
                     id = name.trim_end_matches(".yaml"),
                 ),
             )

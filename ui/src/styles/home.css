@@ -130,7 +130,41 @@
 .nt-problems { padding: 0; list-style: none; display: grid; gap: var(--sp-1); color: var(--color-alert); }
 .nt-error { margin: 0; font-size: 13px; line-height: 1.45; color: var(--color-alert); overflow-wrap: anywhere; }
 .nt-acts { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); }
+/* Sticky inside the dialog's own scroll box; the negative offsets reach over its padding so no
+   template text shows through underneath. */
+.nt-foot {
+  position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 1;
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  margin: 0 calc(-1 * var(--sp-6)) calc(-1 * var(--sp-6)); padding: var(--sp-3) var(--sp-6) var(--sp-6);
+  background: var(--color-panel-solid); border-top: 1px solid var(--color-hairline);
+}
 .nt-busy { margin-right: auto; font-size: 13px; color: var(--color-ink-3); }
 
 .lw-opening { align-items: center; justify-content: center; }
 .lw-opening p { position: relative; margin: 0; color: var(--color-ink-3); font-size: 14px; }
+
+/* ---- Deleting a team ------------------------------------------------------ */
+/* The card is one big button, so its "…" sits beside it in the list item, inside the card's own
+   right padding where neither the file path nor the arrow reaches. */
+.home-grid > li { position: relative; }
+.home-card-acts { position: absolute; right: var(--sp-1); bottom: var(--sp-1); }
+.home-card-more { width: 28px; height: 28px; color: var(--color-ink-3); }
+.home-card-more[aria-expanded="true"] { background: var(--color-accent-tint); color: var(--color-ink); }
+.home-card-more:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.home-card-menu { right: 0; bottom: calc(100% + var(--sp-1)); min-width: 184px; padding: var(--sp-1); }
+.home-card-menu .pop-row.alert { color: var(--color-alert); }
+.home-card-menu .pop-row.alert:hover { background: color-mix(in srgb, var(--color-alert) 10%, transparent); }
+
+.lw-deleteteam {
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto;
+  padding: var(--sp-6); box-sizing: border-box; display: flex; flex-direction: column; gap: var(--sp-3);
+}
+.lw-deleteteam h2 { margin: 0 0 var(--sp-1); font: 400 24px/1.2 var(--font-serif); color: var(--color-ink); overflow-wrap: anywhere; }
+.lw-deleteteam p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--color-ink-2); overflow-wrap: anywhere; }
+.lw-deleteteam .dt-alert { color: var(--color-alert); }
+.lw-deleteteam .dt-acts { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
+.lw-deleteteam .btn-danger-fill { background: var(--color-alert); color: var(--color-white); border-color: transparent; }
+.lw-deleteteam .btn-danger-fill:disabled { opacity: .45; cursor: not-allowed; }
+/* The switcher's footer links, "Delete team…" included, read as unavailable when they are. */
+.pop-foot .link:disabled { color: var(--color-ink-3); cursor: not-allowed; text-decoration: none; }

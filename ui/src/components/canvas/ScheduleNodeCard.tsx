@@ -1,4 +1,6 @@
-import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
+import type { Node, NodeProps } from '@xyflow/react'
+
+import { CardPorts } from './CardPorts'
 import { AlertCircle, Clock3 } from 'lucide-react'
 
 import { summarizeSchedule } from '../../lib/team-file/schedule'
@@ -30,7 +32,7 @@ export function ScheduleNodeCard({ data }: NodeProps<ScheduleNode>) {
         </span>
         <span className={`schedule-state ${data.invalid ? 'error' : ''}`} aria-hidden="true" />
       </button>
-      <Handle type="source" position={Position.Right} isConnectable={false} />
+      <CardPorts input={false} />
     </article>
   )
 }

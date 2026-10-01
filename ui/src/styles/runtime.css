@@ -139,6 +139,8 @@
 .rt-strip .msg .link { font: inherit; }
 .rt-strip .wm { font: 400 11px/15px var(--font-mono); color: var(--color-ink-2); flex: none; margin-left: auto; }
 .rt-strip .msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A failure is read in full: it says what went wrong and what to do, and both are past the cut. */
+.rt-strip.alert .msg { white-space: normal; overflow-wrap: anywhere; }
 /* §3.4: `[ Reuse ]` on a failed response node — the strip is the node, this is its action. */
 .rt-response > .rt-strip { margin-inline: calc(-1 * var(--sp-4)); }
 .rt-response .rr-reuse { display: block; width: calc(100% + 2 * var(--sp-4)); margin: 0 calc(-1 * var(--sp-4)) calc(-1 * var(--sp-3)); padding: var(--sp-2) var(--sp-4); background: none; border: 0; border-top: 1px solid var(--color-hairline); color: var(--color-accent); font: 400 12px/16px var(--font-sans); text-align: left; cursor: pointer; }

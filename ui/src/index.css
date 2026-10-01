@@ -10,6 +10,7 @@
 @import './styles/settings.css';
 @import './styles/home.css';
 @import './styles/chrome.css';
+@import './styles/loom.css';
 
 .operator-context { max-height: min(180px, 25vh); overflow: auto; padding-bottom: var(--sp-2); }
 .operator-context summary { cursor: pointer; color: var(--color-accent); font-size: 12px; }
@@ -46,7 +47,7 @@
 /* Composer height changes with review context and follow-up controls. Keep every dock clear. */
 .lw-shell .lw-activity,
 .lw-shell .lw-inspector {
-  max-height: calc(100dvh - 2 * var(--lw-panel-inset) - var(--lw-composer-height, 56px) - var(--sp-3));
+  max-height: calc(100dvh - var(--lw-below-header) - var(--lw-panel-inset) - var(--lw-composer-height, 56px) - var(--sp-3));
 }
 .lw-shell .lw-history,
 .lw-shell .mode-pop {
@@ -54,7 +55,10 @@
 }
 @media (max-width: 767px) {
   .lw-shell .lw-composer { background: var(--color-panel-solid); }
+  /* A bottom sheet on phones: docked above the composer and as tall as its content. `top: auto`
+     has to be said here, where it outranks `.panel.top`; the older phone rule never won. */
   .lw-shell .lw-activity, .lw-shell .lw-inspector {
+    top: auto;
     bottom: calc(var(--lw-panel-inset) + var(--lw-composer-height, 56px) + var(--sp-3));
     min-height: 0;
     z-index: 41;

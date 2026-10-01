@@ -1,0 +1,8 @@
+[
+  { "url": "http://localhost:5173/", "theme": "dark", "out": "../screenshots/home-dark.png" },
+  { "url": "http://localhost:5173/", "theme": "light", "out": "../screenshots/home-light.png" },
+  { "url": "http://localhost:5173/?path=daily-news.yaml", "theme": "dark", "click": "Build", "wait": 1500, "out": "../screenshots/build-dark.png" },
+  { "url": "http://localhost:5173/?path=daily-news.yaml", "theme": "light", "click": "Build", "wait": 1500, "out": "../screenshots/build-light.png" },
+  { "url": "http://localhost:5173/?path=daily-news.yaml&run=a9b34249-b88f-4e3f-8bcf-1be1176f4001", "theme": "dark", "wait": 2500, "out": "../screenshots/run-dark.png" },
+  { "url": "http://localhost:5173/?path=daily-news.yaml&run=a9b34249-b88f-4e3f-8bcf-1be1176f4001", "theme": "light", "wait": 2500, "out": "../screenshots/run-light.png" }
+]

@@ -10,11 +10,6 @@ export function middleTruncate(value: string, max = 24): string {
   return `${value.slice(0, head)}…${value.slice(value.length - tail)}`
 }
 
-// §5.1: "Budget shows $ + limitUsd formatted to 2 dp."
-export function formatUsd(amount: number): string {
-  return `$${amount.toFixed(2)}`
-}
-
 /** "just now", "5 minutes ago", "yesterday", "3 days ago", then a date — for lists people scan. */
 export function relativeTime(at: Date, now: Date = new Date()): string {
   const seconds = Math.round((now.getTime() - at.getTime()) / 1000)

@@ -9,7 +9,7 @@ import { TeamFileModel, TeamFileParseError } from './document'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
 import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
-import type { AgentConfig, BriefEntryConfig, BudgetConfig, CapabilityRef, EdgeConfig, GuardsConfig, ScheduleConfig, SpawnConfig, TeamDocument } from './types'
+import type { AgentConfig, BriefEntryConfig, CapabilityRef, EdgeConfig, GuardsConfig, ScheduleConfig, SpawnConfig, TeamDocument } from './types'
 import {
   loadTeamValidator,
   displayFieldProblems,
@@ -51,6 +51,8 @@ export interface ExternalChange {
 export interface LoadFailure {
   message: string
   line: string | null
+  /** `yaml`: the text is not YAML. `shape`: it is YAML, but not a team file. */
+  kind: 'yaml' | 'shape'
 }
 
 interface HistoryEntry {
@@ -80,11 +82,12 @@ function sourceLineAtError(source: string, lineNumber: number): string | null {
 }
 
 function parseFailure(error: TeamFileParseError, source: string): LoadFailure {
+  if (error.kind === 'shape') return { message: error.message, line: null, kind: 'shape' }
   const lineNumber = Number(error.message.match(/(?:at )?line (\d+)/i)?.[1])
   const line = lineNumber > 0
     ? sourceLineAtError(source, lineNumber)
     : error.message.match(/line \d+[^;]*/i)?.[0] ?? null
-  return { message: error.message, line }
+  return { message: error.message, line, kind: 'yaml' }
 }
 
 /** Resolve a daemon-approved relative team path against its canonical discovery root. */
@@ -128,6 +131,16 @@ export function slugifyTeamName(name: string): string {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '') || 'new-team'
   )
+}
+
+/**
+ * A new team's id, from the file it will be saved as. Two teams can share a name ("Trip planner"
+ * twice is `trip-planner.yaml` and `trip-planner-2.yaml`), but not an id: the Notebook is keyed
+ * by it, so a shared id silently handed the second team the first one's notes.
+ */
+export function teamIdForPath(path: string): string {
+  const file = path.split('/').pop() ?? path
+  return slugifyTeamName(file.replace(/\.ya?ml$/i, ''))
 }
 
 function edgeFromConfig(edge: EdgeConfig): ConfiguredEdge {
@@ -210,7 +223,6 @@ export function useTeamDocument() {
   const [edges, setEdges] = useState<ConfiguredEdge[]>([])
   const [entrypoint, setEntrypointState] = useState<string | null>(null)
   const [teamGuards, setTeamGuards] = useState<GuardsConfig | null>(null)
-  const [teamBudget, setTeamBudget] = useState<BudgetConfig | null>(null)
   const [teamSchedule, setTeamSchedule] = useState<ScheduleConfig | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('no-file')
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -237,10 +249,14 @@ export function useTeamDocument() {
 
   useEffect(() => {
     if (!['new', 'dirty', 'invalid', 'conflict', 'saving', 'error'].includes(saveState)) return
+    // `error` also covers a team that never loaded (a bad link, a file that is not a team). There
+    // is nothing of the operator's to lose then, and warning would put a "Leave site?" prompt in
+    // front of every way out of the error, including the error's own "Open another team…".
+    if (saveState === 'error' && loadedYaml === null && !isNewRef.current) return
     const warnBeforeLeaving = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
     window.addEventListener('beforeunload', warnBeforeLeaving)
     return () => window.removeEventListener('beforeunload', warnBeforeLeaving)
-  }, [saveState])
+  }, [saveState, loadedYaml])
 
   const resetHistory = useCallback(() => {
     undoRef.current = []
@@ -275,7 +291,6 @@ export function useTeamDocument() {
     setYamlPreview(entry.yaml)
     setEntrypointState(snapshot.entrypoint || null)
     setTeamGuards(snapshot.guards ?? null)
-    setTeamBudget(snapshot.budget ?? null)
     setTeamSchedule(snapshot.schedule ?? null)
     setTeamSchedule(snapshot.schedule ?? null)
     setNodes(
@@ -317,7 +332,7 @@ export function useTeamDocument() {
   const createNewDocument = useCallback((name: string, filePath?: string) => {
     const trimmed = name.trim()
     if (!trimmed) return
-    const id = slugifyTeamName(trimmed)
+    const id = filePath ? teamIdForPath(filePath) : slugifyTeamName(trimmed)
     const model = TeamFileModel.create(id, trimmed)
     modelRef.current = model
     loadedRevisionRef.current = null
@@ -329,7 +344,6 @@ export function useTeamDocument() {
     setEdges([])
     setEntrypointState(null)
     setTeamGuards(null)
-    setTeamBudget(null)
     setTeamSchedule(null)
     setDocumentSnapshot(model.snapshot())
     setYamlPreview(model.toYaml())
@@ -387,7 +401,6 @@ export function useTeamDocument() {
         setPath(discovery ? absoluteTeamPath(discovery.root, requestedPath) : requestedPath)
         setEntrypointState(snapshot.entrypoint)
         setTeamGuards(snapshot.guards ?? null)
-        setTeamBudget(snapshot.budget ?? null)
         setTeamSchedule(snapshot.schedule ?? null)
         setTeamSchedule(snapshot.schedule ?? null)
         setNodes(
@@ -467,7 +480,6 @@ export function useTeamDocument() {
       isNewRef.current = false
       setEntrypointState(snapshot.entrypoint)
       setTeamGuards(snapshot.guards ?? null)
-      setTeamBudget(snapshot.budget ?? null)
       setTeamSchedule(snapshot.schedule ?? null)
       setTeamSchedule(snapshot.schedule ?? null)
       setNodes(
@@ -820,6 +832,15 @@ export function useTeamDocument() {
     [markDirty, captureHistory],
   )
 
+  /** The team's display name. Its file and id stay as they are: runs and notes are filed under them. */
+  const renameTeam = useCallback((name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed || !modelRef.current || trimmed === modelRef.current.snapshot().name) return
+    captureHistory()
+    modelRef.current.setName(trimmed)
+    markDirty()
+  }, [markDirty, captureHistory])
+
   const updateAgentSpawn = useCallback((id: string, value: SpawnConfig) => {
     captureHistory()
     modelRef.current?.setAgentField(id, 'spawn', value)
@@ -857,58 +878,21 @@ export function useTeamDocument() {
     [markDirty, captureHistory],
   )
 
+  // The model is written before `setNodes`, not inside its updater: `markDirty` reads the model
+  // synchronously, so a write deferred to the updater left the preview and validation one edit behind.
   const updateAgentCwd = useCallback(
     (id: string, cwd: string) => {
+      const target = nodes.find((node) => node.id === id)
+      if (!target || target.data.agent.kind === 'operator') return
       captureHistory()
+      const spawn: SpawnConfig = { cmd: '', args: [], env: {}, ...target.data.agent.spawn, cwd }
+      modelRef.current?.setAgentField(id, 'spawn', spawn)
       setNodes((current) =>
-        current.map((node) => {
-          if (node.id !== id || node.data.agent.kind === 'operator') {
-            return node
-          }
-          const spawn: SpawnConfig = { cmd: '', args: [], env: {}, ...node.data.agent.spawn, cwd }
-          modelRef.current?.setAgentField(id, 'spawn', spawn)
-          return { ...node, data: { ...node.data, agent: { ...node.data.agent, spawn } } }
-        }),
+        current.map((node) => node.id === id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, spawn } } } : node),
       )
       markDirty()
     },
-    [markDirty, captureHistory],
-  )
-
-  const updateAgentBudget = useCallback(
-    (id: string, limitUsd: number) => {
-      captureHistory()
-      setNodes((current) =>
-        current.map((node) => {
-          if (node.id !== id || node.data.agent.kind === 'operator') {
-            return node
-          }
-          const budget = { ...node.data.agent.budget, limitUsd }
-          modelRef.current?.setAgentField(id, 'budget', budget)
-          return { ...node, data: { ...node.data, agent: { ...node.data.agent, budget } } }
-        }),
-      )
-      markDirty()
-    },
-    [markDirty, captureHistory],
-  )
-
-  const updateAgentWarnAt = useCallback(
-    (id: string, warnAtPercent: number) => {
-      captureHistory()
-      setNodes((current) =>
-        current.map((node) => {
-          if (node.id !== id || node.data.agent.kind === 'operator') {
-            return node
-          }
-          const budget = { limitUsd: 0, ...node.data.agent.budget, warnAtPercent }
-          modelRef.current?.setAgentField(id, 'budget', budget)
-          return { ...node, data: { ...node.data, agent: { ...node.data.agent, budget } } }
-        }),
-      )
-      markDirty()
-    },
-    [markDirty, captureHistory],
+    [nodes, markDirty, captureHistory],
   )
 
   const updateAgentAllowRecruiting = useCallback(
@@ -995,36 +979,22 @@ export function useTeamDocument() {
     [markDirty, captureHistory],
   )
 
-  // §8.1: the mode-pill popover's edit affordance for team-level `guards`/`budget` — the only
+  // §8.1: the mode-pill popover's edit affordance for team-level `guards` — the only
   // home these fields have, per TEAM_CONFIG.md's default-to-8 rule when a guard is absent.
   const updateTeamGuards = useCallback(
     (field: keyof GuardsConfig, value: number) => {
       captureHistory()
-      setTeamGuards((current) => {
-        const next: GuardsConfig = {
-          maxDispatchDepth: current?.maxDispatchDepth ?? 8,
-          maxConcurrentDispatches: current?.maxConcurrentDispatches ?? 8,
-          [field]: value,
-        }
-        modelRef.current?.setGuards(next)
-        return next
-      })
+      const next: GuardsConfig = {
+        maxDispatchDepth: teamGuards?.maxDispatchDepth ?? 8,
+        maxConcurrentDispatches: teamGuards?.maxConcurrentDispatches ?? 8,
+        [field]: value,
+      }
+      // Before the setter, not inside it, as in `updateAgentCwd`: `markDirty` reads the model now.
+      modelRef.current?.setGuards(next)
+      setTeamGuards(next)
       markDirty()
     },
-    [markDirty, captureHistory],
-  )
-
-  const updateTeamBudget = useCallback(
-    (limitUsd: number) => {
-      captureHistory()
-      setTeamBudget((current) => {
-        const next: BudgetConfig = { ...current, limitUsd }
-        modelRef.current?.setTeamBudget(next)
-        return next
-      })
-      markDirty()
-    },
-    [markDirty, captureHistory],
+    [teamGuards, markDirty, captureHistory],
   )
 
   const updateTeamSchedule = useCallback(
@@ -1377,7 +1347,6 @@ export function useTeamDocument() {
     entrypoint,
     entrypointProblem,
     teamGuards,
-    teamBudget,
     teamSchedule,
     /**
      * The team's `memory.inherits` entries as the document holds them.
@@ -1387,9 +1356,12 @@ export function useTeamDocument() {
      * happens to drag the same row out of the Library.
      */
     memoryInherits: documentSnapshot?.memory?.inherits ?? [],
+    /** The Brief files the document names, saved or not; the panel lists only the saved ones. */
+    briefPaths: (documentSnapshot?.memory?.brief ?? []).map((entry) => entry.path),
     responder: documentSnapshot?.responder ?? null,
     /** The team's display `name`, for chrome that should not show a file path. */
     teamName: documentSnapshot?.name?.trim() || null,
+    renameTeam,
     /** True until the daemon's schema is compiled; validity is unknown, not failed, meanwhile. */
     checking: schemaLoading,
     saveState,
@@ -1434,15 +1406,12 @@ export function useTeamDocument() {
     updateAgentSpawn,
     updateAgentThinkingEffort,
     updateAgentCwd,
-    updateAgentBudget,
-    updateAgentWarnAt,
     updateAgentAllowRecruiting,
     updateAgentMemory,
     setAgentCapabilities,
     promoteEntrypoint,
     promoteResponder,
     updateTeamGuards,
-    updateTeamBudget,
     updateTeamSchedule,
     addBriefEntry,
     removeBriefEntry,

@@ -1007,13 +1007,13 @@ mod tests {
         .expect("brief");
         fs::write(
             root.join("research.yaml"),
-            "schemaVersion: 1\nid: research-team\nname: Research team\nentrypoint: lead\nmemory:\n  brief:\n    - path: brief/constraints.md\nagents:\n  - id: lead\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nid: research-team\nname: Research team\nentrypoint: lead\nmemory:\n  brief:\n    - path: brief/constraints.md\nagents:\n  - id: lead\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n",
         )
         .expect("team with memory");
         // A team with no memory block is not a knowledge source.
         fs::write(
             root.join("plain.yaml"),
-            "schemaVersion: 1\nid: plain\nname: Plain\nentrypoint: lead\nagents:\n  - id: lead\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nid: plain\nname: Plain\nentrypoint: lead\nagents:\n  - id: lead\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n",
         )
         .expect("team without memory");
 

@@ -135,4 +135,16 @@ describe('MemoryPanel', () => {
     expect(screen.getByRole('button', { name: /write a note/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /add a file/i })).toBeDisabled()
   })
+
+  // "Add to the Brief" writes the file at once but the entry joins the team only on save. The
+  // panel used to show nothing in between, so a note looked like it had vanished.
+  it('lists a note that is not saved yet and offers to save the team', () => {
+    const onSaveTeam = vi.fn()
+    render(panel({ unsavedEntries: ['trip.brief/budget.md'], onSaveTeam }))
+    const pending = screen.getByRole('status')
+    expect(pending).toHaveTextContent('Not saved yet')
+    expect(pending).toHaveTextContent('trip.brief/budget.md')
+    fireEvent.click(screen.getByRole('button', { name: 'Save team' }))
+    expect(onSaveTeam).toHaveBeenCalledOnce()
+  })
 })

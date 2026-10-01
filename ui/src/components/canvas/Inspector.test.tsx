@@ -10,7 +10,7 @@ const node: AgentNode = {
     label: 'News Editor', isEntrypoint: false,
     agent: {
       id: 'editor', name: 'News Editor', role: 'Edit the digest.', model: 'claude-sonnet-5', status: 'idle',
-      spawn: { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '.' }, budget: { limitUsd: 2 },
+      spawn: { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '.' },
     },
   },
 }
@@ -18,7 +18,7 @@ const node: AgentNode = {
 function renderInspectorProps(overrides: Partial<InspectorProps> = {}): InspectorProps {
   return {
     node, isEntrypoint: false, isResponder: false, onRename: vi.fn(), onModelChange: vi.fn(), onCwdChange: vi.fn(),
-    onBudgetChange: vi.fn(), onAllowRecruitingChange: vi.fn(), onPromoteEntrypoint: vi.fn(), onPromoteResponder: vi.fn(),
+    onAllowRecruitingChange: vi.fn(), onPromoteEntrypoint: vi.fn(), onPromoteResponder: vi.fn(),
     onDelete: vi.fn(), onClose: vi.fn(), onFieldBlur: vi.fn(),
     onMemoryBriefChange: vi.fn(), onDeliverAsChange: vi.fn(),
     modelOptions: [
@@ -191,11 +191,18 @@ describe('Inspector memory toggles', () => {
   })
 })
 
-it('edits a review question without offering a model, budget or entrypoint', () => {
+// Budgets are retired: a harness agent's settings have no spend limit or warn-at field to edit.
+it('offers no budget field for a harness agent', () => {
+  renderInspector()
+  expect(screen.queryByLabelText('Budget limit in USD')).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('Warn at percent')).not.toBeInTheDocument()
+  expect(screen.queryByText('Budget')).not.toBeInTheDocument()
+})
+
+it('edits a review question without offering a model or entrypoint', () => {
   const props = renderInspector({ node: { ...node, data: { label: 'You', agent: { kind: 'operator', id: 'review', name: 'You', role: 'Approve?' } } } })
   fireEvent.change(screen.getByLabelText('Review question'), { target: { value: 'What should change?' } })
   expect(props.onRename).toHaveBeenCalledWith('role', 'What should change?')
   expect(screen.queryByRole('combobox', { name: 'Model' })).not.toBeInTheDocument()
-  expect(screen.queryByLabelText('Budget limit in USD')).not.toBeInTheDocument()
   expect(screen.queryByText(/Make entrypoint/)).not.toBeInTheDocument()
 })

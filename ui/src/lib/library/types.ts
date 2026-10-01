@@ -20,5 +20,4 @@ export interface LibrarySource {
   /** Only presets pre-fill these — §4.5: "From a preset, both are already filled". */
   role?: string
   model?: string
-  budgetUsd?: number
 }

@@ -5,7 +5,7 @@
    `.build-workspace` keeps only Build's own layout.
 
    A run adds rows under the identity row it shares with Build: the projected
-   task state, the spend, and the routes into this agent's evidence and packet.
+   task state and the routes into this agent's evidence and packet.
    --------------------------------------------------------------------------- */
 
 /* The identity row is the whole card when there is no run, so an agent card with
@@ -32,10 +32,13 @@
 
 .build-node-meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 9px; color: var(--color-ink-3); font: 400 11px/14px var(--font-mono); }
 .build-node-meta .model { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.build-node-meta .cost { flex: none; color: var(--color-ink-2); }
 
-/* The budget lane is flush with the card's own perimeter, so it follows this card's padding. */
-.build-node .budget-lane { margin: 10px -13px -12px; border-radius: 0 0 6px 6px; }
+/* Build: this agent's app is not on this computer. Wraps rather than truncates — the app's name is
+   the part the operator needs — and stays at every depth, because the run cannot start without it. */
+.build-node-app-problem {
+  margin: 9px 0 0; padding-top: 8px; border-top: 1px solid var(--color-hairline);
+  color: var(--color-alert); font: 400 11px/15px var(--font-sans); overflow-wrap: anywhere;
+}
 
 /* Pipeline ordinal, outside the card as on every other node that carries one. */
 .build-node .step {

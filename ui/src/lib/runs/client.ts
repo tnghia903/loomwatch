@@ -3,6 +3,8 @@
 // `sessionId`, so the evidence stream at /api/session/stream can be opened immediately.
 import { useCallback, useEffect, useState } from 'react'
 
+import { daemonFetch } from '../daemonFetch'
+
 export type RunStatus = 'queued' | 'starting' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 export type RunTrigger = 'manual' | 'schedule'
 
@@ -154,7 +156,7 @@ export interface StartRunOptions {
 }
 
 export async function startRun(teamPath: string, prompt: string, { startKey, expectedRevision, followsRunId, startAt, fromCheckpointId, retryOfRunId, signal }: StartRunOptions): Promise<RunRecord> {
-  const response = await fetch('/api/runs', {
+  const response = await daemonFetch('/api/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     // The lineage keys are omitted rather than sent as null: a plain run's body stays byte-identical
@@ -183,42 +185,42 @@ export async function startRun(teamPath: string, prompt: string, { startKey, exp
  * landed, and the only way the client can tell them apart.
  */
 export async function findRunByStartKey(startKey: string, signal?: AbortSignal): Promise<RunRecord | null> {
-  const response = await fetch(`/api/runs?startKey=${encodeURIComponent(startKey)}`, { signal, cache: 'no-store' })
+  const response = await daemonFetch(`/api/runs?startKey=${encodeURIComponent(startKey)}`, { signal, cache: 'no-store' })
   if (response.status === 404) return null
   return readRun<RunRecord>(response)
 }
 
 export async function answerRun(runId: string, node: string, text: string, sendBack?: string): Promise<RunRecord> {
-  return readRun<RunRecord>(await fetch(`/api/runs/${encodeURIComponent(runId)}/answers`, {
+  return readRun<RunRecord>(await daemonFetch(`/api/runs/${encodeURIComponent(runId)}/answers`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ node, text, ...(sendBack ? { sendBack } : {}) }), cache: 'no-store',
   }))
 }
 
 export async function askRunAgent(runId: string, agent: string, text: string): Promise<{ agent: string; reply: string }> {
-  return readRun(await fetch(`/api/runs/${encodeURIComponent(runId)}/agents/${encodeURIComponent(agent)}/ask`, {
+  return readRun(await daemonFetch(`/api/runs/${encodeURIComponent(runId)}/agents/${encodeURIComponent(agent)}/ask`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }), cache: 'no-store',
   }))
 }
 
 export async function cancelRun(runId: string): Promise<RunRecord> {
-  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', cache: 'no-store' })
+  const response = await daemonFetch(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', cache: 'no-store' })
   return readRun<RunRecord>(response)
 }
 
 export async function fetchRun(runId: string, signal?: AbortSignal): Promise<RunRecord> {
-  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}`, { signal, cache: 'no-store' })
+  const response = await daemonFetch(`/api/runs/${encodeURIComponent(runId)}`, { signal, cache: 'no-store' })
   return readRun<RunRecord>(response)
 }
 
 export async function fetchSchedules(signal?: AbortSignal): Promise<ScheduleEntry[]> {
-  const response = await fetch('/api/schedules', { signal, cache: 'no-store' })
+  const response = await daemonFetch('/api/schedules', { signal, cache: 'no-store' })
   return readRun<ScheduleEntry[]>(response)
 }
 
 /** "Run the routine now": expands the schedule's prompt, runs it, and delivers like a timed fire. */
 export async function runScheduleNow(teamPath: string): Promise<RunRecord> {
-  const response = await fetch('/api/schedules/run', {
+  const response = await daemonFetch('/api/schedules/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ teamPath }),
@@ -228,7 +230,7 @@ export async function runScheduleNow(teamPath: string): Promise<RunRecord> {
 }
 
 export async function fetchRuns(signal?: AbortSignal): Promise<RunRecord[]> {
-  const response = await fetch('/api/runs', { signal, cache: 'no-store' })
+  const response = await daemonFetch('/api/runs', { signal, cache: 'no-store' })
   return readRun<RunRecord[]>(response)
 }
 
@@ -324,7 +326,7 @@ export interface InstructionFile {
 }
 
 export async function fetchInstructions(path: string, signal?: AbortSignal): Promise<InstructionFile> {
-  const response = await fetch(`/api/instructions?path=${encodeURIComponent(path)}`, { signal })
+  const response = await daemonFetch(`/api/instructions?path=${encodeURIComponent(path)}`, { signal })
   if (!response.ok) {
     let message = response.statusText
     try {

@@ -3,13 +3,14 @@ import { ChipDot } from '../ui/glyphs'
 
 // §9.5: the product's only modal, because there is no document to fall back to.
 export function ParseFailureModal({ failure, path }: { failure: LoadFailure; path?: string | null }) {
+  const title = failure.kind === 'shape' ? 'This file isn’t a LoomWatch team.' : 'This file isn’t valid YAML.'
   return (
     <div className="lw-modal-scrim">
-      <div role="alertdialog" aria-modal="true" aria-label="Team file could not be parsed" className="e2 lw-dialog">
+      <div role="alertdialog" aria-modal="true" aria-label={title} className="e2 lw-dialog">
         <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
           <ChipDot state="invalid" />
           <span>
-            <div className="t-title">This file isn't valid YAML.</div>
+            <div className="t-title">{title}</div>
             <div className="t-meta" style={{ color: 'var(--color-ink-3)' }}>{failure.message}</div>
           </span>
         </div>

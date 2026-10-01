@@ -30,12 +30,17 @@ export const DOCK = {
   /** A schedule keeps the dock column, above the Prompt, so neither card hides the other. */
   scheduleOffsetY: -132,
   evidenceW: 190,
-  evidenceH: 68,
-  /** The fan opens below its agent, clear of the left-to-right spine and of the two anchors. */
-  fanCols: 2,
+  /** The rendered height of an evidence card (`.activity-ent`: order, name, status, detail). */
+  evidenceH: 90,
+  /**
+   * The fan opens below its agent as one column, left-aligned with the agent and below anything
+   * already hanging from it, so the agent's resources and its evidence read as one list — which
+   * `lib/canvas/ports.ts` draws as a tree off a single trunk.
+   */
+  fanCols: 1,
   fanGapX: 208,
-  fanGapY: 82,
-  fanOffsetX: 12,
+  fanGapY: 104,
+  fanOffsetX: 0,
   fanOffsetY: 138,
   /** Helpers a run reveals are seeded below the entrypoint, never on top of it. */
   helperOffsetY: 300,
@@ -121,11 +126,13 @@ export interface Fan {
  * configured node (§15.2.3). Only one agent is ever fanned, so what React Flow renders is capped
  * at the agents plus one cluster instead of every event card.
  */
-export function fanEvidence(anchor: Point, ids: readonly string[]): Fan {
+export function fanEvidence(anchor: Point, ids: readonly string[], clearance: number = DOCK.fanOffsetY): Fan {
   const { shown, hidden } = visibleEvidence(ids)
+  // `clearance` starts the comb below whatever already hangs from the agent (its resources).
+  const top = Math.max(DOCK.fanOffsetY, clearance)
   const slot = (index: number): Point => ({
     x: anchor.x + DOCK.fanOffsetX + (index % DOCK.fanCols) * DOCK.fanGapX,
-    y: anchor.y + DOCK.fanOffsetY + Math.floor(index / DOCK.fanCols) * DOCK.fanGapY,
+    y: anchor.y + top + Math.floor(index / DOCK.fanCols) * DOCK.fanGapY,
   })
   return {
     shown: Object.fromEntries(shown.map((id, index) => [id, slot(index)])),

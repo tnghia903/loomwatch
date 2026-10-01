@@ -79,7 +79,7 @@ code, kbd, pre { font-family: var(--font-mono); }
 .panel { position: absolute; z-index: 40; }
 .panel.left   { left: var(--lw-panel-inset); }
 .panel.right  { right: var(--lw-panel-inset); }
-.panel.top    { top: var(--lw-panel-inset); }
+.panel.top    { top: var(--lw-panel-top, var(--lw-panel-inset)); }
 .panel.bottom { bottom: calc(var(--lw-panel-inset) + var(--lw-bottom-offset)); }
 .panel.cx     { left: 50%; transform: translateX(-50%); }
 
@@ -498,12 +498,7 @@ kbd.key {
 .node-rule { height: 1px; background: var(--color-hairline); flex: none; margin-top: auto; }
 .node-meta { display: flex; align-items: center; gap: var(--sp-2); color: var(--lw-node-meta); min-width: 0; flex: none; margin-top: var(--sp-2); }
 .node-meta .model { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.node-meta .cost { flex: none; color: var(--color-ink-2); }
 .node-meta .lock { color: var(--color-ink-3); flex: none; display: grid; }
-.budget-lane { height: 3px; flex: none; margin: var(--sp-2) -14px 0 -17px; background: var(--lw-budget-track); border-radius: 0 0 var(--r-lg) var(--r-lg); overflow: hidden; }
-.budget-lane > i { display: block; height: 100%; background: var(--lw-budget-fill); }
-.budget-lane.warn > i { background: var(--lw-budget-warn); }
-.budget-lane.over > i { background: var(--lw-budget-over); }
 /* pipeline step badge (top-left, outside) + validity dot (top-right, outside) */
 .node .step {
   position: absolute; left: -8px; top: -8px; width: 16px; height: 16px;

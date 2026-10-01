@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
+import { describeEvidence } from '../../lib/story/weft'
 import { formatOffset, type Evidence } from '../../lib/watch/events'
 import { EntityGlyph, StatusGlyph } from '../ui/glyphs'
 
@@ -30,11 +31,13 @@ export function ActivityPanel({ evidence, ownerLabel, onClose }: { evidence: Evi
   const status = evidence.status === 'succeeded' ? 'succeeded' : evidence.status === 'failed' || evidence.status === 'rejected' ? 'failed' : evidence.status === 'pending' ? 'starting' : 'running'
   const output = contentText(evidence.content) || (evidence.rawOutput !== null && evidence.rawOutput !== undefined ? pretty(evidence.rawOutput) : '')
   return (
-    <aside className="panel right top e1 lw-activity" aria-labelledby="activity-title" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
+    <aside className="panel right top e1 lw-activity" aria-labelledby="activity-title activity-raw" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
       <header className="insp-head">
         <span className="node-glyph"><EntityGlyph kind={evidence.kind} size={20} /></span>
         <span className="insp-text">
-          <div className="insp-title t-title" id="activity-title">{evidence.name}</div>
+          {/* Plain words first; the exact call, as recorded, right under it. */}
+          <div className="insp-title t-title" id="activity-title">{describeEvidence(ownerLabel.split(' · ')[0], evidence).replace(/\.$/, '')}</div>
+          <div className="insp-raw t-mono-sm" id="activity-raw" title={evidence.name}>{evidence.name}</div>
           <div className="insp-id t-mono">#{String(evidence.order).padStart(2, '0')} · {formatOffset(evidence.offsetMs)} · seq {evidence.seq}</div>
           <div className="insp-status t-micro"><StatusGlyph status={status} /> {evidence.status} observed activity</div>
         </span>

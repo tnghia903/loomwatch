@@ -815,7 +815,7 @@ mod tests {
     /// A scheduled team whose single agent is the shell-script harness at `harness`.
     fn scheduled_team_yaml(harness: &Path, schedule_yaml: &str) -> String {
         format!(
-            "schemaVersion: 1\nid: routine\nname: Routine team\nentrypoint: solo\nschedule:\n{schedule_yaml}agents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nid: routine\nname: Routine team\nentrypoint: solo\nschedule:\n{schedule_yaml}agents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n",
             harness.display()
         )
     }
@@ -1045,7 +1045,7 @@ mod tests {
         .unwrap();
         fs::write(
             dir.0.join("plain.yml"),
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
         )
         .unwrap();
         fs::write(
@@ -1194,7 +1194,7 @@ mod tests {
         .unwrap();
         fs::write(
             teams_root.join("plain.yaml"),
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
         )
         .unwrap();
         let archive = EventArchive::from_pool(pool);

@@ -639,10 +639,6 @@ mod tests {
             },
             model: "default".to_owned(),
             thinking_effort: None,
-            budget: crate::config::BudgetConfig {
-                limit_usd: 1.0,
-                warn_at_percent: 80,
-            },
             allow_recruiting: true,
             capabilities,
             memory: None,

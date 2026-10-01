@@ -9,17 +9,21 @@ interface BuildHeadingProps {
   checking: boolean
   saveState: SaveState
   documentChipState: SaveState
+  /** What stops an agent's app from starting on this computer, when something does. */
+  appProblem?: string | null
   onSave: () => void
   onRun: () => void
 }
 
 /** Build's heading. It says what to do next, not what the screen is called. */
-export function BuildHeading({ agentCount, isValid, checking, saveState, documentChipState, onSave, onRun }: BuildHeadingProps) {
+export function BuildHeading({ agentCount, isValid, checking, saveState, documentChipState, appProblem = null, onSave, onRun }: BuildHeadingProps) {
   const heading = agentCount === 0
-    ? { title: 'Add your first agent', detail: 'Click + next to an AI app on the left. You can add more agents and connect them later.' }
+    ? { title: 'Add your first agent', detail: 'Pick a job on the left, like Researcher or Writer. You can add more helpers and connect them later.' }
     : !isValid && !checking
       ? { title: 'Finish setting up', detail: 'Open the list at the top to see what still needs your attention.' }
-      : { title: 'Your team is ready', detail: 'Press Run team and describe what you want done. Add agents and connect them to hand work along.' }
+      : appProblem
+        ? { title: 'Finish setting up', detail: appProblem }
+        : { title: 'Your team is ready', detail: 'Press Run team and describe what you want done. Add agents and connect them to hand work along.' }
   return (
     <header className="build-workspace-heading">
       <div>

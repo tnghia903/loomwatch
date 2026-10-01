@@ -5,7 +5,7 @@ LoomWatch team files are YAML documents validated against
 version `1`; readers must reject a version they do not understand instead of guessing.
 
 The root document stores stable, user-authored configuration only: the team identity,
-entrypoint, optional responder, budgets, guard policy, agents, and configured pipeline edges. Observed edges,
+entrypoint, optional responder, guard policy, agents, and configured pipeline edges. Observed edges,
 agent status, and run events are runtime records archived in Postgres. Their shared wire
 shapes are defined as `$defs.Edge` and `$defs.RunEvent` in the same schema so Phase 02 and
 later can reference one contract.
@@ -58,24 +58,13 @@ depend on the document as a whole:
 - `Agent.model` stores the harness model id. Optional `Agent.thinkingEffort` stores the
   harness's reasoning-effort id separately; at session start LoomWatch applies both through
   ACP configuration. Older combined selectors such as `gpt-6-astra[high]` remain readable.
-- Each `budget.limitUsd` is a pre-delegation admission threshold and must be finite. A zero
-  agent limit prevents that agent from being admitted through `dispatch`, `ask`, or
-  `handoff`. When present, the team threshold is checked independently of agent thresholds,
-  and need not equal or exceed their sum. These checks do not stop the entrypoint or an
-  in-flight turn, so observed spend may exceed a threshold. Loaders apply `warnAtPercent:
-  80` whenever it is absent; schema defaults are annotations only.
-- The Team Bus accounts non-negative finite `costUsd` values from normalized `usage` events
-  and from `turn_end.payload.usage`. These values are spend deltas supplied by the ACP
-  harness; the bus does not infer whether a reported value is cumulative, so harnesses must
-  normalize cumulative provider totals into deltas. Before `dispatch`, `ask`, or `handoff`
-  starts another process, the bus checks the target agent and team totals, archives one
-  `usage` warning per scope after its threshold, and archives a failed `tool_update` when it
-  refuses the delegation.
+- `budget` (team or agent level) is retired ([ADR 0027](decisions/0027-retire-cost-budgets.md)).
+  Readers accept it in any shape and ignore it, so older team files still load; writers must not
+  add it. LoomWatch neither tracks spend nor refuses a delegation because of it.
 - `usage` payloads are discriminated (`$defs.UsagePayload` in the schema): harness-reported
-  updates carry `sessionUpdate: "usage_update"` (or a bare `costUsd` spend delta), while
-  LoomWatch-local control-plane events carry `phase` — today only `phase: "budget_warning"`
-  with `scope`, `spentUsd`, `limitUsd`, and `warnAtPercent`. Control-plane `usage` events are
-  excluded from spend accounting by contract, not by the absence of `costUsd`.
+  updates carry `sessionUpdate: "usage_update"` (or a bare `costUsd` delta) and are archived as
+  evidence only. Runs archived before ADR 0027 may also hold LoomWatch's own
+  `phase: "budget_warning"` events; nothing writes them now.
 - `guards.maxDispatchDepth` and `guards.maxConcurrentDispatches` both default to `8` when
   absent. The Team Bus refuses delegation beyond the depth limit and refuses a background
   `dispatch` or `handoff` while the configured number of those tasks is still running.
@@ -251,7 +240,7 @@ cannot be reconstructed safely from the normalized projection.
 ## Operator review stops and questions
 
 A pipeline agent may declare `kind: operator` with `role` as its question and optional `name`
-(default `You`). It must omit `spawn`, `model`, `thinkingEffort` and `budget`. Operator nodes
+(default `You`). It must omit `spawn`, `model` and `thinkingEffort`. Operator nodes
 cannot be the entrypoint or appear in team mode; consecutive stops are allowed. The app must
 start a pipeline containing stops, so answers have a loopback operator endpoint.
 

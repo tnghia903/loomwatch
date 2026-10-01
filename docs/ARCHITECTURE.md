@@ -94,14 +94,15 @@ text where it doesn't.
 
 ### Guards — enforced in the bus, never in prompts
 
-A delegation loop burning several vendors' API keys overnight is the failure mode that
-actually costs money. All four are enforced server-side so no agent can prompt past them:
+A delegation loop burning several vendors' allowances overnight is the failure mode that
+actually costs money. All three are enforced server-side so no agent can prompt past them:
 
 - **Depth cap** — `dispatch` carries a depth counter, refused past N
 - **Fan-out cap** — only N background `dispatch`/`handoff` tasks may be outstanding
 - **Cycle detection** — A → B → A is rejected
-- **Budget admission** — new delegations are refused at per-agent or per-team thresholds;
-  entrypoint and in-flight turns are not interrupted
+
+Dollar budgets were a fourth guard until [ADR 0027](decisions/0027-retire-cost-budgets.md)
+retired them: on a Claude or Codex subscription a dollar figure measures nothing you pay.
 
 `handoff` marks the caller stopped in Team Bus status, but ACP provides no cancellation hook
 for the active caller turn. The caller is expected to return after the successful tool call;
@@ -134,7 +135,7 @@ helpers within its own step, with a per-node lock available to forbid it.
 - The agent panel lists **detected harnesses** (discovered on `PATH`), **configured
   endpoints**, and **saved role presets**.
 - Dragging one onto the canvas instantiates a configured agent node; name, role, model,
-  working directory and budget are set on the node.
+  and working directory are set on the node.
 - **Two edge layers render together:** configured edges (solid, drawn by the user, real
   constraints) and observed edges (animated, derived from Team Bus events).
 - **The canvas is a visual editor over version-controlled YAML on disk.** Team design must
@@ -143,7 +144,7 @@ helpers within its own step, with a per-node lock available to forbid it.
 ### Data model
 
 ```
-Agent    { id, name, role, spawn{cmd,args,env,cwd}, model, budget, status }
+Agent    { id, name, role, spawn{cmd,args,env,cwd}, model, status }
 Edge     { from, to, layer: configured|observed, kind: sequence|dispatch|ask|handoff, ts }
 RunEvent { id, sessionId, agentId, seq, ts, kind: message|thought|tool_call|tool_update|
                                                    plan|permission|session_meta|usage|

@@ -8,6 +8,7 @@ import { parse } from 'yaml'
 import type { DetectedHarness } from '../harnesses'
 import { rankHarnesses, TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath } from './templates'
 import type { TeamDocument } from './types'
+import { teamIdForPath } from './useTeamDocument'
 import { compileTeamValidator } from './validation'
 
 // The real schema the daemon serves, so a template can never drift into a file the daemon refuses.
@@ -46,6 +47,19 @@ describe('team templates', () => {
   it('never reuses a file name that already exists', () => {
     expect(uniqueTeamPath('Blog writer', [])).toBe('blog-writer.yaml')
     expect(uniqueTeamPath('Blog writer', ['blog-writer.yaml', 'Blog-Writer-2.yaml'])).toBe('blog-writer-3.yaml')
+  })
+
+  // The Notebook is filed by team id. Two teams named "Trip planner" got the same id and shared
+  // one Notebook; the id now comes from the file, which is unique.
+  it('gives a second team with the same name its own id, taken from its file', () => {
+    const path = uniqueTeamPath('Trip planner', ['trip-planner.yaml'])
+    expect(path).toBe('trip-planner-2.yaml')
+    expect(teamIdForPath(path)).toBe('trip-planner-2')
+    expect(teamIdForPath('nested/Café Plans.YML')).toBe('cafe-plans')
+    const doc = parse(templateTeamYaml('single', 'Trip planner', harness('claude'), 'sonnet', new Date(), teamIdForPath(path))) as TeamDocument
+    expect(doc.id).toBe('trip-planner-2')
+    expect(doc.name).toBe('Trip planner')
+    expect(validate(doc).valid).toBe(true)
   })
 
   it('prefers apps most people have signed in, and drops ones that cannot run', () => {

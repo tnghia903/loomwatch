@@ -1,7 +1,6 @@
 import { X } from 'lucide-react'
 import { createElement, useState } from 'react'
 
-import { formatUsd } from '../../lib/format'
 import type { HarnessModel } from '../../lib/harnesses'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { splitModelSelector } from '../../lib/models'
@@ -17,8 +16,6 @@ export interface InspectorProps {
   onModelChange: (value: string) => void
   onThinkingEffortChange?: (value: string) => void
   onCwdChange: (value: string) => void
-  onBudgetChange: (limitUsd: number) => void
-  onWarnAtChange?: (warnAtPercent: number) => void
   onAllowRecruitingChange: (allow: boolean) => void
   /** docs/TEAM_MEMORY.md §5: per-agent `memory.brief` / `memory.deliverAs`. */
   onMemoryBriefChange?: (readsBrief: boolean) => void
@@ -48,13 +45,10 @@ export interface InspectorProps {
 // UX_REDESIGN §5.4: three zones in the order the operator thinks — IDENTITY (what stands
 // between a drop and a valid save), BEHAVIOUR (what the agent may do), PROCESS (collapsed).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
-export function Inspector({ node, isEntrypoint, isResponder, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onBudgetChange, onWarnAtChange, onAllowRecruitingChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onPromoteResponder, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false }: InspectorProps) {
+export function Inspector({ node, isEntrypoint, isResponder, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onPromoteResponder, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false }: InspectorProps) {
   const { agent, runtime } = node.data
   const [processOpen, setProcessOpen] = useState(false)
   const status = runtime?.status ?? agent.status ?? 'idle'
-  const spent = runtime?.costUsd ?? null
-  const pct = runtime?.spentPct ?? 0
-  const lane = pct >= 100 ? 'over' : pct >= (agent.budget?.warnAtPercent ?? 80) ? 'warn' : ''
   const parsedSelector = splitModelSelector(agent.model ?? '')
   const selectableModelsById = new Map<string, HarnessModel>(modelOptions.map((model) => [model.id, model]))
   if (parsedSelector.modelId && !selectableModelsById.has(parsedSelector.modelId)) selectableModelsById.set(parsedSelector.modelId, { id: parsedSelector.modelId, name: parsedSelector.modelId, thinkingEfforts: [] })
@@ -194,15 +188,6 @@ export function Inspector({ node, isEntrypoint, isResponder, onRename, onModelCh
             <span className="txt"><b className="t-body">Brief in its own memory file</b><span className="t-meta">{nativeFile ? "Written into the managed workspace as the harness's own memory file, which a compaction does not reach" : 'Packet only — it keeps its declared folder, and a compaction can summarise the Brief away'}</span></span>
           </button>
         )}
-        <div className={`field ${zoneClass('limitUsd')}`}>
-          <label className="t-meta">Budget</label>
-          <div className="row2">
-            <input className="input mono" data-agent-field="limitUsd" type="number" min={0} step={0.01} value={(agent.budget?.limitUsd ?? 0)} readOnly={readOnly} aria-label="Budget limit in USD" onChange={(event) => onBudgetChange(Number(event.target.value))} onBlur={() => onFieldBlur('limitUsd')} />
-            <input className="input mono" type="number" min={1} max={100} value={agent.budget?.warnAtPercent ?? 80} readOnly={readOnly || !onWarnAtChange} aria-label="Warn at percent" onChange={(event) => onWarnAtChange?.(Number(event.target.value))} />
-          </div>
-          <div className={`budget-lane ${lane}`} style={{ margin: '6px 0 0', borderRadius: 'var(--r-full)' }} aria-hidden="true"><i style={{ width: `${Math.min(100, pct)}%` }} /></div>
-          <span className="hint t-mono-sm">{hint('limitUsd', spent !== null ? `${formatUsd(spent)} spent of ${formatUsd((agent.budget?.limitUsd ?? 0))} · warn at ${agent.budget?.warnAtPercent ?? 80}%` : `${formatUsd((agent.budget?.limitUsd ?? 0))} limit · warn at ${agent.budget?.warnAtPercent ?? 80}%`)}</span>
-        </div>
       </div>
 
       <div className="zone">

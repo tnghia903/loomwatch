@@ -8,11 +8,6 @@ export interface SpawnConfig {
   cwd: string
 }
 
-export interface BudgetConfig {
-  limitUsd: number
-  warnAtPercent?: number
-}
-
 export interface GuardsConfig {
   maxDispatchDepth?: number
   maxConcurrentDispatches?: number
@@ -50,7 +45,6 @@ export interface AgentConfig {
   spawn?: SpawnConfig
   model?: string
   thinkingEffort?: string
-  budget?: BudgetConfig
   allowRecruiting?: boolean
   /** Capabilities the daemon delivers into this agent's workspace before the run. Executable, so
       it lives in the team file and saves explicitly — unlike the card positions in the sidecar. */
@@ -109,7 +103,6 @@ export interface TeamDocument {
   entrypoint: string
   /** Optional explicit owner of the canonical team output. */
   responder?: string
-  budget?: BudgetConfig
   guards?: GuardsConfig
   conversation?: { stop?: { keepAliveMinutes?: number }; [key: string]: unknown }
   schedule?: ScheduleConfig

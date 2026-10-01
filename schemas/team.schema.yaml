@@ -23,8 +23,7 @@ properties:
     type: string
     minLength: 1
   budget:
-    description: Team-wide pre-delegation admission budget, checked in addition to agent budgets.
-    $ref: "#/$defs/Budget"
+    $ref: "#/$defs/RetiredBudget"
   guards:
     description: Server-enforced limits for delegation through the Team Bus.
     $ref: "#/$defs/Guards"
@@ -396,22 +395,12 @@ $defs:
         type: string
         minLength: 1
 
-  Budget:
-    type: object
-    additionalProperties: false
-    required:
-      - limitUsd
-    properties:
-      limitUsd:
-        description: Spend threshold used to refuse new Team Bus delegations.
-        type: number
-        minimum: 0
-      warnAtPercent:
-        description: Percentage of limitUsd at which LoomWatch emits a warning.
-        type: integer
-        minimum: 1
-        maximum: 100
-        default: 80
+  RetiredBudget:
+    description: >-
+      Retired by ADR 0027: LoomWatch no longer tracks spend or enforces a budget. Accepted at team
+      and agent level, in any shape, and ignored, so team files written before then still load.
+      Writers must not add it.
+    deprecated: true
 
   Guards:
     type: object
@@ -430,8 +419,8 @@ $defs:
 
   Agent:
     description: >-
-      One node of the team. A `harness` node runs an ACP harness and must say how (spawn, model,
-      budget). An `operator` node is the person at the keyboard standing in the pipeline: it has an
+      One node of the team. A `harness` node runs an ACP harness and must say how (spawn and
+      model). An `operator` node is the person at the keyboard standing in the pipeline: it has an
       id, sits on edges and takes part in the topological order, and instead of a harness it has a
       question — its `role` — which is what the panel shows when the pipeline reaches it. See
       docs/TEAM_MEMORY.md, "The operator is a node".
@@ -442,7 +431,7 @@ $defs:
       - role
     oneOf:
       - title: Harness node
-        description: Runs an ACP harness, so it must say how to start it and what it may spend.
+        description: Runs an ACP harness, so it must say how to start it and which model to select.
         properties:
           kind:
             const: harness
@@ -450,12 +439,11 @@ $defs:
           - name
           - spawn
           - model
-          - budget
       - title: Operator node
         description: >-
-          A review stop. `spawn`, `model` and `budget` are not merely optional here but refused:
-          an operator node spawns nothing, selects no model and bills nobody, so declaring one
-          would make the file say something the daemon does not do. `name` defaults to "You".
+          A review stop. `spawn`, `model` and `thinkingEffort` are not merely optional here but
+          refused: an operator node spawns nothing and selects no model, so declaring one would
+          make the file say something the daemon does not do. `name` defaults to "You".
         properties:
           kind:
             const: operator
@@ -465,7 +453,6 @@ $defs:
           anyOf:
             - required: [spawn]
             - required: [model]
-            - required: [budget]
             - required: [thinkingEffort]
     properties:
       id:
@@ -501,7 +488,7 @@ $defs:
         type: string
         minLength: 1
       budget:
-        $ref: "#/$defs/Budget"
+        $ref: "#/$defs/RetiredBudget"
       allowRecruiting:
         description: Whether this agent may recruit helpers while executing its own step.
         type: boolean
@@ -882,10 +869,9 @@ $defs:
     description: >-
       Either a harness-reported usage update or a LoomWatch-local control-plane
       event, discriminated structurally. Harness updates carry sessionUpdate
-      (the ACP update archived verbatim, spend deltas as costUsd; cost_usd is
-      accepted as a legacy alias). A bare spend delta carries only costUsd.
-      LoomWatch-local events carry phase and are never spend: they are excluded
-      from budget accounting by contract, not by the absence of costUsd.
+      (the ACP update archived verbatim). A bare spend delta carries only
+      costUsd. LoomWatch reads neither as spend: budgets were retired by
+      ADR 0027, and these are kept as evidence only.
     type: object
     anyOf:
       - description: ACP usage_update, archived verbatim.
@@ -895,7 +881,7 @@ $defs:
             const: usage_update
         required:
           - sessionUpdate
-      - description: Bare harness-supplied spend delta, counted toward budgets.
+      - description: Bare harness-supplied spend delta, archived as evidence.
         type: object
         properties:
           costUsd:
@@ -903,7 +889,9 @@ $defs:
             minimum: 0
         required:
           - costUsd
-      - description: LoomWatch-local control-plane event; never counted as spend.
+      - description: >-
+          Retired budget warning. LoomWatch stopped writing it with ADR 0027; runs archived before
+          then still contain it, so it stays valid here.
         type: object
         additionalProperties: false
         properties:

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { RunEvent } from '../lib/watch/events'
@@ -16,11 +16,11 @@ const flowRuntime = vi.hoisted(() => ({
 const documentState = vi.hoisted(() => ({
   path: '/teams/demo.yaml',
   nodes: [
-    { id: 'researcher', type: 'agent', position: { x: 0, y: 0 }, selected: false, data: { label: 'Researcher', agent: { id: 'researcher', name: 'Researcher', role: 'Research', model: 'demo', status: 'idle', spawn: { cmd: 'fake', args: [] as string[], env: {}, cwd: '.' }, budget: { limitUsd: 5 } }, isEntrypoint: true } },
-    { id: 'reviewer', type: 'agent', position: { x: 300, y: 0 }, selected: false, data: { label: 'Reviewer', agent: { id: 'reviewer', name: 'Reviewer', role: 'Review', model: 'demo', status: 'idle', spawn: { cmd: 'fake', args: [] as string[], env: {}, cwd: '.' }, budget: { limitUsd: 3 } } } },
+    { id: 'researcher', type: 'agent', position: { x: 0, y: 0 }, selected: false, data: { label: 'Researcher', agent: { id: 'researcher', name: 'Researcher', role: 'Research', model: 'demo', status: 'idle', spawn: { cmd: 'fake', args: [] as string[], env: {}, cwd: '.' } }, isEntrypoint: true } },
+    { id: 'reviewer', type: 'agent', position: { x: 300, y: 0 }, selected: false, data: { label: 'Reviewer', agent: { id: 'reviewer', name: 'Reviewer', role: 'Review', model: 'demo', status: 'idle', spawn: { cmd: 'fake', args: [] as string[], env: {}, cwd: '.' } } } },
   ],
   edges: [{ id: 'researcher->reviewer', source: 'researcher', target: 'reviewer', data: { kind: 'sequence', ts: '' }, selected: false }],
-  entrypoint: 'researcher', responder: null as string | null, entrypointProblem: null, teamGuards: null, teamBudget: null, teamSchedule: null,
+  entrypoint: 'researcher', responder: null as string | null, entrypointProblem: null, teamGuards: null, teamSchedule: null,
   saveState: 'clean', documentChipState: 'clean', saveError: null, documentProblems: [], fieldProblemsByAgent: new Map(), isValid: true,
   readOnlyReason: null, fileGone: false, loadFailure: null, externalChange: null, diskNotice: null, yamlPreview: 'a: 1', loadedYaml: 'a: 1',
   canUndo: false, canRedo: false, refusal: null, mode: 'pipeline',
@@ -29,12 +29,13 @@ const documentState = vi.hoisted(() => ({
   createNewDocument: vi.fn(), reloadFromDisk: vi.fn(), keepMine: vi.fn(), useDisk: vi.fn(), saveCopy: vi.fn(), layoutNodes: vi.fn(),
   settleNodeCollision: vi.fn(), capturePositionHistory: vi.fn(), undo: vi.fn(), redo: vi.fn(), onNodesChange: vi.fn(), onEdgesChange: vi.fn(),
   onConnect: vi.fn(), addAgentFromDrop: vi.fn(), save: vi.fn(async () => true), touchField: vi.fn(), renameAgent: vi.fn(), updateAgentModel: vi.fn(),
-  updateAgentCwd: vi.fn(), updateAgentBudget: vi.fn(), updateAgentWarnAt: vi.fn(), updateAgentAllowRecruiting: vi.fn(), promoteEntrypoint: vi.fn(), promoteResponder: vi.fn(),
-  removeAgent: vi.fn(), updateTeamGuards: vi.fn(), updateTeamBudget: vi.fn(), updateTeamSchedule: vi.fn(), dismissRefusal: vi.fn(), keepLastEdgeRemoval: vi.fn(), undoLastEdgeRemoval: vi.fn(),
+  updateAgentCwd: vi.fn(), updateAgentAllowRecruiting: vi.fn(), promoteEntrypoint: vi.fn(), promoteResponder: vi.fn(),
+  removeAgent: vi.fn(), updateTeamGuards: vi.fn(), updateTeamSchedule: vi.fn(), dismissRefusal: vi.fn(), keepLastEdgeRemoval: vi.fn(), undoLastEdgeRemoval: vi.fn(),
   updateAgentMemory: vi.fn(), addBriefEntry: vi.fn(), removeBriefEntry: vi.fn(),
   // ADR 0016: `memory.inherits` is what the canvas draws memory cards from, and agent positions
   // arrive from the sidecar through `applyPositions` — neither dirties the document.
   memoryInherits: [] as Array<{ team?: string; pack?: string; appliesTo?: string[] }>,
+  briefPaths: [] as string[], renameTeam: vi.fn(),
   applyPositions: vi.fn(), addMemoryInherit: vi.fn(), removeMemoryInherit: vi.fn(), excludeInheritedBrief: vi.fn(),
   setAgentCapabilities: vi.fn(), updateAgentThinkingEffort: vi.fn(),
   checkDiskRevision: vi.fn(async () => {}), currentRevision: () => 'rev-7',
@@ -370,7 +371,8 @@ describe('Workspace', () => {
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
     fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('connection lost')
+    // A dropped connection is said in plain words, not as the browser's TypeError.
+    expect(await screen.findByRole('alert')).toHaveTextContent('Can’t reach the LoomWatch server')
     expect(screen.getByLabelText('What should the team do?')).toHaveValue('Summarise the repo')
     fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
     await waitFor(() => expect(startKeys).toHaveLength(2))
@@ -694,7 +696,7 @@ describe('Workspace', () => {
       const originalSteps = documentState.pipelineSteps
       documentState.nodes = [...originalNodes, {
         id: 'new-agent', type: 'agent', position: { x: 600, y: 0 }, selected: false,
-        data: { label: 'New Agent', agent: { id: 'new-agent', name: 'New Agent', role: 'Unwired', model: 'demo', status: 'idle', spawn: { cmd: 'fake', args: [], env: {}, cwd: '.' }, budget: { limitUsd: 1 } } },
+        data: { label: 'New Agent', agent: { id: 'new-agent', name: 'New Agent', role: 'Unwired', model: 'demo', status: 'idle', spawn: { cmd: 'fake', args: [], env: {}, cwd: '.' } } },
       }]
       // This is intentionally how pipelineOrder represents an invalid draft: the orphan remains
       // inspectable at the end of the list, but it is not part of the entrypoint's execution path.
@@ -1208,5 +1210,62 @@ describe('Connections entry point', () => {
     // The menu closes behind it, like every other item here.
     expect(screen.queryByRole('menuitem', { name: 'Connections…' })).not.toBeInTheDocument()
     Object.defineProperty(window, 'location', { configurable: true, value: real })
+  })
+})
+
+// A team shared by a colleague names an app this computer does not have. Build used to say "Your
+// team is ready" and the run failed at once with `spawn_failed`; now the daemon is asked first.
+describe('an agent whose app is not on this computer', () => {
+  function answerCommands(status: 'not_found' | 'found') {
+    const fallback = globalThis.fetch
+    const asked: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('/api/commands?')) {
+        asked.push(url)
+        return new Response(JSON.stringify({ commands: [{ cmd: 'fake', status }] }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return fallback(input, init)
+    }))
+    return asked
+  }
+
+  it('is named on its card and in the heading, and Run is blocked with the reason', async () => {
+    const asked = answerCommands('not_found')
+    renderWorkspace()
+    expect(await screen.findByRole('heading', { name: 'Finish setting up' })).toBeInTheDocument()
+    expect(asked).toEqual(['/api/commands?cmd=fake'])
+    expect(screen.getByText('2 agents’ apps can’t start on this computer: Researcher, Reviewer. Open the list at the top to see what to change.')).toBeInTheDocument()
+    expect(screen.getByText('Researcher’s app “fake” isn’t installed on this computer.')).toHaveClass('build-node-app-problem')
+    expect(screen.getByText('Reviewer’s app “fake” isn’t installed on this computer.')).toHaveClass('build-node-app-problem')
+    expect(screen.getByRole('button', { name: /2 things to finish, open team switcher/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+    // The planned stages say so too, rather than "Ready" above a composer that refuses to run.
+    const stages = screen.getByRole('list', { name: 'Team stages' })
+    expect(within(stages).getAllByText('Can’t start')).toHaveLength(2)
+    expect(within(stages).queryByText('Ready')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
+    const reason = '2 agents’ apps can’t start on this computer: Researcher, Reviewer.'
+    expect(screen.getByText(reason)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Run ↵/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Run ↵/ })).toHaveAttribute('title', reason)
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+  })
+
+  // The counterfactual: the same team, with its app installed, is ready and runs.
+  it('leaves a team whose apps are installed ready to run', async () => {
+    const asked = answerCommands('found')
+    renderWorkspace()
+    await waitFor(() => expect(asked).toHaveLength(1))
+    expect(await screen.findByRole('heading', { name: 'Your team is ready' })).toBeInTheDocument()
+    expect(document.querySelector('.build-node-app-problem')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+    expect(within(screen.getByRole('list', { name: 'Team stages' })).getAllByText('Ready')).toHaveLength(2)
+    fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
+    // Ready, the composer sends with its own "Run team" arrow; blocked, it showed a disabled "Run ↵".
+    expect(screen.getByRole('button', { name: 'Run team' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: /^Run ↵/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/can’t start on this computer/)).not.toBeInTheDocument()
   })
 })

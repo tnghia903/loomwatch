@@ -37,7 +37,6 @@ describe('nodeFromDrop', () => {
             role: '',
             model: '',
             spawn: { cmd: 'opencode', args: ['acp'], env: {}, cwd: '.' },
-            budget: { limitUsd: 5 },
             allowRecruiting: true,
           },
         },

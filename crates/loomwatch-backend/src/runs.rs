@@ -534,6 +534,17 @@ pub struct RunRegistry {
     store: Option<RunStore>,
 }
 
+/// Opaque: the records are the API's to report, and the REST router's state only needs to be
+/// printable as a whole.
+impl std::fmt::Debug for RunRegistry {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RunRegistry")
+            .field("durable", &self.store.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 impl RunRegistry {
     /// A registry backed by the `runs` table. Records still live in the cache; this is what makes
     /// them outlive the process.
@@ -754,6 +765,21 @@ impl RunRegistry {
             .filter_map(|run_id| inner.runs.get(run_id))
             .map(|entry| entry.record.clone())
             .collect()
+    }
+
+    /// The newest run of `team_path` (normalised, relative to the teams root) that has not
+    /// finished. A run waiting on the operator is `running`, so it counts; a record a previous
+    /// process left unfinished does not, because [`Self::reload`] marked it failed.
+    #[must_use]
+    pub fn live_run_for(&self, team_path: &str) -> Option<RunRecord> {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        inner
+            .order
+            .iter()
+            .rev()
+            .filter_map(|run_id| inner.runs.get(run_id))
+            .find(|entry| entry.record.team_path == team_path && !entry.record.status.is_terminal())
+            .map(|entry| entry.record.clone())
     }
 
     /// `queued → starting`; stamps `started_at`. `false` when the run was cancelled first.
@@ -2502,7 +2528,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
             let first = stage("stage-a", "a done", true);
             let second = stage("stage-b", "b done", false);
             let yaml = format!(
-                "schemaVersion: 1\nid: chain\nname: Two-stage chain\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: first\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n  - id: b\n    name: B\n    role: second\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\nedges:\n  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
+                "schemaVersion: 1\nid: chain\nname: Two-stage chain\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: first\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n  - id: b\n    name: B\n    role: second\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\nedges:\n  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
                 first.display(),
                 second.display()
             );
@@ -2513,7 +2539,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
 
         fn write_team(&self, name: &str, harness: &Path) -> PathBuf {
             let yaml = format!(
-                "schemaVersion: 1\nid: fake\nname: Fake harness team\nentrypoint: solo\nagents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n",
+                "schemaVersion: 1\nid: fake\nname: Fake harness team\nentrypoint: solo\nagents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n",
                 harness.display()
             );
             let path = self.0.join(name);
@@ -2573,7 +2599,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     #[test]
     fn registry_transitions_are_monotonic_and_terminal_states_never_change() {
         let team = TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\n  - id: b\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\nedges:\n  - {from: a, to: b, layer: configured, kind: sequence, ts: \"2026-09-10T00:00:00Z\"}\n",
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n  - id: b\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\nedges:\n  - {from: a, to: b, layer: configured, kind: sequence, ts: \"2026-09-10T00:00:00Z\"}\n",
         )
         .unwrap();
         let record =
@@ -2644,7 +2670,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     #[test]
     fn queued_record_uses_the_explicit_team_responder() {
         let team = TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nresponder: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\n  - id: b\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\nedges:\n  - {from: a, to: b, layer: configured, kind: sequence, ts: \"2026-09-10T00:00:00Z\"}\n",
+            "schemaVersion: 1\nentrypoint: a\nresponder: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n  - id: b\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\nedges:\n  - {from: a, to: b, layer: configured, kind: sequence, ts: \"2026-09-10T00:00:00Z\"}\n",
         )
         .expect("team with explicit responder");
 
@@ -2666,7 +2692,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     #[sqlx::test(migrations = "../../migrations")]
     async fn run_records_and_their_start_keys_survive_a_registry_reload(pool: sqlx::PgPool) {
         let team = TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
         )
         .expect("a valid team");
         let archive = EventArchive::from_pool(pool);
@@ -2755,7 +2781,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     #[sqlx::test(migrations = "../../migrations")]
     async fn a_daemon_restart_marks_a_record_no_process_owns_as_failed(pool: sqlx::PgPool) {
         let team = TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
         )
         .expect("a valid team");
         let archive = EventArchive::from_pool(pool);
@@ -3335,7 +3361,7 @@ exit 7
     #[test]
     fn start_keys_collapse_duplicates_and_bind_to_the_exact_request_fingerprint() {
         let team = TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
         )
         .unwrap();
         let original =
@@ -3375,7 +3401,7 @@ exit 7
     #[test]
     fn failed_runs_carry_the_code_and_stop_reason_the_daemon_reported() {
         let team = TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
         )
         .unwrap();
         let record =
@@ -3433,7 +3459,7 @@ exit 7
     #[test]
     fn delivery_is_recorded_on_finished_runs_and_null_until_then() {
         let team = TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
         )
         .unwrap();
         let record =
@@ -3606,7 +3632,7 @@ exit 7
     async fn a_start_key_can_be_recovered_by_get() {
         let dir = TeamsDir::new();
         let team = TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
         )
         .unwrap();
         let record =
