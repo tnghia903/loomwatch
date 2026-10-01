@@ -17,7 +17,7 @@ const pipeline: RunEvent[] = [
   event(8, 'tool_update', { callId: 'c3', status: 'failed', rawOutput: { error: 'unauthorized' } }),
   event(9, 'message', { role: 'agent', content: { type: 'text', text: 'Lead reply ' } }),
   event(10, 'message', { role: 'agent', content: { type: 'text', text: 'done.' } }),
-  event(11, 'turn_end', { stopReason: 'end_turn', usage: { costUsd: 0.25, totalTokens: 1200 } }),
+  event(11, 'turn_end', { stopReason: 'end_turn', usage: { totalTokens: 1200 } }),
   event(12, 'process', { phase: 'exited', exitCode: 0 }),
   event(13, 'process', { phase: 'spawned', pid: 2 }, 'reviewer'),
   event(14, 'message', { role: 'user', content: { type: 'text', text: 'Compare…\n\n## Results from preceding stages' } }, 'reviewer'),
@@ -31,7 +31,7 @@ describe('projectRun', () => {
     const projection = projectRun(pipeline, Infinity, { responder: 'reviewer' })
     expect(projection.prompt).toBe('Compare the two strategies.')
     expect(projection.agents.map((agent) => agent.id)).toEqual(['lead', 'reviewer'])
-    expect(projection.agents[0]).toMatchObject({ status: 'succeeded', taskState: 'DONE', reply: 'Lead reply done.', costUsd: 0.25, tokens: 1200, thoughts: 1, toolCalls: 3 })
+    expect(projection.agents[0]).toMatchObject({ status: 'succeeded', taskState: 'DONE', reply: 'Lead reply done.', tokens: 1200, thoughts: 1, toolCalls: 3 })
     expect(projection.agents[1].reply).toBe('Review: strategy B.')
     expect(projection.phase).toBe('succeeded')
   })

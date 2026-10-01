@@ -1,4 +1,6 @@
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, getSmoothStepPath, type EdgeProps } from '@xyflow/react'
+import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from '@xyflow/react'
+
+import { routeEdge } from './route'
 
 import type { ProvEdge, WeftEdge } from '../../lib/runs/graph'
 import type { ConfiguredEdge } from '../../lib/team-file/useTeamDocument'
@@ -10,8 +12,8 @@ function cx(...classes: Array<string | false | null | undefined>): string {
 // DESIGN_LANGUAGE §13: configured (warp) — quiet grey solid 1.5 px, filled arrowhead, static.
 // Where an observed edge coincides with it, no second line is drawn: the warp gains a 24 px
 // gold shuttle per event and a ×n count badge.
-export function WarpEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data }: EdgeProps<ConfiguredEdge>) {
-  const [path, labelX, labelY] = getSmoothStepPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, borderRadius: 12 })
+export function WarpEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data, selected }: EdgeProps<ConfiguredEdge>) {
+  const { path, labelX, labelY } = routeEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
   const extra = data as (ConfiguredEdge['data'] & { shuttle?: boolean; count?: number; anomaly?: boolean }) | undefined
   return (
     <>
@@ -21,14 +23,18 @@ export function WarpEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePos
         <EdgeLabelRenderer>
           <span className={cx('edge-label edge-badge t-mono-sm', extra.anomaly && 'alert')} style={{ left: labelX, top: labelY }} title={`${extra.count} observed event${extra.count === 1 ? '' : 's'} along this configured edge`}>×{extra.count}</span>
         </EdgeLabelRenderer>
-      ) : <EdgeLabelRenderer><span className="edge-label edge-badge t-mono-sm" style={{ left: labelX, top: labelY }}>hands off</span></EdgeLabelRenderer>}
+      ) : selected ? <EdgeLabelRenderer><span className="edge-label edge-badge t-mono-sm" style={{ left: labelX, top: labelY }}>hands off</span></EdgeLabelRenderer> : null}
     </>
   )
 }
 
 // Observed (weft): gold, dashed, travelling. dispatch 6 4; ask 2 3 both ends; handoff 10 4 heavy.
 export function WeftEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, markerStart, data }: EdgeProps<WeftEdge>) {
-  const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
+  // Observed calls keep the weft's curve on a plain relay; every other shape is the shared route.
+  const routed = routeEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
+  const [path, labelX, labelY] = routed.kind === 'forward'
+    ? getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
+    : [routed.path, routed.labelX, routed.labelY]
   const kind = data?.kind ?? 'dispatch'
   return (
     <>
@@ -49,23 +55,17 @@ export function BuildProvEdgeView(props: EdgeProps<ProvEdge>) {
 }
 
 export function ProvEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data, selected, build = false }: EdgeProps<ProvEdge> & { build?: boolean }) {
-  // `arc` keeps the run → output edge above the evidence field: it runs level from the run
-  // node, then drops vertically into the output's top handle (the prototype's `completes as`).
-  const [path, labelX, labelY] = build && data?.label === 'responds with'
-    ? [`M ${sourceX} ${sourceY} H ${sourceX + 24} V ${Math.min(sourceY, targetY) - 80} H ${targetX - 24} V ${targetY} H ${targetX}`, (sourceX + targetX) / 2, Math.min(sourceY, targetY) - 80]
-    : build
-    ? getSmoothStepPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, borderRadius: 12 })
-    : data?.resource
-    ? [`M ${sourceX} ${sourceY} V ${sourceY + 24} H ${targetX - 40} V ${targetY} H ${targetX}`, targetX - 44, targetY - 12]
-    : data?.arc
-    ? [`M ${sourceX} ${sourceY} C ${sourceX + (targetX - sourceX) * 0.55} ${sourceY}, ${targetX} ${Math.min(sourceY, targetY - 140)}, ${targetX} ${targetY}`, sourceX + (targetX - sourceX) * 0.55, sourceY - 10]
-    : getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, curvature: 0.35 })
+  // Every provenance line takes its shape from the sides its ports chose (lib/canvas/ports.ts).
+  const { path, labelX, labelY, kind } = routeEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
+  // A drop's word sits beside the line and a tree branch's left of the trunk, so lines stay unbroken.
+  const beside = kind === 'drop'
+  const before = kind === 'tree'
   return (
     <>
-      <BaseEdge id={id} path={path} markerEnd={markerEnd} className={cx('prov', data?.resource && 'resource-edge', data?.story && 'story-edge', data?.live && 'prov-live', data?.prior && 'prior-edge')} />
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} className={cx('prov', data?.resource && 'resource-edge', data?.story && 'story-edge', data?.live && 'prov-live', data?.prior && 'prior-edge', data?.arc && 'arc-edge')} />
       {data?.label && (
         <EdgeLabelRenderer>
-          <div className={cx('prov-label t-micro', data.story && 'story-label', data.live && 'prov-live-label', selected && data.onRemove && 'with-remove')} style={{ left: labelX, top: labelY + (data.labelOffset ?? 0) }}>
+          <div className={cx('prov-label t-micro', data.story && 'story-label', data.live && 'prov-live-label', selected && data.onRemove && 'with-remove', beside && 'beside', before && 'before', data.arc && 'arc-label')} style={{ left: labelX, top: labelY + (data.labelOffset ?? 0) }}>
             <span>{build ? ({ 'uses skill': 'requires', 'responds with': 'produces', 'uses tool': 'can use' }[data.label.toLowerCase()] ?? data.label.toLowerCase()) : data.label}</span>
             {selected && data.onRemove ? (
               <button

@@ -61,12 +61,12 @@ export interface SessionSummary {
    */
   task?: string | null
 }
-export interface WatchedAgent { id: string; status: AgentStatus; text: string; costUsd: number | null }
+export interface WatchedAgent { id: string; status: AgentStatus; text: string }
 export interface Delegation { id: string; from: string; to: string; kind: 'dispatch' | 'ask' | 'handoff'; status: string; seq: number }
 /**
  * Something the operator has to decide about. `evidenceId` names the recorded call that raised
  * it, where one exists, so the alert can open the thing itself instead of only naming its owner
- * — a crash, a budget warning and a non-`end_turn` stop have no call behind them and carry none.
+ * — a crash and a non-`end_turn` stop have no call behind them and carry none.
  */
 export interface Attention { id: string; seq: number; agentId: string; message: string; evidenceId?: string }
 
@@ -152,7 +152,6 @@ export interface ProjectedAgent {
   /** Calls opened but not yet paired to a terminal update — the tools-coverage fact (CONTRACT §12). */
   openCalls: number
   turns: number
-  costUsd: number | null
   tokens: number | null
   contextUsed: number | null
   contextSize: number | null
@@ -284,7 +283,7 @@ export interface RunProjection {
   startedAt: string | null
   updatedAt: string | null
   lastSeq: number
-  totals: { costUsd: number | null; thoughts: number; toolCalls: number; messages: number; agents: number }
+  totals: { thoughts: number; toolCalls: number; messages: number; agents: number }
   coverage: Record<CoverageKey, CategoryCoverage>
 }
 
@@ -597,7 +596,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
     if (!agent) {
       agent = {
         id, status: 'idle', taskState: 'READY', capture: 'recorded', task: 'Awaiting a task', text: '', reply: '', thoughtChars: 0, thoughts: 0,
-        toolCalls: 0, turns: 0, costUsd: null, tokens: null, contextUsed: null, contextSize: null,
+        toolCalls: 0, turns: 0, tokens: null, contextUsed: null, contextSize: null,
         firstSeq: event.seq, lastSeq: event.seq, firstTs: event.ts, lastTs: event.ts, exitCode: null, stopReason: null, pid: null, model: null, busUnavailable: false,
         received: null, memory: null, promptSections: null,
         streaming: false, thinking: false, turnText: '', turnPhaseKnown: false, openCalls: new Set(), handedOff: false,
@@ -849,13 +848,12 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         break
       }
       case 'usage': {
-        if (p.phase === 'budget_warning') {
-          attention.push({ id: event.id, seq: event.seq, agentId: agent.id, message: `Budget warning for ${String(p.scope ?? agent.id)}: $${String(p.spentUsd)} of $${String(p.limitUsd)}` })
-        } else {
-          if (typeof p.costUsd === 'number' && Number.isFinite(p.costUsd) && p.costUsd >= 0) agent.costUsd = (agent.costUsd ?? 0) + p.costUsd
-          if (typeof p.used === 'number') agent.contextUsed = p.used
-          if (typeof p.size === 'number') agent.contextSize = p.size
-        }
+        // Runs archived before spend tracking was retired (ADR 0027) still carry
+        // `phase: "budget_warning"` usage events. They name no context occupancy, so they are
+        // skipped without an alert.
+        if (p.phase === 'budget_warning') break
+        if (typeof p.used === 'number') agent.contextUsed = p.used
+        if (typeof p.size === 'number') agent.contextSize = p.size
         break
       }
       case 'turn_end': {
@@ -870,7 +868,6 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         agent.thinking = false
         agent.stopReason = typeof p.stopReason === 'string' ? p.stopReason : 'end_turn'
         if (object(p.usage)) {
-          if (typeof p.usage.costUsd === 'number' && Number.isFinite(p.usage.costUsd) && p.usage.costUsd >= 0) agent.costUsd = (agent.costUsd ?? 0) + p.usage.costUsd
           if (typeof p.usage.totalTokens === 'number') agent.tokens = (agent.tokens ?? 0) + p.usage.totalTokens
         }
         if (agent.stopReason !== 'end_turn') {
@@ -929,7 +926,6 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
   else if (registry === 'queued' || registry === 'starting' || registry === 'running') phase = 'running'
   else phase = missingCanonicalResponse ? 'failed' : responseText ? 'succeeded' : 'partial'
 
-  const costs = list.map((agent) => agent.costUsd).filter((cost): cost is number => cost !== null)
   const count = (kinds: EvidenceKind[]) => evidence.filter((item) => kinds.includes(item.kind)).length
 
   // CONTRACT §12: each category publishes `level: complete|partial|unavailable` with a
@@ -969,7 +965,6 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
     updatedAt,
     lastSeq,
     totals: {
-      costUsd: costs.length > 0 ? costs.reduce((sum, cost) => sum + cost, 0) : null,
       thoughts: list.reduce((sum, agent) => sum + agent.thoughts, 0),
       toolCalls: list.reduce((sum, agent) => sum + agent.toolCalls, 0),
       messages,
@@ -1013,7 +1008,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
 export function projectEvents(events: readonly RunEvent[], throughSeq = Infinity) {
   const projection = projectRun(events, throughSeq)
   return {
-    agents: projection.agents.map((agent): WatchedAgent => ({ id: agent.id, status: agent.status, text: agent.text, costUsd: agent.costUsd })),
+    agents: projection.agents.map((agent): WatchedAgent => ({ id: agent.id, status: agent.status, text: agent.text })),
     delegations: projection.delegations,
     attention: projection.attention,
   }

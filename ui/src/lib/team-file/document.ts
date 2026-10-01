@@ -1,9 +1,43 @@
 import { type Document, isMap, isScalar, isSeq, parseDocument, stringify } from 'yaml'
 
-import type { AgentConfig, BriefEntryConfig, BudgetConfig, EdgeConfig, GuardsConfig, ScheduleConfig, TeamDocument } from './types'
+import type { AgentConfig, BriefEntryConfig, EdgeConfig, GuardsConfig, ScheduleConfig, TeamDocument } from './types'
 
 /** The document could not be parsed as YAML, or does not shape up as a team file. */
-export class TeamFileParseError extends Error {}
+export class TeamFileParseError extends Error {
+  /** `yaml` when the text is not YAML at all; `shape` when it is YAML but not a team. */
+  readonly kind: 'yaml' | 'shape'
+
+  constructor(message: string, kind: 'yaml' | 'shape' = 'yaml') {
+    super(message)
+    this.kind = kind
+  }
+}
+
+const TEAM_KEYS = ['schemaVersion', 'agents', 'entrypoint'] as const
+
+/**
+ * Refuses YAML that parses but is not a team: a stray `docker-compose.yml` or a notes file in the
+ * teams folder. Everything downstream reads `agents` as a list, so letting such a file through
+ * made the editor crash instead of saying what was wrong with it. A half-written team (a
+ * `schemaVersion` and no agents yet) still opens, so its problems can be shown and fixed.
+ */
+function assertTeamShape(doc: Document): void {
+  const root = doc.contents
+  if (root === null || (isScalar(root) && (root.value === null || root.value === ''))) {
+    throw new TeamFileParseError('The file is empty, so there is no team in it.', 'shape')
+  }
+  if (!isMap(root) || !TEAM_KEYS.some((key) => root.has(key))) {
+    throw new TeamFileParseError('It doesn’t describe a team. A team file lists its agents under “agents:”.', 'shape')
+  }
+  const agents = root.get('agents', true)
+  if (agents !== undefined && !isSeq(agents)) {
+    throw new TeamFileParseError('Its “agents:” entry isn’t a list, so the agents can’t be read.', 'shape')
+  }
+  const edges = root.get('edges', true)
+  if (edges !== undefined && !isSeq(edges)) {
+    throw new TeamFileParseError('Its “edges:” entry isn’t a list, so the connections between agents can’t be read.', 'shape')
+  }
+}
 
 // Wraps a CST-preserving yaml.Document, not a plain object, so untouched fields keep
 // their original formatting, comments, and key order across a load/edit/save cycle.
@@ -19,6 +53,7 @@ export class TeamFileModel {
     if (doc.errors.length > 0) {
       throw new TeamFileParseError(doc.errors.map((error) => error.message).join('; '))
     }
+    assertTeamShape(doc)
     return new TeamFileModel(doc)
   }
 
@@ -64,14 +99,6 @@ export class TeamFileModel {
   /** Unset `entrypoint` (§5.4: deleting it with 2+ agents left picks no automatic survivor). */
   clearEntrypoint(): void {
     this.doc.delete('entrypoint')
-  }
-
-  setTeamBudget(budget: BudgetConfig | undefined): void {
-    if (budget === undefined) {
-      this.doc.delete('budget')
-      return
-    }
-    this.doc.set('budget', this.doc.createNode(budget))
   }
 
   setGuards(guards: GuardsConfig | undefined): void {

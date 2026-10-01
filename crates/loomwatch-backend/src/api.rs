@@ -31,6 +31,11 @@ const TEAM_SCHEMA: &str = include_str!("../../../schemas/team.schema.yaml");
 struct ApiState {
     writes: Arc<Mutex<()>>,
     search_path: Option<OsString>,
+    /// The `PATH` a run starts its harnesses with: the daemon's own, without the per-user
+    /// folders `search_path` adds. `AcpProcess::spawn` resolves a bare `spawn.cmd` against this,
+    /// so `GET /api/commands` must too — an app found only in `search_path` is listed in the
+    /// Library and still fails to start.
+    run_path: Option<OsString>,
     teams_root: PathBuf,
     allowed_hosts: Vec<String>,
     home_dir: Option<PathBuf>,
@@ -47,6 +52,9 @@ struct ApiState {
     /// /api/harnesses/{id}/models` and only read by `GET /api/harnesses` — so the list reports
     /// what a real ACP handshake last said without ever spawning one itself.
     harness_health: Arc<Mutex<HashMap<String, HealthRecord>>>,
+    /// The run-control router's registry, read by exactly one handler: `DELETE /api/team` refuses
+    /// while a run of the team has not finished, because that run is still reading its files.
+    runs: crate::runs::RunRegistry,
 }
 
 /// How long a model-discovery outcome is reported on `GET /api/harnesses`.
@@ -274,6 +282,46 @@ pub struct HarnessModels {
     pub current_thinking_effort: Option<String>,
 }
 
+/// `GET /api/commands`: whether each asked-about `spawn.cmd` would start, one entry per distinct
+/// command in the order asked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CommandReport {
+    pub commands: Vec<CommandCheck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CommandCheck {
+    pub cmd: String,
+    pub status: CommandStatus,
+    /// The executable that was found: where a run will start it for `found`, and the per-user
+    /// folder the daemon's `PATH` lacks for `outside_path`. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// What [`check_command`] concluded, without starting anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandStatus {
+    /// A run will find this executable.
+    Found,
+    /// Not on the daemon's `PATH` or in any per-user install folder, or an absolute path that
+    /// does not exist.
+    NotFound,
+    /// Only in a per-user folder that `GET /api/harnesses` searches and the daemon's own `PATH`
+    /// lacks — the Library lists the app, and a run still cannot start it.
+    OutsidePath,
+    /// An absolute path to something that is not an executable file.
+    NotExecutable,
+    /// A relative path such as `./bin/agent`. It resolves against the agent's working folder,
+    /// which a run can swap for a prepared workspace, so it is not judged here.
+    Unchecked,
+}
+
+/// Most commands one `GET /api/commands` checks. A team names a handful; this bounds the work an
+/// arbitrary query string can ask for, at one `stat` per `PATH` entry each.
+const MAX_COMMAND_CHECKS: usize = 64;
+
 #[derive(Debug, Deserialize)]
 struct TeamPath {
     /// The team file, relative to the teams root. `team=` is accepted as an alias so a client can
@@ -301,6 +349,10 @@ pub struct TeamsDiscovery {
     /// One summary per entry of `files`, in the same order, so a picker can show a team's name
     /// instead of its file path without opening every file itself.
     pub teams: Vec<TeamSummary>,
+    /// Where the teams waiting in `.trash/` used to live, sorted. Never teams — the list does not
+    /// show them — but names a new team must not take: their run history and Notebook notes are
+    /// still filed under that path and id (`docs/decisions/0028-delete-a-team-to-the-trash.md`).
+    pub trashed: Vec<String>,
 }
 
 /// What the team picker shows for one discovered file.
@@ -318,22 +370,52 @@ pub struct TeamSummary {
     /// Last modification time (RFC 3339), when the platform reports one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modified_at: Option<String>,
+    /// Why the file cannot be opened as a team, when it cannot: `unreadable` (not YAML, or not
+    /// readable at all) or `not_a_team` (YAML, but with none of a team's keys). Absent for a
+    /// team, including an unfinished one, so the picker never calls a broken file "needs setup".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub problem: Option<&'static str>,
 }
 
 /// The two top-level keys a summary needs. Everything else in the file is ignored, so a summary
 /// never fails on a field this build does not know.
-#[derive(Deserialize)]
 struct TeamHeader {
     name: Option<String>,
-    #[serde(default)]
-    agents: Vec<serde::de::IgnoredAny>,
+    agent_count: usize,
+}
+
+/// The same line the editor draws (`TeamFileModel.parse`): a mapping with at least one of a
+/// team's own keys, whose `agents`, when present, is a list.
+fn read_team_header(text: &str) -> Result<TeamHeader, &'static str> {
+    let value = serde_yaml::from_str::<serde_yaml::Value>(text).map_err(|_| "unreadable")?;
+    let Some(mapping) = value.as_mapping() else {
+        return Err("not_a_team");
+    };
+    let is_team = ["schemaVersion", "agents", "entrypoint"]
+        .iter()
+        .any(|key| mapping.contains_key(*key));
+    let agents = mapping.get("agents");
+    if !is_team || agents.is_some_and(|agents| !agents.is_sequence()) {
+        return Err("not_a_team");
+    }
+    Ok(TeamHeader {
+        name: mapping
+            .get("name")
+            .and_then(serde_yaml::Value::as_str)
+            .map(str::to_owned),
+        agent_count: agents
+            .and_then(serde_yaml::Value::as_sequence)
+            .map_or(0, Vec::len),
+    })
 }
 
 fn summarize_team_file(teams_root: &Path, relative: &str) -> TeamSummary {
     let path = teams_root.join(relative);
     let header = fs::read_to_string(&path)
-        .ok()
-        .and_then(|text| serde_yaml::from_str::<TeamHeader>(&text).ok());
+        .map_err(|_| "unreadable")
+        .and_then(|text| read_team_header(&text));
+    let problem = header.as_ref().err().copied();
+    let header = header.ok();
     let modified_at = fs::metadata(&path)
         .and_then(|metadata| metadata.modified())
         .ok()
@@ -346,8 +428,9 @@ fn summarize_team_file(teams_root: &Path, relative: &str) -> TeamSummary {
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .map(str::to_owned),
-        agent_count: header.map_or(0, |header| header.agents.len()),
+        agent_count: header.map_or(0, |header| header.agent_count),
         modified_at,
+        problem,
     }
 }
 
@@ -357,13 +440,20 @@ fn summarize_team_file(teams_root: &Path, relative: &str) -> TeamSummary {
 ///
 /// Returns an error when `teams_root` cannot be canonicalized.
 pub fn router(teams_root: PathBuf, allowed_hosts: Vec<String>) -> io::Result<Router> {
-    router_with_archive(teams_root, allowed_hosts, None)
+    router_with_archive(
+        teams_root,
+        allowed_hosts,
+        None,
+        crate::runs::RunRegistry::default(),
+    )
 }
 
-/// Build the REST router with the archive the capability inventory needs to count kept notes.
+/// Build the REST router with the archive the capability inventory needs to count kept notes,
+/// and the run registry `DELETE /api/team` checks for a team's unfinished runs.
 ///
-/// The daemon uses this; every other caller (and every test) keeps [`router`], which passes `None`
-/// and reports `kept: null` — the honest absence rather than a zero it could not have counted.
+/// The daemon uses this with the same registry it hands the run-control router; every other caller
+/// (and every test) keeps [`router`], which passes no archive and reports `kept: null` — the honest
+/// absence rather than a zero it could not have counted — and an empty registry.
 ///
 /// # Errors
 ///
@@ -372,18 +462,24 @@ pub fn router_with_archive(
     teams_root: PathBuf,
     allowed_hosts: Vec<String>,
     archive: Option<crate::archive::EventArchive>,
+    runs: crate::runs::RunRegistry,
 ) -> io::Result<Router> {
     // The inherited `PATH` alone is not enough: see `EXTRA_HARNESS_DIRECTORIES`.
     // Executables come from the runtime home, not the independently configured read-only
     // capability import. Finding a host binary in an import would not make it runnable here.
     let runtime_home = std::env::var_os("HOME").map(PathBuf::from);
-    let search_path = augment_search_path(std::env::var_os("PATH"), runtime_home.as_deref());
+    let run_path = std::env::var_os("PATH");
+    let search_path = augment_search_path(run_path.clone(), runtime_home.as_deref());
     router_with(
         teams_root,
         allowed_hosts,
-        search_path,
+        SearchPaths {
+            detection: search_path,
+            run: run_path,
+        },
         archive,
         crate::host_runner::configured_client(),
+        runs,
     )
 }
 
@@ -400,19 +496,38 @@ pub fn router_with_path(
     allowed_hosts: Vec<String>,
     search_path: Option<OsString>,
 ) -> io::Result<Router> {
-    router_with(teams_root, allowed_hosts, search_path, None, None)
+    let paths = SearchPaths {
+        run: search_path.clone(),
+        detection: search_path,
+    };
+    router_with(
+        teams_root,
+        allowed_hosts,
+        paths,
+        None,
+        None,
+        crate::runs::RunRegistry::default(),
+    )
+}
+
+/// Where executables are looked for: [`ApiState::search_path`] and [`ApiState::run_path`].
+struct SearchPaths {
+    detection: Option<OsString>,
+    run: Option<OsString>,
 }
 
 fn router_with(
     teams_root: PathBuf,
     allowed_hosts: Vec<String>,
-    search_path: Option<OsString>,
+    paths: SearchPaths,
     archive: Option<crate::archive::EventArchive>,
     host_runner: Option<crate::host_runner::ClientConfig>,
+    runs: crate::runs::RunRegistry,
 ) -> io::Result<Router> {
     let state = ApiState {
         writes: Arc::default(),
-        search_path,
+        search_path: paths.detection,
+        run_path: paths.run,
         teams_root: fs::canonicalize(teams_root)?,
         allowed_hosts: allowed_hosts
             .into_iter()
@@ -423,19 +538,23 @@ fn router_with(
         archive,
         host_runner,
         harness_health: Arc::default(),
+        runs,
     };
     Ok(Router::new()
         .route("/api/harnesses", get(get_harnesses))
         .route("/api/harnesses/{id}/models", get(get_harness_models))
+        .route("/api/commands", get(get_commands))
         .route("/api/capabilities", get(get_capabilities))
         .route("/api/capabilities/{id}", get(get_capability_details))
         .route("/api/teams", get(get_teams))
-        .route("/api/team", get(get_team).put(put_team))
+        .route("/api/team", get(get_team).put(put_team).delete(delete_team))
         .route("/api/instructions", get(get_instructions))
         .route("/api/team/layout", get(get_layout).put(put_layout))
         .route("/api/memory", get(get_memory))
         .route("/api/memory/file", axum::routing::put(put_memory_file))
         .route("/api/config/schema", get(get_config_schema))
+        .route("/api/files/stat", get(get_file_stat))
+        .route("/api/files/open", axum::routing::post(post_file_open))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             enforce_allowed_host,
@@ -610,6 +729,37 @@ async fn get_harness_models(
     }))
 }
 
+/// `GET /api/commands?cmd=…&cmd=…` — whether each `spawn.cmd` would start, before a run tries.
+///
+/// The team file is not read: Build asks about the document it is editing, which a run saves
+/// first, so a check of the file on disk would trail every unsaved change of app. Nothing is ever
+/// executed — a command is looked up exactly as `AcpProcess::spawn` will look it up, and that is
+/// all.
+async fn get_commands(
+    State(state): State<ApiState>,
+    Query(query): Query<Vec<(String, String)>>,
+) -> Result<Json<CommandReport>, ApiError> {
+    let mut commands: Vec<String> = Vec::new();
+    for (key, cmd) in query {
+        if key != "cmd" || cmd.is_empty() || commands.contains(&cmd) {
+            continue;
+        }
+        if commands.len() == MAX_COMMAND_CHECKS {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                format!("at most {MAX_COMMAND_CHECKS} commands are checked at once"),
+            ));
+        }
+        commands.push(cmd);
+    }
+    Ok(Json(CommandReport {
+        commands: commands
+            .iter()
+            .map(|cmd| check_command(cmd, state.run_path.as_deref(), state.search_path.as_deref()))
+            .collect(),
+    }))
+}
+
 /// Harness report for the machine running this process, including user install prefixes.
 /// The host runner uses this exact detector, so its inventory and spawn allowlist cannot drift.
 #[must_use]
@@ -684,6 +834,24 @@ struct InstructionFile {
 ///
 /// Scoped by `resolve_existing_team_path`, so a path outside the teams root is refused rather
 /// than turning the daemon into a general file reader.
+/// What a file an agent produced is (`crate::files`): the team output shows it as a card.
+async fn get_file_stat(
+    State(state): State<ApiState>,
+    Query(query): Query<TeamPath>,
+) -> Result<Json<crate::files::FileFacts>, ApiError> {
+    crate::files::stat(&state.teams_root, &query.path).map(Json)
+}
+
+/// Open a produced file with its default app, or show it in its folder. JSON only: a page on
+/// another site cannot send this without a preflight the daemon never answers.
+async fn post_file_open(
+    State(state): State<ApiState>,
+    Json(request): Json<crate::files::OpenRequest>,
+) -> Result<StatusCode, ApiError> {
+    crate::files::open(&state.teams_root, &request).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn get_instructions(
     State(state): State<ApiState>,
     Query(query): Query<TeamPath>,
@@ -738,7 +906,7 @@ async fn get_teams(State(state): State<ApiState>) -> Result<Json<TeamsDiscovery>
                 .iter()
                 .map(|file| summarize_team_file(&teams_root, file))
                 .collect::<Vec<_>>();
-            (files, teams)
+            (files, teams, trashed_team_paths(&teams_root))
         })
     })
     .await
@@ -748,7 +916,7 @@ async fn get_teams(State(state): State<ApiState>) -> Result<Json<TeamsDiscovery>
             format!("failed to discover team files: {error}"),
         )
     })?;
-    let (files, teams) = scanned.map_err(|error| {
+    let (files, teams, trashed) = scanned.map_err(|error| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("failed to discover team files: {error}"),
@@ -758,6 +926,7 @@ async fn get_teams(State(state): State<ApiState>) -> Result<Json<TeamsDiscovery>
         root: state.teams_root.to_string_lossy().into_owned(),
         files,
         teams,
+        trashed,
     }))
 }
 
@@ -885,6 +1054,295 @@ async fn put_team(
         )
     })?;
     Ok(team_response(&team_file))
+}
+
+/// Where `DELETE /api/team` puts a team: a hidden folder under the teams root, so the team list,
+/// the scheduler and the memory index stop seeing the team while every byte of it stays where the
+/// operator can get it back. See `docs/decisions/0028-delete-a-team-to-the-trash.md`.
+pub(crate) const TRASH_DIR: &str = ".trash";
+
+/// The note inside each trashed team's folder: a [`DeletedTeam`], saying where it came from.
+const TRASH_MANIFEST: &str = "deleted.json";
+
+/// What `DELETE /api/team` moved, and where. Also written into the trash folder as its manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletedTeam {
+    /// The team file as the team list named it, relative to the teams root. Moving the `moved`
+    /// files back into this path's folder restores the team, history and notes included.
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The folder the team now lives in, relative to the teams root.
+    pub trash: String,
+    /// File names inside `trash`: the team's own `<team>.brief` folder and `<team>.layout.json`
+    /// sidecar when it had them, then the YAML.
+    pub moved: Vec<String>,
+    /// RFC 3339.
+    pub deleted_at: String,
+}
+
+/// Move a team out of the team list and into `<teams root>/.trash/`.
+///
+/// Confined exactly like `PUT /api/team`: the path resolves, symlinks first, to a file strictly
+/// below the teams root. Run history and Notebook notes are kept, filed under the team's path and
+/// id as they were, so restoring the files restores the team whole.
+///
+/// Refused (409) while a run of the team has not finished, which is still reading its files, and
+/// while another team's `memory.inherits` names it, which would stop that team from running.
+async fn delete_team(
+    State(state): State<ApiState>,
+    Query(query): Query<TeamPath>,
+) -> Result<Json<DeletedTeam>, ApiError> {
+    let refuse = |message: String| ApiError::new(StatusCode::CONFLICT, message);
+    // The same lock every team write takes, so no save can recreate a sidecar mid-move.
+    let _write = state.writes.lock().map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "team write lock unavailable".into(),
+        )
+    })?;
+    let team = resolve_existing_team_path(&state.teams_root, &query.path)?;
+    // A link's sidecars sit beside its target, which may be listed as a team of its own; moving
+    // either half would leave the other dangling.
+    let requested = rooted_candidate(&state.teams_root, &query.path);
+    if fs::symlink_metadata(&requested).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(refuse(format!(
+            "{} is a link to another file, so LoomWatch can't move it whole. Remove the link in \
+             your teams folder instead.",
+            query.path.display()
+        )));
+    }
+    let relative = listed_team_path(&state.teams_root, &team).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            format!("{} is not in your teams list.", query.path.display()),
+        )
+    })?;
+    if state.runs.live_run_for(&relative).is_some() {
+        return Err(refuse(
+            "This team is running right now. Stop the run or wait for it to finish, then delete \
+             the team."
+                .to_owned(),
+        ));
+    }
+    let dependents = teams_inheriting(&state.teams_root, &team, &relative).map_err(|error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to check which teams read this one's memory: {error}"),
+        )
+    })?;
+    if !dependents.is_empty() {
+        let (verb, whose) = if dependents.len() == 1 {
+            ("reads", "that team's")
+        } else {
+            ("read", "their")
+        };
+        return Err(refuse(format!(
+            "{} {verb} this team's memory. Remove it from {whose} memory settings first, then \
+             delete this team.",
+            dependents.join(", "),
+        )));
+    }
+    let name = summarize_team_file(&state.teams_root, &relative).name;
+    let deleted = move_team_to_trash(
+        &state.teams_root,
+        &team,
+        &relative,
+        name,
+        chrono::Utc::now(),
+    )
+    .map_err(|error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "couldn't move {} to {TRASH_DIR}; nothing was moved: {error}",
+                query.path.display()
+            ),
+        )
+    })?;
+    Ok(Json(deleted))
+}
+
+/// `team` (canonical) as `GET /api/teams` lists it, or `None` when the list never would: not a
+/// `.yaml`/`.yml` file, or inside a hidden folder — the trash itself, `.loomwatch` workspaces —
+/// or a package cache. A team already in the trash cannot be deleted again.
+fn listed_team_path(teams_root: &Path, team: &Path) -> Option<String> {
+    if !team.is_file() || !is_team_file(team) {
+        return None;
+    }
+    let relative = normalized_relative_path(teams_root, team)?;
+    let folders = relative.rsplit_once('/').map_or("", |(folders, _)| folders);
+    let hidden = folders
+        .split('/')
+        .any(|folder| is_skipped_team_directory(std::ffi::OsStr::new(folder)));
+    (!hidden).then_some(relative)
+}
+
+/// Names of the listed teams, other than `relative` itself, whose enabled `memory.inherits` names
+/// this team's id — the same id the memory index files it under (its `id`, else its file stem).
+fn teams_inheriting(teams_root: &Path, team: &Path, relative: &str) -> io::Result<Vec<String>> {
+    let Some(config) = fs::read_to_string(team)
+        .ok()
+        .and_then(|source| TeamConfig::parse(&source).ok())
+    else {
+        // A file that does not load is not in the memory index, so nothing can inherit it.
+        return Ok(Vec::new());
+    };
+    let id = if config.id.is_empty() {
+        team.file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    } else {
+        config.id
+    };
+    Ok(discover_team_files(teams_root)?
+        .into_iter()
+        .filter(|file| file != relative)
+        .filter(|file| {
+            fs::read_to_string(teams_root.join(file))
+                .ok()
+                .and_then(|source| TeamConfig::parse(&source).ok())
+                .and_then(|other| other.memory)
+                .is_some_and(|memory| {
+                    memory.enabled
+                        && memory
+                            .inherits
+                            .iter()
+                            .any(|entry| entry.team.as_deref() == Some(id.as_str()))
+                })
+        })
+        .map(|file| {
+            let summary = summarize_team_file(teams_root, &file);
+            summary.name.unwrap_or(summary.path)
+        })
+        .collect())
+}
+
+/// Move the team's own `<team>.brief/` folder, its `<team>.layout.json` sidecar and its YAML into
+/// a new folder under `.trash/`, the YAML last.
+///
+/// A rename never copies, so nothing is lost if this stops part-way, and a failure puts back what
+/// already moved: the team leaves the list only once its YAML has gone, which is the last step.
+/// The manifest is written first, so a folder found half-filled after a crash still says whose
+/// files it holds.
+fn move_team_to_trash(
+    teams_root: &Path,
+    team: &Path,
+    relative: &str,
+    name: Option<String>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> io::Result<DeletedTeam> {
+    let trash_root = teams_root.join(TRASH_DIR);
+    match fs::symlink_metadata(&trash_root) {
+        // `symlink_metadata` reports a link as not a directory, so a `.trash` link that leads
+        // out of the teams root is refused rather than followed.
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => {
+            return Err(io::Error::other(format!(
+                "{TRASH_DIR} in the teams folder is not a folder"
+            )));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir(&trash_root)?,
+        Err(error) => return Err(error),
+    }
+
+    // `trip.yaml` and `trip.yml` side by side share `trip.brief/` and `trip.layout.json`; those
+    // stay for the team that remains.
+    let shares_sidecars = ["yaml", "yml"]
+        .iter()
+        .map(|extension| team.with_extension(extension))
+        .any(|sibling| sibling != team && sibling.is_file());
+    let mut sources = Vec::new();
+    if !shares_sidecars {
+        sources.extend(
+            [team.with_extension("brief"), layout_path(team)]
+                .into_iter()
+                .filter(|sidecar| fs::symlink_metadata(sidecar).is_ok()),
+        );
+    }
+    sources.push(team.to_path_buf());
+
+    let stem = team.file_stem().map_or_else(
+        || "team".to_owned(),
+        |stem| stem.to_string_lossy().into_owned(),
+    );
+    let base = format!("{}-{stem}", now.format("%Y-%m-%dT%H%M%SZ"));
+    let (folder_name, folder) = (1..=100)
+        .map(|attempt| {
+            if attempt == 1 {
+                base.clone()
+            } else {
+                format!("{base}-{attempt}")
+            }
+        })
+        .find_map(|candidate| {
+            let folder = trash_root.join(&candidate);
+            match fs::create_dir(&folder) {
+                Ok(()) => Some(Ok((candidate, folder))),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .unwrap_or_else(|| Err(io::Error::other("no free folder name in the trash")))?;
+
+    let deleted = DeletedTeam {
+        path: relative.to_owned(),
+        name,
+        trash: format!("{TRASH_DIR}/{folder_name}"),
+        moved: sources
+            .iter()
+            .filter_map(|source| source.file_name())
+            .map(|file| file.to_string_lossy().into_owned())
+            .collect(),
+        deleted_at: now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    };
+    let abandon = |moved: &[(PathBuf, PathBuf)]| {
+        for (source, target) in moved.iter().rev() {
+            let _ = fs::rename(target, source);
+        }
+        let _ = fs::remove_file(folder.join(TRASH_MANIFEST));
+        let _ = fs::remove_dir(&folder);
+    };
+    let manifest = serde_json::to_vec_pretty(&deleted).map_err(io::Error::other)?;
+    if let Err(error) = fs::write(folder.join(TRASH_MANIFEST), manifest) {
+        abandon(&[]);
+        return Err(error);
+    }
+    let mut moved = Vec::new();
+    for source in sources {
+        let Some(file_name) = source.file_name() else {
+            continue;
+        };
+        let target = folder.join(file_name);
+        if let Err(error) = fs::rename(&source, &target) {
+            abandon(&moved);
+            return Err(error);
+        }
+        moved.push((source, target));
+    }
+    Ok(deleted)
+}
+
+/// The original paths of the teams in the trash, read from each folder's manifest. A folder with
+/// no readable manifest still holds its files; it just cannot say whose they were.
+fn trashed_team_paths(teams_root: &Path) -> Vec<String> {
+    let trash_root = teams_root.join(TRASH_DIR);
+    if !fs::symlink_metadata(&trash_root).is_ok_and(|metadata| metadata.is_dir()) {
+        return Vec::new();
+    }
+    let Ok(entries) = fs::read_dir(trash_root) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<String> = entries
+        .flatten()
+        .filter_map(|entry| fs::read(entry.path().join(TRASH_MANIFEST)).ok())
+        .filter_map(|bytes| serde_json::from_slice::<DeletedTeam>(&bytes).ok())
+        .map(|deleted| deleted.path)
+        .collect();
+    paths.sort_unstable();
+    paths.dedup();
+    paths
 }
 
 #[derive(Debug, Deserialize)]
@@ -1489,6 +1947,43 @@ fn augment_search_path(inherited: Option<OsString>, home: Option<&Path>) -> Opti
     std::env::join_paths(directories).ok().or(inherited)
 }
 
+/// Judge one `spawn.cmd` the way a run will resolve it, without running it.
+///
+/// A bare name is looked up on `run_path`, the `PATH` a run inherits. `detection_path` only
+/// explains a miss: an app that `GET /api/harnesses` finds in a per-user folder can be listed in
+/// the Library and still not start, and "not installed" would be the wrong thing to say about it.
+fn check_command(
+    cmd: &str,
+    run_path: Option<&std::ffi::OsStr>,
+    detection_path: Option<&std::ffi::OsStr>,
+) -> CommandCheck {
+    let command = Path::new(cmd);
+    let (status, path) = if command.is_absolute() {
+        if is_executable(command) {
+            (CommandStatus::Found, Some(command.to_path_buf()))
+        } else if fs::metadata(command).is_ok() {
+            (CommandStatus::NotExecutable, None)
+        } else {
+            (CommandStatus::NotFound, None)
+        }
+    } else if command.components().count() > 1 {
+        (CommandStatus::Unchecked, None)
+    } else if let Some(found) = run_path.and_then(|run_path| find_executable(run_path, cmd)) {
+        (CommandStatus::Found, Some(found))
+    } else if let Some(found) =
+        detection_path.and_then(|detection_path| find_executable(detection_path, cmd))
+    {
+        (CommandStatus::OutsidePath, Some(found))
+    } else {
+        (CommandStatus::NotFound, None)
+    };
+    CommandCheck {
+        cmd: cmd.to_owned(),
+        status,
+        path: path.map(|path| path.to_string_lossy().into_owned()),
+    }
+}
+
 fn find_executable(search_path: &std::ffi::OsStr, command: &str) -> Option<PathBuf> {
     std::env::split_paths(search_path)
         .flat_map(|directory| executable_candidates(&directory, command))
@@ -1556,7 +2051,7 @@ mod tests {
 
     use super::*;
 
-    const VALID_TEAM: &str = "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n";
+    const VALID_TEAM: &str = "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n";
 
     struct TempDirectory(PathBuf);
 
@@ -1689,6 +2184,67 @@ mod tests {
         }
     }
 
+    /// The team output turns a produced file into a card: the route answers inside the teams root
+    /// and refuses the same path shape everywhere else.
+    #[tokio::test]
+    async fn file_stat_describes_a_produced_file_and_refuses_outside_paths() {
+        let root = TempDirectory::new();
+        let workspace = root.0.join(".loomwatch").join("team").join("writer");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        fs::write(workspace.join("report.docx"), b"PK").expect("write report");
+        let canonical = fs::canonicalize(&root.0).expect("canonical root");
+        let report = canonical.join(".loomwatch/team/writer/report.docx");
+
+        let response = test_router(&root.0)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/files/stat?path={}", report.display()))
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = response_json(response).await;
+        assert_eq!(json["name"], "report.docx");
+        assert_eq!(json["kind"], "document");
+        assert_eq!(json["exists"], true);
+        assert_eq!(json["openable"], true);
+
+        let response = test_router(&root.0)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/files/stat?path=/etc/hosts")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// Opening launches an app, so it must not be reachable from a plain cross-site form post: only
+    /// a JSON body is accepted, and a browser will not send one cross-origin without a preflight.
+    #[tokio::test]
+    async fn file_open_accepts_json_only() {
+        let root = TempDirectory::new();
+        let response = test_router(&root.0)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/files/open")
+                    .header(header::HOST, "localhost")
+                    .header(header::CONTENT_TYPE, "text/plain")
+                    .body(Body::from(r#"{"path":"x.docx"}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+
     #[tokio::test]
     async fn instructions_endpoint_reports_a_file_the_run_no_longer_has() {
         let root = TempDirectory::new();
@@ -1815,6 +2371,138 @@ mod tests {
             hermes.unavailable_reason.as_deref(),
             Some("hermes-acp is not on the searched PATH.")
         );
+    }
+
+    /// A team shared from another machine names an app this one does not have. Build asks before
+    /// the run does, so each command must come back judged the way `AcpProcess::spawn` would
+    /// resolve it — and asking must never start one. `npx` is how the Claude and Codex bridges
+    /// run without a standalone install, so it is checked like any other name on the `PATH`.
+    #[tokio::test]
+    async fn command_check_judges_each_spawn_command_without_running_it() {
+        let root = TempDirectory::new();
+        let bin = root.0.join("bin");
+        fs::create_dir(&bin).expect("create bin");
+        let ran = root.0.join("ran");
+        create_executable_with_contents(
+            &bin,
+            "npx",
+            &format!("#!/bin/sh\ntouch '{}'\n", ran.display()),
+        );
+        let installed = bin.join("npx");
+        let not_a_program = root.0.join("notes.txt");
+        fs::write(&not_a_program, "not a program").expect("write a plain file");
+        let gone = root.0.join("gone/agent");
+        let search_path = std::env::join_paths([&bin]).expect("join search path");
+        let router = test_router_with_path(&root.0, Some(search_path));
+
+        let query = [
+            "npx",
+            "acme-agent-cli",
+            "npx",
+            "",
+            &installed.to_string_lossy(),
+            &not_a_program.to_string_lossy(),
+            &gone.to_string_lossy(),
+            "./bin/agent",
+        ]
+        .iter()
+        .map(|cmd| {
+            // Temporary folders can hold `+` or spaces, which a query would otherwise decode.
+            let encoded: String = cmd
+                .bytes()
+                .map(|byte| match byte {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' => {
+                        char::from(byte).to_string()
+                    }
+                    _ => format!("%{byte:02X}"),
+                })
+                .collect();
+            format!("cmd={encoded}")
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+        let (status, report) = get_json(&router, &format!("/api/commands?{query}")).await;
+
+        assert_eq!(status, StatusCode::OK, "{report}");
+        assert_eq!(
+            report,
+            json!({
+                "commands": [
+                    {"cmd": "npx", "status": "found", "path": installed.to_string_lossy()},
+                    {"cmd": "acme-agent-cli", "status": "not_found"},
+                    {"cmd": installed.to_string_lossy(), "status": "found", "path": installed.to_string_lossy()},
+                    {"cmd": not_a_program.to_string_lossy(), "status": "not_executable"},
+                    {"cmd": gone.to_string_lossy(), "status": "not_found"},
+                    {"cmd": "./bin/agent", "status": "unchecked"},
+                ]
+            })
+        );
+        // The counterfactual: the same script, run, leaves the marker. Checking left none.
+        assert!(!ran.exists(), "checking a command must never execute it");
+        assert!(
+            std::process::Command::new(&installed)
+                .status()
+                .expect("run the fixture")
+                .success()
+        );
+        assert!(ran.exists(), "the fixture must be able to prove it ran");
+    }
+
+    /// Under launchd the daemon's own `PATH` is `/usr/bin:/bin:…`. The Library still lists an app
+    /// in `~/.opencode/bin` (detection searches there), but a run cannot start it — so the check
+    /// says "outside the PATH", with where it is, rather than "not installed".
+    #[tokio::test]
+    async fn a_command_only_in_a_per_user_folder_is_outside_the_run_path() {
+        let system = TempDirectory::new();
+        let per_user = TempDirectory::new();
+        create_executable(&per_user.0, "opencode");
+        let run_path = std::env::join_paths([&system.0]).expect("run path");
+        let detection_path =
+            std::env::join_paths([&system.0, &per_user.0]).expect("detection path");
+        // The production split, built directly: `router_with_path` gives both the same value.
+        let router = router_with(
+            system.0.clone(),
+            vec!["localhost".to_owned()],
+            SearchPaths {
+                detection: Some(detection_path.clone()),
+                run: Some(run_path),
+            },
+            None,
+            None,
+            crate::runs::RunRegistry::default(),
+        )
+        .expect("build API router");
+
+        let (status, report) = get_json(&router, "/api/commands?cmd=opencode").await;
+        assert_eq!(status, StatusCode::OK, "{report}");
+        assert_eq!(
+            report,
+            json!({"commands": [{
+                "cmd": "opencode",
+                "status": "outside_path",
+                "path": per_user.0.join("opencode").to_string_lossy(),
+            }]})
+        );
+
+        // Once the daemon's own PATH has the folder, a run finds it there.
+        let found = check_command(
+            "opencode",
+            Some(detection_path.as_os_str()),
+            Some(detection_path.as_os_str()),
+        );
+        assert_eq!(found.status, CommandStatus::Found);
+    }
+
+    #[tokio::test]
+    async fn command_check_refuses_an_unbounded_question() {
+        let root = TempDirectory::new();
+        let query = (0..=MAX_COMMAND_CHECKS)
+            .map(|index| format!("cmd=app-{index}"))
+            .collect::<Vec<_>>()
+            .join("&");
+        let (status, body) =
+            get_json(&test_router(&root.0), &format!("/api/commands?{query}")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     }
 
     /// Part B root cause (b): a daemon launched without the per-user prefixes on its `PATH` finds
@@ -2111,7 +2799,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         );
     }
 
-    const MEMORY_TEAM: &str = "schemaVersion: 1\nentrypoint: a\nmemory:\n  brief:\n    - path: brief/constraints.md\n    - path: brief/tone.md\n      appliesTo:\n        - b\nagents:\n  - id: a\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n  - id: b\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n";
+    const MEMORY_TEAM: &str = "schemaVersion: 1\nentrypoint: a\nmemory:\n  brief:\n    - path: brief/constraints.md\n    - path: brief/tone.md\n      appliesTo:\n        - b\nagents:\n  - id: a\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n  - id: b\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n";
 
     #[tokio::test]
     async fn memory_endpoint_reports_the_brief_with_its_scope_and_budget() {
@@ -2484,8 +3172,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             "schedule": schedule,
             "agents": [{
                 "id": "a", "name": "A", "role": "collect", "model": "m",
-                "spawn": {"cmd": "acp", "args": [], "env": {}, "cwd": "."},
-                "budget": {"limitUsd": 1}
+                "spawn": {"cmd": "acp", "args": [], "env": {}, "cwd": "."}
             }],
             "edges": []
         })
@@ -2597,6 +3284,12 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         )
         .expect("write named team");
         fs::write(directory.0.join("broken.yaml"), "agents: [unclosed").expect("write broken");
+        fs::write(directory.0.join("notes.yaml"), "shopping:\n  - milk\n").expect("write notes");
+        fs::write(
+            directory.0.join("started.yaml"),
+            "schemaVersion: 1\nname: Draft\n",
+        )
+        .expect("write unfinished team");
         for skipped in [".loomwatch/workspace", "node_modules/pkg"] {
             let folder = directory.0.join(skipped);
             fs::create_dir_all(&folder).expect("create skipped folder");
@@ -2616,13 +3309,23 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
-        assert_eq!(body["files"], json!(["broken.yaml", "named.yaml"]));
-        // A file that does not parse is still listed, by path, with no invented name.
+        assert_eq!(
+            body["files"],
+            json!(["broken.yaml", "named.yaml", "notes.yaml", "started.yaml"])
+        );
+        // A file that does not parse is still listed, by path, with no invented name, and says
+        // why it cannot be opened rather than passing for an unfinished team.
         assert_eq!(body["teams"][0]["path"], json!("broken.yaml"));
         assert!(body["teams"][0].get("name").is_none());
         assert_eq!(body["teams"][0]["agentCount"], json!(0));
+        assert_eq!(body["teams"][0]["problem"], json!("unreadable"));
         assert_eq!(body["teams"][1]["name"], json!("Research desk"));
         assert_eq!(body["teams"][1]["agentCount"], json!(1));
+        assert!(body["teams"][1].get("problem").is_none());
+        assert_eq!(body["teams"][2]["problem"], json!("not_a_team"));
+        // An unfinished team is still a team: no problem, zero agents.
+        assert_eq!(body["teams"][3]["name"], json!("Draft"));
+        assert!(body["teams"][3].get("problem").is_none());
     }
 
     #[tokio::test]
@@ -3092,5 +3795,317 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
                 .as_str()
                 .is_some_and(|error| error.contains("invalid team YAML"))
         );
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────────────
+    // Deleting a team
+    // ───────────────────────────────────────────────────────────────────────────────────────────
+
+    const TRIP_TEAM: &str = "schemaVersion: 1\nid: trip\nname: Trip planner\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n";
+
+    fn router_with_runs(teams_root: &Path, runs: crate::runs::RunRegistry) -> Router {
+        router_with(
+            teams_root.to_path_buf(),
+            vec!["localhost".to_owned()],
+            SearchPaths {
+                detection: None,
+                run: None,
+            },
+            None,
+            None,
+            runs,
+        )
+        .expect("build API router")
+    }
+
+    async fn delete_request(router: Router, path: &str) -> Response {
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("path", path)
+            .finish();
+        router
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/api/team?{query}"))
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response")
+    }
+
+    async fn error_text(response: Response) -> String {
+        response_json(response).await["error"]
+            .as_str()
+            .expect("error message")
+            .to_owned()
+    }
+
+    /// A team on disk is its YAML, its layout sidecar and its own Brief folder. Deleting it moves
+    /// all three out of the list together, erases nothing, and leaves every other team alone.
+    #[tokio::test]
+    async fn delete_moves_the_team_with_its_layout_and_brief_into_the_trash() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        fs::write(root.0.join("trip.layout.json"), "{}").expect("write layout");
+        fs::create_dir(root.0.join("trip.brief")).expect("create Brief folder");
+        fs::write(root.0.join("trip.brief/style.md"), "# Style\n").expect("write Brief");
+        fs::write(root.0.join("other.yaml"), VALID_TEAM).expect("write other team");
+        fs::write(root.0.join("other.layout.json"), "{}").expect("write other layout");
+
+        let response = delete_request(test_router(&root.0), "trip.yaml").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let deleted: DeletedTeam =
+            serde_json::from_value(response_json(response).await).expect("deleted team");
+        assert_eq!(deleted.path, "trip.yaml");
+        assert_eq!(deleted.name.as_deref(), Some("Trip planner"));
+        assert_eq!(
+            deleted.moved,
+            ["trip.brief", "trip.layout.json", "trip.yaml"]
+        );
+        assert!(
+            deleted.trash.starts_with(".trash/") && deleted.trash.ends_with("-trip"),
+            "{}",
+            deleted.trash
+        );
+
+        let folder = root.0.join(&deleted.trash);
+        assert_eq!(
+            fs::read_to_string(folder.join("trip.yaml")).expect("trashed team"),
+            TRIP_TEAM
+        );
+        assert_eq!(
+            fs::read_to_string(folder.join("trip.brief/style.md")).expect("trashed Brief"),
+            "# Style\n"
+        );
+        assert!(folder.join("trip.layout.json").is_file());
+        let manifest: DeletedTeam =
+            serde_json::from_slice(&fs::read(folder.join(TRASH_MANIFEST)).expect("read manifest"))
+                .expect("manifest JSON");
+        assert_eq!(manifest, deleted);
+        for gone in ["trip.yaml", "trip.layout.json", "trip.brief"] {
+            assert!(
+                fs::symlink_metadata(root.0.join(gone)).is_err(),
+                "{gone} is still beside the teams"
+            );
+        }
+        assert!(root.0.join("other.yaml").is_file());
+        assert!(root.0.join("other.layout.json").is_file());
+
+        // The list forgets the team, but remembers its name is taken.
+        let listing = test_router(&root.0)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/teams")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        let body = response_json(listing).await;
+        assert_eq!(body["files"], json!(["other.yaml"]));
+        assert_eq!(body["trashed"], json!(["trip.yaml"]));
+    }
+
+    #[tokio::test]
+    async fn delete_is_confined_to_the_teams_the_list_shows() {
+        let directory = TempDirectory::new();
+        let teams_root = directory.0.join("teams");
+        fs::create_dir(&teams_root).expect("create teams root");
+        let outside = directory.0.join("outside.yaml");
+        fs::write(&outside, VALID_TEAM).expect("write outside file");
+
+        // Out of the root, lexically, absolutely, or as the root itself.
+        for path in [
+            "../outside.yaml",
+            outside.to_str().expect("UTF-8 path"),
+            ".",
+        ] {
+            let response = delete_request(test_router(&teams_root), path).await;
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
+        }
+        assert_eq!(
+            fs::read_to_string(&outside).expect("read outside file"),
+            VALID_TEAM
+        );
+
+        // Inside the root, but never a team in the list: missing, not YAML, already in the trash,
+        // or part of a managed workspace.
+        let kept = [
+            "notes.md",
+            ".trash/2026-10-01T090000Z-old/old.yaml",
+            ".loomwatch/trip/a/agent.yaml",
+        ];
+        for file in kept {
+            let path = teams_root.join(file);
+            fs::create_dir_all(path.parent().expect("parent")).expect("create folder");
+            fs::write(&path, VALID_TEAM).expect("write file");
+        }
+        for path in kept.iter().copied().chain(["missing.yaml"]) {
+            let response = delete_request(test_router(&teams_root), path).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+        for file in kept {
+            assert!(teams_root.join(file).is_file(), "{file} was moved");
+        }
+        // Only the trashed team that was already there: no refusal created a folder.
+        assert_eq!(
+            fs::read_dir(teams_root.join(TRASH_DIR))
+                .expect("trash")
+                .count(),
+            1
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn delete_never_follows_a_link_out_of_the_root_or_moves_half_of_one() {
+        use std::os::unix::fs::symlink;
+
+        let directory = TempDirectory::new();
+        let teams_root = directory.0.join("teams");
+        fs::create_dir(&teams_root).expect("create teams root");
+        let outside = directory.0.join("outside.yaml");
+        fs::write(&outside, VALID_TEAM).expect("write outside file");
+        symlink(&outside, teams_root.join("escape.yaml")).expect("link out");
+        fs::write(teams_root.join("real.yaml"), VALID_TEAM).expect("write team");
+        symlink(teams_root.join("real.yaml"), teams_root.join("alias.yaml")).expect("link in");
+
+        let escape = delete_request(test_router(&teams_root), "escape.yaml").await;
+        assert_eq!(escape.status(), StatusCode::FORBIDDEN);
+        assert!(outside.is_file());
+        assert!(fs::symlink_metadata(teams_root.join("escape.yaml")).is_ok());
+
+        let alias = delete_request(test_router(&teams_root), "alias.yaml").await;
+        assert_eq!(alias.status(), StatusCode::CONFLICT);
+        assert!(error_text(alias).await.contains("is a link"));
+        assert!(fs::symlink_metadata(teams_root.join("alias.yaml")).is_ok());
+        assert!(teams_root.join("real.yaml").is_file());
+
+        // A `.trash` that is itself a link out of the root is never written through.
+        let elsewhere = directory.0.join("elsewhere");
+        fs::create_dir(&elsewhere).expect("create elsewhere");
+        symlink(&elsewhere, teams_root.join(TRASH_DIR)).expect("link the trash out");
+        let response = delete_request(test_router(&teams_root), "real.yaml").await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(teams_root.join("real.yaml").is_file());
+        assert_eq!(fs::read_dir(&elsewhere).expect("elsewhere").count(), 0);
+    }
+
+    /// A run reads its team's files as it goes, and a waiting run is still running.
+    #[tokio::test]
+    async fn delete_waits_until_no_run_of_the_team_is_unfinished() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        fs::write(root.0.join("other.yaml"), VALID_TEAM).expect("write other team");
+        let team = TeamConfig::parse(TRIP_TEAM).expect("team parses");
+        let runs = crate::runs::RunRegistry::default();
+        let queued = |path: &str| {
+            crate::runs::RunRecord::queued(
+                path.to_owned(),
+                "Plan a week in Kyoto".to_owned(),
+                &team,
+                crate::runs::RunTrigger::Manual,
+            )
+            .expect("run record")
+        };
+        let mut finished = queued("trip.yaml");
+        finished.status = crate::runs::RunStatus::Succeeded;
+        runs.insert(finished);
+        let live = queued("trip.yaml");
+        runs.insert(live.clone());
+        runs.insert(queued("other.yaml"));
+
+        // Refused however the path is spelled.
+        let absolute = root.0.join("trip.yaml");
+        for path in ["trip.yaml", absolute.to_str().expect("UTF-8 path")] {
+            let refused = delete_request(router_with_runs(&root.0, runs.clone()), path).await;
+            assert_eq!(refused.status(), StatusCode::CONFLICT, "{path}");
+            assert!(error_text(refused).await.contains("running right now"));
+            assert!(root.0.join("trip.yaml").is_file());
+        }
+
+        assert!(matches!(
+            runs.cancel(&live.run_id),
+            crate::runs::CancelOutcome::Cancelled(_)
+        ));
+        let response = delete_request(router_with_runs(&root.0, runs), "trip.yaml").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(!root.0.join("trip.yaml").exists());
+    }
+
+    /// Inheritance is by id, and the memory index does not look in the trash, so deleting a team
+    /// another one inherits from would stop that team from running.
+    #[tokio::test]
+    async fn delete_refuses_a_team_whose_memory_another_team_inherits() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        let borrower = "schemaVersion: 1\nid: japan\nname: Japan trip\nentrypoint: a\nmemory:\n  inherits:\n    - team: trip\nagents:\n  - id: a\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n";
+        fs::write(root.0.join("japan.yaml"), borrower).expect("write borrower");
+
+        let refused = delete_request(test_router(&root.0), "trip.yaml").await;
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        assert!(
+            error_text(refused)
+                .await
+                .starts_with("Japan trip reads this team's memory.")
+        );
+        assert!(root.0.join("trip.yaml").is_file());
+
+        // A memory block that is switched off reads nothing.
+        fs::write(
+            root.0.join("japan.yaml"),
+            borrower.replace("memory:\n", "memory:\n  enabled: false\n"),
+        )
+        .expect("switch the borrower's memory off");
+        let response = delete_request(test_router(&root.0), "trip.yaml").await;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    /// `trip.yaml` and `trip.yml` resolve to the same `trip.layout.json` and `trip.brief/`, so
+    /// deleting one leaves them for the other.
+    #[tokio::test]
+    async fn delete_leaves_sidecars_a_same_named_team_still_uses() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        fs::write(root.0.join("trip.yml"), VALID_TEAM).expect("write sibling");
+        fs::write(root.0.join("trip.layout.json"), "{}").expect("write layout");
+        fs::create_dir(root.0.join("trip.brief")).expect("create Brief folder");
+
+        let response = delete_request(test_router(&root.0), "trip.yaml").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let deleted: DeletedTeam =
+            serde_json::from_value(response_json(response).await).expect("deleted team");
+        assert_eq!(deleted.moved, ["trip.yaml"]);
+        assert!(root.0.join("trip.yml").is_file());
+        assert!(root.0.join("trip.layout.json").is_file());
+        assert!(root.0.join("trip.brief").is_dir());
+    }
+
+    #[test]
+    fn two_deletions_in_one_second_get_a_folder_each() {
+        let directory = TempDirectory::new();
+        let root = fs::canonicalize(&directory.0).expect("canonical root");
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-01T09:00:00Z")
+            .expect("timestamp")
+            .with_timezone(&chrono::Utc);
+        let folders = (0..2)
+            .map(|_| {
+                fs::write(root.join("trip.yaml"), TRIP_TEAM).expect("write team");
+                move_team_to_trash(&root, &root.join("trip.yaml"), "trip.yaml", None, now)
+                    .expect("move to trash")
+                    .trash
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            folders,
+            [
+                ".trash/2026-10-01T090000Z-trip",
+                ".trash/2026-10-01T090000Z-trip-2"
+            ]
+        );
+        assert_eq!(trashed_team_paths(&root), ["trip.yaml"]);
     }
 }

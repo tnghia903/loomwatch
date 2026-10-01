@@ -10,9 +10,10 @@ export interface AgentRuntime {
   task: string
   /** `Agent A · lead`, `Agent B · responder`, `Agent · helper` — presentation labels (§12.6). */
   ownerLabel: string
-  costUsd: number | null
-  spentPct: number | null
+  /** This agent is executing right now (drives the live perimeter). */
   live: boolean
+  /** The run is being watched as it happens, not replayed: agent marks may move (lib/story/mark.ts). */
+  watching?: boolean
   busUnavailable?: boolean
   /** Set when this stage was handed the preceding stages' replies, so the card can offer to show them. */
   received?: string | null

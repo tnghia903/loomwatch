@@ -977,7 +977,11 @@ impl TeamIndex {
                     continue;
                 }
                 if meta.is_dir() {
-                    stack.push((path, depth + 1));
+                    // A deleted team is not one to inherit: reading it would bring back memory
+                    // the operator removed, and a new team reusing its id would read as a clash.
+                    if entry.file_name() != crate::api::TRASH_DIR {
+                        stack.push((path, depth + 1));
+                    }
                     continue;
                 }
                 let extension = path.extension().and_then(|value| value.to_str());
@@ -3181,7 +3185,7 @@ fn now_rfc3339() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{BudgetConfig, PacketConfig, SpawnConfig};
+    use crate::config::{PacketConfig, SpawnConfig};
     use std::collections::BTreeMap;
 
     struct TempDirectory(PathBuf);
@@ -3215,10 +3219,6 @@ mod tests {
             },
             model: "m".to_owned(),
             thinking_effort: None,
-            budget: BudgetConfig {
-                limit_usd: 1.0,
-                warn_at_percent: 80,
-            },
             allow_recruiting: true,
             capabilities: Vec::new(),
             memory: None,
@@ -4352,12 +4352,44 @@ mod tests {
             format!(
                 "schemaVersion: 1\nid: {id}\nentrypoint: lead\nmemory:\n  brief:\n    - path: \
                  brief/constraints.md\n{inherits_yaml}agents:\n  - id: lead\n    spawn:\n      \
-                 cmd: opencode\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: \
-                 1\n"
+                 cmd: opencode\n      cwd: .\n    model: test/model\n"
             ),
         )
         .expect("write team");
         path
+    }
+
+    /// A deleted team waits in `.trash/` with its id intact. Inheriting it would bring back memory
+    /// the operator removed, so the index does not look there.
+    #[test]
+    fn a_team_in_the_trash_cannot_be_inherited() {
+        let directory = TempDirectory::new();
+        let root = directory.0.join("teams");
+        fs::create_dir_all(&root).expect("create root");
+        let trashed = root
+            .join(crate::api::TRASH_DIR)
+            .join("2026-10-01T090000Z-team");
+        write_team_with_brief(&trashed, "research-team", "We ship on ACP v1 only.", &[]);
+        let borrower =
+            write_team_with_brief(&root, "daily-news", "British spelling.", &["research-team"]);
+        let config = crate::config::TeamConfig::load(&borrower).expect("borrower loads");
+
+        let error = TeamMemory::load(
+            &MemoryRoots {
+                team_dir: borrower.parent().expect("team directory"),
+                teams_root: &root,
+            },
+            &borrower,
+            config.memory.as_ref(),
+        )
+        .expect_err("a trashed team is not inheritable");
+        assert!(
+            error
+                .message
+                .contains("is not a team file under the teams root"),
+            "{}",
+            error.message
+        );
     }
 
     /// An inherited Brief entry is pinned like the team's own, labelled with its origin, and
@@ -4479,7 +4511,7 @@ mod tests {
         fs::create_dir_all(root.join("plain")).expect("create root");
         fs::write(
             root.join("plain/team.yaml"),
-            "schemaVersion: 1\nid: plain\nentrypoint: lead\nagents:\n  - id: lead\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nid: plain\nentrypoint: lead\nagents:\n  - id: lead\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n",
         )
         .expect("write plain team");
         let borrower = write_team_with_brief(&root, "borrower", "B.", &["plain"]);

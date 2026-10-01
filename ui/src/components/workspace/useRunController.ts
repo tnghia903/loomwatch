@@ -94,7 +94,7 @@ export function useRunController({ doc, session, history, activeRunId, record, w
       // §1.5: the file moved between the save and the start, so no run was created. Hand it to
       // the §9.3 conflict bar rather than reporting it as a failed start; the prompt stays put.
       if (caught instanceof RunApiError && caught.code === STALE_TEAM_REVISION) void doc.checkDiskRevision()
-      setStartError(caught instanceof RunApiError ? caught.message : String(caught))
+      setStartError(caught instanceof Error ? caught.message : String(caught))
     } finally {
       setStarting(false)
     }

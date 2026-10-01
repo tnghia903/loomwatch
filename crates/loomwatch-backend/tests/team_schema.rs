@@ -318,13 +318,15 @@ fn review_regressions_are_covered() {
 /// `$defs/Agent`'s two branches, which no shipped example can exercise from both sides at once.
 ///
 /// An operator node is not "an agent with optional fields": the `oneOf` **refuses** `spawn`,
-/// `model`, `budget` and `thinkingEffort` on it, because an operator node starts nothing, selects
-/// no model and bills nobody, and a file that declared one would be saying something the daemon
-/// does not do. A harness node still requires all three, which is the half that would silently
-/// rot if the requirement were merely moved into a branch nothing tests.
+/// `model` and `thinkingEffort` on it, because an operator node starts nothing and selects no
+/// model, and a file that declared one would be saying something the daemon does not do. A
+/// harness node still requires spawn and model, which is the half that would silently rot if the
+/// requirement were merely moved into a branch nothing tests.
+///
+/// `budget` was retired by ADR 0027: it is accepted on either kind and ignored, so a team file
+/// written before then stays valid.
 #[test]
-fn the_schema_takes_an_operator_node_without_spawn_model_or_budget_and_refuses_a_harness_without_them()
- {
+fn the_schema_takes_an_operator_node_without_spawn_or_model_and_refuses_a_harness_without_them() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let schema = read_yaml(&workspace.join("schemas/team.schema.yaml"));
     let validator = jsonschema::draft202012::new(&schema)
@@ -348,7 +350,7 @@ fn the_schema_takes_an_operator_node_without_spawn_model_or_budget_and_refuses_a
         .collect();
     assert!(
         errors.is_empty(),
-        "an operator node needs no spawn, model or budget:\n{}",
+        "an operator node needs no spawn or model:\n{}",
         errors.join("\n")
     );
     assert!(
@@ -359,7 +361,27 @@ fn the_schema_takes_an_operator_node_without_spawn_model_or_budget_and_refuses_a
         }))),
         "`name` defaults to You, so an operator node may omit it"
     );
-    for refused in ["spawn", "model", "budget", "thinkingEffort"] {
+    assert!(
+        validator.is_valid(&with_agent(json!({
+            "id": "review",
+            "kind": "operator",
+            "role": "Approve the findings.",
+            "budget": {"limitUsd": 0}
+        }))),
+        "a retired `budget` on an operator node is accepted and ignored"
+    );
+    let mut legacy = with_agent(json!({
+        "id": "review",
+        "kind": "operator",
+        "role": "Approve the findings."
+    }));
+    legacy["budget"] = json!({"limitUsd": 12.5});
+    legacy["agents"][0]["budget"] = json!({"limitUsd": 3, "warnAtPercent": 70});
+    assert!(
+        validator.is_valid(&legacy),
+        "a retired `budget` at team level or on a harness node is accepted and ignored"
+    );
+    for refused in ["spawn", "model", "thinkingEffort"] {
         let mut agent = json!({
             "id": "review",
             "kind": "operator",
@@ -368,7 +390,6 @@ fn the_schema_takes_an_operator_node_without_spawn_model_or_budget_and_refuses_a
         });
         agent[refused] = match refused {
             "spawn" => json!({"cmd": "/bin/sh", "cwd": "."}),
-            "budget" => json!({"limitUsd": 1}),
             _ => json!("something"),
         };
         assert!(
@@ -382,7 +403,7 @@ fn the_schema_takes_an_operator_node_without_spawn_model_or_budget_and_refuses_a
             "name": "Review",
             "role": "Approve the findings."
         }))),
-        "a harness node (no `kind`, so the default) still requires spawn, model and budget"
+        "a harness node (no `kind`, so the default) still requires spawn and model"
     );
 }
 

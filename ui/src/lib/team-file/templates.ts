@@ -21,6 +21,11 @@ export interface TeamTemplate {
   description: string
   /** Steps shown as a small diagram, in order. */
   steps: readonly string[]
+  /**
+   * What a finished run of this template looks like, drawn as a thumbnail so the operator picks by
+   * outcome rather than by wiring. Always labelled as an example: nothing has run yet.
+   */
+  example?: { title: string; lines: readonly string[]; note?: string }
 }
 
 export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
@@ -29,18 +34,21 @@ export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
     title: 'One assistant',
     description: 'A single AI agent does the whole task. The easiest way to start.',
     steps: ['Assistant'],
+    example: { title: 'Three ways to speed up the build', lines: ['1. Cache dependencies between runs', '2. Split the test suite in two', '3. Skip unchanged packages'] },
   },
   {
     id: 'research-write',
     title: 'Researcher and writer',
     description: 'One agent gathers the facts, a second turns them into the finished result.',
     steps: ['Researcher', 'Writer'],
+    example: { title: 'Market brief: AI note-taking', lines: ['Three tools lead; two launched this year', 'Prices cluster around $10–20 a month', 'Sources: 6 articles, 2 pricing pages'] },
   },
   {
     id: 'research-review-write',
     title: 'Research, your approval, then writing',
     description: 'The team pauses after research so you can approve it or ask for changes.',
     steps: ['Researcher', 'You', 'Writer'],
+    example: { title: 'Competitor summary', lines: ['Acme shipped a team canvas', 'Northwind cut prices by 20%', 'Globex is hiring for agents'], note: 'You approved the research before writing' },
   },
   {
     id: 'blank',
@@ -95,7 +103,6 @@ function agent(id: string, name: string, role: string, harness: DetectedHarness,
     role,
     spawn: { cmd: harness.spawn.cmd, args: [...harness.spawn.args], env: {}, cwd: '.' },
     model,
-    budget: { limitUsd: 5 },
   }
 }
 
@@ -109,9 +116,10 @@ function sequence(from: string, to: string, ts: string): EdgeConfig {
  * `model` must be an id the harness itself advertised (its current model, normally): a harness
  * that advertises models rejects an id it does not know, which would fail the first run.
  */
-export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, name: string, harness: DetectedHarness, model: string, now = new Date()): string {
+/** `id` should come from the file the team is saved as (`teamIdForPath`), so a second team with
+ * the same name does not share the first one's id, and with it the first one's Notebook. */
+export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, name: string, harness: DetectedHarness, model: string, now = new Date(), id = slugifyTeamName(name)): string {
   const ts = now.toISOString()
-  const id = slugifyTeamName(name)
   let agents: AgentConfig[]
   let edges: EdgeConfig[]
   if (template === 'single') {

@@ -71,18 +71,19 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
     expect(after[changed[0]]).toBe('    model: claude-opus-6')
   })
 
-  it('replacing a budget touches only that agent, not the other one', () => {
+  it('replacing a nested block touches only that agent, not the other one', () => {
     const source = readExample('research-team.yaml')
     const model = TeamFileModel.parse(source)
-    model.setAgentField('reviewer', 'budget', { limitUsd: 7 })
+    model.setAgentField('reviewer', 'spawn', { cmd: 'claude-agent-acp', args: [], env: {}, cwd: 'review' })
     const result = model.toYaml()
 
     const before = source.split('\n')
     const after = result.split('\n')
     expect(after).toHaveLength(before.length)
-    const changedLines = before.filter((line, index) => line !== after[index])
-    expect(changedLines).toEqual(['      limitUsd: 5'])
-    expect(result).toContain('      limitUsd: 7')
+    const changed = before.flatMap((line, index) => (line === after[index] ? [] : [index]))
+    expect(changed).toHaveLength(1)
+    expect(changed[0]).toBeGreaterThan(before.findIndex((line) => line.includes('id: reviewer')))
+    expect(after[changed[0]]).toBe('      cwd: review')
   })
 
   it('renaming the team leaves every other line byte-identical', () => {
@@ -131,7 +132,6 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
       role: 'Take notes',
       spawn: { cmd: 'opencode', args: ['acp'], env: {}, cwd: '.' },
       model: 'test/model',
-      budget: { limitUsd: 1 },
     })
     expect(model.toYaml()).not.toBe(source)
 
@@ -148,7 +148,6 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
       role: 'Take notes',
       spawn: { cmd: 'opencode', args: ['acp'], env: {}, cwd: '.' },
       model: 'test/model',
-      budget: { limitUsd: 1 },
     })
     model.addEdge({
       from: 'reviewer',
@@ -174,6 +173,35 @@ describe('TeamFileModel error handling', () => {
     expect(() => TeamFileModel.parse('agents: [\n')).toThrow(TeamFileParseError)
   })
 
+  // A stray notes file or compose file in the teams folder used to load as a "team" and crash the
+  // editor on its first look at `agents`. It must be refused, and refused as a shape problem so
+  // the screen says "not a team" rather than "not valid YAML".
+  it.each([
+    ['YAML that is not a team', 'shopping:\n  - milk\n  - eggs\n'],
+    ['a list at the top level', '- a\n- b\n'],
+    ['an empty file', ''],
+    ['a file with only comments', '# nothing here yet\n'],
+    ['agents that are not a list', 'schemaVersion: 1\nagents: {a: 1}\nedges: []\n'],
+    ['edges that are not a list', 'schemaVersion: 1\nagents: []\nedges: nope\n'],
+  ])('refuses %s as not a team', (_label, source) => {
+    let caught: unknown = null
+    try { TeamFileModel.parse(source) } catch (error) { caught = error }
+    expect(caught).toBeInstanceOf(TeamFileParseError)
+    expect((caught as TeamFileParseError).kind).toBe('shape')
+  })
+
+  it('still opens a half-written team, so its problems can be shown and fixed', () => {
+    const snapshot = TeamFileModel.parse('schemaVersion: 1\nname: Draft\n').snapshot()
+    expect(snapshot.name).toBe('Draft')
+    expect(snapshot.agents).toBeUndefined()
+  })
+
+  it('marks a YAML syntax error as a yaml problem', () => {
+    let caught: unknown = null
+    try { TeamFileModel.parse('agents: [\n') } catch (error) { caught = error }
+    expect((caught as TeamFileParseError).kind).toBe('yaml')
+  })
+
   it('rejects editing a field on an unknown agent', () => {
     const model = TeamFileModel.parse(readExample('research-team.yaml'))
     expect(() => model.setAgentField('nobody', 'model', 'x')).toThrow(TeamFileParseError)
@@ -188,7 +216,6 @@ describe('TeamFileModel error handling', () => {
         role: '',
         spawn: { cmd: 'opencode', args: [], env: {}, cwd: '.' },
         model: 'test/model',
-        budget: { limitUsd: 1 },
       }),
     ).toThrow(TeamFileParseError)
   })
@@ -200,7 +227,7 @@ describe('TeamFileModel error handling', () => {
 })
 
 describe('memory.inherits editing', () => {
-  const bare = 'schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: r\n    spawn:\n      cmd: opencode\n      args: []\n      env: {}\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\nedges: []\n'
+  const bare = 'schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: r\n    spawn:\n      cmd: opencode\n      args: []\n      env: {}\n      cwd: .\n    model: m\nedges: []\n'
 
   it('creates the block, then narrows an existing entry rather than adding a second one', () => {
     const model = TeamFileModel.parse(bare)
@@ -265,7 +292,7 @@ describe('memory.inherits editing', () => {
 })
 
 describe('memory.brief editing', () => {
-  const bare = 'schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: r\n    spawn:\n      cmd: opencode\n      args: []\n      env: {}\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\nedges: []\n'
+  const bare = 'schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: r\n    spawn:\n      cmd: opencode\n      args: []\n      env: {}\n      cwd: .\n    model: m\nedges: []\n'
 
   it('creates the memory block on the first entry and appends to it after that', () => {
     const model = TeamFileModel.parse(bare)
@@ -309,7 +336,7 @@ describe('memory.brief editing', () => {
 // The Inspector's Behaviour-zone memory toggles (docs/TEAM_MEMORY.md §5). Both keys are
 // executable, so they go through the document model and wait for an explicit save.
 describe('per-agent memory overrides', () => {
-  const bare = 'schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: r\n    # keeps its own repository\n    spawn:\n      cmd: opencode\n      args: []\n      env: {}\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\nedges: []\n'
+  const bare = 'schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: r\n    # keeps its own repository\n    spawn:\n      cmd: opencode\n      args: []\n      env: {}\n      cwd: .\n    model: m\nedges: []\n'
 
   it('creates the block on the first key and adds the second beside it', () => {
     const model = TeamFileModel.parse(bare)

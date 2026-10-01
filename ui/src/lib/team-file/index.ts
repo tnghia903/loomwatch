@@ -4,7 +4,6 @@ export { TeamFileModel, TeamFileParseError } from './document'
 export type {
   AgentConfig,
   AgentStatus,
-  BudgetConfig,
   EdgeConfig,
   EdgeKind,
   EdgeLayer,

@@ -1,5 +1,6 @@
 // Thin wrapper over GET /api/harnesses (TNG-52, crates/loomwatch-backend/src/api.rs).
 // Mirrors backend::DetectedHarness — camelCase over the wire already.
+import { daemonFetch } from './daemonFetch'
 
 export interface HarnessSpawn {
   cmd: string
@@ -87,7 +88,7 @@ export class HarnessesApiError extends Error {
 }
 
 export async function fetchHarnesses(): Promise<HarnessReport> {
-  const response = await fetch('/api/harnesses')
+  const response = await daemonFetch('/api/harnesses')
   if (!response.ok) {
     throw new HarnessesApiError(response.statusText, response.status)
   }
@@ -95,7 +96,7 @@ export async function fetchHarnesses(): Promise<HarnessReport> {
 }
 
 export async function fetchHarnessModels(harnessId: string): Promise<HarnessModels> {
-  const response = await fetch(`/api/harnesses/${encodeURIComponent(harnessId)}/models`)
+  const response = await daemonFetch(`/api/harnesses/${encodeURIComponent(harnessId)}/models`)
   if (!response.ok) {
     let message = response.statusText
     try {

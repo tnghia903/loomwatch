@@ -312,9 +312,19 @@ and [Notion setup](docs/NOTION.md).
 | --- | --- |
 | Team definitions and canvas layouts | `~/LoomWatch/teams`; Compose-only deployments use `LOOMWATCH_TEAMS_DIR` |
 | Brief files | Paths configured by the team, usually beside its YAML file |
+| Deleted teams | `.trash` inside your teams folder, one folder per deleted team |
 | Run history, recorded events, and Notebook entries | The local PostgreSQL Docker volume |
 | Database settings | `.env` in the source repository |
 | Provider sign-in | Managed by each host agent app; Compose-only deployments use `loomwatch-home` |
+
+To delete a team, choose **Delete team…** from its **…** menu on Home or from the team switcher.
+LoomWatch refuses while the team is running, or while another team reads its memory. Nothing is
+erased. The team file, its layout and its own notes folder (`<team>.brief`, if it has one) move to
+`.trash/<date>-<team>/` inside your teams folder. Its run history and Notebook entries stay in the
+database, and no new team takes its file name while it is in the trash. To restore it, move the
+files in that folder back to where `path` in its `deleted.json` says the team file was, and leave
+`deleted.json` behind. In Finder, press ⌘⇧. to show hidden folders. To remove a team for good,
+delete its folder from `.trash`.
 
 Back up your teams folder and PostgreSQL database if you want to move or preserve your work.
 `docker compose stop` preserves data. Avoid `docker compose down -v` for normal shutdown:

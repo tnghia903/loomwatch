@@ -2,8 +2,6 @@ schemaVersion: 1
 id: phase03-hermes-acp
 name: Phase 03 Hermes permission smoke test
 entrypoint: permission-agent
-budget:
-  limitUsd: 1
 agents:
   - id: permission-agent
     name: Hermes Permission Agent
@@ -16,7 +14,5 @@ agents:
         HERMES_YOLO_MODE: "0"
       cwd: ..
     model: deepseek-v4-flash
-    budget:
-      limitUsd: 1
     allowRecruiting: false
 edges: []

@@ -126,19 +126,34 @@ describe('archive replay', () => {
     expect(crash?.evidenceId).toBeUndefined()
     expect(crash?.agentId).toBe('lead')
   })
-  it('keeps messages per agent and reverses statuses, costs, and alerts when scrubbing', () => {
+  it('keeps messages per agent and reverses statuses and alerts when scrubbing', () => {
     const events = [
       event(0, 'process', { phase: 'spawned' }),
       event(1, 'message', { role: 'agent', content: { type: 'text', text: 'Hel' } }),
       event(2, 'message', { role: 'agent', content: { type: 'text', text: 'lo' } }),
       event(3, 'message', { role: 'agent', content: { type: 'text', text: 'Separate' } }, 'helper'),
-      event(4, 'usage', { costUsd: 0.5 }),
+      event(4, 'usage', { used: 500, size: 8000 }),
       event(5, 'process', { phase: 'crashed', message: 'Exited unexpectedly' }),
     ]
-    expect(projectEvents(events).agents[0]).toMatchObject({ text: 'Hello', status: 'failed', costUsd: 0.5 })
+    expect(projectEvents(events).agents[0]).toEqual({ id: 'lead', text: 'Hello', status: 'failed' })
     expect(projectEvents(events).agents[1].text).toBe('Separate')
-    expect(projectEvents(events, 1).agents[0]).toMatchObject({ text: 'Hel', status: 'running', costUsd: null })
+    expect(projectEvents(events, 1).agents[0]).toMatchObject({ text: 'Hel', status: 'running' })
     expect(projectEvents(events, 1).attention).toEqual([])
+  })
+  // ADR 0027 retired spend tracking, but runs archived before it still carry the daemon's old
+  // `budget_warning` usage events. Replaying one must raise no alert and must not disturb the
+  // context and token facts that ride the same event kind.
+  it('replays an archived budget warning silently, keeping context and token tracking', () => {
+    const events = [
+      event(0, 'process', { phase: 'spawned' }),
+      event(1, 'usage', { used: 1200, size: 200000 }),
+      event(2, 'usage', { phase: 'budget_warning', scope: 'lead', spentUsd: 4.1 }),
+      event(3, 'turn_end', { stopReason: 'end_turn', usage: { totalTokens: 900 } }),
+    ]
+    const state = projectRun(events)
+    expect(state.attention).toEqual([])
+    expect(state.agents[0]).toMatchObject({ contextUsed: 1200, contextSize: 200000, tokens: 900 })
+    expect(projectEvents(events).attention).toEqual([])
   })
   it('does not mark an agent completed on turn_end', () => {
     const state = projectEvents([event(0, 'process', { phase: 'spawned' }), event(1, 'turn_end', { stopReason: 'end_turn' })])
@@ -250,13 +265,13 @@ it('keeps the operator answer as exact evidence, without replacing the original 
 })
 
 
-it('keeps handover and checkpoint text out of the answer while retaining their cost and transcript', () => {
+it('keeps handover and checkpoint text out of the answer while retaining their tokens and transcript', () => {
   const rows = [
     event(0, 'message', { role: 'agent', content: { type: 'text', text: 'The actual answer' } }),
     event(1, 'turn_end', { stopReason: 'end_turn' }),
     event(2, 'session_meta', { phase: 'turn_purpose', purpose: 'checkpoint' }),
     event(3, 'message', { role: 'agent', content: { type: 'text', text: '## Done: internal checkpoint' } }),
-    event(4, 'turn_end', { stopReason: 'end_turn', usage: { costUsd: 0.2 } }),
+    event(4, 'turn_end', { stopReason: 'end_turn', usage: { totalTokens: 200 } }),
     event(5, 'session_meta', { phase: 'turn_purpose', purpose: 'work' }),
   ]
   for (const cut of [3, 4, 5]) {
@@ -264,7 +279,7 @@ it('keeps handover and checkpoint text out of the answer while retaining their c
     expect(result.agents[0].reply).toBe('The actual answer')
     expect(result.agents[0].text).toContain('internal checkpoint')
   }
-  expect(projectRun(rows).agents[0].costUsd).toBe(0.2)
+  expect(projectRun(rows).agents[0].tokens).toBe(200)
   expect(projectRun([...rows, event(6, 'message', { role: 'agent', content: { type: 'text', text: 'Revised answer' } }), event(7, 'turn_end', { stopReason: 'end_turn' })]).agents[0].reply).toBe('Revised answer')
 })
 

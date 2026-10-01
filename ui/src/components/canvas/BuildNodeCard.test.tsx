@@ -5,9 +5,12 @@ import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { CanvasActionsContext, type CanvasActions } from './CanvasActionsContext'
 import { BuildAgentCard } from './BuildNodeCard'
 
+// The canvas zoom the card reads its depth from (lib/story/depth.ts); 1 is the Team depth.
+const view = vi.hoisted(() => ({ zoom: 1 }))
 vi.mock('@xyflow/react', () => ({
   Handle: ({ type, className }: { type: string; className?: string }) => <span data-handle={type} className={className} />,
   Position: { Left: 'left', Right: 'right' },
+  useStore: (selector: (state: { transform: [number, number, number] }) => unknown) => selector({ transform: [0, 0, view.zoom] }),
 }))
 
 const actions: CanvasActions = {
@@ -26,13 +29,12 @@ const nodeData: AgentNode['data'] = {
     role: 'Protocol Researcher',
     spawn: { cmd: 'opencode', args: [], env: {}, cwd: '.' },
     model: 'openai/gpt-5.4',
-    budget: { limitUsd: 5 },
     status: 'idle',
   },
   isEntrypoint: true,
 }
 
-const runtime = { status: 'running' as const, taskState: 'STREAMING' as const, task: 'Writing the reply', ownerLabel: 'Agent A · lead', costUsd: 1.25, spentPct: 25, live: true }
+const runtime = { status: 'running' as const, taskState: 'STREAMING' as const, task: 'Writing the reply', ownerLabel: 'Agent A · lead', live: true }
 
 function renderCard(data: AgentNode['data'], actionOverrides: Partial<CanvasActions> = {}, selected = false) {
   return render(
@@ -61,13 +63,12 @@ describe('BuildAgentCard on the Build canvas', () => {
     expect(screen.getByText('OpenCode')).toHaveClass('node-kind')
   })
 
-  // Nothing a run projects belongs on a card with no run behind it: the spend, the task row and
-  // the evidence routes would all be claims about an attempt that does not exist.
+  // Nothing a run projects belongs on a card with no run behind it: the task row and the
+  // evidence routes would both be claims about an attempt that does not exist.
   it('carries no run rows without a runtime', () => {
     const { container } = renderCard({ ...nodeData, harnessLabel: 'Claude Code' })
     expect(container.querySelector('.build-node-task')).toBeNull()
     expect(container.querySelector('.build-node-meta')).toBeNull()
-    expect(container.querySelector('.budget-lane')).toBeNull()
   })
 
   it('surfaces incomplete settings without changing the card it is drawn on', () => {
@@ -75,38 +76,53 @@ describe('BuildAgentCard on the Build canvas', () => {
     expect(screen.getByText('Check settings')).toBeInTheDocument()
     expect(container.firstElementChild).toHaveClass('kind-harness')
   })
+
+  // A team shared from another computer: the file is fine, the app is not here.
+  it('says on the card when its app is not on this computer, and in its accessible name', () => {
+    const sentence = 'Agent Ada’s app “acme-agent-cli” isn’t installed on this computer.'
+    const { container } = renderCard({ ...nodeData, appProblem: sentence })
+    expect(screen.getByText(sentence)).toHaveClass('build-node-app-problem')
+    expect(container.firstElementChild).toHaveAccessibleName(`Agent Ada, OpenCode, Protocol Researcher, ${sentence}`)
+  })
+
+  it('draws no app problem on a card that has none', () => {
+    const { container } = renderCard(nodeData)
+    expect(container.querySelector('.build-node-app-problem')).toBeNull()
+    expect(container.firstElementChild).toHaveAccessibleName('Agent Ada, OpenCode, Protocol Researcher')
+  })
 })
 
 // The Run canvas ("Full trace") draws the same card, so these assert that what a run adds lands
 // on it — and that the card is still recognisably the one the operator composed.
 describe('BuildAgentCard while a run is shown', () => {
-  it('keeps the Build identity row and adds the task row, spend and pipeline ordinal', () => {
+  it('keeps the Build identity row and adds the task row, model and pipeline ordinal', () => {
     const { container } = renderCard({ ...nodeData, harnessLabel: 'Claude Code', runtime })
     const card = container.firstElementChild!
     expect(card).toHaveClass('build-node', 'kind-harness', 'has-run', 'st-running')
     expect(screen.getByText('Claude Code')).toHaveClass('node-kind')
     expect(screen.getByText('Agent A · lead · STREAMING')).toBeInTheDocument()
     expect(screen.getByText('Writing the reply')).toHaveClass('task-text')
-    expect(screen.getByText('$1.25 / $5.00')).toHaveClass('cost')
     expect(screen.getByText('openai/gpt-5.4')).toHaveClass('model')
-    expect((card.querySelector('.budget-lane > i') as HTMLElement).style.width).toBe('25%')
+    // Spend is not tracked: the meta row is the model alone, with no dollar figure or meter.
+    expect(card.querySelector('.build-node-meta')?.children).toHaveLength(1)
+    expect(card).not.toHaveTextContent('$')
     expect(card.querySelector('.step')).toHaveTextContent('2')
   })
 
   // The React Flow node wrapper already carries the run's accessible name; a second one on the
   // card would announce the same agent twice.
+  // A run that could not start says so in its own error; the card does not repeat a pre-run check.
+  it('draws no app problem while a run is shown', () => {
+    const { container } = renderCard({ ...nodeData, runtime, appProblem: 'Agent Ada’s app “acme-agent-cli” isn’t installed on this computer.' })
+    expect(container.querySelector('.build-node-app-problem')).toBeNull()
+  })
+
   it('leaves the accessible name to the node wrapper while a run is shown', () => {
     const { container } = renderCard({ ...nodeData, runtime })
     expect(container.firstElementChild).not.toHaveAttribute('aria-label')
     cleanup()
     const planned = renderCard({ ...nodeData, harnessLabel: 'Claude Code' })
     expect(planned.container.firstElementChild).toHaveAttribute('aria-label', 'Agent Ada, Claude Code, Protocol Researcher')
-  })
-
-  it('shows the budget limit alone when the run recorded no spend for this agent', () => {
-    renderCard({ ...nodeData, runtime: { ...runtime, costUsd: null, spentPct: null } })
-    expect(screen.getByText('$5.00')).toHaveClass('cost')
-    expect(screen.queryByText(/\$5\.00 \/ /)).not.toBeInTheDocument()
   })
 
   it('marks the perimeter with the run status, and lets selection take it back', () => {
@@ -154,7 +170,7 @@ describe('BuildAgentCard while a run is shown', () => {
 })
 
 describe('BuildAgentCard as a review stop', () => {
-  it('renders the question and its answer route, with no harness, model or spend', () => {
+  it('renders the question and its answer route, with no harness or model', () => {
     const onAnswer = vi.fn()
     const { container } = renderCard({
       label: 'You',
@@ -165,7 +181,6 @@ describe('BuildAgentCard as a review stop', () => {
     expect(container.firstElementChild).toHaveClass('build-node', 'kind-operator', 'st-waiting')
     expect(screen.getByText('Approve the findings?')).toBeInTheDocument()
     expect(screen.getByText(/Parked with no process running/)).toBeInTheDocument()
-    expect(container.querySelector('.budget-lane')).toBeNull()
     expect(container.querySelector('.build-node-meta')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Answer' }))
     expect(onAnswer).toHaveBeenCalledOnce()
@@ -176,5 +191,39 @@ describe('BuildAgentCard as a review stop', () => {
     expect(screen.getByText('You · Budget sign-off')).toBeInTheDocument()
     expect(screen.getByText('Pauses for your decision')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Answer' })).not.toBeInTheDocument()
+  })
+})
+
+describe('BuildAgentCard at each depth', () => {
+  afterEach(() => { view.zoom = 1 })
+
+  it('says one plain sentence when zoomed out to Story', () => {
+    view.zoom = 0.5
+    renderCard(nodeData)
+    expect(screen.getByText('Researches')).toHaveClass('depth-story-line')
+    expect(document.querySelector('.depth-trace-facts')).toBeNull()
+  })
+
+  it('tells the run state as a sentence at Story depth', () => {
+    view.zoom = 0.5
+    renderCard({ ...nodeData, runtime })
+    expect(document.querySelector('.depth-story-line')).toHaveTextContent('Writing the reply')
+  })
+
+  it('adds the facts an expert checks when zoomed in to Trace', () => {
+    view.zoom = 1.4
+    renderCard(nodeData)
+    const facts = document.querySelector('.depth-trace-facts') as HTMLElement
+    expect(facts).not.toBeNull()
+    expect(facts).toHaveTextContent('ada')
+    expect(facts).toHaveTextContent('openai/gpt-5.4')
+    expect(facts).toHaveTextContent('opencode')
+    expect(document.querySelector('.depth-story-line')).toBeNull()
+  })
+
+  it('adds nothing at Team depth', () => {
+    renderCard(nodeData)
+    expect(document.querySelector('.depth-story-line')).toBeNull()
+    expect(document.querySelector('.depth-trace-facts')).toBeNull()
   })
 })

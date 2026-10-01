@@ -1,8 +1,13 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
+import { parse } from 'yaml'
 
 import type { TeamDocument } from './types'
 import Ajv2020 from 'ajv/dist/2020'
 
+import { TeamFileModel } from './document'
 import { compileTeamValidator as compileWith, displayFieldProblems } from './validation'
 
 const compileTeamValidator = (schema: object) => compileWith(schema, Ajv2020)
@@ -22,14 +27,13 @@ const daemonSchema = {
       type: 'array', minItems: 1,
       items: {
         type: 'object',
-        required: ['id', 'name', 'role', 'spawn', 'model', 'budget'],
+        required: ['id', 'name', 'role', 'spawn', 'model'],
         properties: {
           id: { type: 'string', minLength: 1 },
           name: { type: 'string', minLength: 1 },
           role: { type: 'string', minLength: 1 },
           model: { type: 'string', minLength: 1 },
           spawn: { type: 'object', required: ['cwd'], properties: { cwd: { type: 'string', minLength: 1 } } },
-          budget: { type: 'object', required: ['limitUsd'], properties: { limitUsd: { type: 'number', minimum: 0 } } },
         },
       },
     },
@@ -45,7 +49,7 @@ function document(overrides: Partial<TeamDocument> = {}): TeamDocument {
     entrypoint: 'researcher',
     agents: [{
       id: 'researcher', name: 'Researcher', role: 'Research', model: 'model-1',
-      spawn: { cmd: 'agent', args: [], env: {}, cwd: '.' }, budget: { limitUsd: 5 },
+      spawn: { cmd: 'agent', args: [], env: {}, cwd: '.' },
     }],
     edges: [],
     ...overrides,
@@ -79,16 +83,12 @@ describe('compileTeamValidator', () => {
     const validate = compileTeamValidator(daemonSchema)
     const result = validate(document({
       entrypoint: 'missing',
-      budget: { limitUsd: Number.POSITIVE_INFINITY },
-      agents: [{ ...document().agents[0], budget: { limitUsd: Number.NaN } }],
       edges: [{ from: 'researcher', to: 'researcher', layer: 'configured', kind: 'sequence', ts: '2026-09-08T00:00:00Z' }],
     }))
 
     expect(result.valid).toBe(false)
-    expect(result.fieldProblemsByAgent.get('researcher')?.limitUsd).toMatchObject({ weight: 'error' })
     expect(result.documentProblems.map((problem) => problem.message)).toEqual(expect.arrayContaining([
       'The starting agent “missing” isn\'t in this team any more. Choose another one.',
-      'Enter a number for the team budget.',
       '“Researcher” can\'t hand work to itself.',
     ]))
   })
@@ -113,6 +113,18 @@ describe('schema problems in plain words', () => {
   })
 })
 
+describe('a half-written team', () => {
+  // `agents` and `edges` are required, but a file can lack them on disk. Validation reports that;
+  // it must not throw while doing it, which used to take the whole editor down with it.
+  it('reports missing lists as problems instead of throwing', () => {
+    const validate = compileTeamValidator(daemonSchema)
+    const doc = { schemaVersion: 1, id: 'draft', name: 'Draft', entrypoint: 'a' } as unknown as TeamDocument
+    let result: ReturnType<typeof validate> | null = null
+    expect(() => { result = validate(doc) }).not.toThrow()
+    expect(result!.valid).toBe(false)
+  })
+})
+
 describe('displayFieldProblems', () => {
   it('shows incomplete fields in copper first, then promotes them to red after save', () => {
     const result = compileTeamValidator(daemonSchema)(document({
@@ -121,5 +133,55 @@ describe('displayFieldProblems', () => {
 
     expect(displayFieldProblems(result.fieldProblemsByAgent, new Set(), false).get('researcher')?.role?.weight).toBe('incomplete')
     expect(displayFieldProblems(result.fieldProblemsByAgent, new Set(), true).get('researcher')?.role?.weight).toBe('error')
+  })
+})
+
+// ADR 0027 retired budgets. A team file written before then may still say `budget:` at team and
+// agent level. The UI neither reads nor writes it and must not flag it: the real schema accepts it
+// as a retired key, and the CST-preserving model carries it through an unrelated edit untouched.
+describe('a team file that still carries a legacy budget block', () => {
+  const schema = parse(readFileSync(resolve(process.cwd(), '../schemas/team.schema.yaml'), 'utf8')) as object
+  const legacy = [
+    'schemaVersion: 1',
+    'id: legacy-team',
+    'name: Legacy team',
+    'entrypoint: researcher',
+    'budget:',
+    '  limitUsd: 20',
+    '  warnAtPercent: 75',
+    'agents:',
+    '  - id: researcher',
+    '    name: Researcher',
+    '    role: Research the question',
+    '    spawn:',
+    '      cmd: opencode',
+    '      args:',
+    '        - acp',
+    '      env: {}',
+    '      cwd: .',
+    '    model: test/model',
+    '    budget:',
+    '      limitUsd: 5',
+    '      warnAtPercent: 80',
+    'edges: []',
+    '',
+  ].join('\n')
+
+  it('loads with no validation problem against the schema the daemon serves', () => {
+    const result = compileWith(schema, Ajv2020)(TeamFileModel.parse(legacy).snapshot())
+    expect(result.documentProblems).toEqual([])
+    expect(result.fieldProblemsByAgent.size).toBe(0)
+    expect(result.valid).toBe(true)
+  })
+
+  it('is left exactly as written by an unrelated edit', () => {
+    const model = TeamFileModel.parse(legacy)
+    model.setAgentField('researcher', 'model', 'test/other')
+    const before = legacy.split('\n')
+    const after = model.toYaml().split('\n')
+    expect(after).toHaveLength(before.length)
+    expect(before.filter((line, index) => line !== after[index])).toEqual(['    model: test/model'])
+    expect(model.toYaml()).toContain('budget:\n  limitUsd: 20\n  warnAtPercent: 75\n')
+    expect(model.toYaml()).toContain('    budget:\n      limitUsd: 5\n      warnAtPercent: 80\n')
   })
 })

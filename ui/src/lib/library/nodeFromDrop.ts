@@ -18,6 +18,8 @@ export type AgentNode = Node<{
   onAnswer?: () => void
   /** docs/CANVAS_SPEC.md §5.2/§5.4: live per-field problems, already reveal-gated. */
   fieldProblems?: AgentFieldProblems
+  /** Build only: why this agent's app cannot start on this computer (`lib/team-file/appChecks`). */
+  appProblem?: string
   /** TNG-113: runtime task state while a run is shown. View state only. */
   runtime?: AgentRuntime
 }>

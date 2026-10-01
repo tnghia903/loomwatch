@@ -9,12 +9,24 @@ export interface CommandAction {
   icon?: LucideIcon
 }
 
+/** What the palette understood from plain words or a /command (lib/story/intent.ts). */
+export interface InterpretedAction extends CommandAction {
+  dialect: 'plain' | 'exact'
+  detail?: string
+}
+
 // UX_REDESIGN §11: ⌘K is the menu. 560 px, e2, centred at 22% from the top, a filter field
 // and a flat ungrouped ranked list. Every primary flow is reachable without a pointer.
-export function CommandPalette({ actions, onClose }: { actions: CommandAction[]; onClose: () => void }) {
+export function CommandPalette({ actions, onClose, interpret }: { actions: CommandAction[]; onClose: () => void; interpret?: (query: string) => InterpretedAction | null }) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
-  const filtered = useMemo(() => rankActions(actions, query), [actions, query])
+  // Plain words and /commands resolve to one proposed action, shown first so Enter does exactly
+  // what the row says; the ordinary list still filters below it.
+  const understood = useMemo(() => interpret?.(query) ?? null, [interpret, query])
+  const filtered = useMemo(() => {
+    const listed = rankActions(actions, query.startsWith('/') ? query.slice(1) : query)
+    return understood ? [understood, ...listed] : listed
+  }, [actions, query, understood])
 
   function run(action: CommandAction | undefined) {
     if (!action || action.disabled) return
@@ -43,15 +55,18 @@ export function CommandPalette({ actions, onClose }: { actions: CommandAction[];
         <div className="pop-list" style={{ maxHeight: 360 }}>
           {filtered.map((action, index) => {
             const Icon = action.icon ?? Command
+            const proposal = action === understood ? understood : null
             return (
-              <button key={action.label} type="button" disabled={action.disabled} onMouseMove={() => setActiveIndex(index)} onClick={() => run(action)} className={`pop-row ${index === activeIndex ? 'active' : ''}`}>
-                <Icon size={14} aria-hidden="true" style={{ color: 'var(--color-ink-3)', flex: 'none' }} />
-                <span className="name t-body">{action.label}</span>
+              <button key={`${proposal ? 'understood:' : ''}${action.label}`} type="button" disabled={action.disabled} onMouseMove={() => setActiveIndex(index)} onClick={() => run(action)} className={`pop-row ${index === activeIndex ? 'active' : ''} ${proposal ? 'understood' : ''}`}>
+                <Icon size={14} aria-hidden="true" style={{ color: proposal ? 'var(--color-accent)' : 'var(--color-ink-3)', flex: 'none' }} />
+                <span className="name t-body">{action.label}{proposal?.detail && <small className="understood-detail">{proposal.detail}</small>}</span>
+                {proposal && <span className="understood-dialect">{proposal.dialect === 'exact' ? 'Command' : 'From your words'}</span>}
                 {action.shortcut && <kbd className="kbd t-mono-sm">{action.shortcut}</kbd>}
               </button>
             )
           })}
-          {filtered.length === 0 && <p className="pop-empty t-meta">No commands match.</p>}
+          {filtered.length === 0 && <p className="pop-empty t-meta">{interpret ? 'Nothing matches. Try plain words like “add a reviewer” or “zoom out”, or a /command.' : 'No commands match.'}</p>}
+          {interpret && !query && <p className="pop-hint t-meta">Type plainly — “add a reviewer”, “zoom out”, “looks good”, “open daily news” — or exactly: <code>/add writer</code>, <code>/depth trace</code>, <code>/approve</code>, <code>/run …</code></p>}
         </div>
       </div>
     </div>

@@ -6,11 +6,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parse } from 'yaml'
 
 import type { DetectedHarness } from '../lib/harnesses'
+import { ErrorBoundary } from './ui/ErrorBoundary'
 import { Workspace } from './Workspace'
 
 // The whole workspace, with the real team-document hook, opening team files the daemon accepts
-// because `config.rs` defaults the keys they leave out. Each used to throw during render, which
-// unmounted the whole app and left a blank page.
+// because `config.rs` defaults the keys they leave out. Each used to throw during render: before
+// the ErrorBoundary that was a blank page, and with it, a team that still could not be opened.
 // Workspace.test.tsx mocks `useTeamDocument`, so it cannot see a file's shape at all.
 
 vi.mock('../lib/watch/useSessionEvents', () => ({
@@ -73,8 +74,8 @@ const SHAPES: Array<{ name: string; yaml: string; card: string }> = [
   {
     name: 'an agent with no name or role, in a team with no id, name or edges',
     yaml: 'schemaVersion: 1\nentrypoint: writer\nagents:\n  - id: writer\n    model: sonnet\n    spawn:\n      cmd: opencode\n      cwd: .\n',
-    // The accessible name is trimmed: the card's label is `${name}, ${app}, ${role}` with both ends empty.
-    card: ', OpenCode,',
+    // The card's label leaves out empty parts, so with no name or role only the app is left.
+    card: 'OpenCode',
   },
 ]
 
@@ -94,8 +95,16 @@ describe('Workspace opens team files that omit keys the daemon defaults', () => 
       if (url.startsWith('/api/team/layout?')) return jsonResponse(200, { version: 1, nodes: [], edges: [], agents: {} })
       return jsonResponse(404, { error: `unexpected ${url}` })
     }))
-    render(<Workspace harnesses={HARNESSES} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onDocumentOpen={vi.fn()} initialRunId={null} />)
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    render(
+      <ErrorBoundary>
+        <Workspace harnesses={HARNESSES} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onDocumentOpen={vi.fn()} initialRunId={null} />
+      </ErrorBoundary>,
+    )
 
     expect(await screen.findByRole('article', { name: card })).toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: 'Something went wrong' })).not.toBeInTheDocument()
+    expect(errors.mock.calls.filter(([first]) => String(first).startsWith('LoomWatch hit an unexpected error'))).toEqual([])
   })
 })

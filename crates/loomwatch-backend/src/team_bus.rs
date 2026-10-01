@@ -1,6 +1,6 @@
 //! Authenticated HTTP MCP Team Bus used by ACP harnesses for structured delegation.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -62,7 +62,6 @@ struct TeamBusState {
     address: SocketAddr,
     tokens: RwLock<BTreeMap<String, AgentSession>>,
     statuses: RwLock<BTreeMap<String, String>>,
-    budget_warnings: Mutex<BTreeSet<String>>,
     dispatch_slots: Arc<Semaphore>,
     tasks: Mutex<Vec<JoinHandle<Result<()>>>>,
     shutdown: Mutex<Option<oneshot::Sender<()>>>,
@@ -165,7 +164,6 @@ impl TeamBus {
             address,
             tokens: RwLock::new(BTreeMap::new()),
             statuses: RwLock::new(statuses),
-            budget_warnings: Mutex::new(BTreeSet::new()),
             dispatch_slots: Arc::new(Semaphore::new(dispatch_limit)),
             tasks: Mutex::new(Vec::new()),
             shutdown: Mutex::new(Some(shutdown_tx)),
@@ -557,7 +555,7 @@ impl TeamBus {
             "dispatch" => {
                 let target = required_string(arguments, "agent")?;
                 let task = required_string(arguments, "task")?;
-                let context = self.guard_delegation(session, &target, event_log).await?;
+                let context = self.guard_delegation(session, &target)?;
                 self.spawn_background(&target, &task, event_log.clone(), context)
                     .await?;
                 Ok(json!({"accepted": true, "agent": target, "mode": "dispatch"}))
@@ -571,7 +569,7 @@ impl TeamBus {
                 if let Some(reply) = self.ask_live(&target, &question).await? {
                     return Ok(json!({ "agent": target, "reply": reply, "live": true }));
                 }
-                let context = self.guard_delegation(session, &target, event_log).await?;
+                let context = self.guard_delegation(session, &target)?;
                 let outcome = self
                     .run_agent(&target, &question, event_log.clone(), context)
                     .await?;
@@ -585,7 +583,7 @@ impl TeamBus {
             "handoff" => {
                 let target = required_string(arguments, "agent")?;
                 let task = required_string(arguments, "task")?;
-                let context = self.guard_delegation(session, &target, event_log).await?;
+                let context = self.guard_delegation(session, &target)?;
                 self.spawn_background(&target, &task, event_log.clone(), context)
                     .await?;
                 self.state
@@ -1070,13 +1068,8 @@ impl TeamBus {
         })
     }
 
-    async fn guard_delegation(
-        &self,
-        session: &AgentSession,
-        target: &str,
-        event_log: &EventLog,
-    ) -> Result<DelegationContext> {
-        let target_agent = self.agent(target)?;
+    fn guard_delegation(&self, session: &AgentSession, target: &str) -> Result<DelegationContext> {
+        self.agent(target)?;
         let next_depth = session
             .dispatch_depth
             .checked_add(1)
@@ -1091,47 +1084,6 @@ impl TeamBus {
             bail!("delegation cycle rejected: {}", cycle.join(" -> "));
         }
 
-        let events = self
-            .state
-            .archive
-            .load_session(event_log.session_id())
-            .await?;
-        let agent_spend = spent_usd(&events, Some(target));
-        let agent_scope = format!("agent:{target}");
-        let agent_exhausted = self
-            .observe_budget(
-                event_log,
-                target,
-                &agent_scope,
-                agent_spend,
-                &target_agent.budget,
-            )
-            .await?;
-        let team_budget_state = if let Some(team_budget) = &self.state.team.budget {
-            let team_spend = spent_usd(&events, None);
-            let exhausted = self
-                .observe_budget(
-                    event_log,
-                    &session.agent_id,
-                    "team",
-                    team_spend,
-                    team_budget,
-                )
-                .await?;
-            Some((team_spend, team_budget.limit_usd, exhausted))
-        } else {
-            None
-        };
-        if agent_exhausted {
-            bail!(
-                "{agent_scope} budget exhausted: spent ${agent_spend:.6} of ${:.6}",
-                target_agent.budget.limit_usd
-            );
-        }
-        if let Some((team_spend, team_limit, true)) = team_budget_state {
-            bail!("team budget exhausted: spent ${team_spend:.6} of ${team_limit:.6}");
-        }
-
         let mut path = session.delegation_path.clone();
         path.push(target.to_owned());
         Ok(DelegationContext {
@@ -1139,71 +1091,6 @@ impl TeamBus {
             depth: next_depth,
         })
     }
-
-    async fn observe_budget(
-        &self,
-        event_log: &EventLog,
-        event_agent_id: &str,
-        scope: &str,
-        spent_usd: f64,
-        budget: &crate::config::BudgetConfig,
-    ) -> Result<bool> {
-        let warning_at_usd = budget.limit_usd * f64::from(budget.warn_at_percent) / 100.0;
-        if spent_usd >= warning_at_usd {
-            let should_emit = self
-                .state
-                .budget_warnings
-                .lock()
-                .await
-                .insert(scope.to_owned());
-            if should_emit {
-                event_log
-                    .append(
-                        event_agent_id,
-                        EventKind::Usage,
-                        json!({
-                            "phase": "budget_warning",
-                            "scope": scope,
-                            "spentUsd": spent_usd,
-                            "limitUsd": budget.limit_usd,
-                            "warnAtPercent": budget.warn_at_percent
-                        }),
-                        Some(json!({
-                            "source": SERVER_NAME,
-                            "event": "budget_warning",
-                            "scope": scope
-                        })),
-                    )
-                    .await?;
-            }
-        }
-        Ok(spent_usd >= budget.limit_usd)
-    }
-}
-
-fn spent_usd(events: &[crate::RunEvent], agent_id: Option<&str>) -> f64 {
-    events
-        .iter()
-        .filter(|event| agent_id.is_none_or(|agent_id| event.agent_id == agent_id))
-        .filter_map(event_cost_usd)
-        .sum()
-}
-
-fn event_cost_usd(event: &crate::RunEvent) -> Option<f64> {
-    let value = match event.kind {
-        EventKind::Usage => event
-            .payload
-            .get("costUsd")
-            .or_else(|| event.payload.get("cost_usd")),
-        EventKind::TurnEnd => event
-            .payload
-            .pointer("/usage/costUsd")
-            .or_else(|| event.payload.pointer("/usage/cost_usd")),
-        _ => None,
-    }?;
-    value
-        .as_f64()
-        .filter(|cost| cost.is_finite() && *cost >= 0.0)
 }
 
 impl TeamBusConnection {
@@ -1584,7 +1471,7 @@ fn two_strings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{BudgetConfig, ConversationConfig, GuardsConfig, SpawnConfig};
+    use crate::config::{ConversationConfig, GuardsConfig, SpawnConfig};
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;
@@ -1621,10 +1508,6 @@ mod tests {
             name: "Test Team".into(),
             entrypoint: "lead".into(),
             responder: None,
-            budget: Some(BudgetConfig {
-                limit_usd: 10.0,
-                warn_at_percent: 80,
-            }),
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -1749,10 +1632,6 @@ mod tests {
             name: "Guard test team".into(),
             entrypoint: "a".into(),
             responder: None,
-            budget: Some(BudgetConfig {
-                limit_usd: 1.0,
-                warn_at_percent: 80,
-            }),
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -1779,14 +1658,6 @@ mod tests {
         )
         .await?;
         let event_log = EventLog::new(archive.clone(), "guard-run".into());
-        event_log
-            .append(
-                "c",
-                EventKind::Usage,
-                json!({"costUsd": 1.0}),
-                Some(json!({"source": "test usage"})),
-            )
-            .await?;
 
         let cycle = bus
             .connection_with_context(
@@ -1817,13 +1688,6 @@ mod tests {
             "delegation depth 3 exceeds guards.maxDispatchDepth 2",
         );
 
-        let budget = bus.connection("b").await?;
-        budget.register(event_log.clone()).await;
-        let response = call_dispatch(&bus, &budget, "c").await?;
-        assert_tool_error_contains(&response, "agent:c budget exhausted");
-        let response = call_dispatch(&bus, &budget, "d").await?;
-        assert_tool_error_contains(&response, "team budget exhausted");
-
         assert!(bus.state.tasks.lock().await.is_empty());
         assert!(
             bus.state
@@ -1843,16 +1707,7 @@ mod tests {
                     && event.payload["status"].as_str() == Some("failed")
             })
             .collect();
-        assert_eq!(failures.len(), 4, "every guard refusal must be archived");
-        let warning_scopes: BTreeSet<_> = events
-            .iter()
-            .filter(|event| {
-                event.kind == EventKind::Usage
-                    && event.payload["phase"].as_str() == Some("budget_warning")
-            })
-            .filter_map(|event| event.payload["scope"].as_str())
-            .collect();
-        assert_eq!(warning_scopes, BTreeSet::from(["agent:c", "team"]));
+        assert_eq!(failures.len(), 2, "every guard refusal must be archived");
         assert_events_match_schema(&events);
         Ok(())
     }
@@ -1879,7 +1734,6 @@ mod tests {
             name: "Fan-out test team".into(),
             entrypoint: "lead".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -1951,7 +1805,6 @@ mod tests {
             name: "Pipeline restriction team".into(),
             entrypoint: "open".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -2035,7 +1888,9 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "../../migrations")]
-    async fn budget_warnings_fire_once_at_agent_and_team_thresholds(
+    /// ADR 0027 retired budgets. Spend a harness reports is still archived as evidence, but no
+    /// amount of it refuses a delegation or makes the bus write anything of its own.
+    async fn archived_spend_neither_refuses_a_delegation_nor_raises_a_warning(
         pool: sqlx::PgPool,
     ) -> Result<()> {
         let team = Arc::new(TeamConfig {
@@ -2044,10 +1899,6 @@ mod tests {
             name: "Warning test team".into(),
             entrypoint: "a".into(),
             responder: None,
-            budget: Some(BudgetConfig {
-                limit_usd: 2.0,
-                warn_at_percent: 80,
-            }),
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -2084,20 +1935,16 @@ mod tests {
         let connection = bus.connection("b").await?;
         let session = bus.state.tokens.read().await[&connection.token].clone();
 
-        bus.guard_delegation(&session, "d", &event_log).await?;
-        bus.guard_delegation(&session, "d", &event_log).await?;
+        bus.guard_delegation(&session, "d")?;
+        bus.guard_delegation(&session, "d")?;
         bus.shutdown().await?;
 
         let events = archive.verify_session("warning-run").await?;
-        let warning_scopes: Vec<_> = events
-            .iter()
-            .filter(|event| {
-                event.kind == EventKind::Usage
-                    && event.payload["phase"].as_str() == Some("budget_warning")
-            })
-            .filter_map(|event| event.payload["scope"].as_str())
-            .collect();
-        assert_eq!(warning_scopes, ["agent:d", "team"]);
+        assert_eq!(
+            events.len(),
+            2,
+            "only the two harness usage reports are archived; the bus adds nothing"
+        );
         assert_events_match_schema(&events);
         Ok(())
     }
@@ -2126,7 +1973,6 @@ mod tests {
             name: "Notebook tools".into(),
             entrypoint: "lead".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -2292,7 +2138,6 @@ mod tests {
             name: "Scoped team".into(),
             entrypoint: "lead".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -2476,7 +2321,6 @@ mod tests {
             name: "Teardown team".into(),
             entrypoint: "a".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -2605,7 +2449,6 @@ mod tests {
             name: "Live ask team".into(),
             entrypoint: "a".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -2747,7 +2590,6 @@ mod tests {
             name: "Helper brief team".into(),
             entrypoint: "lead".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: Some(crate::config::MemoryConfig {
@@ -2834,10 +2676,6 @@ mod tests {
             },
             model: "test/model".into(),
             thinking_effort: None,
-            budget: BudgetConfig {
-                limit_usd: 1.0,
-                warn_at_percent: 80,
-            },
             capabilities: Vec::new(),
             memory: None,
             allow_recruiting: true,

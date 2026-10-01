@@ -13,6 +13,7 @@ import {
   Maximize2,
   Minimize2,
   Network,
+  Plus,
   Search,
   ShieldCheck,
   Wrench,
@@ -28,14 +29,25 @@ import { formatOffset } from '../../lib/watch/events'
 import type { RunColumnProps } from './RunColumn'
 import { StripLine } from './StoryNodes'
 import { useCanvasActions } from '../canvas/CanvasActionsContext'
+import { buildReceipt } from '../../lib/story/receipt'
+import { RunReceipt } from './RunReceipt'
+import { WeftBar } from './WeftBar'
+import { markState } from '../../lib/story/mark'
+import { AgentMark } from '../ui/AgentMark'
+import { FileCard } from '../ui/FileCard'
+import { fileRefsIn } from '../../lib/files/fileRefs'
 
 export interface DeliveryLaneProps extends RunColumnProps {
   harnessLabels?: ReadonlyMap<string, string>
   planned?: boolean
+  /** Planned runs only: agent id → why its app cannot start on this computer (`lib/team-file/appChecks`). */
+  appProblems?: ReadonlyMap<string, string>
   pipeline: boolean
   linearPipeline?: boolean
   onTrace: () => void
   onHistory?: () => void
+  /** Leave this finished run for a blank request, for a task that is not a follow-up of it. */
+  onNewRun?: () => void
   /**
    * A stage to bring into view, raised from outside the lane — today, the operator clicking an
    * Attention alert to reach the agent it belongs to. It is a request, not the selection itself:
@@ -78,10 +90,12 @@ export function DeliveryLane({
   linearPipeline = true,
   planned = false,
   harnessLabels = new Map(),
+  appProblems = new Map(),
   onInspectEvidence,
   onSelectAgent,
   onTrace,
   onHistory,
+  onNewRun,
   focusAgentId = null,
 }: DeliveryLaneProps) {
   // The answer is what this view exists for; fetch its renderer before the first token arrives.
@@ -185,6 +199,26 @@ export function DeliveryLane({
     setReceipt(null)
     setQuery('')
   }
+  // The loom views of this run: the timeline (who worked when) and, once it ends, the receipt.
+  const weftOrder = useMemo(() => agents.map((node) => ({ id: node.id, name: node.data.agent.name, operator: node.data.agent.kind === 'operator', status: node.data.runtime?.status, taskState: node.data.runtime?.taskState })), [agents])
+  const terminal = ['succeeded', 'partial', 'failed', 'cancelled'].includes(phase)
+  const runReceipt = useMemo(() => (planned || !terminal ? null : buildReceipt({
+    attempt,
+    prompt,
+    phase,
+    elapsed,
+    agents: agents.map((node) => ({ id: node.id, name: node.data.agent.name, operator: node.data.agent.kind === 'operator', runtime: node.data.runtime })),
+    projection,
+    evidenceByAgent,
+    harnessLabels: new Map(agents.map((node) => [node.id, snapshots.get(node.id)?.[0]?.harness ?? harnessLabels.get(node.id) ?? ''])),
+    answered: Boolean(output.text),
+  })), [planned, terminal, attempt, prompt, phase, elapsed, agents, projection, evidenceByAgent, snapshots, harnessLabels, output.text])
+  const fileMakers = useMemo(() => agents.map((node) => ({ id: node.id, name: node.data.agent.name })), [agents])
+  const deliveredFiles = useMemo(() => (output.streaming ? [] : fileRefsIn(output.text)), [output.text, output.streaming])
+  const showStage = (id: string) => {
+    select(id)
+    document.getElementById(`delivery-stage-${id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }
   // An Attention alert names the agent it belongs to; opening that stage is what "go to it" means
   // on this surface, where the skills and tools panel is already scoped to the selected stage.
   // Adjusted during render rather than in an effect (React's "adjusting state when a prop
@@ -240,9 +274,14 @@ export function DeliveryLane({
               {prompt || (planned ? 'Describe the result you want to create.' : `${elapsed} · ${agents.length} agents`)}
             </p>
           </div>
-          {output.text && !output.streaming && !planned ? <button className="btn btn-primary" onClick={() => { setReviewChecked(false); setReviewOpen(true) }}>{reviewed ? 'View review' : 'Review output'} <ArrowRight size={15} /></button> : <button className="btn" onClick={onTrace}>
-            <Network size={15} /> {planned ? 'Edit team' : 'Full trace'}
-          </button>}
+          <div className="delivery-heading-acts">
+            {/* A finished run otherwise only offers to continue itself; a different task needs a
+                way back to the blank request without a detour through Build. */}
+            {onNewRun && terminal && !planned && <button className="btn" onClick={onNewRun}><Plus size={15} /> New run</button>}
+            {output.text && !output.streaming && !planned ? <button className="btn btn-primary" onClick={() => { setReviewChecked(false); setReviewOpen(true) }}>{reviewed ? 'View review' : 'Review output'} <ArrowRight size={15} /></button> : <button className="btn" onClick={onTrace}>
+              <Network size={15} /> {planned ? 'Edit team' : 'Full trace'}
+            </button>}
+          </div>
         </header>
         <article className="delivery-request">
           <div className="delivery-request-label"><span className="delivery-eyebrow">Request</span>{onHistory && <button className="delivery-link" onClick={onHistory}>Run history <ArrowDown size={12} /></button>}</div>
@@ -253,6 +292,8 @@ export function DeliveryLane({
                 : 'No original prompt was captured.')}
           </p>
         </article>
+        {runReceipt && <RunReceipt receipt={runReceipt} onInspectEvidence={onInspectEvidence} onSelectAgent={showStage} onTrace={onTrace} />}
+        {!planned && projection.startedAt && <WeftBar projection={projection} order={weftOrder} relay={pipeline} onInspectEvidence={onInspectEvidence} />}
         <div className="delivery-section-head">
           <h2>
             {pipeline && linearPipeline ? 'Team handoff' : 'Team contributions'}
@@ -266,6 +307,9 @@ export function DeliveryLane({
         <div className="delivery-stages" role="list" aria-label="Team stages">
           {agents.map((node, index) => {
             const { agent, runtime } = node.data
+            // A planned stage whose app is not on this computer is not ready: the run would fail
+            // the moment it reached it. Only a plan says so — a run that happened has its own state.
+            const appProblem = planned ? appProblems.get(node.id) : undefined
             const required = capabilityEvidence(
               agent,
               evidenceByAgent.get(node.id) ?? [],
@@ -281,6 +325,7 @@ export function DeliveryLane({
                   <button className="delivery-handoff-arrow prototype-handoff" aria-label={`Inspect handoff to ${agent.name}`} onClick={() => inspectHandover?.(node.id)}><span>Handoff</span><ArrowRight size={24} /><small>View handoff</small></button>
                 )}
                 <article
+                  id={`delivery-stage-${node.id}`}
                   className={`delivery-stage ${selected?.id === node.id ? 'selected' : ''}`}
                 >
                   <button
@@ -289,18 +334,22 @@ export function DeliveryLane({
                     onClick={() => select(node.id)}
                   >
                     <span className="delivery-stage-number">{index + 1}</span>
-                    <span>
+                    <AgentMark id={node.id} name={agent.name} size={22} operator={agent.kind === 'operator'} state={planned ? 'still' : markState(runtime)} events={runtime?.eventCount ?? 0} animate={mode === 'live'} />
+                    <span className="delivery-stage-name">
                       <strong>{agent.name}</strong>
                       <small>{agent.role || 'Team agent'}</small>
                     </span>
                     <span
-                      className={`delivery-status status-${runtime?.status ?? 'idle'}`}
+                      className={`delivery-status status-${appProblem ? 'failed' : runtime?.status ?? 'idle'}`}
                     >
-                      {planned
-                        ? 'Ready'
-                        : (runtime?.taskState?.toLowerCase() ?? 'waiting')}
+                      {appProblem
+                        ? 'Can’t start'
+                        : planned
+                          ? 'Ready'
+                          : (runtime?.taskState?.toLowerCase() ?? 'waiting')}
                     </span>
                   </button>
+                  {appProblem && <p className="delivery-stage-problem">{appProblem}</p>}
                   <div className="delivery-agent-facts">
                     <div><span>{agent.kind === 'operator' ? 'Done by' : 'AI app'}</span><strong><Code2 size={15} />{agent.kind === 'operator' ? 'You' : snapshots.get(node.id)?.[0]?.harness ?? harnessLabels.get(node.id) ?? 'Not recorded'}</strong></div>
                     <div><span>{planned ? 'Produces' : 'Contribution'}</span><strong>{node.id === output.producer ? 'Team output' : pipeline ? 'Stage handoff' : 'Agent response'}</strong></div>
@@ -690,6 +739,12 @@ export function DeliveryLane({
               ? `Written by ${agents.find((node) => node.id === output.producer)?.data.agent.name ?? output.producerLabel}`
               : `Assigned to ${output.producerLabel}`}
           </p>
+          {/* A file the reply names is the deliverable: up here, ready to open, not buried as a path. */}
+          {deliveredFiles.length > 0 && (
+            <div className="delivery-files" role="group" aria-label="Files in this reply">
+              {deliveredFiles.map((path) => <FileCard key={path} path={path} compact={deliveredFiles.length > 2} agents={fileMakers} />)}
+            </div>
+          )}
         </header>
         <div className="delivery-output-scroll">
           <p className="delivery-output-quality">

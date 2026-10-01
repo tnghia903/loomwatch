@@ -46,7 +46,7 @@
 .build-graph .resource-edge { stroke-dasharray:5 4; }
 .lw-shell { --workspace-glass: color-mix(in srgb,var(--color-panel-solid) 94%,transparent); }
 [data-theme=dark] .lw-shell { --color-ground:#0b0c0e; --color-panel:#111315; --color-panel-solid:#17191c; --color-ink:#f5f3ee; --color-ink-2:#cac9cf; --color-ink-3:#b2b1b7; --color-hairline:#303236; --color-accent:#e9c46a; }
-.lw-shell .workspace-chrome { top:0!important; left:0; right:0; height:64px; display:grid; grid-template-columns:1fr auto 1fr; padding:0 28px; gap:24px; border:0; border-bottom:1px solid var(--color-hairline); border-radius:0; box-shadow:none; background:var(--workspace-glass); }
+.lw-shell .workspace-chrome { top:0!important; left:0; right:0; height:64px; display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); padding:0 28px; gap:24px; border:0; border-bottom:1px solid var(--color-hairline); border-radius:0; box-shadow:none; background:var(--workspace-glass); }
 .lw-shell .delivery-brand { display:block; font-size:22px; font-weight:650; letter-spacing:-.6px; }
 .lw-shell .workspace-chrome>.lw-chip { justify-self:end; min-width:0; max-width:330px; background:transparent; box-shadow:none; border-color:transparent; }
 .lw-shell .workspace-chrome .chip-l2 { font-size:12px; }

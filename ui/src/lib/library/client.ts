@@ -1,3 +1,5 @@
+import { daemonFetch } from '../daemonFetch'
+
 export interface DetectedCapability {
   id: string
   name: string
@@ -84,7 +86,7 @@ export const STALE_DAEMON = 'This daemon is older than the app it is serving. Re
 export const STALE_DETAILS_DAEMON = 'This daemon is older than the app it is serving. Restart loomwatchd to view capability details.'
 
 export async function fetchCapabilities(): Promise<CapabilityInventory> {
-  const response = await fetch('/api/capabilities')
+  const response = await daemonFetch('/api/capabilities')
   if (response.status === 404) throw new Error(STALE_DAEMON)
   if (!response.ok) throw new Error(response.statusText || 'Capability scan failed')
   if (servesHtml(response)) throw new Error(STALE_DAEMON)
@@ -94,7 +96,7 @@ export async function fetchCapabilities(): Promise<CapabilityInventory> {
 /** Load a selected capability's local definition. Skill instructions are intentionally fetched
  * on demand rather than included in the inventory response. */
 export async function fetchCapabilityDetails(id: string): Promise<CapabilityDetails> {
-  const response = await fetch(`/api/capabilities/${encodeURIComponent(id)}`)
+  const response = await daemonFetch(`/api/capabilities/${encodeURIComponent(id)}`)
   if (response.status === 404 || servesHtml(response)) throw new Error(STALE_DETAILS_DAEMON)
   if (!response.ok) {
     let message = response.statusText || 'Capability details could not be loaded'

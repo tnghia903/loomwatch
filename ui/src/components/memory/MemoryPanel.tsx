@@ -57,6 +57,13 @@ export interface MemoryPanelProps {
   onOpenOriginTeam?: (origin: string) => void
   /** Write this team's Brief and kept notes to a pack folder under the teams root. */
   onExportPack?: () => Promise<string>
+  /**
+   * Entries the open document names that the saved team file does not yet: a note just added is
+   * written to disk at once but joins the team only when the team is saved, and without this the
+   * panel showed nothing at all for it.
+   */
+  unsavedEntries?: readonly string[]
+  onSaveTeam?: () => void
 }
 
 type Draft =
@@ -68,7 +75,7 @@ type Draft =
 export function MemoryPanel({
   teamPath, view, loading, error, editable, onWriteNote, onAddFile, onEditNote, onRemove, onRetry, onClose,
   notebook = null, notebookLoading = false, notebookError = null, onReviseNote, onNoteHistory,
-  onRetryNotebook, onExcludeInherited, onOpenOriginTeam, onExportPack,
+  onRetryNotebook, onExcludeInherited, onOpenOriginTeam, onExportPack, unsavedEntries = [], onSaveTeam,
 }: MemoryPanelProps) {
   const closeButton = useRef<HTMLButtonElement>(null)
   const [draft, setDraft] = useState<Draft>(null)
@@ -164,8 +171,19 @@ export function MemoryPanel({
         </div>
       )}
 
-      {!loading && !error && entries.length === 0 && (
+      {!loading && !error && entries.length === 0 && unsavedEntries.length === 0 && (
         <p className="t-body" style={{ margin: 0 }}>Give your team something to keep in mind.</p>
+      )}
+
+      {!loading && !error && unsavedEntries.length > 0 && (
+        <div className="zone" role="status">
+          <div className="zone-head t-micro"><span>Not saved yet</span><span>{unsavedEntries.length}</span></div>
+          {unsavedEntries.map((path) => <span key={path} className="t-mono-sm" style={{ color: 'var(--color-ink-2)', overflowWrap: 'anywhere' }}>{path}</span>)}
+          <p className="hint t-meta" style={{ margin: 0 }}>
+            Save the team to keep {unsavedEntries.length === 1 ? 'this entry' : 'these entries'}. Agents are given the Brief from the next run.
+          </p>
+          {onSaveTeam && editable && <span><button type="button" className="btn btn-primary" onClick={onSaveTeam}>Save team</button></span>}
+        </div>
       )}
 
       {!loading && !error && teamWide.length > 0 && (
@@ -237,7 +255,7 @@ export function MemoryPanel({
           <div className="zone-head t-micro">{draft.kind === 'note' ? 'Write a note' : draft.kind === 'edit' ? `Edit ${draft.title}` : 'Add a file'}</div>
           {draft.kind === 'note' ? (
             <label className="field">
-              <span className="t-meta">Markdown. Its first heading names the entry, and the file is named from it.</span>
+              <span className="t-meta">Plain words are fine. Its first line names the entry; start it with “# ” to give it a title of its own.</span>
               <textarea className="input" autoFocus value={draft.body} disabled={busy}
                 onChange={(event) => setDraft({ kind: 'note', body: event.target.value })}
                 placeholder={'# House constraints\nWe ship on ACP v1 only. Never touch main.'} />

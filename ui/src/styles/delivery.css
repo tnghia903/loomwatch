@@ -19,6 +19,12 @@
   gap: 16px;
   margin-bottom: 26px;
 }
+.delivery-heading-acts {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
 .delivery-eyebrow {
   text-transform: uppercase;
   font-size: 11px;
@@ -58,6 +64,9 @@
 .delivery-status.status-failed,
 .delivery-cap-state.state-failed {
   color: var(--color-alert);
+}
+.delivery-status.status-partial {
+  color: var(--color-accent);
 }
 .delivery-status.status-running,
 .delivery-status.status-starting {
@@ -121,14 +130,17 @@
   align-items: flex-start;
   width: 100%;
 }
-.delivery-stage-select > span:nth-child(2) {
+/* Named, not positional: other things (the stage number, the agent's mark) sit beside it. When the
+   card is narrow the status moves to its own line rather than squeezing the name mid-word. */
+.delivery-stage-select { flex-wrap: wrap; }
+.delivery-stage-select > .delivery-stage-name {
   flex: 1;
-  min-width: 0;
+  min-width: min(7.5em, 100%);
 }
 .delivery-stage-select strong {
   display: block;
   font-size: 14px;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .delivery-stage-select small {
   display: block;
@@ -156,6 +168,11 @@
   margin: 18px 0;
   color: var(--color-ink-2);
   overflow-wrap: anywhere;
+}
+/* A planned stage whose app is not on this computer: the same sentence its Build card carries. */
+.delivery-stage > p.delivery-stage-problem {
+  margin: 12px 0 4px;
+  color: var(--color-alert);
 }
 .delivery-stage-meta {
   display: flex;

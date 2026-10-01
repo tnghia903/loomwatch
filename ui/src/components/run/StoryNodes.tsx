@@ -1,4 +1,6 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import type { NodeProps } from '@xyflow/react'
+
+import { CardPorts } from '../canvas/CardPorts'
 
 import type { EvidenceNode, MoreNode, OutputNode, PromptNode, RunNode } from '../../lib/runs/graph'
 import { RUN_PHASE_STATUS } from '../../lib/runs/graph'
@@ -40,7 +42,7 @@ export function PromptNodeCard({ data }: NodeProps<PromptNode>) {
           <span className="t-meta prompt-draft-hint">Click to type</span>
         </span>
         <span className={cx('rt-body t-body', !data.text && 'empty')}>{body}</span>
-        <Handle type="source" position={Position.Right} isConnectable={false} />
+        <CardPorts input={false} />
       </button>
     )
   }
@@ -53,7 +55,7 @@ export function PromptNodeCard({ data }: NodeProps<PromptNode>) {
         <span className="prompt-lock t-meta">Original kept</span>
       </div>
       <div className="rt-body t-body selectable">{data.text}</div>
-      <Handle type="source" position={Position.Right} isConnectable={false} />
+      <CardPorts input={false} />
     </article>
   )
 }
@@ -66,9 +68,7 @@ export function RunNodeCard({ data }: NodeProps<RunNode>) {
     <div className={cx('rt run-node', `st-${status}`)} role="status" aria-label={`${label}, ${data.phase}, initiated by the prompt`}>
       <div className="rt-head t-micro"><StatusGlyph status={status} /> {label}</div>
       <div className="run-meta t-meta">{data.trigger === 'schedule' ? 'Routine' : data.branch} · <b>{data.phase}</b>{data.elapsed !== '—' ? ` · ${data.elapsed}` : ''}</div>
-      <Handle type="target" position={Position.Left} isConnectable={false} />
-      <Handle type="source" position={Position.Right} isConnectable={false} />
-      <Handle type="source" position={Position.Bottom} id="lead" isConnectable={false} />
+      <CardPorts />
     </div>
   )
 }
@@ -97,7 +97,7 @@ export function EvidenceNodeCard({ data }: NodeProps<EvidenceNode>) {
       <span className="ae-sub t-meta"><StatusGlyph status={status} /> {word} · {ownerLabel.split(' · ')[0]} {evidence.relation}</span>
       <span className="ae-detail t-mono-sm">{evidence.detail}</span>
       <span className="ae-drag t-body" aria-hidden="true">⠿</span>
-      <Handle type="target" position={Position.Left} isConnectable={false} />
+      <CardPorts output={false} />
     </button>
   )
 }
@@ -111,7 +111,7 @@ export function MoreEvidenceCard({ data }: NodeProps<MoreNode>) {
       <span className="ae-order t-micro">+{data.hidden} more</span>
       <span className="ae-main t-body-m"><span className="ae-name">{data.total} events from {data.ownerLabel.split(' · ')[0]}</span></span>
       <span className="ae-sub t-meta">Open provenance for the full list</span>
-      <Handle type="target" position={Position.Left} isConnectable={false} />
+      <CardPorts output={false} />
     </button>
   )
 }
@@ -171,8 +171,7 @@ export function OutputNodeCard({ data }: NodeProps<OutputNode>) {
           [ Reuse ]
         </button>
       )}
-      <Handle type="target" position={Position.Left} isConnectable={data.configurable === true} />
-      <Handle type="target" position={Position.Top} id="run" isConnectable={false} />
+      <CardPorts output={false} connectIn={data.configurable === true} />
     </article>
   )
 }

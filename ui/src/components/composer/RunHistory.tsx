@@ -75,7 +75,7 @@ export function RunHistory({ entries, currentId, loading, error, onOpen, onClose
       </div>
       <div className="pop-sep" />
       <div className="pop-foot">
-        <span className="pop-note t-meta">Reopening a run is a replay. It never re-executes, and a replayed graph is byte-equivalent to the live one.</span>
+        <span className="pop-note t-meta">Reopening a run shows exactly what was recorded. It never runs the agents again.</span>
       </div>
     </div>
   )

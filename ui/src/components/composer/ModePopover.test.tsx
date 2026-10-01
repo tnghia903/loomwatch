@@ -17,7 +17,7 @@ const routine: ScheduleEntry = {
 function renderPopover(schedule: ScheduleEntry | null, onRunRoutineNow = vi.fn()) {
   render(
     <ModePopover mode="pipeline" steps={[{ id: 'a', step: 1, joinFrom: [] }, { id: 'b', step: 2, joinFrom: ['a'] }]} nodeNames={new Map([['a', 'Collector'], ['b', 'Writer']])} entrypointName="Collector"
-      guards={null} budget={null} anomalies={[]} readOnly={false} onUpdateGuards={vi.fn()} onUpdateBudget={vi.fn()} onClose={vi.fn()} schedule={schedule} onRunRoutineNow={onRunRoutineNow} />,
+      guards={null} anomalies={[]} readOnly={false} onUpdateGuards={vi.fn()} onClose={vi.fn()} schedule={schedule} onRunRoutineNow={onRunRoutineNow} />,
   )
   return onRunRoutineNow
 }
@@ -44,4 +44,13 @@ describe('ModePopover routine section', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('previous scheduled run r1 is still running')
     expect(screen.getByText(/next not scheduled/)).toBeInTheDocument()
   })
+})
+
+// Budgets are retired: the guards stay, and there is no team spend limit left to set.
+it('offers the delegation guards and no team budget', () => {
+  renderPopover(null)
+  expect(screen.getByLabelText('Max dispatch depth')).toBeInTheDocument()
+  expect(screen.getByLabelText('Max concurrent dispatches')).toBeInTheDocument()
+  expect(screen.queryByLabelText('Team budget limit in USD')).not.toBeInTheDocument()
+  expect(screen.queryByText(/budget/i)).not.toBeInTheDocument()
 })

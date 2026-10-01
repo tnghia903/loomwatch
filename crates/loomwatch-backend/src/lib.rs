@@ -8,6 +8,7 @@ pub mod archive;
 pub mod capabilities;
 pub mod composer;
 pub mod config;
+mod files;
 pub mod host_runner;
 pub mod memory;
 pub mod notebook_api;
@@ -2217,9 +2218,7 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        AgentConfig, BudgetConfig, ConversationConfig, EdgeConfig, GuardsConfig, SpawnConfig,
-    };
+    use crate::config::{AgentConfig, ConversationConfig, EdgeConfig, GuardsConfig, SpawnConfig};
     use memory::PromptSectionKind as Kind;
     use std::collections::BTreeMap;
 
@@ -2294,7 +2293,6 @@ mod tests {
             name: "Pipeline test team".into(),
             entrypoint: "a".into(),
             responder: Some("a".into()),
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -2459,7 +2457,6 @@ mod tests {
             name: "Pipeline diamond team".into(),
             entrypoint: "a".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -2602,7 +2599,6 @@ mod tests {
             name: "Pre-minted pipeline".into(),
             entrypoint: "a".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -2690,7 +2686,6 @@ mod tests {
             name: "Pre-minted team".into(),
             entrypoint: "solo".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -2733,7 +2728,6 @@ mod tests {
             name: "Broken harness".into(),
             entrypoint: "solo".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -2848,7 +2842,6 @@ mod tests {
             name: "Brief team".into(),
             entrypoint: "a".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: Some(crate::config::MemoryConfig {
@@ -3143,7 +3136,6 @@ mod tests {
             name: "Notebook team".into(),
             entrypoint: "a".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: Some(crate::config::MemoryConfig {
@@ -3337,7 +3329,6 @@ mod tests {
             name: "Oversize team".into(),
             entrypoint: "a".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: Some(crate::config::MemoryConfig {
@@ -3487,7 +3478,6 @@ mod tests {
             name: "Follow-up team".into(),
             entrypoint: "a".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -3672,7 +3662,6 @@ mod tests {
             name: "Follow a failed run".into(),
             entrypoint: "a".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,
@@ -3797,10 +3786,6 @@ mod tests {
             },
             model: "test/model".into(),
             thinking_effort: None,
-            budget: BudgetConfig {
-                limit_usd: 1.0,
-                warn_at_percent: 80,
-            },
             capabilities: Vec::new(),
             memory: None,
             allow_recruiting: true,
@@ -3845,7 +3830,6 @@ mod tests {
             spawn: SpawnConfig::default(),
             model: String::new(),
             thinking_effort: None,
-            budget: BudgetConfig::unbilled(),
             capabilities: Vec::new(),
             memory: None,
             allow_recruiting: false,
@@ -3871,7 +3855,6 @@ mod tests {
             name: "Review stop".into(),
             entrypoint: "a".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig {
                 stop: config::StopConfig { keep_alive_minutes },
@@ -4592,7 +4575,6 @@ mod tests {
             name: "Asking team".into(),
             entrypoint: "a".into(),
             responder: None,
-            budget: None,
             schedule: None,
             conversation: ConversationConfig::default(),
             memory: None,

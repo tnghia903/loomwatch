@@ -18,8 +18,6 @@ agents:
       env: {}
       cwd: .
     model: kimi-for-coding/k3-256k
-    budget:
-      limitUsd: 5
     allowRecruiting: true
   - id: reviewer
     name: Code Reviewer
@@ -30,8 +28,6 @@ agents:
       env: {}
       cwd: .
     model: claude-opus-5
-    budget:
-      limitUsd: 5
     allowRecruiting: false
 edges: []
 `
@@ -51,8 +47,6 @@ agents:
       env: {}
       cwd: .
     model: kimi-for-coding/k3-256k
-    budget:
-      limitUsd: 5
     allowRecruiting: true
   - id: reviewer
     name: Code Reviewer
@@ -63,8 +57,6 @@ agents:
       env: {}
       cwd: .
     model: claude-opus-5
-    budget:
-      limitUsd: 5
     allowRecruiting: false
   - id: editor
     name: Copy Editor
@@ -76,8 +68,6 @@ agents:
       env: {}
       cwd: .
     model: kimi-for-coding/k3-256k
-    budget:
-      limitUsd: 5
     allowRecruiting: false
 edges: []
 `
@@ -97,8 +87,6 @@ agents:
       env: {}
       cwd: .
     model: kimi-for-coding/k3-256k
-    budget:
-      limitUsd: 5
     allowRecruiting: true
 edges: []
 `
@@ -112,14 +100,13 @@ const SCHEMA_GATE = {
       type: 'array',
       items: {
         type: 'object',
-        required: ['name', 'role', 'model', 'spawn', 'budget'],
+        required: ['name', 'role', 'model', 'spawn'],
         properties: {
           name: { type: 'string', minLength: 1 },
           role: { type: 'string', minLength: 1 },
           model: { type: 'string', minLength: 1 },
           thinkingEffort: { type: 'string', minLength: 1 },
           spawn: { type: 'object', required: ['cwd'], properties: { cwd: { type: 'string', minLength: 1 } } },
-          budget: { type: 'object', required: ['limitUsd'], properties: { limitUsd: { type: 'number', minimum: 0 } } },
         },
       },
     },
@@ -200,7 +187,7 @@ describe('useTeamDocument', () => {
 
     act(() => result.current.addAgentFromDrop(JSON.stringify({
       group: 'presets', id: 'reviewer', label: 'Reviewer', role: 'Review work', model: 'model-1',
-      budgetUsd: 5, spawn: { cmd: 'codex-acp', args: [] },
+      spawn: { cmd: 'codex-acp', args: [] },
     }), { x: 0, y: 0 }))
     await act(async () => { await result.current.save() })
 
@@ -229,6 +216,37 @@ describe('useTeamDocument', () => {
     await waitFor(() => expect(result.current.loadFailure).not.toBeNull())
     expect(result.current.saveState).toBe('error')
     expect(result.current.loadFailure?.line).toBe('schemaVersion: [')
+  })
+
+  it('refuses a YAML file that is not a team, and leaves without a "Leave site?" prompt', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, {
+      path: '/teams/notes.yaml', yaml: 'shopping:\n  - milk\n',
+    })))
+    const listens = vi.spyOn(window, 'addEventListener')
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.loadFailure).not.toBeNull())
+    expect(result.current.loadFailure?.kind).toBe('shape')
+    expect(result.current.saveState).toBe('error')
+    // Nothing was loaded, so there is nothing to lose: the way out must not ask to stay.
+    expect(listens.mock.calls.some(([type]) => type === 'beforeunload')).toBe(false)
+    listens.mockRestore()
+  })
+
+  it('renames the team without touching its id or file', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
+      String(input) === '/api/config/schema'
+        ? jsonResponse(200, SCHEMA_GATE)
+        : jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML }),
+    ))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    act(() => result.current.renameTeam('  Trip planner (Japan) '))
+    expect(result.current.teamName).toBe('Trip planner (Japan)')
+    expect(result.current.saveState).toBe('dirty')
+    expect(result.current.yamlPreview).toContain('name: Trip planner (Japan)')
+    expect(result.current.yamlPreview).toContain('id: research-team')
+    act(() => result.current.undo())
+    expect(result.current.teamName).toBe('Research and review')
   })
 
   it('routes malformed YAML from manual reload through the parse-failure modal state', async () => {
@@ -554,6 +572,39 @@ describe('useTeamDocument', () => {
     expect(result.current.nodes.find((node) => node.id === 'researcher')?.data.agent.thinkingEffort).toBe('high')
     expect(result.current.yamlPreview).toContain('thinkingEffort: high')
     expect(result.current.yamlPreview).toContain('model: kimi-for-coding/k3-256k')
+  })
+
+  it('shows a working-folder edit in the YAML preview and validation at once, keeping the rest of spawn', async () => {
+    const yaml = TEAM_YAML.replace('      cwd: .\n    model: kimi-for-coding/k3-256k', '      cwd: ""\n    model: kimi-for-coding/k3-256k')
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
+      String(input) === '/api/config/schema'
+        ? jsonResponse(200, SCHEMA_GATE)
+        : jsonResponse(200, { path: '/teams/research-team.yaml', yaml }),
+    ))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.fieldProblemsByAgent.get('researcher')?.cwd).toBeDefined())
+
+    act(() => result.current.updateAgentCwd('researcher', 'work'))
+
+    expect(result.current.yamlPreview).toContain('cwd: work')
+    expect(result.current.fieldProblemsByAgent.get('researcher')?.cwd).toBeUndefined()
+    expect(result.current.isValid).toBe(true)
+    expect(result.current.nodes.find((node) => node.id === 'researcher')?.data.agent.spawn)
+      .toEqual({ cmd: 'opencode', args: ['acp'], env: {}, cwd: 'work' })
+  })
+
+  it('shows each team guard edit in the YAML preview at once, keeping the other guard', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+    act(() => result.current.updateTeamGuards('maxDispatchDepth', 3))
+    expect(result.current.yamlPreview).toContain('maxDispatchDepth: 3')
+
+    act(() => result.current.updateTeamGuards('maxConcurrentDispatches', 4))
+    expect(result.current.teamGuards).toEqual({ maxDispatchDepth: 3, maxConcurrentDispatches: 4 })
+    expect(result.current.yamlPreview).toContain('maxDispatchDepth: 3')
+    expect(result.current.yamlPreview).toContain('maxConcurrentDispatches: 4')
   })
 
   it('save() rechecks an unchanged disk revision, PUTs the mutated YAML, and settles on saved', async () => {
@@ -939,7 +990,7 @@ describe('useTeamDocument', () => {
       vi.useRealTimers()
     })
 
-    it('edits team guards and budget through the mode-pill affordance', async () => {
+    it('edits team guards through the mode-pill affordance', async () => {
       const fetchMock = vi.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
         if (!init) {
           return jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })
@@ -951,13 +1002,9 @@ describe('useTeamDocument', () => {
       await waitFor(() => expect(result.current.saveState).toBe('clean'))
 
       expect(result.current.teamGuards).toBeNull()
-      expect(result.current.teamBudget).toBeNull()
 
       act(() => result.current.updateTeamGuards('maxDispatchDepth', 3))
       expect(result.current.teamGuards).toEqual({ maxDispatchDepth: 3, maxConcurrentDispatches: 8 })
-
-      act(() => result.current.updateTeamBudget(25))
-      expect(result.current.teamBudget).toEqual({ limitUsd: 25 })
       expect(result.current.saveState).toBe('dirty')
 
       await act(async () => {
@@ -967,7 +1014,7 @@ describe('useTeamDocument', () => {
       const [, init] = putCall as [string, RequestInit]
       const body = JSON.parse(init.body as string) as { yaml: string }
       expect(body.yaml).toContain('maxDispatchDepth: 3')
-      expect(body.yaml).toContain('limitUsd: 25')
+      expect(body.yaml).not.toContain('budget')
     })
   })
 })

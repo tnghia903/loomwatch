@@ -17,7 +17,6 @@ const presetSource: LibrarySource = {
   label: 'Reviewer',
   role: 'Reviewer',
   model: 'claude-opus-5',
-  budgetUsd: 5,
   spawn: { cmd: 'claude-agent-acp', args: [] },
 }
 
@@ -28,7 +27,6 @@ function agent(overrides: Partial<AgentConfig> = {}): AgentConfig {
     role: 'Existing role',
     model: 'existing/model',
     spawn: { cmd: 'opencode', args: ['acp'], env: {}, cwd: '.' },
-    budget: { limitUsd: 12 },
     allowRecruiting: true,
     ...overrides,
   }
@@ -73,14 +71,10 @@ describe('buildAgentFromSource', () => {
     expect(result.id).toBe('opencode-3')
   })
 
-  it('defaults budget to $5 when there is no prior agent', () => {
-    const result = buildAgentFromSource(harnessSource, [])
-    expect(result.budget?.limitUsd).toBe(5)
-  })
-
-  it('inherits budget from the last-created agent, ignoring the preset’s own suggestion', () => {
-    const result = buildAgentFromSource(presetSource, [agent({ id: 'a', budget: { limitUsd: 12 } })])
-    expect(result.budget?.limitUsd).toBe(12)
+  // Budgets are retired: a new agent carries no spend limit, whatever its source or neighbours.
+  it('writes no budget into the new agent', () => {
+    expect(buildAgentFromSource(harnessSource, [])).not.toHaveProperty('budget')
+    expect(buildAgentFromSource(presetSource, [agent({ id: 'a' })])).not.toHaveProperty('budget')
   })
 
   it('always sets allowRecruiting true and never writes status', () => {

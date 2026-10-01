@@ -1,8 +1,6 @@
 import type { AgentConfig } from '../team-file/types'
 import type { LibrarySource } from './types'
 
-const DEFAULT_BUDGET_USD = 5
-
 // $defs.Identifier (schemas/team.schema.yaml): ^[A-Za-z0-9][A-Za-z0-9._-]*$
 function slugify(label: string): string {
   const slug = label
@@ -37,9 +35,7 @@ export const DEFAULT_AGENT_ROLE = 'Complete the request you are given. Work care
  * `model` stays empty for a bare harness/endpoint source because GET /api/harnesses advertises no
  * models; the workspace fills it with the harness's own default once that harness's catalog loads.
  * `role` starts as [`DEFAULT_AGENT_ROLE`]. A preset source pre-fills both, "the entire argument for
- * presets." `budget.limitUsd` always follows the doc-inheritance rule (last node created, else $5)
- * regardless of source kind — a preset's own suggested budget is display-only in the Library row,
- * not written to the agent.
+ * presets."
  */
 export function buildAgentFromSource(
   source: LibrarySource,
@@ -48,8 +44,6 @@ export function buildAgentFromSource(
   const existingIds = new Set(existingAgents.map((agent) => agent.id))
   const id = uniqueId(slugify(source.label), existingIds)
   if (source.kind === 'operator') return { id, kind: 'operator', name: source.label, role: source.role ?? 'Review the work and say what should happen next.' }
-  const inheritedBudget = existingAgents.findLast((agent) => agent.kind !== 'operator')?.budget?.limitUsd
-
   return {
     id,
     name: source.label,
@@ -61,7 +55,6 @@ export function buildAgentFromSource(
       env: {},
       cwd: '.',
     },
-    budget: { limitUsd: inheritedBudget ?? DEFAULT_BUDGET_USD },
     allowRecruiting: true,
   }
 }

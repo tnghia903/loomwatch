@@ -2,8 +2,6 @@ schemaVersion: 1
 id: research-team
 name: Research and review
 entrypoint: researcher
-budget:
-  limitUsd: 8
 guards:
   maxDispatchDepth: 4
   maxConcurrentDispatches: 4
@@ -18,9 +16,6 @@ agents:
       env: {}
       cwd: .
     model: kimi-for-coding/k3-256k
-    budget:
-      limitUsd: 5
-      warnAtPercent: 80
     allowRecruiting: true
   - id: reviewer
     name: Code Reviewer
@@ -31,8 +26,6 @@ agents:
       env: {}
       cwd: .
     model: claude-opus-5
-    budget:
-      limitUsd: 5
     allowRecruiting: false
 edges:
   - from: researcher

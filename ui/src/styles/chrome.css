@@ -9,6 +9,14 @@
 
 .lw-shell { --lw-header-h: 64px; --lw-below-header: calc(var(--lw-header-h) + 12px); }
 
+/* The rule, not a list of panels: the default start of every top-anchored panel is below the
+   header (`.panel.top` reads `--lw-panel-top`). Panels placed deliberately — Build's inspector under
+   its heading, the phone sheets docked to the bottom — keep setting `top` themselves, unchanged.
+   The right-hand detail sheets show recorded text (URLs, paths, commands): it wraps, and a sheet
+   never scrolls sideways — a long URL used to widen its content and show the record clipped. */
+.lw-shell { --lw-panel-top: var(--lw-below-header); }
+.lw-shell .panel.right.top { overflow-x: hidden; overflow-wrap: anywhere; }
+
 .lw-shell .lw-library { top: var(--lw-below-header); height: calc(100% - var(--lw-below-header) - 20px); max-height: calc(100% - var(--lw-below-header) - 20px); }
 .lw-shell .lw-library.collapsed { top: var(--lw-below-header); height: auto; }
 

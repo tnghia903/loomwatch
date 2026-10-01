@@ -24,8 +24,6 @@ pub struct TeamConfig {
     #[serde(default)]
     pub responder: Option<String>,
     #[serde(default)]
-    pub budget: Option<BudgetConfig>,
-    #[serde(default)]
     pub guards: GuardsConfig,
     pub agents: Vec<AgentConfig>,
     #[serde(default)]
@@ -353,8 +351,8 @@ pub const DEFAULT_NOTION_TITLE: &str = "{{team}} — {{date}}";
 /// `operator` is the person at the keyboard standing in the pipeline (`docs/TEAM_MEMORY.md`, "The
 /// operator is a node"): it has an id, it sits on edges, it takes part in the topological order,
 /// and instead of a harness it has a **question** — its `role` — which is what the panel shows
-/// when the pipeline reaches it. `spawn`, `model` and `budget` are absent for this kind, because
-/// there is nothing to spawn, no model to select and no provider to bill.
+/// when the pipeline reaches it. `spawn` and `model` are absent for this kind, because there is
+/// nothing to spawn and no model to select.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentKind {
@@ -389,7 +387,6 @@ pub struct AgentConfig {
     pub spawn: SpawnConfig,
     pub model: String,
     pub thinking_effort: Option<String>,
-    pub budget: BudgetConfig,
     pub allow_recruiting: bool,
     pub capabilities: Vec<CapabilityRef>,
     /// Per-agent memory overrides; the team's `memory:` block applies when absent.
@@ -420,8 +417,6 @@ struct RawAgent {
     model: Option<String>,
     #[serde(default)]
     thinking_effort: Option<String>,
-    #[serde(default)]
-    budget: Option<BudgetConfig>,
     #[serde(default = "default_allow_recruiting")]
     allow_recruiting: bool,
     #[serde(default)]
@@ -446,7 +441,6 @@ impl TryFrom<RawAgent> for AgentConfig {
                 for (field, present) in [
                     ("spawn", raw.spawn.is_some()),
                     ("model", raw.model.is_some()),
-                    ("budget", raw.budget.is_some()),
                 ] {
                     if present {
                         return Err(format!(
@@ -476,7 +470,6 @@ impl TryFrom<RawAgent> for AgentConfig {
                     spawn: SpawnConfig::default(),
                     model: String::new(),
                     thinking_effort: None,
-                    budget: BudgetConfig::unbilled(),
                     allow_recruiting: false,
                     capabilities: raw.capabilities,
                     memory: raw.memory,
@@ -489,11 +482,6 @@ impl TryFrom<RawAgent> for AgentConfig {
                 let model = raw.model.ok_or_else(|| {
                     format!("agent {id:?} is missing `model`, the harness's model selector.")
                 })?;
-                let budget = raw.budget.ok_or_else(|| {
-                    format!(
-                        "agent {id:?} is missing `budget`, the pre-delegation admission threshold."
-                    )
-                })?;
                 Ok(Self {
                     id,
                     name: raw.name.unwrap_or_default(),
@@ -502,7 +490,6 @@ impl TryFrom<RawAgent> for AgentConfig {
                     spawn,
                     model,
                     thinking_effort: raw.thinking_effort,
-                    budget,
                     allow_recruiting: raw.allow_recruiting,
                     capabilities: raw.capabilities,
                     memory: raw.memory,
@@ -598,27 +585,6 @@ impl Default for SpawnConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BudgetConfig {
-    pub limit_usd: f64,
-    #[serde(default = "default_warn_at_percent")]
-    pub warn_at_percent: u8,
-}
-
-impl BudgetConfig {
-    /// The budget of a node that cannot spend: an operator stop. Zero rather than infinity,
-    /// because a zero limit is already the team file's way of saying "never admit this through
-    /// delegation", and an operator node is exactly that.
-    #[must_use]
-    pub const fn unbilled() -> Self {
-        Self {
-            limit_usd: 0.0,
-            warn_at_percent: 100,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GuardsConfig {
@@ -644,10 +610,6 @@ pub struct EdgeConfig {
     pub layer: String,
     pub kind: String,
     pub ts: String,
-}
-
-const fn default_warn_at_percent() -> u8 {
-    80
 }
 
 const fn default_max_dispatch_depth() -> u32 {
@@ -1131,7 +1093,7 @@ mod tests {
     #[test]
     fn resolves_entrypoint_agent() {
         let team: TeamConfig = serde_yaml::from_str(
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n",
         )
         .expect("valid config");
         assert_eq!(team.entrypoint_agent().expect("entrypoint").id, "a");
@@ -1140,7 +1102,7 @@ mod tests {
     #[test]
     fn resolves_an_explicit_pipeline_responder() {
         let team = TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nresponder: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n  - id: b\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\nedges:\n  - {from: a, to: b, layer: configured, kind: sequence, ts: \"2026-09-10T00:00:00Z\"}\n",
+            "schemaVersion: 1\nentrypoint: a\nresponder: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n  - id: b\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\nedges:\n  - {from: a, to: b, layer: configured, kind: sequence, ts: \"2026-09-10T00:00:00Z\"}\n",
         )
         .expect("explicit pipeline responder is valid");
         assert_eq!(team.responder_id().expect("responder"), "a");
@@ -1149,7 +1111,7 @@ mod tests {
     #[test]
     fn rejects_an_unknown_or_non_entrypoint_team_responder() {
         let unknown = TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nresponder: ghost\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\nedges: []\n",
+            "schemaVersion: 1\nentrypoint: a\nresponder: ghost\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\nedges: []\n",
         )
         .expect_err("unknown responder must be rejected");
         assert!(
@@ -1159,7 +1121,7 @@ mod tests {
         );
 
         let mismatch = TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nresponder: b\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n  - id: b\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\nedges: []\n",
+            "schemaVersion: 1\nentrypoint: a\nresponder: b\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n  - id: b\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\nedges: []\n",
         )
         .expect_err("team-mode responder must be the entrypoint");
         assert!(mismatch.to_string().contains("must match entrypoint"));
@@ -1168,7 +1130,7 @@ mod tests {
     #[test]
     fn stores_thinking_effort_separately_and_builds_the_acp_selector() {
         let team: TeamConfig = serde_yaml::from_str(
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: vendor/deep\n    thinkingEffort: high\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: vendor/deep\n    thinkingEffort: high\n",
         )
         .expect("valid config");
         assert_eq!(team.agents[0].thinking_effort.as_deref(), Some("high"));
@@ -1180,8 +1142,11 @@ mod tests {
         assert_eq!(legacy.model_selector(), "vendor/deep[xhigh]");
     }
 
+    /// Budgets were retired by ADR 0027. A team file written before then still says `budget:` at
+    /// team and agent level, and on a review stop, where the loader used to refuse it; all three
+    /// must still load, so nobody has to edit a working team to keep running it.
     #[test]
-    fn parses_team_and_agent_budgets_and_edges() {
+    fn a_retired_budget_block_still_loads_and_is_ignored() {
         let team: TeamConfig = serde_yaml::from_str(
             r#"schemaVersion: 1
 id: example
@@ -1200,6 +1165,11 @@ agents:
     budget:
       limitUsd: 3
       warnAtPercent: 70
+  - id: review
+    kind: operator
+    role: Approve the findings.
+    budget:
+      limitUsd: 0
 edges:
   - from: a
     to: b
@@ -1210,11 +1180,9 @@ edges:
         )
         .expect("valid config");
 
-        assert_eq!(team.budget.expect("team budget").warn_at_percent, 80);
         assert_eq!(team.guards.max_dispatch_depth, 8);
         assert_eq!(team.guards.max_concurrent_dispatches, 8);
-        assert!((team.agents[0].budget.limit_usd - 3.0).abs() < f64::EPSILON);
-        assert_eq!(team.agents[0].budget.warn_at_percent, 70);
+        assert_eq!(team.agents[1].kind, AgentKind::Operator);
         assert!(team.agents[0].allow_recruiting);
         assert_eq!(team.edges[0].from, "a");
         assert_eq!(team.edges[0].to, "b");
@@ -1222,7 +1190,7 @@ edges:
 
     fn pipeline_team(entrypoint: &str, edges_yaml: &str) -> TeamConfig {
         serde_yaml::from_str(&format!(
-            "schemaVersion: 1\nentrypoint: {entrypoint}\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n  - id: b\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n  - id: c\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\nedges:\n{edges_yaml}\n"
+            "schemaVersion: 1\nentrypoint: {entrypoint}\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n  - id: b\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n  - id: c\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\nedges:\n{edges_yaml}\n"
         ))
         .expect("valid config")
     }
@@ -1327,7 +1295,7 @@ edges:
     #[test]
     fn parses_dispatch_guards() {
         let team: TeamConfig = serde_yaml::from_str(
-            "schemaVersion: 1\nentrypoint: a\nguards:\n  maxDispatchDepth: 3\n  maxConcurrentDispatches: 5\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nentrypoint: a\nguards:\n  maxDispatchDepth: 3\n  maxConcurrentDispatches: 5\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n",
         )
         .expect("valid config");
 
@@ -1335,7 +1303,8 @@ edges:
         assert_eq!(team.guards.max_concurrent_dispatches, 5);
     }
 
-    const SOLO_AGENT: &str = "agents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n";
+    const SOLO_AGENT: &str =
+        "agents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n";
 
     fn scheduled_team(schedule_yaml: &str) -> Result<TeamConfig> {
         TeamConfig::parse(&format!(
@@ -1479,7 +1448,7 @@ edges:
     #[test]
     fn a_daily_routine_in_a_named_zone_parses() {
         let team = TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nschedule:\n  cron: \"0 8 * * *\"\n  timezone: Asia/Singapore\n  prompt: \"Prepare the {{date}} digest.\"\n  enabled: true\n  deliver:\n    notion:\n      title: \"AI, tech & business news — {{date}}\"\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n",
+            "schemaVersion: 1\nentrypoint: a\nschedule:\n  cron: \"0 8 * * *\"\n  timezone: Asia/Singapore\n  prompt: \"Prepare the {{date}} digest.\"\n  enabled: true\n  deliver:\n    notion:\n      title: \"AI, tech & business news — {{date}}\"\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n",
         )
         .expect("a daily routine is a valid team");
         let schedule = team.schedule.expect("the routine declares a schedule");
