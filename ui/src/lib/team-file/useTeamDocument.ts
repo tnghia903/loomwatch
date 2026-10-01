@@ -9,7 +9,7 @@ import { TeamFileModel, TeamFileParseError } from './document'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
 import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
-import type { AgentConfig, BriefEntryConfig, BudgetConfig, CapabilityRef, EdgeConfig, GuardsConfig, ScheduleConfig, SpawnConfig } from './types'
+import type { AgentConfig, BriefEntryConfig, BudgetConfig, CapabilityRef, EdgeConfig, GuardsConfig, ScheduleConfig, SpawnConfig, TeamDocument } from './types'
 import {
   loadTeamValidator,
   displayFieldProblems,
@@ -142,11 +142,43 @@ function edgeFromConfig(edge: EdgeConfig): ConfiguredEdge {
   }
 }
 
+/**
+ * The agents and configured edges a snapshot draws. `edges` is a serde default in the daemon
+ * (`config.rs`), so a file without it is a team with no connections, not a broken one, and a
+ * half-written team may have no `agents` yet. Validation still reads the snapshot itself, so the
+ * schema's view of either omission is shown as a problem rather than hidden.
+ */
+function drawableParts(snapshot: TeamDocument): { agents: AgentConfig[]; configured: EdgeConfig[] } {
+  return {
+    agents: Array.isArray(snapshot.agents) ? snapshot.agents : [],
+    configured: Array.isArray(snapshot.edges) ? snapshot.edges.filter((edge) => edge.layer === 'configured') : [],
+  }
+}
+
+/**
+ * Fills in what the daemon defaults when a file leaves it out (`config.rs` `RawAgent` and
+ * `SpawnConfig`): an empty `name` and `role`, and no `spawn.args` or `spawn.env`. An agent the daemon
+ * accepts must be one the canvas can draw — harness detection compares `args` as a list and the card
+ * reads `role` as text, and a file that left either out blanked the workspace. The schema still
+ * requires them, and validation reads the snapshot rather than these nodes, so the file is still
+ * shown as needing a fix.
+ */
+function withDaemonDefaults(agent: AgentConfig): AgentConfig {
+  const { spawn } = agent
+  return {
+    ...agent,
+    name: agent.name ?? '',
+    role: agent.role ?? '',
+    ...(spawn ? { spawn: { ...spawn, args: Array.isArray(spawn.args) ? spawn.args : [], env: spawn.env ?? {} } } : {}),
+  }
+}
+
 function nodeFromAgent(
-  agent: AgentConfig,
+  config: AgentConfig,
   position: { x: number; y: number },
   isEntrypoint: boolean,
 ): AgentNode {
+  const agent = withDaemonDefaults(config)
   return {
     id: agent.id,
     type: 'agent',
@@ -236,6 +268,7 @@ export function useTeamDocument() {
   const restoreHistoryEntry = useCallback((entry: HistoryEntry) => {
     const model = TeamFileModel.parse(entry.yaml)
     const snapshot = model.snapshot()
+    const { agents, configured } = drawableParts(snapshot)
     modelRef.current = model
     isNewRef.current = entry.isNew
     setDocumentSnapshot(snapshot)
@@ -246,11 +279,11 @@ export function useTeamDocument() {
     setTeamSchedule(snapshot.schedule ?? null)
     setTeamSchedule(snapshot.schedule ?? null)
     setNodes(
-      snapshot.agents.map((agent) =>
+      agents.map((agent) =>
         nodeFromAgent(agent, entry.positions[agent.id] ?? { x: 0, y: 0 }, agent.id === snapshot.entrypoint),
       ),
     )
-    setEdges(snapshot.edges.filter((edge) => edge.layer === 'configured').map(edgeFromConfig))
+    setEdges(configured.map(edgeFromConfig))
     setSaveState(entry.isNew ? 'new' : 'dirty')
   }, [])
 
@@ -341,10 +374,7 @@ export function useTeamDocument() {
         }
         const model = TeamFileModel.parse(yaml)
         const snapshot = model.snapshot()
-        const agents = Array.isArray(snapshot.agents) ? snapshot.agents : []
-        const configured = Array.isArray(snapshot.edges)
-          ? snapshot.edges.filter((edge) => edge.layer === 'configured')
-          : []
+        const { agents, configured } = drawableParts(snapshot)
         const positions = seededLayout(
           agents.map((agent) => agent.id),
           configured.map((edge) => ({ from: edge.from, to: edge.to })),
@@ -425,10 +455,7 @@ export function useTeamDocument() {
         throw error
       }
       const snapshot = model.snapshot()
-      const agents = Array.isArray(snapshot.agents) ? snapshot.agents : []
-      const configured = Array.isArray(snapshot.edges)
-        ? snapshot.edges.filter((edge) => edge.layer === 'configured')
-        : []
+      const { agents, configured } = drawableParts(snapshot)
       const positions = seededLayout(
         agents.map((agent) => agent.id),
         configured.map((edge) => ({ from: edge.from, to: edge.to })),

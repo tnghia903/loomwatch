@@ -65,7 +65,7 @@ function applySchemaError(
   const yamlPath = schemaErrorPath(error)
   const agentMatch = AGENT_ERROR_PATH.exec(error.instancePath)
   if (agentMatch) {
-    const agent = doc.agents[Number(agentMatch[1])]
+    const agent = doc.agents?.[Number(agentMatch[1])]
     if (!agent) {
       return
     }
@@ -98,7 +98,7 @@ function applySchemaError(
 
   const edgeMatch = EDGE_ERROR_PATH.exec(error.instancePath)
   if (edgeMatch) {
-    const edge = doc.edges[Number(edgeMatch[1])]
+    const edge = doc.edges?.[Number(edgeMatch[1])]
     documentProblems.push({
       message: describeSchemaError(error, doc),
       ...(edge ? { edge: { from: edge.from, to: edge.to } } : {}),
@@ -165,7 +165,7 @@ const SPAWN_LABELS: Record<string, string> = { cmd: 'app command', args: 'app ar
 function describePlace(doc: TeamDocument, instancePath: string): string {
   const agentMatch = AGENT_ERROR_PATH.exec(instancePath)
   if (agentMatch) {
-    const agent = doc.agents[Number(agentMatch[1])]
+    const agent = doc.agents?.[Number(agentMatch[1])]
     const who = agent?.name || agent?.id || `Agent ${Number(agentMatch[1]) + 1}`
     const rest = agentMatch[2]
     if (!rest) return who
@@ -278,10 +278,13 @@ function applySemanticRules(
   fieldProblemsByAgent: Map<string, AgentFieldProblems>,
   documentProblems: DocumentProblem[],
 ): void {
+  // A half-written team may not have its lists yet; the schema errors already say so.
+  const agents = Array.isArray(doc.agents) ? doc.agents : []
+  const edges = Array.isArray(doc.edges) ? doc.edges : []
   const seenIds = new Set<string>()
-  const names = new Map(doc.agents.map((agent) => [agent.id, agent.name?.trim() || agent.id]))
+  const names = new Map(agents.map((agent) => [agent.id, agent.name?.trim() || agent.id]))
   const named = (id: string) => `“${names.get(id) ?? id}”`
-  for (const [agentIndex, agent] of doc.agents.entries()) {
+  for (const [agentIndex, agent] of agents.entries()) {
     if (seenIds.has(agent.id)) {
       documentProblems.push({ message: `Two agents use the same id “${agent.id}”. Give one of them a different id.`, agentId: agent.id, yamlPath: ['agents', agentIndex, 'id'] })
     }
@@ -289,7 +292,7 @@ function applySemanticRules(
 
     if (agent.kind === 'operator') {
       if (agent.id === doc.entrypoint) documentProblems.push({ message: 'Your review step can\'t come first. Start the team with an agent.', agentId: agent.id })
-      if (!doc.edges?.some((edge) => edge.layer === 'configured')) documentProblems.push({ message: 'Your review step needs agents before and after it. Connect the agents first.', agentId: agent.id })
+      if (!edges.some((edge) => edge.layer === 'configured')) documentProblems.push({ message: 'Your review step needs agents before and after it. Connect the agents first.', agentId: agent.id })
       continue
     }
     const limit = agent.budget?.limitUsd ?? NaN
@@ -328,7 +331,7 @@ function applySemanticRules(
     }
   }
 
-  const configured = doc.edges.filter((edge): edge is EdgeConfig => edge.layer === 'configured')
+  const configured = edges.filter((edge): edge is EdgeConfig => edge.layer === 'configured')
   const seenPairs = new Set<string>()
   for (const edge of configured) {
     if (edge.from === edge.to) {

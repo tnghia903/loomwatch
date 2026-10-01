@@ -236,7 +236,7 @@ export class TeamFileModel {
   }
 
   addAgent(agent: AgentConfig): void {
-    const agents = this.requireSeq('agents')
+    const agents = this.ensureSeq('agents')
     if (agents.items.some((item) => isMap(item) && item.get('id') === agent.id)) {
       throw new TeamFileParseError(`agent id ${agent.id} already exists`)
     }
@@ -249,7 +249,7 @@ export class TeamFileModel {
   }
 
   addEdge(edge: EdgeConfig): void {
-    const edges = this.requireSeq('edges')
+    const edges = this.ensureSeq('edges')
     edges.add(this.doc.createNode(edge))
   }
 
@@ -270,6 +270,17 @@ export class TeamFileModel {
       throw new TeamFileParseError(`team document has no ${key} sequence`)
     }
     return node
+  }
+
+  /**
+   * The list to add to, created when the key is absent. The daemon defaults a missing `edges` to
+   * none, and `parse` admits a half-written team with no `agents` yet, so the first connection or
+   * agent in such a file has nowhere to go until this writes the key. A key that is present but not
+   * a list was already refused by `parse`.
+   */
+  private ensureSeq(key: 'agents' | 'edges') {
+    if (!this.doc.has(key)) this.doc.set(key, this.doc.createNode([]))
+    return this.requireSeq(key)
   }
 
   private requireAgentIndex(agentId: string): number {

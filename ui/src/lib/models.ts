@@ -1,10 +1,12 @@
 import { knownHarness, type DetectedHarness, type HarnessModel } from './harnesses'
 import type { AgentConfig } from './team-file/types'
 
+// A team file may omit `spawn.args`: the daemon defaults it to none, though the schema requires it.
 function sameSpawn(left: AgentConfig['spawn'], right: DetectedHarness['spawn']): boolean {
+  const args = left?.args ?? []
   return left !== undefined && left.cmd === right.cmd
-    && left.args.length === right.args.length
-    && left.args.every((arg, index) => arg === right.args[index])
+    && args.length === right.args.length
+    && args.every((arg, index) => arg === right.args[index])
 }
 
 export function harnessIdForAgent(agent: AgentConfig, harnesses: readonly DetectedHarness[]): string | null {
@@ -12,7 +14,8 @@ export function harnessIdForAgent(agent: AgentConfig, harnesses: readonly Detect
   const detected = harnesses.find((harness) => sameSpawn(agent.spawn, harness.spawn))
   if (detected) return detected.id
 
-  const { cmd, args } = agent.spawn
+  const { cmd } = agent.spawn
+  const args = agent.spawn.args ?? []
   if (cmd === 'loomwatchd' && args[0] === 'harness-client') {
     const harnessIndex = args.indexOf('--harness')
     return harnessIndex >= 0 ? args[harnessIndex + 1] ?? null : null
