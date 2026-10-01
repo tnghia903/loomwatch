@@ -74,7 +74,7 @@ describe('Inspector model picker', () => {
     const retry = vi.fn()
     const { rerender } = render(<Inspector {...renderInspectorProps({ modelOptionsLoading: true })} />)
     expect(screen.getByRole('combobox', { name: 'Model' })).toBeDisabled()
-    expect(screen.getByText('Loading models from this harness…')).toBeInTheDocument()
+    expect(screen.getByText('Loading models from this app…')).toBeInTheDocument()
 
     rerender(<Inspector {...renderInspectorProps({ modelOptionsError: 'adapter unavailable', onRetryModelOptions: retry })} />)
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
@@ -94,7 +94,7 @@ describe('Inspector model picker', () => {
       fieldProblems: { model: { weight: 'error', message: 'Required' } },
       onRetryModelOptions: retry,
     })} />)
-    expect(screen.getByText(/Could not load this harness's models: failed to load models from Claude/)).toBeInTheDocument()
+    expect(screen.getByText(/Could not load this app's models: failed to load models from Claude/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(retry).toHaveBeenCalledOnce()
   })

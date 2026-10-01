@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TeamDocument } from './types'
-import { compileTeamValidator, displayFieldProblems } from './validation'
+import Ajv2020 from 'ajv/dist/2020'
+
+import { compileTeamValidator as compileWith, displayFieldProblems } from './validation'
+
+const compileTeamValidator = (schema: object) => compileWith(schema, Ajv2020)
 
 // Represents the daemon-delivered contract for the inspector's editable fields. The validator
 // itself accepts whatever full schema the daemon returns; this compact fixture keeps the tests
@@ -54,7 +58,7 @@ describe('compileTeamValidator', () => {
     const result = validate({ ...document(), unexpected: true } as TeamDocument)
 
     expect(result.documentProblems).toContainEqual(expect.objectContaining({
-      message: '(document) must NOT have additional properties',
+      message: 'The team file has a setting LoomWatch doesn\'t recognise: “unexpected”.',
       yamlPath: ['unexpected'],
     }))
   })
@@ -83,10 +87,29 @@ describe('compileTeamValidator', () => {
     expect(result.valid).toBe(false)
     expect(result.fieldProblemsByAgent.get('researcher')?.limitUsd).toMatchObject({ weight: 'error' })
     expect(result.documentProblems.map((problem) => problem.message)).toEqual(expect.arrayContaining([
-      'Entrypoint `missing` does not name an agent in this team.',
-      'Team budget must be a finite number.',
-      '`researcher` can\'t follow itself.',
+      'The starting agent “missing” isn\'t in this team any more. Choose another one.',
+      'Enter a number for the team budget.',
+      '“Researcher” can\'t hand work to itself.',
     ]))
+  })
+})
+
+describe('schema problems in plain words', () => {
+  const identifierSchema = { ...daemonSchema, properties: { ...daemonSchema.properties, entrypoint: { type: 'string', minLength: 1, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$' } } }
+
+  // A brand-new team has no agent and so no entrypoint: one "Add your first agent" row says that.
+  // The empty string used to add two more rows in JSON-pointer and regex terms.
+  it('says nothing extra about the entrypoint of a team that has no agents yet', () => {
+    const result = compileTeamValidator(identifierSchema)(document({ entrypoint: '', agents: [] }))
+    expect(result.valid).toBe(false)
+    expect(result.documentProblems).toEqual([])
+  })
+
+  it('names the place and the rule instead of quoting the schema', () => {
+    const result = compileTeamValidator(identifierSchema)(document({ entrypoint: '-bad id' }))
+    const messages = result.documentProblems.map((problem) => problem.message)
+    expect(messages).toContain('The starting agent can only use letters, numbers, dots, dashes and underscores, and must start with a letter or number.')
+    expect(messages.join(' ')).not.toMatch(/\/entrypoint|must match pattern|\^\[/)
   })
 })
 

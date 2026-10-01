@@ -1,4 +1,4 @@
-import type { DetectedHarness, HarnessModel } from './harnesses'
+import { knownHarness, type DetectedHarness, type HarnessModel } from './harnesses'
 import type { AgentConfig } from './team-file/types'
 
 function sameSpawn(left: AgentConfig['spawn'], right: DetectedHarness['spawn']): boolean {
@@ -23,6 +23,19 @@ export function harnessIdForAgent(agent: AgentConfig, harnesses: readonly Detect
   if (cmd === 'opencode') return 'opencode'
   if (cmd === 'hermes-acp') return 'hermes'
   return null
+}
+
+/**
+ * What runs this agent, in words: "Claude", "You (review step)", "Codex (not installed)", or
+ * "Custom command: python3". Replaces "Harness not recorded", which was shown for every agent that
+ * did not match a detected harness — including the operator's own review step and the offline demo.
+ */
+export function appLabelForAgent(agent: AgentConfig, harnesses: readonly DetectedHarness[]): string {
+  if (agent.kind === 'operator') return 'You (review step)'
+  const id = harnessIdForAgent(agent, harnesses)
+  if (id) return harnesses.find((harness) => harness.id === id)?.name ?? `${knownHarness(id).name} (not installed)`
+  const cmd = agent.spawn?.cmd.split('/').pop()
+  return cmd ? `Custom command: ${cmd}` : 'Not set'
 }
 
 const THINKING_EFFORTS = new Set(['default', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])

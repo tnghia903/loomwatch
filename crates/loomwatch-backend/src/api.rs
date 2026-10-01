@@ -252,6 +252,57 @@ pub struct TeamsDiscovery {
     pub root: String,
     /// YAML files below `root`, encoded as sorted, `/`-separated relative paths.
     pub files: Vec<String>,
+    /// One summary per entry of `files`, in the same order, so a picker can show a team's name
+    /// instead of its file path without opening every file itself.
+    pub teams: Vec<TeamSummary>,
+}
+
+/// What the team picker shows for one discovered file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamSummary {
+    /// The relative path, identical to the matching `files` entry.
+    pub path: String,
+    /// The file's `name`. Absent when the file does not parse as a team, so the picker falls
+    /// back to the path rather than inventing a name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Number of `agents[]` entries, review stops included.
+    pub agent_count: usize,
+    /// Last modification time (RFC 3339), when the platform reports one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at: Option<String>,
+}
+
+/// The two top-level keys a summary needs. Everything else in the file is ignored, so a summary
+/// never fails on a field this build does not know.
+#[derive(Deserialize)]
+struct TeamHeader {
+    name: Option<String>,
+    #[serde(default)]
+    agents: Vec<serde::de::IgnoredAny>,
+}
+
+fn summarize_team_file(teams_root: &Path, relative: &str) -> TeamSummary {
+    let path = teams_root.join(relative);
+    let header = fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_yaml::from_str::<TeamHeader>(&text).ok());
+    let modified_at = fs::metadata(&path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .map(|modified| chrono::DateTime::<chrono::Utc>::from(modified).to_rfc3339());
+    TeamSummary {
+        path: relative.to_owned(),
+        name: header
+            .as_ref()
+            .and_then(|header| header.name.as_deref())
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned),
+        agent_count: header.map_or(0, |header| header.agents.len()),
+        modified_at,
+    }
 }
 
 /// Build the REST router using the daemon process's `PATH`.
@@ -567,7 +618,26 @@ async fn get_instructions(
 }
 
 async fn get_teams(State(state): State<ApiState>) -> Result<Json<TeamsDiscovery>, ApiError> {
-    let files = discover_team_files(&state.teams_root).map_err(|error| {
+    // Directory walking and reading every team file is blocking I/O; keep it off the runtime's
+    // worker threads so a large teams folder never stalls the run streams.
+    let teams_root = state.teams_root.clone();
+    let scanned = tokio::task::spawn_blocking(move || {
+        discover_team_files(&teams_root).map(|files| {
+            let teams = files
+                .iter()
+                .map(|file| summarize_team_file(&teams_root, file))
+                .collect::<Vec<_>>();
+            (files, teams)
+        })
+    })
+    .await
+    .map_err(|error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to discover team files: {error}"),
+        )
+    })?;
+    let (files, teams) = scanned.map_err(|error| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("failed to discover team files: {error}"),
@@ -576,7 +646,16 @@ async fn get_teams(State(state): State<ApiState>) -> Result<Json<TeamsDiscovery>
     Ok(Json(TeamsDiscovery {
         root: state.teams_root.to_string_lossy().into_owned(),
         files,
+        teams,
     }))
+}
+
+/// Folders a team never lives in: hidden ones (including the daemon's own `.loomwatch` managed
+/// workspaces, which can hold whole repositories) and package caches. Skipping them keeps the
+/// picker free of stray YAML and the scan fast as workspaces grow.
+fn is_skipped_team_directory(name: &std::ffi::OsStr) -> bool {
+    name.to_str()
+        .is_some_and(|name| name.starts_with('.') || name == "node_modules")
 }
 
 fn discover_team_files(teams_root: &Path) -> io::Result<Vec<String>> {
@@ -592,7 +671,9 @@ fn discover_team_files(teams_root: &Path) -> io::Result<Vec<String>> {
             // Directory symlinks are deliberately not followed. This both avoids cycles and
             // makes it impossible for traversal to leave the configured tree while scanning.
             if file_type.is_dir() {
-                directories.push(path);
+                if !is_skipped_team_directory(&entry.file_name()) {
+                    directories.push(path);
+                }
                 continue;
             }
             if !(file_type.is_file() || file_type.is_symlink()) || !is_team_file(&path) {
@@ -1466,7 +1547,10 @@ mod tests {
 
         for uri in [
             "/api/instructions?path=../secret.md".to_owned(),
-            format!("/api/instructions?path={}", outside.0.join("secret.md").display()),
+            format!(
+                "/api/instructions?path={}",
+                outside.0.join("secret.md").display()
+            ),
         ] {
             let response = test_router(&root.0)
                 .oneshot(
@@ -2192,15 +2276,66 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             .expect("response");
 
         assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
         assert_eq!(
-            response_json(response).await,
-            json!({
-                "root": fs::canonicalize(&directory.0)
+            body["root"],
+            json!(
+                fs::canonicalize(&directory.0)
                     .expect("canonical teams root")
-                    .to_string_lossy(),
-                "files": ["nested/a.YAML", "nested/b.yml", "z.yaml"]
-            })
+                    .to_string_lossy()
+            )
         );
+        assert_eq!(
+            body["files"],
+            json!(["nested/a.YAML", "nested/b.yml", "z.yaml"])
+        );
+        let summaries = body["teams"].as_array().expect("team summaries");
+        assert_eq!(
+            summaries
+                .iter()
+                .map(|team| team["path"].as_str().expect("summary path"))
+                .collect::<Vec<_>>(),
+            ["nested/a.YAML", "nested/b.yml", "z.yaml"]
+        );
+        assert!(summaries.iter().all(|team| team["agentCount"] == json!(1)));
+        assert!(summaries.iter().all(|team| team["modifiedAt"].is_string()));
+    }
+
+    #[tokio::test]
+    async fn teams_endpoint_names_each_team_and_skips_hidden_and_package_folders() {
+        let directory = TempDirectory::new();
+        fs::write(
+            directory.0.join("named.yaml"),
+            format!("name: '  Research desk  '\n{VALID_TEAM}"),
+        )
+        .expect("write named team");
+        fs::write(directory.0.join("broken.yaml"), "agents: [unclosed").expect("write broken");
+        for skipped in [".loomwatch/workspace", "node_modules/pkg"] {
+            let folder = directory.0.join(skipped);
+            fs::create_dir_all(&folder).expect("create skipped folder");
+            fs::write(folder.join("stray.yaml"), VALID_TEAM).expect("write stray yaml");
+        }
+
+        let response = test_router(&directory.0)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/teams")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["files"], json!(["broken.yaml", "named.yaml"]));
+        // A file that does not parse is still listed, by path, with no invented name.
+        assert_eq!(body["teams"][0]["path"], json!("broken.yaml"));
+        assert!(body["teams"][0].get("name").is_none());
+        assert_eq!(body["teams"][0]["agentCount"], json!(0));
+        assert_eq!(body["teams"][1]["name"], json!("Research desk"));
+        assert_eq!(body["teams"][1]["agentCount"], json!(1));
     }
 
     #[tokio::test]

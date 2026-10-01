@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { AgentNode } from './nodeFromDrop'
 import { nodeFromDrop } from './nodeFromDrop'
+import { DEFAULT_AGENT_ROLE } from './createAgent'
 import type { LibrarySource } from './types'
 
 const harnessSource: LibrarySource = {
@@ -18,7 +19,7 @@ describe('nodeFromDrop', () => {
     expect(node?.position).toEqual({ x: 104, y: 40 })
     expect(node?.selected).toBe(true)
     expect(node?.data.agent.name).toBe('OpenCode')
-    expect(node?.data.agent.role).toBe('')
+    expect(node?.data.agent.role).toBe(DEFAULT_AGENT_ROLE)
   })
 
   it('deselects existing nodes are left to the caller (does not mutate input)', () => {

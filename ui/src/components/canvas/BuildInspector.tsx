@@ -11,8 +11,20 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
   // sends the operator to a field. The short panel does not contain most fields, so opening it
   // first would hide the thing they came for.
   if (advanced) return <div className="advanced-node-settings"><Inspector {...props} onClose={() => setAdvanced(false)} /></div>
+  const reviewStep = node.data.agent.kind === 'operator'
   return <aside className="node-inspector" aria-label="Selected node settings" onKeyDown={e => { if (e.key === 'Escape') onClose() }}>
-    <div className="inspector-head"><div><span className="eyebrow">Selected harness</span><strong>{node.data.agent.name}</strong></div><button className="icon-button" onClick={onClose} aria-label="Close inspector"><X size={15} /></button><button className="icon-button" onClick={onDelete} disabled={readOnly} aria-label={`Remove ${node.data.agent.name}`}><Trash2 size={15} /></button></div>
-    <div className="inspector-fields"><label>Agent name<input value={node.data.agent.name} disabled={readOnly} onChange={e => onRename('name', e.target.value)} /></label><label>Role<input value={node.data.agent.role} disabled={readOnly} onChange={e => onRename('role', e.target.value)} /></label><label>Harness<select value={harnessId ?? ''} disabled={readOnly} onChange={e => onHarnessChange?.(e.target.value)}><option value="" disabled>Select harness</option>{harnesses.map(h => <option key={h.id} value={h.id} disabled={h.acpAvailable === false}>{h.name}</option>)}</select></label><p><Puzzle size={13} />Skills remain portable across harnesses.</p><button className="btn" onClick={() => setAdvanced(true)}>Model & advanced settings</button></div>
+    <div className="inspector-head"><div><span className="eyebrow">{reviewStep ? 'Your review step' : 'Agent'}</span><strong>{node.data.agent.name}</strong></div><button className="icon-button" onClick={onClose} aria-label="Close inspector"><X size={15} /></button><button className="icon-button" onClick={onDelete} disabled={readOnly} aria-label={`Remove ${node.data.agent.name}`}><Trash2 size={15} /></button></div>
+    <div className="inspector-fields">
+      <label>Name<input value={node.data.agent.name} disabled={readOnly} onChange={e => onRename('name', e.target.value)} /></label>
+      {/* Instructions are prose; a one-line input hid all but the first few words of them. */}
+      <label>{reviewStep ? 'What to check' : 'Instructions'}<textarea rows={4} value={node.data.agent.role} disabled={readOnly} onChange={e => onRename('role', e.target.value)} placeholder={reviewStep ? 'What should you look at before the team continues?' : 'What should this agent do?'} /></label>
+      {reviewStep
+        ? <p>The team pauses here and waits for you to approve the work or ask for changes.</p>
+        : <>
+          <label>AI app<select value={harnessId ?? ''} disabled={readOnly} onChange={e => onHarnessChange?.(e.target.value)}><option value="" disabled>Choose an app</option>{harnesses.map(h => <option key={h.id} value={h.id} disabled={h.acpAvailable === false}>{h.name}</option>)}</select></label>
+          <p><Puzzle size={13} />Skills you connect work with any AI app.</p>
+          <button className="btn" onClick={() => setAdvanced(true)}>Model and more settings</button>
+        </>}
+    </div>
   </aside>
 }

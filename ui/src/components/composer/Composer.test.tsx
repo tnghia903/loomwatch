@@ -101,12 +101,12 @@ it('offers Follow up with the stages in pipeline order, and ⌘↵ sends it', ()
   )
   const chooser = screen.getByLabelText('Follow up target') as HTMLSelectElement
   expect([...chooser.options].map((option) => option.textContent)).toEqual([
-    'whole pipeline',
-    'from Protocol Researcher',
-    'from Code Reviewer',
-    'from Technical Writer',
+    'the beginning',
+    'Protocol Researcher',
+    'Code Reviewer',
+    'Technical Writer',
   ])
-  expect(screen.getByText(/Whole pipeline: every stage runs again/)).toBeInTheDocument()
+  expect(screen.getByText(/Runs every step again, building on this answer/)).toBeInTheDocument()
 
   fireEvent.change(chooser, { target: { value: 'writer' } })
   expect(onFollowUpTargetChange).toHaveBeenCalledWith('writer')
@@ -118,7 +118,7 @@ it('offers Follow up with the stages in pipeline order, and ⌘↵ sends it', ()
   expect(screen.getByRole('button', { name: /Follow up/ })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Retry' })).toHaveAttribute(
     'title',
-    'Start a new run from the same prompt, from zero',
+    'Run the original request again from scratch',
   )
 })
 
@@ -134,8 +134,8 @@ it('names the chosen follow-up target in the note, and offers only the whole pip
       followUpTarget="writer" onFollowUpTargetChange={vi.fn()} onFollowUp={vi.fn()}
     />,
   )
-  expect(screen.getByText(/From Technical Writer: the earlier stages' handovers are reused/)).toBeInTheDocument()
-  expect(screen.queryByText(/Whole pipeline:/)).not.toBeInTheDocument()
+  expect(screen.getByText(/Starts again at Technical Writer, reusing what the earlier steps handed over/)).toBeInTheDocument()
+  expect(screen.queryByText(/Runs every step again/)).not.toBeInTheDocument()
   unmount()
 
   // Team mode has no configured order, so there is no stage to start at and the chooser says so.
@@ -148,7 +148,7 @@ it('names the chosen follow-up target in the note, and offers only the whole pip
     />,
   )
   const chooser = screen.getByLabelText('Follow up target') as HTMLSelectElement
-  expect([...chooser.options].map((option) => option.textContent)).toEqual(['whole pipeline'])
+  expect([...chooser.options].map((option) => option.textContent)).toEqual(['the beginning'])
 })
 
 // A build with no follow-up wiring keeps today's terminal composer exactly: Retry plus New run.
@@ -201,4 +201,66 @@ it('lets the operator reply to a server-reported warm agent during a run', () =>
   rerender(<Composer {...props} replyAgents={[]} />)
   expect(screen.getByRole('textbox')).toBeDisabled()
   expect(screen.queryByRole('button', { name: /^Reply/ })).not.toBeInTheDocument()
+})
+
+function keyProps(state: ComposerState, value: string) {
+  const handlers = { onSubmit: vi.fn(), onRetry: vi.fn(), onNewRun: vi.fn(), onAnswer: vi.fn() }
+  render(
+    <Composer
+      mode="pipeline" stepCount={2} state={state} value={value} onChange={vi.fn()} onStop={vi.fn()}
+      onOpenMode={vi.fn()} onOpenHistory={vi.fn()} modeOpen={false} historyOpen={false} {...handlers}
+    />,
+  )
+  return handlers
+}
+
+// Every chat app an operator already uses sends on ↵; requiring ⌘↵ made the first run look broken.
+it('sends on Enter, keeps Shift+Enter for a newline, and never sends mid-IME composition', () => {
+  const { onSubmit } = keyProps({ kind: 'ready' }, 'Summarise the report')
+  const box = screen.getByRole('textbox')
+  fireEvent.keyDown(box, { key: 'Enter', shiftKey: true })
+  fireEvent.keyDown(box, { key: 'Enter', isComposing: true })
+  fireEvent.keyDown(box, { key: 'Enter', keyCode: 229 })
+  expect(onSubmit).not.toHaveBeenCalled()
+  fireEvent.keyDown(box, { key: 'Enter' })
+  expect(onSubmit).toHaveBeenCalledOnce()
+})
+
+// A stray Enter in an empty box after a run must not silently re-run the whole team.
+it('only retries a finished run on an explicit ⌘↵, never on a bare Enter', () => {
+  const { onRetry } = keyProps({ kind: 'terminal', phase: 'succeeded' }, '')
+  const box = screen.getByRole('textbox')
+  fireEvent.keyDown(box, { key: 'Enter' })
+  expect(onRetry).not.toHaveBeenCalled()
+  fireEvent.keyDown(box, { key: 'Enter', metaKey: true })
+  expect(onRetry).toHaveBeenCalledOnce()
+})
+
+// "Looks good" is the most common answer at a review stop; it must not require typing.
+it('lets a review stop be approved without a comment, and names who work goes back to', () => {
+  const waiting = { node: 'review', name: 'You', kind: 'review_stop' as const, since: '2026-10-01T00:00:00Z', question: 'Approve?', park: 'kept_alive' as const, parkNote: 'kept alive', handoverFrom: 'researcher', sendBackAvailable: true }
+  const onAnswer = vi.fn()
+  render(
+    <Composer
+      mode="pipeline" stepCount={3} state={{ kind: 'answering', waiting, sending: false }} value="" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()}
+      onRetry={vi.fn()} onNewRun={vi.fn()} onOpenMode={vi.fn()} onOpenHistory={vi.fn()} modeOpen={false} historyOpen={false}
+      onAnswer={onAnswer} agentNames={new Map([['researcher', 'Researcher']])}
+    />,
+  )
+  expect(screen.getByRole('button', { name: 'Send back to Researcher' })).toBeDisabled()
+  fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+  expect(onAnswer).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+  expect(onAnswer).toHaveBeenCalledWith()
+})
+
+it('still requires words to answer an agent’s question', () => {
+  const waiting = { node: 'writer', name: 'Writer', kind: 'question' as const, since: '2026-10-01T00:00:00Z', question: 'Which tone?', park: 'kept_alive' as const, parkNote: 'kept alive', sendBackAvailable: false }
+  render(
+    <Composer
+      mode="pipeline" stepCount={3} state={{ kind: 'answering', waiting, sending: false }} value="" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()}
+      onRetry={vi.fn()} onNewRun={vi.fn()} onOpenMode={vi.fn()} onOpenHistory={vi.fn()} modeOpen={false} historyOpen={false} onAnswer={vi.fn()}
+    />,
+  )
+  expect(screen.getByRole('button', { name: /^Reply/ })).toBeDisabled()
 })

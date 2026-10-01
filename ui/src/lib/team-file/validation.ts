@@ -3,7 +3,7 @@
 // §5.4 assigns every problem one of two weights — `incomplete` (copper, "unfinished") or
 // `error` (red, "wrong") — for the five fields the inspector actually edits.
 
-import Ajv2020 from 'ajv/dist/2020'
+import type Ajv2020 from 'ajv/dist/2020'
 import type { ErrorObject } from 'ajv'
 
 import type { EdgeConfig, TeamDocument } from './types'
@@ -92,7 +92,7 @@ function applySchemaError(
     // Other agent-scoped errors (id pattern, spawn.cmd pattern, etc.) have no inspector field
     // today — TNG-55 scoped the inspector to name/role/model/cwd/budget — so surface them as a
     // document problem naming the agent rather than dropping them silently.
-    documentProblems.push({ message: describeSchemaError(error), agentId: agent.id, yamlPath })
+    documentProblems.push({ message: describeSchemaError(error, doc), agentId: agent.id, yamlPath })
     return
   }
 
@@ -100,7 +100,7 @@ function applySchemaError(
   if (edgeMatch) {
     const edge = doc.edges[Number(edgeMatch[1])]
     documentProblems.push({
-      message: describeSchemaError(error),
+      message: describeSchemaError(error, doc),
       ...(edge ? { edge: { from: edge.from, to: edge.to } } : {}),
       yamlPath,
     })
@@ -118,8 +118,14 @@ function applySchemaError(
   if (error.instancePath === '/agents' && error.keyword === 'minItems') {
     return
   }
+  // A team with no agents yet has no entrypoint either, and that is the one problem the dedicated
+  // entrypoint UX already names ("Add your first agent"). Its empty string also fails the
+  // identifier's length and pattern rules — two more rows saying the same thing in schema terms.
+  if (error.instancePath === '/entrypoint' && doc.entrypoint === '') {
+    return
+  }
 
-  documentProblems.push({ message: describeSchemaError(error), yamlPath })
+  documentProblems.push({ message: describeSchemaError(error, doc), yamlPath })
 }
 
 function schemaErrorPath(error: ErrorObject): (string | number)[] {
@@ -138,9 +144,79 @@ function schemaErrorPath(error: ErrorObject): (string | number)[] {
   return parts
 }
 
-function describeSchemaError(error: ErrorObject): string {
-  const path = error.instancePath === '' ? '(document)' : error.instancePath
-  return `${path} ${error.message ?? 'is invalid'}`
+/** Plain names for the places a schema error can point at, so nobody has to read a JSON pointer. */
+const PLACE_LABELS: Record<string, string> = {
+  '': 'The team file',
+  '/id': 'The team id',
+  '/name': 'The team name',
+  '/entrypoint': 'The starting agent',
+  '/responder': 'The agent that writes the final answer',
+  '/agents': 'The agent list',
+  '/edges': 'The connections between steps',
+  '/schedule': 'The schedule',
+  '/memory': 'Team memory',
+  '/budget': 'The team budget',
+  '/guards': 'The delegation limits',
+  '/conversation': 'The conversation settings',
+}
+
+const SPAWN_LABELS: Record<string, string> = { cmd: 'app command', args: 'app arguments', env: 'environment settings', cwd: 'working folder' }
+
+function describePlace(doc: TeamDocument, instancePath: string): string {
+  const agentMatch = AGENT_ERROR_PATH.exec(instancePath)
+  if (agentMatch) {
+    const agent = doc.agents[Number(agentMatch[1])]
+    const who = agent?.name || agent?.id || `Agent ${Number(agentMatch[1]) + 1}`
+    const rest = agentMatch[2]
+    if (!rest) return who
+    const [head, sub] = rest.split('/')
+    if (head === 'spawn' && sub && SPAWN_LABELS[sub]) return `${who}'s ${SPAWN_LABELS[sub]}`
+    return `${who}'s ${head === 'id' ? 'id' : head.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()}`
+  }
+  if (EDGE_ERROR_PATH.test(instancePath)) return 'A connection between steps'
+  if (PLACE_LABELS[instancePath]) return PLACE_LABELS[instancePath]
+  const top = `/${instancePath.split('/')[1] ?? ''}`
+  return PLACE_LABELS[top] ? `${PLACE_LABELS[top]} (${instancePath.split('/').slice(2).join(' › ')})` : `The setting ${instancePath.slice(1).replaceAll('/', ' › ')}`
+}
+
+/**
+ * One schema failure as a sentence an operator can act on.
+ *
+ * ajv's own text ("/entrypoint must match pattern \"^[A-Za-z0-9]…\"") is accurate and useless to
+ * anyone who has not read the schema, so each keyword the team schema actually uses gets its own
+ * wording; anything else falls back to ajv's message, still prefixed with a plain place name.
+ */
+function describeSchemaError(error: ErrorObject, doc: TeamDocument): string {
+  const place = describePlace(doc, error.instancePath)
+  const params = error.params as Record<string, unknown>
+  switch (error.keyword) {
+    case 'minLength':
+      return params.limit === 1 ? `${place} can't be empty.` : `${place} must be at least ${String(params.limit)} characters.`
+    case 'maxLength':
+      return `${place} must be at most ${String(params.limit)} characters.`
+    case 'pattern':
+      return String(params.pattern).startsWith('^[A-Za-z0-9]')
+        ? `${place} can only use letters, numbers, dots, dashes and underscores, and must start with a letter or number.`
+        : `${place} isn't in the expected format.`
+    case 'required':
+      return `${place} is missing “${String(params.missingProperty)}”.`
+    case 'additionalProperties':
+      return `${place} has a setting LoomWatch doesn't recognise: “${String(params.additionalProperty)}”.`
+    case 'type':
+      return `${place} should be ${/^[aeiou]/.test(String(params.type)) ? 'an' : 'a'} ${String(params.type)}.`
+    case 'const':
+      return `${place} must be ${JSON.stringify(params.allowedValue)}.`
+    case 'enum':
+      return `${place} must be one of: ${(params.allowedValues as unknown[] | undefined)?.map((value) => JSON.stringify(value)).join(', ') ?? 'the allowed values'}.`
+    case 'minimum':
+      return `${place} must be ${String(params.limit)} or more.`
+    case 'maximum':
+      return `${place} must be ${String(params.limit)} or less.`
+    case 'minItems':
+      return `${place} needs at least ${String(params.limit)} item${params.limit === 1 ? '' : 's'}.`
+    default:
+      return `${place} ${error.message ?? 'is invalid'}.`
+  }
 }
 
 interface EdgeEndpoints {
@@ -203,22 +279,24 @@ function applySemanticRules(
   documentProblems: DocumentProblem[],
 ): void {
   const seenIds = new Set<string>()
+  const names = new Map(doc.agents.map((agent) => [agent.id, agent.name?.trim() || agent.id]))
+  const named = (id: string) => `“${names.get(id) ?? id}”`
   for (const [agentIndex, agent] of doc.agents.entries()) {
     if (seenIds.has(agent.id)) {
-      documentProblems.push({ message: `Duplicate agent id \`${agent.id}\`.`, agentId: agent.id, yamlPath: ['agents', agentIndex, 'id'] })
+      documentProblems.push({ message: `Two agents use the same id “${agent.id}”. Give one of them a different id.`, agentId: agent.id, yamlPath: ['agents', agentIndex, 'id'] })
     }
     seenIds.add(agent.id)
 
     if (agent.kind === 'operator') {
-      if (agent.id === doc.entrypoint) documentProblems.push({ message: 'A review stop cannot be the entrypoint. Start with an agent.', agentId: agent.id })
-      if (!doc.edges?.some((edge) => edge.layer === 'configured')) documentProblems.push({ message: 'Review stops need a pipeline. Connect the agents first.', agentId: agent.id })
+      if (agent.id === doc.entrypoint) documentProblems.push({ message: 'Your review step can\'t come first. Start the team with an agent.', agentId: agent.id })
+      if (!doc.edges?.some((edge) => edge.layer === 'configured')) documentProblems.push({ message: 'Your review step needs agents before and after it. Connect the agents first.', agentId: agent.id })
       continue
     }
     const limit = agent.budget?.limitUsd ?? NaN
     if (!Number.isFinite(limit)) {
       setFieldProblem(fieldProblemsByAgent, agent.id, 'limitUsd', {
         weight: 'error',
-        message: 'Budget must be a finite number.',
+        message: 'Enter a number for the budget.',
       })
     } else if (limit < 0) {
       setFieldProblem(fieldProblemsByAgent, agent.id, 'limitUsd', {
@@ -232,7 +310,7 @@ function applySemanticRules(
   // document can tell whether that identifier belongs to one of its agents.
   if (doc.entrypoint && !seenIds.has(doc.entrypoint)) {
     documentProblems.push({
-      message: `Entrypoint \`${doc.entrypoint}\` does not name an agent in this team.`,
+      message: `The starting agent “${doc.entrypoint}” isn't in this team any more. Choose another one.`,
       agentId: doc.entrypoint,
       yamlPath: ['entrypoint'],
     })
@@ -244,7 +322,7 @@ function applySemanticRules(
   if (doc.budget) {
     const limit = doc.budget.limitUsd
     if (!Number.isFinite(limit)) {
-      documentProblems.push({ message: 'Team budget must be a finite number.', yamlPath: ['budget', 'limitUsd'] })
+      documentProblems.push({ message: 'Enter a number for the team budget.', yamlPath: ['budget', 'limitUsd'] })
     } else if (limit < 0) {
       documentProblems.push({ message: 'Team budget must be zero or greater.', yamlPath: ['budget', 'limitUsd'] })
     }
@@ -255,7 +333,7 @@ function applySemanticRules(
   for (const edge of configured) {
     if (edge.from === edge.to) {
       documentProblems.push({
-        message: `\`${edge.from}\` can't follow itself.`,
+        message: `${named(edge.from)} can't hand work to itself.`,
         edge: { from: edge.from, to: edge.to },
         yamlPath: ['edges'],
       })
@@ -263,7 +341,7 @@ function applySemanticRules(
     const pairKey = `${edge.from}->${edge.to}`
     if (seenPairs.has(pairKey)) {
       documentProblems.push({
-        message: `Duplicate edge \`${edge.from} → ${edge.to}\`.`,
+        message: `${named(edge.from)} → ${named(edge.to)} is connected twice.`,
         edge: { from: edge.from, to: edge.to },
         yamlPath: ['edges'],
       })
@@ -271,7 +349,7 @@ function applySemanticRules(
     seenPairs.add(pairKey)
     if (!seenIds.has(edge.from) || !seenIds.has(edge.to)) {
       documentProblems.push({
-        message: `Edge \`${edge.from} → ${edge.to}\` names an agent that no longer exists.`,
+        message: `A connection points at an agent that was removed (${edge.from} → ${edge.to}).`,
         edge: { from: edge.from, to: edge.to },
         yamlPath: ['edges'],
       })
@@ -281,7 +359,7 @@ function applySemanticRules(
   const cycle = findCycle(configured)
   if (cycle) {
     documentProblems.push({
-      message: `Pipeline has a loop: \`${cycle.from} → ${cycle.to}\` closes a cycle.`,
+      message: `The steps go round in a circle: ${named(cycle.from)} → ${named(cycle.to)} leads back to an earlier step.`,
       edge: cycle,
       yamlPath: ['edges'],
     })
@@ -293,7 +371,7 @@ function applySemanticRules(
     const incoming = configured.find((edge) => edge.to === doc.entrypoint)
     if (incoming) {
       documentProblems.push({
-        message: `\`${doc.entrypoint}\` is the entrypoint, so it can't have an incoming step.`,
+        message: `${named(doc.entrypoint)} starts the team, so nothing can hand work to it.`,
         agentId: doc.entrypoint,
         yamlPath: ['entrypoint'],
       })
@@ -306,8 +384,8 @@ function applySemanticRules(
  * into the UI"). The returned function is cheap to call on every edit — ajv's compiled
  * validator is a plain function call, no re-parsing of the schema.
  */
-export function compileTeamValidator(schema: object): TeamValidator {
-  const ajv = new Ajv2020({ allErrors: true, strict: false })
+export function compileTeamValidator(schema: object, Ajv: typeof Ajv2020): TeamValidator {
+  const ajv = new Ajv({ allErrors: true, strict: false })
   const validate = ajv.compile(schema)
 
   return (doc: TeamDocument): ValidationResult => {
@@ -363,4 +441,14 @@ export function displayFieldProblems(
     }
   }
   return display
+}
+
+/**
+ * [`compileTeamValidator`] with ajv loaded on demand. ajv and its URI parser are a fifth of the
+ * app's code and only matter once the schema has arrived — which is already asynchronous — so they
+ * are kept out of the bundle the first screen waits for.
+ */
+export async function loadTeamValidator(schema: object): Promise<TeamValidator> {
+  const { default: Ajv } = await import('ajv/dist/2020')
+  return compileTeamValidator(schema, Ajv)
 }

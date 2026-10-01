@@ -74,10 +74,10 @@ export function Inspector({ node, isEntrypoint, isResponder, onRename, onModelCh
   // so `model` is always "Required" in exactly the state where the catalog could not be read —
   // showing the field problem there left an empty list, no reason for it, and no way back.
   const modelHint = modelOptionsLoading
-    ? 'Loading models from this harness…'
+    ? 'Loading models from this app…'
     : modelOptionsError
-      ? `Could not load this harness's models: ${modelOptionsError}`
-      : hint('model', 'Models reported by this agent harness.')
+      ? `Could not load this app's models: ${modelOptionsError}`
+      : hint('model', 'The models this AI app offers.')
 
   if (agent.kind === 'operator') return (
     <aside className="panel right top e1 lw-inspector" aria-label="Inspector" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
@@ -132,10 +132,10 @@ export function Inspector({ node, isEntrypoint, isResponder, onRename, onModelCh
             {!agent.model && <option value="" disabled>Select a model</option>}
             {selectableModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
           </select>
-          <span className="hint t-meta">{runtime?.status === 'running' ? 'Routed through the harness for this run.' : selectedModel?.description ?? modelHint}{modelOptionsError && onRetryModelOptions && <> <button type="button" className="link model-retry" onClick={onRetryModelOptions}>Retry</button></>}</span>
+          <span className="hint t-meta">{runtime?.status === 'running' ? 'Used by the AI app for this run.' : selectedModel?.description ?? modelHint}{modelOptionsError && onRetryModelOptions && <> <button type="button" className="link model-retry" onClick={onRetryModelOptions}>Retry</button></>}</span>
         </div>
         <div className="field thinking-field">
-          <span className="thinking-label"><label className="t-meta" htmlFor="insp-thinking">Thinking effort</label><output className="t-body-m" htmlFor="insp-thinking">{selectedEffort?.name ?? 'Harness default'}</output></span>
+          <span className="thinking-label"><label className="t-meta" htmlFor="insp-thinking">Thinking effort</label><output className="t-body-m" htmlFor="insp-thinking">{selectedEffort?.name ?? 'App default'}</output></span>
           <input
             id="insp-thinking"
             className="thinking-slider"
@@ -146,14 +146,14 @@ export function Inspector({ node, isEntrypoint, isResponder, onRename, onModelCh
             value={selectedEffortIndex}
             disabled={readOnly || modelOptionsLoading || !onThinkingEffortChange || thinkingOptions.length === 0}
             aria-label="Thinking effort"
-            aria-valuetext={selectedEffort?.name ?? 'Harness default'}
+            aria-valuetext={selectedEffort?.name ?? 'App default'}
             onChange={(event) => {
               const effort = thinkingOptions[Number(event.target.value)]
               if (effort) onThinkingEffortChange?.(effort.id)
             }}
           />
           {thinkingOptions.length > 1 && <span className="thinking-scale t-micro"><span>{thinkingOptions[0].name}</span><span>{thinkingOptions[thinkingOptions.length - 1].name}</span></span>}
-          <span className="hint t-meta">{selectedEffort?.description ?? (modelOptionsLoading ? 'Loading effort choices…' : thinkingOptions.length === 0 ? 'This harness does not expose a separate effort setting.' : 'Controls how much reasoning the model uses.')}</span>
+          <span className="hint t-meta">{selectedEffort?.description ?? (modelOptionsLoading ? 'Loading effort choices…' : thinkingOptions.length === 0 ? 'This AI app does not offer a separate effort setting.' : 'Controls how much reasoning the model uses.')}</span>
         </div>
       </div>
 
@@ -161,7 +161,7 @@ export function Inspector({ node, isEntrypoint, isResponder, onRename, onModelCh
         <div className="zone-head t-micro">Behaviour</div>
         <button type="button" className={`check round ${isEntrypoint ? 'on' : ''}`} disabled={isEntrypoint || readOnly} onClick={onPromoteEntrypoint} aria-pressed={isEntrypoint} title={isEntrypoint ? 'Every team starts somewhere. Pick another agent to move the entry point.' : undefined}>
           <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
-          <span className="txt"><b className="t-body">Entry point for this team</b><span className="t-meta">Receives the goal first</span></span>
+          <span className="txt"><b className="t-body">Starts the team</b><span className="t-meta">Receives your request first</span></span>
         </button>
         <button
           type="button"
@@ -172,11 +172,11 @@ export function Inspector({ node, isEntrypoint, isResponder, onRename, onModelCh
           title={!pipeline && !isEntrypoint ? 'Create a pipeline to choose a responder other than the entrypoint.' : isResponder ? 'Pick another pipeline agent to move the team output.' : undefined}
         >
           <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
-          <span className="txt"><b className="t-body">Produces the team output</b><span className="t-meta">Its reply becomes the canonical response</span></span>
+          <span className="txt"><b className="t-body">Produces the team output</b><span className="t-meta">Its answer becomes the team’s final answer</span></span>
         </button>
         <button type="button" className={`check ${agent.allowRecruiting !== false ? 'on' : ''}`} disabled={readOnly} onClick={() => onAllowRecruitingChange(agent.allowRecruiting === false)} aria-pressed={agent.allowRecruiting !== false}>
           <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
-          <span className="txt"><b className="t-body">May recruit helpers</b><span className="t-meta">{pipeline ? 'Withdrawn in pipeline mode — only ask stays' : 'dispatch, ask and handoff through the Team Bus'}</span></span>
+          <span className="txt"><b className="t-body">Can ask other agents for help</b><span className="t-meta">{pipeline ? 'Off when steps run in order — it can still ask others questions' : 'Can hand parts of the task to other agents and ask them questions'}</span></span>
         </button>
         {/* docs/TEAM_MEMORY.md §5: the two per-agent memory keys. The copy uses only the four
             sanctioned words — supplied, retrieved, kept, eligible — and never says the agent

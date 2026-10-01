@@ -212,7 +212,7 @@ code, kbd, pre { font-family: var(--font-mono); }
 .lbadge {
   display: inline-block; padding: 1px 5px; border-radius: var(--r-full);
   border: 1px solid var(--color-hairline); color: var(--color-ink-3);
-  font: 500 9px/1.4 var(--font-sans); letter-spacing: .04em; white-space: nowrap;
+  font: 500 11px/1.4 var(--font-sans); letter-spacing: .04em; white-space: nowrap;
 }
 .lbadge.st-permission { color: var(--color-accent); border-color: var(--color-accent-dim); }
 .lbadge.st-disconnected { color: var(--color-halt); border-color: color-mix(in srgb, var(--color-halt) 50%, transparent); }
@@ -789,21 +789,10 @@ textarea.input { padding: 6px var(--sp-3); resize: vertical; min-height: 84px; }
 .bar-stack .bar { position: static; }
 
 /* ---------------------------------------------------------------------------
-   FIRST RUN — §10.1. The one screen that uses the serif display step.
+   LOOM MARK — the brand glyph (Home header, and anywhere else it appears).
    --------------------------------------------------------------------------- */
-.lw-firstrun { position: absolute; inset: 0; z-index: 50; display: grid; place-items: center; background: var(--color-ground); }
-.lw-firstrun .ground { position: absolute; inset: 0; background-image: radial-gradient(circle at 1px 1px, var(--color-ground-dot) 1px, transparent 0); background-size: 16px 16px; }
-.fr-stack { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); text-align: center; }
 .fr-mark { color: var(--color-accent); animation: frIn var(--t-entrance) var(--ease-out) both; }
-.fr-title { color: var(--color-ink); animation: frIn var(--t-entrance) var(--ease-out) 60ms both; margin: 0; }
-.fr-sub { color: var(--color-ink-2); animation: frIn var(--t-entrance) var(--ease-out) 120ms both; margin: 0; }
-.fr-cta { margin-top: var(--sp-4); animation: frIn var(--t-entrance) var(--ease-out) 180ms both; }
-.fr-alt { animation: frIn var(--t-entrance) var(--ease-out) 240ms both; }
-.fr-form { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); animation: frIn var(--t-entrance) var(--ease-out) both; }
-.fr-form .input { width: 320px; text-align: center; font-size: 18px; height: 40px; }
 @keyframes frIn { from { opacity: 0; transform: translateY(8px) scale(.96) } to { opacity: 1; transform: none } }
-.fr-foot { position: absolute; left: var(--sp-6); bottom: var(--sp-5); color: var(--color-ink-3); display: flex; align-items: center; gap: var(--sp-2); }
-.fr-corner { position: absolute; right: var(--sp-5); bottom: var(--sp-5); height: 36px; padding: 0 6px 0 var(--sp-4); border-radius: var(--r-full); display: flex; align-items: center; gap: var(--sp-2); color: var(--color-ink-3); }
 
 /* ---------------------------------------------------------------------------
    BADGES — live vs replay must be unmistakable
