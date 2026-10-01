@@ -1,34 +1,31 @@
-import { Background, getNodesBounds, getViewportForBounds, MarkerType, ReactFlow, useNodesInitialized, useReactFlow, type Edge, type EdgeChange, type Node, type NodeChange, type OnNodeDrag } from '@xyflow/react'
+import { Background, getNodesBounds, getViewportForBounds, ReactFlow, useNodesInitialized, useReactFlow, type EdgeChange, type Node, type NodeChange, type OnNodeDrag } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { fetchHarnessModels, type DetectedHarness, type HarnessModels } from '../lib/harnesses'
+import type { DetectedHarness } from '../lib/harnesses'
 import { briefFileNameFor, exportPack, fetchMemory, fetchNoteHistory, fetchNotes, fetchRunCheckpoints, fetchRunContext, reviseNote, writeMemoryFile, type Checkpoint, type ContextPacket, type MemoryView, type Note, type NotebookView } from '../lib/memory/client'
 import type { AgentNode } from '../lib/library/nodeFromDrop'
 import type { CapabilityInventory, DetectedCapability } from '../lib/library/client'
-import { askRunAgent, answerRun, cancelRun, describeNextFire, findRunByStartKey, isTerminalRun, newStartKey, RunApiError, runScheduleNow, scheduleForPath, STALE_TEAM_REVISION, startRun, useSchedules } from '../lib/runs/client'
+import { describeNextFire, isTerminalRun, runScheduleNow, scheduleForPath, useSchedules } from '../lib/runs/client'
 import { ownerLabelFor } from '../lib/runs/graph'
 import { appLabelForAgent, harnessIdForAgent, modelOptionsForAgent } from '../lib/models'
-import type { EvidenceNode, MoreNode, OutputNode, PromptNode, RunNode, WeftEdge } from '../lib/runs/graph'
-import { causalOrder, DOCK, dockAnchors, fanEvidence, helperPositions, historicalRunPositions } from '../lib/runs/runOverlay'
+import type { OutputNode } from '../lib/runs/graph'
+import { causalOrder, DOCK } from '../lib/runs/runOverlay'
 import { historyRunUrl, mergeHistory, threadHistory } from '../lib/runs/history'
 import { useRunHistory } from '../lib/runs/useRunHistory'
 import { useRunSession } from '../lib/runs/useRunSession'
-import { teamDisplayName } from '../lib/team-file/client'
 import { snapToGrid } from '../lib/grid'
-import { SCHEDULE_CARD } from '../lib/team-file/schedule'
 import { reviewProblems, yamlLineForPath, type ReviewProblem } from '../lib/team-file/problems'
 import { pipelineTerminal } from '../lib/team-file/pipelineOrder'
 import { unifiedYamlDiff } from '../lib/team-file/diff'
-import type { AgentConfig, AgentStatus } from '../lib/team-file/types'
 import { useTeamDocument } from '../lib/team-file/useTeamDocument'
 import { organizePipeline, type Positions } from '../lib/composer-layout/organize'
 import { useComposerLayout } from '../lib/composer-layout/useComposerLayout'
-import { CAPABILITY_CARD, RELATION, capabilityNodeId, freeCapabilitySlot, refuseCapabilityEdge, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
+import { RELATION, capabilityNodeId, freeCapabilitySlot, refuseCapabilityEdge, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
 import { setThemeMode, useTheme } from '../lib/theme'
 import { useAnnouncementQueue } from '../lib/useAnnouncementQueue'
 import type { AgentField } from '../lib/team-file/validation'
-import { recordedReplyText, formatElapsed, isNotebookWrite, type Attention, type Evidence, type RunPhase, type TaskState } from '../lib/watch/events'
+import { recordedReplyText, formatElapsed, isNotebookWrite, type Attention, type Evidence, type RunPhase } from '../lib/watch/events'
 import { CanvasActionsContext, type CanvasActions } from './canvas/CanvasActionsContext'
 import { CommandPalette, type CommandAction } from './canvas/CommandPalette'
 import { ConflictBar } from './canvas/ConflictBar'
@@ -36,15 +33,12 @@ import { DocumentSwitcher } from './canvas/DocumentSwitcher'
 import { EdgeRefusalPopover } from './canvas/EdgeRefusalPopover'
 import { EntrypointProblemBar } from './canvas/EntrypointProblemBar'
 import { Home } from './home/Home'
-import { openTeam, useTeamList } from '../lib/team-file/useTeamList'
-import { NewTeamDialog } from './home/NewTeamDialog'
 import { Inspector } from './canvas/Inspector'
 import { CapabilityInspector, type InspectedCapability } from './canvas/CapabilityInspector'
 import { LayerLegend, type LayerSolo } from './canvas/LayerLegend'
 import { ParseFailureModal } from './canvas/ParseFailureModal'
-import { ScheduleNodeCard, type ScheduleNode } from './canvas/ScheduleNodeCard'
+import { ScheduleNodeCard } from './canvas/ScheduleNodeCard'
 import { SchedulePanel } from './canvas/SchedulePanel'
-import { type CapabilityNode } from './canvas/capabilityNode'
 import { ViewControls } from './canvas/ViewControls'
 import { YamlSheet } from './canvas/YamlSheet'
 import { BuildProvEdgeView, ProvEdgeView, WarpEdgeView, WeftEdgeView } from './canvas/edges'
@@ -52,7 +46,7 @@ import { BuildAgentCard, BuildCapabilityCard, BuildOutputCard } from './canvas/B
 import { BuildResourceInspector } from './canvas/BuildResourceInspector'
 import { BuildInspector } from './canvas/BuildInspector'
 import { ComponentPalette } from './library/ComponentPalette'
-import { ArrowRight, Menu as MenuIcon, Play, Wrench, X } from 'lucide-react'
+import { Play, Wrench } from 'lucide-react'
 import { Composer, type ComposerState } from './composer/Composer'
 import { ModePopover } from './composer/ModePopover'
 import { RunHistory } from './composer/RunHistory'
@@ -68,6 +62,17 @@ import { ProvenancePanel } from './run/ProvenancePanel'
 import { DeliveryLane } from './run/DeliveryLane'
 import { EvidenceNodeCard, MoreEvidenceCard, OutputNodeCard, PromptNodeCard, RunNodeCard } from './run/StoryNodes'
 import { ChipDot } from './ui/glyphs'
+import { AttentionAlerts } from './workspace/AttentionAlerts'
+import { BuildHeading } from './workspace/BuildHeading'
+import { BuildOutcome } from './workspace/BuildOutcome'
+import { capabilityEdgeId } from './workspace/canvasGraph'
+import { OutputEditor } from './workspace/OutputEditor'
+import { ConflictSheetFooter, InlineConfirm, NewTeamSheet, OpenTeamSheet, SaveCopySheet } from './workspace/Sheets'
+import { useCanvasGraph } from './workspace/useCanvasGraph'
+import { useModelCatalog } from './workspace/useModelCatalog'
+import { useRunController } from './workspace/useRunController'
+import { useWorkspaceShortcuts } from './workspace/useWorkspaceShortcuts'
+import { WorkspaceMenu } from './workspace/WorkspaceMenu'
 
 // One canvas anatomy for both surfaces. Run ("Full trace") draws the team the operator composed,
 // so it must be recognisably the same object: the agent and capability cards are the Build cards,
@@ -81,18 +86,7 @@ const nodeTypes = { agent: BuildAgentCard, schedule: ScheduleNodeCard, capabilit
 const edgeTypes = { warp: WarpEdgeView, weft: WeftEdgeView, prov: ProvEdgeView }
 const buildNodeTypes = { ...nodeTypes, response: BuildOutputCard }
 const buildEdgeTypes = { ...edgeTypes, prov: BuildProvEdgeView }
-// Planned capability wiring: the same quiet neutral stroke as a story edge, carrying the one
-// relationship word the typed matrix allows for that target kind (TNG-122 §4).
-const PLAN_MARKER = { type: MarkerType.Arrow, color: 'var(--color-warp)', width: 13, height: 13 }
-const WARP_MARKER = { type: MarkerType.ArrowClosed, color: 'var(--color-warp)', width: 14, height: 14 }
-const WEFT_MARKER = { type: MarkerType.Arrow, color: 'var(--color-accent)', width: 16, height: 16 }
-const PROV_MARKER = { type: MarkerType.Arrow, color: 'var(--color-warp)', width: 14, height: 14 }
-const LIVE_MARKER = { type: MarkerType.Arrow, color: 'var(--color-live)', width: 14, height: 14 }
 const EMPTY_CAPABILITY_INVENTORY: CapabilityInventory = { skills: [], tools: [], sources: [] }
-
-function capabilityEdgeId(from: string, to: string): string {
-  return `capability:${from}->${to}`
-}
 
 interface WorkspaceProps {
   harnesses: DetectedHarness[]
@@ -114,7 +108,6 @@ interface WorkspaceProps {
 }
 
 type AnyNode = Node
-type AnyEdge = Edge
 
 function linesDiffer(a: string, b: string): number {
   if (a === b) return 0
@@ -144,10 +137,6 @@ function memoryKey(memory: MemoryRef | undefined): string {
   return ''
 }
 
-function syntheticAgent(id: string): AgentConfig {
-  return { id, name: id, role: 'Observed agent', spawn: { cmd: '', args: [], env: {}, cwd: '.' }, model: '', budget: { limitUsd: 0 } }
-}
-
 function writeRunToUrl(runId: string | null) {
   const params = new URLSearchParams(window.location.search)
   if (runId) params.set('run', runId)
@@ -166,8 +155,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
 
   // ---- chrome state --------------------------------------------------------------------
   const [outputEditorOpen, setOutputEditorOpen] = useState(false)
-  const outputPlanRef = useRef<{ name: string; format: string } | undefined>(undefined)
-  const [workspaceMenu, setWorkspaceMenu] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [modeOpen, setModeOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(initialHistoryOpen)
@@ -214,24 +201,12 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const [selectedCapabilityEdgeIds, setSelectedCapabilityEdgeIds] = useState<ReadonlySet<string>>(new Set())
   const [inspectedCapability, setInspectedCapability] = useState<InspectedCapability | null>(null)
   const [planRefusal, setPlanRefusal] = useState<string | null>(null)
-  const [modelCatalog, setModelCatalog] = useState<HarnessModels & { error: string | null }>({ harnessId: '', models: [], error: null })
-  const modelCatalogCache = useRef(new Map<string, Omit<HarnessModels, 'harnessId'> & { error: string | null }>())
-  const [modelCatalogRetry, setModelCatalogRetry] = useState(0)
 
   // ---- run state -----------------------------------------------------------------------
   const [activeRunId, setActiveRunId] = useState<string | null>(initialRunId)
   const [runSetup, setRunSetup] = useState(false)
   const [runPresentation, setRunPresentation] = useState<'delivery' | 'trace'>('delivery')
   const [lastOpenedRun, setLastOpenedRun] = useState<{ id: string; path: string | null } | null>(initialRunId ? { id: initialRunId, path: doc.path } : null)
-  const [composerText, setComposerText] = useState('')
-  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null)
-  const [startError, setStartError] = useState<string | null>(null)
-  const answerInFlight = useRef(false)
-  const [answerSending, setAnswerSending] = useState(false)
-  const [starting, setStarting] = useState(false)
-  // §1.6: the start key of the attempt in hand, surviving a failed POST so the re-press is the
-  // same attempt. Cleared once the daemon answers with a run id.
-  const startAttempt = useRef<{ identity: string; key: string } | null>(null)
   // §15.2.1: the *configured* graph's positions are the document's in every state, so what is left
   // here is presentation-only: the two docked anchors, the Run card, and the evidence cards the
   // operator has dragged out of their fan. `runPositions` — which used to hold every agent's
@@ -256,7 +231,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const [notesGeneration, setNotesGeneration] = useState(0)
   /** Runs whose review strip the operator has already dealt with, so it does not come back. */
   const [reviewed, setReviewed] = useState<Set<string>>(() => new Set())
-  const [retryOf] = useState<Map<string, string>>(() => new Map())
   /** Where the next follow-up starts: `null` is the whole pipeline, a stage id is "from <stage>". */
   const [followUpTarget, setFollowUpTarget] = useState<string | null>(null)
   /** The stopped run's checkpoints, read over REST so the strip can offer to continue from one. */
@@ -334,164 +308,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     return () => window.removeEventListener('resize', resize)
   }, [])
 
-  // ---- starting a run: there is no "run without saving" (TNG89 §1.4) ------------------
-  const launch = useCallback(async (prompt: string, parent?: string | null, expectedRevision: string | null = null, lineage?: { followsRunId?: string | null; startAt?: string | null; fromCheckpointId?: string | null }) => {
-    if (!doc.path) return
-    // §1.6: one start key per attempt, held for the life of the attempt. An attempt is this
-    // prompt against this revision of this file, so a re-press after a lost response carries the
-    // SAME key and the daemon answers with the run it already started (200) instead of starting a
-    // second one. A connection loss during submit never retries blind.
-    // The lineage is part of the attempt's identity: "shorter" as a whole-pipeline follow-up and
-    // "shorter" as a follow-up from Writer are different requests, and one start key for both
-    // would make the second a 409 conflict instead of a run.
-    const identity = `${doc.path}\0${parent ?? ''}\0${expectedRevision ?? ''}\0${lineage?.followsRunId ?? ''}\0${lineage?.startAt ?? ''}\0${lineage?.fromCheckpointId ?? ''}\0${prompt}`
-    const attempt = startAttempt.current?.identity === identity ? startAttempt.current : { identity, key: newStartKey() }
-    startAttempt.current = attempt
-    setStarting(true)
-    setStartError(null)
-    try {
-      const created = await startRun(doc.path, prompt, { startKey: attempt.key, expectedRevision, retryOfRunId: parent, ...lineage })
-      startAttempt.current = null
-      if (parent) retryOf.set(created.runId, parent)
-      session.applyRecord(created)
-      showRun(created.runId)
-      setComposerText('')
-      window.dispatchEvent(new Event('loomwatch:close-library'))
-      void history.refresh()
-    } catch (caught) {
-      // §1.6: a lost response is not a failed run, it is an unknown one — so ask the daemon what
-      // this start key did before reporting anything. A `RunApiError` is an answer and needs no
-      // recovery; anything else means none arrived, and a 404 here is the daemon saying the
-      // request never landed. Guessing either way is the blind retry the clause forbids.
-      const recovered = caught instanceof RunApiError ? null : await findRunByStartKey(attempt.key).catch(() => null)
-      if (recovered) {
-        startAttempt.current = null
-        if (parent) retryOf.set(recovered.runId, parent)
-        session.applyRecord(recovered)
-        showRun(recovered.runId)
-        setComposerText('')
-        window.dispatchEvent(new Event('loomwatch:close-library'))
-        void history.refresh()
-        return
-      }
-      // §1.5: the file moved between the save and the start, so no run was created. Hand it to
-      // the §9.3 conflict bar rather than reporting it as a failed start; the prompt stays put.
-      if (caught instanceof RunApiError && caught.code === STALE_TEAM_REVISION) void doc.checkDiskRevision()
-      setStartError(caught instanceof RunApiError ? caught.message : String(caught))
-    } finally {
-      setStarting(false)
-    }
-  }, [doc, history, retryOf, session, showRun])
-
-  const submit = useCallback(async (promptOverride?: string) => {
-    const prompt = (promptOverride ?? composerText).trim()
-    if (!prompt || !doc.path) return
-    // §1.6: re-pressing while a start is in flight is a no-op, not a second run.
-    if (starting || pendingPrompt !== null) return
-    const parent = activeRunId && isTerminalRun(record?.status) ? activeRunId : null
-    // §1.4: there is no "run without saving" — the run executes an exact snapshot of the file.
-    if (['dirty', 'new'].includes(doc.documentChipState)) {
-      setPendingPrompt(prompt)
-      const saved = await doc.save()
-      setPendingPrompt(null)
-      if (!saved) { setStartError('The team file could not be saved, so no run was started.'); return }
-    }
-    // §1.4: the run is pinned to `expectedRevision` — the revision the PUT just returned, read
-    // after the await so it is the one this save landed and not the one loaded before it.
-    const outputPlan = outputPlanRef.current
-    const request = outputPlan ? `${prompt}\n\nRequested deliverable: ${outputPlan.name}\nFormat: ${outputPlan.format}` : prompt
-    await launch(request, parent, doc.currentRevision())
-  }, [composerText, doc, launch, activeRunId, record?.status, starting, pendingPrompt])
-
-  const stop = useCallback(async () => {
-    if (!activeRunId) return
-    try { session.applyRecord(await cancelRun(activeRunId)) } catch (caught) { setStartError(caught instanceof Error ? caught.message : String(caught)) }
-  }, [activeRunId, session])
-
-  const sendAnswer = useCallback(async (sendBack?: string) => {
-    // Approving a review stop needs no comment; the daemon still requires words, so the approval
-    // is said explicitly. Sending work back, or answering an agent's question, needs real text.
-    const text = composerText.trim() || (waiting?.kind === 'review_stop' && !sendBack ? 'Approved. Continue as planned.' : '')
-    if (!activeRunId || !waiting || !text || answerInFlight.current) return
-    answerInFlight.current = true
-    setAnswerSending(true)
-    setStartError(null)
-    try {
-      const next = await answerRun(activeRunId, waiting.node, text, sendBack)
-      session.applyRecord(next)
-      if (next.runId !== activeRunId) showRun(next.runId)
-      setComposerText('')
-      void history.refresh()
-    } catch (error) { setStartError(error instanceof Error ? error.message : String(error)) }
-    finally { answerInFlight.current = false; setAnswerSending(false) }
-  }, [activeRunId, waiting, composerText, session, history, showRun])
-
-  const replyToAgent = useCallback(async (agentId: string) => {
-    if (!activeRunId || !composerText.trim() || answerInFlight.current) return
-    answerInFlight.current = true
-    setAnswerSending(true)
-    setStartError(null)
-    try {
-      await askRunAgent(activeRunId, agentId, composerText.trim())
-      setComposerText('')
-      setStatusAnnouncement('Reply received. Open the agent’s events to read the conversation.')
-    } catch (error) { setStartError(error instanceof Error ? error.message : String(error)) }
-    finally { answerInFlight.current = false; setAnswerSending(false) }
-  }, [activeRunId, composerText])
-
-  const retry = useCallback(() => {
-    const prompt = record?.prompt ?? projection.prompt ?? ''
-    if (prompt) void submit(prompt)
-  }, [projection.prompt, record?.prompt, submit])
-
-  /**
-   * Follow up: a new run that is a child of the one on screen (decision 8).
-   *
-   * `followUpTarget` is `null` for the whole pipeline and a stage id for "from <stage>", where the
-   * earlier stages are **not** re-executed — their stored handovers are replayed. Unlike Retry,
-   * this does not save the document first: the followed run's stages are replayed from the archive,
-   * so pinning the new run to whatever is on disk now is the same trade every run already makes.
-   */
-  const followUp = useCallback(async () => {
-    const prompt = composerText.trim()
-    if (!prompt || !activeRunId || !doc.path || starting) return
-    if (['dirty', 'new'].includes(doc.documentChipState)) {
-      setPendingPrompt(prompt)
-      const saved = await doc.save()
-      setPendingPrompt(null)
-      if (!saved) { setStartError('The team file could not be saved, so no follow-up was started.'); return }
-    }
-    await launch(prompt, null, doc.currentRevision(), {
-      followsRunId: activeRunId,
-      startAt: doc.mode === 'pipeline' ? followUpTarget : null,
-    })
-  }, [activeRunId, composerText, doc, followUpTarget, launch, starting])
-
-  /**
-   * "Start a new run from this checkpoint" — never "Resume".
-   *
-   * The label is the design's, verbatim and deliberately: nothing here reattaches to the stopped
-   * run, nothing reconciles the side effects it had already caused, and a word that implied either
-   * would be a promise the tree cannot keep. The prompt is the stopped run's own, so the operator
-   * can press it without retyping the goal.
-   */
-  const startFromCheckpoint = useCallback(async (checkpointId: string) => {
-    if (!doc.path || starting) return
-    const prompt = (record?.prompt ?? projection.prompt ?? '').trim() || composerText.trim()
-    if (!prompt) { setStartError('This run has no prompt to continue from. Type one first.'); return }
-    await launch(prompt, null, doc.currentRevision(), { fromCheckpointId: checkpointId })
-  }, [composerText, doc, launch, projection.prompt, record?.prompt, starting])
-
-  // §3.4: `[ Reuse ]` on the failed response node copies the run's original prompt back
-  // into the composer — the prompt survives on the Prompt node (§12.2), so this is a
-  // missing route, not lost data.
-  const reusePrompt = useCallback(() => {
-    const prompt = record?.prompt ?? projection.prompt ?? ''
-    if (!prompt) return
-    setComposerText(prompt)
-    document.querySelector<HTMLTextAreaElement>('.lw-composer textarea')?.focus()
-  }, [record?.prompt, projection.prompt])
-
   // §15.2.2: the permanent Prompt node is the composer seen in a second place, so clicking it
   // puts the caret in the one editor rather than opening another.
   const focusComposer = useCallback(() => {
@@ -502,6 +318,21 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     if (activeRunId) setLastOpenedRun({ id: activeRunId, path: doc.path })
     showRun(null)
   }, [activeRunId, doc.path, showRun])
+
+  // ---- team graph ----------------------------------------------------------------------
+  const stepById = useMemo(() => new Map(doc.pipelineSteps.map((step) => [step.id, { ...step, step: step.step + (doc.teamSchedule ? 1 : 0) }])), [doc.pipelineSteps, doc.teamSchedule])
+  const nodeNames = useMemo(() => new Map(doc.nodes.map((node) => [node.id, node.data.label])), [doc.nodes])
+  const agentIds = useMemo(() => doc.nodes.map((node) => node.id), [doc.nodes])
+  // Planned capability wiring lives in a sidecar, never in the team file the daemon runs.
+  const composerLayout = useComposerLayout(doc.path, agentIds, doc.saveState !== 'new')
+  // Starting, answering and stopping runs, and the composer text they consume.
+  const {
+    composerText, setComposerText, pendingPrompt, starting, startError, setStartError, answerSending, retryOf,
+    submit, stop, sendAnswer, replyToAgent, retry, followUp, startFromCheckpoint, reusePrompt,
+  } = useRunController({
+    doc, session, history, activeRunId, record, waiting, projectionPrompt: projection.prompt, showRun, followUpTarget,
+    output: composerLayout.output, announce: setStatusAnnouncement,
+  })
 
   const runRoutineNow = useCallback(async () => {
     if (!routine || routineBusy) return
@@ -519,17 +350,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     } finally {
       setRoutineBusy(false)
     }
-  }, [routine, routineBusy, session, showRun, schedules, history])
-
-  // ---- team graph ----------------------------------------------------------------------
-  const stepById = useMemo(() => new Map(doc.pipelineSteps.map((step) => [step.id, { ...step, step: step.step + (doc.teamSchedule ? 1 : 0) }])), [doc.pipelineSteps, doc.teamSchedule])
-  const nodeNames = useMemo(() => new Map(doc.nodes.map((node) => [node.id, node.data.label])), [doc.nodes])
-  const agentIds = useMemo(() => doc.nodes.map((node) => node.id), [doc.nodes])
-  // Planned capability wiring lives in a sidecar, never in the team file the daemon runs.
-  const composerLayout = useComposerLayout(doc.path, agentIds, doc.saveState !== 'new')
-  // `submit` is declared above this hook, so it reads the planned deliverable through a ref that is
-  // kept current after each commit rather than written during render.
-  useEffect(() => { outputPlanRef.current = composerLayout.output }, [composerLayout.output])
+  }, [routine, routineBusy, session, showRun, schedules, history, setStartError])
   // A skill is executable, so its wiring lives in the team file; tools and knowledge sources have
   // no delivery contract yet and stay planned intent in the sidecar. The canvas draws both the
   // same way, so the edges it renders are the union.
@@ -731,6 +552,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     setYamlHighlightLine(yamlLineForPath(doc.yamlPreview, ['schedule']))
     setYamlOpen(true)
   }, [doc.yamlPreview])
+  const openScheduleEditor = useCallback(() => setScheduleEditorOpen(true), [])
   const configuredPairs = useMemo(() => new Set(doc.edges.map((edge) => `${edge.source}->${edge.target}`)), [doc.edges])
 
   // A question travels back up a configured edge: the stage before this one stays alive precisely
@@ -778,18 +600,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     projection.evidence.forEach((item) => { const list = map.get(item.agentId) ?? []; list.push(item.id); map.set(item.agentId, list) })
     return map
   }, [projection.evidence])
-  // §15.2.6: helpers a run reveals that the document has no node for. They are placed by the
-  // existing seeded auto-layout around the entrypoint, as view state — node positions are not
-  // part of the team file at all, so there is nothing to offer saving them to (see the ledger).
-  const entrypointPosition = useMemo(() => {
-    const entry = doc.nodes.find((node) => node.id === (doc.entrypoint ?? leadId)) ?? doc.nodes[0]
-    return entry?.position ?? null
-  }, [doc.nodes, doc.entrypoint, leadId])
-  const helperPlacements = useMemo(() => {
-    if (!entrypointPosition) return {}
-    const helpers = orderedAgentIds.filter((id) => !doc.nodes.some((node) => node.id === id))
-    return helperPositions(helpers, entrypointPosition)
-  }, [orderedAgentIds, doc.nodes, entrypointPosition])
 
   // CONTRACT §4: only the canonical responder's reply is the answer; other agents' messages
   // are evidence. The fallback exists solely for archived sessions whose team is unknown.
@@ -854,388 +664,15 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     [packetAgents, activeRunId],
   )
 
-  /**
-   * Replays are read-only stories, so they may use a clean presentation layout without moving the
-   * saved Build canvas. Include observed handoffs as layout constraints and bridge an archived lead
-   * into the current configured entrypoint when the team file has changed since the run. This is
-   * exactly the case that previously stranded an old `collector` beneath the current pipeline.
-   */
-  const historicalPositions = useMemo(() => {
-    if (!runView || session.mode !== 'replay') return null
-    const agentIds = new Set(orderedAgentIds)
-    const sequence = [
-      ...doc.edges.map((edge) => ({ from: edge.source, to: edge.target })),
-      ...projection.delegations.map((edge) => ({ from: edge.from, to: edge.to })),
-    ].filter(({ from, to }) => agentIds.has(from) && agentIds.has(to) && from !== to)
-    return historicalRunPositions(
-      orderedAgentIds.map((id) => ({ id, ...synthMeasurements[id] })),
-      sequence,
-      capabilityCards.map((node) => ({ id: node.id, ...synthMeasurements[node.id] })),
-      allWiringEdges,
-      leadId,
-      doc.entrypoint,
-    )
-  }, [runView, session.mode, orderedAgentIds, doc.edges, doc.entrypoint, projection.delegations, synthMeasurements, capabilityCards, allWiringEdges, leadId])
-
-  // ---- one canvas — TNG89_INTERACTION.md §15 -------------------------------------------
-  //
-  //   > The configured graph never moves; a run is drawn onto it.
-  //
-  // One builder, not a compose branch and a run branch. The same agent cards sit at the same
-  // `doc.nodes` positions in every state and gain runtime facts — status rail, live perimeter,
-  // task, cost, event count, the packet route — when a run is shown. The Prompt and Output nodes
-  // are permanent and docked to the ends of the configured graph, which is what guarantees rows
-  // 23/24/42 (Prompt first, Output last) now that no column computes it.
-  const graph = useMemo(() => {
-    const nodes: AnyNode[] = []
-    const edges: AnyEdge[] = []
-    const addNode = (node: AnyNode) => {
-      const measured = synthMeasurements[node.id]
-      nodes.push(measured ? { ...node, measured } : node)
-    }
-
-    const docNodeById = new Map(doc.nodes.map((node) => [node.id, node]))
-    // A replay's archived lead is the story's entrypoint even when the team file has changed.
-    // Build and live views continue to use the current document as their source of truth.
-    const entryId = historicalPositions ? leadId ?? doc.entrypoint ?? doc.nodes[0]?.id ?? null : doc.entrypoint ?? leadId ?? doc.nodes[0]?.id ?? null
-    // Pipeline mode docks the Output right of the terminal stage; team mode has no configured
-    // order, so the entrypoint — the only stage the file names — carries both anchors.
-    const historicalMode = historicalPositions ? record?.mode ?? doc.mode : doc.mode
-    const terminalId = historicalPositions
-      ? responderId ?? (historicalMode === 'team' ? entryId : responderFromDoc)
-      : doc.mode === 'pipeline'
-        ? (responderId && docNodeById.has(responderId) ? responderId : responderFromDoc)
-        : entryId
-    const pointFor = (id: string | null | undefined) => id ? historicalPositions?.[id] ?? docNodeById.get(id)?.position ?? helperPlacements[id] : null
-    const entryPoint = pointFor(entryId)
-    const configuredTerminalPoint = pointFor(terminalId) ?? entryPoint
-    // The responder can be any stage. Its output must still sit beyond the entire team,
-    // rather than overlap a later card when the first agent owns the response.
-    const storyPoints = historicalPositions
-      ? orderedAgentIds.map((id) => historicalPositions[id]).filter((point): point is { x: number; y: number } => Boolean(point))
-      : doc.nodes.map((node) => node.position)
-    const terminalPoint = configuredTerminalPoint
-      ? { ...configuredTerminalPoint, x: Math.max(configuredTerminalPoint.x, ...storyPoints.map((point) => point.x)) }
-      : configuredTerminalPoint
-    const docked = entryPoint ? dockAnchors(entryPoint, terminalPoint ?? entryPoint) : null
-    const terminalName = terminalId ? nodeNames.get(terminalId) ?? terminalId : 'the last stage'
-
-    // ---- the permanent Prompt node (§15.2.2), first in the DOM and in causal order -------
-    if (docked) {
-      const prompt: PromptNode = {
-        id: '__prompt',
-        type: 'prompt',
-        position: overlayPositions.__prompt ?? docked.prompt,
-        initialWidth: DOCK.promptW,
-        initialHeight: DOCK.promptH,
-        data: runView
-          ? { text: (record?.prompt ?? projection.prompt ?? '') || '(prompt not archived)', attempt, runId: activeRunId ?? '', lineage: lineageLabel }
-          // Before a run it mirrors the composer's draft and focuses it when clicked: one editor
-          // seen in two places, never two editors.
-          : { text: composerText, attempt: null, runId: '', draft: true },
-        draggable: true,
-        selectable: false,
-        connectable: false,
-      }
-      addNode(prompt)
-    }
-    if (docked && runView) {
-      const runId = activeRunId ?? ''
-      const parent = retryOf.get(runId)
-      const promptHeight = synthMeasurements.__prompt?.height ?? DOCK.promptH
-      const runPosition = overlayPositions.__run ?? {
-        ...docked.run,
-        y: docked.prompt.y + Math.max(DOCK.runOffsetY, promptHeight + 32),
-      }
-      // §12.2 requires the attempt card to stay visible; §15 shrinks it into the Prompt's dock
-      // column rather than giving it a column of its own.
-      const run: RunNode = {
-        id: '__run',
-        type: 'run',
-        position: runPosition,
-        initialWidth: DOCK.runW,
-        initialHeight: DOCK.runH,
-        data: { attempt, phase, runId, mode: session.mode, branch: lineageLabel ?? (parent ? 'Retry of an earlier run' : 'Initiating branch'), elapsed, trigger: record?.trigger },
-        draggable: true,
-        selectable: false,
-        connectable: false,
-      }
-      addNode(run)
-      edges.push({ id: '__prompt->__run', source: '__prompt', target: '__run', type: 'prov', markerEnd: PROV_MARKER, data: { label: 'starts', story: true }, selectable: false, focusable: false })
-      const lead = leadId && (docNodeById.has(leadId) || helperPlacements[leadId]) ? leadId : entryId
-      if (lead) edges.push({ id: '__run->lead', source: '__run', sourceHandle: 'lead', target: lead, type: 'prov', markerEnd: PROV_MARKER, data: { label: 'assigns lead', story: true }, selectable: false, focusable: false })
-    } else if (docked && entryId) {
-      // Before a run the same arrow names the same configured relationship: this prompt starts here.
-      edges.push({ id: '__prompt->entry', source: '__prompt', target: entryId, type: 'prov', markerEnd: PROV_MARKER, data: { label: 'starts', story: true }, selectable: false, focusable: false, ariaLabel: `starts from your prompt to ${nodeNames.get(entryId) ?? entryId}` })
-    }
-
-    // ---- the schedule card keeps the dock column, above the Prompt -----------------------
-    if (visibleSchedule && docked) {
-      const scheduleNode: ScheduleNode = {
-        id: '__schedule',
-        type: 'schedule',
-        position: docked.schedule,
-        initialWidth: SCHEDULE_CARD.width,
-        initialHeight: SCHEDULE_CARD.height,
-        draggable: false,
-        selectable: true,
-        selected: scheduleEditorOpen,
-        connectable: false,
-        data: {
-          schedule: visibleSchedule,
-          invalid: scheduleProblems.length > 0,
-          editorOpen: scheduleEditorOpen,
-          onOpen: () => setScheduleEditorOpen(true),
-        },
-      }
-      addNode(scheduleNode)
-      if (entryId) edges.push({ id: '__schedule->entrypoint', source: '__schedule', target: entryId, type: 'warp', markerEnd: WARP_MARKER, selectable: false, focusable: false, ariaLabel: `schedule starts ${nodeNames.get(entryId) ?? entryId}` })
-    }
-
-    // ---- the agents, at the positions the operator arranged (§15.2.1) ---------------------
-    const projectedById = new Map(projection.agents.map((agent) => [agent.id, agent]))
-    const agentIdsInOrder = runView ? orderedAgentIds : doc.nodes.map((node) => node.id)
-    agentIdsInOrder.forEach((id) => {
-      const docNode = docNodeById.get(id)
-      const position = historicalPositions?.[id] ?? docNode?.position ?? helperPlacements[id]
-      if (!position) return
-      const agent = docNode?.data.agent ?? syntheticAgent(id)
-      const base: AgentNode = docNode ?? { id, type: 'agent', position, selected: false, data: { label: agent.name, agent } }
-      const label = ownerLabels.get(id) ?? id
-      const projected = projectedById.get(id)
-      const costUsd = projected?.costUsd ?? null
-      const eventCount = evidenceByAgent.get(id)?.length ?? 0
-      const runtime = !runView
-        ? undefined
-        : projected
-          ? { status: projected.status, taskState: projected.taskState, task: projected.task, ownerLabel: label, costUsd, spentPct: costUsd !== null && (agent.budget?.limitUsd ?? 0) > 0 ? (costUsd / (agent.budget?.limitUsd ?? 0)) * 100 : null, live: live && (projected.status === 'running' || projected.status === 'starting'), busUnavailable: projected.busUnavailable, received: projected.received, eventCount, openCalls: projected.openCalls, fanned: fannedAgentId === id, hasPacket: packetAgentIds.has(id), givenNotes: givenNotes[id] ?? 0 }
-          : { status: 'idle' as AgentStatus, taskState: (phase === 'queued' || phase === 'starting' ? 'QUEUED' : 'READY') as TaskState, task: phase === 'queued' || phase === 'starting' ? 'Waiting for the run to start' : 'Awaiting a task', ownerLabel: label, costUsd: null, spentPct: null, live: false, eventCount, fanned: fannedAgentId === id, hasPacket: packetAgentIds.has(id), givenNotes: givenNotes[id] ?? 0 }
-      if (runtime && session.cursor === null && waiting) {
-        if (waiting.node === id) Object.assign(runtime, { status: 'waiting', taskState: 'WAITING', task: waiting.question, live: false })
-        else if (waiting.handoverFrom === id) Object.assign(runtime, { status: 'succeeded', taskState: 'SUCCEEDED', task: 'Handover ready', live: false })
-      }
-      addNode({
-        ...base,
-        position,
-        data: { ...base.data, label: agent.name, agent, isEntrypoint: id === (doc.entrypoint ?? leadId), fieldProblems: docNode?.data.fieldProblems, runtime, waiting: session.cursor === null && waiting?.node === id ? waiting : null, onAnswer: focusComposer },
-        ariaLabel: runtime
-          ? `${agent.name}, ${label}, ${runtime.taskState}, ${runtime.task}`
-          : `${agent.name}, ${agent.role || 'no role'}, ${agent.model || 'no model'}, ${agent.status ?? 'idle'}`,
-        ariaRole: 'button' as const,
-      })
-    })
-
-    // ---- one agent's evidence, fanned beside it (§15.2.3) --------------------------------
-    // Folded is the default: the count lives on the card, and only the agent the operator opened
-    // renders cards, so React Flow draws the agents plus one cluster instead of every event.
-    if (runView && fannedAgentId) {
-      const anchor = historicalPositions?.[fannedAgentId] ?? docNodeById.get(fannedAgentId)?.position ?? helperPlacements[fannedAgentId]
-      const ids = evidenceByAgent.get(fannedAgentId) ?? []
-      if (anchor && ids.length > 0) {
-        const fan = fanEvidence(anchor, ids)
-        projection.evidence.forEach((item) => {
-          if (item.agentId !== fannedAgentId) return
-          // Evidence folded into the "+N more" card has no slot and no node; the panel lists it.
-          const position = overlayPositions[item.id] ?? fan.shown[item.id]
-          if (!position) return
-          const isLive = live && (item.status === 'running' || item.status === 'pending')
-          const evidenceNode: EvidenceNode = {
-            id: item.id,
-            type: 'evidence',
-            position,
-            initialWidth: DOCK.evidenceW,
-            initialHeight: DOCK.evidenceH,
-            draggable: true,
-            connectable: false,
-            data: { evidence: item, ownerLabel: ownerLabels.get(item.agentId) ?? item.agentId, live: isLive, selected: inspectedEvidenceId === item.id },
-          }
-          addNode(evidenceNode)
-          edges.push({ id: `ev:${item.id}`, source: item.agentId, target: item.id, type: 'prov', markerEnd: isLive ? LIVE_MARKER : PROV_MARKER, data: { live: isLive }, selectable: false, focusable: false, ariaLabel: `${ownerLabels.get(item.agentId) ?? item.agentId} ${item.relation} ${item.name}` })
-        })
-        if (fan.more) {
-          const moreNode: MoreNode = {
-            id: `__more:${fannedAgentId}`,
-            type: 'more',
-            position: overlayPositions[`__more:${fannedAgentId}`] ?? fan.more,
-            initialWidth: DOCK.evidenceW,
-            initialHeight: DOCK.evidenceH,
-            draggable: true,
-            selectable: false,
-            connectable: false,
-            data: { agentId: fannedAgentId, ownerLabel: ownerLabels.get(fannedAgentId) ?? fannedAgentId, hidden: fan.more.hidden, total: ids.length },
-          }
-          addNode(moreNode)
-          edges.push({ id: `more:${fannedAgentId}`, source: fannedAgentId, target: moreNode.id, type: 'prov', markerEnd: PROV_MARKER, data: {}, selectable: false, focusable: false })
-        }
-      }
-    }
-
-    // ---- configured sequence edges, in every state (the warp) ----------------------------
-    const delegationCounts = new Map<string, number>()
-    projection.delegations.forEach((delegation) => { const key = `${delegation.from}->${delegation.to}`; delegationCounts.set(key, (delegationCounts.get(key) ?? 0) + 1) })
-    doc.edges.forEach((edge) => {
-      const key = `${edge.source}->${edge.target}`
-      const count = runView ? delegationCounts.get(key) ?? 0 : 0
-      edges.push({ ...edge, type: 'warp', markerEnd: WARP_MARKER, data: { ...edge.data!, count: count || undefined, shuttle: count > 0 && live && projectedById.get(edge.target)?.status === 'running' }, ariaLabel: `sequence from ${nodeNames.get(edge.source) ?? edge.source} to ${nodeNames.get(edge.target) ?? edge.target}` })
-    })
-
-    // ---- observed delegations drawn on the configured graph (the weft) --------------------
-    if (runView) {
-      const seenWeft = new Set<string>()
-      projection.delegations.forEach((delegation) => {
-        const key = `${delegation.from}->${delegation.to}`
-        if (configuredPairs.has(key) || seenWeft.has(`${key}:${delegation.kind}`)) return
-        seenWeft.add(`${key}:${delegation.kind}`)
-        // DESIGN_LANGUAGE §13: the weft fades once its target is no longer live, so the
-        // live frontier of the graph is the brightest thing on screen.
-        const targetStatus = projectedById.get(delegation.to)?.status
-        const aged = !(live && (targetStatus === 'running' || targetStatus === 'starting' || targetStatus === 'waiting'))
-        const weft: WeftEdge = { id: `weft:${key}:${delegation.kind}`, source: delegation.from, target: delegation.to, type: 'weft', markerEnd: WEFT_MARKER, markerStart: delegation.kind === 'ask' ? WEFT_MARKER : undefined, data: { kind: delegation.kind, count: delegationCounts.get(key), anomaly: doc.mode === 'pipeline', aged }, selectable: false, focusable: false }
-        edges.push(weft)
-      })
-    }
-
-    // ---- planned capability wiring, in every state ----------------------------------------
-    for (const capability of capabilityCards) {
-      const wiredTo = allWiringEdges.filter((edge) => edge.to === capability.id).length
-      const node: CapabilityNode = {
-        id: capability.id,
-        type: 'capability',
-        position: historicalPositions?.[capability.id] ?? capability.position,
-        initialWidth: CAPABILITY_CARD.width,
-        initialHeight: CAPABILITY_CARD.height,
-        draggable: editable,
-        selectable: true,
-        selected: selectedCapabilities.has(capability.id),
-        data: { kind: capability.kind, name: capability.name, source: capability.source, wiredTo, readOnly: !editable, onRemove: () => removeCapabilityCards([capability.id]) },
-      }
-      addNode(node)
-    }
-    for (const edge of allWiringEdges) {
-      const capability = capabilityCards.find((node) => node.id === edge.to)
-      if (!capability) continue
-      // A whole-team inherit is drawn from the Prompt node, which only exists once the graph has
-      // an entrypoint to dock against; without it the edge would name a node that is not there.
-      if (edge.from === '__prompt' && !docked) continue
-      const owner = edge.from === '__prompt' ? 'the whole team' : nodeNames.get(edge.from) ?? edge.from
-      const ownerPosition = historicalPositions?.[edge.from] ?? docNodeById.get(edge.from)?.position
-      const capabilityPosition = historicalPositions?.[capability.id] ?? capability.position
-      const resourceLane = ownerPosition && Math.abs(capabilityPosition.x - ownerPosition.x) < 48 && capabilityPosition.y > ownerPosition.y + 150
-      const id = capabilityEdgeId(edge.from, edge.to)
-      edges.push({
-        id,
-        source: edge.from,
-        sourceHandle: resourceLane ? 'resources' : undefined,
-        target: edge.to,
-        type: 'prov',
-        markerEnd: PLAN_MARKER,
-        ariaLabel: `${owner} ${RELATION[capability.kind]} ${capability.name}`,
-        data: {
-          label: RELATION[capability.kind],
-          story: false,
-          resource: !runView || Boolean(resourceLane),
-          onRemove: editable ? () => removeCapabilityEdge(edge.from, edge.to) : undefined,
-          removeLabel: `Remove connection: ${owner} ${RELATION[capability.kind]} ${capability.name}`,
-        },
-        selected: selectedCapabilityEdgeIds.has(id),
-        selectable: editable,
-        deletable: editable,
-        focusable: editable,
-      })
-    }
-
-    // ---- the permanent Output node (§15.2.2), last in the DOM and in causal order ---------
-    if (docked) {
-      // The answer is credited by name alone: "Assigned to Writer", not "Writer · final answer".
-      const responderLabel = responderAgent ? nodeNames.get(responderAgent.id) ?? responderAgent.id : responderId ? nodeNames.get(responderId) ?? responderId : 'the team'
-      const producer = responderAgent?.id ?? responderId
-      const producerName = (producer ? nodeNames.get(producer) : null) ?? terminalName
-      // A follow-up "from Writer" runs Writer only, so the promise has to name the stage that will
-      // actually reply — the *first executed* one when it is also the last, and the terminal stage
-      // otherwise. Naming the terminal stage of a pipeline whose earlier stages are not running
-      // would promise an answer from something that never starts.
-      const firstExecutedName = record?.startAt ? nodeNames.get(record.startAt) ?? record.startAt : null
-      if (!runView) {
-        const output: OutputNode = {
-          id: '__output',
-          type: 'response',
-          position: overlayPositions.__output ?? docked.output,
-          initialWidth: DOCK.outputW,
-          initialHeight: DOCK.outputH,
-          draggable: true,
-          selectable: false,
-          connectable: editable && doc.mode === 'pipeline',
-          // No attempt exists, so there is no phase word, no live/replay badge and no producer to
-          // credit — only the configured promise of who will fill it.
-          data: { text: '', phase: 'queued', phaseText: 'No run yet.', producer: terminalId, producerLabel: terminalName, mode: 'live', streaming: false, pending: false, strip: null, compact: false, expanded: false, terminal: false, configurable: editable && doc.mode === 'pipeline', awaiting: true, placeholder: `The team's answer appears here when ${terminalName} replies.` },
-        }
-        addNode(output)
-        if (terminalId) edges.push({ id: '__responds', source: terminalId, target: '__output', type: 'prov', markerEnd: PROV_MARKER, data: { label: 'responds with', story: true }, selectable: false, focusable: false, ariaLabel: `responds with from ${terminalName} to the output` })
-        return { nodes, edges }
-      }
-      const streaming = live && phase === 'running' && responderAgent?.taskState === 'STREAMING'
-      const pending = phase === 'queued' || phase === 'starting'
-      const runningCount = projection.agents.filter((agent) => agent.status === 'running' || agent.status === 'starting').length
-      const phaseText = waiting && session.cursor === null ? 'Waiting for your answer.' : phase === 'queued' ? 'Queued — waiting for a supervisor.'
-        : phase === 'starting' ? `Starting ${nodeNames.get(leadId ?? '') ?? leadId ?? 'the lead'}…`
-        : phase === 'running' ? (streaming ? `Streaming — ${responderLabel} responding.` : `Running — ${runningCount} agent${runningCount === 1 ? '' : 's'} active.`)
-        : phase === 'succeeded' ? `Answered in ${elapsed}.`
-        : phase === 'partial' ? 'Partial answer.'
-        : phase === 'failed' ? 'Run failed.'
-        : 'Cancelled — partial answer kept.'
-      const crash = projection.attention.find((alert) => /crash/i.test(alert.message))
-      // §3.4 / CONTRACT §3: the strip carries the daemon's stable machine-readable code and
-      // its verbatim message — never a token or a sentence manufactured here. The watermark
-      // resolves the daemon's own code, then its stop reason, then the one code the contract
-      // itself assigns to an evidence-derived condition (`missing_canonical_response`,
-      // CONTRACT §4, via the projection), then the exit fact; when the daemon reported none
-      // of these it says so instead of picking a plausible token.
-      const exitFact = record?.exitCode !== null && record?.exitCode !== undefined ? `exit ${record.exitCode}` : null
-      const strip = session.error && live ? { tone: 'halt' as const, message: `Live events reconnecting — answer shown to`, watermark: `seq ${session.lastSeq}` }
-        : phase === 'partial' || phase === 'failed' ? {
-            tone: 'alert' as const,
-            message: record?.error ?? crash?.message
-              ?? (phase === 'failed' && (record?.errorCode ?? record?.stopReason ?? projection.errorCode) === 'missing_canonical_response'
-                ? 'The run finished but no agent produced an answer.'
-                : 'No error message was reported.'),
-            watermark: record?.errorCode ?? record?.stopReason ?? projection.errorCode ?? exitFact ?? 'no code reported',
-          }
-        : phase === 'cancelled' ? { tone: 'halt' as const, message: 'Cancelled by the operator. Partial answer kept.', watermark: 'cancelled' }
-        : null
-      // A placeholder is a promise, so it is only offered while the run can still keep it. A
-      // terminal run with no answer gets the strip and `[ Reuse ]` instead (§3.4).
-      const settled = phase === 'succeeded' || phase === 'partial' || phase === 'failed' || phase === 'cancelled'
-      const output: OutputNode = {
-        id: '__output',
-        type: 'response',
-        position: overlayPositions.__output ?? docked.output,
-        initialWidth: DOCK.outputW,
-        initialHeight: DOCK.outputH,
-        draggable: true,
-        selectable: false,
-        connectable: false,
-        data: { text: responseText, phase, phaseText, producer: responderAgent?.id ?? responderId ?? null, producerLabel: responderLabel, mode: session.mode, streaming, pending, strip, compact: provenanceOpen, expanded: provenanceOpen, terminal: session.terminal, placeholder: responseText || settled ? null : `The team's answer appears here when ${firstExecutedName && orderedAgentIds.length <= 1 ? firstExecutedName : producerName} replies.` },
-      }
-      addNode(output)
-      if (producer && (docNodeById.has(producer) || helperPlacements[producer])) edges.push({ id: '__responds', source: producer, target: '__output', type: 'prov', markerEnd: PROV_MARKER, data: { label: 'responds with', story: true }, selectable: false, focusable: false })
-      edges.push({ id: '__completes', source: '__run', target: '__output', targetHandle: 'run', type: 'prov', markerEnd: PROV_MARKER, data: { label: `Run ${String(attempt).padStart(2, '0')} · completes as`, story: true, arc: true }, selectable: false, focusable: false })
-    }
-    return { nodes, edges }
-  }, [runView, doc.nodes, doc.edges, doc.mode, doc.entrypoint, nodeNames, projection, record, activeRunId, attempt, retryOf, phase, session.mode, session.error, session.lastSeq, session.terminal, elapsed, orderedAgentIds, ownerLabels, evidenceByAgent, leadId, live, configuredPairs, overlayPositions, synthMeasurements, inspectedEvidenceId, responderAgent, responderId, responderFromDoc, responseText, provenanceOpen, visibleSchedule, scheduleProblems.length, scheduleEditorOpen, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, composerText, fannedAgentId, helperPlacements, historicalPositions, packetAgentIds, givenNotes, lineageLabel, waiting, focusComposer, session.cursor, removeCapabilityEdge, removeCapabilityCards])
-
-  // Both surfaces draw the same agent card, so both name the harness that card runs in — a run
-  // that cannot resolve one says so rather than falling back to the generic word. The Prompt node
-  // and the configured output name belong to Build alone: a run has an attempt to show instead of
-  // a draft, and an answer to read instead of a promise.
-  const canvasNodes = useMemo(() => {
-    const named = graph.nodes.map((node) => node.type === 'agent'
-      ? { ...node, data: { ...node.data, harnessLabel: appLabelForAgent((node as AgentNode).data.agent, harnesses) } }
-      : node)
-    if (runView) return named
-    return named
-      .filter((node) => node.id !== '__prompt' || allWiringEdges.some((edge) => edge.from === '__prompt'))
-      .map((node) => node.type === 'response' ? { ...node, data: { ...node.data, outputName: composerLayout.output?.name, outputFormat: composerLayout.output?.format } } : node)
-  }, [graph.nodes, harnesses, runView, allWiringEdges, composerLayout.output])
+  // ---- one canvas — TNG89_INTERACTION.md §15: the configured graph never moves; a run is drawn onto it.
+  const { graph, canvasNodes } = useCanvasGraph({
+    runView, doc, session, nodeNames, projection, record, activeRunId, attempt, retryOf, phase, elapsed, lineageLabel,
+    orderedAgentIds, ownerLabels, evidenceByAgent, leadId, live, waiting, configuredPairs, overlayPositions, synthMeasurements,
+    fannedAgentId, inspectedEvidenceId, packetAgentIds, givenNotes, responderAgent, responderId, responderFromDoc, responseText,
+    provenanceOpen, composerText, visibleSchedule, scheduleInvalid: scheduleProblems.length > 0, scheduleEditorOpen, onOpenSchedule: openScheduleEditor,
+    capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityCards, removeCapabilityEdge,
+    harnesses, outputPlan: composerLayout.output,
+  })
 
   const observedCount = projection.delegations.length
   // UX_REDESIGN §6.7: solo is conditional chrome — the legend is its only readout and click-path
@@ -1465,49 +902,13 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     ? ((runView ? graph.nodes.find((node) => node.id === selectedDocNode.id && node.type === 'agent') : undefined) as AgentNode | undefined) ?? selectedDocNode
     : null
   const inspectedHarnessId = inspectedNode ? harnessIdForAgent(inspectedNode.data.agent, harnesses) : null
-  useEffect(() => {
-    if (!inspectedHarnessId) return
-    let cancelled = false
-    const cached = modelCatalogCache.current.get(inspectedHarnessId)
-    if (cached) {
-      void Promise.resolve().then(() => {
-        if (!cancelled) setModelCatalog({ harnessId: inspectedHarnessId, ...cached })
-      })
-      return () => { cancelled = true }
-    }
-    void fetchHarnessModels(inspectedHarnessId).then(
-      (catalog) => {
-        const result = { models: catalog.models, currentModelId: catalog.currentModelId, currentThinkingEffort: catalog.currentThinkingEffort, error: null }
-        modelCatalogCache.current.set(inspectedHarnessId, result)
-        if (!cancelled) setModelCatalog({ harnessId: inspectedHarnessId, ...result })
-      },
-      // Only a catalog that was actually read is cached. Discovery spawns the harness over ACP,
-      // and an `npx`-launched adapter can blow the daemon's discovery budget on a cold start and
-      // answer in a couple of seconds on the next attempt — caching that would strand the agent
-      // on an empty model list for the rest of the session, reselecting the node included.
-      (caught: unknown) => {
-        const result = { models: [], currentModelId: undefined, currentThinkingEffort: undefined, error: caught instanceof Error ? caught.message : String(caught) }
-        if (!cancelled) setModelCatalog({ harnessId: inspectedHarnessId, ...result })
-      },
-    )
-    return () => { cancelled = true }
-  }, [inspectedHarnessId, modelCatalogRetry])
-  // A newly placed agent has no model, and an empty model blocks the run behind a "Required" field
-  // the operator did not know to look for. Once this harness's catalog is in hand, adopt the model
-  // the harness itself would use — its current model — so the agent can run as soon as it is placed.
-  const inspectedAgentId = inspectedNode?.id ?? null
-  const inspectedAgentNeedsModel = Boolean(inspectedNode && inspectedNode.data.agent.kind !== 'operator' && !inspectedNode.data.agent.model)
-  const { updateAgentModel } = doc
-  useEffect(() => {
-    if (!editable || !inspectedAgentId || !inspectedAgentNeedsModel) return
-    if (modelCatalog.harnessId !== inspectedHarnessId || modelCatalog.error) return
-    const model = modelCatalog.currentModelId ?? modelCatalog.models[0]?.id
-    if (model) updateAgentModel(inspectedAgentId, model)
-  }, [editable, inspectedAgentId, inspectedAgentNeedsModel, inspectedHarnessId, modelCatalog, updateAgentModel])
-  const inspectedModels = modelCatalog.harnessId === inspectedHarnessId ? modelCatalog.models : []
-  const inspectedDefaultThinkingEffort = modelCatalog.harnessId === inspectedHarnessId ? modelCatalog.currentThinkingEffort : undefined
-  const inspectedModelsError = modelCatalog.harnessId === inspectedHarnessId ? modelCatalog.error : null
-  const inspectedModelsLoading = Boolean(inspectedHarnessId && modelCatalog.harnessId !== inspectedHarnessId)
+  const modelCatalog = useModelCatalog({
+    harnessId: inspectedHarnessId,
+    agentId: inspectedNode?.id ?? null,
+    agentNeedsModel: Boolean(inspectedNode && inspectedNode.data.agent.kind !== 'operator' && !inspectedNode.data.agent.model),
+    editable,
+    updateAgentModel: doc.updateAgentModel,
+  })
   const inspectedEvidence: Evidence | null = inspectedEvidenceId ? projection.evidence.find((item) => item.id === inspectedEvidenceId) ?? null : null
   // Who handed it over: the stage before this one in causal order, which is what the daemon
   // concatenated into this agent's first prompt.
@@ -2030,7 +1431,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     if (notificationsOn) { setNotificationsOn(false); return }
     if (!('Notification' in window)) { setStartError('Notifications are unavailable in this browser.'); return }
     try { setNotificationsOn((await Notification.requestPermission()) === 'granted') } catch { setNotificationsOn(false) }
-  }, [notificationsOn])
+  }, [notificationsOn, setStartError])
 
   const statusById = useMemo(() => new Map(projection.agents.map((agent) => [agent.id, `${nodeNames.get(agent.id) ?? agent.id}: ${agent.taskState.toLowerCase()}`])), [projection.agents, nodeNames])
   const priorStatuses = useRef<Map<string, string> | null>(null)
@@ -2102,108 +1503,17 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     { label: 'Connections…', run: () => window.location.assign('/connections') },
   ], [doc, editable, composerText, submit, openNewTeam, toggleLibrary, windowWidth, runView, closeRun, cycleProblem, problems.length, theme, notificationsOn, enableNotifications, layersVisible, fitCanvas, organize, canOrganize])
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const mod = event.metaKey || event.ctrlKey
-      const key = event.key.toLowerCase()
-      const editingText = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLElement && event.target.isContentEditable)
-      if (mod && key === 'k') { event.preventDefault(); setPaletteOpen(true); return }
-      if (mod && key === 's') { event.preventDefault(); if (editable) void doc.save(); return }
-      if (mod && event.shiftKey && key === 'l') { event.preventDefault(); setSweeping(true); window.setTimeout(() => setSweeping(false), 340); setThemeMode(theme === 'dark' ? 'light' : 'dark'); return }
-      if (mod && key === 'n') { event.preventDefault(); openNewTeam(); return }
-      if (mod && key === 'p') { event.preventDefault(); setHistoryOpen((open) => !open); return }
-      // §1.2: ⌘↵ submits from anywhere in the app, including a focused canvas — above the
-      // `editingText` guard below, which would otherwise swallow it in every other field. The
-      // composer's own textarea binds it directly (there it also serves Retry and New run), so
-      // it is skipped here rather than submitted twice.
-      if (mod && event.key === 'Enter') {
-        if (!(event.target instanceof HTMLElement && event.target.closest('.lw-composer'))) { event.preventDefault(); void submit() }
-        return
-      }
-      if (event.key === 'F8') { event.preventDefault(); cycleProblem(event.shiftKey ? -1 : 1); return }
-      if (event.key === 'Escape') {
-        if (pendingNodeDelete.length > 0) setPendingNodeDelete([])
-        else if (discardConfirm) setDiscardConfirm(false)
-        else if (paletteOpen) setPaletteOpen(false)
-        else if (historyOpen) setHistoryOpen(false)
-        else if (modeOpen) setModeOpen(false)
-        else if (problemsOpen) setProblemsOpen(false)
-        else if (yamlOpen) setYamlOpen(false)
-        else if (compareOpen) setCompareOpen(false)
-        else if (doc.refusal) doc.dismissRefusal()
-        else if (inspectedEvidenceId) setInspectedEvidenceId(null)
-        else if (handoverAgentId) setHandoverAgentId(null)
-        else if (inspectedCapability) clearSelection()
-        else if (provenanceOpen) setProvenanceOpen(false)
-        else if (memoryOpen) setMemoryOpen(false)
-        // §6.1: Esc unwinds the deepest disclosure. A fan is one, and folding it is not the same
-        // as clearing the run — that is the last step in the chain, and only once it is terminal.
-        else if (fannedAgentId) setFannedAgentId(null)
-        else if (selectedNodes.length > 0 || selectedEdges.length > 0 || selectedCapabilityEdgeIds.size > 0) clearSelection()
-        else if (editingText) (event.target as HTMLElement).blur()
-        else if (runView && session.terminal) closeRun()
-        return
-      }
-      if (editingText) return
-      if (mod && key === 'z') { event.preventDefault(); if (event.shiftKey) doc.redo(); else doc.undo(); return }
-      if (mod && key === '\\') { event.preventDefault(); if (windowWidth >= 768) toggleLibrary(); return }
-      if (mod && key === '0') { event.preventDefault(); void flow.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 300 }); return }
-      if (mod && (key === '+' || key === '=')) { event.preventDefault(); void flow.zoomIn({ duration: 200 }); return }
-      if (mod && key === '-') { event.preventDefault(); void flow.zoomOut({ duration: 200 }); return }
-      if (event.altKey && mod && key === 'l') { event.preventDefault(); organize(); return }
-      if (layersVisible && key === 'l' && !mod && !event.altKey) { event.preventDefault(); setSolo((current) => (current === 'both' ? 'configured' : current === 'configured' ? 'observed' : 'both')); return }
-      if ((event.key === 'Delete' || event.key === 'Backspace') && editable) {
-        const selectedNodeIds = doc.nodes.filter((node) => node.selected).map((node) => node.id)
-        const selectedEdgeIds = doc.edges.filter((edge) => edge.selected).map((edge) => edge.id)
-        const selectedCapabilityEdges = [...selectedCapabilityEdgeIds]
-        // Removing a capability card takes no confirmation: it deletes planned intent in a
-        // sidecar, never an agent or anything the daemon runs.
-        const capabilities = capabilityCards.filter((node) => selectedCapabilities.has(node.id)).map((node) => node.id)
-        if (capabilities.length > 0) removeCapabilityCards(capabilities)
-        if (selectedNodeIds.length > 0) requestNodeDelete(selectedNodeIds)
-        else if (capabilities.length === 0 && selectedCapabilityEdges.length > 0) {
-          for (const id of selectedCapabilityEdges) {
-            const edge = capabilityEdgeById.get(id)
-            if (edge) removeCapabilityEdge(edge.from, edge.to)
-          }
-        } else if (capabilities.length === 0 && selectedEdgeIds.length > 0) doc.onEdgesChange(selectedEdgeIds.map((id) => ({ id, type: 'remove' as const })))
-        return
-      }
-      if (runView && (event.key === 'ArrowLeft' || event.key === 'ArrowRight') && session.lastSeq > 0) {
-        event.preventDefault()
-        const position = session.cursor === null ? session.lastSeq : session.cursor
-        session.setCursor(event.key === 'ArrowLeft' ? Math.max(0, position - 1) : position + 1)
-        return
-      }
-      // Tab walks the agents only while the canvas itself has focus; everywhere else it must keep
-      // moving focus between controls, or keyboard users are trapped on the canvas.
-      if (event.key === 'Tab' && doc.nodes.length > 0 && !runView && event.target instanceof HTMLElement && event.target.closest('.lw-canvas')) {
-        event.preventDefault()
-        const orderedIds = doc.pipelineSteps.length > 0 ? doc.pipelineSteps.map((step) => step.id) : doc.nodes.map((node) => node.id)
-        const currentIndex = orderedIds.findIndex((id) => doc.nodes.some((node) => node.id === id && node.selected))
-        const nextId = orderedIds[(currentIndex + (event.shiftKey ? -1 : 1) + orderedIds.length) % orderedIds.length]
-        doc.onNodesChange(doc.nodes.map((node) => ({ id: node.id, type: 'select' as const, selected: node.id === nextId })))
-        const next = doc.nodes.find((node) => node.id === nextId)
-        if (next) void flow.fitView({ nodes: [next], padding: 0.6, maxZoom: 1, duration: 200 })
-        return
-      }
-      if (event.key === 'Enter') {
-        if (pendingNodeDelete.length > 0) { deleteNodes(pendingNodeDelete); setPendingNodeDelete([]); return }
-        if (discardConfirm) { setDiscardConfirm(false); void doc.reloadFromDisk(); return }
-        const selected = doc.nodes.find((node) => node.selected)
-        if (selected && editable) window.dispatchEvent(new CustomEvent('loomwatch:rename-agent', { detail: { id: selected.id } }))
-        return
-      }
-      if (key === 'f' && !mod) {
-        event.preventDefault()
-        const selected = doc.nodes.filter((node) => node.selected)
-        if (event.shiftKey && selected.length > 0) void flow.fitView({ nodes: selected, padding: 0.2, maxZoom: 1, duration: 300 })
-        else fitCanvas()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [doc, editable, flow, submit, openNewTeam, toggleLibrary, paletteOpen, yamlOpen, compareOpen, windowWidth, clearSelection, discardConfirm, pendingNodeDelete, requestNodeDelete, deleteNodes, historyOpen, modeOpen, problemsOpen, inspectedEvidenceId, handoverAgentId, inspectedCapability, provenanceOpen, memoryOpen, selectedNodes.length, selectedEdges.length, selectedCapabilityEdgeIds, runView, session, closeRun, theme, cycleProblem, layersVisible, composerLayout, capabilityCards, selectedCapabilities, fannedAgentId, organize, fitCanvas, capabilityEdgeById, removeCapabilityEdge, removeCapabilityCards])
+  useWorkspaceShortcuts({
+    editable, doc, flow, theme, windowWidth, runView, layersVisible, session,
+    submit, openNewTeam, toggleLibrary, cycleProblem, clearSelection, closeRun, organize, fitCanvas,
+    pendingNodeDelete, setPendingNodeDelete, requestNodeDelete, deleteNodes, discardConfirm, setDiscardConfirm,
+    paletteOpen, setPaletteOpen, historyOpen, setHistoryOpen, modeOpen, setModeOpen, problemsOpen, setProblemsOpen,
+    yamlOpen, setYamlOpen, compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
+    handoverAgentId, setHandoverAgentId, inspectedCapability, provenanceOpen, setProvenanceOpen, memoryOpen, setMemoryOpen,
+    fannedAgentId, setFannedAgentId, setSolo, setSweeping,
+    selectedNodes, selectedEdges, selectedCapabilities, selectedCapabilityEdgeIds, capabilityCards, capabilityEdgeById,
+    removeCapabilityCards, removeCapabilityEdge,
+  })
 
   // §13: at tablet widths, allow either the Library sheet or the inspector, never both.
   useEffect(() => {
@@ -2293,12 +1603,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const lifecycleResult = phase === 'queued' || phase === 'starting' ? 'not started' : phase === 'running' ? (responseText ? 'streaming' : 'pending') : phase === 'succeeded' ? 'done' : phase
   const loadedYaml = doc.loadedYaml ?? ''
   const differ = doc.documentChipState === 'dirty' ? linesDiffer(loadedYaml, doc.yamlPreview) : 0
-  // The Build heading says what to do next, not what the screen is called.
-  const setupHeading = doc.nodes.length === 0
-    ? { title: 'Add your first agent', detail: 'Click + next to an AI app on the left. You can add more agents and connect them later.' }
-    : !doc.isValid && !doc.checking
-      ? { title: 'Finish setting up', detail: 'Open the list at the top to see what still needs your attention.' }
-      : { title: 'Your team is ready', detail: 'Press Run team and describe what you want done. Add agents and connect them to hand work along.' }
 
   // §9.5: a failed load has no canvas to return to — the only modal.
   if (doc.loadFailure) return <ParseFailureModal failure={doc.loadFailure} path={doc.path} />
@@ -2402,7 +1706,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
-        {!runView && !runSetup && <header className="build-workspace-heading"><div><h1>{setupHeading.title}</h1><span>{doc.saveState === 'new' ? 'Not saved yet' : ['dirty', 'conflict', 'error'].includes(doc.saveState) ? 'Unsaved changes' : 'Saved'}</span><p>{setupHeading.detail}</p></div><div className="build-workspace-actions"><button className="btn" disabled={!['dirty', 'new'].includes(doc.documentChipState) || !doc.isValid} onClick={() => void doc.save()}>Save</button><button className="btn btn-primary" onClick={() => { setRunSetup(true); setRunPresentation('delivery') }}><Play size={15} />Run team</button></div></header>}
+        {!runView && !runSetup && <BuildHeading agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} documentChipState={doc.documentChipState} onSave={() => void doc.save()} onRun={() => { setRunSetup(true); setRunPresentation('delivery') }} />}
 
         <div aria-live="polite" aria-atomic="true" className="visually-hidden">{politeAnnouncement}</div>
         <div aria-live="assertive" className="visually-hidden">{assertiveAnnouncement}</div>
@@ -2430,7 +1734,11 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>
           {/* The brand is the way home: every team is one click from the list of all teams. */}
           <a className="delivery-brand" href="/" aria-label="LoomWatch — all teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}>LoomWatch</a>
-          <div className="prototype-workspace-menu"><button aria-label="Menu" title="Menu" aria-haspopup="menu" aria-expanded={workspaceMenu} onClick={() => setWorkspaceMenu(!workspaceMenu)}><MenuIcon size={15} aria-hidden="true" /></button>{workspaceMenu && <div role="menu"><button role="menuitem" onClick={() => { setWorkspaceMenu(false); window.location.assign('/') }}>All teams</button><button role="menuitem" onClick={() => { setWorkspaceMenu(false); setHistoryOpen(true) }}>Run history</button><button role="menuitem" onClick={() => { setWorkspaceMenu(false); clearSelection(); setMemoryOpen(true) }}>Team memory</button><button role="menuitem" onClick={() => { setWorkspaceMenu(false); setModeOpen(true) }}>Run settings</button><button role="menuitem" onClick={() => { setWorkspaceMenu(false); window.location.assign('/connections') }}>Connections…</button><button role="menuitem" disabled={!canOrganize} onClick={() => { setWorkspaceMenu(false); organize() }}>Organize</button>{previousArrangement && <button role="menuitem" onClick={() => { setWorkspaceMenu(false); undoOrganize() }}>Undo organize</button>}{runView && <button role="menuitem" onClick={() => { setWorkspaceMenu(false); setRunPresentation('trace') }}>Full trace</button>}<button role="menuitem" onClick={() => { setWorkspaceMenu(false); setYamlOpen(true) }}>View as YAML (advanced)</button></div>}</div>
+          <WorkspaceMenu
+            canOrganize={canOrganize} canUndoOrganize={Boolean(previousArrangement)} runView={runView}
+            onHistory={() => setHistoryOpen(true)} onMemory={() => { clearSelection(); setMemoryOpen(true) }} onRunSettings={() => setModeOpen(true)}
+            onOrganize={organize} onUndoOrganize={undoOrganize} onFullTrace={() => setRunPresentation('trace')} onShowYaml={() => setYamlOpen(true)}
+          />
           <nav className="workspace-view-tabs" aria-label="Workspace view">
             <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); if (activeRunId) setRunPresentation('delivery'); else if (lastOpenedRun?.path === doc.path) showRun(lastOpenedRun.id); else { setRunSetup(true); setRunPresentation('delivery') } }}><Play size={15} />Run</button>
             <button type="button" aria-pressed={!runView && !runSetup} onClick={() => { clearSelection(); closeRun() }}><Wrench size={15} />Build</button>
@@ -2459,27 +1767,25 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         </div>
 
         {!runView && !runSetup && !inspecting && doc.nodes.length > 0 && (
-          <aside className="build-outcome" aria-label="Expected team output">
-            <span className="delivery-eyebrow">Team output</span>
-            <h2>Choose who delivers the result.</h2>
-            <label>Final response by
-              <select aria-label="Final response owner" value={responderFromDoc ?? ''} disabled={!editable || doc.mode !== 'pipeline'} onChange={(event) => doc.promoteResponder(event.target.value)}>
-                {!responderFromDoc && <option value="" disabled>Choose an agent</option>}
-                {doc.nodes.map((node) => <option key={node.id} value={node.id}>{node.data.agent.name}</option>)}
-              </select>
-            </label>
-            <p>{doc.mode === 'pipeline' ? 'This agent’s answer becomes the team output. Each stage keeps its own work and evidence.' : 'The lead agent delivers the team’s final response.'}</p>
-            <button className="btn btn-primary" onClick={() => { setRunSetup(true); setRunPresentation('delivery') }}>Preview next run</button>
-          </aside>
+          <BuildOutcome
+            responder={responderFromDoc} agents={doc.nodes} pipeline={doc.mode === 'pipeline'} canChooseResponder={editable && doc.mode === 'pipeline'}
+            onPromoteResponder={(id) => doc.promoteResponder(id)} onPreview={() => { setRunSetup(true); setRunPresentation('delivery') }}
+          />
         )}
 
-        {!runView && !runSetup && outputEditorOpen && <aside className="node-inspector" aria-label="Selected output settings"><div className="inspector-head"><div><span className="eyebrow">Selected output</span><strong>{composerLayout.output?.name || 'Team response'}</strong></div><button className="icon-button" aria-label="Close output settings" onClick={() => setOutputEditorOpen(false)}><X size={16} /></button></div><div className="inspector-fields"><label>Deliverable name<input value={composerLayout.output?.name ?? 'Team response'} onChange={e => composerLayout.setOutput({ name: e.target.value, format: composerLayout.output?.format ?? 'Markdown report' })} /></label><label>Format<select value={composerLayout.output?.format ?? 'Markdown report'} onChange={e => composerLayout.setOutput({ name: composerLayout.output?.name ?? 'Team response', format: e.target.value })}><option>Markdown report</option><option>HTML dashboard</option><option>Document and files</option></select></label><label>Produced by<select value={responderFromDoc ?? ''} disabled={!editable || doc.mode !== 'pipeline'} onChange={e => doc.promoteResponder(e.target.value)}>{doc.nodes.map(node => <option key={node.id} value={node.id}>{node.data.agent.name}</option>)}</select></label><p>Connect the final harness to make its ownership explicit.</p><small>{composerLayout.saving ? 'Saving…' : 'Applies to the next new run.'}</small></div></aside>}
+        {!runView && !runSetup && outputEditorOpen && (
+          <OutputEditor
+            output={composerLayout.output} onOutputChange={composerLayout.setOutput} saving={composerLayout.saving}
+            responder={responderFromDoc} agents={doc.nodes} canChooseResponder={editable && doc.mode === 'pipeline'}
+            onPromoteResponder={(id) => doc.promoteResponder(id)} onClose={() => setOutputEditorOpen(false)}
+          />
+        )}
         {inspectedNode && !inspectedCapability && !inspectedEvidence && (
           <WorkspaceInspector
             startAdvanced={forcedInspectorField?.agentId === inspectedNode.id} fixHint={forcedInspectorField?.agentId === inspectedNode.id ? forcedInspectorField.hint : undefined} onDismissFixHint={() => setForcedInspectorField(null)}
             harnesses={harnesses} harnessId={inspectedHarnessId ?? undefined} onHarnessChange={(id: string) => { const harness = harnesses.find(item => item.id === id); if (harness) doc.updateAgentSpawn(inspectedNode.id, { env: {}, cwd: '.', ...inspectedNode.data.agent.spawn, ...harness.spawn }) }}
             node={inspectedNode} isEntrypoint={inspectedNode.id === doc.entrypoint} isResponder={inspectedNode.id === responderFromDoc} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} pipeline={doc.mode === 'pipeline'}
-            modelOptions={modelOptionsForAgent(inspectedNode.data.agent, doc.nodes.map((node) => node.data.agent), harnesses, inspectedModels)} defaultThinkingEffort={inspectedDefaultThinkingEffort} modelOptionsLoading={inspectedModelsLoading} modelOptionsError={inspectedModelsError} onRetryModelOptions={() => { if (inspectedHarnessId) modelCatalogCache.current.delete(inspectedHarnessId); setModelCatalog({ harnessId: '', models: [], error: null }); setModelCatalogRetry((attempt) => attempt + 1) }}
+            modelOptions={modelOptionsForAgent(inspectedNode.data.agent, doc.nodes.map((node) => node.data.agent), harnesses, modelCatalog.models)} defaultThinkingEffort={modelCatalog.defaultThinkingEffort} modelOptionsLoading={modelCatalog.loading} modelOptionsError={modelCatalog.error} onRetryModelOptions={modelCatalog.retry}
             onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)}
             onCwdChange={(value) => doc.updateAgentCwd(inspectedNode.id, value)} onBudgetChange={(value) => { retireFixHint(inspectedNode.id, 'limitUsd'); doc.updateAgentBudget(inspectedNode.id, value) }} onWarnAtChange={(value) => doc.updateAgentWarnAt(inspectedNode.id, value)}
             onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onPromoteResponder={() => doc.promoteResponder(inspectedNode.id)} onDelete={() => requestNodeDelete([inspectedNode.id])}
@@ -2570,23 +1876,11 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           <ProvenancePanel projection={projection} ownerLabels={ownerLabels} onInspect={(id) => { const item = projection.evidence.find((candidate) => candidate.id === id); if (item) setFannedAgentId(item.agentId); setInspectedEvidenceId(id) }} onClose={() => setProvenanceOpen(false)} />
         )}
 
-        {alerts.length > 0 && (
-          // In the delivery view the run's title and request sit top-left, so alerts dock bottom-left
-          // there; on the canvas they keep their place beside the lifecycle strip.
-          <div className="panel e1" style={{ left: 'var(--lw-panel-inset)', top: waiting && !deliveryShown ? 132 : undefined, bottom: waiting && !deliveryShown ? undefined : deliveryShown ? 'var(--lw-panel-inset)' : 'calc(var(--lw-panel-inset) + 72px)', width: 'min(320px, calc(100vw - 40px))', maxHeight: '40vh', overflow: 'auto', padding: 'var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', zIndex: 45 }} role="region" aria-label={`Attention, ${alerts.length}`}>
-            <span className="t-micro" style={{ color: 'var(--color-ink-3)' }}>Attention · {alerts.length}</span>
-            {alerts.map((alert) => (
-              <div key={alert.id} className={`rt-strip ${alert.id.startsWith('waiting:') ? 'operator-attention' : 'alert'} t-meta`} style={{ borderTop: 0, padding: '6px 8px', borderRadius: 'var(--r-sm)', background: 'var(--color-panel-solid)', alignItems: 'flex-start', flexDirection: 'column', gap: 6 }}>
-                <span className="msg" style={{ whiteSpace: 'normal' }}><b style={{ color: 'var(--color-ink)' }}>{nodeNames.get(alert.agentId) ?? alert.agentId}</b> · {alert.message}</span>
-                <span className="alert-acts t-meta">
-                  {fixForAlert(alert) && <button type="button" className="link alert-fix" onClick={() => fixAttention(alert)}>Fix in Build <ArrowRight size={12} aria-hidden="true" /></button>}
-                  <button type="button" className="link" onClick={() => revealAttention(alert)}>{alert.evidenceId ? 'Show evidence' : 'Show the agent'}</button>
-                  <button type="button" className="link" onClick={() => setDismissedAlerts((ids) => new Set([...ids, alert.id]))}>Dismiss</button>
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+        <AttentionAlerts
+          alerts={alerts} nodeNames={nodeNames} waiting={Boolean(waiting)} deliveryShown={deliveryShown}
+          canFix={(alert) => fixForAlert(alert) !== null} onFix={fixAttention} onReveal={revealAttention}
+          onDismiss={(alert) => setDismissedAlerts((ids) => new Set([...ids, alert.id]))}
+        />
 
         {layersVisible && runPresentation === 'trace' && <LayerLegend configured={doc.edges.length} observed={observedCount} solo={soloActive} onSolo={setSolo} />}
         {(!runView && !runSetup || runPresentation === 'trace') && <ViewControls prototype={!runView} onFit={fitCanvas} onOrganize={windowWidth >= 768 ? organize : undefined} organizeDisabled={!canOrganize} onUndoOrganize={canOrganize && previousArrangement?.key === arrangementKey ? undoOrganize : undefined} />}
@@ -2682,82 +1976,4 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       </div>
     </CanvasActionsContext.Provider>
   )
-}
-
-function ConflictSheetFooter({ onKeepMine, onUseDisk }: { onKeepMine: () => void; onUseDisk: () => void }) {
-  const [confirmDisk, setConfirmDisk] = useState(false)
-  return (
-    <footer style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)', padding: 'var(--sp-3) var(--sp-4)', borderTop: '1px solid var(--color-hairline)' }}>
-      <button type="button" className="btn" onClick={onKeepMine}>Keep mine</button>
-      <button type="button" className={`btn ${confirmDisk ? 'btn-danger' : ''}`} onClick={() => (confirmDisk ? onUseDisk() : setConfirmDisk(true))} style={confirmDisk ? { color: 'var(--color-alert)' } : undefined}>{confirmDisk ? 'Discard my edits?' : 'Use disk'}</button>
-    </footer>
-  )
-}
-
-function InlineConfirm({ message, confirmLabel, onConfirm, onCancel }: { message: string; confirmLabel: string; onConfirm: () => void; onCancel: () => void }) {
-  return (
-    <div role="alertdialog" aria-label={message} className="pointer-events-none absolute inset-x-0 z-50 flex justify-center" style={{ bottom: 'calc(var(--lw-panel-inset) + 72px)' }}>
-      <div className="e2 lw-confirm t-body" style={{ pointerEvents: 'auto' }}>
-        <span>{message}</span>
-        <button type="button" className="btn" onClick={onCancel}>Cancel</button>
-        <button type="button" className="btn btn-danger-fill" onClick={onConfirm}>{confirmLabel}</button>
-      </div>
-    </div>
-  )
-}
-
-function Sheet({ label, onClose, children }: { label: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div className="lw-scrim dim" onMouseDown={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={label} className="pop e2" style={{ left: '50%', top: '22%', transform: 'translateX(-50%)', width: 'min(480px, calc(100vw - 32px))', padding: 'var(--sp-5)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }} onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
-        {children}
-      </div>
-    </div>
-  )
-}
-
-function OpenTeamSheet({ onClose }: { onClose: () => void }) {
-  const { teams, error } = useTeamList()
-  const [query, setQuery] = useState('')
-  const needle = query.trim().toLowerCase()
-  const matches = (teams ?? []).filter((team) => !needle || teamDisplayName(team).toLowerCase().includes(needle) || team.path.toLowerCase().includes(needle))
-  return (
-    <Sheet label="Open a team" onClose={onClose}>
-      <form onSubmit={(event) => { event.preventDefault(); if (matches[0]) openTeam(matches[0].path) }} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
-        <label className="field"><span className="t-micro" style={{ color: 'var(--color-ink-3)' }}>Open a team</span><input autoFocus className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a team by name" /></label>
-        <div className="pop-list" style={{ padding: 0, maxHeight: 280 }} aria-label="Your teams">
-          {teams === null && !error && <p role="status" className="pop-empty t-meta">Finding teams…</p>}
-          {error && <p role="alert" className="pop-empty t-meta" style={{ color: 'var(--color-alert)' }}>{error}</p>}
-          {teams !== null && matches.length === 0 && <p className="pop-empty t-meta">No team matches.</p>}
-          {matches.map((team) => (
-            <button key={team.path} type="button" onClick={() => openTeam(team.path)} className="pop-row" style={{ height: 'auto', padding: '8px 12px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
-              <span className="name t-body-m">{teamDisplayName(team)}</span>
-              <span className="t-mono-sm" style={{ color: 'var(--color-ink-3)' }}>{team.path}</span>
-            </button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)' }}><button type="button" className="btn" onClick={onClose}>Cancel</button></div>
-      </form>
-    </Sheet>
-  )
-}
-
-function SaveCopySheet({ onClose, onSave, error }: { onClose: () => void; onSave: (path: string) => Promise<boolean>; error: string | null }) {
-  const [path, setPath] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [attempted, setAttempted] = useState(false)
-  return (
-    <Sheet label="Save a copy" onClose={onClose}>
-      <form onSubmit={async (event) => { event.preventDefault(); setAttempted(true); if (!path.trim() || saving) return; setSaving(true); const saved = await onSave(path.trim()); setSaving(false); if (saved) onClose() }} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
-        <label className="field"><span className="t-micro" style={{ color: 'var(--color-ink-3)' }}>Save copy as</span><input autoFocus className="input mono" value={path} onChange={(event) => setPath(event.target.value)} placeholder="research-team-copy.yaml" /><span className="hint t-meta">Relative to the daemon teams directory.</span></label>
-        {attempted && error && <p role="alert" className="t-meta" style={{ color: 'var(--color-alert)', margin: 0 }}>{error}</p>}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)' }}><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!path.trim() || saving}>{saving ? 'Saving…' : 'Save a copy'}</button></div>
-      </form>
-    </Sheet>
-  )
-}
-
-function NewTeamSheet({ harnesses, openTeamUnsaved, onClose, onCreateBlank }: { harnesses: DetectedHarness[]; openTeamUnsaved: boolean; onClose: () => void; onCreateBlank: (name: string, path: string) => void }) {
-  const { teams } = useTeamList()
-  return <NewTeamDialog harnesses={harnesses} existingPaths={teams?.map((team) => team.path) ?? []} openTeamUnsaved={openTeamUnsaved} onCreateBlank={onCreateBlank} onClose={onClose} />
 }
