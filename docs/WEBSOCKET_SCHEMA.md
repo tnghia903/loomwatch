@@ -283,3 +283,22 @@ The envelope, the event kinds and every existing payload shape are unchanged.
 
 Both new phases carry `raw.source: loomwatch`. See
 [ADR 0021](decisions/0021-skill-routing-by-portability.md).
+
+
+### Additive knowledge and tool delivery metadata (2026-10-01)
+
+The envelope, the event kinds and every existing payload shape are unchanged.
+
+- `prompt_sections` gains section kinds `knowledge` (`## Knowledge: <name>`, a wired knowledge
+  source's contents, framed as source material) and `tool` (`## Tool: <name>`, an MCP server
+  connected to the session). Added in one change with `memory::PromptSectionKind` and
+  `ui/src/lib/watch/events.ts`, per the rule above.
+- `prompt_sections` gains `knowledge` — `[{name, source, folders, readAccess, chars, sha256}]` — and
+  `tools` — `[{name, server, provider, configPath, transport, envNames, headerNames, permission}]`.
+  Each key is present only when the agent was delivered at least one of that kind, so a record from
+  a run that wired neither is byte-identical to before. `readAccess` and `permission` are `granted`
+  (LoomWatch wrote the allow rule into the workspace's Claude Code settings) or `harnessPolicy`.
+  `envNames` and `headerNames` are names only: the values from the operator's MCP config reach the
+  harness in `session/new` and are never archived.
+
+See [ADR 0029](decisions/0029-deliver-knowledge-and-tools.md).

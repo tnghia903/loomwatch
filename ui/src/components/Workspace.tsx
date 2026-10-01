@@ -22,7 +22,7 @@ import { unifiedYamlDiff } from '../lib/team-file/diff'
 import { useTeamDocument } from '../lib/team-file/useTeamDocument'
 import { organizePipeline, type Positions } from '../lib/composer-layout/organize'
 import { useComposerLayout } from '../lib/composer-layout/useComposerLayout'
-import { RELATION, capabilityNodeId, freeCapabilitySlot, refuseCapabilityEdge, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
+import { RELATION, capabilityIsCard, capabilityNodeId, freeCapabilitySlot, refuseCapabilityEdge, teamFileKind, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
 import { setThemeMode, useTheme } from '../lib/theme'
 import { useAnnouncementQueue } from '../lib/useAnnouncementQueue'
 import type { AgentField } from '../lib/team-file/validation'
@@ -64,6 +64,7 @@ import { ProvenancePanel } from './run/ProvenancePanel'
 import { DeliveryLane } from './run/DeliveryLane'
 import { EvidenceNodeCard, MoreEvidenceCard, OutputNodeCard, PromptNodeCard, RunNodeCard } from './run/StoryNodes'
 import { ChipDot } from './ui/glyphs'
+import { SegmentThumb } from './ui/SegmentThumb'
 import { AttentionAlerts } from './workspace/AttentionAlerts'
 import { BuildHeading } from './workspace/BuildHeading'
 import { BuildOutcome } from './workspace/BuildOutcome'
@@ -81,6 +82,8 @@ import { matchTeam, parseIntent } from '../lib/story/intent'
 import { APPROVAL_TEXT } from '../lib/story/needsYou'
 import { DEPTH_LABEL, DEPTH_ZOOM } from '../lib/story/depth'
 import { harnessForRole, ROLE_PRESETS, roleSource } from '../lib/library/roles'
+import { savedJobPreset, useSavedJobs } from '../lib/library/jobs'
+import type { LibrarySource } from '../lib/library/types'
 import { OPERATOR_SOURCE } from '../lib/library/fixtures'
 import { teamSentence } from '../lib/story/teamSentence'
 import { depthForZoom } from '../lib/story/depth'
@@ -391,18 +394,15 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   // no delivery contract yet and stay planned intent in the sidecar. The canvas draws both the
   // same way, so the edges it renders are the union.
   const wiringEdges = useMemo(() => {
-    const cardIdByName = new Map(
-      composerLayout.nodes.filter((node) => node.kind === 'skill').map((node) => [node.name, node.id]),
-    )
     const executable = doc.nodes.flatMap((node) =>
       (node.data.agent.capabilities ?? []).flatMap((capability) => {
-        const to = cardIdByName.get(capability.name)
-        return to ? [{ from: node.id, to }] : []
+        const card = composerLayout.nodes.find((candidate) => capabilityIsCard(capability, candidate))
+        return card ? [{ from: node.id, to: card.id }] : []
       }),
     )
-    // Sidecar edges drawn before capabilities were executable keep rendering: dropping them would
-    // silently erase wiring the operator can see on their canvas. They stay planned-only until the
-    // edge is drawn again, which now writes it to the team file.
+    // Sidecar edges drawn before their kind was executable keep rendering: dropping them would
+    // silently erase wiring the operator can see on their canvas. `legacyWiring` below offers to
+    // write them into the team file, which is what makes them delivered (ADR 0029).
     const planned = composerLayout.edges.filter(
       (edge) => !executable.some((live) => live.from === edge.from && live.to === edge.to),
     )
@@ -473,11 +473,11 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const removeCapabilityCards = useCallback((ids: readonly string[]) => {
     if (ids.length === 0) return
     const going = capabilityCards.filter((node) => ids.includes(node.id))
-    const names = new Set(going.filter((node) => node.kind === 'skill').map((node) => node.name))
-    if (names.size > 0) {
+    // Every kind the team file delivers (ADR 0012, 0029), so removing a card stops its delivery.
+    if (going.some((card) => teamFileKind(card))) {
       for (const node of doc.nodes) {
         const current = node.data.agent.capabilities ?? []
-        const kept = current.filter((capability) => !names.has(capability.name))
+        const kept = current.filter((capability) => !going.some((card) => capabilityIsCard(capability, card)))
         if (kept.length !== current.length) doc.setAgentCapabilities(node.id, kept)
       }
     }
@@ -517,6 +517,33 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     const memory = memoryEdges.filter((edge) => !wiringEdges.some((live) => live.from === edge.from && live.to === edge.to))
     return [...wiringEdges, ...memory]
   }, [wiringEdges, memoryEdges])
+  /**
+   * Sidecar edges to a card the team file can deliver, from an agent whose team-file entry does not
+   * name it: wiring drawn before its kind was executable (ADR 0029). The canvas draws it, but no
+   * run receives it until it is written to the team file — which `deliverLegacyWiring` offers.
+   */
+  const legacyWiring = useMemo(() => composerLayout.edges.filter((edge) => {
+    const card = composerLayout.nodes.find((node) => node.id === edge.to)
+    const agent = doc.nodes.find((node) => node.id === edge.from)?.data.agent
+    return Boolean(card && agent && teamFileKind(card)
+      && !(agent.capabilities ?? []).some((capability) => capabilityIsCard(capability, card)))
+  }), [composerLayout.edges, composerLayout.nodes, doc.nodes])
+  const deliverLegacyWiring = useCallback(() => {
+    const byAgent = new Map<string, CapabilityNodeConfig[]>()
+    for (const edge of legacyWiring) {
+      const card = composerLayout.nodes.find((node) => node.id === edge.to)
+      if (card) byAgent.set(edge.from, [...(byAgent.get(edge.from) ?? []), card])
+    }
+    for (const [agentId, cards] of byAgent) {
+      const current = doc.nodes.find((node) => node.id === agentId)?.data.agent.capabilities ?? []
+      const added = cards.flatMap((card) => {
+        const kind = teamFileKind(card)
+        return kind ? [{ kind, name: card.name }] : []
+      })
+      doc.setAgentCapabilities(agentId, [...current, ...added])
+    }
+    setStatusAnnouncement(`${legacyWiring.length === 1 ? 'One connection is' : `${legacyWiring.length} connections are`} now in the team file. Save to deliver ${legacyWiring.length === 1 ? 'it' : 'them'} on the next run.`)
+  }, [composerLayout.nodes, doc, legacyWiring])
   const capabilityEdgeById = useMemo(
     () => new Map(allWiringEdges.map((edge) => [capabilityEdgeId(edge.from, edge.to), edge])),
     [allWiringEdges],
@@ -540,15 +567,14 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         if (appliesTo.length > 0) doc.addMemoryInherit({ ...key, appliesTo })
         else doc.removeMemoryInherit(key)
       }
-    } else if (capability.kind === 'skill') {
+    } else {
+      // Skills, knowledge and tools all live in the team file (ADR 0012, 0029).
       const agent = doc.nodes.find((node) => node.id === source)?.data.agent
       const current = agent?.capabilities ?? []
-      const kept = current.filter((entry) => entry.name !== capability.name)
+      const kept = current.filter((entry) => !capabilityIsCard(entry, capability))
       if (agent && kept.length !== current.length) doc.setAgentCapabilities(source, kept)
-      // Pre-executable layouts may still contain the same skill edge in the sidecar.
+      // Layouts from before the kind was executable may still hold the same edge in the sidecar.
       if (composerLayout.edges.some((edge) => edge.from === source && edge.to === target)) composerLayout.disconnect(source, target)
-    } else {
-      composerLayout.disconnect(source, target)
     }
 
     const id = capabilityEdgeId(source, target)
@@ -870,7 +896,11 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             const capability = capabilityCards.find((node) => node.id === change.id)
             if (capability) {
               const inventory = capability.kind === 'skill' ? capabilityInventory.skills : capability.kind === 'tool' ? capabilityInventory.tools : capabilityInventory.sources
+              // A card records the provenance the Library showed when it was placed, and provenance
+              // changes whenever another app turns out to hold the same skill. The Library lists one
+              // row per kind and name, so the name is the identity; the source only breaks a tie.
               const item = inventory.find((candidate) => candidate.name === capability.name && candidate.source === capability.source)
+                ?? inventory.find((candidate) => candidate.name.toLowerCase() === capability.name.toLowerCase())
                 ?? { id: capability.id, name: capability.name, source: capability.source, detail: 'Planned capability on this canvas.', status: 'Compatible' as const }
               setInspectedCapability({ item, kind: capability.kind })
               setInspectedEvidenceId(null)
@@ -1159,9 +1189,15 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   /** Whether the deliverable, rather than the canvas, is the surface on screen. */
   const deliveryShown = (runView || runSetup) && runPresentation === 'delivery'
   const inspecting = Boolean(inspectedNode || inspectedCapability || inspectedEvidence || provenanceOpen || scheduleOpen || memoryPanelOpen)
-  const inspectedCapabilityNode = inspectedCapability ? composerLayout.nodes.find((node) => node.kind === inspectedCapability.kind && node.name === inspectedCapability.item.name && node.source === inspectedCapability.item.source) ?? null : null
-  const inspectedCapabilityAgents = inspectedCapability?.kind === 'skill'
-    ? doc.nodes.filter((node) => (node.data.agent.capabilities ?? []).some((skill) => skill.name === inspectedCapability.item.name)).map((node) => node.data.agent.name)
+  // Kind and name identify a card; its recorded source can lag the Library's (see the card-select handler).
+  const inspectedCapabilityNode = inspectedCapability ? composerLayout.nodes.find((node) => node.kind === inspectedCapability.kind && node.name === inspectedCapability.item.name && node.source === inspectedCapability.item.source)
+    ?? composerLayout.nodes.find((node) => node.kind === inspectedCapability.kind && node.name.toLowerCase() === inspectedCapability.item.name.toLowerCase()) ?? null : null
+  /** The team-file kind the inspected capability is wired as; `null` for memory (ADR 0029). */
+  const inspectedTeamKind = inspectedCapability ? teamFileKind({ kind: inspectedCapability.kind, memory: inspectedCapability.item.memory }) : null
+  const wiresInspected = (capability: { kind: string; name: string }) =>
+    capability.kind === inspectedTeamKind && capability.name === inspectedCapability?.item.name
+  const inspectedCapabilityAgents = inspectedTeamKind
+    ? doc.nodes.filter((node) => (node.data.agent.capabilities ?? []).some(wiresInspected)).map((node) => node.data.agent.name)
     : inspectedCapabilityNode
     ? wiringEdges.filter((edge) => edge.to === inspectedCapabilityNode.id).map((edge) => nodeNames.get(edge.from) ?? edge.from)
     : []
@@ -1198,10 +1234,12 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     // The Prompt node is the operator, and the operator's scope is the whole team — so a memory
     // card wired from it writes the whole-team form. Every other refusal rule still applies.
     const wholeTeam = source === '__prompt' && targetCapability?.memory !== undefined
+    // A sidecar-only edge is not a reason to refuse: drawing it again is how it reaches the team
+    // file and starts being delivered (ADR 0029).
     const refusal = wholeTeam ? null : refuseCapabilityEdge(
       { id: source, isAgent: !sourceCapability },
       { id: target, isAgent: !targetCapability, kind: targetCapability?.kind },
-      allWiringEdges,
+      allWiringEdges.filter((edge) => !legacyWiring.some((legacy) => legacy.from === edge.from && legacy.to === edge.to)),
     )
     if (refusal) { setPlanRefusal(refusal); return }
     if (!targetCapability) { setPlanRefusal('A capability cannot start a connection. Drag from the agent that should use it.'); return }
@@ -1224,20 +1262,21 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         : `${nodeNames.get(source) ?? source} reads ${targetCapability.name}.`)
       return
     }
-    if (targetCapability.kind === 'skill') {
-      const agent = doc.nodes.find((node) => node.id === source)?.data.agent
-      if (!agent) return
-      // Skill provenance and execution harness are independent. The daemon copies the selected
-      // Agent Skills bundle into this agent's harness-native project directory before the run.
-      const already = agent.capabilities ?? []
-      if (!already.some((capability) => capability.name === targetCapability.name)) {
-        doc.setAgentCapabilities(source, [...already, { kind: 'skill', name: targetCapability.name }])
-      }
-    } else {
-      composerLayout.connect(source, target)
+    const kind = teamFileKind(targetCapability)
+    const agent = doc.nodes.find((node) => node.id === source)?.data.agent
+    if (!kind || !agent) {
+      setPlanRefusal('Connect skills, knowledge and tools to the agent that should use them.')
+      return
+    }
+    // Executable configuration, like a skill (ADR 0012): the daemon copies a skill into the
+    // agent's workspace, supplies a knowledge source's contents in its prompt, and hands a tool to
+    // its harness as an MCP server (ADR 0029). Provenance and the agent's harness are independent.
+    const already = agent.capabilities ?? []
+    if (!already.some((capability) => capabilityIsCard(capability, targetCapability))) {
+      doc.setAgentCapabilities(source, [...already, { kind, name: targetCapability.name }])
     }
     setStatusAnnouncement(`${nodeNames.get(source) ?? source} ${RELATION[targetCapability.kind]} ${targetCapability.name}.`)
-  }, [capabilityCards, allWiringEdges, composerLayout, doc, nodeNames])
+  }, [capabilityCards, allWiringEdges, legacyWiring, doc, nodeNames])
   useEffect(() => {
     if (!planRefusal) return
     const timer = setTimeout(() => setPlanRefusal(null), 4000)
@@ -1330,6 +1369,28 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     return id
   }, [capabilityCards, composerLayout, doc])
 
+  /**
+   * A job can bring skills (ADR 0030): the new agent's team-file entry already names them, and a
+   * card is what shows them on the canvas — `wiringEdges` draws the line once the card exists. Only
+   * skills without a card get one, beside where the agent landed.
+   */
+  const placeJobSkills = useCallback((raw: string, near: { x: number; y: number }) => {
+    let source: LibrarySource
+    try {
+      source = JSON.parse(raw) as LibrarySource
+    } catch {
+      return
+    }
+    const taken = [...doc.nodes.map((node) => node.position), ...capabilityCards.map((node) => node.position)]
+    for (const capability of source.capabilities ?? []) {
+      if (capability.kind !== 'skill' || capabilityCards.some((card) => capabilityIsCard(capability, card))) continue
+      const installed = capabilityInventory.skills.find((item) => item.name.toLowerCase() === capability.name.toLowerCase())
+      const at = freeCapabilitySlot({ x: snapToGrid(near.x + 280), y: snapToGrid(near.y) }, taken)
+      composerLayout.place({ kind: 'skill', name: capability.name, source: installed?.source ?? 'Not found on this computer' }, at)
+      taken.push(at)
+    }
+  }, [capabilityCards, capabilityInventory.skills, composerLayout, doc.nodes])
+
   /** Whether a flow-space point lands on the permanent Prompt node's card. */
   const overPromptNode = useCallback((point: { x: number; y: number }) => {
     const prompt = flow.getNode('__prompt')
@@ -1382,8 +1443,10 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     const raw = event.dataTransfer.getData(LIBRARY_DRAG_MIME)
     if (!raw) return
     event.preventDefault()
-    doc.addAgentFromDrop(raw, flow.screenToFlowPosition({ x: event.clientX, y: event.clientY }))
-  }, [doc, flow, editable, runView, projection.evidence, placeCapability, overPromptNode])
+    const at = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+    doc.addAgentFromDrop(raw, at)
+    placeJobSkills(raw, at)
+  }, [doc, flow, editable, runView, projection.evidence, placeCapability, overPromptNode, placeJobSkills])
 
   const onNodeDragStart = useCallback<OnNodeDrag<AnyNode>>(() => {
     nodeDraggingRef.current = true
@@ -1398,11 +1461,14 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   useEffect(() => {
     const add = (event: Event) => {
       if (!editable || !doc.path) return
-      doc.addAgentFromDrop((event as CustomEvent<string>).detail, flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))
+      const raw = (event as CustomEvent<string>).detail
+      const at = flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+      doc.addAgentFromDrop(raw, at)
+      placeJobSkills(raw, at)
     }
     window.addEventListener('loomwatch:add-agent', add)
     return () => window.removeEventListener('loomwatch:add-agent', add)
-  }, [doc, editable, flow])
+  }, [doc, editable, flow, placeJobSkills])
 
   // ---- notifications + announcements -----------------------------------------------------
   const waitingAlert: Attention | null = useMemo(() => waiting ? { id: `waiting:${waiting.questionId ?? waiting.since}`, seq: session.lastSeq, agentId: waiting.node, message: waiting.question } : null, [waiting, session.lastSeq])
@@ -1558,8 +1624,10 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   ], [doc, editable, composerText, submit, openNewTeam, toggleLibrary, windowWidth, runView, closeRun, cycleProblem, problems.length, theme, notificationsOn, enableNotifications, layersVisible, fitCanvas, organize, canOrganize])
 
   // ⌘K's second dialect: plain words or /commands become one proposed action (lib/story/intent.ts).
+  // The operator's saved jobs are named there too, so "add a release notes writer" places one.
+  const savedJobs = useSavedJobs().jobs
   const interpret = useCallback((query: string): InterpretedAction | null => {
-    const parsed = parseIntent(query)
+    const parsed = parseIntent(query, savedJobs)
     if (!parsed) return null
     const { intent } = parsed
     const dialect = parsed.exact ? 'exact' as const : 'plain' as const
@@ -1567,7 +1635,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     const addAgent = (payload: object) => window.dispatchEvent(new CustomEvent('loomwatch:add-agent', { detail: JSON.stringify(payload) }))
     switch (intent.kind) {
       case 'add': {
-        const preset = ROLE_PRESETS.find((candidate) => candidate.id === intent.job)
+        const own = intent.saved ? savedJobs.find((candidate) => candidate.id === intent.job) : undefined
+        const preset = own ? savedJobPreset(own) : ROLE_PRESETS.find((candidate) => candidate.id === intent.job)
         const source = preset ? roleSource(preset, harnesses) : null
         const app = preset ? harnessForRole(preset, harnesses) : null
         if (!preset) return null
@@ -1588,7 +1657,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       case 'run':
         return { dialect, label: `Run: “${intent.request}”`, detail: doc.path ? 'Puts it in the request box so you can check it, then press Enter' : 'Open a team first', disabled: !doc.path, run: () => { setComposerText(intent.request); window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('.lw-composer textarea')?.focus(), 0) } }
     }
-  }, [doc.path, editable, harnesses, flow, needsYou, setComposerText])
+  }, [doc.path, editable, harnesses, flow, needsYou, setComposerText, savedJobs])
 
   useWorkspaceShortcuts({
     editable, doc, flow, theme, windowWidth, runView, layersVisible, session,
@@ -1797,7 +1866,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
-        {!runView && !runSetup && <BuildHeading agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} documentChipState={doc.documentChipState} appProblem={appProblemDetail} onSave={() => void doc.save()} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); window.setTimeout(focusComposer, 0) }} />}
+        {!runView && !runSetup && <BuildHeading agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} documentChipState={doc.documentChipState} appProblem={appProblemDetail} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onSave={() => void doc.save()} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); window.setTimeout(focusComposer, 0) }} />}
 
         <div aria-live="polite" aria-atomic="true" className="visually-hidden">{politeAnnouncement}</div>
         <div aria-live="assertive" className="visually-hidden">{assertiveAnnouncement}</div>
@@ -1832,6 +1901,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           />
           <div className="needs-you-anchor">{needsYouTray}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view">
+            <SegmentThumb />
             <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); if (activeRunId) setRunPresentation('delivery'); else if (lastOpenedRun?.path === doc.path) showRun(lastOpenedRun.id); else { setRunSetup(true); setRunPresentation('delivery') } }}><Play size={15} />Run</button>
             <button type="button" aria-pressed={!runView && !runSetup} onClick={() => { clearSelection(); closeRun() }}><Wrench size={15} />Build</button>
             {runView && runPresentation === 'trace' && <button type="button" className="trace-back" onClick={() => setRunPresentation('delivery')}>Back to output</button>}
@@ -1894,16 +1964,18 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             {...inspectedCapability}
             placed={Boolean(inspectedCapabilityNode)}
             connectedAgents={inspectedCapabilityAgents}
-            agents={doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => ({ id: node.id, name: node.data.agent.name, harnessId: harnessIdForAgent(node.data.agent, harnesses), harness: appLabelForAgent(node.data.agent, harnesses), connected: (node.data.agent.capabilities ?? []).some((skill) => skill.name === inspectedCapability.item.name) }))}
+            agents={doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => ({ id: node.id, name: node.data.agent.name, harnessId: harnessIdForAgent(node.data.agent, harnesses), harness: appLabelForAgent(node.data.agent, harnesses), connected: (node.data.agent.capabilities ?? []).some(wiresInspected) }))}
             onToggleAgent={(id, connected) => {
-              if (!editable || inspectedCapability.kind !== 'skill') return
+              const kind = inspectedTeamKind
+              if (!editable || !kind) return
               const agent = doc.nodes.find((node) => node.id === id)?.data.agent
               if (!agent) return
               const current = agent.capabilities ?? []
               const name = inspectedCapability.item.name
-              if (connected && !inspectedCapabilityNode) placeCapability(JSON.stringify({kind: 'skill', name, source: inspectedCapability.item.source}), flow.screenToFlowPosition({x: window.innerWidth / 2, y: window.innerHeight / 2}))
-              doc.setAgentCapabilities(id, connected ? [...current.filter((skill) => skill.name !== name), {kind: 'skill', name}] : current.filter((skill) => skill.name !== name))
-              setStatusAnnouncement(`${name} ${connected ? 'is required by' : 'was disconnected from'} ${agent.name}. Save the team to keep this change.`)
+              if (connected && !inspectedCapabilityNode) placeCapability(JSON.stringify({kind: inspectedCapability.kind, name, source: inspectedCapability.item.source}), flow.screenToFlowPosition({x: window.innerWidth / 2, y: window.innerHeight / 2}))
+              const others = current.filter((capability) => !wiresInspected(capability))
+              doc.setAgentCapabilities(id, connected ? [...others, {kind, name}] : others)
+              setStatusAnnouncement(`${name} ${connected ? (kind === 'skill' ? 'is required by' : 'is connected to') : 'was disconnected from'} ${agent.name}. Save the team to keep this change.`)
             }}
             readOnly={!editable}
             onAdd={() => {

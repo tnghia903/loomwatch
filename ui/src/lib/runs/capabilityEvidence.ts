@@ -47,7 +47,10 @@ export function capabilityEvidence(
   snapshot?: RequiredSkillReceipt[],
 ): RunCapability[] {
   const owned = evidence.filter((item) => item.agentId === agent.id)
-  const skills: RunCapability[] = (snapshot ?? agent.capabilities ?? []).map(
+  // Skills only: knowledge and tools (ADR 0029) are not opened as a SKILL.md, so a skill receipt
+  // could never be found for them and every one would read as "never opened".
+  const wiredSkills = (agent.capabilities ?? []).filter((capability) => capability.kind === 'skill')
+  const skills: RunCapability[] = (snapshot ?? wiredSkills).map(
     (skill) => {
       const receipt = snapshot?.find((item) => item.name === skill.name)
       const receipts = owned.filter(

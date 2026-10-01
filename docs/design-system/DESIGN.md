@@ -229,7 +229,7 @@ everything:
 - **Build** — a canvas. The team as one plain sentence across the top ("Every day at 10:00 AM
   and whenever you ask, News Collector collects what is needed, then News Editor edits…"), a
   *Hire by job* palette on the left (Researcher, Writer, Editor, Reviewer, Coder, Designer,
-  Analyst, You), cards wired left-to-right, a Story · Team · Trace depth dial bottom-right.
+  Analyst, You), led by *Your jobs* once the operator has saved any, cards wired left-to-right, a Story · Team · Trace depth dial bottom-right.
 - **Run** — result-led. Left: the request, the team handoff as numbered stage cards, a run
   receipt, a timeline. Right: the team's output in a reader, with a composer for follow-ups.
 

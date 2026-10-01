@@ -115,6 +115,59 @@ describe('CapabilityInspector', () => {
     expect(screen.queryByRole('button', { name: 'Connect to Research' })).not.toBeInTheDocument()
   })
 
+  it('shows what a knowledge source holds, which is what a connected agent receives', async () => {
+    serve({
+      id: 'source-project', kind: 'knowledge',
+      definitions: [
+        { source: 'LoomWatch · folder', path: '/work/loomwatch', content: 'crates/\nui/\nREADME.md' },
+        { source: 'OpenCode · sessions in this project', path: '/work/loomwatch', content: '2026-09-30 10:00  Fix the canvas' },
+      ],
+    })
+    const source = { id: 'source-project', name: 'loomwatch project', source: 'LoomWatch + OpenCode', detail: 'Previously used project context', status: 'Ready' as const }
+    render(<CapabilityInspector item={source} kind="knowledge" placed connectedAgents={['Research']} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
+
+    expect(await screen.findByText(/Fix the canvas/)).toBeInTheDocument()
+    expect(screen.getByText('Contents')).toBeInTheDocument()
+    expect(screen.getByText('LoomWatch · folder')).toBeInTheDocument()
+    expect(screen.getByText(/crates\//)).toBeInTheDocument()
+    expect(screen.getByText(/receives exactly these contents in its opening prompt/)).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/capabilities/source-project'))
+  })
+
+  /** ADR 0029: knowledge and tools are connected to agents like skills, through the team file. */
+  it('connects a knowledge source or a tool to an agent, but not team memory', async () => {
+    serve({ id: 'source-project', kind: 'knowledge', definitions: [{ source: 'LoomWatch · folder', path: '/work', content: 'README.md' }] })
+    const onToggleAgent = vi.fn()
+    const agents = [{ id: 'research', name: 'Research', harness: 'Claude Code', connected: true }]
+    const source = { id: 'source-project', name: 'loomwatch project', source: 'LoomWatch', detail: 'Project folder', status: 'Ready' as const }
+    const view = render(<CapabilityInspector item={source} kind="knowledge" placed connectedAgents={['Research']} agents={agents} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
+    await screen.findByText(/README.md/)
+    expect(screen.getByText('Connected')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Use loomwatch project with Research (Claude Code)' }))
+    expect(onToggleAgent).toHaveBeenCalledWith('research', false)
+    expect(screen.getByText(/supply its contents to an agent in the next run/)).toBeInTheDocument()
+
+    serve({ id: 'tool-memory', kind: 'tool', definitions: [] })
+    const tool = { id: 'tool-memory', name: 'Agent Memory', source: 'Claude Code', detail: 'Local MCP connector', status: 'Compatible' as const }
+    view.rerender(<CapabilityInspector item={tool} kind="tool" placed={false} connectedAgents={[]} agents={[{ ...agents[0], connected: false }]} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Use Agent Memory with Research (Claude Code)' }))
+    expect(onToggleAgent).toHaveBeenLastCalledWith('research', true)
+    expect(screen.getByText(/give an agent its MCP server in the next run/)).toBeInTheDocument()
+
+    serve({ id: 'memory-team', kind: 'knowledge', definitions: [] })
+    const memory = { id: 'memory-team', name: 'Research team · memory', source: 'LoomWatch', detail: '1 brief entry', status: 'Ready' as const, memory: { team: 'research-team', brief: 1 } }
+    view.rerender(<CapabilityInspector item={memory} kind="knowledge" placed={false} connectedAgents={[]} agents={agents} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  })
+
+  it('says so when a knowledge source has nothing readable', async () => {
+    serve({ id: 'source-empty', kind: 'knowledge', definitions: [] })
+    const source = { id: 'source-empty', name: 'Empty project', source: 'OpenCode', detail: 'Previously used project context', status: 'Ready' as const }
+    render(<CapabilityInspector item={source} kind="knowledge" placed={false} connectedAgents={[]} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
+
+    expect(await screen.findByText('Nothing readable was found for this source.')).toBeInTheDocument()
+  })
+
   it('names connected agents and reveals an existing card', async () => {
     const onReveal = vi.fn()
     render(<CapabilityInspector item={item} kind="skill" placed connectedAgents={['Collector', 'Editor']} onAdd={vi.fn()} onReveal={onReveal} onClose={vi.fn()} />)

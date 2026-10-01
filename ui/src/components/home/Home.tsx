@@ -135,10 +135,10 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
           )}
           {shown.length > 0 && (
             <ul className="home-grid">
-              {shown.map((team) => {
+              {shown.map((team, index) => {
                 const fabric = fabricFor(runs, team.path)
                 return (
-                <li key={team.path}>
+                <li key={team.path} style={{ ['--card-i' as string]: index }}>
                   <button type="button" className={`home-card ${fabric.waiting ? 'waiting' : ''}`} onClick={() => openTeam(team.path)}>
                     <span className="home-card-name">{teamDisplayName(team)}{fabric.waiting && <em className="home-card-waiting">Waiting for you</em>}</span>
                     <span className="home-card-meta">{describeTeam(team)}</span>

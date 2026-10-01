@@ -8,8 +8,10 @@ pub mod archive;
 pub mod capabilities;
 pub mod composer;
 pub mod config;
+pub mod delivery;
 mod files;
 pub mod host_runner;
+mod jobs;
 pub mod memory;
 pub mod notebook_api;
 pub mod notion;
@@ -336,11 +338,7 @@ async fn run_team_mode(
     }
     .supply(&agent.id, vec![agent.id.clone()], None, &mut packet)
     .await?;
-    let composed = compose_prompt(agent, &packet, &NodeTask::goal(prompt)).with_required_skills(
-        workspace
-            .as_ref()
-            .map_or(&[], |workspace| workspace.required_skills.as_slice()),
-    );
+    let composed = compose_for(agent, &packet, &NodeTask::goal(prompt), workspace.as_ref());
     let cwd = workspace
         .as_ref()
         .map_or(declared_cwd, |workspace| workspace.cwd.clone());
@@ -349,6 +347,7 @@ async fn run_team_mode(
         args: agent.spawn.args.clone(),
         env: agent.spawn.env.clone(),
         cwd,
+        tools: composed.delivery.tools.clone(),
     };
 
     let process = AcpProcess::spawn(&spec)
@@ -571,7 +570,7 @@ async fn run_pipeline_nodes(
         if let Some(previous) = parked.take() {
             previous.release(archive, exit_timeout).await?;
         }
-        let (spec, required_skills) = node_process_spec(team, team_path, agent, memory)?;
+        let (spec, required_skills, delivery) = node_process_spec(team, team_path, agent, memory)?;
         let node_prompt = stage_task(
             team,
             agent_id,
@@ -595,8 +594,12 @@ async fn run_pipeline_nodes(
         }
         .supply_stage(agent_id, &node_prompt, &mut packet)
         .await?;
-        let composed =
-            compose_prompt(agent, &packet, &node_prompt).with_required_skills(&required_skills);
+        let composed = compose_prompt(agent, &packet, &node_prompt)
+            .with_required_skills(&required_skills)
+            .with_delivery(
+                &delivery,
+                workspace::Harness::of(agent) == workspace::Harness::Claude,
+            );
         let mut process = AcpProcess::spawn(&spec).with_context(|| {
             format!("failed to spawn ACP harness for pipeline node {}", agent.id)
         })?;
@@ -1740,7 +1743,11 @@ fn node_process_spec(
     team_path: &Path,
     agent: &config::AgentConfig,
     memory: &memory::TeamMemory,
-) -> Result<(ProcessSpec, Vec<workspace::PreparedSkill>)> {
+) -> Result<(
+    ProcessSpec,
+    Vec<workspace::PreparedSkill>,
+    delivery::Delivery,
+)> {
     let declared_cwd = resolve_cwd(team_path, &agent.spawn.cwd)?;
     // Pipeline mode withdraws `dispatch`/`handoff` outright and gates `ask` on the node's own
     // `allowRecruiting`, so its note promises less (`team_bus::refuse_by_mode`).
@@ -1755,15 +1762,19 @@ fn node_process_spec(
     let cwd = workspace
         .as_ref()
         .map_or(declared_cwd, |workspace| workspace.cwd.clone());
-    let skills = workspace.map_or_else(Vec::new, |workspace| workspace.required_skills);
+    let (skills, delivery) = workspace.map_or_else(Default::default, |workspace| {
+        (workspace.required_skills, workspace.delivery)
+    });
     Ok((
         ProcessSpec {
             cmd: agent.spawn.cmd.clone(),
             args: agent.spawn.args.clone(),
             env: agent.spawn.env.clone(),
             cwd,
+            tools: delivery.tools.clone(),
         },
         skills,
+        delivery,
     ))
 }
 
@@ -2122,7 +2133,28 @@ pub(crate) fn compose_prompt(
         text,
         sections,
         required_skills: Vec::new(),
+        delivery: delivery::Delivery::default(),
     }
+}
+
+/// [`compose_prompt`] plus everything `materialise` delivered: required skills (ADR 0020, 0021),
+/// then knowledge and tools (ADR 0029). `None` is an agent that wired nothing.
+pub(crate) fn compose_for(
+    agent: &config::AgentConfig,
+    packet: &memory::ContextPacket,
+    task: &NodeTask,
+    workspace: Option<&workspace::Workspace>,
+) -> memory::ComposedPrompt {
+    let composed = compose_prompt(agent, packet, task);
+    let Some(workspace) = workspace else {
+        return composed;
+    };
+    composed
+        .with_required_skills(&workspace.required_skills)
+        .with_delivery(
+            &workspace.delivery,
+            workspace::Harness::of(agent) == workspace::Harness::Claude,
+        )
 }
 
 /// What a node is asked to do: the run's goal, plus — for a later pipeline stage — what its
@@ -2177,11 +2209,22 @@ fn wired_capabilities(agent: &config::AgentConfig) -> Option<String> {
     let names = agent
         .capabilities
         .iter()
-        .map(|capability| format!("- {} (skill)", capability.name))
+        .map(|capability| format!("- {} ({})", capability.name, capability.kind.as_str()))
         .collect::<Vec<_>>()
         .join("\n");
+    // A skills-only agent keeps the sentence it always had, so its prompt is byte-identical to
+    // before ADR 0029.
+    if agent
+        .capabilities
+        .iter()
+        .all(|capability| capability.kind == config::CapabilityKind::Skill)
+    {
+        return Some(format!(
+            "The operator connected these to you for this task, and they are available in your working directory. These are required for this task. Their complete instructions are supplied in the required-skill sections below.\n{names}"
+        ));
+    }
     Some(format!(
-        "The operator connected these to you for this task, and they are available in your working directory. These are required for this task. Their complete instructions are supplied in the required-skill sections below.\n{names}"
+        "The operator connected these to you for this task. Each one has its own section below: skills are required instructions, knowledge is source material to consult, and tools are MCP servers available in this session.\n{names}"
     ))
 }
 

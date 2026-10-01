@@ -61,6 +61,10 @@ pub struct ProcessSpec {
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub cwd: PathBuf,
+    /// MCP servers the operator wired to this agent (ADR 0029), handed over in `session/new` and
+    /// again in `session/load` beside the Team Bus. Part of the spec rather than the prompt so a
+    /// respawned stage reopens with exactly the tools it started with.
+    pub tools: Vec<crate::delivery::DeliveredTool>,
 }
 
 struct RpcResult {
@@ -126,6 +130,48 @@ impl<'a> BoundaryTurn<'a> {
     }
 }
 
+/// The wired tools as ACP `McpServer` objects, or why this harness cannot take one of them.
+///
+/// ACP requires every agent to accept stdio servers; HTTP and SSE only when `initialize`
+/// advertised them. A tool the harness cannot take fails the run here, before `session/new`, naming
+/// the tool and the transport — never a session that silently lacks it (ADR 0029 decision 5).
+fn wired_tool_servers(
+    agent_id: &str,
+    tools: &[crate::delivery::DeliveredTool],
+    initialized: &Value,
+) -> Result<Vec<Value>> {
+    use crate::delivery::Transport;
+
+    let advertises = |transport: &str| {
+        initialized
+            .pointer(&format!("/agentCapabilities/mcpCapabilities/{transport}"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
+    tools
+        .iter()
+        .map(|tool| {
+            let accepted = match tool.transport {
+                Transport::Stdio => true,
+                Transport::Http => advertises("http"),
+                Transport::Sse => advertises("sse"),
+            };
+            if !accepted {
+                bail!(
+                    "cannot deliver the tool {} to {agent_id}: its server {} uses {} and this \
+                     harness did not advertise {} MCP support. Disconnect the tool from this \
+                     agent, or configure a stdio version of the server.",
+                    tool.name,
+                    tool.server,
+                    tool.transport.label(),
+                    tool.transport.label()
+                );
+            }
+            Ok(tool.server_definition.clone())
+        })
+        .collect()
+}
+
 /// Owns one ACP child and both sides of its line-delimited JSON-RPC stream.
 pub struct AcpProcess {
     child: Child,
@@ -148,6 +194,8 @@ pub struct AcpProcess {
     /// response — decision 7's tier selector, read from the response this process already
     /// archives as `session_meta`. `false` until `initialize` has answered.
     supports_load_session: bool,
+    /// Wired MCP servers, from [`ProcessSpec::tools`].
+    tools: Vec<crate::delivery::DeliveredTool>,
 }
 
 impl AcpProcess {
@@ -198,6 +246,7 @@ impl AcpProcess {
             event_log: None,
             request_timeout: REQUEST_TIMEOUT,
             supports_load_session: false,
+            tools: spec.tools.clone(),
         })
     }
 
@@ -387,7 +436,7 @@ impl AcpProcess {
             .unwrap_or(false);
         // The same Team Bus definition the session was created with. A reloaded session that was
         // handed a *different* bus would be a session whose tools moved under it mid-conversation.
-        let mcp_servers = if supports_http_mcp {
+        let mut mcp_servers = if supports_http_mcp {
             context
                 .bus
                 .map(TeamBusConnection::server_definition)
@@ -396,6 +445,12 @@ impl AcpProcess {
         } else {
             Vec::new()
         };
+        // And the same wired tools, for the same reason.
+        mcp_servers.extend(wired_tool_servers(
+            agent_id,
+            &self.tools,
+            &initialized.result,
+        )?);
         self.session_id = Some(acp_session_id.to_owned());
 
         let event_log = context
@@ -630,7 +685,7 @@ impl AcpProcess {
             .pointer("/agentCapabilities/mcpCapabilities/http")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let mcp_servers = if supports_http_mcp {
+        let mut mcp_servers = if supports_http_mcp {
             context
                 .bus
                 .map(TeamBusConnection::server_definition)
@@ -639,6 +694,13 @@ impl AcpProcess {
         } else {
             Vec::new()
         };
+        // Checked before `session/new`, so a transport this harness cannot take fails the run
+        // before anything is created rather than leaving a session without its tools.
+        mcp_servers.extend(wired_tool_servers(
+            agent_id,
+            &self.tools,
+            &initialized.result,
+        )?);
         let cwd = self.cwd.to_string_lossy().into_owned();
         let created = self
             .request(
@@ -2449,6 +2511,7 @@ mod tests {
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
         };
         let archive = EventArchive::from_pool(pool.clone());
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -2540,6 +2603,7 @@ mod tests {
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -2561,6 +2625,77 @@ mod tests {
             .expect("set_model metadata");
         assert_eq!(configured.payload["value"], "vendor/deep");
         assert_eq!(configured.raw.as_ref().unwrap()["id"], 3);
+    }
+
+    fn wired_tool(definition: serde_json::Value) -> crate::delivery::DeliveredTool {
+        crate::delivery::prepare(
+            "Agent Memory",
+            &crate::capabilities::ToolDefinition {
+                provider: "Claude Code".into(),
+                config_path: "/home/operator/.claude.json".into(),
+                server: "agentmemory".into(),
+                format: crate::capabilities::ToolFormat::Claude,
+                value: definition,
+            },
+            &|_| None,
+        )
+        .expect("deliverable")
+    }
+
+    /// ADR 0029's tool contract, enforced by the harness rather than by reading our own request
+    /// back: the fake exits 9 unless `session/new` hands it the wired server beside nothing else.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_wired_tool_is_handed_to_the_harness_in_session_new(pool: PgPool) {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r request
+            case "$request" in
+              *'"method":"session/new"'*'"mcpServers":[{"args":["-y","@agentmemory/mcp"],"command":"npx","env":[],"name":"agentmemory"}]'*) ;;
+              *) exit 9 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"wired-tool"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
+        "#;
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: std::env::current_dir().expect("cwd"),
+            tools: vec![wired_tool(
+                serde_json::json!({"command": "npx", "args": ["-y", "@agentmemory/mcp"]}),
+            )],
+        };
+        let archive = EventArchive::from_pool(pool);
+        AcpProcess::spawn(&spec)
+            .expect("spawn")
+            .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
+            .await
+            .expect("the harness received the wired server");
+    }
+
+    /// A transport the harness did not advertise fails before `session/new`, naming the tool.
+    #[test]
+    fn a_remote_tool_needs_the_harness_to_advertise_its_transport() {
+        let remote =
+            wired_tool(serde_json::json!({"type": "http", "url": "https://example.test/mcp"}));
+        let tools = [remote];
+        let error =
+            wired_tool_servers("writer", &tools, &serde_json::json!({"protocolVersion": 1}))
+                .expect_err("refused");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("Agent Memory") && message.contains("HTTP"),
+            "{message}"
+        );
+        let advertised =
+            serde_json::json!({"agentCapabilities": {"mcpCapabilities": {"http": true}}});
+        let servers = wired_tool_servers("writer", &tools, &advertised).expect("accepted");
+        assert_eq!(servers[0]["type"], "http");
     }
 
     #[sqlx::test(migrations = "../../migrations")]
@@ -2585,6 +2720,7 @@ mod tests {
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
         };
         let skill = crate::workspace::PreparedSkill::fixture(
             "claude-design",
@@ -2595,6 +2731,7 @@ mod tests {
         let composed = crate::memory::ComposedPrompt {
             text: "## Role\nDesigner\n\n## Task\nMake a report".into(),
             required_skills: vec![],
+            delivery: crate::delivery::Delivery::default(),
             sections: vec![
                 crate::memory::PromptSection {
                     kind: crate::memory::PromptSectionKind::Role,
@@ -2735,6 +2872,7 @@ mod tests {
             args: vec!["-c".into(), script.to_owned()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
         };
         let skill = crate::workspace::PreparedSkill::fixture(
             "claude-design",
@@ -2745,6 +2883,7 @@ mod tests {
         let composed = crate::memory::ComposedPrompt {
             text: "## Task\nMake a report".into(),
             required_skills: vec![],
+            delivery: crate::delivery::Delivery::default(),
             sections: vec![crate::memory::PromptSection {
                 kind: crate::memory::PromptSectionKind::Task,
                 heading: "## Task".into(),
@@ -2897,6 +3036,7 @@ mod tests {
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -2973,6 +3113,7 @@ mod tests {
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -3016,6 +3157,7 @@ mod tests {
             args: Vec::new(),
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -3065,6 +3207,7 @@ mod tests {
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -3112,6 +3255,7 @@ mod tests {
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -3158,6 +3302,7 @@ mod tests {
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec)

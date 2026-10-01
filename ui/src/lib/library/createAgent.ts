@@ -56,5 +56,6 @@ export function buildAgentFromSource(
       cwd: '.',
     },
     allowRecruiting: true,
+    ...(source.capabilities?.length ? { capabilities: source.capabilities.map((capability) => ({ ...capability })) } : {}),
   }
 }

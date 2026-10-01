@@ -39,6 +39,19 @@ const ROUTE_NOTE: Record<SkillRoute, (harness: string) => string> = {
   blocked: () => 'blocked — LoomWatch knows no project skill directory for this harness',
 }
 
+/** What connecting means for each kind, in the words the run will bear out (ADR 0012, 0029). */
+const PICKER_NOTE: Record<CapabilityKind, string> = {
+  skill: 'Connect this skill to require it in the next run. Its discovery source can differ from the agent’s harness.',
+  knowledge: 'Connect this source to supply its contents to an agent in the next run.',
+  tool: 'Connect this tool to give an agent its MCP server in the next run. Its config source can differ from the agent’s harness.',
+}
+
+const DELIVERY_NOTE: Record<CapabilityKind, string> = {
+  skill: 'Save the team to keep these connections. LoomWatch delivers the bundle to every connected agent and adapts how the prompt introduces it: a harness that cannot be relied on to run the skill as written gets its text inlined with a note mapping what it assumes onto what that agent actually has.',
+  knowledge: 'Save the team to keep these connections. Each connected agent gets the contents shown below in its prompt as source material, and the folder’s path. On Claude Code, LoomWatch also grants read access to that folder; other apps apply their own rules.',
+  tool: 'Save the team to keep these connections. LoomWatch hands this MCP server to each connected agent’s app when the run starts, using your own server settings. On Claude Code it also allows the server’s tools; other apps apply their own rules. A run fails up front if an app cannot take the server.',
+}
+
 /** Plain-words heading for the portability classification. */
 const KIND_NOTE: Record<string, string> = {
   artifact: 'Produces a deliverable',
@@ -51,16 +64,22 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
   const glyph = kind === 'knowledge' ? 'source' : kind
   const [retry, setRetry] = useState(0)
   const [detailState, setDetailState] = useState<{ id: string; details: CapabilityDetails | null; error: string | null }>({ id: '', details: null, error: null })
+  // Skills load their SKILL.md and knowledge sources load what they hold; a tool has nothing to read.
+  const readsDetails = kind === 'skill' || kind === 'knowledge'
+  // What an agent can be connected to through the team file (ADR 0012, 0029). Memory is wired
+  // through `memory.inherits` on the canvas instead, so it has no picker here.
+  const wireable = kind !== 'knowledge' || !item.memory
+  const noun = kind === 'skill' ? 'skill' : kind === 'tool' ? 'tool' : 'source'
   useEffect(() => {
-    if (kind !== 'skill') return
+    if (!readsDetails) return
     let cancelled = false
     void fetchCapabilityDetails(item.id).then(
       (details) => { if (!cancelled) setDetailState({ id: item.id, details, error: null }) },
       (error: unknown) => { if (!cancelled) setDetailState({ id: item.id, details: null, error: error instanceof Error ? error.message : String(error) }) },
     )
     return () => { cancelled = true }
-  }, [item.id, kind, retry])
-  const detailsLoading = kind === 'skill' && detailState.id !== item.id
+  }, [item.id, readsDetails, retry])
+  const detailsLoading = readsDetails && detailState.id !== item.id
   const details = detailState.id === item.id ? detailState.details : null
   const detailsError = detailState.id === item.id ? detailState.error : null
   const portability = details?.portability ?? null
@@ -129,49 +148,59 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
           </div>
         )}
 
-        {kind === 'skill' && (
+        {wireable && (
           <div className="zone capability-agent-picker">
             <div className="zone-head t-micro">Use with agents</div>
-            <p className="capability-description t-meta">Connect this skill to require it in the next run. Its discovery source can differ from the agent’s harness.</p>
+            <p className="capability-description t-meta">{PICKER_NOTE[kind]}</p>
             {agents.length ? agents.map((agent) => {
               const route = routeFor(agent.harnessId)
               return (
                 <label key={agent.id} className="capability-agent-option">
                   <input type="checkbox" aria-label={`Use ${item.name} with ${agent.name} (${agent.harness})`} checked={agent.connected} disabled={readOnly || !onToggleAgent} onChange={(event) => onToggleAgent?.(agent.id, event.target.checked)} />
                   <span><strong>{agent.name}</strong><small>{agent.harness}{route ? ` · ${ROUTE_NOTE[route](agent.harness)}` : ''}</small></span>
-                  {agent.connected && <span className="capability-required">Required</span>}
+                  {agent.connected && <span className="capability-required">{kind === 'skill' ? 'Required' : 'Connected'}</span>}
                 </label>
               )
-            }) : <p className="hint t-meta">Add an agent to your team to connect this skill.</p>}
+            }) : <p className="hint t-meta">Add an agent to your team to connect this {noun}.</p>}
             {suggestion && (
               <p className="capability-suggestion t-meta">
                 <span>This skill produces a deliverable and its own text leans on Claude ({portability?.needs.join(', ')}). {suggestion.name} runs Claude Code, where those assumptions hold.</span>
                 <button type="button" className="btn" disabled={readOnly || !onToggleAgent} onClick={() => onToggleAgent?.(suggestion.id, true)}>Connect to {suggestion.name}</button>
               </p>
             )}
-            <p className="hint t-meta">Save the team to keep these connections. LoomWatch delivers the bundle to every connected agent and adapts how the prompt introduces it: a harness that cannot be relied on to run the skill as written gets its text inlined with a note mapping what it assumes onto what that agent actually has.</p>
+            <p className="hint t-meta">{DELIVERY_NOTE[kind]}</p>
           </div>
         )}
 
-        {kind === 'skill' && (
+        {readsDetails && (
           <div className="zone capability-instructions">
-            <div className="zone-head t-micro">Skill definition</div>
-            {detailsLoading && <div className="capability-definition-loading" role="status"><span className="skel-bar" /><span className="skel-bar" /><span className="skel-bar" /><span className="visually-hidden">Loading skill definition…</span></div>}
+            <div className="zone-head t-micro">{kind === 'skill' ? 'Skill definition' : 'Contents'}</div>
+            {detailsLoading && <div className="capability-definition-loading" role="status"><span className="skel-bar" /><span className="skel-bar" /><span className="skel-bar" /><span className="visually-hidden">{kind === 'skill' ? 'Loading skill definition…' : 'Loading contents…'}</span></div>}
             {detailsError && (
               <div className="inline-error" role="alert">
-                <span className="msg t-body">Couldn’t load this skill’s definition.</span>
+                <span className="msg t-body">{kind === 'skill' ? 'Couldn’t load this skill’s definition.' : 'Couldn’t load what this source holds.'}</span>
                 <span className="detail t-meta">{detailsError}</span>
                 <span><button type="button" className="btn" onClick={() => { setDetailState({ id: '', details: null, error: null }); setRetry((value) => value + 1) }}>Retry</button></span>
               </div>
             )}
-            {details && details.definitions.length === 0 && <p className="capability-description t-meta">No readable SKILL.md definition was found.</p>}
+            {details && details.definitions.length === 0 && <p className="capability-description t-meta">{kind === 'skill' ? 'No readable SKILL.md definition was found.' : 'Nothing readable was found for this source.'}</p>}
             {details?.definitions.map((definition) => (
               <section key={`${definition.source}:${definition.path}`} className="capability-definition-source">
                 <header><span className="t-body-m">{definition.source}</span><span className="t-mono-sm" title={definition.path}>{definition.path}</span></header>
                 <pre className="capability-definition t-mono-sm">{definition.content}</pre>
               </section>
             ))}
-            {!detailsLoading && !detailsError && details && <span className="hint t-meta">Loaded locally on demand from {details.definitions.length === 1 ? 'this skill file' : `${details.definitions.length} matching skill files`}.</span>}
+            {!detailsLoading && !detailsError && details && (
+              <span className="hint t-meta">
+                {kind === 'skill'
+                  ? `Loaded locally on demand from ${details.definitions.length === 1 ? 'this skill file' : `${details.definitions.length} matching skill files`}.`
+                  : item.memory
+                    ? 'Read locally on demand. A live team’s kept notes are listed in its Memory panel.'
+                    // ADR 0012: a knowledge source that is not memory has no delivery contract yet.
+                    // ADR 0029: the snapshot shown here is the one a connected agent's prompt carries.
+                    : 'Read locally on demand. An agent connected to this source receives exactly these contents in its opening prompt.'}
+              </span>
+            )}
           </div>
         )}
 
@@ -188,7 +217,7 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
           <button type="button" className="btn btn-primary capability-action" disabled={readOnly && !placed} onClick={placed ? onReveal : onAdd}>
             {placed ? 'Show on canvas' : <><Plus size={14} aria-hidden="true" /> Add to canvas</>}
           </button>
-          <span className="hint t-meta">{kind === 'skill' ? 'Placing a card alone does not require the skill. Connect it to an agent above or on the canvas.' : 'Canvas placement records intent only. The harness still controls authorization.'}</span>
+          <span className="hint t-meta">{wireable ? `Placing a card alone delivers nothing. Connect the ${noun} to an agent above or on the canvas.` : 'Connect this memory to an agent, or to the Prompt node for the whole team, on the canvas.'}</span>
         </div>
       </div>
     </aside>

@@ -2,7 +2,7 @@ import { CapabilityGraph } from './CapabilityGraph'
 import { Markdown } from '../ui/Markdown'
 import { preloadMarkdown } from '../ui/preloadMarkdown'
 import { SuppliedInstructions } from './SuppliedInstructions'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowRight,
@@ -36,6 +36,7 @@ import { markState } from '../../lib/story/mark'
 import { AgentMark } from '../ui/AgentMark'
 import { FileCard } from '../ui/FileCard'
 import { fileRefsIn } from '../../lib/files/fileRefs'
+import { liftInto, noteShownRequest } from '../../lib/motion/lift'
 
 export interface DeliveryLaneProps extends RunColumnProps {
   harnessLabels?: ReadonlyMap<string, string>
@@ -234,6 +235,16 @@ export function DeliveryLane({
       setQuery('')
     }
   }
+  // Stage motion follows the session, not a recorded status: a replay never shows work in motion.
+  const live = mode === 'live' && !planned
+  // The request the composer just sent lifts into place here (lib/motion/lift.ts). Before paint, so
+  // the text never shows in its final spot first.
+  const requestText = useRef<HTMLParagraphElement>(null)
+  useLayoutEffect(() => {
+    liftInto(requestText.current, prompt)
+    noteShownRequest(prompt)
+    return () => noteShownRequest('')
+  }, [prompt])
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(output.text)
@@ -244,7 +255,7 @@ export function DeliveryLane({
   }
   return (
     <main
-      className={`delivery-lane ${expanded ? 'output-expanded' : ''}`}
+      className={`delivery-lane ${expanded ? 'output-expanded' : ''} ${live ? 'live' : ''}`}
       aria-label="Run workspace"
       onKeyDown={(event) => {
         if (event.key !== 'Escape' || (!receipt && !expanded)) return
@@ -285,7 +296,7 @@ export function DeliveryLane({
         </header>
         <article className="delivery-request">
           <div className="delivery-request-label"><span className="delivery-eyebrow">Request</span>{onHistory && <button className="delivery-link" onClick={onHistory}>Run history <ArrowDown size={12} /></button>}</div>
-          <p className="selectable">
+          <p ref={requestText} className="selectable">
             {prompt ||
               (planned
                 ? 'Type your request in the box at the bottom right, then press Enter.'
@@ -315,6 +326,7 @@ export function DeliveryLane({
               evidenceByAgent.get(node.id) ?? [],
               snapshots.get(node.id),
             ).filter((item) => item.required)
+            const working = live && (runtime?.status === 'starting' || runtime?.status === 'running')
             return (
               <div
                 className="delivery-stage-wrap"
@@ -322,11 +334,11 @@ export function DeliveryLane({
                 key={node.id}
               >
                 {index > 0 && pipeline && linearPipeline && (
-                  <button className="delivery-handoff-arrow prototype-handoff" aria-label={`Inspect handoff to ${agent.name}`} onClick={() => inspectHandover?.(node.id)}><span>Handoff</span><ArrowRight size={24} /><small>View handoff</small></button>
+                  <button className={`delivery-handoff-arrow prototype-handoff ${working ? 'passing' : ''}`} aria-label={`Inspect handoff to ${agent.name}`} onClick={() => inspectHandover?.(node.id)}><span>Handoff</span><ArrowRight size={24} /><small>View handoff</small></button>
                 )}
                 <article
                   id={`delivery-stage-${node.id}`}
-                  className={`delivery-stage ${selected?.id === node.id ? 'selected' : ''}`}
+                  className={`delivery-stage ${selected?.id === node.id ? 'selected' : ''} ${working ? 'working' : ''}`}
                 >
                   <button
                     className="delivery-stage-select"

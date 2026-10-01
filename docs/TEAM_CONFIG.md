@@ -92,9 +92,38 @@ commands containing a path separator are rejected. The command is executed direc
 
 ## Capabilities
 
-`agents[].capabilities` lists what the daemon delivers into an agent's workspace before it runs.
-Only `kind: skill` is executable today; tools and knowledge sources are composed on the canvas but
-reach an agent through mechanisms the schema does not yet model.
+`agents[].capabilities` lists what the daemon delivers to an agent before it runs. Each entry is
+`{ kind, name }`, where `name` is the capability's name in the Library:
+
+```yaml
+capabilities:
+  - { kind: skill, name: claude-design }        # copied into the workspace, required in the prompt
+  - { kind: knowledge, name: loomwatch project } # contents in the prompt; a folder is readable
+  - { kind: tool, name: Agent Memory }           # your MCP server, handed to the harness
+```
+
+Team memory is not a capability: wire another team's memory or an imported pack through
+`memory.inherits` (see [Team memory](TEAM_MEMORY.md)).
+
+**Knowledge** is supplied in the agent's opening prompt as the same snapshot the Library's
+**Contents** panel shows: for a project folder, its top-level listing and README; for an OpenCode
+project, its recent session titles. It is framed as source material, never as instructions. A
+source that is a folder is also a read grant for that folder. On Claude Code, LoomWatch writes
+`permissions.additionalDirectories` and a `Read(//<folder>/**)` allow rule into the workspace's
+`.claude/settings.json`; other apps apply their own rules. One agent's knowledge is capped at
+64 KiB, and a run over the cap fails rather than shortening it.
+
+**Tools** are MCP servers you already configured for Claude Code (`~/.claude.json`,
+`~/.claude/settings.json`), Codex (`~/.codex/config.toml`) or OpenCode
+(`~/.config/opencode/opencode.json`). LoomWatch reads the definition, preferring the receiving
+agent's own app, and passes it to the harness in ACP `session/new` beside the Team Bus. That works
+on any ACP app: stdio servers always, HTTP and SSE servers only when the app advertises them.
+`${VAR}` (Claude Code), `{env:VAR}` (OpenCode) and Codex's `env_vars`, `bearer_token_env_var` and
+`env_http_headers` are resolved from the daemon's environment. Values reach only the harness
+process; the run record keeps names. On Claude Code, LoomWatch also writes an `mcp__<server>` allow
+rule. A server that is disabled, needs a variable the daemon lacks, or uses a setting ACP cannot
+carry (a Codex `cwd` or tool filter) fails the run with the reason. See
+[ADR 0029](decisions/0029-deliver-knowledge-and-tools.md).
 
 An agent that declares capabilities runs in `<team dir>/.loomwatch/<team>/<agent>/` instead of its
 declared `spawn.cwd`. LoomWatch copies each wired skill's whole bundle from whichever harness or

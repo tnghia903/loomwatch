@@ -1,4 +1,5 @@
 import type { HarnessSpawn } from '../harnesses'
+import type { CapabilityRef } from '../team-file/types'
 
 export type LibraryGroup = 'detected' | 'endpoints' | 'presets'
 
@@ -20,4 +21,6 @@ export interface LibrarySource {
   /** Only presets pre-fill these — §4.5: "From a preset, both are already filled". */
   role?: string
   model?: string
+  /** Skills a job brings with it (ADR 0030/0031); delivered on whatever app the agent runs. */
+  capabilities?: CapabilityRef[]
 }

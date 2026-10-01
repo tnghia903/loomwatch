@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { Composer, type ComposerState } from './Composer'
+import { liftInto, noteShownRequest } from '../../lib/motion/lift'
 
 afterEach(cleanup)
 
@@ -224,6 +225,23 @@ it('sends on Enter, keeps Shift+Enter for a newline, and never sends mid-IME com
   expect(onSubmit).not.toHaveBeenCalled()
   fireEvent.keyDown(box, { key: 'Enter' })
   expect(onSubmit).toHaveBeenCalledOnce()
+})
+
+// The run a send starts lifts the sent text out of this box (lib/motion/lift.ts), so ↵ has to leave
+// where that text was before the composer clears.
+it('leaves where the sent text was, for the run it starts to lift into place', () => {
+  HTMLElement.prototype.animate = vi.fn(() => ({ finished: Promise.resolve() }) as unknown as Animation)
+  try {
+    noteShownRequest('An earlier request')
+    keyProps({ kind: 'terminal', phase: 'succeeded' }, 'A different goal')
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+    const box = document.body.appendChild(document.createElement('p'))
+    box.textContent = 'A different goal'
+    expect(liftInto(box, 'A different goal')).toBe(true)
+  } finally {
+    delete (HTMLElement.prototype as Partial<HTMLElement>).animate
+    document.querySelectorAll('.lift-ghost').forEach((ghost) => ghost.remove())
+  }
 })
 
 // A stray Enter in an empty box after a run must not silently re-run the whole team.

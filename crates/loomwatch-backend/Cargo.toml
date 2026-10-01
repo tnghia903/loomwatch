@@ -31,6 +31,7 @@ uuid = { version = "1.18", features = ["v4"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 cron = "0.17"
 chrono-tz = "0.10"
+toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 
 [dev-dependencies]
 futures-util = "0.3"

@@ -1,6 +1,8 @@
 import { ArrowRight, MessageSquare, Asterisk, History, Notebook, Square, Workflow } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
+import { markLiftOrigin } from '../../lib/motion/lift'
+
 import type { WaitingOn } from '../../lib/runs/client'
 import type { ExecutionMode } from '../../lib/team-file/useTeamDocument'
 import type { RunPhase } from '../../lib/watch/events'
@@ -108,6 +110,11 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
   // "When the Output arrives the composer does not go dark. It offers Follow up." Available only
   // on a terminal run, because a follow-up is a child of a run that is over.
   const canFollowUp = terminal && onFollowUp !== undefined
+  // A send that starts a run leaves where its text was, so the run can lift it into its Request box.
+  const sending = (send: (() => void) | undefined) => () => { markLiftOrigin(textarea.current, value); send?.() }
+  const submit = sending(onSubmit)
+  const newRun = sending(onNewRun)
+  const followUp = sending(onFollowUp)
   const targetName = followUpTarget
     ? followUpStages.find((stage) => stage.id === followUpTarget)?.name ?? followUpTarget
     : null
@@ -127,11 +134,11 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
       // composer is in follow-up mode, and Retry stays reachable by its own button.
       if (replyTo && !replySending && value.trim()) onReply?.(replyTo.id)
       else if (answering && !answering.sending && value.trim()) onAnswer?.()
-      else if (canFollowUp && value.trim()) onFollowUp?.()
+      else if (canFollowUp && value.trim()) followUp()
       // Re-running with nothing typed is only ever deliberate: ⌘↵, never a stray ↵.
       else if (terminal && !value.trim() && modified) onRetry()
-      else if (terminal && value.trim()) onNewRun()
-      else if (canSubmit) onSubmit()
+      else if (terminal && value.trim()) newRun()
+      else if (canSubmit) submit()
     }
     // §1.2: Esc blurs, which collapses the grown input above. It is handled here rather than in
     // the workspace's Escape chain so that dismissing the composer never also clears a selection.
@@ -167,8 +174,8 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
     action = <>
       <button type="button" className="btn" onClick={onRetry} title="Run the original request again from scratch">Retry</button>
       {canFollowUp
-        ? <button type="button" className="btn btn-primary" onClick={() => onFollowUp?.()} disabled={!value.trim()} title={value.trim() ? undefined : 'Type what to change first.'}>{dirty ? 'Save & follow up' : 'Follow up'} <kbd>↵</kbd></button>
-        : <button type="button" className="btn btn-primary" onClick={onNewRun} disabled={!value.trim()} title={value.trim() ? undefined : 'Type a new goal first.'}>New run</button>}
+        ? <button type="button" className="btn btn-primary" onClick={followUp} disabled={!value.trim()} title={value.trim() ? undefined : 'Type what to change first.'}>{dirty ? 'Save & follow up' : 'Follow up'} <kbd>↵</kbd></button>
+        : <button type="button" className="btn btn-primary" onClick={newRun} disabled={!value.trim()} title={value.trim() ? undefined : 'Type a new goal first.'}>New run</button>}
     </>
   } else if (state.kind === 'saving') {
     action = <button type="button" className="btn" disabled>Saving…</button>
@@ -177,14 +184,14 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
     // steps, and §1.4 requires they stay legible as two.
     action = <button type="button" className="btn" disabled>Starting…</button>
   } else if (state.kind === 'dirty') {
-    action = <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={!canSubmit}>Save &amp; run <kbd>↵</kbd></button>
+    action = <button type="button" className="btn btn-primary" onClick={submit} disabled={!canSubmit}>Save &amp; run <kbd>↵</kbd></button>
   } else if (state.kind === 'blocked' || state.kind === 'unavailable') {
     action = <>
       {state.kind === 'blocked' && state.action && <button type="button" className="btn" onClick={state.action.run}>{state.action.label}</button>}
       <button type="button" className="btn btn-primary" disabled title={state.reason}>Run <kbd>↵</kbd></button>
     </>
   } else {
-    action = <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={!canSubmit} title={canSubmit ? undefined : 'Type what the team should do.'}>Run <kbd>↵</kbd></button>
+    action = <button type="button" className="btn btn-primary" onClick={submit} disabled={!canSubmit} title={canSubmit ? undefined : 'Type what the team should do.'}>Run <kbd>↵</kbd></button>
   }
 
   let noteNode: ReactNode = note
@@ -267,7 +274,7 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
           {noteNode && <span className={`comp-note t-meta ${noteClass}`} role={noteClass === 'err' ? 'alert' : undefined}>{noteNode}</span>}
         </div>
         <div className="comp-act">
-          {slim && !busy && (state.kind === 'ready' || state.kind === 'dirty') ? <button type="button" className="iconbtn prototype-send" aria-label="Run team" disabled={!canSubmit} onClick={onSubmit}><ArrowRight size={17} /></button> : action}
+          {slim && !busy && (state.kind === 'ready' || state.kind === 'dirty') ? <button type="button" className="iconbtn prototype-send" aria-label="Run team" disabled={!canSubmit} onClick={submit}><ArrowRight size={17} /></button> : action}
           <button type="button" className="iconbtn" onClick={onOpenHistory} aria-haspopup="dialog" aria-expanded={historyOpen} title="Run history — reopen a previous run (replay)" aria-label="Run history"><History size={16} aria-hidden="true" /></button>
         </div>
       </div>

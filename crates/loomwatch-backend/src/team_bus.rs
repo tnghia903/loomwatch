@@ -983,6 +983,10 @@ impl TeamBus {
             args: agent.spawn.args.clone(),
             env: agent.spawn.env.clone(),
             cwd,
+            tools: workspace
+                .as_ref()
+                .map(|workspace| workspace.delivery.tools.clone())
+                .unwrap_or_default(),
         };
         let mut packet = self.state.memory.packet_for(agent)?;
         // A delegated helper's lineage is the server-owned `delegation_path` on its caller's
@@ -1005,12 +1009,12 @@ impl TeamBus {
                 .await
                 .map_err(|error| anyhow::anyhow!("{error}"))?;
         }
-        let composed = crate::compose_prompt(agent, &packet, &crate::NodeTask::goal(prompt))
-            .with_required_skills(
-                workspace
-                    .as_ref()
-                    .map_or(&[], |workspace| workspace.required_skills.as_slice()),
-            );
+        let composed = crate::compose_for(
+            agent,
+            &packet,
+            &crate::NodeTask::goal(prompt),
+            workspace.as_ref(),
+        );
         let connection = self.connection_with_context(&agent.id, context).await?;
         let process = AcpProcess::spawn(&spec)
             .with_context(|| format!("failed to spawn ACP harness for agent {}", agent.id))?;
@@ -2484,6 +2488,7 @@ mod tests {
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            tools: Vec::new(),
         };
         let mut process = AcpProcess::spawn(&spec)?;
         let event_log = EventLog::new(archive.clone(), "live-ask-run".into());

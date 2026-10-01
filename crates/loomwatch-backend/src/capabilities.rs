@@ -1,10 +1,13 @@
 //! Read-only discovery of local skills, MCP tools and knowledge sources.
 //!
 //! The Library inventory deliberately returns metadata only: names, provenance and compatibility.
-//! A separate, on-demand detail lookup can return a selected skill's local `SKILL.md`; connector
+//! A separate, on-demand detail lookup can return a selected skill's local `SKILL.md`, or what a
+//! selected knowledge source holds: a project folder's top-level listing and README, the titles of
+//! `OpenCode` sessions run there, or a memory source's Brief and kept notes. Connector
 //! configuration values and `OpenCode` conversation contents are never returned.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -91,6 +94,8 @@ pub struct MemorySourceRef {
 pub struct CapabilityDetails {
     pub id: String,
     pub kind: String,
+    /// A skill's matching `SKILL.md` files, or what a knowledge source holds — one entry per thing
+    /// read, each naming where it came from. Empty for a tool.
     pub definitions: Vec<CapabilityDefinition>,
     /// What this skill assumes about the harness running it, and what each harness will therefore
     /// do with it. Metadata derived from the skill's own text — never connector configuration and
@@ -230,48 +235,14 @@ pub fn detect_capabilities(home: Option<&Path>, teams_root: &Path) -> Capability
     let mut tools = BTreeMap::<String, CapabilityBuilder>::new();
     let mut sources = BTreeMap::<String, CapabilityBuilder>::new();
 
-    if let Some(home) = home {
-        // Ranks order the list: what the operator installed themselves first, plugin payloads last.
-        scan_skill_root(
-            &home.join(".claude/skills"),
-            "Claude Code",
-            4,
-            RANK_PERSONAL,
-            &mut skills,
-        );
-        scan_skill_root(
-            &home.join(".codex/skills"),
-            "Codex",
-            5,
-            RANK_HARNESS,
-            &mut skills,
-        );
-        scan_skill_root(
-            &home.join(".agents/skills"),
-            "Shared",
-            4,
-            RANK_SHARED,
-            &mut skills,
-        );
-        // OpenCode is one of the three harnesses the Library offers, but its skills root was the
-        // one never scanned.
-        scan_skill_root(
-            &home.join(".config/opencode/skills"),
-            "OpenCode",
-            4,
-            RANK_HARNESS,
-            &mut skills,
-        );
-        // Both harnesses install plugins that carry skills. Scanning only Codex's cache listed 123
-        // Codex plugin skills beside a single Claude Code one, which read as a broken scan.
-        scan_plugin_skill_root(&home.join(".codex/plugins/cache"), "Codex", 10, &mut skills);
-        scan_plugin_skill_root(
-            &home.join(".claude/plugins"),
-            "Claude Code",
-            10,
-            &mut skills,
-        );
+    for root in skill_roots(home, teams_root) {
+        match root.layout {
+            SkillLayout::Skills => scan_skill_root(&root, &mut skills),
+            SkillLayout::Plugins => scan_plugin_skill_root(&root, &mut skills),
+        }
+    }
 
+    if let Some(home) = home {
         scan_codex_mcp(&home.join(".codex/config.toml"), &mut tools);
         scan_json_connectors(
             &home.join(".claude.json"),
@@ -300,16 +271,11 @@ pub fn detect_capabilities(home: Option<&Path>, teams_root: &Path) -> Capability
     // belongs here rather than in a second inventory nobody would think to look in.
     scan_team_memory_sources(teams_root, &mut sources);
 
-    let team_directory_name = teams_root.file_name().and_then(|name| name.to_str());
-    let project_name = if team_directory_name == Some("teams") {
-        teams_root
-            .parent()
-            .and_then(Path::file_name)
-            .and_then(|name| name.to_str())
-    } else {
-        team_directory_name
-    };
-    if let Some(name) = project_name {
+    if let Some(name) = project_folder(teams_root)
+        .as_deref()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+    {
         add_capability(
             &mut sources,
             &project_label(name),
@@ -355,10 +321,10 @@ pub fn detect_capability_details(
                 .map(|item| ("knowledge", item))
         })?;
 
-    let definitions = if kind == "skill" {
-        home.map_or_else(Vec::new, |home| skill_definitions(home, item))
-    } else {
-        Vec::new()
+    let definitions = match kind {
+        "skill" => skill_definitions(home, teams_root, item),
+        "knowledge" => knowledge_contents(home, teams_root, item),
+        _ => Vec::new(),
     };
     // The first definition is the one `workspace::materialise` would copy, so its text is the one
     // the route must be computed from. Reading a second copy from another provider would report a
@@ -377,66 +343,58 @@ pub fn detect_capability_details(
 
 /// Where a discovered skill actually lives, per provider. `workspace.rs` needs this to copy a
 /// wired skill into an agent's workspace; `detect_capability_details` needs it to show the source.
+/// Every installed copy of `item`, best first: the copy `workspace::materialise` delivers is the
+/// first one. Reads the same folders as the inventory, in [`skill_roots`] order.
 #[must_use]
-pub fn skill_definitions_for(home: &Path, item: &DetectedCapability) -> Vec<CapabilityDefinition> {
-    skill_definitions(home, item)
+pub fn skill_definitions_for(
+    home: Option<&Path>,
+    teams_root: &Path,
+    item: &DetectedCapability,
+) -> Vec<CapabilityDefinition> {
+    skill_definitions(home, teams_root, item)
 }
 
-fn skill_definitions(home: &Path, item: &DetectedCapability) -> Vec<CapabilityDefinition> {
+fn skill_definitions(
+    home: Option<&Path>,
+    teams_root: &Path,
+    item: &DetectedCapability,
+) -> Vec<CapabilityDefinition> {
     let mut definitions = Vec::new();
     let mut seen = BTreeSet::new();
-    for (root, source, depth) in [
-        (home.join(".claude/skills"), "Claude Code", 4),
-        (home.join(".codex/skills"), "Codex", 5),
-        (home.join(".agents/skills"), "Shared", 4),
-        (home.join(".config/opencode/skills"), "OpenCode", 4),
-    ] {
-        collect_matching_definitions(
-            &root,
-            source,
-            depth,
-            false,
-            item,
-            &mut seen,
-            &mut definitions,
-        );
+    // Root order is preference order. Sorting the copies by source name instead once delivered a
+    // trashed plugin generation, because `/.trash/` sorts before `/synced/`.
+    for root in skill_roots(home, teams_root) {
+        collect_matching_definitions(&root, item, &mut seen, &mut definitions);
     }
-    for (root, source) in [
-        (home.join(".codex/plugins/cache"), "Codex"),
-        (home.join(".claude/plugins"), "Claude Code"),
-    ] {
-        collect_matching_definitions(&root, source, 10, true, item, &mut seen, &mut definitions);
-    }
-    definitions
-        .sort_by(|left, right| (&left.source, &left.path).cmp(&(&right.source, &right.path)));
     definitions
 }
 
 fn collect_matching_definitions(
-    root: &Path,
-    provider: &str,
-    max_depth: usize,
-    plugin_source: bool,
+    root: &SkillRoot,
     item: &DetectedCapability,
     seen: &mut BTreeSet<PathBuf>,
     definitions: &mut Vec<CapabilityDefinition>,
 ) {
-    for path in find_skill_files(root, max_depth) {
-        let directory = path.parent().unwrap_or(root);
+    let mut paths = find_skill_files(&root.path, root.depth, root.exclude);
+    paths.sort();
+    for path in paths {
+        let directory = path.parent().unwrap_or(&root.path);
         let fallback = directory
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("Unnamed skill");
         let (name, _) = read_skill_metadata(&path, fallback);
-        let source = if plugin_source {
+        let source = if root.layout == SkillLayout::Plugins {
             plugin_name(directory).map_or_else(
-                || provider.to_owned(),
-                |plugin| format!("{provider} · {plugin}"),
+                || root.provider.clone(),
+                |plugin| format!("{} · {plugin}", root.provider),
             )
         } else {
-            provider.to_owned()
+            root.provider.clone()
         };
-        if name != item.name || !capability_has_source(&item.source, &source) {
+        // Rows merge copies by lowercased name, so a copy spelled `PDF` beside `pdf` is the same
+        // skill and must be offered for delivery too.
+        if !name.eq_ignore_ascii_case(&item.name) || !capability_has_source(&item.source, &source) {
             continue;
         }
         let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
@@ -650,37 +608,228 @@ fn stable_id(kind: &str, name: &str, source: &str) -> String {
     format!("{kind}-{:016x}", hasher.finish())
 }
 
-/// Directories that never hold a SKILL.md but can hold thousands of files.
-const SKIP_DIRECTORIES: [&str; 4] = ["node_modules", ".git", "dist", "target"];
+/// Directories that never hold an installed skill: build output and package caches that can hold
+/// thousands of files, and the folders apps park superseded or half-written copies in. Claude Code
+/// keeps every earlier plugin generation in `.trash/` and stages downloads in `.staging/`; reading
+/// them listed old copies beside live ones and, worse, delivered the trashed copy.
+const SKIP_DIRECTORIES: [&str; 7] = [
+    "node_modules",
+    ".git",
+    "dist",
+    "target",
+    ".trash",
+    ".staging",
+    ".tmp",
+];
 
-fn scan_skill_root(
-    root: &Path,
-    provider: &str,
-    max_depth: usize,
+/// How a skill folder is laid out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SkillLayout {
+    /// `<root>/…/<skill>/SKILL.md`: skills the operator or an app installed directly.
+    Skills,
+    /// `<root>/…/<plugin>[/<version>]/skills/<skill>/SKILL.md`: skills a plugin brought along.
+    Plugins,
+}
+
+/// One folder skills are read from.
+#[derive(Debug, Clone)]
+struct SkillRoot {
+    path: PathBuf,
+    /// Who installed them, as the Library names the source.
+    provider: String,
+    depth: usize,
     rank: u8,
-    skills: &mut BTreeMap<String, CapabilityBuilder>,
-) {
-    for skill in find_skill_files(root, max_depth) {
+    layout: SkillLayout,
+    /// Folder names skipped directly below `path`, beyond [`SKIP_DIRECTORIES`].
+    exclude: &'static [&'static str],
+}
+
+impl SkillRoot {
+    fn new(path: PathBuf, provider: &str, rank: u8, layout: SkillLayout) -> Self {
+        Self {
+            path,
+            provider: provider.to_owned(),
+            depth: if layout == SkillLayout::Plugins {
+                10
+            } else {
+                5
+            },
+            rank,
+            layout,
+            exclude: &[],
+        }
+    }
+}
+
+/// Every folder skills are read from, in the order a copy is preferred when several folders hold
+/// a skill of the same name.
+///
+/// Detection and delivery both read this one list (ADR 0031). They used to keep a copy each, and a
+/// folder added to one but not the other would list a skill that no agent could then be given.
+///
+/// A skill's source never limits where it runs: `workspace::materialise` copies the chosen bundle
+/// into whatever folder the receiving app reads, and `skill_routing` decides whether its text also
+/// travels in the prompt.
+fn skill_roots(home: Option<&Path>, teams_root: &Path) -> Vec<SkillRoot> {
+    use SkillLayout::Skills;
+    let mut roots = home_skill_roots(home);
+    // Skills kept in the project the teams live in, the way Claude Code and Codex read a
+    // repository's own `.claude/skills` and `.agents/skills`. Second in preference, after the
+    // operator's own Claude Code skills. A project folder that is the home folder adds nothing:
+    // its skills are already listed under the app that owns them.
+    if let Some(project) = project_folder(teams_root)
+        && let Some(name) = project.file_name().and_then(|name| name.to_str())
+    {
+        let label = project_label(name);
+        let home_paths = roots
+            .iter()
+            .map(|root| fs::canonicalize(&root.path).unwrap_or_else(|_| root.path.clone()))
+            .collect::<BTreeSet<_>>();
+        let position = usize::from(home.is_some()).min(roots.len());
+        let project_roots = [".claude/skills", ".agents/skills"]
+            .into_iter()
+            .map(|relative| SkillRoot::new(project.join(relative), &label, RANK_PERSONAL, Skills))
+            .filter(|root| {
+                let path = fs::canonicalize(&root.path).unwrap_or_else(|_| root.path.clone());
+                !home_paths.contains(&path)
+            })
+            .collect::<Vec<_>>();
+        roots.splice(position..position, project_roots);
+    }
+    roots
+}
+
+/// The skill folders under the home directory, best first; [`skill_roots`] adds the project's.
+fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
+    use SkillLayout::{Plugins, Skills};
+    let Some(home) = home else {
+        return Vec::new();
+    };
+    let mut roots = vec![SkillRoot::new(
+        home.join(".claude/skills"),
+        "Claude Code",
+        RANK_PERSONAL,
+        Skills,
+    )];
+    roots.push(SkillRoot::new(
+        home.join(".codex/skills"),
+        "Codex",
+        RANK_HARNESS,
+        Skills,
+    ));
+    // OpenCode documents `skill/`; `skills/` is what most installers write.
+    for relative in [".config/opencode/skills", ".config/opencode/skill"] {
+        roots.push(SkillRoot::new(
+            home.join(relative),
+            "OpenCode",
+            RANK_HARNESS,
+            Skills,
+        ));
+    }
+    roots.push(SkillRoot::new(
+        home.join(".gemini/skills"),
+        "Gemini",
+        RANK_HARNESS,
+        Skills,
+    ));
+    // Hermes files skills by category (`<category>/<skill>/SKILL.md`) and keeps a set per profile.
+    // Its own source checkout and optional-skills catalog are not installed skills, so they are
+    // not read.
+    roots.push(SkillRoot::new(
+        home.join(".hermes/skills"),
+        "Hermes",
+        RANK_HARNESS,
+        Skills,
+    ));
+    for profile in subfolders(&home.join(".hermes/profiles")) {
+        roots.push(SkillRoot::new(
+            profile.join("skills"),
+            "Hermes",
+            RANK_HARNESS,
+            Skills,
+        ));
+    }
+    for relative in [
+        ".openclaw/skills",
+        ".openclaw/workspace/skills",
+        ".openclaw/plugin-skills",
+    ] {
+        roots.push(SkillRoot::new(
+            home.join(relative),
+            "OpenClaw",
+            RANK_HARNESS,
+            Skills,
+        ));
+    }
+    roots.push(SkillRoot::new(
+        home.join(".pi/agent/skills"),
+        "pi",
+        RANK_HARNESS,
+        Skills,
+    ));
+    roots.push(SkillRoot::new(
+        home.join(".agents/skills"),
+        "Shared",
+        RANK_SHARED,
+        Skills,
+    ));
+    // Plugins last. Claude Code's `marketplaces/` is the catalog of every plugin a marketplace
+    // offers, installed or not; listing it showed uninstalled plugins as ready to use.
+    roots.push(SkillRoot::new(
+        home.join(".codex/plugins/cache"),
+        "Codex",
+        RANK_INSTALLED,
+        Plugins,
+    ));
+    let mut claude_plugins = SkillRoot::new(
+        home.join(".claude/plugins"),
+        "Claude Code",
+        RANK_INSTALLED,
+        Plugins,
+    );
+    claude_plugins.exclude = &["marketplaces"];
+    roots.push(claude_plugins);
+    roots.push(SkillRoot::new(
+        home.join(".gemini/extensions"),
+        "Gemini",
+        RANK_INSTALLED,
+        Plugins,
+    ));
+    roots
+}
+
+/// The plain folders directly inside `path`, sorted; none when it is missing.
+fn subfolders(path: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(path) else {
+        return Vec::new();
+    };
+    let mut folders = entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    folders.sort();
+    folders
+}
+
+fn scan_skill_root(root: &SkillRoot, skills: &mut BTreeMap<String, CapabilityBuilder>) {
+    for skill in find_skill_files(&root.path, root.depth, root.exclude) {
         let fallback = skill
             .parent()
             .and_then(Path::file_name)
             .and_then(|name| name.to_str())
             .unwrap_or("Unnamed skill");
         let (name, description) = read_skill_metadata(&skill, fallback);
-        add_capability(skills, &name, provider, &description, rank);
+        add_capability(skills, &name, &root.provider, &description, root.rank);
     }
 }
 
 /// A plugin cache holds `…/<plugin>[/<version>]/skills/<skill>/SKILL.md`. The plugin is what tells
 /// two identically named skills apart, so it becomes both the dedup key and the visible source.
-fn scan_plugin_skill_root(
-    root: &Path,
-    provider: &str,
-    max_depth: usize,
-    skills: &mut BTreeMap<String, CapabilityBuilder>,
-) {
-    for skill in find_skill_files(root, max_depth) {
-        let directory = skill.parent().unwrap_or(root);
+fn scan_plugin_skill_root(root: &SkillRoot, skills: &mut BTreeMap<String, CapabilityBuilder>) {
+    for skill in find_skill_files(&root.path, root.depth, root.exclude) {
+        let directory = skill.parent().unwrap_or(&root.path);
         let fallback = directory
             .file_name()
             .and_then(|name| name.to_str())
@@ -688,8 +837,8 @@ fn scan_plugin_skill_root(
         let (name, description) = read_skill_metadata(&skill, fallback);
         let plugin = plugin_name(directory);
         let source = plugin.as_deref().map_or_else(
-            || provider.to_owned(),
-            |plugin| format!("{provider} · {plugin}"),
+            || root.provider.clone(),
+            |plugin| format!("{} · {plugin}", root.provider),
         );
         let key = plugin.as_deref().map_or_else(
             || name.to_ascii_lowercase(),
@@ -701,13 +850,14 @@ fn scan_plugin_skill_root(
                 )
             },
         );
-        add_keyed_capability(skills, &key, &name, &source, &description, RANK_INSTALLED);
+        add_keyed_capability(skills, &key, &name, &source, &description, root.rank);
     }
 }
 
 /// Every `SKILL.md` under `root`, following symlinks — the harnesses install skills by linking
 /// them in (5 of the 6 in `~/.claude/skills` here), so skipping links hid most of them.
-fn find_skill_files(root: &Path, max_depth: usize) -> Vec<PathBuf> {
+/// `exclude` names folders skipped directly below `root` only.
+fn find_skill_files(root: &Path, max_depth: usize, exclude: &[&str]) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut seen = BTreeSet::new();
     let mut pending = vec![(root.to_path_buf(), 0usize)];
@@ -740,7 +890,9 @@ fn find_skill_files(root: &Path, max_depth: usize) -> Vec<PathBuf> {
             };
             if is_directory {
                 let name = entry.file_name();
-                if SKIP_DIRECTORIES.iter().any(|skip| name == *skip) {
+                if SKIP_DIRECTORIES.iter().any(|skip| name == *skip)
+                    || (depth == 0 && exclude.iter().any(|skip| name == *skip))
+                {
                     continue;
                 }
                 pending.push((path, depth + 1));
@@ -764,9 +916,24 @@ fn plugin_name(skill_directory: &Path) -> Option<String> {
             .parent()
             .and_then(Path::file_name)
             .and_then(|name| name.to_str())
-            .map(str::to_owned);
+            .map(|name| without_generation(name).to_owned());
     }
-    Some(name.to_owned())
+    Some(without_generation(name).to_owned())
+}
+
+/// `engineering~g3` → `engineering`: Claude Code's synced plugins carry a generation suffix that
+/// changes on every update, which showed one plugin as three.
+fn without_generation(name: &str) -> &str {
+    match name.rsplit_once("~g") {
+        Some((plugin, generation))
+            if !plugin.is_empty()
+                && !generation.is_empty()
+                && generation.chars().all(|c| c.is_ascii_digit()) =>
+        {
+            plugin
+        }
+        _ => name,
+    }
 }
 
 /// `1.1.0-alpha.2`, `26.904.11930` — a cache directory named for the release, not the plugin.
@@ -778,25 +945,9 @@ fn read_skill_metadata(path: &Path, fallback: &str) -> (String, String) {
     let Ok(source) = fs::read_to_string(path) else {
         return (humanize(fallback), "Local skill".to_owned());
     };
-    let mut name = None;
-    let mut description = None;
-    if source.starts_with("---") {
-        for line in source
-            .lines()
-            .skip(1)
-            .take_while(|line| line.trim() != "---")
-        {
-            let Some((key, value)) = line.split_once(':') else {
-                continue;
-            };
-            let value = value.trim().trim_matches(['\'', '"']);
-            match key.trim() {
-                "name" if !value.is_empty() => name = Some(value.to_owned()),
-                "description" if !value.is_empty() => description = Some(value.to_owned()),
-                _ => {}
-            }
-        }
-    }
+    let (frontmatter, _) = crate::skill_routing::split_frontmatter(&source);
+    let name = crate::skill_routing::frontmatter_field(frontmatter, "name");
+    let description = crate::skill_routing::frontmatter_field(frontmatter, "description");
     (
         name.unwrap_or_else(|| humanize(fallback)),
         description.unwrap_or_else(|| "Local skill".to_owned()),
@@ -889,53 +1040,522 @@ fn scan_opencode_sources(home: &Path, sources: &mut BTreeMap<String, CapabilityB
     }
     add_capability(
         sources,
-        "OpenCode history",
+        OPENCODE_HISTORY,
         "OpenCode",
         "Previous sessions and tool sources",
         RANK_PINNED,
     );
 
-    let uri = format!("file:{}?mode=ro", database.to_string_lossy());
-    let output = Command::new("sqlite3")
-        .args([
-            "-readonly",
-            "-json",
-            &uri,
-            "SELECT worktree, name FROM project ORDER BY time_updated DESC;",
-        ])
-        .output();
-    let Ok(output) = output else {
-        return;
-    };
-    if !output.status.success() {
-        return;
-    }
-    let Ok(projects) = serde_json::from_slice::<Vec<OpenCodeProject>>(&output.stdout) else {
+    let Some(projects) = query_opencode::<OpenCodeProject>(
+        &database,
+        "SELECT worktree, name FROM project ORDER BY time_updated DESC;",
+    ) else {
         return;
     };
     for project in projects {
-        // OpenCode records a row for every directory a session ever ran in, including `/` and the
-        // home directory. Those listed as "Project project" and "tnghia project" — neither is a
-        // knowledge source anyone would drag onto a canvas.
-        let worktree = PathBuf::from(&project.worktree);
-        if worktree.parent().is_none() || worktree == home {
-            continue;
-        }
-        let Some(fallback) = worktree.file_name().and_then(|name| name.to_str()) else {
+        let Some(label) = opencode_project_label(home, &project.worktree, project.name) else {
             continue;
         };
-        let name = project
-            .name
-            .filter(|name| !name.trim().is_empty())
-            .unwrap_or_else(|| fallback.to_owned());
         add_capability(
             sources,
-            &project_label(&name),
+            &label,
             "OpenCode",
             "Previously used project context",
             RANK_INSTALLED,
         );
     }
+}
+
+/// The name `OpenCode`'s whole session history is listed under.
+const OPENCODE_HISTORY: &str = "OpenCode history";
+
+/// The Library name for one `OpenCode` project, or `None` for a row that is not a project.
+fn opencode_project_label(home: &Path, worktree: &str, name: Option<String>) -> Option<String> {
+    // OpenCode records a row for every directory a session ever ran in, including `/` and the
+    // home directory. Those listed as "Project project" and "tnghia project" — neither is a
+    // knowledge source anyone would drag onto a canvas.
+    let worktree = Path::new(worktree);
+    if worktree.parent().is_none() || worktree == home {
+        return None;
+    }
+    let fallback = worktree.file_name().and_then(|name| name.to_str())?;
+    let name = name
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| fallback.to_owned());
+    Some(project_label(&name))
+}
+
+/// Run one read-only query against `OpenCode`'s database. `None` when `sqlite3` is missing, the
+/// database cannot be opened, or the rows do not have the expected shape.
+fn query_opencode<T: serde::de::DeserializeOwned>(database: &Path, sql: &str) -> Option<Vec<T>> {
+    let uri = format!("file:{}?mode=ro", database.to_string_lossy());
+    let output = Command::new("sqlite3")
+        .args(["-readonly", "-json", &uri, sql])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    // `sqlite3 -json` prints nothing at all for a query with no rows.
+    if output.stdout.iter().all(u8::is_ascii_whitespace) {
+        return Some(Vec::new());
+    }
+    serde_json::from_slice(&output.stdout).ok()
+}
+
+/// The folder the Library lists as "<name> project": the teams root's parent when the root is a
+/// plain `teams` folder inside a project, and the root itself otherwise.
+fn project_folder(teams_root: &Path) -> Option<PathBuf> {
+    if teams_root.file_name().and_then(|name| name.to_str()) == Some("teams") {
+        teams_root.parent().map(Path::to_path_buf)
+    } else {
+        Some(teams_root.to_path_buf())
+    }
+}
+
+/// Entries listed from a project folder before the listing says how many more there are.
+const FOLDER_LISTING_LIMIT: usize = 200;
+/// Lines of a README shown before it is cut off.
+const README_LINE_LIMIT: usize = 120;
+/// `OpenCode` sessions listed for one project, or across the whole history.
+const SESSION_LIMIT: usize = 30;
+
+/// What one knowledge source holds, read on demand: the inspector's Contents, and — since ADR 0029
+/// — exactly what an agent wired to the source is handed in its opening prompt.
+///
+/// One function serves both on purpose. "What you see in the panel is what the agent gets" holds
+/// only while there is one reader.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KnowledgeSnapshot {
+    pub contents: Vec<CapabilityDefinition>,
+    /// The folders the source is, for a source that is one: a project folder, or the worktree an
+    /// `OpenCode` project ran in. Canonical, existing and de-duplicated. Empty for `OpenCode`
+    /// history and for memory, which are records rather than places.
+    pub folders: Vec<PathBuf>,
+}
+
+/// Read one knowledge source. See [`KnowledgeSnapshot`].
+#[must_use]
+pub fn knowledge_snapshot(
+    home: Option<&Path>,
+    teams_root: &Path,
+    item: &DetectedCapability,
+) -> KnowledgeSnapshot {
+    if let Some(reference) = &item.memory {
+        return KnowledgeSnapshot {
+            contents: memory_contents(teams_root, reference),
+            folders: Vec::new(),
+        };
+    }
+    let mut snapshot = KnowledgeSnapshot::default();
+    let mut folders = Vec::new();
+    if capability_has_source(&item.source, "LoomWatch")
+        && let Some(folder) = project_folder(teams_root)
+        && folder
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| project_label(name) == item.name)
+    {
+        snapshot
+            .contents
+            .extend(folder_contents(&folder, "LoomWatch"));
+        folders.push(folder);
+    }
+    if let Some(home) = home
+        && capability_has_source(&item.source, "OpenCode")
+    {
+        let sessions = opencode_contents(home, &item.name);
+        if item.name != OPENCODE_HISTORY {
+            // A project's sessions are filed under the worktree they ran in, which is the folder.
+            folders.extend(
+                sessions
+                    .iter()
+                    .map(|definition| PathBuf::from(&definition.path)),
+            );
+        }
+        snapshot.contents.extend(sessions);
+    }
+    for folder in folders {
+        if let Ok(canonical) = fs::canonicalize(&folder)
+            && canonical.is_dir()
+            && !snapshot.folders.contains(&canonical)
+        {
+            snapshot.folders.push(canonical);
+        }
+    }
+    snapshot
+}
+
+fn knowledge_contents(
+    home: Option<&Path>,
+    teams_root: &Path,
+    item: &DetectedCapability,
+) -> Vec<CapabilityDefinition> {
+    knowledge_snapshot(home, teams_root, item).contents
+}
+
+/// Which config format a [`ToolDefinition`] is written in. The three name the same facts
+/// differently, so the format travels with the value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolFormat {
+    /// `mcpServers` in `~/.claude.json` or `~/.claude/settings.json`.
+    Claude,
+    /// `[mcp_servers.<name>]` in `~/.codex/config.toml`.
+    Codex,
+    /// `mcp` in `~/.config/opencode/opencode.json`.
+    OpenCode,
+}
+
+/// One MCP server definition exactly as the operator wrote it, found where a tool was discovered.
+///
+/// Holds values — tokens, environment — so it is deliberately neither `Serialize` nor `Debug`:
+/// `tool_delivery` turns it into something that can be recorded.
+#[derive(Clone, PartialEq)]
+pub struct ToolDefinition {
+    /// `Claude Code`, `Codex` or `OpenCode`.
+    pub provider: String,
+    pub config_path: PathBuf,
+    /// The server's key in that file, which is also the name a harness lists its tools under.
+    pub server: String,
+    pub format: ToolFormat,
+    pub value: Value,
+}
+
+/// Every definition behind one Library tool, in the order the Library scan found them: Claude
+/// Code's (top-level before per-project), then Codex's, then `OpenCode`'s.
+#[must_use]
+pub fn tool_definitions_for(home: &Path, item: &DetectedCapability) -> Vec<ToolDefinition> {
+    let mut found = Vec::new();
+    let mut add =
+        |provider: &str, format: ToolFormat, path: PathBuf, servers: Vec<(String, Value)>| {
+            if !capability_has_source(&item.source, provider) {
+                return;
+            }
+            for (server, value) in servers {
+                if humanize(&server) == item.name {
+                    found.push(ToolDefinition {
+                        provider: provider.to_owned(),
+                        config_path: path.clone(),
+                        server,
+                        format,
+                        value,
+                    });
+                }
+            }
+        };
+    for path in [
+        home.join(".claude.json"),
+        home.join(".claude/settings.json"),
+    ] {
+        let servers = read_json(&path)
+            .map(|value| json_definitions(&value, "mcpServers"))
+            .unwrap_or_default();
+        add("Claude Code", ToolFormat::Claude, path, servers);
+    }
+    let codex = home.join(".codex/config.toml");
+    let servers = fs::read_to_string(&codex)
+        .ok()
+        .and_then(|source| source.parse::<toml::Table>().ok())
+        .and_then(|mut table| table.remove("mcp_servers"))
+        .and_then(|servers| serde_json::to_value(servers).ok())
+        .and_then(|value| match value {
+            Value::Object(servers) => Some(servers.into_iter().collect()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    add("Codex", ToolFormat::Codex, codex, servers);
+    let opencode = home.join(".config/opencode/opencode.json");
+    let servers = read_json(&opencode)
+        .map(|value| json_definitions(&value, "mcp"))
+        .unwrap_or_default();
+    add("OpenCode", ToolFormat::OpenCode, opencode, servers);
+    found
+}
+
+fn read_json(path: &Path) -> Option<Value> {
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
+/// Every `collection_key` table in a JSON config, the outermost first — the same walk
+/// [`collect_json_connector_keys`] makes for the Library, so delivery finds what the Library listed.
+fn json_definitions(value: &Value, collection_key: &str) -> Vec<(String, Value)> {
+    let mut found = Vec::new();
+    let mut pending = std::collections::VecDeque::from([value]);
+    while let Some(value) = pending.pop_front() {
+        match value {
+            Value::Object(object) => {
+                if let Some(Value::Object(servers)) = object.get(collection_key) {
+                    found.extend(
+                        servers
+                            .iter()
+                            .map(|(key, server)| (key.clone(), server.clone())),
+                    );
+                }
+                pending.extend(object.values());
+            }
+            Value::Array(values) => pending.extend(values),
+            _ => {}
+        }
+    }
+    found
+}
+
+/// A project folder's top-level listing, folders first, and its README when it has one.
+///
+/// Names only for the listing: a file's contents are never read here, so a `.env` beside the
+/// teams shows as a name and nothing more.
+fn folder_contents(folder: &Path, provider: &str) -> Vec<CapabilityDefinition> {
+    let Ok(entries) = fs::read_dir(folder) else {
+        return Vec::new();
+    };
+    let mut names = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let is_file = !entry.file_type().is_ok_and(|kind| kind.is_dir());
+            Some((is_file, name.to_lowercase(), name))
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    let mut listing = names
+        .iter()
+        .take(FOLDER_LISTING_LIMIT)
+        .map(|(is_file, _, name)| {
+            if *is_file {
+                name.clone()
+            } else {
+                format!("{name}/")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if names.is_empty() {
+        listing.push_str("This folder is empty.");
+    } else if names.len() > FOLDER_LISTING_LIMIT {
+        let _ = write!(
+            listing,
+            "\n… and {} more",
+            names.len() - FOLDER_LISTING_LIMIT
+        );
+    }
+    let mut contents = vec![CapabilityDefinition {
+        source: format!("{provider} · folder"),
+        path: folder.to_string_lossy().into_owned(),
+        content: listing,
+    }];
+    let readme = names
+        .iter()
+        .filter(|(is_file, lowered, _)| {
+            *is_file && matches!(lowered.as_str(), "readme.md" | "readme" | "readme.txt")
+        })
+        .find_map(|(_, _, name)| {
+            let path = folder.join(name);
+            fs::read_to_string(&path)
+                .ok()
+                .map(|text| (name, path, text))
+        });
+    if let Some((name, path, text)) = readme {
+        let lines = text.lines().count();
+        let mut content = text
+            .lines()
+            .take(README_LINE_LIMIT)
+            .collect::<Vec<_>>()
+            .join("\n");
+        if lines > README_LINE_LIMIT {
+            let _ = write!(
+                content,
+                "\n\n… {} more lines in the file",
+                lines - README_LINE_LIMIT
+            );
+        }
+        contents.push(CapabilityDefinition {
+            source: format!("{provider} · {name}"),
+            path: path.to_string_lossy().into_owned(),
+            content,
+        });
+    }
+    contents
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenCodeSession {
+    worktree: String,
+    name: Option<String>,
+    title: Option<String>,
+    directory: Option<String>,
+    time_updated: Option<i64>,
+}
+
+/// The titles of the `OpenCode` sessions behind one source, newest first. Titles and dates only —
+/// never a message from the conversation.
+fn opencode_contents(home: &Path, name: &str) -> Vec<CapabilityDefinition> {
+    let database = home.join(".local/share/opencode/opencode.db");
+    if !database.is_file() {
+        return Vec::new();
+    }
+    let Some(rows) = query_opencode::<OpenCodeSession>(
+        &database,
+        "SELECT p.worktree, p.name, s.title, s.directory, s.time_updated \
+         FROM project p LEFT JOIN session s ON s.project_id = p.id AND s.parent_id IS NULL \
+         ORDER BY s.time_updated DESC;",
+    ) else {
+        return Vec::new();
+    };
+    session_contents(home, name, &database, &rows)
+}
+
+/// `rows` is every project, joined to its top-level sessions newest first.
+fn session_contents(
+    home: &Path,
+    name: &str,
+    database: &Path,
+    rows: &[OpenCodeSession],
+) -> Vec<CapabilityDefinition> {
+    if name == OPENCODE_HISTORY {
+        let lines = rows
+            .iter()
+            .filter(|row| row.title.is_some())
+            .take(SESSION_LIMIT)
+            .map(|row| {
+                let mut line = session_line(row);
+                if let Some(directory) = &row.directory {
+                    let _ = write!(line, "\n    {directory}");
+                }
+                line
+            })
+            .collect::<Vec<_>>();
+        return vec![CapabilityDefinition {
+            source: "OpenCode · recent sessions".to_owned(),
+            path: database.to_string_lossy().into_owned(),
+            content: if lines.is_empty() {
+                "No sessions recorded yet.".to_owned()
+            } else {
+                lines.join("\n")
+            },
+        }];
+    }
+    let mut projects = BTreeMap::<String, Vec<String>>::new();
+    for row in rows {
+        if opencode_project_label(home, &row.worktree, row.name.clone()).as_deref() != Some(name) {
+            continue;
+        }
+        let sessions = projects.entry(row.worktree.clone()).or_default();
+        if row.title.is_some() && sessions.len() < SESSION_LIMIT {
+            sessions.push(session_line(row));
+        }
+    }
+    projects
+        .into_iter()
+        .map(|(worktree, sessions)| CapabilityDefinition {
+            source: "OpenCode · sessions in this project".to_owned(),
+            path: worktree,
+            content: if sessions.is_empty() {
+                "No sessions recorded for this project.".to_owned()
+            } else {
+                sessions.join("\n")
+            },
+        })
+        .collect()
+}
+
+fn session_line(row: &OpenCodeSession) -> String {
+    let when = row
+        .time_updated
+        .and_then(chrono::DateTime::from_timestamp_millis)
+        .map(|time| {
+            time.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_default();
+    let title = row.title.as_deref().unwrap_or_default();
+    format!("{when}  {title}").trim().to_owned()
+}
+
+/// A memory source's pinned Brief and, for a pack, its kept notes.
+///
+/// A live team's kept notes are rows in Postgres and this module never opens a pool, which is why
+/// the inspector points at the Memory panel for those rather than claiming there are none.
+fn memory_contents(teams_root: &Path, reference: &MemorySourceRef) -> Vec<CapabilityDefinition> {
+    let Ok(root) = fs::canonicalize(teams_root) else {
+        return Vec::new();
+    };
+    if let Some(folder) = &reference.pack {
+        let Ok(pack) = crate::memory::Pack::load(&root, Path::new(folder)) else {
+            return Vec::new();
+        };
+        let mut contents = brief_contents(&pack.brief);
+        if !pack.notes.is_empty() {
+            contents.push(CapabilityDefinition {
+                source: format!("Kept notes · {}", pack.notes.len()),
+                path: root
+                    .join(folder)
+                    .join("notebook.jsonl")
+                    .to_string_lossy()
+                    .into_owned(),
+                content: pack
+                    .notes
+                    .iter()
+                    .map(|note| {
+                        format!(
+                            "{} · {} · {}\n{}",
+                            note.title,
+                            note.kind.as_str(),
+                            note.created_at,
+                            note.body.trim()
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n"),
+            });
+        }
+        return contents;
+    }
+    let Some(team_id) = &reference.team else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(&root) else {
+        return Vec::new();
+    };
+    for path in entries.flatten().map(|entry| entry.path()) {
+        if !matches!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("yaml" | "yml")
+        ) || fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_symlink())
+        {
+            continue;
+        }
+        let Ok(team) = fs::read_to_string(&path)
+            .map_err(|_| ())
+            .and_then(|source| crate::config::TeamConfig::parse(&source).map_err(|_| ()))
+        else {
+            continue;
+        };
+        if crate::memory::scope_id(&team.id, &path) != *team_id {
+            continue;
+        }
+        let roots = crate::memory::MemoryRoots::for_team(&path, Some(&root));
+        return match crate::memory::TeamMemory::load(&roots, &path, team.memory.as_ref()) {
+            Ok(memory) => brief_contents(&memory.brief),
+            Err(error) => vec![CapabilityDefinition {
+                source: "Brief".to_owned(),
+                path: path.to_string_lossy().into_owned(),
+                content: format!("This team's Brief could not be read: {error}"),
+            }],
+        };
+    }
+    Vec::new()
+}
+
+fn brief_contents(brief: &[crate::memory::BriefEntry]) -> Vec<CapabilityDefinition> {
+    brief
+        .iter()
+        .map(|entry| CapabilityDefinition {
+            source: format!("Brief · {}", entry.title),
+            path: entry.path.clone(),
+            content: entry.body.clone(),
+        })
+        .collect()
 }
 
 /// "loomwatch" → "loomwatch project", but "Optimization Group Project" stays as it is.
@@ -1161,11 +1781,32 @@ mod tests {
             ),
             "index",
         );
+        // Claude Code's synced plugins carry a generation suffix and park earlier generations in
+        // `.trash/`; its `marketplaces/` folder is a catalog of plugins that are not installed.
+        let synced = ".claude/plugins/synced/account";
+        write_skill(
+            &home
+                .0
+                .join(format!("{synced}/engineering~g3/skills/code-review")),
+            "code-review",
+        );
+        write_skill(
+            &home
+                .0
+                .join(".claude/plugins/.trash/old/engineering~g2/skills/code-review"),
+            "code-review",
+        );
+        write_skill(
+            &home
+                .0
+                .join(format!("{synced}/.staging/1/design/skills/half-written")),
+            "half-written",
+        );
         write_skill(
             &home.0.join(
-                ".claude/plugins/marketplaces/official/plugins/engineering/skills/code-review",
+                ".claude/plugins/marketplaces/official/plugins/uninstalled/skills/catalog-only",
             ),
-            "code-review",
+            "catalog-only",
         );
 
         let inventory = detect_capabilities(Some(&home.0), &home.0);
@@ -1183,6 +1824,96 @@ mod tests {
                 ("index", "Codex · sales"),
             ]
         );
+        let code_review = &inventory.skills[0];
+        let definitions = skill_definitions(Some(&home.0), &home.0, code_review);
+        assert_eq!(
+            definitions.len(),
+            1,
+            "the trashed generation is never offered for delivery"
+        );
+        assert!(
+            definitions[0].path.contains("engineering~g3"),
+            "{:?}",
+            definitions[0].path
+        );
+    }
+
+    /// Every app `LoomWatch` drives keeps its own skills somewhere; each folder is listed under the
+    /// app that owns it, and a skill several apps share is one row.
+    #[test]
+    fn lists_skills_from_every_app_and_the_project_the_teams_live_in() {
+        let home = TempDirectory::new();
+        let project = TempDirectory::new();
+        let teams = project.0.join("teams");
+        fs::create_dir_all(&teams).expect("teams folder");
+        write_skill(&home.0.join(".hermes/skills/research/arxiv"), "arxiv");
+        write_skill(
+            &home.0.join(".hermes/profiles/hannah/skills/writing/memo"),
+            "memo",
+        );
+        write_skill(
+            &home.0.join(".hermes/hermes-agent/skills/source-checkout"),
+            "source-checkout",
+        );
+        write_skill(&home.0.join(".openclaw/skills/notion"), "notion");
+        write_skill(&home.0.join(".openclaw/workspace/skills/canvas"), "canvas");
+        write_skill(&home.0.join(".gemini/skills/gemini-only"), "gemini-only");
+        write_skill(
+            &home.0.join(".gemini/extensions/maps/skills/directions"),
+            "directions",
+        );
+        write_skill(&home.0.join(".pi/agent/skills/pi-only"), "pi-only");
+        write_skill(
+            &home.0.join(".config/opencode/skill/opencode-only"),
+            "opencode-only",
+        );
+        write_skill(&home.0.join(".agents/skills/notion"), "notion");
+        write_skill(&project.0.join(".claude/skills/house-style"), "house-style");
+
+        let inventory = detect_capabilities(Some(&home.0), &teams);
+        let listed = inventory
+            .skills
+            .iter()
+            .map(|skill| (skill.name.as_str(), skill.source.as_str()))
+            .collect::<BTreeMap<_, _>>();
+        let project_name = project_label(&project.0.file_name().expect("name").to_string_lossy());
+        assert_eq!(listed.get("arxiv"), Some(&"Hermes"));
+        assert_eq!(listed.get("memo"), Some(&"Hermes"));
+        assert_eq!(listed.get("notion"), Some(&"OpenClaw + Shared"));
+        assert_eq!(listed.get("canvas"), Some(&"OpenClaw"));
+        assert_eq!(listed.get("gemini-only"), Some(&"Gemini"));
+        assert_eq!(listed.get("directions"), Some(&"Gemini · maps"));
+        assert_eq!(listed.get("pi-only"), Some(&"pi"));
+        assert_eq!(listed.get("opencode-only"), Some(&"OpenCode"));
+        assert_eq!(listed.get("house-style"), Some(&project_name.as_str()));
+        assert_eq!(
+            listed.get("source-checkout"),
+            None,
+            "an app's own source tree is not installed skills"
+        );
+
+        // Delivery reads the same folders: each of these can be handed to an agent.
+        for skill in &inventory.skills {
+            assert!(
+                !skill_definitions(Some(&home.0), &teams, skill).is_empty(),
+                "{} is listed but could not be delivered",
+                skill.name
+            );
+        }
+    }
+
+    #[test]
+    fn a_multi_line_description_reaches_the_library_whole() {
+        let home = TempDirectory::new();
+        let directory = home.0.join(".claude/skills/slides");
+        fs::create_dir_all(&directory).expect("skill directory");
+        fs::write(
+            directory.join("SKILL.md"),
+            "---\nname: slides\ndescription: >-\n  Turns notes\n  into slides.\n---\nBody\n",
+        )
+        .expect("write skill");
+        let inventory = detect_capabilities(Some(&home.0), &home.0);
+        assert_eq!(inventory.skills[0].detail, "Turns notes into slides.");
     }
 
     /// Personal skills lead the list; a plugin's payload follows, however many there are.
@@ -1217,6 +1948,135 @@ mod tests {
                 "shared-one",
                 "aaa-from-plugin"
             ]
+        );
+    }
+
+    /// The card the operator clicks on is a folder, so its contents are the folder's names and its
+    /// README — and never the bytes of anything else in it, a `.env` least of all.
+    #[test]
+    fn a_project_knowledge_source_shows_its_folder_and_readme_but_no_other_file() {
+        let directory = TempDirectory::new();
+        let project = directory.0.join("demo");
+        let root = project.join("teams");
+        fs::create_dir_all(&root).expect("teams root");
+        fs::create_dir_all(project.join("src")).expect("source folder");
+        fs::write(project.join("README.md"), "# Demo\nWhat this project is.\n").expect("readme");
+        fs::write(project.join(".env"), "TOKEN=do-not-show\n").expect("env file");
+
+        let inventory = detect_capabilities(None, &root);
+        let source = inventory
+            .sources
+            .iter()
+            .find(|source| source.name == "demo project")
+            .expect("the project folder is a knowledge source");
+        let details =
+            detect_capability_details(None, &root, &source.id).expect("details for the source");
+
+        assert_eq!(details.kind, "knowledge");
+        let [listing, readme] = details.definitions.as_slice() else {
+            panic!("a listing and a README: {:?}", details.definitions);
+        };
+        assert_eq!(listing.source, "LoomWatch · folder");
+        assert_eq!(listing.path, project.to_string_lossy());
+        assert_eq!(listing.content, "src/\nteams/\n.env\nREADME.md");
+        assert_eq!(readme.source, "LoomWatch · README.md");
+        assert_eq!(readme.content, "# Demo\nWhat this project is.");
+        assert!(
+            details
+                .definitions
+                .iter()
+                .all(|definition| !definition.content.contains("do-not-show")),
+            "{:?}",
+            details.definitions
+        );
+    }
+
+    #[test]
+    fn a_team_memory_knowledge_source_shows_its_brief() {
+        let directory = TempDirectory::new();
+        let root = directory.0.join("teams");
+        fs::create_dir_all(root.join("brief")).expect("teams root");
+        fs::write(
+            root.join("brief/constraints.md"),
+            "# Constraints\nACP v1 only.\n",
+        )
+        .expect("brief");
+        fs::write(
+            root.join("research.yaml"),
+            "schemaVersion: 1\nid: research-team\nname: Research team\nentrypoint: lead\nmemory:\n  brief:\n    - path: brief/constraints.md\nagents:\n  - id: lead\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n",
+        )
+        .expect("team with memory");
+
+        let inventory = detect_capabilities(None, &root);
+        let source = inventory
+            .sources
+            .iter()
+            .find(|source| source.memory.is_some())
+            .expect("a memory source");
+        let details =
+            detect_capability_details(None, &root, &source.id).expect("details for the source");
+
+        let [entry] = details.definitions.as_slice() else {
+            panic!("one Brief entry: {:?}", details.definitions);
+        };
+        assert_eq!(entry.source, "Brief · Constraints");
+        assert_eq!(entry.path, "brief/constraints.md");
+        assert!(entry.content.contains("ACP v1 only."), "{entry:?}");
+    }
+
+    /// A project lists its own sessions and nobody else's; the history lists everyone's. Titles
+    /// and dates only — the rows never carry a message to leak.
+    #[test]
+    fn opencode_sources_list_session_titles_for_their_own_project() {
+        let home = PathBuf::from("/home/operator");
+        let row = |worktree: &str, title: Option<&str>, time: i64| OpenCodeSession {
+            worktree: worktree.to_owned(),
+            name: None,
+            title: title.map(str::to_owned),
+            directory: Some(worktree.to_owned()),
+            time_updated: Some(time),
+        };
+        let rows = [
+            row("/work/loomwatch", Some("Fix the canvas"), 1_790_000_000_000),
+            row(
+                "/work/paperclip",
+                Some("Paperclip session"),
+                1_789_000_000_000,
+            ),
+            row(
+                "/work/loomwatch",
+                Some("Plan the release"),
+                1_788_000_000_000,
+            ),
+            row("/work/empty", None, 0),
+            row("/", Some("A global session"), 1_787_000_000_000),
+        ];
+        let database = Path::new("/home/operator/opencode.db");
+
+        let project = session_contents(&home, "loomwatch project", database, &rows);
+        let [sessions] = project.as_slice() else {
+            panic!("one project: {project:?}");
+        };
+        assert_eq!(sessions.path, "/work/loomwatch");
+        let titles = sessions
+            .content
+            .lines()
+            .map(|line| line.split("  ").nth(1).unwrap_or_default())
+            .collect::<Vec<_>>();
+        assert_eq!(titles, ["Fix the canvas", "Plan the release"]);
+
+        let empty = session_contents(&home, "empty project", database, &rows);
+        assert_eq!(empty[0].content, "No sessions recorded for this project.");
+
+        let history = session_contents(&home, OPENCODE_HISTORY, database, &rows);
+        assert_eq!(history[0].source, "OpenCode · recent sessions");
+        assert!(
+            history[0].content.contains("A global session"),
+            "{history:?}"
+        );
+        assert!(
+            history[0].content.contains("Paperclip session"),
+            "{history:?}"
         );
     }
 

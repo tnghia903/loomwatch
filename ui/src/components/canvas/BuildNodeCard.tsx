@@ -5,7 +5,7 @@ import { KIND_LABEL } from '../../lib/composer-layout/types'
 import { middleTruncate } from '../../lib/format'
 import type { OutputNode } from '../../lib/runs/graph'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
-import type { AgentStatus } from '../../lib/team-file/types'
+import type { AgentConfig, AgentStatus, CapabilityRef } from '../../lib/team-file/types'
 import { monogramForSpawnCmd } from '../../lib/harnesses'
 import { StatusGlyph } from '../ui/glyphs'
 import { useCanvasActions } from './CanvasActionsContext'
@@ -15,6 +15,11 @@ import { roleGlyph } from './roleGlyph'
 import { depthForZoom, storyLine } from '../../lib/story/depth'
 import { markState } from '../../lib/story/mark'
 import { AgentMark } from '../ui/AgentMark'
+
+/** The names of one kind of capability an agent is wired to, for the trace depth's facts. */
+function wiredNames(agent: Pick<AgentConfig, 'capabilities'>, kind: CapabilityRef['kind']): string {
+  return (agent.capabilities ?? []).filter((capability) => capability.kind === kind).map((capability) => capability.name).join(', ')
+}
 
 function cx(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(' ')
@@ -141,7 +146,9 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
           <dt>model</dt><dd>{agent.model || 'app default'}</dd>
           <dt>command</dt><dd>{[agent.spawn?.cmd, ...(agent.spawn?.args ?? [])].filter(Boolean).join(' ') || '—'}</dd>
           <dt>folder</dt><dd>{agent.spawn?.cwd || '.'}</dd>
-          <dt>skills</dt><dd>{agent.capabilities?.map((capability) => capability.name).join(', ') || 'none'}</dd>
+          <dt>skills</dt><dd>{wiredNames(agent, 'skill') || 'none'}</dd>
+          {wiredNames(agent, 'knowledge') && <><dt>knowledge</dt><dd>{wiredNames(agent, 'knowledge')}</dd></>}
+          {wiredNames(agent, 'tool') && <><dt>tools</dt><dd>{wiredNames(agent, 'tool')}</dd></>}
           {runtime && <><dt>events</dt><dd>{eventCount}{runtime.openCalls ? ` · ${runtime.openCalls} still open` : ''}</dd></>}
         </dl>}
       </div>

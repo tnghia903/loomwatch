@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { STALE_DAEMON, STALE_DETAILS_DAEMON, fetchCapabilities, fetchCapabilityDetails } from './client'
+import { CAPABILITY_NOT_FOUND, STALE_DAEMON, STALE_DETAILS_DAEMON, fetchCapabilities, fetchCapabilityDetails } from './client'
 
 const fetchMock = vi.fn()
 
@@ -60,5 +60,11 @@ describe('fetchCapabilityDetails', () => {
   it('explains that an older daemon must be restarted', async () => {
     fetchMock.mockResolvedValue(response({ status: 404, body: { error: 'API route not found' } }))
     await expect(fetchCapabilityDetails('skill-old')).rejects.toThrow(STALE_DETAILS_DAEMON)
+  })
+
+  /** A current daemon that does not know the id is not a stale daemon, and must not say so. */
+  it('says a capability is missing, not that the daemon is old, when the id is unknown', async () => {
+    fetchMock.mockResolvedValue(response({ status: 404, body: { error: 'unknown capability "skill:claude-design"' } }))
+    await expect(fetchCapabilityDetails('skill:claude-design')).rejects.toThrow(CAPABILITY_NOT_FOUND)
   })
 })

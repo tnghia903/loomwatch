@@ -464,6 +464,13 @@ export type PromptSectionKind =
    * the same change, which is the rule.
    */
   | 'skill_translation'
+  /**
+   * `## Knowledge: <name>` — a wired knowledge source's contents, supplied as source material,
+   * and `## Tool: <name>` — an MCP server connected to the session (ADR 0029). Added here and in
+   * `memory::PromptSectionKind` in the same change, which is the rule.
+   */
+  | 'knowledge'
+  | 'tool'
 export interface PromptSection {
   kind: PromptSectionKind
   heading: string

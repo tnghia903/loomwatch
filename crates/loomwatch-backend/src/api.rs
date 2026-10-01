@@ -555,6 +555,11 @@ fn router_with(
         .route("/api/config/schema", get(get_config_schema))
         .route("/api/files/stat", get(get_file_stat))
         .route("/api/files/open", axum::routing::post(post_file_open))
+        .route("/api/jobs", get(get_jobs))
+        .route(
+            "/api/jobs/{id}",
+            axum::routing::put(put_job).delete(delete_job),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             enforce_allowed_host,
@@ -700,6 +705,7 @@ async fn get_harness_models(
         args: harness.spawn.args.clone(),
         env: std::collections::BTreeMap::new(),
         cwd: state.teams_root.clone(),
+        tools: Vec::new(),
     };
     let discovered = discover_models(&spec).await;
     state
@@ -850,6 +856,73 @@ async fn post_file_open(
 ) -> Result<StatusCode, ApiError> {
     crate::files::open(&state.teams_root, &request).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The jobs the operator saved (`crate::jobs`, ADR 0030), and the files in the jobs folder that
+/// are not valid jobs.
+async fn get_jobs(State(state): State<ApiState>) -> Result<Json<crate::jobs::JobList>, ApiError> {
+    let teams_root = state.teams_root.clone();
+    tokio::task::spawn_blocking(move || crate::jobs::list_jobs(&teams_root))
+        .await
+        .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .map(Json)
+        .map_err(job_error)
+}
+
+/// Save a job. `If-None-Match: *` saves only when no job has this id, so the UI can ask before
+/// replacing one; without it an existing job is replaced.
+async fn put_job(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(spec): Json<crate::jobs::JobSpec>,
+) -> Result<Json<crate::jobs::SavedJob>, ApiError> {
+    let create_only = headers
+        .get(header::IF_NONE_MATCH)
+        .is_some_and(|value| value.as_bytes() == b"*");
+    let _write = state.writes.lock().map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "job write lock unavailable".into(),
+        )
+    })?;
+    crate::jobs::save_job(&state.teams_root, &id, spec, create_only)
+        .map(Json)
+        .map_err(job_error)
+}
+
+/// Remove a saved job: its file moves to `.jobs/.removed/`. No team changes.
+async fn delete_job(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let _write = state.writes.lock().map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "job write lock unavailable".into(),
+        )
+    })?;
+    let moved = crate::jobs::remove_job(&state.teams_root, &id).map_err(job_error)?;
+    Ok(Json(json!({ "id": id, "movedTo": moved })))
+}
+
+fn job_error(error: crate::jobs::JobError) -> ApiError {
+    use crate::jobs::JobError;
+    match error {
+        JobError::Invalid(message) => ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, message),
+        JobError::Exists(name) => ApiError::new(
+            StatusCode::PRECONDITION_FAILED,
+            format!("You already have a job called “{name}”."),
+        ),
+        JobError::NotFound(id) => ApiError::new(
+            StatusCode::NOT_FOUND,
+            format!("There is no saved job “{id}”."),
+        ),
+        JobError::Io(message) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("The jobs folder could not be used: {message}"),
+        ),
+    }
 }
 
 async fn get_instructions(
@@ -2243,6 +2316,125 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    /// A saved job round-trips through the API: created once, refused a second create so the UI
+    /// can ask before replacing it, listed, removed, and kept out of the team list throughout.
+    // One test on purpose: each step reads the state the previous one left on disk.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn jobs_are_saved_listed_and_removed_without_becoming_teams() {
+        let root = TempDirectory::new();
+        let job = r#"{"name":"Release notes","does":"Drafts release notes","instructions":"Write the notes.","apps":["codex"],"skills":["release-style"]}"#;
+        let put = |create_only: bool| {
+            let mut request = Request::builder()
+                .method("PUT")
+                .uri("/api/jobs/release-notes")
+                .header(header::HOST, "localhost")
+                .header(header::CONTENT_TYPE, "application/json");
+            if create_only {
+                request = request.header(header::IF_NONE_MATCH, "*");
+            }
+            request.body(Body::from(job)).expect("request")
+        };
+        let get = |uri: &str| {
+            Request::builder()
+                .uri(uri)
+                .header(header::HOST, "localhost")
+                .body(Body::empty())
+                .expect("request")
+        };
+
+        let response = test_router(&root.0)
+            .oneshot(put(true))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = test_router(&root.0)
+            .oneshot(put(true))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::PRECONDITION_FAILED);
+        let response = test_router(&root.0)
+            .oneshot(put(false))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let list = response_json(
+            test_router(&root.0)
+                .oneshot(get("/api/jobs"))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(list["jobs"][0]["id"], "release-notes");
+        assert_eq!(list["jobs"][0]["skills"][0], "release-style");
+        let teams = response_json(
+            test_router(&root.0)
+                .oneshot(get("/api/teams"))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(teams["files"], json!([]), "a job is never listed as a team");
+
+        let response = test_router(&root.0)
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/jobs/release-notes")
+                    .header(header::HOST, "localhost")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":"X","instructions":""}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let delete = || {
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/jobs/release-notes")
+                .header(header::HOST, "localhost")
+                .body(Body::empty())
+                .expect("request")
+        };
+        let response = test_router(&root.0)
+            .oneshot(delete())
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = test_router(&root.0)
+            .oneshot(delete())
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let list = response_json(
+            test_router(&root.0)
+                .oneshot(get("/api/jobs"))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(list["jobs"], json!([]));
+
+        let response = test_router(&root.0)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/jobs")
+                    .header(header::HOST, "evil.example")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "jobs sit behind the host check"
+        );
     }
 
     #[tokio::test]

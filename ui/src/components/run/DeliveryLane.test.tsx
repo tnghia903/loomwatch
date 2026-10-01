@@ -18,6 +18,8 @@ vi.mock('@xyflow/react', () => ({
   ReactFlow: ({ nodes, nodeTypes }: { nodes: Array<{ id: string; type: string; data: unknown }>; nodeTypes: Record<string, ComponentType<{ data: unknown }>> }) => <>{nodes.map(node => createElement(nodeTypes[node.type], { key: node.id, data: node.data }))}</>,
 }))
 import { projectRun } from '../../lib/watch/events'
+import type { AgentRuntime } from '../../lib/runs/graph'
+import { markLiftOrigin, noteShownRequest } from '../../lib/motion/lift'
 const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
   const actions = {
     renameAgent: vi.fn(),
@@ -311,6 +313,55 @@ describe('Delivery Lane', () => {
 
   // A planned stage used to read "Ready" even when its app was not on this computer, while the
   // composer beneath it refused to run for exactly that reason.
+  // The breathing perimeter and the handoff sweep (styles/motion.css) hang off these classes.
+  describe('the stage that is working', () => {
+    const runtime = (status: AgentRuntime['status']) => ({ status, taskState: 'RUNNING', task: 'Writing', ownerLabel: '', live: status === 'running' }) as AgentRuntime
+    const agents = (writerStatus: AgentRuntime['status']) => [
+      { id: 'researcher', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Researcher', agent: { id: 'researcher', name: 'Researcher', role: 'Research' }, runtime: runtime('succeeded') } },
+      { id: 'writer', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Writer', agent: { id: 'writer', name: 'Writer', role: 'Write' }, runtime: runtime(writerStatus) } },
+    ] as DeliveryLaneProps['agents']
+    const stage = (id: string) => document.getElementById(`delivery-stage-${id}`) as HTMLElement
+
+    it('is marked, with the handoff into it, while the run is watched live', () => {
+      setup({ mode: 'live', phase: 'running', agents: agents('running') })
+      expect(screen.getByRole('main', { name: 'Run workspace' })).toHaveClass('live')
+      expect(stage('writer')).toHaveClass('working')
+      expect(stage('researcher')).not.toHaveClass('working')
+      expect(screen.getByRole('button', { name: 'Inspect handoff to Writer' })).toHaveClass('passing')
+    })
+
+    it('settles once the stage finishes', () => {
+      setup({ mode: 'live', phase: 'succeeded', agents: agents('succeeded') })
+      expect(stage('writer')).not.toHaveClass('working')
+      expect(screen.getByRole('button', { name: 'Inspect handoff to Writer' })).not.toHaveClass('passing')
+    })
+
+    it('never moves in a replay, whatever the recorded status says', () => {
+      setup({ mode: 'replay', agents: agents('running') })
+      expect(screen.getByRole('main', { name: 'Run workspace' })).not.toHaveClass('live')
+      expect(stage('writer')).not.toHaveClass('working')
+      expect(screen.getByRole('button', { name: 'Inspect handoff to Writer' })).not.toHaveClass('passing')
+    })
+  })
+
+  // lib/motion/lift.ts decides when; this is the Run view collecting it.
+  describe('the request the composer just sent', () => {
+    afterEach(() => {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).animate
+      document.querySelectorAll('.lift-ghost').forEach((ghost) => ghost.remove())
+    })
+
+    it('lifts into the Request box of the run it started', () => {
+      HTMLElement.prototype.animate = vi.fn(() => ({ finished: Promise.resolve() }) as unknown as Animation)
+      noteShownRequest('An earlier request')
+      markLiftOrigin(document.body.appendChild(document.createElement('textarea')), 'Research LoomWatch')
+      setup({ mode: 'live', phase: 'running' })
+      expect(document.querySelector('.lift-ghost')).toHaveTextContent('Research LoomWatch')
+      // The copy flies, and the real line stays hidden until it lands.
+      expect(HTMLElement.prototype.animate).toHaveBeenCalledTimes(2)
+    })
+  })
+
   describe('a planned stage whose app is not on this computer', () => {
     const sentence = 'Designer’s app “acme-agent-cli” isn’t installed on this computer.'
     const stage = () => document.getElementById('delivery-stage-designer') as HTMLElement
