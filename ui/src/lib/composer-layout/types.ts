@@ -139,6 +139,23 @@ export function refuseCapabilityEdge(
   return null
 }
 
+/**
+ * The `agents[].capabilities` kind a card is wired as, or `null` for a memory card, which is wired
+ * through `memory.inherits` instead (ADR 0016). Skills since ADR 0012; knowledge and tools since
+ * ADR 0029, when each gained a delivery contract.
+ */
+export function teamFileKind(card: Pick<CapabilityNodeConfig, 'kind' | 'memory'>): CapabilityKind | null {
+  return card.kind === 'knowledge' && card.memory ? null : card.kind
+}
+
+/** Whether a team-file capability entry is this card. Kind and name both: a tool and a skill may share a name. */
+export function capabilityIsCard(
+  capability: { kind: CapabilityKind; name: string },
+  card: Pick<CapabilityNodeConfig, 'kind' | 'name' | 'memory'>,
+): boolean {
+  return teamFileKind(card) === capability.kind && capability.name === card.name
+}
+
 /** Rendered size of a capability card (`.capability-node`), used to keep placements apart. */
 export const CAPABILITY_CARD = { width: 276, height: 72, gap: 24 }
 

@@ -23,6 +23,14 @@ describe('parseIntent', () => {
     expect(parseIntent(input)).toEqual({ intent, exact })
   })
 
+  it('adds one of the operator’s saved jobs by its full name, ahead of a built-in word', () => {
+    const saved = [{ id: 'release-notes-writer', name: 'Release notes writer' }, { id: 'writer', name: 'Writer' }]
+    expect(parseIntent('add a release notes writer', saved)).toEqual({ intent: { kind: 'add', job: 'release-notes-writer', saved: true }, exact: false })
+    expect(parseIntent('/add Writer', saved)).toEqual({ intent: { kind: 'add', job: 'writer', saved: true }, exact: true })
+    expect(parseIntent('add an editor', saved)).toEqual({ intent: { kind: 'add', job: 'editor' }, exact: false })
+    expect(parseIntent('add a release notes', saved)).toBeNull()
+  })
+
   it('does not guess at what it does not know', () => {
     expect(parseIntent('add a unicorn')).toBeNull()
     expect(parseIntent('make it better')).toBeNull()

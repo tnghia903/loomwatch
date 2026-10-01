@@ -512,7 +512,27 @@ pub struct CapabilityRef {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CapabilityKind {
+    /// Copied into the workspace and required in the prompt (ADR 0012, 0019, 0021).
     Skill,
+    /// A knowledge source that is not memory: its contents are supplied in the prompt and a folder
+    /// source is a read grant for that folder (ADR 0029). Memory is wired through
+    /// `memory.inherits`, not here.
+    Knowledge,
+    /// An MCP server from the operator's own harness config, passed to the harness in
+    /// `session/new` (ADR 0029).
+    Tool,
+}
+
+impl CapabilityKind {
+    /// The word the team file uses, which is also how the prompt names the kind.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Skill => "skill",
+            Self::Knowledge => "knowledge",
+            Self::Tool => "tool",
+        }
+    }
 }
 
 impl AgentConfig {

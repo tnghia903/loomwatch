@@ -495,11 +495,12 @@ $defs:
         default: true
       capabilities:
         description: >-
-          Capabilities this agent may use. Before the run the daemon materialises each one into the
-          agent's workspace in the harness's own format, so the harness discovers it the way it
-          discovers any local capability. Naming one here does not grant access: the harness still
-          authorises every use, and a capability the daemon cannot find fails the run rather than
-          silently doing nothing.
+          Capabilities this agent may use. Before the run the daemon delivers each one: a skill
+          into the agent's workspace in the harness's own format, a knowledge source into the
+          prompt, and a tool as an MCP server on the session. Where LoomWatch knows the harness's
+          per-workspace permission file (Claude Code), wiring a knowledge folder or a tool writes
+          an allow rule for exactly that; elsewhere the harness still authorises every use. A
+          capability the daemon cannot deliver fails the run rather than silently doing nothing.
         type: array
         default: []
         items:
@@ -531,12 +532,16 @@ $defs:
     properties:
       kind:
         description: >-
-          Only `skill` is executable today. Tools and knowledge sources are composed on the canvas
-          but reach an agent through mechanisms this schema does not yet model (an MCP grant and a
-          mounted source), so they stay out until each has its own contract.
+          `skill` is copied into the agent's workspace and required in its prompt (ADR 0012, 0019,
+          0021). `knowledge` supplies a knowledge source's contents in the prompt as source
+          material, and a folder source is a read grant for that folder (ADR 0029). `tool` passes
+          the operator's own MCP server definition to the harness in ACP `session/new` (ADR 0029).
+          Team memory is wired through `memory.inherits`, never as `knowledge`.
         type: string
         enum:
           - skill
+          - knowledge
+          - tool
       name:
         description: The capability's name as the Library reports it.
         type: string

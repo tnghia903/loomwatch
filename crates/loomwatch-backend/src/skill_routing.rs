@@ -210,16 +210,57 @@ pub fn split_frontmatter(text: &str) -> (&str, &str) {
     ("", text)
 }
 
-/// The skill's own one-line `description:`, which is what a `native` route puts in the prompt.
+/// The skill's own `description:`, as one line, which is what a `native` route puts in the prompt.
 #[must_use]
 pub fn description(text: &str) -> Option<String> {
     let (frontmatter, _) = split_frontmatter(text);
-    frontmatter.lines().find_map(|line| {
-        let (key, value) = line.split_once(':')?;
-        (key.trim() == "description")
-            .then(|| value.trim().trim_matches(['\'', '"']).trim().to_owned())
-            .filter(|value| !value.is_empty())
-    })
+    frontmatter_field(frontmatter, "description")
+}
+
+/// One top-level `key:` of a skill's frontmatter as one line of plain text: quotes removed, and a
+/// value written over several lines — a `>-` or `|` block, or an indented continuation — joined
+/// with spaces.
+///
+/// Not a YAML parser, on purpose: frontmatter is read for a name and a description, and a skill
+/// whose frontmatter does not parse as YAML must still be listed. Reading only the first line
+/// handed the literal `>-` to the Library and to every prompt that quoted the description.
+#[must_use]
+pub fn frontmatter_field(frontmatter: &str, key: &str) -> Option<String> {
+    let mut lines = frontmatter.lines().peekable();
+    while let Some(line) = lines.next() {
+        // An indented `name:` belongs to a nested map, not to the skill.
+        if line.starts_with([' ', '\t']) {
+            continue;
+        }
+        let Some((found, value)) = line.split_once(':') else {
+            continue;
+        };
+        if found.trim() != key {
+            continue;
+        }
+        let first = value.trim();
+        let block = first.starts_with(['>', '|'])
+            && first[1..]
+                .chars()
+                .all(|c| matches!(c, '-' | '+') || c.is_ascii_digit());
+        let mut parts = Vec::new();
+        if !block && !first.is_empty() {
+            parts.push(first);
+        }
+        while let Some(next) = lines.peek() {
+            if !next.trim().is_empty() && !next.starts_with([' ', '\t']) {
+                break;
+            }
+            if !next.trim().is_empty() {
+                parts.push(next.trim());
+            }
+            lines.next();
+        }
+        let joined = parts.join(" ");
+        let value = joined.trim_matches(['\'', '"']).trim();
+        return (!value.is_empty()).then(|| value.to_owned());
+    }
+    None
 }
 
 /// Read one skill's text and report what it assumes about its harness.
@@ -267,17 +308,20 @@ pub fn analyse(text: &str) -> SkillPortability {
 ///
 /// The rule, and only the rule:
 ///
-/// * a harness with no project skill directory is `blocked` before anything else is considered —
-///   `LoomWatch` will not claim delivery it cannot perform (ADR 0019 decision 5);
+/// * a harness that loads no skills from a project folder (Hermes, an unknown app) is `inline`
+///   before anything else is considered: nothing would discover the bundle on disk, so its
+///   instructions travel in the prompt (ADR 0031, replacing ADR 0019 decision 5's refusal);
 /// * Claude Code is `native` for everything, because every coupling this module detects is a
 ///   Claude facility and Claude has it;
 /// * on any other harness, execution-level coupling or a behaviour-governing skill is `inline`,
 ///   because those are the two cases where the body has to be *in* the prompt to have any effect;
 /// * everything else is `native`: the bundle is on disk and the prompt says to read it.
+///
+/// No harness is `blocked` any more; the variant stays because archived runs recorded it.
 #[must_use]
 pub fn route(portability: &SkillPortability, harness: Harness) -> SkillRoute {
     if harness.skill_directory().is_none() {
-        return SkillRoute::Blocked;
+        return SkillRoute::Inline;
     }
     if harness == Harness::Claude {
         return SkillRoute::Native;
@@ -410,11 +454,27 @@ pub fn self_report(reply: &str) -> Option<String> {
 /// would be the same false assurance ADR 0019's last consequence left in place.
 #[must_use]
 pub fn translation_note(request: &TranslationRequest<'_>) -> String {
-    let mut note = format!(
-        "This skill was written for Claude Code; you are running on {}. Its instructions are above, unchanged, and its files are in {}. Where it assumes something you do not have, use this mapping.\n",
-        request.harness.label(),
-        request.bundle_dir,
-    );
+    let mut note = if request.harness.skill_directory().is_some() {
+        format!(
+            "This skill was written for Claude Code; you are running on {}. Its instructions are above, unchanged, and its files are in {}. Where it assumes something you do not have, use this mapping.\n",
+            request.harness.label(),
+            request.bundle_dir,
+        )
+    } else if request.needs.is_empty() {
+        // Inline only because this app loads no skills from a folder; the skill itself assumes
+        // nothing, so there is no mapping to give and no claim about who it was written for.
+        format!(
+            "You are running on {}, which does not load skills from a project folder, so this skill's instructions are above, unchanged. Its files are in {}.\n",
+            request.harness.label(),
+            request.bundle_dir,
+        )
+    } else {
+        format!(
+            "This skill was written for Claude Code; you are running on {}, which does not load skills from a project folder, so its instructions are above, unchanged, and its files are in {}. Where it assumes something you do not have, use this mapping.\n",
+            request.harness.label(),
+            request.bundle_dir,
+        )
+    };
     for need in SkillNeed::ALL {
         if !request.needs.contains(&need) {
             continue;
@@ -997,11 +1057,52 @@ mod tests {
     }
 
     #[test]
-    fn a_harness_with_no_skill_directory_is_blocked_before_anything_else() {
+    fn a_harness_with_no_skill_directory_gets_every_skill_inline() {
         let portable = analyse("---\nname: x\ndescription: d\n---\nNothing special.\n");
         for harness in [Harness::Hermes, Harness::Other] {
-            assert_eq!(route(&portable, harness), SkillRoute::Blocked);
+            assert_eq!(route(&portable, harness), SkillRoute::Inline);
         }
+        let note = translation_note(&TranslationRequest {
+            skill: "x",
+            harness: Harness::Hermes,
+            needs: &portable.needs,
+            bundle_dir: ".agents/skills/x",
+            bus: bus_tools(Harness::Hermes, BusMode::None, false),
+            siblings_wired: &[],
+            siblings_missing: &[],
+        });
+        assert!(
+            note.starts_with("You are running on Hermes, which does not load skills"),
+            "{note}"
+        );
+        assert!(
+            !note.contains("written for Claude Code"),
+            "a portable skill makes no such claim: {note}"
+        );
+    }
+
+    #[test]
+    fn a_multi_line_description_is_read_whole() {
+        for frontmatter in [
+            "name: x\ndescription: >-\n  Turns notes\n  into slides.\nlicense: MIT",
+            "name: x\ndescription: |\n  Turns notes\n\n  into slides.\n",
+            "name: x\ndescription: Turns notes\n  into slides.\n",
+            "name: x\ndescription: \"Turns notes into slides.\"\n",
+        ] {
+            assert_eq!(
+                frontmatter_field(frontmatter, "description").as_deref(),
+                Some("Turns notes into slides."),
+                "{frontmatter}"
+            );
+        }
+        assert_eq!(
+            frontmatter_field("metadata:\n  name: nested\n", "name"),
+            None
+        );
+        assert_eq!(
+            frontmatter_field("description: >-\nname: x\n", "description"),
+            None
+        );
     }
 
     #[test]

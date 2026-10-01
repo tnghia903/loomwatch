@@ -3,6 +3,7 @@ import { Maximize2, Minus, Moon, Plus, Sun, Workflow, Undo2 } from 'lucide-react
 
 import { useTheme } from '../../lib/theme'
 import { DEPTHS, DEPTH_LABEL, DEPTH_ZOOM, depthForZoom, type Depth } from '../../lib/story/depth'
+import { SegmentThumb } from '../ui/SegmentThumb'
 
 /**
  * Story · Team · Trace: the zoom levels at which cards change what they say (lib/story/depth.ts).
@@ -44,6 +45,7 @@ export function DepthDial({ className = '' }: { className?: string }) {
         ;(event.currentTarget.querySelectorAll('button')[index] as HTMLButtonElement | undefined)?.focus()
       }}
     >
+      <SegmentThumb />
       {DEPTHS.map((option) => (
         <button key={option} type="button" role="radio" aria-checked={depth === option} tabIndex={depth === option ? 0 : -1} aria-label={DEPTH_LABEL[option].name} aria-description={DEPTH_LABEL[option].hint} title={DEPTH_LABEL[option].hint} onClick={() => go(option)}>
           {DEPTH_LABEL[option].name}

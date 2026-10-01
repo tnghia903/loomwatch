@@ -84,6 +84,8 @@ export function servesHtml(response: Response): boolean {
 
 export const STALE_DAEMON = 'This daemon is older than the app it is serving. Restart loomwatchd to pick up the local capability scan.'
 export const STALE_DETAILS_DAEMON = 'This daemon is older than the app it is serving. Restart loomwatchd to view capability details.'
+/** A current daemon answering 404 with its own error: the capability is not on this machine now. */
+export const CAPABILITY_NOT_FOUND = 'LoomWatch can’t find this on this computer any more. It may have been uninstalled or renamed; search the Library for it.'
 
 export async function fetchCapabilities(): Promise<CapabilityInventory> {
   const response = await daemonFetch('/api/capabilities')
@@ -97,7 +99,14 @@ export async function fetchCapabilities(): Promise<CapabilityInventory> {
  * on demand rather than included in the inventory response. */
 export async function fetchCapabilityDetails(id: string): Promise<CapabilityDetails> {
   const response = await daemonFetch(`/api/capabilities/${encodeURIComponent(id)}`)
-  if (response.status === 404 || servesHtml(response)) throw new Error(STALE_DETAILS_DAEMON)
+  if (servesHtml(response)) throw new Error(STALE_DETAILS_DAEMON)
+  if (response.status === 404) {
+    // A daemon with this route answers an unknown id with `unknown capability "<id>"`; one that
+    // predates the route falls through to `API route not found` (`spa.rs`). Only the second is stale.
+    let message = ''
+    try { message = String(((await response.json()) as { error?: unknown }).error ?? '') } catch { /* not JSON */ }
+    throw new Error(message.startsWith('unknown capability') ? CAPABILITY_NOT_FOUND : STALE_DETAILS_DAEMON)
+  }
   if (!response.ok) {
     let message = response.statusText || 'Capability details could not be loaded'
     try {

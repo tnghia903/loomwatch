@@ -259,6 +259,71 @@ describe('Workspace', () => {
     }
   })
 
+  /**
+   * A card records the provenance the Library showed when it was placed. When another app later
+   * turns out to hold the same skill, the Library's source changes; the card must still open the
+   * Library's row, or the inspector asks the daemon for the card's own id and reports a stale daemon.
+   */
+  it('opens the Library row for a card whose recorded source has since changed', async () => {
+    composerLayoutState.nodes = [{ id: 'skill:claude-design', kind: 'skill', name: 'claude-design', source: 'Claude Code + OpenCode', position: { x: 10, y: 20 } }]
+    const inventory = { tools: [], sources: [], skills: [{ id: 'skill-a1eb6eeb', name: 'claude-design', source: 'Claude Code + Hermes + OpenCode', detail: 'Design one-off HTML artifacts.', status: 'Ready' as const }] }
+    const view = render(<Workspace harnesses={[]} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onDocumentOpen={vi.fn()} initialRunId={null} capabilityInventory={inventory} />)
+    try {
+      await screen.findByLabelText(/claude-design, skill from Claude Code \+ OpenCode/)
+      act(() => flowRuntime.onNodesChange?.([{ id: 'skill:claude-design', type: 'select', selected: true }]))
+
+      const inspector = await screen.findByRole('complementary', { name: 'Selected resource settings' })
+      expect(inspector).toHaveTextContent('Claude Code + Hermes + OpenCode')
+      expect(inspector).not.toHaveTextContent('Planned capability on this canvas.')
+    } finally {
+      view.unmount()
+    }
+  })
+
+  /** ADR 0029: a tool or a knowledge source is executable configuration, like a skill. */
+  it('wires a tool and a knowledge source into the team file, not the sidecar', async () => {
+    composerLayoutState.nodes = [
+      { id: 'tool:computer', kind: 'tool', name: 'Computer', source: 'Claude Code', position: { x: 10, y: 20 } },
+      { id: 'knowledge:demo', kind: 'knowledge', name: 'demo project', source: 'LoomWatch', position: { x: 10, y: 120 } },
+    ]
+    const view = renderWorkspace()
+    try {
+      await screen.findByLabelText(/^Computer, .*from Claude Code/)
+      act(() => flowRuntime.onConnect?.({ source: 'reviewer', target: 'tool:computer' }))
+      expect(documentState.setAgentCapabilities).toHaveBeenLastCalledWith('reviewer', [{ kind: 'tool', name: 'Computer' }])
+      act(() => flowRuntime.onConnect?.({ source: 'reviewer', target: 'knowledge:demo' }))
+      expect(documentState.setAgentCapabilities).toHaveBeenLastCalledWith('reviewer', [{ kind: 'knowledge', name: 'demo project' }])
+    } finally {
+      view.unmount()
+    }
+  })
+
+  /**
+   * Wiring drawn before ADR 0029 lives only in the sidecar: drawn, never delivered. The canvas says
+   * so and one click writes it to the team file — and redrawing it is not refused as a duplicate.
+   */
+  it('offers to deliver sidecar-only wiring and lets it be redrawn', async () => {
+    composerLayoutState.nodes = [
+      { id: 'knowledge:demo', kind: 'knowledge', name: 'demo project', source: 'LoomWatch', position: { x: 10, y: 20 } },
+      { id: 'knowledge:memory', kind: 'knowledge', name: 'Research · memory', source: 'LoomWatch', position: { x: 10, y: 120 }, memory: { team: 'research' } },
+    ]
+    composerLayoutState.edges = [{ from: 'reviewer', to: 'knowledge:demo' }]
+    const view = renderWorkspace()
+    try {
+      const deliver = await screen.findByRole('button', { name: 'Deliver on the next run' })
+      expect(deliver.closest('p')).toHaveTextContent('One connection on the canvas is drawn but not delivered to agents yet.')
+      fireEvent.click(deliver)
+      expect(documentState.setAgentCapabilities).toHaveBeenLastCalledWith('reviewer', [{ kind: 'knowledge', name: 'demo project' }])
+
+      vi.mocked(documentState.setAgentCapabilities).mockClear()
+      act(() => flowRuntime.onConnect?.({ source: 'reviewer', target: 'knowledge:demo' }))
+      expect(screen.queryByText('That agent already reaches this capability.')).not.toBeInTheDocument()
+      expect(documentState.setAgentCapabilities).toHaveBeenCalledWith('reviewer', [{ kind: 'knowledge', name: 'demo project' }])
+    } finally {
+      view.unmount()
+    }
+  })
+
   it('leaves L inert on the compose view, where no legend names the edge layers', () => {
     const { container } = renderWorkspace()
     const shell = container.querySelector('.lw-shell')!

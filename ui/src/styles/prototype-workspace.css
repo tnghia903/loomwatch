@@ -105,6 +105,7 @@
 .build-workspace-heading h1 { display:inline; font-size:28px; font-weight:620; letter-spacing:-.6px; }
 .build-workspace-heading span { margin-left:16px; color:var(--color-ink-3); font-size:12px; }
 .build-workspace-heading p { margin:10px 0 0; font-size:13px; color:var(--color-ink-3); }
+.build-workspace-heading .build-undelivered { display:flex; align-items:center; gap:10px; flex-wrap:wrap; color:var(--color-ink-2); }
 .build-workspace-actions { display:flex; gap:8px; }
 .build-workspace .lw-canvas { top:176px; }
 .build-workspace .lw-library,.build-workspace .lw-library.collapsed { top:190px; left:14px; max-height:calc(100% - 210px); height:calc(100% - 210px); border-radius:8px; }

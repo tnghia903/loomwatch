@@ -1,6 +1,7 @@
 import { stringify } from 'yaml'
 
 import { isHarnessRunnable, type DetectedHarness } from '../harnesses'
+import { ROLE_PRESETS } from '../library/roles'
 import type { AgentConfig, EdgeConfig } from './types'
 import { slugifyTeamName } from './useTeamDocument'
 
@@ -91,10 +92,19 @@ export function uniqueTeamPath(name: string, existing: readonly string[]): strin
 
 const ROLES = {
   assistant: 'Complete the request you are given. Work carefully, then reply with the finished result.',
-  researcher: 'Research the request. Collect the facts, sources and open questions the writer will need, and hand them over clearly.',
-  writer: 'Turn what you were handed into the finished result the request asks for. Keep it accurate, clear and ready to use.',
   review: 'Read the research. Approve it, or say what should change before writing starts.',
 } as const
+
+/**
+ * A template's Researcher and Writer are the palette's jobs of the same name, so a starter team and
+ * a team built by hand get the same instructions. Read at call time: `roles.ts` imports this module,
+ * and reading its presets while this one is still loading would find them uninitialised.
+ */
+function jobRole(id: 'researcher' | 'writer'): string {
+  const preset = ROLE_PRESETS.find((candidate) => candidate.id === id)
+  if (!preset) throw new Error(`no built-in job ${id}`)
+  return preset.role
+}
 
 function agent(id: string, name: string, role: string, harness: DetectedHarness, model: string): AgentConfig {
   return {
@@ -126,13 +136,13 @@ export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, nam
     agents = [agent('assistant', 'Assistant', ROLES.assistant, harness, model)]
     edges = []
   } else if (template === 'research-write') {
-    agents = [agent('researcher', 'Researcher', ROLES.researcher, harness, model), agent('writer', 'Writer', ROLES.writer, harness, model)]
+    agents = [agent('researcher', 'Researcher', jobRole('researcher'), harness, model), agent('writer', 'Writer', jobRole('writer'), harness, model)]
     edges = [sequence('researcher', 'writer', ts)]
   } else {
     agents = [
-      agent('researcher', 'Researcher', ROLES.researcher, harness, model),
+      agent('researcher', 'Researcher', jobRole('researcher'), harness, model),
       { id: 'review', kind: 'operator', name: 'You', role: ROLES.review },
-      agent('writer', 'Writer', ROLES.writer, harness, model),
+      agent('writer', 'Writer', jobRole('writer'), harness, model),
     ]
     edges = [sequence('researcher', 'review', ts), sequence('review', 'writer', ts)]
   }

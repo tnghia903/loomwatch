@@ -10,7 +10,8 @@ import type { Depth } from './depth'
  * at something it cannot show first.
  */
 export type Intent =
-  | { kind: 'add'; job: string }
+  /** `saved` marks one of the operator's own jobs (`lib/library/jobs.ts`), by its saved id. */
+  | { kind: 'add'; job: string; saved?: boolean }
   | { kind: 'review-step' }
   | { kind: 'run'; request: string }
   | { kind: 'depth'; depth: Depth }
@@ -40,12 +41,27 @@ function job(word: string): string | null {
   return JOB_WORDS[word.toLowerCase().replace(/s$/, '')] ?? JOB_WORDS[word.toLowerCase()] ?? null
 }
 
-export function parseIntent(input: string): ParsedIntent | null {
+/** A saved job the command bar can add by name. */
+export interface NamedJob {
+  id: string
+  name: string
+}
+
+export function parseIntent(input: string, savedJobs: readonly NamedJob[] = []): ParsedIntent | null {
   const text = input.trim()
   if (!text) return null
   const exact = text.startsWith('/')
   const body = (exact ? text.slice(1) : text).trim()
   const lower = body.toLowerCase().replace(/[.!?]+$/, '')
+
+  // The operator's own jobs, by their full name: "add a release notes writer". Checked before the
+  // built-in words, so a saved job called "Writer" is the one "add a writer" places.
+  const verb = /^(?:add|hire|i need|we need|get me|bring in)\s+/
+  if (verb.test(lower) && savedJobs.length) {
+    const wanted = lower.replace(verb, '').replace(new RegExp(`^${ARTICLE}`), '').trim()
+    const own = savedJobs.find((saved) => saved.name.trim().toLowerCase() === wanted)
+    if (own) return { intent: { kind: 'add', job: own.id, saved: true }, exact }
+  }
 
   // Adding helpers: "/add writer", "add a reviewer", "hire an editor", "I need a coder".
   const add = lower.match(new RegExp(`^(?:add|hire|i need|we need|get me|bring in)\\s+${ARTICLE}([a-z]+)`))

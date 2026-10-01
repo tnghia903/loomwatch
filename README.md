@@ -313,6 +313,7 @@ and [Notion setup](docs/NOTION.md).
 | Team definitions and canvas layouts | `~/LoomWatch/teams`; Compose-only deployments use `LOOMWATCH_TEAMS_DIR` |
 | Brief files | Paths configured by the team, usually beside its YAML file |
 | Deleted teams | `.trash` inside your teams folder, one folder per deleted team |
+| Your saved jobs | `.jobs` inside your teams folder, one `<job>.yaml` per job; removed jobs move to `.jobs/.removed` |
 | Run history, recorded events, and Notebook entries | The local PostgreSQL Docker volume |
 | Database settings | `.env` in the source repository |
 | Provider sign-in | Managed by each host agent app; Compose-only deployments use `loomwatch-home` |
@@ -325,6 +326,12 @@ database, and no new team takes its file name while it is in the trash. To resto
 files in that folder back to where `path` in its `deleted.json` says the team file was, and leave
 `deleted.json` behind. In Finder, press ⌘⇧. to show hidden folders. To remove a team for good,
 delete its folder from `.trash`.
+
+To reuse an agent that works, select it in Build and choose **Save as job**. It appears under
+**Your jobs** at the top of the palette, with its instructions, app, model and skills, and can be
+added to any team. Placing a job copies it into the team, so changing or removing the job later
+leaves existing teams alone. A job is one small file, so you can share it by copying it into another
+teams folder's `.jobs`.
 
 Back up your teams folder and PostgreSQL database if you want to move or preserve your work.
 `docker compose stop` preserves data. Avoid `docker compose down -v` for normal shutdown:

@@ -1,0 +1,145 @@
+/* ---------------------------------------------------------------------------
+   MOTION — DESIGN.md § Motion. A live run that looks live in the Run view; an entrance for every
+   overlay that used to appear in a single frame; switches whose tint slides; Home cards that
+   arrive in turn; and the sent request lifting into the run it started.
+
+   Rules kept here: motion tokens only; never position, opacity and scale at once; entrances
+   move with `translate` / `scale` (the individual properties), so they compose with the
+   `transform: translateX(-50%)` several popovers centre themselves with. Every animation sits
+   behind `prefers-reduced-motion: no-preference`; the rules outside it are static: what reduced
+   motion keeps (a running stage's 2 px blue perimeter) and what moving needs to exist at all (the
+   switch thumb, which simply jumps).
+   --------------------------------------------------------------------------- */
+
+/* ---- Run view: the stage that is working ---------------------------------- */
+
+.delivery-stage {
+  position: relative;
+  transition: border-color var(--t-quick) var(--ease-out), box-shadow var(--t-quick) var(--ease-out);
+}
+/* Blue means live. Selection keeps its gold ring; the live perimeter sits inside it. */
+.delivery-stage.working:not(.selected) { border-color: var(--color-live); }
+.delivery-stage.working::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px var(--color-live-tint);
+}
+/* The status word fades to its next colour as the agent's mark ties off. */
+.delivery-status { transition: color var(--t-move) var(--ease-out), border-color var(--t-move) var(--ease-out); }
+.delivery-lane.live .delivery-status:is(.status-running, .status-starting)::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  vertical-align: 1px;
+  border-radius: var(--r-full);
+  background: currentColor;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .delivery-stage.working::after {
+    box-shadow: inset 0 0 0 1px var(--color-live-tint), inset 0 0 18px color-mix(in srgb, var(--color-live) 16%, transparent);
+    animation: stage-breathe var(--t-breathe) ease-in-out infinite;
+  }
+  .delivery-lane.live .delivery-status:is(.status-running, .status-starting)::before {
+    animation: breathe var(--t-breathe) ease-in-out infinite;
+  }
+  /* Work reaching the next stage: the arrow into it travels once, in live blue, then rests. */
+  .delivery-handoff-arrow.passing svg { animation: handoff-pass var(--t-settle) var(--ease-out) both; }
+  /* The answer arriving: it rises into the panel once; streamed text then grows in place. */
+  .delivery-response { animation: rise-in var(--t-entrance) var(--ease-out) both; }
+}
+
+@keyframes stage-breathe { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+@keyframes handoff-pass {
+  0% { translate: -14px 0; opacity: 0; color: var(--color-live); }
+  60% { translate: 0 0; opacity: 1; color: var(--color-live); }
+}
+@keyframes rise-in { from { opacity: 0; translate: 0 6px; } }
+
+/* ---- Overlays: entrances ---------------------------------------------------
+   Exits are not animated: these overlays unmount on close, and holding them mounted for an exit
+   would change what focus and the tests see. */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Popovers settle 4 px toward the control that opened them. */
+  .pop, .needs-you-panel { animation: pop-in var(--t-quick) var(--ease-out) both; }
+  /* These open upward, from the composer or a card's foot. */
+  .pop:is(.home-card-menu, .mode-pop, .lw-history) { animation-name: pop-in-up; }
+
+  /* Dialogs grow from 98% while they fade; the dimmed page behind them fades on its own. */
+  .pop:is(.lw-newteam, .lw-deleteteam),
+  .lw-dialog,
+  .delivery-review-dialog[open],
+  .prototype-handover-dialog[open] { animation: dialog-in var(--t-entrance) var(--ease-out) both; }
+  .lw-modal-scrim,
+  .lw-scrim.dim,
+  .delivery-review-dialog[open]::backdrop,
+  .prototype-handover-dialog[open]::backdrop { animation: fade-in var(--t-quick) var(--ease-out) both; }
+
+  /* Inspectors slide in from the edge they dock to. The glass inspector fades its layers, not
+     itself: opacity on the panel would make it the backdrop root, and the blur would arrive late. */
+  .node-inspector { animation: panel-in var(--t-move) var(--ease-out) both; }
+  .lw-inspector { animation: panel-slide var(--t-move) var(--ease-out) both; }
+  .lw-inspector > * { animation: fade-in var(--t-move) var(--ease-out) both; }
+}
+
+@keyframes pop-in { from { opacity: 0; translate: 0 -4px; } }
+@keyframes pop-in-up { from { opacity: 0; translate: 0 4px; } }
+@keyframes dialog-in { from { opacity: 0; scale: .98; } }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes panel-in { from { opacity: 0; translate: 8px 0; } }
+@keyframes panel-slide { from { translate: 8px 0; } }
+
+/* ---- Switches: one tint that slides (components/ui/SegmentThumb.tsx) ---------
+   Run | Build and Story · Team · Trace mark the selected segment the same way (DESIGN.md
+   § Switches), so both get the thumb. The selected button keeps its gold word; the tint is the
+   thumb's. Buttons are positioned so they paint above it. */
+
+.workspace-view-tabs, .depth-dial { position: relative; }
+.workspace-view-tabs > button, .depth-dial > button { position: relative; }
+.segment-thumb {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  background: var(--color-accent-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+.workspace-view-tabs > .segment-thumb { border-radius: 5px; }
+.depth-dial > .segment-thumb { border-radius: 6px; }
+:is(.workspace-view-tabs, .depth-dial):has(> .segment-thumb:not([hidden])) > :is([aria-pressed="true"], [aria-checked="true"]) {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* ---- The request lifting into the Run view (lib/motion/lift.ts) ------------- */
+
+.lift-ghost { position: fixed; z-index: 300; margin: 0; pointer-events: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .segment-thumb.ready { transition: translate var(--t-move) var(--ease-out), width var(--t-move) var(--ease-out); }
+
+  /* Home: the team cards arrive one after another (capped, so a long list never waits), and each
+     card's recent runs then rise into its cloth from the baseline. */
+  .home-grid > li {
+    animation: rise-in var(--t-entrance) var(--ease-out) both;
+    animation-delay: calc(min(var(--card-i, 0), 8) * 40ms);
+  }
+  .fabric-thread {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+    animation: thread-grow var(--t-entrance) var(--ease-out) both;
+    animation-delay: calc(min(var(--card-i, 0), 8) * 40ms + 120ms + var(--thread-i, 0) * 30ms);
+  }
+  .fabric-thread.st-working {
+    animation: thread-grow var(--t-entrance) var(--ease-out) both, weft-breathe 1.6s ease-in-out infinite;
+    animation-delay: calc(min(var(--card-i, 0), 8) * 40ms + 120ms + var(--thread-i, 0) * 30ms), 0s;
+  }
+}
+
+@keyframes thread-grow { from { scale: 1 0; } }

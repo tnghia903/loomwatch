@@ -122,6 +122,18 @@ impl Harness {
         }
     }
 
+    /// Where a wired skill's files are copied for this harness. The harness's own folder when it
+    /// has one; otherwise the shared `.agents/skills`, which nothing discovers by itself — the
+    /// skill's instructions travel in the prompt instead (`skill_routing::route`), and the copy is
+    /// there so the files the skill refers to can still be read.
+    #[must_use]
+    pub const fn delivery_directory(self) -> &'static str {
+        match self.skill_directory() {
+            Some(directory) => directory,
+            None => ".agents/skills",
+        }
+    }
+
     /// The `id` this harness carries in `api.rs`'s `HARNESSES` catalog, which is the key the web
     /// UI knows an agent's harness by. `None` for a harness `LoomWatch` cannot name.
     #[must_use]
@@ -211,6 +223,8 @@ pub struct Workspace {
     /// The harness-native memory file the Brief was written as (`CLAUDE.md`, `AGENTS.md`,
     /// `GEMINI.md`), or `None` when the Brief reached this agent through the packet only.
     pub brief_file: Option<String>,
+    /// The knowledge sources and tools wired to this agent (ADR 0029).
+    pub delivery: crate::delivery::Delivery,
 }
 
 /// A selected skill's exact identity and bytes. Metadata is archived; the instruction text is
@@ -360,23 +374,36 @@ pub fn materialise(
     let mut delivered = Vec::new();
     let mut required_skills = Vec::new();
     let mut instruction_bytes = 0usize;
-    for capability in &agent.capabilities {
-        let CapabilityRef {
-            kind: CapabilityKind::Skill,
-            name,
-        } = capability;
+    // Knowledge and tools are delivered by `deliver_knowledge_and_tools` below (ADR 0029).
+    let wired_skills =
+        (agent.capabilities.iter()).filter(|wired| wired.kind == CapabilityKind::Skill);
+    for CapabilityRef { name, .. } in wired_skills {
+        // The Library lists a skill once whatever its spelling, so the same skill wired twice is
+        // delivered once.
+        if required_skills
+            .iter()
+            .any(|skill: &PreparedSkill| skill.name.eq_ignore_ascii_case(name))
+        {
+            continue;
+        }
+        // Rows are keyed by lowercased name, so a team file that spells a skill differently from
+        // its frontmatter still names the same skill.
         let item = inventory
             .skills
             .iter()
             .find(|item| item.name == *name)
+            .or_else(|| {
+                inventory
+                    .skills
+                    .iter()
+                    .find(|item| item.name.eq_ignore_ascii_case(name))
+            })
             .ok_or_else(|| {
                 fail(format!(
                     "cannot use the skill {name}: no skill by that name is installed on this machine."
                 ))
             })?;
-        let definition = home
-            .map(|home| capabilities::skill_definitions_for(home, item))
-            .unwrap_or_default()
+        let definition = capabilities::skill_definitions_for(home, teams_root, item)
             .into_iter()
             .next()
             .ok_or_else(|| {
@@ -389,7 +416,7 @@ pub fn materialise(
                 "cannot use the skill {name}: no project skill directory was prepared."
             ))
         })?;
-        let directory = copy_skill(&definition, destination)
+        let directory = copy_skill(&definition, name, destination)
             .map_err(|error| fail(format!("cannot use the skill {name}: {error}")))?;
         let path = destination.join(&directory).join("SKILL.md");
         let bytes = fs::read(&path)
@@ -407,6 +434,9 @@ pub fn materialise(
         required_skills.push(prepare_skill(agent, name, &definition, &path, text, bus));
         delivered.push(directory);
     }
+    let delivery =
+        deliver_knowledge_and_tools(home, teams_root, &inventory, agent, &root, declared_cwd)
+            .map_err(&fail)?;
     // Written after the skills so a failed skill delivery does not leave a Brief file behind for a
     // run that never starts. Rewritten on every run, like the skills tree, so an edited Brief is
     // picked up and a removed one stops being delivered.
@@ -425,7 +455,32 @@ pub fn materialise(
         skills: delivered,
         required_skills,
         brief_file: brief_file.map(str::to_owned),
+        delivery,
     }))
+}
+
+/// ADR 0029: resolve the knowledge and tools an agent wires, after its skills, and on Claude Code
+/// write the grant that wiring implies into the workspace's settings.
+fn deliver_knowledge_and_tools(
+    home: Option<&Path>,
+    teams_root: &Path,
+    inventory: &capabilities::CapabilityInventory,
+    agent: &AgentConfig,
+    root: &Path,
+    declared_cwd: &Path,
+) -> Result<crate::delivery::Delivery, String> {
+    let mut delivery = crate::delivery::prepare_for(
+        home,
+        teams_root,
+        inventory,
+        agent,
+        &crate::delivery::process_env,
+    )?;
+    if Harness::of(agent) == Harness::Claude {
+        let base = read_settings(declared_cwd);
+        crate::delivery::grant_claude_access(root, base.as_deref(), &mut delivery)?;
+    }
+    Ok(delivery)
 }
 
 /// Rebuild the managed workspace directory and return the skill tree to copy into, if any.
@@ -445,26 +500,29 @@ fn prepare_root(
         }
     }
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
-    let skills_dir = if agent.capabilities.is_empty() {
-        None
-    } else {
-        let harness = Harness::of(agent);
-        let relative = harness.skill_directory().ok_or_else(|| {
-            format!(
-                "cannot deliver skills: LoomWatch does not know the project skill directory for {}.",
-                harness.label()
-            )
-        })?;
-        let directory = root.join(relative);
+    // Only a wired skill needs a skill tree; an agent wired to knowledge or tools alone does not.
+    let skills_dir = if agent
+        .capabilities
+        .iter()
+        .any(|capability| capability.kind == CapabilityKind::Skill)
+    {
+        let directory = root.join(Harness::of(agent).delivery_directory());
         fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
         Some(directory)
+    } else {
+        None
     };
     // The harness only ever asks LoomWatch for permission, and LoomWatch refuses anything the
     // workspace does not allow. Carrying the declared cwd's settings across keeps that contract
     // with the operator's own file rather than inventing a policy here.
+    let managed_settings = root.join(".claude/settings.json");
     if let Some(settings) = read_settings(declared_cwd) {
-        fs::write(root.join(".claude/settings.json"), settings)
-            .map_err(|error| error.to_string())?;
+        fs::create_dir_all(root.join(".claude")).map_err(|error| error.to_string())?;
+        fs::write(&managed_settings, settings).map_err(|error| error.to_string())?;
+    } else if managed_settings.is_file() {
+        // Managed like the skill trees: a grant an earlier run wrote for a knowledge folder or a
+        // tool (ADR 0029) must not outlive the wiring that justified it.
+        fs::remove_file(&managed_settings).map_err(|error| error.to_string())?;
     }
     Ok(skills_dir)
 }
@@ -565,17 +623,40 @@ fn read_settings(declared_cwd: &Path) -> Option<Vec<u8>> {
 
 /// Copy the skill's whole directory, not just its `SKILL.md`: a skill may ship scripts, references
 /// and assets it loads by relative path, and half a skill is worse than none.
-fn copy_skill(definition: &CapabilityDefinition, into: &Path) -> io::Result<String> {
+///
+/// The copy is named for the skill, not for the folder it came from. Installers name folders
+/// freely (`claude-design--fd7fe6db51`, a plugin's `index`), so two wired skills could land in one
+/// folder and overwrite each other, and the run's "opened the skill" evidence — which matches
+/// `<skills>/<name>/SKILL.md` — missed every skill whose folder was named otherwise. A name that
+/// cannot be a folder name falls back to the source folder's.
+fn copy_skill(definition: &CapabilityDefinition, skill: &str, into: &Path) -> io::Result<String> {
     let source = Path::new(&definition.path)
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "skill file has no directory"))?
         .to_path_buf();
-    let name = source
-        .file_name()
-        .and_then(|part| part.to_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "skill directory has no name"))?
-        .to_owned();
-    copy_tree(&source, &into.join(&name))?;
+    let usable = !skill.is_empty()
+        && !skill.starts_with('.')
+        && !skill.contains(['/', '\\', '\0'])
+        && skill.len() <= 128;
+    let name = if usable {
+        skill.to_owned()
+    } else {
+        source
+            .file_name()
+            .and_then(|part| part.to_str())
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "skill directory has no name")
+            })?
+            .to_owned()
+    };
+    let target = into.join(&name);
+    if target.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("another wired skill was already delivered as {name}"),
+        ));
+    }
+    copy_tree(&source, &target)?;
     Ok(name)
 }
 
@@ -658,6 +739,73 @@ mod tests {
         }
     }
 
+    /// ADR 0029: a knowledge folder wired to a Claude Code agent becomes a read grant in the
+    /// workspace's settings, with no skill tree prepared for an agent that wired no skill — and the
+    /// grant does not outlive the wiring when the same agent moves to another harness.
+    #[test]
+    fn a_wired_knowledge_folder_is_granted_on_claude_and_the_grant_goes_with_the_wiring() {
+        let temp = TempDirectory::new();
+        let project = temp.path().join("demo");
+        let teams = project.join("teams");
+        fs::create_dir_all(&teams).expect("teams");
+        fs::write(project.join("README.md"), "# Demo\n").expect("readme");
+        let team = teams.join("team.yaml");
+        let knowledge = vec![CapabilityRef {
+            kind: CapabilityKind::Knowledge,
+            name: "demo project".to_owned(),
+        }];
+
+        let workspace = materialise(
+            None,
+            &teams,
+            &team,
+            "team",
+            &agent(
+                "npx",
+                &["@agentclientprotocol/claude-agent-acp"],
+                knowledge.clone(),
+            ),
+            &teams,
+            &no_memory(),
+            BusMode::Pipeline,
+        )
+        .expect("delivered")
+        .expect("a workspace");
+        assert!(!workspace.cwd.join(".claude/skills").exists());
+        let folder = fs::canonicalize(&project).expect("canonical");
+        assert_eq!(
+            workspace.delivery.knowledge[0].folders,
+            [folder.to_string_lossy()]
+        );
+        let settings = fs::read_to_string(workspace.cwd.join(".claude/settings.json"))
+            .expect("the grant is written");
+        assert!(
+            settings.contains(&format!("Read(/{}/**)", folder.display())),
+            "{settings}"
+        );
+
+        let moved = materialise(
+            None,
+            &teams,
+            &team,
+            "team",
+            &agent("npx", &["@agentclientprotocol/codex-acp"], knowledge),
+            &teams,
+            &no_memory(),
+            BusMode::Pipeline,
+        )
+        .expect("delivered")
+        .expect("a workspace");
+        assert!(
+            !moved.cwd.join(".claude/settings.json").exists(),
+            "an earlier run's grant must not survive a harness switch"
+        );
+        assert_eq!(
+            moved.delivery.knowledge[0].read_access,
+            Some(crate::delivery::Permission::HarnessPolicy)
+        );
+    }
+
     #[test]
     fn an_agent_that_wired_nothing_keeps_the_cwd_it_declared() {
         let temp = TempDirectory::new();
@@ -734,6 +882,125 @@ mod tests {
         assert!(
             receipt.text.ends_with("Body"),
             "the prepared prompt retains the selected revision"
+        );
+    }
+
+    /// Hermes loads no skills from a project folder. A wired skill used to refuse the whole run;
+    /// now its instructions travel in the prompt and its files sit beside the agent (ADR 0031).
+    #[test]
+    fn an_app_with_no_skill_folder_gets_the_skill_in_its_prompt_instead_of_a_refusal() {
+        let temp = TempDirectory::new();
+        let home = temp.path().join("home");
+        let source = home.join(".claude/skills/house-style");
+        fs::create_dir_all(&source).expect("skill directory");
+        fs::write(
+            source.join("SKILL.md"),
+            "---\nname: house-style\ndescription: Our writing rules\n---\nWrite short sentences.",
+        )
+        .expect("SKILL.md");
+        let teams = temp.path().join("teams");
+        fs::create_dir_all(&teams).expect("teams");
+
+        let workspace = materialise(
+            Some(&home),
+            &teams,
+            &teams.join("team.yaml"),
+            "team",
+            &agent("hermes", &["acp"], vec![skill("house-style")]),
+            &teams,
+            &no_memory(),
+            BusMode::Pipeline,
+        )
+        .expect("a Hermes agent is given the skill, not refused")
+        .expect("a wired capability produces a workspace");
+
+        assert!(
+            workspace
+                .cwd
+                .join(".agents/skills/house-style/SKILL.md")
+                .is_file()
+        );
+        let receipt = &workspace.required_skills[0];
+        assert_eq!(receipt.route, SkillRoute::Inline);
+        assert_eq!(receipt.body, "Write short sentences.");
+        let note = receipt
+            .translation
+            .as_deref()
+            .expect("a note says why it is inline");
+        assert!(
+            note.contains("does not load skills from a project folder"),
+            "{note}"
+        );
+    }
+
+    /// Installers name folders freely. The copy is named for the skill, so two skills from folders
+    /// with the same name cannot overwrite each other, and the run's evidence — which matches
+    /// `<skills>/<name>/SKILL.md` — can see the skill being opened.
+    #[test]
+    fn a_skill_is_delivered_under_its_own_name_and_matched_whatever_its_case() {
+        let temp = TempDirectory::new();
+        let home = temp.path().join("home");
+        for (folder, name) in [
+            (".claude/skills/claude-design--fd7fe6db51", "claude-design"),
+            (
+                ".codex/plugins/cache/mkt/sales/1.0.0/skills/index",
+                "sales-index",
+            ),
+            (
+                ".codex/plugins/cache/mkt/data/1.0.0/skills/index",
+                "data-index",
+            ),
+        ] {
+            let source = home.join(folder);
+            fs::create_dir_all(&source).expect("skill directory");
+            fs::write(
+                source.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: d\n---\n{name} body"),
+            )
+            .expect("SKILL.md");
+        }
+        let teams = temp.path().join("teams");
+        fs::create_dir_all(&teams).expect("teams");
+
+        let workspace = materialise(
+            Some(&home),
+            &teams,
+            &teams.join("team.yaml"),
+            "team",
+            &agent(
+                "claude-agent-acp",
+                &[],
+                vec![
+                    skill("Claude-Design"),
+                    skill("sales-index"),
+                    skill("data-index"),
+                    skill("claude-design"),
+                ],
+            ),
+            &teams,
+            &no_memory(),
+            BusMode::Pipeline,
+        )
+        .expect("delivery succeeds")
+        .expect("a workspace");
+
+        let skills = workspace.cwd.join(".claude/skills");
+        assert!(skills.join("Claude-Design/SKILL.md").is_file());
+        assert!(
+            fs::read_to_string(skills.join("sales-index/SKILL.md"))
+                .expect("sales")
+                .contains("sales-index body")
+        );
+        assert!(
+            fs::read_to_string(skills.join("data-index/SKILL.md"))
+                .expect("data")
+                .contains("data-index body")
+        );
+        assert!(!skills.join("index").exists());
+        assert_eq!(
+            workspace.required_skills.len(),
+            3,
+            "the same skill wired twice is delivered once"
         );
     }
 

@@ -12,7 +12,7 @@ export function TeamFabric({ fabric }: { fabric: Fabric }) {
         {/* The weft passes under every other thread and over the rest. */}
         <line className="fabric-weft" x1={0} y1={12} x2={width} y2={12} />
         {fabric.threads.map((thread, index) => (
-          <rect key={thread.runId} className={`fabric-thread st-${thread.state}`} x={index * PITCH + 2} y={2} width={7} height={20} rx={3}>
+          <rect key={thread.runId} className={`fabric-thread st-${thread.state}`} style={{ ['--thread-i' as string]: index }} x={index * PITCH + 2} y={2} width={7} height={20} rx={3}>
             <title>{thread.label}</title>
           </rect>
         ))}

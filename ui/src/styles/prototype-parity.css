@@ -141,6 +141,9 @@
 .legend-line.dotted { border-top-style:dashed; }
 .node-inspector { position:absolute; z-index:6; right:16px; top:72px; width:280px; background:var(--surface); border:1px solid color-mix(in srgb, var(--color-ink) 18%, transparent); border-radius:8px; box-shadow:0 14px 50px #0009; padding:15px; }
 .inspector-head { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; padding-bottom:13px; border-bottom:1px solid var(--line-soft); }
+/* The title takes the free width so a Close + Remove pair sits together instead of being spread apart. */
+.inspector-head > div:first-child { flex:1; min-width:0; }
+.inspector-head .icon-button + .icon-button { margin-left:-6px; }
 .inspector-head strong { display:block; font-size:14px; margin-top:6px; font-weight:600; }
 .inspector-fields { display:grid; gap:12px; padding-top:14px; }
 .inspector-fields label { display:flex; flex-direction:column; gap:6px; color:var(--muted); font-size:12px; }
