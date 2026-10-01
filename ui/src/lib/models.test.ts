@@ -40,3 +40,19 @@ describe('modelOptionsForAgent', () => {
     ])
   })
 })
+
+describe('harnessIdForAgent', () => {
+  // The daemon defaults a missing `spawn.args` to none, so a team file may leave it out.
+  it('reads a spawn without args as no args, for a detected harness and for the fallbacks', () => {
+    const opencode: DetectedHarness = {
+      id: 'opencode', name: 'OpenCode', command: 'opencode', executablePath: '/bin/opencode', acpAvailable: true,
+      spawn: { cmd: 'opencode', args: ['acp'] },
+    }
+    const hermes: DetectedHarness = { ...opencode, id: 'hermes', name: 'Hermes', command: 'hermes-acp', spawn: { cmd: 'hermes-acp', args: [] } }
+    const bare = (cmd: string) => ({ ...agent('m', cmd), spawn: { cmd, cwd: '.' } }) as unknown as AgentConfig
+    expect(harnessIdForAgent(bare('hermes-acp'), [opencode, hermes])).toBe('hermes')
+    expect(harnessIdForAgent(bare('opencode'), [opencode, hermes])).toBe('opencode')
+    expect(harnessIdForAgent(bare('loomwatchd'), [opencode])).toBeNull()
+    expect(harnessIdForAgent(bare('npx'), [opencode])).toBeNull()
+  })
+})
