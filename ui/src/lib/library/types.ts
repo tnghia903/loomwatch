@@ -9,6 +9,8 @@ export type LibraryGroup = 'detected' | 'endpoints' | 'presets'
  */
 export interface LibrarySource {
   group: LibraryGroup
+  kind?: 'operator'
+  unavailableReason?: string
   /** Stable id within its group; not the future agent id (that is slugified from `label`). */
   id: string
   /** Becomes the new agent's `name`. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { pipelineOrder } from './pipelineOrder'
+import { pipelineOrder, pipelineTerminal } from './pipelineOrder'
 
 describe('pipelineOrder', () => {
   it('is empty in team mode (no edges)', () => {
@@ -53,5 +53,31 @@ describe('pipelineOrder', () => {
   it('still produces an order when entrypoint is null', () => {
     const steps = pipelineOrder(['a', 'b'], [{ from: 'a', to: 'b' }], null)
     expect(steps.map((s) => s.id)).toEqual(['a', 'b'])
+  })
+})
+
+describe('pipelineTerminal', () => {
+  it('ignores a newly added agent that is disconnected from the entrypoint', () => {
+    expect(pipelineTerminal(
+      ['a', 'b', 'new-agent'],
+      [{ from: 'a', to: 'b' }],
+      'a',
+    )).toBe('b')
+  })
+
+  it('finds the shared terminal after branches converge', () => {
+    expect(pipelineTerminal(
+      ['a', 'b', 'c', 'd'],
+      [{ from: 'a', to: 'b' }, { from: 'a', to: 'c' }, { from: 'b', to: 'd' }, { from: 'c', to: 'd' }],
+      'a',
+    )).toBe('d')
+  })
+
+  it('returns no responder while reachable branches have multiple terminals', () => {
+    expect(pipelineTerminal(
+      ['a', 'b', 'c'],
+      [{ from: 'a', to: 'b' }, { from: 'a', to: 'c' }],
+      'a',
+    )).toBeNull()
   })
 })

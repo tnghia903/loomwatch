@@ -9,7 +9,7 @@ import { TeamFileModel, TeamFileParseError } from './document'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
 import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
-import type { AgentConfig, BudgetConfig, EdgeConfig, GuardsConfig, SpawnConfig } from './types'
+import type { AgentConfig, BriefEntryConfig, BudgetConfig, CapabilityRef, EdgeConfig, GuardsConfig, ScheduleConfig, SpawnConfig } from './types'
 import {
   compileTeamValidator,
   displayFieldProblems,
@@ -64,7 +64,7 @@ const EXTERNAL_CHANGE_MESSAGE =
 
 async function hashTeamYaml(yaml: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(yaml))
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return 'sha256:' + Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 function sourceLineAtError(source: string, lineNumber: number): string | null {
@@ -159,14 +159,17 @@ function nodeFromAgent(
 /**
  * Owns the canvas's document lifecycle: load a team file named by `?path=`, keep React Flow
  * node/edge state and the CST-preserving `TeamFileModel` (TNG-53) in sync on every edit, and
- * save. Node positions are not part of the team file (docs/CANVAS_SPEC.md §7.3 — flagged, not
- * decided), so drags never touch the model; only agent/edge/entrypoint content does.
+ * save. Node positions are not part of the team file (docs/CANVAS_SPEC.md §7.3, decided in ADR
+ * 0016: they live in the `<team>.layout.json` sidecar), so drags never touch the model; only
+ * agent/edge/entrypoint content does. The sidecar's positions arrive through `applyPositions`,
+ * which is also not a dirtying edit — see its doc comment.
  *
  * New teams use the daemon's existing relative-path PUT support: the document remains in memory
  * until its first agent makes it valid, then the first explicit save creates `<slug>.yaml` below
  * the configured teams root (§10.2).
  */
 export function useTeamDocument() {
+  const saveInFlightRef = useRef(false)
   const modelRef = useRef<TeamFileModel | null>(null)
   const loadedRevisionRef = useRef<string | null>(null)
   const [path, setPath] = useState<string | null>(null)
@@ -176,6 +179,7 @@ export function useTeamDocument() {
   const [entrypoint, setEntrypointState] = useState<string | null>(null)
   const [teamGuards, setTeamGuards] = useState<GuardsConfig | null>(null)
   const [teamBudget, setTeamBudget] = useState<BudgetConfig | null>(null)
+  const [teamSchedule, setTeamSchedule] = useState<ScheduleConfig | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('no-file')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [refusal, setRefusal] = useState<EdgeRefusal | null>(null)
@@ -192,10 +196,19 @@ export function useTeamDocument() {
   const [externalChange, setExternalChange] = useState<ExternalChange | null>(null)
   const [diskNotice, setDiskNotice] = useState<string | null>(null)
   const [yamlPreview, setYamlPreview] = useState('')
+  /** The bytes last read from or written to disk, so the chip can state a magnitude (§9.1). */
+  const [loadedYaml, setLoadedYaml] = useState<string | null>(null)
   const isNewRef = useRef(false)
   const undoRef = useRef<HistoryEntry[]>([])
   const redoRef = useRef<HistoryEntry[]>([])
   const [historyState, setHistoryState] = useState({ undo: 0, redo: 0 })
+
+  useEffect(() => {
+    if (!['new', 'dirty', 'invalid', 'conflict', 'saving', 'error'].includes(saveState)) return
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', warnBeforeLeaving)
+    return () => window.removeEventListener('beforeunload', warnBeforeLeaving)
+  }, [saveState])
 
   const resetHistory = useCallback(() => {
     undoRef.current = []
@@ -230,6 +243,8 @@ export function useTeamDocument() {
     setEntrypointState(snapshot.entrypoint || null)
     setTeamGuards(snapshot.guards ?? null)
     setTeamBudget(snapshot.budget ?? null)
+    setTeamSchedule(snapshot.schedule ?? null)
+    setTeamSchedule(snapshot.schedule ?? null)
     setNodes(
       snapshot.agents.map((agent) =>
         nodeFromAgent(agent, entry.positions[agent.id] ?? { x: 0, y: 0 }, agent.id === snapshot.entrypoint),
@@ -280,8 +295,11 @@ export function useTeamDocument() {
     setEntrypointState(null)
     setTeamGuards(null)
     setTeamBudget(null)
+    setTeamSchedule(null)
+    setTeamSchedule(null)
     setDocumentSnapshot(model.snapshot())
     setYamlPreview(model.toYaml())
+    setLoadedYaml(null)
     setSaveError(null)
     setReadOnlyReason(null)
     setFileGone(false)
@@ -295,7 +313,6 @@ export function useTeamDocument() {
   useEffect(() => {
     const requestedPath = new URLSearchParams(window.location.search).get('path')
     let cancelled = false
-    setSchemaLoading(true)
 
     async function load() {
       if (!requestedPath) {
@@ -312,12 +329,12 @@ export function useTeamDocument() {
       }
       let source: string | null = null
       try {
-        const [{ yaml }, discovery] = await Promise.all([
+        const [{ yaml, revision }, discovery] = await Promise.all([
           fetchTeamFile(requestedPath),
           requestedPath.startsWith('/') ? Promise.resolve(null) : fetchTeamsDiscovery(),
         ])
         source = yaml
-        const loadedRevision = await hashTeamYaml(yaml)
+        const loadedRevision = revision ?? await hashTeamYaml(yaml)
         if (cancelled) {
           return
         }
@@ -340,6 +357,8 @@ export function useTeamDocument() {
         setEntrypointState(snapshot.entrypoint)
         setTeamGuards(snapshot.guards ?? null)
         setTeamBudget(snapshot.budget ?? null)
+        setTeamSchedule(snapshot.schedule ?? null)
+        setTeamSchedule(snapshot.schedule ?? null)
         setNodes(
           agents.map((agent) =>
             nodeFromAgent(agent, positions[agent.id] ?? { x: 0, y: 0 }, agent.id === snapshot.entrypoint),
@@ -348,6 +367,7 @@ export function useTeamDocument() {
         setEdges(configured.map(edgeFromConfig))
         setDocumentSnapshot(snapshot)
         setYamlPreview(yaml)
+        setLoadedYaml(yaml)
         resetHistory()
         setFileGone(false)
         const schemaVersion = (snapshot as { schemaVersion?: unknown }).schemaVersion
@@ -390,7 +410,7 @@ export function useTeamDocument() {
   }, [resetHistory])
 
   const applyDiskYaml = useCallback(
-    async (yaml: string, notice?: string) => {
+    async (yaml: string, notice?: string, revision?: string) => {
       let model: TeamFileModel
       try {
         model = TeamFileModel.parse(yaml)
@@ -415,11 +435,13 @@ export function useTeamDocument() {
       )
       const currentPositions = new Map(nodes.map((node) => [node.id, node.position]))
       modelRef.current = model
-      loadedRevisionRef.current = await hashTeamYaml(yaml)
+      loadedRevisionRef.current = revision ?? await hashTeamYaml(yaml)
       isNewRef.current = false
       setEntrypointState(snapshot.entrypoint)
       setTeamGuards(snapshot.guards ?? null)
       setTeamBudget(snapshot.budget ?? null)
+      setTeamSchedule(snapshot.schedule ?? null)
+      setTeamSchedule(snapshot.schedule ?? null)
       setNodes(
         agents.map((agent) =>
           nodeFromAgent(
@@ -432,6 +454,7 @@ export function useTeamDocument() {
       setEdges(configured.map(edgeFromConfig))
       setDocumentSnapshot(snapshot)
       setYamlPreview(yaml)
+      setLoadedYaml(yaml)
       resetHistory()
       setExternalChange(null)
       setSaveError(null)
@@ -458,8 +481,8 @@ export function useTeamDocument() {
   const reloadFromDisk = useCallback(async () => {
     if (!path || isNewRef.current) return
     try {
-      const { yaml } = await fetchTeamFile(path)
-      await applyDiskYaml(yaml, 'Reloaded from disk')
+      const { yaml, revision } = await fetchTeamFile(path)
+      await applyDiskYaml(yaml, 'Reloaded from disk', revision)
     } catch (error) {
       if (error instanceof TeamFileApiError && error.status === 404) {
         const reason = 'File is gone. Save a copy to continue editing.'
@@ -474,41 +497,46 @@ export function useTeamDocument() {
     }
   }, [path, applyDiskYaml])
 
-  // §9.3's intentionally weak but honest focus polling until the daemon has revision events.
-  useEffect(() => {
-    async function checkForExternalChange() {
-      const loadedRevision = loadedRevisionRef.current
-      if (!path || !loadedRevision || isNewRef.current) return
-      try {
-        const { yaml } = await fetchTeamFile(path)
-        const diskRevision = await hashTeamYaml(yaml)
-        if (diskRevision === loadedRevision) return
-        // §9.5: a read-only document cannot hold unsaved edits, so a changed disk revision is
-        // not a conflict — re-evaluate it like a clean canvas (§9.3), which re-classifies the
-        // new schemaVersion and may even lift the read-only state.
-        if (saveState === 'clean' || saveState === 'saved' || saveState === 'read-only') {
-          await applyDiskYaml(yaml, 'Reloaded from disk')
-        } else {
-          setExternalChange({ diskYaml: yaml, diskRevision })
-          setSaveError(EXTERNAL_CHANGE_MESSAGE)
-          setSaveState('conflict')
-        }
-      } catch (error) {
-        if (error instanceof TeamFileApiError && error.status === 404) {
-          const reason = 'File is gone. Save a copy to continue editing.'
-          setReadOnlyReason(reason)
-          setFileGone(true)
-          setSaveError(reason)
-          setSaveState('read-only')
-        }
+  // §9.3: compare the loaded revision against disk and hand the difference to the conflict bar.
+  // Polled on focus (intentionally weak but honest, until the daemon has revision events), and
+  // called directly when `POST /api/runs` refuses a stale revision (§1.5).
+  const checkDiskRevision = useCallback(async () => {
+    const loadedRevision = loadedRevisionRef.current
+    if (!path || !loadedRevision || isNewRef.current) return
+    try {
+      const { yaml, revision } = await fetchTeamFile(path)
+      const diskRevision = revision ?? await hashTeamYaml(yaml)
+      if (diskRevision === loadedRevision) return
+      // §9.5: a read-only document cannot hold unsaved edits, so a changed disk revision is
+      // not a conflict — re-evaluate it like a clean canvas (§9.3), which re-classifies the
+      // new schemaVersion and may even lift the read-only state.
+      if (saveState === 'clean' || saveState === 'saved' || saveState === 'read-only') {
+        await applyDiskYaml(yaml, 'Reloaded from disk', revision)
+      } else {
+        setExternalChange({ diskYaml: yaml, diskRevision })
+        setSaveError(EXTERNAL_CHANGE_MESSAGE)
+        setSaveState('conflict')
+      }
+    } catch (error) {
+      if (error instanceof TeamFileApiError && error.status === 404) {
+        const reason = 'File is gone. Save a copy to continue editing.'
+        setReadOnlyReason(reason)
+        setFileGone(true)
+        setSaveError(reason)
+        setSaveState('read-only')
       }
     }
-    window.addEventListener('focus', checkForExternalChange)
-    return () => window.removeEventListener('focus', checkForExternalChange)
   }, [path, saveState, applyDiskYaml])
+
+  useEffect(() => {
+    const onFocus = () => void checkDiskRevision()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [checkDiskRevision])
 
   const keepMine = useCallback(() => {
     if (!externalChange) return
+    isNewRef.current = false
     loadedRevisionRef.current = externalChange.diskRevision
     setExternalChange(null)
     setSaveError(null)
@@ -517,30 +545,32 @@ export function useTeamDocument() {
 
   const useDisk = useCallback(async () => {
     if (!externalChange) return
-    await applyDiskYaml(externalChange.diskYaml)
+    await applyDiskYaml(externalChange.diskYaml, undefined, externalChange.diskRevision)
   }, [externalChange, applyDiskYaml])
 
   const saveCopy = useCallback(async (requestedPath: string) => {
     const targetPath = requestedPath.trim()
-    if (!targetPath || !modelRef.current) return false
+    if (!targetPath || !modelRef.current || saveInFlightRef.current) return false
+    saveInFlightRef.current = true
     setSaveState('saving')
     try {
       const yaml = modelRef.current.toYaml()
-      const saved = await saveTeamFile(targetPath, yaml)
       let root = teamsRoot
-      if (!saved.path.startsWith('/') && !root) {
+      if (!targetPath.startsWith('/') && !root) {
         const discovery = await fetchTeamsDiscovery()
         root = discovery.root
         setTeamsRoot(root)
       }
+      const saved = await saveTeamFile(targetPath, yaml, null)
       const displayPath = root ? absoluteTeamPath(root, saved.path) : saved.path
-      loadedRevisionRef.current = await hashTeamYaml(yaml)
+      loadedRevisionRef.current = saved.revision ?? await hashTeamYaml(yaml)
       isNewRef.current = false
+      setLoadedYaml(yaml)
       setPath(displayPath)
       setReadOnlyReason(null)
       setFileGone(false)
       setSaveError(null)
-      setSaveState('saved')
+      setSaveState(modelRef.current.toYaml() === yaml ? 'saved' : 'dirty')
       window.history.replaceState({}, '', `/?path=${encodeURIComponent(displayPath)}`)
       window.setTimeout(() => setSaveState((current) => (current === 'saved' ? 'clean' : current)), 2000)
       return true
@@ -548,6 +578,8 @@ export function useTeamDocument() {
       setSaveError(error instanceof Error ? error.message : String(error))
       setSaveState('read-only')
       return false
+    } finally {
+      saveInFlightRef.current = false
     }
   }, [teamsRoot])
 
@@ -563,6 +595,7 @@ export function useTeamDocument() {
       const remainingNodes = nodes.filter((node) => !idSet.has(node.id))
       const droppedEdges = edges.filter((edge) => idSet.has(edge.source) || idSet.has(edge.target))
       const remainingEdges = edges.filter((edge) => !idSet.has(edge.source) && !idSet.has(edge.target))
+      const configuredResponder = documentSnapshot?.responder
 
       droppedEdges.forEach((edge) => modelRef.current?.removeEdge(edge.source, edge.target))
       idSet.forEach((id) => modelRef.current?.removeAgent(id))
@@ -578,6 +611,11 @@ export function useTeamDocument() {
         } else {
           modelRef.current?.clearEntrypoint()
         }
+      }
+
+      if (configuredResponder) {
+        if (remainingEdges.length === 0 && nextEntrypoint) modelRef.current?.setResponder(nextEntrypoint)
+        else if (idSet.has(configuredResponder)) modelRef.current?.clearResponder()
       }
 
       setNodes(remainingNodes.map((node) => ({ ...node, data: { ...node.data, isEntrypoint: node.id === nextEntrypoint } })))
@@ -601,7 +639,7 @@ export function useTeamDocument() {
         })
       }
     },
-    [nodes, edges, entrypoint, markDirty, captureHistory],
+    [nodes, edges, entrypoint, documentSnapshot?.responder, markDirty, captureHistory],
   )
 
   const removeAgent = useCallback((id: string) => removeAgents([id]), [removeAgents])
@@ -623,6 +661,7 @@ export function useTeamDocument() {
       })
 
       pairs.forEach((pair) => modelRef.current?.removeEdge(pair.from, pair.to))
+      if (remaining.length === 0 && documentSnapshot?.responder && entrypoint) modelRef.current?.setResponder(entrypoint)
       setEdges(remaining)
       markDirty()
 
@@ -632,12 +671,39 @@ export function useTeamDocument() {
         setPendingEdgeRemoval({ edges: removed })
       }
     },
-    [edges, markDirty, captureHistory],
+    [edges, entrypoint, documentSnapshot?.responder, markDirty, captureHistory],
   )
 
   const removeEdgeBetween = useCallback(
     (from: string, to: string) => removeEdgesBetween([{ from, to }]),
     [removeEdgesBetween],
+  )
+
+  /**
+   * Put the agent cards where the `<team>.layout.json` sidecar says they were left.
+   *
+   * Deliberately **not** a dirtying edit and deliberately not in the undo stack: these are the
+   * positions this document already had, arriving from the sidecar a moment after the YAML. ADR
+   * 0016 puts them there rather than in the team file, so restoring them is not a change to the
+   * document the daemon runs — which is exactly what makes a drag never dirty the team file.
+   *
+   * An agent with no saved position keeps the seeded auto-layout, which is a normal state and not
+   * an error: the same file opens the same shape on a machine that has never seen it.
+   */
+  const applyPositions = useCallback(
+    (positions: Record<string, { x: number; y: number }>) => {
+      setNodes((current) => {
+        let changed = false
+        const next = current.map((node) => {
+          const saved = positions[node.id]
+          if (!saved || (saved.x === node.position.x && saved.y === node.position.y)) return node
+          changed = true
+          return { ...node, position: saved }
+        })
+        return changed ? next : current
+      })
+    },
+    [],
   )
 
   const onNodesChange = useCallback(
@@ -678,6 +744,10 @@ export function useTeamDocument() {
         return
       }
 
+      if (newNode.data.agent.kind === 'operator' && edges.length === 0) {
+        window.dispatchEvent(new CustomEvent('loomwatch:placement-refused', { detail: 'Review stops need a pipeline. Connect two agents first, then add You.' }))
+        return
+      }
       captureHistory()
       modelRef.current?.addAgent(newNode.data.agent)
 
@@ -696,7 +766,7 @@ export function useTeamDocument() {
       }
       markDirty()
     },
-    [nodes, entrypoint, markDirty, captureHistory],
+    [nodes, entrypoint, edges.length, markDirty, captureHistory],
   )
 
   const renameAgent = useCallback(
@@ -722,6 +792,15 @@ export function useTeamDocument() {
     [markDirty, captureHistory],
   )
 
+  const updateAgentSpawn = useCallback((id: string, value: SpawnConfig) => {
+    captureHistory()
+    modelRef.current?.setAgentField(id, 'spawn', value)
+    modelRef.current?.setAgentField(id, 'model', '')
+    modelRef.current?.setAgentField(id, 'thinkingEffort', undefined)
+    setNodes(current => current.map(node => node.id === id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, spawn: value, model: '', thinkingEffort: undefined } } } : node))
+    markDirty()
+  }, [markDirty, captureHistory])
+
   const updateAgentModel = useCallback(
     (id: string, value: string) => {
       captureHistory()
@@ -736,15 +815,29 @@ export function useTeamDocument() {
     [markDirty, captureHistory],
   )
 
+  const updateAgentThinkingEffort = useCallback(
+    (id: string, value: string) => {
+      captureHistory()
+      modelRef.current?.setAgentField(id, 'thinkingEffort', value)
+      setNodes((current) =>
+        current.map((node) =>
+          node.id === id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, thinkingEffort: value } } } : node,
+        ),
+      )
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
   const updateAgentCwd = useCallback(
     (id: string, cwd: string) => {
       captureHistory()
       setNodes((current) =>
         current.map((node) => {
-          if (node.id !== id) {
+          if (node.id !== id || node.data.agent.kind === 'operator') {
             return node
           }
-          const spawn: SpawnConfig = { ...node.data.agent.spawn, cwd }
+          const spawn: SpawnConfig = { cmd: '', args: [], env: {}, ...node.data.agent.spawn, cwd }
           modelRef.current?.setAgentField(id, 'spawn', spawn)
           return { ...node, data: { ...node.data, agent: { ...node.data.agent, spawn } } }
         }),
@@ -759,10 +852,28 @@ export function useTeamDocument() {
       captureHistory()
       setNodes((current) =>
         current.map((node) => {
-          if (node.id !== id) {
+          if (node.id !== id || node.data.agent.kind === 'operator') {
             return node
           }
           const budget = { ...node.data.agent.budget, limitUsd }
+          modelRef.current?.setAgentField(id, 'budget', budget)
+          return { ...node, data: { ...node.data, agent: { ...node.data.agent, budget } } }
+        }),
+      )
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
+  const updateAgentWarnAt = useCallback(
+    (id: string, warnAtPercent: number) => {
+      captureHistory()
+      setNodes((current) =>
+        current.map((node) => {
+          if (node.id !== id || node.data.agent.kind === 'operator') {
+            return node
+          }
+          const budget = { limitUsd: 0, ...node.data.agent.budget, warnAtPercent }
           modelRef.current?.setAgentField(id, 'budget', budget)
           return { ...node, data: { ...node.data, agent: { ...node.data.agent, budget } } }
         }),
@@ -786,13 +897,71 @@ export function useTeamDocument() {
     [markDirty, captureHistory],
   )
 
+  /**
+   * The Inspector's Behaviour-zone memory toggles: `memory.brief` and `memory.deliverAs`.
+   *
+   * Both are executable — they change what the daemon puts in the opening prompt and whether it
+   * moves the agent into the managed workspace — so they go through the document model and wait
+   * for an explicit save, like every other Behaviour field. Passing `undefined` clears the key,
+   * which is how an agent goes back to inheriting the team's `memory:` block.
+   */
+  const updateAgentMemory = useCallback(
+    (id: string, field: 'brief' | 'deliverAs', value: boolean | 'native-file' | 'packet-only' | undefined) => {
+      captureHistory()
+      modelRef.current?.setAgentMemory(id, field, value)
+      setNodes((current) =>
+        current.map((node) => {
+          if (node.id !== id) return node
+          const memory: NonNullable<AgentConfig['memory']> = { ...node.data.agent.memory }
+          if (value === undefined) delete memory[field]
+          else if (field === 'brief') memory.brief = value as boolean
+          else memory.deliverAs = value as 'native-file' | 'packet-only'
+          const next = Object.keys(memory).length > 0 ? memory : undefined
+          return { ...node, data: { ...node.data, agent: { ...node.data.agent, memory: next } } }
+        }),
+      )
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
+  /**
+   * Wiring a capability to an agent is a change to what the daemon runs, so it edits the team file
+   * and waits for an explicit save — unlike the card's position, which stays in the autosaved
+   * sidecar. Connecting the same capability twice is a no-op rather than a duplicate.
+   */
+  const setAgentCapabilities = useCallback(
+    (id: string, capabilities: CapabilityRef[]) => {
+      captureHistory()
+      const next = capabilities.length > 0 ? capabilities : undefined
+      modelRef.current?.setAgentField(id, 'capabilities', next)
+      setNodes((current) =>
+        current.map((node) =>
+          node.id === id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, capabilities: next } } } : node,
+        ),
+      )
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
   const promoteEntrypoint = useCallback(
     (id: string) => {
       captureHistory()
       modelRef.current?.setEntrypoint(id)
+      if (edges.length === 0 && documentSnapshot?.responder) modelRef.current?.setResponder(id)
       setNodes((current) => current.map((node) => ({ ...node, data: { ...node.data, isEntrypoint: node.id === id } })))
       setEntrypointState(id)
       setRefusal(null)
+      markDirty()
+    },
+    [edges.length, documentSnapshot?.responder, markDirty, captureHistory],
+  )
+
+  const promoteResponder = useCallback(
+    (id: string) => {
+      captureHistory()
+      modelRef.current?.setResponder(id)
       markDirty()
     },
     [markDirty, captureHistory],
@@ -825,6 +994,81 @@ export function useTeamDocument() {
         modelRef.current?.setTeamBudget(next)
         return next
       })
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
+  const updateTeamSchedule = useCallback(
+    (schedule: ScheduleConfig) => {
+      captureHistory()
+      modelRef.current?.setSchedule(schedule)
+      setTeamSchedule(schedule)
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
+  // The Memory panel's half of adding a Brief entry. The Markdown file is written by
+  // `PUT /api/memory/file`; the `memory.brief` line goes through the document like every other
+  // executable change, so the operator reviews and saves it rather than the daemon writing YAML
+  // behind their back (docs/TEAM_MEMORY.md, ADR 0014).
+  const addBriefEntry = useCallback(
+    (entry: BriefEntryConfig) => {
+      captureHistory()
+      modelRef.current?.addBriefEntry(entry)
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
+  /** Stop supplying a Brief entry. The Markdown file on disk is the operator's and is kept. */
+  const removeBriefEntry = useCallback(
+    (path: string) => {
+      captureHistory()
+      modelRef.current?.removeBriefEntry(path)
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
+  /**
+   * Add or narrow one `memory.inherits` entry. Executable configuration, so it becomes an unsaved
+   * change the operator reviews in the YAML preview rather than a write the daemon makes.
+   */
+  const addMemoryInherit = useCallback(
+    (entry: { team?: string; pack?: string; appliesTo?: string[] }) => {
+      captureHistory()
+      try {
+        modelRef.current?.addMemoryInherit(entry)
+      } catch (caught: unknown) {
+        setRefusal({ message: caught instanceof Error ? caught.message : String(caught) })
+        return
+      }
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
+  const removeMemoryInherit = useCallback(
+    (key: { team?: string; pack?: string }) => {
+      captureHistory()
+      modelRef.current?.removeMemoryInherit(key)
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
+  /** Decline one inherited Brief entry. The origin team keeps it; this team stops being supplied it. */
+  const excludeInheritedBrief = useCallback(
+    (key: { team?: string; pack?: string }, path: string) => {
+      captureHistory()
+      try {
+        modelRef.current?.excludeInheritedBrief(key, path)
+      } catch (caught: unknown) {
+        setRefusal({ message: caught instanceof Error ? caught.message : String(caught) })
+        return
+      }
       markDirty()
     },
     [markDirty, captureHistory],
@@ -993,7 +1237,7 @@ export function useTeamDocument() {
   }, [])
 
   // The node cards (§5.2) render the same reveal-gated problems as the inspector, merged into
-  // `data` rather than threaded through context so `AgentNodeCard` stays a plain data renderer.
+  // `data` rather than threaded through context so the agent card stays a plain data renderer.
   const nodesForCanvas = useMemo(
     () =>
       nodes.map((node) => {
@@ -1018,36 +1262,37 @@ export function useTeamDocument() {
       ? 'invalid'
       : saveState
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (): Promise<boolean> => {
     // "Settles ... on ⌘S" (§5.4): an attempted save is itself what reveals a still-incomplete
     // field as an error, whether or not the save actually proceeds below.
     setAttemptedSave(true)
-    if (!path || !modelRef.current || schemaLoading || readOnlyReason || entrypointProblem || (validation && !validation.valid)) {
-      return
+    if (saveInFlightRef.current || !path || !modelRef.current || schemaLoading || readOnlyReason || entrypointProblem || (validation && !validation.valid)) {
+      return false
     }
+    saveInFlightRef.current = true
     setSaveState('saving')
     try {
       const loadedRevision = loadedRevisionRef.current
       const yaml = modelRef.current.toYaml()
-      const nextRevision = await hashTeamYaml(yaml)
       if (!isNewRef.current) {
         if (!loadedRevision) {
           throw new Error('Cannot verify whether the team file changed on disk.')
         }
         const disk = await fetchTeamFile(path)
-        const diskRevision = await hashTeamYaml(disk.yaml)
+        const diskRevision = disk.revision ?? await hashTeamYaml(disk.yaml)
         if (diskRevision !== loadedRevision) {
           setExternalChange({ diskYaml: disk.yaml, diskRevision })
           setSaveState('conflict')
           setSaveError(EXTERNAL_CHANGE_MESSAGE)
-          return
+          return false
         }
       }
 
       const wasNew = isNewRef.current
-      await saveTeamFile(path, yaml)
-      loadedRevisionRef.current = nextRevision
+      const saved = await saveTeamFile(path, yaml, wasNew ? null : loadedRevision)
+      loadedRevisionRef.current = saved.revision ?? await hashTeamYaml(yaml)
       isNewRef.current = false
+      setLoadedYaml(yaml)
       if (wasNew) {
         window.history.replaceState({}, '', `/?path=${encodeURIComponent(path)}`)
       }
@@ -1058,7 +1303,26 @@ export function useTeamDocument() {
       } else {
         setSaveState('dirty')
       }
+      return true
     } catch (error) {
+      if (error instanceof TeamFileApiError && error.status === 412) {
+        setSaveState('conflict')
+        setSaveError(EXTERNAL_CHANGE_MESSAGE)
+        try {
+          const disk = await fetchTeamFile(path)
+          setExternalChange({ diskYaml: disk.yaml, diskRevision: disk.revision ?? await hashTeamYaml(disk.yaml) })
+        } catch (diskError) {
+          if (diskError instanceof TeamFileApiError && diskError.status === 404) {
+            const reason = 'File is gone. Save a copy to continue editing.'
+            setExternalChange(null)
+            setReadOnlyReason(reason)
+            setFileGone(true)
+            setSaveError(reason)
+            setSaveState('read-only')
+          }
+        }
+        return false
+      }
       // §9.3: the backing file was deleted or renamed before this save reached disk. Like
       // reloadFromDisk and focus polling, keep the in-memory document, go read-only with a
       // File is gone reason, and leave Save a copy available instead of a generic error.
@@ -1068,10 +1332,13 @@ export function useTeamDocument() {
         setFileGone(true)
         setSaveError(reason)
         setSaveState('read-only')
-        return
+        return false
       }
       setSaveState('error')
       setSaveError(error instanceof TeamFileApiError ? error.message : String(error))
+      return false
+    } finally {
+      saveInFlightRef.current = false
     }
   }, [path, schemaLoading, readOnlyReason, entrypointProblem, validation])
 
@@ -1083,6 +1350,16 @@ export function useTeamDocument() {
     entrypointProblem,
     teamGuards,
     teamBudget,
+    teamSchedule,
+    /**
+     * The team's `memory.inherits` entries as the document holds them.
+     *
+     * The canvas draws the **union** of the sidecar's memory cards and these, so a `memory.inherits`
+     * entry written by hand in the YAML shows as a card rather than being invisible until someone
+     * happens to drag the same row out of the Library.
+     */
+    memoryInherits: documentSnapshot?.memory?.inherits ?? [],
+    responder: documentSnapshot?.responder ?? null,
     saveState,
     documentChipState,
     saveError,
@@ -1095,6 +1372,7 @@ export function useTeamDocument() {
     externalChange,
     diskNotice,
     yamlPreview,
+    loadedYaml,
     canUndo: historyState.undo > 0,
     canRedo: historyState.redo > 0,
     refusal,
@@ -1108,6 +1386,7 @@ export function useTeamDocument() {
     useDisk,
     saveCopy,
     layoutNodes,
+    applyPositions,
     settleNodeCollision,
     capturePositionHistory: captureHistory,
     undo,
@@ -1120,16 +1399,33 @@ export function useTeamDocument() {
     removeEdgeBetween,
     renameAgent,
     updateAgentModel,
+    updateAgentSpawn,
+    updateAgentThinkingEffort,
     updateAgentCwd,
     updateAgentBudget,
+    updateAgentWarnAt,
     updateAgentAllowRecruiting,
+    updateAgentMemory,
+    setAgentCapabilities,
     promoteEntrypoint,
+    promoteResponder,
     updateTeamGuards,
     updateTeamBudget,
+    updateTeamSchedule,
+    addBriefEntry,
+    removeBriefEntry,
+    addMemoryInherit,
+    removeMemoryInherit,
+    excludeInheritedBrief,
     touchField,
     dismissRefusal,
     keepLastEdgeRemoval,
     undoLastEdgeRemoval,
     save,
+    checkDiskRevision,
+    // §1.4: the revision the last load or save settled on. A function, not state: `submit()`
+    // reads it immediately after awaiting `save()`, where a captured value would still be the
+    // pre-save revision — and pinning the run to that is the race the field exists to close.
+    currentRevision: () => loadedRevisionRef.current,
   }
 }

@@ -1,0 +1,864 @@
+/* ===========================================================================
+   LoomWatch — component styles, ported from docs/mockups/prototype.css.
+   Built strictly on tokens.css: no hex values and no --lw-* primitives.
+   Section comments cite the spec section they implement.
+   =========================================================================== */
+
+[hidden] { display: none !important; }
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--color-ground);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  transition: background-color var(--t-move) var(--ease-out), color var(--t-move) var(--ease-out);
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+code, kbd, pre { font-family: var(--font-mono); }
+
+/* TNG-127: the app is a direct-manipulation canvas, not a document. Selection
+   is re-enabled on genuine content below. */
+.lw-shell { user-select: none; -webkit-user-select: none; }
+.lw-shell .rr-body, .lw-shell .rr-body code, .lw-shell .ent-out, .lw-shell .story-prompt .rt-body,
+.lw-shell .code, .lw-shell input, .lw-shell textarea, .lw-shell [contenteditable],
+.lw-shell .selectable { user-select: text; -webkit-user-select: text; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  clip-path: inset(50%); overflow: hidden; white-space: nowrap;
+}
+
+.yaml-line { display: block; min-width: max-content; margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); border-left: 2px solid transparent; }
+.yaml-line.problem-line { color: var(--color-ink); background: color-mix(in srgb, var(--color-alert) 12%, transparent); border-left-color: var(--color-alert); outline: 0; }
+
+/* ---------------------------------------------------------------------------
+   SHELL + CANVAS GROUND — UX_REDESIGN §3, §7
+   --------------------------------------------------------------------------- */
+.lw-shell { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--color-ground); color: var(--color-ink); }
+.lw-shell.dragging .react-flow__background { opacity: .6; }
+.lw-shell.dragging::after {
+  content: ""; position: absolute; inset: var(--lw-panel-inset);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  border-radius: var(--r-lg); pointer-events: none; z-index: 60;
+}
+.lw-canvas { position: absolute; inset: 0; }
+.react-flow { background: var(--color-ground); }
+.react-flow__attribution { display: none; }
+.react-flow__background { transition: opacity var(--t-quick) var(--ease-out); }
+.react-flow__pane { cursor: default; }
+.react-flow__pane.dragging { cursor: grabbing; }
+.react-flow__node { transition: transform var(--t-move) var(--ease-out); }
+.react-flow__node.dragging, .lw-shell.node-dragging .react-flow__node { transition: none; }
+.react-flow__node:focus, .react-flow__node:focus-visible { outline: 0; }
+.react-flow__node:focus-visible > .node,
+.react-flow__node:focus-visible > .rt,
+.react-flow__node:focus-visible > .activity-ent {
+  box-shadow: 0 0 0 1px var(--color-panel-solid), 0 0 0 3px var(--lw-node-ring);
+}
+.react-flow__edge:focus, .react-flow__edge:focus-visible { outline: 0; }
+.react-flow__edge:focus-visible .react-flow__edge-path { stroke: var(--color-accent); stroke-width: 2.5; }
+.react-flow__edge-interaction { stroke-width: 14px; }
+.react-flow__edgelabel-renderer { z-index: 5; }
+
+/* the theme sweep — DESIGN_LANGUAGE §9. A single gold wipe, 320ms. */
+.lw-sweep {
+  position: absolute; inset: 0; z-index: 200; pointer-events: none; opacity: 0;
+  background: linear-gradient(100deg, transparent 38%,
+              color-mix(in srgb, var(--color-accent) 22%, transparent) 50%, transparent 62%);
+}
+.lw-shell.sweeping .lw-sweep { animation: sweep var(--t-entrance) var(--ease-out); }
+@keyframes sweep { from { opacity: 1; transform: translateX(-100%); } to { opacity: 1; transform: translateX(100%); } }
+
+/* ---------------------------------------------------------------------------
+   FLOATING PANEL PRIMITIVE — UX_REDESIGN §3
+   --------------------------------------------------------------------------- */
+.panel { position: absolute; z-index: 40; }
+.panel.left   { left: var(--lw-panel-inset); }
+.panel.right  { right: var(--lw-panel-inset); }
+.panel.top    { top: var(--lw-panel-inset); }
+.panel.bottom { bottom: calc(var(--lw-panel-inset) + var(--lw-bottom-offset)); }
+.panel.cx     { left: 50%; transform: translateX(-50%); }
+
+/* ---------------------------------------------------------------------------
+   LIBRARY — UX_REDESIGN §4, TNG-123/124. 288 px, collapsible to a 48 px rail.
+   --------------------------------------------------------------------------- */
+.lw-library {
+  width: var(--lw-library-w);
+  height: calc(100% - 56px);
+  max-height: calc(100% - 56px);
+  left: 28px;
+  top: 28px;
+  padding: 0 var(--sp-3) var(--sp-4);
+  display: flex; flex-direction: column; gap: 0;
+  overflow: hidden;
+  background-color: var(--e1-fill);
+  background-image: var(--e1-sheen);
+  border-radius: 18px;
+  border-color: color-mix(in srgb, var(--color-ink-3) 28%, transparent);
+  box-shadow: var(--e1-shadow);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  transition: width var(--t-move) var(--ease-out), padding var(--t-move) var(--ease-out);
+}
+.lw-library.collapsed { width: var(--lw-library-rail-w); padding: var(--sp-2) 0; height: auto; top: var(--lw-panel-inset); left: var(--lw-panel-inset); }
+.lw-library.library-sheet { z-index: 60; }
+.lw-library.collapsed .lib-controls, .lw-library.collapsed .lib-scroll,
+.lw-library.collapsed .lib-foot, .lw-library.collapsed .lib-head-text { display: none; }
+.lw-library .rail-only { display: none; }
+.lw-library.collapsed .rail-only { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); }
+.lib-brand {
+  height: 76px; padding: 0 var(--sp-3); flex: none;
+  display: flex; align-items: center; gap: var(--sp-3);
+  border-bottom: 1px solid var(--color-hairline);
+}
+.lib-brand img { width: 36px; height: 36px; border-radius: var(--r-md); }
+.lib-brand > span { display: flex; flex-direction: column; min-width: 0; }
+.lib-brand strong { color: var(--color-ink); }
+.lib-brand small { color: var(--color-ink-2); white-space: nowrap; }
+.lib-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex: none; min-height: 60px; padding: var(--sp-2) var(--sp-3) 0; }
+.lib-title { display: inline-flex; align-items: center; gap: 10px; color: var(--color-ink); }
+.lib-scan { display: inline-flex; align-items: center; gap: 4px; }
+.lib-scan .link { display: inline-flex; align-items: center; gap: 6px; color: var(--color-ink); }
+.lib-scan .link:disabled { cursor: default; opacity: .55; text-decoration: none; }
+.lib-scan-status { min-height: 18px; padding: 0 50px 8px 45px; margin-top: -6px; display: flex; justify-content: flex-end; align-items: center; gap: 7px; color: var(--color-ink-3); }
+.scan-dot, .ready-dot { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--color-ok); box-shadow: 0 0 9px color-mix(in srgb, var(--color-ok) 45%, transparent); flex: none; }
+.scan-dot.error { background: var(--color-alert); box-shadow: none; }
+.lib-head-text { color: var(--color-ink-3); }
+.lib-title .lib-head-text { color: var(--color-ink); }
+.lib-controls { display: flex; flex-direction: column; gap: var(--sp-2); flex: none; padding: 0 var(--sp-2) var(--sp-4); }
+.lib-search {
+  display: flex; align-items: center; gap: var(--sp-2);
+  height: 38px; padding: 0 var(--sp-3);
+  border: 1px solid var(--color-hairline); border-radius: var(--r-sm);
+  color: var(--color-ink-3);
+}
+.lib-search:focus-within { border-color: var(--color-accent); }
+.lib-search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--color-ink); font: 400 12px/16px var(--font-sans); }
+.lib-search input::placeholder { color: var(--color-ink-3); }
+.lib-filters { display: flex; flex-wrap: wrap; gap: 3px; }
+.lfilt {
+  height: 22px; padding: 0 var(--sp-2);
+  border: 1px solid var(--color-hairline); border-radius: var(--r-full);
+  background: none; color: var(--color-ink-3);
+  font: 500 11px/1 var(--font-sans); white-space: nowrap;
+}
+.lfilt:hover { background: var(--color-accent-tint); color: var(--color-ink); }
+.lfilt.on { background: var(--color-accent-tint); color: var(--color-ink); border-color: var(--color-accent-dim); }
+
+.lib-scroll {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; gap: var(--sp-3);
+  padding: 0 8px 0 8px; margin-right: -4px;
+  scrollbar-width: thin; scrollbar-color: var(--color-ink-3) transparent;
+}
+.lib-scroll::-webkit-scrollbar { width: 6px; }
+.lib-scroll::-webkit-scrollbar-thumb { background: var(--color-hairline); border-radius: var(--r-full); }
+.lib-scroll:hover::-webkit-scrollbar-thumb { background: var(--color-ink-3); }
+.lib-scroll.can-scroll-up { mask-image: linear-gradient(to bottom, transparent, black 20px); }
+.lib-scroll.can-scroll-down { mask-image: linear-gradient(to top, transparent, black 20px); }
+.lib-scroll.can-scroll-up.can-scroll-down { mask-image: linear-gradient(to bottom, transparent, black 20px, black calc(100% - 20px), transparent); }
+
+.lib-group { display: flex; flex-direction: column; gap: var(--sp-2); }
+.lib-group + .lib-group { border-top: 1px solid var(--color-hairline); padding-top: var(--sp-3); }
+.lib-group-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); color: var(--color-ink-3); padding: var(--sp-2) var(--sp-1); }
+.lib-chev { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; padding: 0; color: var(--color-ink-2); letter-spacing: .07em; text-transform: uppercase; text-align: left; }
+.capability-group .lib-chev { color: var(--color-ink); letter-spacing: 0; text-transform: none; }
+.lib-chev:hover { color: var(--color-ink); }
+.lib-count {
+  display: inline-flex; flex: none; align-items: center; justify-content: center;
+  min-width: 22px; height: 16px; padding: 0 6px;
+  border-radius: var(--r-full); background: var(--color-hairline);
+  color: var(--color-ink-3); font: 500 10px/16px var(--font-mono);
+}
+.lib-rows { display: flex; flex-direction: column; gap: 6px; }
+.lib-row {
+  min-height: 44px;
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--color-hairline);
+  background: color-mix(in srgb, var(--color-panel-solid) 38%, transparent);
+  color: inherit; text-align: left; width: 100%;
+  cursor: grab;
+  transition: background-color var(--t-instant) var(--ease-out), border-color var(--t-instant) var(--ease-out);
+}
+.lib-row:hover { background: var(--color-accent-tint); border-color: var(--color-accent-dim); }
+.lib-row:active { cursor: grabbing; }
+.lib-row .drag-dots { margin-left: auto; color: var(--color-ink-3); opacity: .75; letter-spacing: -1px; flex: none; }
+.lib-row .drag-dots.leading { margin: 0; }
+.lib-row:hover .drag-dots { opacity: 1; }
+.lib-row.unavailable { opacity: .55; cursor: not-allowed; background: transparent; }
+.lib-row.unavailable:hover { background: none; border-color: var(--color-hairline); }
+.lib-row.dragging { opacity: .35; border-style: dashed; }
+.lib-row.armed { border-color: var(--color-accent); background: var(--color-accent-tint); box-shadow: inset 3px 0 0 var(--color-accent); }
+.lib-row-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.lib-row-name { color: var(--color-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-row-sub { color: var(--color-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-row-meta { display: flex; align-items: center; gap: 4px; min-width: 0; color: var(--color-ink-3); }
+.lib-row-compat { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* A capability row is an agent row that places a resource instead of a worker: same 44 px card,
+   same grab cursor, same grip at the trailing edge. It used to be a static `listitem` with a
+   leading grip it could not honour. */
+.capability-row { min-height: 56px; padding: 7px var(--sp-3) 7px var(--sp-2); }
+.capability-row .monogram { width: 36px; height: 36px; border: 1px solid var(--color-hairline); background: color-mix(in srgb, var(--color-panel-solid) 80%, transparent); }
+.cap-status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--color-ink-2); flex: none; }
+.ready-dot.local { background: var(--color-halt); box-shadow: none; }
+.lib-more { min-height: 30px; padding: 3px 4px; border: 0; background: none; color: var(--color-ink-2); text-align: left; }
+.lib-more:hover { color: var(--color-ink); }
+.lbadge {
+  display: inline-block; padding: 1px 5px; border-radius: var(--r-full);
+  border: 1px solid var(--color-hairline); color: var(--color-ink-3);
+  font: 500 9px/1.4 var(--font-sans); letter-spacing: .04em; white-space: nowrap;
+}
+.lbadge.st-permission { color: var(--color-accent); border-color: var(--color-accent-dim); }
+.lbadge.st-disconnected { color: var(--color-halt); border-color: color-mix(in srgb, var(--color-halt) 50%, transparent); }
+.lbadge.st-unavailable { color: var(--color-ink-3); border-style: dashed; }
+.lbadge.wired { color: var(--color-ink); background: var(--color-accent-tint); border-color: var(--color-accent-dim); }
+.lib-foot { flex: none; display: flex; flex-direction: column; gap: 3px; padding: var(--sp-3) var(--sp-3) 0; border-top: 1px solid var(--color-hairline); color: var(--color-ink-3); }
+
+/* harness monogram — DESIGN_LANGUAGE §12: monochrome, never vendor art. */
+.monogram {
+  width: 20px; height: 20px; flex: none;
+  display: grid; place-items: center;
+  border-radius: var(--r-md);
+  background: var(--color-hairline); color: var(--color-ink-2);
+  font: 600 10px/1 var(--font-mono);
+}
+.monogram.res { border-radius: var(--r-full); color: var(--color-ink-3); }
+
+/* §4.0 loading skeletons — no spinner in a list */
+.skel-row { height: 40px; display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); }
+.skel-sq { width: 20px; height: 20px; border-radius: var(--r-md); background: var(--color-accent-tint); flex: none; }
+.skel-bars { display: flex; flex-direction: column; gap: 5px; flex: 1; }
+.skel-bar { height: 7px; border-radius: var(--r-full); background: var(--color-hairline); display: block; }
+.skel-row { animation: skel 1200ms ease-in-out infinite; }
+.skel-frozen { animation: none; opacity: .4; }
+@keyframes skel { 0%,100% { opacity: .4 } 50% { opacity: .7 } }
+
+/* §16 inline error block */
+.inline-error { border: 1px dashed var(--color-alert); border-radius: var(--r-md); padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
+.inline-error .msg { color: var(--color-ink); }
+.inline-error .detail { color: var(--color-ink-2); overflow-wrap: anywhere; }
+
+/* §4.3 empty group */
+.lib-empty { padding: var(--sp-3); border: 1px dashed var(--color-hairline); border-radius: var(--r-md); color: var(--color-ink-3); display: flex; flex-direction: column; gap: var(--sp-2); }
+
+/* the carry ghost that follows a library drag (TNG-127) */
+.lib-carry {
+  position: fixed; top: 0; left: 0; z-index: 90; pointer-events: none;
+  max-width: 260px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  padding: 6px var(--sp-3); border-radius: var(--r-sm);
+  border: 1px dashed var(--color-accent-dim);
+  background: var(--color-panel-solid); color: var(--color-ink);
+  box-shadow: var(--e2-shadow); opacity: .92;
+}
+.lib-carry.over-canvas { border-color: var(--color-accent); border-style: solid; background: var(--color-accent-tint); }
+
+/* ---------------------------------------------------------------------------
+   DOCUMENT SWITCHER — UX_REDESIGN §9.1 / §9.1a. 44 px, two lines, top-centre.
+   --------------------------------------------------------------------------- */
+.lw-chip {
+  min-width: 280px; max-width: min(560px, calc(100vw - 2 * var(--lw-panel-inset)));
+  height: var(--lw-chip-h);
+  padding: 0 var(--sp-3) 0 var(--sp-4);
+  display: flex; align-items: center; gap: var(--sp-3);
+  overflow: hidden;
+}
+.lw-chip .chip-open {
+  align-self: stretch; min-width: 0; flex: 1;
+  display: flex; align-items: center; gap: var(--sp-3);
+  background: none; border: 0; color: inherit; text-align: left; cursor: pointer;
+}
+.lw-chip .chip-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.lw-chip .chip-l1 { color: var(--color-ink); display: flex; align-items: center; gap: var(--sp-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lw-chip .chip-l2 { color: var(--color-ink-3); display: flex; align-items: center; gap: var(--sp-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lw-chip .chev { margin-left: auto; color: var(--color-ink-3); flex: none; display: grid; }
+.lw-chip .chip-action { display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+.dot { width: 12px; height: 12px; flex: none; display: inline-grid; }
+.lw-chip .ledger {
+  position: absolute; left: 0; bottom: 0; height: 2px; width: 100%;
+  background: var(--color-accent); transform: scaleX(0); transform-origin: left center; opacity: 0;
+}
+.lw-chip.saving .ledger { opacity: 1; animation: ledger var(--t-settle) var(--ease-out) forwards; }
+.lw-chip.saved  .ledger { opacity: 1; transform: scaleX(1); background: var(--color-ok); }
+.lw-chip.failed .ledger { opacity: 1; transform: scaleX(.55); background: var(--color-alert); }
+@keyframes ledger { from { transform: scaleX(0) } to { transform: scaleX(1) } }
+
+/* ---------------------------------------------------------------------------
+   BUTTONS — the gold fill is rationed. DESIGN_LANGUAGE §8, Law 2.
+   --------------------------------------------------------------------------- */
+.btn {
+  height: 28px; padding: 0 var(--sp-3);
+  border-radius: var(--r-sm); border: 1px solid var(--color-hairline);
+  background: transparent; color: var(--color-ink-2);
+  font: 500 13px/1 var(--font-sans);
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  cursor: pointer; white-space: nowrap;
+  transition: background-color var(--t-instant) var(--ease-out), color var(--t-instant) var(--ease-out);
+}
+.btn:hover { background: var(--color-accent-tint); color: var(--color-ink); }
+.btn-primary { background: var(--color-accent-fill); border-color: transparent; color: var(--color-accent-on-fill); font-weight: 600; }
+.btn-primary:hover { background: var(--color-accent-fill); filter: brightness(1.06); color: var(--color-accent-on-fill); }
+.btn-primary:disabled, .btn:disabled { background: var(--color-hairline); color: var(--color-ink-3); border-color: transparent; cursor: not-allowed; filter: none; }
+.btn-lg { height: 44px; padding: 0 var(--sp-7); border-radius: var(--r-md); font-size: 15px; }
+.btn-danger:hover { background: color-mix(in srgb, var(--color-alert) 12%, transparent); color: var(--color-alert); }
+.link { background: none; border: 0; padding: 0; color: var(--color-accent); font: 500 13px/18px var(--font-sans); cursor: pointer; text-underline-offset: 3px; }
+.link:hover { text-decoration: underline; }
+.link.alert { color: var(--color-alert); }
+.iconbtn {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border: 0; background: transparent; color: var(--color-ink-2);
+  border-radius: var(--r-sm); cursor: pointer; position: relative; flex: none;
+}
+.iconbtn:hover { background: var(--color-accent-tint); color: var(--color-ink); }
+.iconbtn:disabled { opacity: .35; cursor: default; }
+.iconbtn[aria-pressed="true"] { color: var(--color-accent); }
+kbd.key {
+  font: 500 10px/1 var(--font-mono); border: 1px solid var(--color-hairline);
+  border-radius: var(--r-xs); padding: 1px 4px; color: var(--color-ink-2);
+}
+
+/* ---------------------------------------------------------------------------
+   AGENT NODE — UX_REDESIGN §5.1. 276 × 96; 124 with a live task row.
+   --------------------------------------------------------------------------- */
+/* Dragging a connection across the canvas must not leave the cards it passed over highlighted
+   like a paragraph: these are objects, not prose. Inputs keep their own selection below. */
+.node, .capability-node, .schedule-node { user-select: none; -webkit-user-select: none; }
+.node input, .node textarea, .capability-node input { user-select: text; -webkit-user-select: text; }
+
+.node {
+  position: relative;
+  width: 276px; min-height: 96px;
+  padding: 13px 14px 0 17px;
+  background: var(--lw-node-fill);
+  border: 1px solid var(--lw-node-border);
+  border-radius: var(--r-lg);
+  display: flex; flex-direction: column;
+  cursor: grab; text-align: left; color: inherit;
+  transition: border-color var(--t-instant) var(--ease-out), box-shadow var(--t-quick) var(--ease-out);
+}
+.node.static { cursor: pointer; }
+.node:hover { border-color: var(--lw-node-border-hover); box-shadow: var(--e1-shadow); }
+.node.selected { box-shadow: var(--e1-shadow), 0 0 0 3px var(--color-panel-solid), 0 0 0 5px var(--lw-node-ring); }
+.node.incomplete { border-color: var(--color-accent); }
+.node.invalid    { border-color: var(--color-alert); border-width: 1.5px; }
+.react-flow__node.dragging .node { opacity: .85; box-shadow: var(--e2-shadow); cursor: grabbing; }
+.node .rail { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-lg) 0 0 var(--r-lg); background: var(--color-ink-3); }
+.node.st-running .rail, .node.st-starting .rail { background: var(--color-live); }
+.node.st-waiting .rail, .node.st-stopped .rail { background: var(--color-halt); }
+.node.st-succeeded .rail { background: var(--color-ok); }
+.node.st-failed .rail { background: var(--color-alert); }
+.node.st-unavailable .rail { background: color-mix(in srgb, var(--color-ink-3) 40%, transparent); }
+/* TNG-113: task execution owns the whole perimeter. Blue means executing. */
+.node.has-task { min-height: 124px; }
+.node.has-task.st-running, .node.has-task.st-starting {
+  border-color: var(--lw-node-live);
+  box-shadow: 0 0 0 1px var(--color-live-tint), 0 0 0 3px color-mix(in srgb, var(--color-live) 28%, transparent);
+  animation: live-border var(--t-breathe) ease-in-out infinite;
+}
+.node.has-task.st-succeeded { border-color: var(--color-ok); }
+
+/* Planned capability cards (TNG-122 §5). Same 276 px width and shell as an agent so the canvas
+   reads as one system, but a dashed perimeter and no step badge: this is editable INTENT, and it
+   never claims the capability ran. Observed capability evidence keeps its own gold treatment. */
+.capability-node {
+  position: relative; width: 276px; min-height: 72px;
+  padding: var(--sp-3) var(--sp-4);
+  display: flex; align-items: flex-start; gap: var(--sp-3);
+  background: color-mix(in srgb, var(--lw-node-fill) 72%, transparent);
+  border: 1px dashed var(--lw-node-border); border-radius: var(--r-lg);
+  color: var(--color-ink); box-shadow: var(--e1-shadow); cursor: grab;
+}
+.capability-node.selected { border-color: var(--color-accent); border-style: solid; }
+.react-flow__node.dragging .capability-node { opacity: .85; box-shadow: var(--e2-shadow); cursor: grabbing; }
+/* Placed but not wired to any agent yet: legible, but visibly not doing anything. */
+.capability-node.unwired { opacity: .82; }
+.capability-glyph {
+  width: 28px; height: 28px; flex: none; display: grid; place-items: center;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--color-panel-solid) 70%, transparent);
+  color: var(--color-ink-2);
+}
+.capability-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.capability-copy strong, .capability-copy .t-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.capability-copy .t-meta { color: var(--color-ink-2); }
+.capability-kind { color: var(--color-ink-3); text-transform: uppercase; letter-spacing: .04em; }
+.capability-remove { width: 24px; height: 24px; flex: none; opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
+.capability-node:hover .capability-remove, .capability-remove:focus-visible { opacity: 1; }
+
+/* Schedule is a first-class canvas object. Its editor docks to the right panel, next to the
+   Inspector, so Review lands on the place a non-technical operator can actually fix without
+   a 420 px form covering the pipeline it starts. */
+.schedule-node {
+  position: relative; width: 276px; min-height: 96px;
+  background: var(--lw-node-fill); border: 1px solid var(--lw-node-border);
+  border-radius: var(--r-lg); color: var(--color-ink); box-shadow: var(--e1-shadow);
+}
+.schedule-step { position: absolute; left: -9px; top: -11px; min-width: 18px; height: 18px; display: grid; place-items: center; border: 1px solid var(--color-hairline); border-radius: var(--r-full); background: var(--color-panel-solid); color: var(--color-ink-2); font: 500 10px/18px var(--font-mono); }
+.schedule-node.invalid { border: 2px solid var(--color-alert); }
+.schedule-node-main {
+  width: 100%; min-height: 92px; padding: var(--sp-4);
+  display: flex; align-items: flex-start; gap: var(--sp-3);
+  border: 0; background: transparent; color: inherit; text-align: left;
+  border-radius: inherit;
+}
+.schedule-node-main:hover { background: color-mix(in srgb, var(--color-accent-tint) 45%, transparent); }
+.schedule-icon { width: 30px; height: 30px; flex: none; display: grid; place-items: center; color: var(--color-ink); }
+.schedule-node.invalid .schedule-icon { color: var(--color-alert); }
+.schedule-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.schedule-copy strong, .schedule-copy span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.schedule-copy .alert-copy { color: var(--color-alert); }
+.schedule-copy .t-mono-sm { color: var(--color-ink-3); }
+.schedule-state { width: 9px; height: 9px; margin-top: 4px; flex: none; border-radius: var(--r-full); border: 1px solid var(--color-ink-3); }
+.schedule-state.error { border: 0; background: var(--color-alert); box-shadow: 0 0 9px color-mix(in srgb, var(--color-alert) 45%, transparent); }
+.schedule-editor { display: flex; flex-direction: column; gap: var(--sp-4); }
+.lw-schedule-panel { width: var(--lw-inspector-w); }
+.schedule-problems {
+  display: flex; gap: var(--sp-3); padding: var(--sp-3);
+  border: 1px solid var(--color-alert); border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--color-alert) 12%, transparent);
+  color: var(--color-alert);
+}
+.schedule-problems > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.schedule-problems ul { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: 2px; }
+.schedule-problems li { color: var(--color-ink-2); overflow-wrap: anywhere; }
+.schedule-note { color: var(--color-ink-3); }
+.schedule-stage { color: var(--color-ink-3); }
+.schedule-save-file { width: 100%; height: 36px; justify-content: center; gap: 6px; }
+.schedule-save-file kbd { opacity: .7; }
+.schedule-editor header { display: flex; flex-direction: column; gap: 2px; }
+.schedule-editor header span { color: var(--color-ink-2); }
+.schedule-tabs { height: 40px; display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--color-hairline); border-radius: var(--r-sm); overflow: hidden; }
+.schedule-tabs button { border: 0; border-right: 1px solid var(--color-hairline); background: transparent; color: var(--color-ink-2); }
+.schedule-tabs button:last-child { border-right: 0; }
+.schedule-tabs button:hover { background: var(--color-accent-tint); color: var(--color-ink); }
+.schedule-tabs button.active { background: var(--color-accent-fill); color: var(--color-accent-on-fill); font-weight: 600; }
+/* Two columns need ~420 px; the right panel is 360 px, so Time and Timezone stack there
+   rather than clipping an IANA zone name to "Asi". */
+.schedule-grid { display: grid; grid-template-columns: 1fr 1.12fr; gap: var(--sp-4); }
+.lw-schedule-panel .schedule-grid { grid-template-columns: 1fr; gap: var(--sp-3); }
+.schedule-field { display: flex; flex-direction: column; gap: 7px; color: var(--color-ink-2); }
+.schedule-field small { color: var(--color-ink-3); }
+.schedule-input { height: 42px; padding: 0 var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-ground); color: var(--color-ink-2); }
+.schedule-input:focus-within { border-color: var(--color-accent); }
+.schedule-input input, .schedule-input select { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--color-ink); appearance: none; }
+.schedule-save { width: 100%; height: 46px; justify-content: center; font-size: 15px; }
+.schedule-editor footer { padding-top: var(--sp-3); display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--color-hairline); }
+.schedule-editor footer .link { display: inline-flex; align-items: center; gap: 6px; }
+.schedule-editor footer .link.muted { color: var(--color-ink-3); }
+.node.has-task.st-failed { border-color: var(--color-alert); }
+.node.has-task.st-stopped { border-color: var(--color-halt); border-style: dashed; }
+@keyframes live-border { 50% { box-shadow: 0 0 0 1px var(--color-live-tint), 0 0 0 6px color-mix(in srgb, var(--color-live) 12%, transparent); } }
+.node-task { min-width: 0; display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--color-hairline); color: var(--color-ink-2); white-space: nowrap; }
+.node-task b { flex: none; color: var(--color-ink); font-size: 10px; letter-spacing: .07em; text-transform: uppercase; }
+.node-task .task-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.node.has-task .node-rule { display: none; }
+.node.has-task .node-meta { margin-top: auto; }
+/* The pipeline handover is archived as the receiving stage's first user message but was never
+   shown; this opens it. Only the stages that were handed something render the chip. */
+.handover-chip {
+  align-self: flex-start; margin-top: 7px;
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 20px; padding: 0 8px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-full);
+  background: none; color: var(--color-ink-2);
+  cursor: pointer;
+  transition: background-color var(--t-instant) var(--ease-out), border-color var(--t-instant) var(--ease-out), color var(--t-instant) var(--ease-out);
+}
+.handover-chip:hover { background: var(--color-accent-tint); border-color: var(--color-accent-dim); color: var(--color-ink); }
+/* TNG89 §15.2.3: the event count and the packet route sit on one row, so folded evidence and
+   "what it was given" are both on the card the operator already placed. Gold is "act here", so
+   the fanned state — the one the operator opened — is the only chip that carries it. */
+.node-chips { align-self: flex-start; margin-top: 7px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
+.node-chips .handover-chip { margin-top: 0; }
+.node-chips .handover-chip.on { border-color: var(--color-accent); color: var(--color-accent); background: var(--color-accent-tint); }
+/* docs/TEAM_MEMORY.md "Before a run": what this agent is configured to be supplied. Static text,
+   not a control — the toggles live in the Inspector's Behaviour zone. */
+.mem-chip {
+  display: inline-flex; align-items: center; height: 18px; padding: 0 7px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-full);
+  color: var(--color-ink-3); white-space: nowrap;
+}
+.status-arc { transform-origin: 6px 6px; animation: status-spin 1200ms linear infinite; }
+.status-halo { animation: status-breathe 2400ms ease-in-out infinite; transform-origin: 6px 6px; }
+@keyframes status-spin { to { transform: rotate(360deg); } }
+@keyframes status-breathe { 0%, 100% { transform: scale(.78); opacity: .35; } 50% { transform: scale(1.08); opacity: 0; } }
+.node-top { display: flex; align-items: flex-start; gap: var(--sp-3); flex: none; }
+.node-glyph { width: 18px; height: 18px; flex: none; color: var(--color-ink-2); margin-top: 1px; display: grid; place-items: center; }
+.node.entry .node-glyph { color: var(--color-accent); box-sizing: content-box; padding: 3px; border: 2px solid var(--color-accent); border-radius: var(--r-full); margin: -3px -3px 0; }
+.node-id { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.node-name { color: var(--lw-node-name); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-role { color: var(--lw-node-role); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-role.empty { color: var(--color-ink-3); font-style: italic; }
+.node-name input, .node-role input { width: 100%; background: none; border: 0; outline: none; padding: 0; color: inherit; font: inherit; border-bottom: 1px solid var(--color-accent); }
+.node-rule { height: 1px; background: var(--color-hairline); flex: none; margin-top: auto; }
+.node-meta { display: flex; align-items: center; gap: var(--sp-2); color: var(--lw-node-meta); min-width: 0; flex: none; margin-top: var(--sp-2); }
+.node-meta .model { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-meta .cost { flex: none; color: var(--color-ink-2); }
+.node-meta .lock { color: var(--color-ink-3); flex: none; display: grid; }
+.budget-lane { height: 3px; flex: none; margin: var(--sp-2) -14px 0 -17px; background: var(--lw-budget-track); border-radius: 0 0 var(--r-lg) var(--r-lg); overflow: hidden; }
+.budget-lane > i { display: block; height: 100%; background: var(--lw-budget-fill); }
+.budget-lane.warn > i { background: var(--lw-budget-warn); }
+.budget-lane.over > i { background: var(--lw-budget-over); }
+/* pipeline step badge (top-left, outside) + validity dot (top-right, outside) */
+.node .step {
+  position: absolute; left: -8px; top: -8px; width: 16px; height: 16px;
+  border-radius: var(--r-full); display: grid; place-items: center;
+  background: var(--color-panel-solid); border: 1px solid var(--color-hairline);
+  color: var(--color-ink-2); font: 600 10px/1 var(--font-sans);
+  animation: step-badge-in var(--t-entrance) both var(--ease-out);
+}
+@keyframes step-badge-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+.node .vdot { position: absolute; right: -5px; top: -5px; width: 10px; height: 10px; border-radius: var(--r-full); border: 2px solid var(--color-panel-solid); display: none; }
+.node.incomplete .vdot { display: block; background: var(--color-accent); }
+.node.invalid    .vdot { display: block; background: var(--color-alert); }
+/* compact levels of detail — §5.5 */
+.node.lod-mid { min-height: 48px; padding: 0 14px 0 17px; flex-direction: row; align-items: center; gap: var(--sp-3); }
+.node.lod-mid .node-name { flex: 1; }
+.node.lod-min { width: 48px; min-height: 48px; padding: 0; align-items: center; justify-content: center; border-radius: var(--r-md); }
+.node.lod-min .node-glyph { width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--color-ink-3); color: var(--color-panel-solid); margin: 0; }
+.node.lod-min.st-running .node-glyph, .node.lod-min.st-starting .node-glyph { background: var(--color-live); }
+.node.lod-min.st-succeeded .node-glyph { background: var(--color-ok); }
+.node.lod-min.st-failed .node-glyph { background: var(--color-alert); }
+.node.lod-min .lod-name { position: absolute; top: 52px; left: 50%; transform: translateX(-50%); white-space: nowrap; color: var(--color-ink); max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+
+/* handles — dormant in team mode, active in pipeline mode (CANVAS_SPEC §8.2) */
+.react-flow__handle {
+  width: 8px !important; height: 8px !important; min-width: 0; min-height: 0;
+  border: 0 !important; border-radius: var(--r-full);
+  background: var(--lw-handle-dormant) !important;
+  opacity: .25;
+  transition: width var(--t-instant), height var(--t-instant), background-color var(--t-instant), opacity var(--t-instant);
+}
+.react-flow__handle::after { content: ""; position: absolute; inset: -12px; border-radius: var(--r-full); }
+.react-flow__handle-left { left: -4px !important; }
+.react-flow__handle-right { right: -4px !important; }
+.mode-pipeline .react-flow__handle { opacity: .4; background: var(--lw-handle-live) !important; }
+.node:hover ~ .react-flow__handle, .react-flow__node:hover .react-flow__handle, .react-flow__handle:hover {
+  width: 12px !important; height: 12px !important; opacity: 1; background: var(--lw-handle-live) !important;
+}
+.react-flow__handle.connectingfrom, .react-flow__handle.connectingto { opacity: 1; background: var(--color-accent) !important; }
+.react-flow__connection-path { stroke: var(--color-accent); stroke-width: 1.5; stroke-dasharray: 6 4; }
+.react-flow__nodesselection-rect, .react-flow__selection { border: 1px dashed var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+
+/* §10.3 ghost node — same 276 × 96 geometry */
+.ghost {
+  width: 276px; height: 96px;
+  border: 1px dashed var(--color-hairline); border-radius: var(--r-lg);
+  display: grid; place-items: center; color: var(--color-ink-3); text-align: center;
+  pointer-events: none;
+}
+.lw-shell.dragging .ghost { border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
+
+/* ---------------------------------------------------------------------------
+   EDGES — DESIGN_LANGUAGE §13. Configured = warp, observed = weft.
+   --------------------------------------------------------------------------- */
+.react-flow__edge-path.warp { stroke: var(--lw-edge-warp); stroke-width: 1.5; fill: none; }
+.react-flow__edge.selected .react-flow__edge-path.warp { stroke: var(--color-accent); stroke-width: 2.5; }
+.react-flow__edge-path.weft { stroke: var(--lw-edge-weft); stroke-width: 1.5; fill: none; filter: var(--bloom); animation: flow var(--t-flow) linear infinite; }
+.react-flow__edge-path.weft.dispatch { stroke-dasharray: 6 4; }
+.react-flow__edge-path.weft.ask { stroke-dasharray: 2 3; stroke-opacity: .8; animation-direction: alternate; }
+.react-flow__edge-path.weft.handoff { stroke-dasharray: 10 4; stroke-width: 2.5; animation: none; }
+.react-flow__edge-path.weft.anomaly { stroke-dasharray: 1 4; stroke: var(--lw-edge-anomaly); filter: none; }
+.react-flow__edge-path.weft.aged { stroke: var(--lw-edge-weft-aged); animation: none; }
+@keyframes flow { to { stroke-dashoffset: -28; } }
+.react-flow__edge-path.shuttle {
+  stroke: var(--color-accent); stroke-width: 2.5; stroke-linecap: round; fill: none;
+  stroke-dasharray: 24 4000; filter: var(--bloom); animation: shuttle 1400ms var(--ease-out) infinite; pointer-events: none;
+}
+@keyframes shuttle { from { stroke-dashoffset: 24 } to { stroke-dashoffset: -700 } }
+.solo-configured .react-flow__edge-path.weft, .solo-configured .react-flow__edge-path.shuttle, .solo-configured .edge-badge { display: none; }
+.solo-observed .react-flow__edge-path.warp { display: none; }
+.edge-badge {
+  padding: 1px var(--sp-2); border-radius: var(--r-full);
+  background: var(--color-accent-tint); border: 1px solid var(--color-accent-dim); color: var(--color-ink);
+  pointer-events: none;
+}
+.edge-badge.alert { border-color: var(--color-alert); color: var(--color-alert); background: transparent; }
+.edge-label { position: absolute; transform: translate(-50%, -50%); pointer-events: none; }
+
+/* ---------------------------------------------------------------------------
+   LAYER LEGEND — §6.7. Conditional chrome: only while observed edges exist.
+   --------------------------------------------------------------------------- */
+.lw-legend {
+  width: 148px; padding: var(--sp-3);
+  display: flex; flex-direction: column; gap: 6px;
+  left: calc(var(--lw-panel-inset) + var(--lw-library-w) + var(--sp-3));
+  transition: left var(--t-move) var(--ease-out);
+}
+.lib-collapsed .lw-legend, .lib-hidden .lw-legend { left: calc(var(--lw-panel-inset) + var(--lw-library-rail-w) + var(--sp-3)); }
+.lib-hidden .lw-legend { left: var(--lw-panel-inset); }
+.legend-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 1px solid transparent; border-radius: var(--r-xs); color: var(--color-ink-2); background: none; width: 100%; }
+.legend-row:hover { background: var(--color-accent-tint); }
+.legend-row .count { margin-left: auto; color: var(--color-ink-3); }
+.legend-row.soloed { border-color: var(--color-accent); color: var(--color-ink); }
+.legend-row.dimmed { color: var(--color-ink-3); opacity: .55; }
+
+/* ---------------------------------------------------------------------------
+   VIEW CONTROLS — §3 / DESIGN_LANGUAGE §11. Carries the theme toggle.
+   --------------------------------------------------------------------------- */
+.lw-viewctl {
+  width: var(--lw-viewctl-w); height: 36px;
+  border-radius: var(--r-full);
+  display: flex; align-items: center; justify-content: space-evenly;
+  padding: 0 var(--sp-1);
+  opacity: .55;
+  transition: opacity var(--t-quick) var(--ease-out);
+}
+.lw-viewctl:hover, .lw-viewctl:focus-within { opacity: 1; }
+.lw-viewctl .zoomlvl { min-width: 38px; text-align: center; color: var(--color-ink-3); font-variant-numeric: tabular-nums; }
+/* The zoom bar is a fixed landmark: it stays put when the Inspector or the schedule panel opens.
+   The right panels stop above it (`--lw-viewctl-clear`) instead, so it stays reachable rather
+   than sliding out from under them. */
+.theme-system .sysdot { display: block; }
+.sysdot { position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%); width: 3px; height: 3px; border-radius: var(--r-full); background: var(--color-ink-3); display: none; }
+
+/* ---------------------------------------------------------------------------
+   INSPECTOR — UX_REDESIGN §5.4. Three zones: IDENTITY, BEHAVIOUR, PROCESS.
+   --------------------------------------------------------------------------- */
+.lw-inspector {
+  width: var(--lw-inspector-w);
+  max-height: calc(100% - 40px - var(--lw-viewctl-clear));
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.inspector-glass {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--color-panel) 58%, transparent);
+  backdrop-filter: blur(32px) saturate(125%);
+  -webkit-backdrop-filter: blur(32px) saturate(125%);
+  will-change: backdrop-filter;
+}
+.inspector-scroll {
+  position: relative; z-index: 1;
+  width: 100%; min-height: 0; flex: 1 1 auto;
+  max-height: calc(100dvh - var(--lw-panel-inset) - var(--lw-panel-inset) - var(--lw-viewctl-clear));
+  padding: var(--sp-5);
+  display: flex; flex-direction: column; gap: var(--sp-5);
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
+}
+.insp-head { display: flex; align-items: flex-start; gap: var(--sp-3); }
+.insp-head .node-glyph { width: 20px; height: 20px; margin-top: 3px; }
+.insp-head .insp-text { flex: 1; min-width: 0; }
+.insp-title { color: var(--color-ink); }
+.insp-title input { width: 100%; background: none; border: 0; border-bottom: 1px solid transparent; outline: none; padding: 0; font: inherit; color: inherit; }
+.insp-title input:focus { border-bottom-color: var(--color-accent); }
+.insp-id { color: var(--color-ink-2); overflow-wrap: anywhere; }
+.insp-status { color: var(--color-ink-3); display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.zone { display: flex; flex-direction: column; gap: var(--sp-3); }
+.zone-head { display: flex; align-items: center; gap: var(--sp-3); color: var(--color-ink-3); }
+.zone-head::after { content: ""; flex: 1; height: 1px; background: var(--color-hairline); }
+.zone-head.toggle { cursor: pointer; background: none; border: 0; padding: 0; font: inherit; width: 100%; text-align: left; }
+.zone-body { display: flex; flex-direction: column; gap: var(--sp-3); }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field > label { color: var(--color-ink-2); }
+.input {
+  min-height: 32px; padding: 0 var(--sp-3); width: 100%;
+  background: var(--color-panel-solid); border: 1px solid var(--color-hairline); border-radius: var(--r-sm);
+  color: var(--color-ink); font: 400 14px/20px var(--font-sans);
+}
+textarea.input { padding: 6px var(--sp-3); resize: vertical; min-height: 84px; }
+.input.mono { font: 400 12px/17px var(--font-mono); }
+.model-select { cursor: pointer; }
+.model-select:disabled { cursor: default; }
+.model-retry { display: inline; padding: 0; font: inherit; }
+.thinking-label { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.thinking-label label { color: var(--color-ink-2); }
+.thinking-label output { color: var(--color-ink); }
+.thinking-slider { width: 100%; height: 18px; accent-color: var(--color-accent); cursor: pointer; }
+.thinking-slider:disabled { cursor: default; opacity: .5; }
+.thinking-scale { display: flex; justify-content: space-between; color: var(--color-ink-3); }
+.input::placeholder { color: var(--color-ink-3); }
+.input:focus { outline: 0; border-color: var(--color-accent); }
+.input:read-only { color: var(--color-ink-2); }
+.field.needs .input { border-color: var(--color-accent); }
+.field.needs .hint  { color: var(--color-accent); }
+.field.error .input { border-color: var(--color-alert); }
+.field.error .hint  { color: var(--color-alert); }
+.hint { color: var(--color-ink-3); }
+.check { display: flex; gap: var(--sp-3); align-items: flex-start; cursor: pointer; background: none; border: 0; padding: 0; width: 100%; text-align: left; font: inherit; color: inherit; }
+.check:disabled { cursor: default; opacity: .7; }
+.check .box { width: 16px; height: 16px; flex: none; margin-top: 2px; border: 1px solid var(--color-ink-3); border-radius: var(--r-xs); display: grid; place-items: center; color: var(--color-accent-on-fill); }
+.check.round .box { border-radius: var(--r-full); }
+.check.on .box { background: var(--color-accent-fill); border-color: transparent; }
+.check .txt { display: flex; flex-direction: column; gap: 1px; }
+.check .txt b { color: var(--color-ink); font-weight: 500; }
+.check .txt span { color: var(--color-ink-3); }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.proc-list { display: grid; grid-template-columns: 52px 1fr; gap: var(--sp-2) var(--sp-3); margin: 0; }
+.proc-list dt { color: var(--color-ink-3); }
+.proc-list dd { color: var(--color-ink-2); overflow-wrap: anywhere; margin: 0; }
+.insp-foot { margin-top: auto; padding-top: var(--sp-4); border-top: 1px solid var(--color-hairline); display: flex; justify-content: space-between; gap: var(--sp-2); }
+.capability-description { margin: 0; color: var(--color-ink-2); overflow-wrap: anywhere; }
+.capability-facts { grid-template-columns: 64px 1fr; }
+/* A need's name is two words at most ("slash commands"); its evidence is the line from the skill
+   that proves it, so the second column takes the rest and wraps. */
+.capability-needs { grid-template-columns: 96px 1fr; }
+.capability-needs dd { font-family: var(--font-mono); font-size: 10px; line-height: 1.5; }
+.capability-suggestion { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); margin: var(--sp-3) 0 0; color: var(--color-ink-2); }
+.capability-placement { display: flex; align-items: flex-start; gap: var(--sp-3); }
+.capability-placement > span:last-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.capability-placement-icon { width: 22px; height: 22px; flex: none; border-radius: var(--r-full); display: grid; place-items: center; color: var(--color-ok); background: color-mix(in srgb, var(--color-ok) 12%, transparent); }
+.capability-action { align-self: flex-start; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.capability-definition-loading { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) 0; }
+.capability-definition-loading .skel-bar { display: block; width: 100%; height: 10px; }
+.capability-definition-loading .skel-bar:nth-child(2) { width: 82%; }
+.capability-definition-loading .skel-bar:nth-child(3) { width: 63%; }
+.capability-definition-source { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.capability-definition-source > header { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.capability-definition-source > header .t-mono-sm { color: var(--color-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.capability-definition {
+  margin: 0; max-height: 360px; padding: var(--sp-3); overflow: auto;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--color-ground) 76%, transparent);
+  color: var(--color-ink-2); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
+   POPOVERS / PALETTE / DIALOG — e2, opaque. Never blur text.
+   --------------------------------------------------------------------------- */
+.pop { position: absolute; z-index: 100; overflow: hidden; }
+.pop-search { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--color-hairline); color: var(--color-ink-3); }
+.pop-search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--color-ink); font: 400 14px/20px var(--font-sans); }
+.pop-search input::placeholder { color: var(--color-ink-3); }
+.pop-list { padding: var(--sp-2); display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
+.pop-row {
+  display: flex; align-items: center; gap: var(--sp-3);
+  min-height: 34px; padding: 0 var(--sp-3);
+  border-radius: var(--r-sm); color: var(--color-ink-2);
+  cursor: pointer; background: none; border: 0; width: 100%; text-align: left;
+}
+.pop-row:hover, .pop-row.active { background: var(--color-accent-tint); color: var(--color-ink); }
+.pop-row.current { background: var(--color-accent-tint); }
+.pop-row:disabled { opacity: .45; cursor: not-allowed; }
+.pop-row .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pop-row .aside { color: var(--color-ink-3); flex: none; }
+.pop-row .kbd { color: var(--color-ink-3); flex: none; }
+.pop-row .goal { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pop-row .when { color: var(--color-ink-3); flex: none; }
+.pop-sep { height: 1px; background: var(--color-hairline); }
+.pop-foot { padding: var(--sp-3) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); }
+.pop-foot .path { color: var(--color-ink-3); overflow-wrap: anywhere; }
+.pop-foot .acts { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
+.pop-note { color: var(--color-ink-3); }
+.pop-empty { padding: var(--sp-3) var(--sp-4); color: var(--color-ink-3); }
+.pop-inline { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--color-ink-2); }
+.pop-inline .btn { height: 24px; }
+.lw-palette { width: min(560px, calc(100vw - 32px)); left: 50%; top: 22%; transform: translateX(-50%); }
+.lw-scrim { position: absolute; inset: 0; z-index: 99; }
+.lw-scrim.dim { background: color-mix(in srgb, var(--color-ground) 45%, transparent); }
+.prob-group { padding: var(--sp-2); }
+.prob-head { padding: var(--sp-2) var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); }
+.prob-head.needs { color: var(--color-accent); }
+.prob-head.errs  { color: var(--color-alert); }
+.prob-row { display: flex; flex-direction: column; gap: 1px; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-sm); cursor: pointer; background: none; border: 0; width: 100%; text-align: left; }
+.prob-row:hover { background: var(--color-accent-tint); }
+.prob-row b { color: var(--color-ink); font-weight: 500; }
+.prob-row span { color: var(--color-ink-3); }
+
+/* the product's only modal — §9.5 parse failure */
+.lw-modal-scrim { position: absolute; inset: 0; z-index: 150; background: color-mix(in srgb, var(--color-ground) 65%, transparent); backdrop-filter: blur(2px); display: grid; place-items: center; }
+.lw-dialog { width: min(520px, calc(100vw - 32px)); padding: var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-4); }
+.code { background: var(--color-ground); border: 1px solid var(--color-hairline); border-radius: var(--r-sm); padding: var(--sp-3); color: var(--color-ink-2); overflow-x: auto; white-space: pre; margin: 0; }
+.code .bad { color: var(--color-alert); }
+
+/* transport bars — §16. Full width, top. */
+.bar {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 120;
+  min-height: 40px; padding: var(--sp-2) var(--sp-6);
+  display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap;
+  border-bottom: 1px solid var(--color-hairline); background: var(--color-panel-solid);
+}
+.bar.halt  { box-shadow: inset 3px 0 0 var(--color-halt); }
+.bar.alert { box-shadow: inset 3px 0 0 var(--color-alert); }
+.bar.ok    { box-shadow: inset 3px 0 0 var(--color-ok); }
+.bar .msg { color: var(--color-ink); }
+.bar .sub { color: var(--color-ink-3); }
+.bar .acts { margin-left: auto; display: flex; gap: var(--sp-3); }
+.bar-stack { position: absolute; left: 0; right: 0; top: 0; z-index: 120; display: flex; flex-direction: column; }
+.bar-stack .bar { position: static; }
+
+/* ---------------------------------------------------------------------------
+   FIRST RUN — §10.1. The one screen that uses the serif display step.
+   --------------------------------------------------------------------------- */
+.lw-firstrun { position: absolute; inset: 0; z-index: 50; display: grid; place-items: center; background: var(--color-ground); }
+.lw-firstrun .ground { position: absolute; inset: 0; background-image: radial-gradient(circle at 1px 1px, var(--color-ground-dot) 1px, transparent 0); background-size: 16px 16px; }
+.fr-stack { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); text-align: center; }
+.fr-mark { color: var(--color-accent); animation: frIn var(--t-entrance) var(--ease-out) both; }
+.fr-title { color: var(--color-ink); animation: frIn var(--t-entrance) var(--ease-out) 60ms both; margin: 0; }
+.fr-sub { color: var(--color-ink-2); animation: frIn var(--t-entrance) var(--ease-out) 120ms both; margin: 0; }
+.fr-cta { margin-top: var(--sp-4); animation: frIn var(--t-entrance) var(--ease-out) 180ms both; }
+.fr-alt { animation: frIn var(--t-entrance) var(--ease-out) 240ms both; }
+.fr-form { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); animation: frIn var(--t-entrance) var(--ease-out) both; }
+.fr-form .input { width: 320px; text-align: center; font-size: 18px; height: 40px; }
+@keyframes frIn { from { opacity: 0; transform: translateY(8px) scale(.96) } to { opacity: 1; transform: none } }
+.fr-foot { position: absolute; left: var(--sp-6); bottom: var(--sp-5); color: var(--color-ink-3); display: flex; align-items: center; gap: var(--sp-2); }
+.fr-corner { position: absolute; right: var(--sp-5); bottom: var(--sp-5); height: 36px; padding: 0 6px 0 var(--sp-4); border-radius: var(--r-full); display: flex; align-items: center; gap: var(--sp-2); color: var(--color-ink-3); }
+
+/* ---------------------------------------------------------------------------
+   BADGES — live vs replay must be unmistakable
+   --------------------------------------------------------------------------- */
+.badge { display: inline-flex; align-items: center; gap: 5px; padding: 1px var(--sp-2); border-radius: var(--r-full); border: 1px solid currentColor; flex: none; }
+.badge-live    { color: var(--color-live); }
+.badge-replay  { color: var(--color-halt); }
+.badge-live .pip { width: 6px; height: 6px; border-radius: var(--r-full); background: currentColor; animation: breathe 2400ms ease-in-out infinite; }
+.badge-replay .pip { width: 6px; height: 6px; background: currentColor; }
+@keyframes breathe { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+
+/* ---------------------------------------------------------------------------
+   TOAST / NOTICE — small, top-centre under the chip
+   --------------------------------------------------------------------------- */
+.lw-notice { padding: 4px var(--sp-3); border-radius: var(--r-sm); color: var(--color-ink-2); background: var(--color-panel-solid); border: 1px solid var(--color-hairline); }
+.lw-notice.alert { color: var(--color-alert); }
+/* The mid-run Brief-edit strip: a fact about when a save lands, not a warning, so it carries the
+   accent's quiet tint rather than alert. Wraps instead of ellipsizing — both times are the point. */
+.lw-brief-strip {
+  pointer-events: auto; display: flex; align-items: flex-start; gap: var(--sp-2);
+  max-width: min(560px, calc(100vw - 32px));
+  border-color: var(--color-accent-dim); background: var(--color-panel-solid);
+  padding: 6px 6px 6px var(--sp-3);
+}
+.lw-brief-strip .msg { min-width: 0; text-wrap: pretty; }
+.lw-brief-strip .msg b { color: var(--color-ink); font-weight: 500; }
+
+/* ---------------------------------------------------------------------------
+   INLINE CONFIRM — bottom-centre, above the composer
+   --------------------------------------------------------------------------- */
+.lw-confirm { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-color: color-mix(in srgb, var(--color-alert) 40%, transparent); }
+.lw-confirm .btn-danger-fill { background: var(--color-alert); color: var(--color-white); border-color: transparent; }
+
+/* ---------------------------------------------------------------------------
+   NARROW — the coordinate canvas becomes a reading column (TNG-115).
+   --------------------------------------------------------------------------- */
+@media (max-width: 767px) {
+  .lw-library, .lw-legend { display: none !important; }
+  .lw-inspector { width: auto; left: var(--sp-3); right: var(--sp-3); top: auto; bottom: 88px; max-height: 60vh; }
+  .inspector-scroll { max-height: 60vh; }
+  .lw-schedule-panel { width: auto; }
+  .lw-chip { min-width: 0; width: calc(100vw - 2 * var(--lw-panel-inset)); }
+  .lw-viewctl { width: auto; }
+  /* §11.6 failure 21: "a core action smaller than 44 px. Fail." The base sheet's 28 px `.btn`
+     and 32 px `.iconbtn` are pointer sizes; every one of them is a touch target here, so they
+     lift together rather than by an ever-growing list of exceptions. `.pop-inline .btn` is
+     restated because its 24 px rule outranks `.btn` on specificity, not on source order. */
+  .btn { height: 44px; padding: 0 var(--sp-4); }
+  .pop-inline .btn { height: 44px; }
+  .iconbtn { width: 44px; height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
+  .react-flow__edge-path.weft { animation: none !important; }
+  .react-flow__edge-path.shuttle { display: none; }
+  .node.has-task.st-running, .node.has-task.st-starting { animation: none !important; border-width: 2px; box-shadow: 0 0 0 2px var(--color-live-tint); }
+}

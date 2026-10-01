@@ -1,0 +1,53 @@
+# A two-stage pipeline with team memory (docs/TEAM_MEMORY.md, ADR 0014).
+#
+# The Brief is the two Markdown files in `team-memory.brief/`. `constraints.md` is supplied to every
+# agent; `tone.md` only to the writer, and the writer's packet says so while the researcher's
+# packet records that it was left out and why.
+schemaVersion: 1
+id: team-memory-example
+name: Team memory example
+entrypoint: researcher
+memory:
+  brief:
+    - path: team-memory.brief/constraints.md
+    - path: team-memory.brief/tone.md
+      appliesTo:
+        - writer
+  packet:
+    maxChars: 8000
+  deliverAs: native-file
+agents:
+  - id: researcher
+    name: Protocol Researcher
+    role: Research ACP behaviour and report what you find
+    spawn:
+      cmd: opencode
+      args:
+        - acp
+      env: {}
+      cwd: .
+    model: kimi-for-coding/k3-256k
+    budget:
+      limitUsd: 5
+  - id: writer
+    name: Technical Writer
+    role: Turn the research into the README section
+    spawn:
+      cmd: claude-agent-acp
+      args: []
+      env: {}
+      cwd: .
+    model: claude-opus-5
+    budget:
+      limitUsd: 5
+    # This agent edits a checked-out repository, so it keeps its own cwd and the Brief reaches it
+    # through the context packet alone. The Memory panel says what that costs: the Brief is not in
+    # the harness's own memory file, so a context compaction can summarise it away.
+    memory:
+      deliverAs: packet-only
+edges:
+  - from: researcher
+    to: writer
+    layer: configured
+    kind: sequence
+    ts: "2026-09-13T00:00:00Z"

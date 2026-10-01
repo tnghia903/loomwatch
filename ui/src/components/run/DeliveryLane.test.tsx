@@ -1,0 +1,291 @@
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { DeliveryLane, type DeliveryLaneProps } from './DeliveryLane'
+import { CanvasActionsContext } from '../canvas/CanvasActionsContext'
+import { createElement, type ComponentType, type ReactNode } from 'react'
+
+vi.mock('@xyflow/react', () => ({
+  ReactFlowProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  Handle: () => null,
+  Position: { Left: 'left', Right: 'right' },
+  MarkerType: { ArrowClosed: 'arrowclosed' },
+  ReactFlow: ({ nodes, nodeTypes }: { nodes: Array<{ id: string; type: string; data: unknown }>; nodeTypes: Record<string, ComponentType<{ data: unknown }>> }) => <>{nodes.map(node => createElement(nodeTypes[node.type], { key: node.id, data: node.data }))}</>,
+}))
+import { projectRun } from '../../lib/watch/events'
+const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
+  const actions = {
+    renameAgent: vi.fn(),
+    touchField: vi.fn(),
+    mode: 'pipeline' as const,
+    stepById: new Map(),
+    nodeNames: new Map(),
+    toggleProvenance: vi.fn(),
+    focusComposer: vi.fn(),
+  }
+  const props: DeliveryLaneProps = {
+    prompt: 'Research LoomWatch',
+    attempt: 15,
+    phase: 'succeeded',
+    branch: 'Initial run',
+    elapsed: '2m 53s',
+    mode: 'replay',
+    pipeline: true,
+    onTrace: vi.fn(),
+    agents: [
+      {
+        id: 'designer',
+        type: 'agent',
+        position: { x: 0, y: 0 },
+        data: {
+          label: 'Designer',
+          agent: {
+            id: 'designer',
+            name: 'Designer',
+            role: 'Design reports',
+            capabilities: [{ kind: 'skill', name: 'claude-design' }],
+          },
+        },
+      },
+    ],
+    evidenceByAgent: new Map(),
+    ownerLabels: new Map(),
+    projection: projectRun([]),
+    selectedEvidenceId: null,
+    onInspectEvidence: vi.fn(),
+    onSelectAgent: vi.fn(),
+    output: {
+      text: '# Market report\n\n| Finding | Impact |\n|---|---|\n| Clear results | Faster review |',
+      phase: 'succeeded',
+      phaseText: 'Answered',
+      producer: 'designer',
+      producerLabel: 'Designer',
+      mode: 'replay',
+      streaming: false,
+      pending: false,
+      strip: null,
+      compact: false,
+      expanded: false,
+      terminal: true,
+    },
+    ...overrides,
+  }
+  const view = render(
+    <CanvasActionsContext.Provider value={actions}>
+      <DeliveryLane {...props} />
+    </CanvasActionsContext.Provider>,
+  )
+  return { ...view, props, actions }
+}
+afterEach(cleanup)
+describe('Delivery Lane', () => {
+  it('keeps the output visible while inspecting an unverified required skill', () => {
+    setup()
+    expect(
+      within(
+        screen.getByRole('complementary', { name: 'Team output' }),
+      ).getByRole('heading', { name: 'Market report', level: 1 }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('table')).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Inspect claude-design: Load unverified',
+      }),
+    )
+    expect(
+      screen.getByText(/No matching read receipt was captured/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Market report', level: 1 }),
+    ).toBeInTheDocument()
+  })
+  /**
+   * ADR 0021's run-side half. Delivery was already visible; what the operator could not see was
+   * whether the agent opened the file, and what LoomWatch told it about running the skill here.
+   * Both are read from the daemon's own records — the route, the `skill_opened` phase, and the
+   * archived `skill_translation` prompt section — never re-derived from prose.
+   */
+  it('shows the route, whether the skill was opened, and the note the agent was actually sent', () => {
+    const skill = {
+      name: 'claude-design',
+      source: 'Claude Code',
+      sourcePath: '/home/.claude/skills/claude-design/SKILL.md',
+      path: '/work/.agents/skills/claude-design/SKILL.md',
+      sha256: 'a'.repeat(64),
+      chars: 200,
+      route: 'inline',
+    }
+    const meta = (seq: number, payload: Record<string, unknown>) => ({
+      id: `e${seq}`, sessionId: 'r', agentId: 'designer', seq,
+      ts: `2026-09-20T10:00:0${seq}Z`, kind: 'session_meta' as const, payload,
+      raw: { source: 'loomwatch' },
+    })
+    const projection = projectRun([
+      meta(0, { phase: 'prompt_sections', requiredSkills: [skill], sections: [
+        { kind: 'required_skill', heading: '## Required skill: claude-design', text: 'body' },
+        { kind: 'skill_translation', heading: '## Reading claude-design on Codex', text: 'Scripts: LoomWatch refuses every permission request your harness makes.' },
+      ] }),
+      meta(1, { phase: 'required_skills_supplied', skills: [skill] }),
+      meta(2, { phase: 'skill_opened', skill: 'claude-design', path: skill.path, sha256: skill.sha256, toolCallId: 'call-7' }),
+      meta(3, { phase: 'skill_self_report', text: '## What I could not follow\n- the bundled script', chars: 47 }),
+    ])
+    setup({ projection })
+
+    expect(screen.getByText('1/1 opened')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Inspect claude-design: Delivered → opened/ }))
+    expect(screen.getByText(/In-prompt, translated/)).toBeInTheDocument()
+    expect(screen.getByText(/its own stream shows it reading the delivered file/)).toBeInTheDocument()
+    expect(screen.getByText(/LoomWatch refuses every permission request/)).toBeInTheDocument()
+    expect(screen.getByText(/the bundled script/)).toBeInTheDocument()
+    expect(screen.getByText(/It is not evidence of what happened/)).toBeInTheDocument()
+  })
+
+  /** The counterfactual: the same delivery with no recorded open must not claim one. */
+  it('says plainly that an unopened skill was delivered and not opened', () => {
+    const skill = {
+      name: 'claude-design', source: 'Claude Code',
+      sourcePath: '/home/.claude/skills/claude-design/SKILL.md',
+      path: '/work/.agents/skills/claude-design/SKILL.md',
+      sha256: 'a'.repeat(64), chars: 200, route: 'native',
+    }
+    const meta = (seq: number, payload: Record<string, unknown>) => ({
+      id: `e${seq}`, sessionId: 'r', agentId: 'designer', seq,
+      ts: `2026-09-20T10:00:0${seq}Z`, kind: 'session_meta' as const, payload,
+      raw: { source: 'loomwatch' },
+    })
+    setup({ projection: projectRun([
+      meta(0, { phase: 'prompt_sections', requiredSkills: [skill], sections: [] }),
+      meta(1, { phase: 'required_skills_supplied', skills: [skill] }),
+    ]) })
+
+    expect(screen.getByText('0/1 opened')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Inspect claude-design: Delivered, pointer in prompt/ }))
+    expect(screen.getByText(/Native — the bundle sits/)).toBeInTheDocument()
+    expect(screen.getByText(/Delivery is not use/)).toBeInTheDocument()
+  })
+
+  it('distinguishes missing output from a successful process and disables copying', () => {
+    const { props } = setup({
+      output: {
+        text: '',
+        phase: 'succeeded',
+        phaseText: 'No text was captured',
+        producer: 'designer',
+        producerLabel: 'Designer',
+        mode: 'replay',
+        streaming: false,
+        pending: false,
+        strip: null,
+        compact: false,
+        expanded: false,
+        terminal: true,
+      },
+    })
+    expect(props.phase).toBe('succeeded')
+    expect(
+      screen.getByRole('heading', { name: 'No response produced' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Copy team output' }),
+    ).toBeNull()
+  })
+  it('uses the existing full trace and composer actions', () => {
+    const { props, actions } = setup()
+    fireEvent.click(screen.getByRole('button', { name: 'Full trace' }))
+    expect(props.onTrace).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('button', { name: 'Request a change' }))
+    expect(actions.focusComposer).toHaveBeenCalledOnce()
+  })
+  it('does not allow review acknowledgement to bypass missing skill evidence', () => {
+    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', '') }
+    setup()
+    fireEvent.click(screen.getByRole('button', { name: 'Review output' }))
+    const review = within(screen.getByRole('dialog', { name: 'Review team output' }))
+    fireEvent.click(review.getByRole('checkbox'))
+    expect(review.getByRole('button', { name: 'Mark reviewed' })).toBeDisabled()
+    fireEvent.click(review.getByRole('button', { name: 'Keep reading' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+  it('records a review only after the user checks the acknowledgement', () => {
+    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', '') }
+    setup({ agents: [] })
+    fireEvent.click(screen.getByRole('button', { name: 'Review output' }))
+    const review = within(screen.getByRole('dialog', { name: 'Review team output' }))
+    expect(review.getByRole('button', { name: 'Mark reviewed' })).toBeDisabled()
+    fireEvent.click(review.getByRole('checkbox'))
+    fireEvent.click(review.getByRole('button', { name: 'Mark reviewed' }))
+    expect(screen.getByRole('button', { name: 'View review' })).toBeInTheDocument()
+    expect(screen.getByText('Reviewed', { selector: '.delivery-output-badge' })).toBeInTheDocument()
+  })
+  it('supports filters and output expansion without changing the team', () => {
+    const { container, props } = setup()
+    fireEvent.click(screen.getByRole('button', { name: 'Tools' }))
+    expect(
+      screen.getByText('No capabilities match this filter.'),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Expand team output' }))
+    expect(container.querySelector('.delivery-lane')).toHaveClass(
+      'output-expanded',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Restore split view' }))
+    expect(container.querySelector('.delivery-lane')).not.toHaveClass(
+      'output-expanded',
+    )
+    expect(props.agents[0].data.agent.capabilities).toEqual([
+      { kind: 'skill', name: 'claude-design' },
+    ])
+  })
+  it('copies the exact Markdown and unwinds evidence before leaving the Run view', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText}})
+    const {props} = setup()
+    fireEvent.click(screen.getByRole('button', {name: 'Copy team output'}))
+    expect(writeText).toHaveBeenCalledWith(props.output.text)
+    expect(await screen.findByText('Response copied')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: 'Inspect claude-design: Load unverified'}))
+    const back = screen.getByRole('button', {name: '← Back to graph'})
+    expect(back).toHaveFocus()
+    fireEvent.keyDown(back, {key: 'Escape'})
+    expect(screen.queryByRole('heading', {name: 'claude-design'})).toBeNull()
+    expect(screen.getByRole('main', {name: 'Run workspace'})).toBeInTheDocument()
+  })
+  it('avoids sequence arrows for branching pipelines', () => {
+    setup({linearPipeline: false, agents: ['a', 'b'].map((id) => ({id, type: 'agent', position: {x: 0, y: 0}, data: {label: id, agent: {id, name: id, role: 'Work'}}}))})
+    expect(screen.queryByLabelText('Next pipeline stage')).toBeNull()
+    expect(screen.getByRole('heading', {name: 'Team contributions'})).toBeInTheDocument()
+  })
+  it('keeps identical skills separate by owner in the whole-team graph', () => {
+    setup({agents: ['Researcher', 'Designer'].map((name) => ({id: name.toLowerCase(), type: 'agent', position: {x: 0, y: 0}, data: {label: name, agent: {id: name.toLowerCase(), name, role: 'Work', capabilities: [{kind: 'skill', name: 'claude-design'}]}}}))})
+    fireEvent.change(screen.getByLabelText('Capability graph scope'), {target: {value: 'team'}})
+    expect(screen.getByRole('button', {name: 'Inspect claude-design: Load unverified · Researcher'})).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: 'Inspect claude-design: Load unverified · Designer'}))
+    expect(screen.getByText('Designer', {selector: '.delivery-receipt-owner'})).toBeInTheDocument()
+    expect(screen.getByRole('heading', {name: 'Market report', level: 1})).toBeInTheDocument()
+  })
+  it('does not execute raw HTML or load embedded remote images in a report', () => {
+    const { container } = setup({
+      output: {
+        text: '<script>alert(1)</script>\n\n![tracking](https://example.com/pixel)',
+        phase: 'succeeded',
+        phaseText: 'Answered',
+        producer: 'designer',
+        producerLabel: 'Designer',
+        mode: 'replay',
+        streaming: false,
+        pending: false,
+        strip: null,
+        compact: false,
+        expanded: false,
+        terminal: true,
+      },
+    })
+    expect(container.querySelector('.delivery-response script')).toBeNull()
+    expect(container.querySelector('.delivery-response img')).toBeNull()
+    expect(screen.getByText('[Image: tracking]')).toBeInTheDocument()
+  })
+})

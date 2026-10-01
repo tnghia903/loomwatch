@@ -75,12 +75,12 @@ describe('buildAgentFromSource', () => {
 
   it('defaults budget to $5 when there is no prior agent', () => {
     const result = buildAgentFromSource(harnessSource, [])
-    expect(result.budget.limitUsd).toBe(5)
+    expect(result.budget?.limitUsd).toBe(5)
   })
 
   it('inherits budget from the last-created agent, ignoring the preset’s own suggestion', () => {
     const result = buildAgentFromSource(presetSource, [agent({ id: 'a', budget: { limitUsd: 12 } })])
-    expect(result.budget.limitUsd).toBe(12)
+    expect(result.budget?.limitUsd).toBe(12)
   })
 
   it('always sets allowRecruiting true and never writes status', () => {

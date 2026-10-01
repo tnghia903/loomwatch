@@ -23,6 +23,8 @@ export interface DocumentProblem {
   message: string
   agentId?: string
   edge?: { from: string; to: string }
+  /** Source location for problems that do not have a dedicated canvas control. */
+  yamlPath?: (string | number)[]
 }
 
 export interface ValidationResult {
@@ -60,6 +62,7 @@ function applySchemaError(
   fieldProblemsByAgent: Map<string, AgentFieldProblems>,
   documentProblems: DocumentProblem[],
 ): void {
+  const yamlPath = schemaErrorPath(error)
   const agentMatch = AGENT_ERROR_PATH.exec(error.instancePath)
   if (agentMatch) {
     const agent = doc.agents[Number(agentMatch[1])]
@@ -89,7 +92,7 @@ function applySchemaError(
     // Other agent-scoped errors (id pattern, spawn.cmd pattern, etc.) have no inspector field
     // today — TNG-55 scoped the inspector to name/role/model/cwd/budget — so surface them as a
     // document problem naming the agent rather than dropping them silently.
-    documentProblems.push({ message: describeSchemaError(error), agentId: agent.id })
+    documentProblems.push({ message: describeSchemaError(error), agentId: agent.id, yamlPath })
     return
   }
 
@@ -99,6 +102,7 @@ function applySchemaError(
     documentProblems.push({
       message: describeSchemaError(error),
       ...(edge ? { edge: { from: edge.from, to: edge.to } } : {}),
+      yamlPath,
     })
     return
   }
@@ -115,7 +119,23 @@ function applySchemaError(
     return
   }
 
-  documentProblems.push({ message: describeSchemaError(error) })
+  documentProblems.push({ message: describeSchemaError(error), yamlPath })
+}
+
+function schemaErrorPath(error: ErrorObject): (string | number)[] {
+  const parts = error.instancePath
+    .split('/')
+    .slice(1)
+    .map((part) => part.replace(/~1/g, '/').replace(/~0/g, '~'))
+    .map((part) => /^\d+$/.test(part) ? Number(part) : part)
+  if (error.keyword === 'additionalProperties') {
+    const property = (error.params as { additionalProperty?: unknown }).additionalProperty
+    if (typeof property === 'string') parts.push(property)
+  } else if (error.keyword === 'required') {
+    const property = (error.params as { missingProperty?: unknown }).missingProperty
+    if (typeof property === 'string') parts.push(property)
+  }
+  return parts
 }
 
 function describeSchemaError(error: ErrorObject): string {
@@ -183,13 +203,18 @@ function applySemanticRules(
   documentProblems: DocumentProblem[],
 ): void {
   const seenIds = new Set<string>()
-  for (const agent of doc.agents) {
+  for (const [agentIndex, agent] of doc.agents.entries()) {
     if (seenIds.has(agent.id)) {
-      documentProblems.push({ message: `Duplicate agent id \`${agent.id}\`.`, agentId: agent.id })
+      documentProblems.push({ message: `Duplicate agent id \`${agent.id}\`.`, agentId: agent.id, yamlPath: ['agents', agentIndex, 'id'] })
     }
     seenIds.add(agent.id)
 
-    const limit = agent.budget.limitUsd
+    if (agent.kind === 'operator') {
+      if (agent.id === doc.entrypoint) documentProblems.push({ message: 'A review stop cannot be the entrypoint. Start with an agent.', agentId: agent.id })
+      if (!doc.edges?.some((edge) => edge.layer === 'configured')) documentProblems.push({ message: 'Review stops need a pipeline. Connect the agents first.', agentId: agent.id })
+      continue
+    }
+    const limit = agent.budget?.limitUsd ?? NaN
     if (!Number.isFinite(limit)) {
       setFieldProblem(fieldProblemsByAgent, agent.id, 'limitUsd', {
         weight: 'error',
@@ -209,6 +234,7 @@ function applySemanticRules(
     documentProblems.push({
       message: `Entrypoint \`${doc.entrypoint}\` does not name an agent in this team.`,
       agentId: doc.entrypoint,
+      yamlPath: ['entrypoint'],
     })
   }
 
@@ -218,9 +244,9 @@ function applySemanticRules(
   if (doc.budget) {
     const limit = doc.budget.limitUsd
     if (!Number.isFinite(limit)) {
-      documentProblems.push({ message: 'Team budget must be a finite number.' })
+      documentProblems.push({ message: 'Team budget must be a finite number.', yamlPath: ['budget', 'limitUsd'] })
     } else if (limit < 0) {
-      documentProblems.push({ message: 'Team budget must be zero or greater.' })
+      documentProblems.push({ message: 'Team budget must be zero or greater.', yamlPath: ['budget', 'limitUsd'] })
     }
   }
 
@@ -231,6 +257,7 @@ function applySemanticRules(
       documentProblems.push({
         message: `\`${edge.from}\` can't follow itself.`,
         edge: { from: edge.from, to: edge.to },
+        yamlPath: ['edges'],
       })
     }
     const pairKey = `${edge.from}->${edge.to}`
@@ -238,6 +265,7 @@ function applySemanticRules(
       documentProblems.push({
         message: `Duplicate edge \`${edge.from} → ${edge.to}\`.`,
         edge: { from: edge.from, to: edge.to },
+        yamlPath: ['edges'],
       })
     }
     seenPairs.add(pairKey)
@@ -245,6 +273,7 @@ function applySemanticRules(
       documentProblems.push({
         message: `Edge \`${edge.from} → ${edge.to}\` names an agent that no longer exists.`,
         edge: { from: edge.from, to: edge.to },
+        yamlPath: ['edges'],
       })
     }
   }
@@ -254,6 +283,7 @@ function applySemanticRules(
     documentProblems.push({
       message: `Pipeline has a loop: \`${cycle.from} → ${cycle.to}\` closes a cycle.`,
       edge: cycle,
+      yamlPath: ['edges'],
     })
   }
 
@@ -265,6 +295,7 @@ function applySemanticRules(
       documentProblems.push({
         message: `\`${doc.entrypoint}\` is the entrypoint, so it can't have an incoming step.`,
         agentId: doc.entrypoint,
+        yamlPath: ['entrypoint'],
       })
     }
   }

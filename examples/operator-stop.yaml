@@ -1,0 +1,70 @@
+# A review stop: the operator standing in the middle of a pipeline.
+#
+# Researcher works, you read what it handed over and say what happens next, Writer acts on your
+# answer. The `review` node is an `agents[]` entry like any other — it has an id, it sits on edges,
+# it takes part in the topological order — except that instead of a harness it has a question,
+# which is its `role`, and that is what the panel shows when the pipeline reaches it.
+#
+# Both harnesses here use `operator-stop-harness.py` so the example runs without a paid provider: they answer
+# the ACP handshake, emit one line of text, then answer repeated send-back, handover and checkpoint turns. Swap
+# `spawn` for a real harness (see examples/research-team.yaml) when you want it to do real work.
+# See docs/TEAM_MEMORY.md, "The operator is a node", and docs/WATCH.md, "Verifying without a paid
+# harness".
+schemaVersion: 1
+id: operator-stop
+name: Review stop demo
+entrypoint: researcher
+
+conversation:
+  stop:
+    # Only harnesses that do NOT advertise `loadSession` read this. One that does is closed while
+    # you think and reopened with `session/load` when you answer, so it costs no process at all.
+    keepAliveMinutes: 15
+
+agents:
+  - id: researcher
+    name: Researcher
+    role: Find out what is true and hand it over.
+    spawn:
+      cmd: python3
+      args:
+        - operator-stop-harness.py
+        - researcher
+      env: {}
+      cwd: .
+    model: fake/offline
+    budget:
+      limitUsd: 0
+
+  # The stop. No spawn, no model, no budget: there is nothing to start, no model to select and
+  # nobody to bill. `name` defaults to "You" if you leave it out.
+  - id: review
+    kind: operator
+    name: You
+    role: Researcher is done. Approve the findings, or say what to change.
+
+  - id: writer
+    name: Writer
+    role: Write the README section the operator asked for.
+    spawn:
+      cmd: python3
+      args:
+        - operator-stop-harness.py
+        - writer
+      env: {}
+      cwd: .
+    model: fake/offline
+    budget:
+      limitUsd: 0
+
+edges:
+  - from: researcher
+    to: review
+    layer: configured
+    kind: sequence
+    ts: "2026-09-13T00:00:00Z"
+  - from: review
+    to: writer
+    layer: configured
+    kind: sequence
+    ts: "2026-09-13T00:00:00Z"

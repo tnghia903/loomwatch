@@ -1,195 +1,237 @@
-import { createElement } from 'react'
+import { X } from 'lucide-react'
+import { createElement, useState } from 'react'
 
 import { formatUsd } from '../../lib/format'
+import type { HarnessModel } from '../../lib/harnesses'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
+import { splitModelSelector } from '../../lib/models'
 import type { AgentField, AgentFieldProblems } from '../../lib/team-file/validation'
+import { StatusGlyph } from '../ui/glyphs'
 import { roleGlyph } from './roleGlyph'
 
-// docs/CANVAS_SPEC.md §5.4: the node inspector. Scoped to the fields TNG-55 names —
-// name, role, model, cwd, budget — plus the two schema-required toggles the same section
-// specifies (entrypoint, allowRecruiting) so those already-built mutators aren't left dead.
-// Spawn args/env editing and presets are out of scope here (§15.3 has no backend for presets).
 export interface InspectorProps {
   node: AgentNode
   isEntrypoint: boolean
+  isResponder: boolean
   onRename: (field: 'name' | 'role', value: string) => void
   onModelChange: (value: string) => void
+  onThinkingEffortChange?: (value: string) => void
   onCwdChange: (value: string) => void
   onBudgetChange: (limitUsd: number) => void
+  onWarnAtChange?: (warnAtPercent: number) => void
   onAllowRecruitingChange: (allow: boolean) => void
+  /** docs/TEAM_MEMORY.md §5: per-agent `memory.brief` / `memory.deliverAs`. */
+  onMemoryBriefChange?: (readsBrief: boolean) => void
+  onDeliverAsChange?: (deliverAs: 'native-file' | 'packet-only') => void
+  /** How many Brief entries this team supplies, so the zone never promises what does not exist. */
+  briefCount?: number
+  /** The team-level default a per-agent `deliverAs` narrows. */
+  teamDeliverAs?: 'native-file' | 'packet-only'
   onPromoteEntrypoint: () => void
+  onPromoteResponder: () => void
   onDelete: () => void
   onClose: () => void
   onFieldBlur: (field: AgentField) => void
+  modelOptions?: readonly HarnessModel[]
+  defaultThinkingEffort?: string
+  modelOptionsLoading?: boolean
+  modelOptionsError?: string | null
+  /** Why the operator was sent to this agent, when something else opened the panel for them. */
+  fixHint?: string
+  onDismissFixHint?: () => void
+  onRetryModelOptions?: () => void
   fieldProblems?: AgentFieldProblems
   readOnly?: boolean
+  pipeline?: boolean
 }
 
-export function Inspector({
-  node,
-  isEntrypoint,
-  onRename,
-  onModelChange,
-  onCwdChange,
-  onBudgetChange,
-  onAllowRecruitingChange,
-  onPromoteEntrypoint,
-  onDelete,
-  onClose,
-  onFieldBlur,
-  fieldProblems,
-  readOnly = false,
-}: InspectorProps) {
-  const { agent } = node.data
+// UX_REDESIGN §5.4: three zones in the order the operator thinks — IDENTITY (what stands
+// between a drop and a valid save), BEHAVIOUR (what the agent may do), PROCESS (collapsed).
+// No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
+export function Inspector({ node, isEntrypoint, isResponder, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onBudgetChange, onWarnAtChange, onAllowRecruitingChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onPromoteResponder, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false }: InspectorProps) {
+  const { agent, runtime } = node.data
+  const [processOpen, setProcessOpen] = useState(false)
+  const status = runtime?.status ?? agent.status ?? 'idle'
+  const spent = runtime?.costUsd ?? null
+  const pct = runtime?.spentPct ?? 0
+  const lane = pct >= 100 ? 'over' : pct >= (agent.budget?.warnAtPercent ?? 80) ? 'warn' : ''
+  const parsedSelector = splitModelSelector(agent.model ?? '')
+  const selectableModelsById = new Map<string, HarnessModel>(modelOptions.map((model) => [model.id, model]))
+  if (parsedSelector.modelId && !selectableModelsById.has(parsedSelector.modelId)) selectableModelsById.set(parsedSelector.modelId, { id: parsedSelector.modelId, name: parsedSelector.modelId, thinkingEfforts: [] })
+  const selectableModels = [...selectableModelsById.values()]
+  const selectedModel = selectableModels.find((model) => model.id === parsedSelector.modelId)
+  const configuredEffort = agent.thinkingEffort ?? parsedSelector.thinkingEffort ?? defaultThinkingEffort
+  const thinkingOptions = selectedModel?.thinkingEfforts ?? []
+  const selectedEffortIndex = Math.max(0, thinkingOptions.findIndex((effort) => effort.id === configuredEffort))
+  const selectedEffort = thinkingOptions[selectedEffortIndex]
+  // A team with no Brief supplies nothing, so neither switch may read as "on": that would be a
+  // promise about nothing, and both are disabled in that state anyway.
+  const readsBrief = agent.memory?.brief !== false && briefCount > 0
+  const nativeFile = (agent.memory?.deliverAs ?? teamDeliverAs) === 'native-file' && briefCount > 0
+  const zoneClass = (field: AgentField) => fieldProblems?.[field] ? (fieldProblems[field]?.weight === 'error' ? 'error' : 'needs') : ''
+  const hint = (field: AgentField, fallback = '') => fieldProblems?.[field]?.message ?? fallback
+  // A catalog failure outranks the field problem it causes. Switching harness clears the model,
+  // so `model` is always "Required" in exactly the state where the catalog could not be read —
+  // showing the field problem there left an empty list, no reason for it, and no way back.
+  const modelHint = modelOptionsLoading
+    ? 'Loading models from this harness…'
+    : modelOptionsError
+      ? `Could not load this harness's models: ${modelOptionsError}`
+      : hint('model', 'Models reported by this agent harness.')
+
+  if (agent.kind === 'operator') return (
+    <aside className="panel right top e1 lw-inspector" aria-label="Inspector" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
+      <div className="inspector-scroll">
+        <div className="zone">
+          <button type="button" className="iconbtn" aria-label="Close inspector" onClick={onClose}><X size={16} /></button>
+          <h2 className="t-title">You · Review stop</h2>
+          <label className="field">Name<input className="input" aria-label="Review stop name" value={agent.name} readOnly={readOnly} onChange={(e) => onRename('name', e.target.value)} onBlur={() => onFieldBlur('name')} /></label>
+          <label className="field">Question<textarea className="input" data-agent-field="role" aria-label="Review question" value={agent.role} readOnly={readOnly} onChange={(e) => onRename('role', e.target.value)} onBlur={() => onFieldBlur('role')} /></label>
+          <p className="t-meta">The pipeline pauses here for your decision. Your answer becomes direction for the next stage.</p>
+          {!readOnly && <button type="button" className="btn btn-danger" onClick={onDelete}>Delete</button>}
+        </div>
+      </div>
+    </aside>
+  )
 
   return (
-    <div
-      role="region"
-      aria-label="Inspector"
-      className="pointer-events-auto flex w-80 max-h-[calc(100vh-32px)] flex-col gap-4 overflow-y-auto rounded-lg border border-hairline/10 bg-surface/72 p-4 shadow-[0_1px_2px_rgb(0_0_0/.04),0_8px_24px_rgb(0_0_0/.08)] backdrop-blur-xl"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          {createElement(roleGlyph(agent.role), {
-            className: 'size-5 shrink-0 text-ink-2',
-            'aria-hidden': 'true',
-          })}
-          <div className="min-w-0">
-            <input
-              value={agent.name}
-              onChange={(event) => onRename('name', event.target.value)}
-              onBlur={() => onFieldBlur('name')}
-              readOnly={readOnly}
-              aria-label="Name"
-              className={inputClass(fieldProblems?.name, 'w-full truncate rounded-sm border border-transparent bg-transparent text-[20px] font-semibold leading-7 text-ink outline-none')}
-            />
-            <Problem problem={fieldProblems?.name} />
-            <p className="truncate font-mono text-[12px] text-ink-2">{agent.id}</p>
+    <aside className="panel right top e1 lw-inspector" aria-label="Inspector" role="region" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
+      <div className="inspector-glass" aria-hidden="true" />
+      <div className="inspector-scroll">
+      <header className="insp-head">
+        <span className="node-glyph">{createElement(roleGlyph(agent.role), { size: 20, 'aria-hidden': 'true' })}</span>
+        <span className="insp-text">
+          <div className={`insp-title t-title field ${zoneClass('name')}`}>
+            <input value={agent.name} aria-label="Name" data-agent-field="name" readOnly={readOnly} onChange={(event) => onRename('name', event.target.value)} onBlur={() => onFieldBlur('name')} />
           </div>
+          <div className="insp-id t-mono">{agent.id}</div>
+          <div className="insp-status t-micro"><StatusGlyph status={status} /> {runtime ? `${runtime.taskState.toLowerCase()} · ${runtime.task}` : status}{runtime?.busUnavailable ? ' · no Team Bus access' : ''}</div>
+        </span>
+        <button type="button" className="iconbtn" onClick={onClose} title="Close (Esc)" aria-label="Close inspector"><X size={15} aria-hidden="true" /></button>
+      </header>
+      {fixHint && (
+        <p className="inspector-fix-hint t-meta" role="note">
+          <span>{fixHint}</span>
+          {onDismissFixHint && <button type="button" className="iconbtn" onClick={onDismissFixHint} aria-label="Dismiss this note"><X size={13} aria-hidden="true" /></button>}
+        </p>
+      )}
+
+      <div className="zone">
+        <div className="zone-head t-micro">Identity</div>
+        <div className={`field ${zoneClass('role')}`}>
+          <label className="t-meta" htmlFor="insp-role">Role and instructions</label>
+          <textarea id="insp-role" className="input" data-agent-field="role" value={agent.role} readOnly={readOnly} placeholder="What this agent should do, which sources to use, what to pass on." onChange={(event) => onRename('role', event.target.value)} onBlur={() => onFieldBlur('role')} />
+          <span className="hint t-meta">{hint('role', 'Included in every turn, including delegated work.')}</span>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close inspector"
-          className="shrink-0 rounded-md px-1.5 py-0.5 text-ink-3 hover:bg-hairline/10 hover:text-ink"
-        >
-          ×
-        </button>
+        <div className={`field ${zoneClass('model')}`}>
+          <label className="t-meta" htmlFor="insp-model">Model</label>
+          <select id="insp-model" className="input model-select" data-agent-field="model" value={parsedSelector.modelId} disabled={readOnly || modelOptionsLoading} onChange={(event) => {
+            if (!agent.thinkingEffort && parsedSelector.thinkingEffort) onThinkingEffortChange?.(parsedSelector.thinkingEffort)
+            onModelChange(event.target.value)
+          }} onBlur={() => onFieldBlur('model')}>
+            {!agent.model && <option value="" disabled>Select a model</option>}
+            {selectableModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+          </select>
+          <span className="hint t-meta">{runtime?.status === 'running' ? 'Routed through the harness for this run.' : selectedModel?.description ?? modelHint}{modelOptionsError && onRetryModelOptions && <> <button type="button" className="link model-retry" onClick={onRetryModelOptions}>Retry</button></>}</span>
+        </div>
+        <div className="field thinking-field">
+          <span className="thinking-label"><label className="t-meta" htmlFor="insp-thinking">Thinking effort</label><output className="t-body-m" htmlFor="insp-thinking">{selectedEffort?.name ?? 'Harness default'}</output></span>
+          <input
+            id="insp-thinking"
+            className="thinking-slider"
+            type="range"
+            min={0}
+            max={Math.max(0, thinkingOptions.length - 1)}
+            step={1}
+            value={selectedEffortIndex}
+            disabled={readOnly || modelOptionsLoading || !onThinkingEffortChange || thinkingOptions.length === 0}
+            aria-label="Thinking effort"
+            aria-valuetext={selectedEffort?.name ?? 'Harness default'}
+            onChange={(event) => {
+              const effort = thinkingOptions[Number(event.target.value)]
+              if (effort) onThinkingEffortChange?.(effort.id)
+            }}
+          />
+          {thinkingOptions.length > 1 && <span className="thinking-scale t-micro"><span>{thinkingOptions[0].name}</span><span>{thinkingOptions[thinkingOptions.length - 1].name}</span></span>}
+          <span className="hint t-meta">{selectedEffort?.description ?? (modelOptionsLoading ? 'Loading effort choices…' : thinkingOptions.length === 0 ? 'This harness does not expose a separate effort setting.' : 'Controls how much reasoning the model uses.')}</span>
+        </div>
       </div>
 
-      <div className="h-px bg-hairline/10" />
-
-      <Field label="Role">
-        <input
-          value={agent.role}
-          onChange={(event) => onRename('role', event.target.value)}
-          onBlur={() => onFieldBlur('role')}
-          readOnly={readOnly}
-          placeholder="Add a role"
-          className={inputClass(fieldProblems?.role, 'h-9 w-full rounded-sm border border-hairline/10 bg-surface-solid px-2 text-[14px] text-ink outline-none')}
-        />
-        <Problem problem={fieldProblems?.role} />
-      </Field>
-
-      <Field label="Model">
-        <input
-          value={agent.model}
-          onChange={(event) => onModelChange(event.target.value)}
-          onBlur={() => onFieldBlur('model')}
-          readOnly={readOnly}
-          placeholder="e.g. claude-opus-5"
-          className={inputClass(fieldProblems?.model, 'h-9 w-full rounded-sm border border-hairline/10 bg-surface-solid px-2 font-mono text-[12px] text-ink outline-none')}
-        />
-        <Problem problem={fieldProblems?.model} />
-      </Field>
-
-      <Field label="Cwd">
-        <input
-          value={agent.spawn.cwd}
-          onChange={(event) => onCwdChange(event.target.value)}
-          onBlur={() => onFieldBlur('cwd')}
-          readOnly={readOnly}
-          className={inputClass(fieldProblems?.cwd, 'h-9 w-full rounded-sm border border-hairline/10 bg-surface-solid px-2 font-mono text-[12px] text-ink outline-none')}
-        />
-        <p className="mt-1 text-[12px] text-ink-3">Relative to the team file</p>
-        <Problem problem={fieldProblems?.cwd} />
-      </Field>
-
-      <Field label="Budget">
-        <div className="flex items-center gap-2">
-          <span className="text-ink-2">$</span>
-          <input
-            type="number"
-            min={0}
-            step={0.01}
-            value={agent.budget.limitUsd}
-            onChange={(event) => onBudgetChange(Number(event.target.value))}
-            onBlur={() => onFieldBlur('limitUsd')}
-            readOnly={readOnly}
-            aria-label="Budget limit in USD"
-            className={inputClass(fieldProblems?.limitUsd, 'h-9 w-full rounded-sm border border-hairline/10 bg-surface-solid px-2 font-mono text-[12px] text-ink outline-none')}
-          />
+      <div className="zone">
+        <div className="zone-head t-micro">Behaviour</div>
+        <button type="button" className={`check round ${isEntrypoint ? 'on' : ''}`} disabled={isEntrypoint || readOnly} onClick={onPromoteEntrypoint} aria-pressed={isEntrypoint} title={isEntrypoint ? 'Every team starts somewhere. Pick another agent to move the entry point.' : undefined}>
+          <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
+          <span className="txt"><b className="t-body">Entry point for this team</b><span className="t-meta">Receives the goal first</span></span>
+        </button>
+        <button
+          type="button"
+          className={`check round ${isResponder ? 'on' : ''}`}
+          disabled={isResponder || readOnly || (!pipeline && !isEntrypoint)}
+          onClick={onPromoteResponder}
+          aria-pressed={isResponder}
+          title={!pipeline && !isEntrypoint ? 'Create a pipeline to choose a responder other than the entrypoint.' : isResponder ? 'Pick another pipeline agent to move the team output.' : undefined}
+        >
+          <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
+          <span className="txt"><b className="t-body">Produces the team output</b><span className="t-meta">Its reply becomes the canonical response</span></span>
+        </button>
+        <button type="button" className={`check ${agent.allowRecruiting !== false ? 'on' : ''}`} disabled={readOnly} onClick={() => onAllowRecruitingChange(agent.allowRecruiting === false)} aria-pressed={agent.allowRecruiting !== false}>
+          <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
+          <span className="txt"><b className="t-body">May recruit helpers</b><span className="t-meta">{pipeline ? 'Withdrawn in pipeline mode — only ask stays' : 'dispatch, ask and handoff through the Team Bus'}</span></span>
+        </button>
+        {/* docs/TEAM_MEMORY.md §5: the two per-agent memory keys. The copy uses only the four
+            sanctioned words — supplied, retrieved, kept, eligible — and never says the agent
+            "knows" or "has read" anything. A team with no Brief says so rather than offering a
+            switch over nothing. */}
+        {onMemoryBriefChange && (
+          <button type="button" className={`check ${readsBrief ? 'on' : ''}`} disabled={readOnly || briefCount === 0} onClick={() => onMemoryBriefChange(agent.memory?.brief === false)} aria-pressed={readsBrief}>
+            <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
+            <span className="txt"><b className="t-body">Reads the team Brief</b><span className="t-meta">{briefCount === 0 ? 'This team has no Brief yet — add one in Memory' : `Supplied ${briefCount} ${briefCount === 1 ? 'entry' : 'entries'} at the start of every session`}</span></span>
+          </button>
+        )}
+        {onDeliverAsChange && (
+          <button type="button" className={`check ${nativeFile ? 'on' : ''}`} disabled={readOnly || briefCount === 0} onClick={() => onDeliverAsChange(nativeFile ? 'packet-only' : 'native-file')} aria-pressed={nativeFile}>
+            <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
+            <span className="txt"><b className="t-body">Brief in its own memory file</b><span className="t-meta">{nativeFile ? "Written into the managed workspace as the harness's own memory file, which a compaction does not reach" : 'Packet only — it keeps its declared folder, and a compaction can summarise the Brief away'}</span></span>
+          </button>
+        )}
+        <div className={`field ${zoneClass('limitUsd')}`}>
+          <label className="t-meta">Budget</label>
+          <div className="row2">
+            <input className="input mono" data-agent-field="limitUsd" type="number" min={0} step={0.01} value={(agent.budget?.limitUsd ?? 0)} readOnly={readOnly} aria-label="Budget limit in USD" onChange={(event) => onBudgetChange(Number(event.target.value))} onBlur={() => onFieldBlur('limitUsd')} />
+            <input className="input mono" type="number" min={1} max={100} value={agent.budget?.warnAtPercent ?? 80} readOnly={readOnly || !onWarnAtChange} aria-label="Warn at percent" onChange={(event) => onWarnAtChange?.(Number(event.target.value))} />
+          </div>
+          <div className={`budget-lane ${lane}`} style={{ margin: '6px 0 0', borderRadius: 'var(--r-full)' }} aria-hidden="true"><i style={{ width: `${Math.min(100, pct)}%` }} /></div>
+          <span className="hint t-mono-sm">{hint('limitUsd', spent !== null ? `${formatUsd(spent)} spent of ${formatUsd((agent.budget?.limitUsd ?? 0))} · warn at ${agent.budget?.warnAtPercent ?? 80}%` : `${formatUsd((agent.budget?.limitUsd ?? 0))} limit · warn at ${agent.budget?.warnAtPercent ?? 80}%`)}</span>
         </div>
-        <p className="mt-1 font-mono text-[12px] text-ink-3">{formatUsd(agent.budget.limitUsd)} limit</p>
-        <Problem problem={fieldProblems?.limitUsd} />
-      </Field>
+      </div>
 
-      <div className="h-px bg-hairline/10" />
+      <div className="zone">
+        <button type="button" className="zone-head toggle t-micro" onClick={() => setProcessOpen((open) => !open)} aria-expanded={processOpen}>
+          <span aria-hidden="true">{processOpen ? '▾' : '▸'}</span> Process
+        </button>
+        {processOpen && (
+          <>
+            <dl className="proc-list t-mono-sm">
+              <dt>cmd</dt><dd>{agent.spawn?.cmd ?? ''}</dd>
+              <dt>args</dt><dd>{agent.spawn?.args?.join(' ') || '—'}</dd>
+              <dt>env</dt><dd>{Object.keys(agent.spawn?.env ?? {}).length > 0 ? Object.keys(agent.spawn?.env ?? {}).join(', ') : '—'}</dd>
+            </dl>
+            <div className={`field ${zoneClass('cwd')}`}>
+              <label className="t-meta" htmlFor="insp-cwd">Working folder</label>
+              <input id="insp-cwd" className="input mono" data-agent-field="cwd" value={agent.spawn?.cwd ?? '.'} readOnly={readOnly} onChange={(event) => onCwdChange(event.target.value)} onBlur={() => onFieldBlur('cwd')} />
+              <span className="hint t-meta">{hint('cwd', 'Relative to the team file')}</span>
+            </div>
+          </>
+        )}
+      </div>
 
-      <label className="flex items-center gap-2 text-[13px] text-ink" title={isEntrypoint ? 'Every team starts somewhere. Check another agent to move the entry point.' : undefined}>
-        <input
-          type="checkbox"
-          checked={isEntrypoint}
-          disabled={isEntrypoint || readOnly}
-          onChange={() => onPromoteEntrypoint()}
-          className="size-4 accent-[var(--color-iris)]"
-        />
-        Entrypoint
-      </label>
-
-      <label className="flex items-center gap-2 text-[13px] text-ink">
-        <input
-          type="checkbox"
-          checked={agent.allowRecruiting !== false}
-          onChange={(event) => onAllowRecruitingChange(event.target.checked)}
-          disabled={readOnly}
-          className="size-4 accent-[var(--color-iris)]"
-        />
-        May recruit helpers
-      </label>
-
-      <div className="h-px bg-hairline/10" />
-
-      {!readOnly && <button
-        type="button"
-        onClick={onDelete}
-        className="self-start text-[13px] text-ink-2 hover:text-red"
-      >
-        Delete node
-      </button>}
-    </div>
-  )
-}
-
-function Problem({ problem }: { problem: AgentFieldProblems[AgentField] }) {
-  if (!problem) return null
-  return (
-    <p className={`mt-1 text-[12px] ${problem.weight === 'error' ? 'text-red' : 'text-copper'}`}>
-      {problem.message}
-    </p>
-  )
-}
-
-function inputClass(problem: AgentFieldProblems[AgentField], base: string): string {
-  const border = problem?.weight === 'error' ? 'border-red' : problem ? 'border-copper' : 'focus:border-iris'
-  return `${base} ${border}`
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3">{label}</p>
-      {children}
-    </div>
+      {!readOnly && (
+        <footer className="insp-foot">
+          <span className="t-meta" style={{ color: 'var(--color-ink-3)' }}>Edits are in memory until ⌘S</span>
+          <button type="button" className="btn btn-danger" style={{ border: 0 }} onClick={onDelete}>Delete</button>
+        </footer>
+      )}
+      </div>
+    </aside>
   )
 }

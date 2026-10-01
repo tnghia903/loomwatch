@@ -1,7 +1,6 @@
-import { Diamond, GripVertical } from 'lucide-react'
-
 import { KNOWN_HARNESSES } from '../../lib/harnesses'
 import type { LibrarySource } from '../../lib/library/types'
+import { EntityGlyph } from '../ui/glyphs'
 import { LIBRARY_DRAG_MIME } from './constants'
 
 function cx(...classes: Array<string | false | undefined>): string {
@@ -13,8 +12,9 @@ function monogramFor(harnessId: string): string {
 }
 
 function subtitleFor(source: LibrarySource): string {
+  if (source.kind === 'operator') return 'Review stop · your decision'
   if (source.group === 'presets') {
-    const budget = source.budgetUsd !== undefined ? ` · $${source.budgetUsd.toFixed(2)}` : ''
+    const budget = source.budgetUsd !== undefined ? ` · $${source.budgetUsd.toFixed(2)} cap` : ''
     return `${source.model ?? ''}${budget}`
   }
   return [source.spawn.cmd, ...source.spawn.args].join(' ')
@@ -24,52 +24,55 @@ interface LibraryRowProps {
   source: LibrarySource
   /** Not-installed harnesses render disabled: no drag handle, "not found on PATH" (§4.2). */
   disabled?: boolean
+  disabledReason?: string
+  onDragStateChange?: (dragging: boolean) => void
 }
 
-// Rows are drag sources only (§4.1) — clicking selects/opens nothing.
-export function LibraryRow({ source, disabled = false }: LibraryRowProps) {
-  const accessibleName = disabled
-    ? `${source.label}, not found on PATH`
-    : `${source.label}, drag onto the canvas to add it`
+// UX_REDESIGN §4.1 / TNG-124: a 44 px card with monogram, name, a mono sub-line and the
+// resting grip handle. Rows are drag sources AND keyboard/click sources for placement.
+export function LibraryRow({ source, disabled = false, disabledReason, onDragStateChange }: LibraryRowProps) {
+  const unavailable = disabled || Boolean(disabledReason)
+  const reason = disabledReason ?? 'not found on PATH'
+  const accessibleName = unavailable
+    ? `${source.label}, ${reason}`
+    : `${source.label}, drag onto the canvas or press Enter to add it`
+
+  const addAgent = () => window.dispatchEvent(new CustomEvent('loomwatch:add-agent', { detail: JSON.stringify(source) }))
 
   return (
     <div
-      role="listitem"
+      role={unavailable ? 'listitem' : 'button'}
       aria-label={accessibleName}
-      title={disabled ? `${source.label} was not found on PATH` : undefined}
-      draggable={!disabled}
+      aria-disabled={unavailable || undefined}
+      title={unavailable ? reason : 'Drag onto the canvas, or click, to add this agent'}
+      draggable={!unavailable}
       onDragStart={(event) => {
-        if (disabled) {
-          event.preventDefault()
-          return
-        }
+        if (unavailable) { event.preventDefault(); return }
         event.dataTransfer.setData(LIBRARY_DRAG_MIME, JSON.stringify(source))
+        event.dataTransfer.setData('text/plain', source.label)
         event.dataTransfer.effectAllowed = 'copy'
+        onDragStateChange?.(true)
       }}
-      className={cx(
-        'group flex h-10 items-center gap-2 rounded-md px-2 transition-colors',
-        disabled ? 'cursor-not-allowed opacity-45' : 'cursor-grab hover:bg-iris/6 active:cursor-grabbing',
-      )}
+      onDragEnd={() => onDragStateChange?.(false)}
+      onClick={() => { if (!unavailable) addAgent() }}
+      onKeyDown={(event) => {
+        if (!unavailable && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); addAgent() }
+      }}
+      tabIndex={unavailable ? undefined : 0}
+      className={cx('lib-row', unavailable && 'unavailable')}
     >
       {source.group === 'presets' ? (
-        <Diamond className="size-4 shrink-0 text-ink-3" aria-hidden="true" />
+        <span className="monogram res"><EntityGlyph kind="agent" size={11} /></span>
       ) : (
-        <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-hairline/10 font-mono text-[11px] text-ink-2">
-          {monogramFor(source.id)}
-        </span>
+        <span className="monogram">{monogramFor(source.id)}</span>
       )}
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[14px] text-ink">{source.label}</span>
-        <span className="block truncate font-mono text-[12px] text-ink-2">
-          {disabled ? 'not found on PATH' : subtitleFor(source)}
-        </span>
+      <span className="lib-row-text">
+        <span className="lib-row-name t-body-m">{source.label}</span>
+        <span className={cx(unavailable ? 'lib-row-sub t-meta' : 'lib-row-sub t-mono-sm')}>{unavailable ? reason : subtitleFor(source)}</span>
+        {!unavailable && <span className="lib-row-meta t-meta"><span className="lib-row-compat">{source.kind === 'operator' ? 'pipeline · pauses for your answer' : source.group === 'presets' ? 'preset · role and model filled' : 'detected harness · needs a role and model'}</span></span>}
       </span>
-      {!disabled && (
-        <GripVertical
-          className="size-4 shrink-0 text-ink-3 opacity-0 transition-opacity group-hover:opacity-60"
-          aria-hidden="true"
-        />
-      )}
+      {!unavailable && <GripVertical className="drag-dots" size={16} aria-hidden="true" />}
     </div>
   )
 }
+import { GripVertical } from 'lucide-react'

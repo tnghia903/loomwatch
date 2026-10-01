@@ -16,6 +16,40 @@ export interface PipelineStep {
 }
 
 /**
+ * The one terminal that a run starting at `entrypoint` can actually reach.
+ *
+ * `pipelineOrder` deliberately appends disconnected nodes so the UI can still list and inspect
+ * an invalid draft. That presentation order must not decide who produces the Output, though: a
+ * freshly dropped orphan is not part of the configured execution path. Branches are accepted only
+ * when they converge on one reachable terminal; otherwise there is no unambiguous responder.
+ */
+export function pipelineTerminal(
+  nodeIds: readonly string[],
+  edges: readonly EdgeEndpoints[],
+  entrypoint: string | null,
+): string | null {
+  if (entrypoint === null || !nodeIds.includes(entrypoint)) return null
+
+  const nodes = new Set(nodeIds)
+  const successors = new Map<string, string[]>(nodeIds.map((id) => [id, []]))
+  for (const edge of edges) {
+    if (nodes.has(edge.from) && nodes.has(edge.to)) successors.get(edge.from)?.push(edge.to)
+  }
+
+  const reachable = new Set<string>()
+  const pending = [entrypoint]
+  while (pending.length > 0) {
+    const id = pending.pop() as string
+    if (reachable.has(id)) continue
+    reachable.add(id)
+    pending.push(...(successors.get(id) ?? []))
+  }
+
+  const terminals = [...reachable].filter((id) => (successors.get(id) ?? []).length === 0)
+  return terminals.length === 1 ? terminals[0] : null
+}
+
+/**
  * Empty when `edges` is empty — team mode has no step order to show. Nodes unreachable from
  * the entrypoint (no path in, e.g. a freshly dropped orphan) are appended last in the order
  * they were passed, since TEAM_CONFIG.md does not define their rank.

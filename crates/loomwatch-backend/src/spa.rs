@@ -20,8 +20,13 @@ const IMMUTABLE_CACHE: &str = "public, max-age=31536000, immutable";
 /// SPA fallback intercepting them.
 pub fn router() -> Router {
     Router::new()
+        .route("/api/health", get(health))
         .route("/", get(index))
         .route("/{*path}", get(asset_or_index))
+}
+
+async fn health() -> &'static str {
+    "ok"
 }
 
 async fn index() -> Response {
@@ -30,6 +35,13 @@ async fn index() -> Response {
 
 async fn asset_or_index(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
+    if path == "api" || path.starts_with("api/") {
+        return (
+            StatusCode::NOT_FOUND,
+            axum::Json(serde_json::json!({"error": "API route not found"})),
+        )
+            .into_response();
+    }
     if UiAssets::get(path).is_some() {
         embedded_response(path, path.starts_with("assets/"))
     } else {
@@ -156,7 +168,6 @@ mod tests {
     #[tokio::test]
     async fn specific_api_routes_take_precedence_over_the_spa_catch_all() {
         let response = router()
-            .route("/api/health", get(|| async { "ok" }))
             .oneshot(Request::get("/api/health").body(Body::empty()).unwrap())
             .await
             .unwrap();

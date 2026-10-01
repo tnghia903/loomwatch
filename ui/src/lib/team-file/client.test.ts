@@ -52,11 +52,11 @@ describe('saveTeamFile', () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/a.yaml', yaml: 'x: 1\n' }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await saveTeamFile('/teams/a.yaml', 'x: 1\n')
+    const result = await saveTeamFile('/teams/a.yaml', 'x: 1\n', 'sha256:abc')
 
     expect(fetchMock).toHaveBeenCalledWith('/api/team', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'If-Match': '"sha256:abc"' },
       body: JSON.stringify({ path: '/teams/a.yaml', yaml: 'x: 1\n' }),
     })
     expect(result).toEqual({ path: '/teams/a.yaml', yaml: 'x: 1\n' })
@@ -68,7 +68,7 @@ describe('saveTeamFile', () => {
       vi.fn().mockResolvedValue(jsonResponse(422, { error: 'invalid team YAML: unsupported schema version' })),
     )
 
-    const failure = saveTeamFile('/teams/a.yaml', 'schemaVersion: 2\n')
+    const failure = saveTeamFile('/teams/a.yaml', 'schemaVersion: 2\n', null)
     await expect(failure).rejects.toThrow(TeamFileApiError)
     await expect(failure).rejects.toMatchObject({ status: 422 })
   })

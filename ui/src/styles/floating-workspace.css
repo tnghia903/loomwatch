@@ -1,0 +1,80 @@
+/* Shared glass surfaces keep Run and Build part of the same canvas workspace. */
+.lw-shell {
+  --workspace-glass: color-mix(in srgb, var(--color-panel-solid) 86%, transparent);
+}
+.lw-shell .build-outcome,
+.lw-shell .workspace-view-tabs,
+.delivery-shown .delivery-work,
+.delivery-shown .delivery-output,
+.delivery-shown .workspace-chrome,
+.delivery-shown .lw-composer {
+  background: var(--workspace-glass);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-lg);
+  box-shadow: var(--e1-shadow);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+}
+.delivery-shown .delivery-lane {
+  background: transparent;
+  gap: 16px;
+}
+.delivery-shown .delivery-work,
+.delivery-shown .delivery-output { min-width: 0; }
+.delivery-shown .delivery-work { padding: 24px; }
+.delivery-shown .delivery-output { overflow: hidden; }
+.lw-shell .build-outcome { padding: 20px; }
+.build-wiring-hint {
+  margin: 0 0 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--color-hairline);
+  line-height: 1.6;
+  color: var(--color-ink-3);
+  font-size: 12px;
+}
+@media (min-width: 768px) {
+  .delivery-shown .workspace-chrome {
+    top: 16px !important;
+    left: 20px;
+    right: 20px;
+    height: 60px;
+    padding: 0 18px;
+  }
+  .delivery-shown .delivery-lane {
+    inset: 92px 20px 20px;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+  .delivery-shown .delivery-lane.output-expanded { grid-template-columns: 1fr; }
+  .delivery-shown .delivery-output {
+    padding-bottom: calc(var(--lw-composer-height, 150px) + 20px);
+  }
+  .delivery-shown .lw-composer {
+    left: calc(60% + 7.6px);
+    right: 32px;
+    bottom: 32px;
+    width: auto;
+    transform: none;
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--r-lg);
+  }
+  .delivery-shown .lw-composer-notices {
+    left: calc(60% + 7.6px);
+    right: 32px;
+    width: auto;
+    transform: none;
+    bottom: calc(var(--lw-composer-height, 150px) + 44px);
+  }
+  .delivery-shown:has(.output-expanded) .lw-composer,
+  .delivery-shown:has(.output-expanded) .lw-composer-notices {
+    left: 32px;
+    right: 32px;
+    width: auto;
+  }
+}
+@media (max-width: 767px) {
+  .delivery-shown .delivery-lane { padding: 8px; gap: 12px; }
+  .delivery-shown .delivery-work { padding: 18px; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .lw-shell { --workspace-glass: var(--color-panel-solid); }
+}

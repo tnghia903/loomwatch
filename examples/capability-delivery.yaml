@@ -1,0 +1,50 @@
+schemaVersion: 1
+id: capability-delivery
+name: Research and design with a wired skill
+entrypoint: researcher
+budget:
+  limitUsd: 8
+# The designer reads the researcher's brief rather than its transcript, and asks for anything the
+# brief left out while the researcher is still alive to answer.
+conversation:
+  brief:
+    summaryChars: 1200
+    maxFindings: 8
+  ask:
+    maxPerStage: 3
+agents:
+  - id: researcher
+    name: Market Researcher
+    role: Research the competitive landscape and report what you find
+    spawn:
+      cmd: claude-agent-acp
+      args: []
+      env: {}
+      cwd: .
+    model: claude-opus-5
+    budget:
+      limitUsd: 5
+    allowRecruiting: true
+  - id: designer
+    name: Report Designer
+    role: Turn the research handed to you into a report the owner can act on
+    spawn:
+      cmd: claude-agent-acp
+      args: []
+      env: {}
+      cwd: .
+    model: claude-opus-5
+    budget:
+      limitUsd: 5
+    allowRecruiting: false
+    # Delivered into this agent's workspace before it starts. Only Claude Code discovers skills
+    # this way, so wiring one to a Codex agent fails the run instead of going quiet.
+    capabilities:
+      - kind: skill
+        name: claude-design
+edges:
+  - from: researcher
+    to: designer
+    layer: configured
+    kind: sequence
+    ts: "2026-09-12T00:00:00Z"

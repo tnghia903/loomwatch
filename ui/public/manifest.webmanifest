@@ -1,0 +1,13 @@
+{
+  "id": "/",
+  "name": "LoomWatch",
+  "short_name": "LoomWatch",
+  "description": "Compose a team of agents. Watch them work.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#08080A",
+  "theme_color": "#08080A",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }],
+  "shortcuts": [{ "name": "Connections", "url": "/connections" }]
+}

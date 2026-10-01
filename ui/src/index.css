@@ -1,211 +1,103 @@
 @import 'tailwindcss';
+@import './styles/tokens.css';
+@import './styles/app.css';
+@import './styles/runtime.css';
+@import './styles/delivery.css';
+@import './styles/floating-workspace.css';
+@import './styles/prototype-workspace.css';
+@import './styles/prototype-parity.css';
+@import './styles/run-canvas.css';
+@import './styles/settings.css';
 
-/* docs/CANVAS_SPEC.md §2.2 — starting palette. Hue/role are fixed; only
-   lightness may be adjusted once the contrast pass (§2.2) lands. */
-@theme {
-  --color-canvas: #f6f5f2;
-  --color-canvas-dot: #dad7cf;
-  --color-surface: #ffffff;
-  --color-surface-solid: #ffffff;
-  --color-hairline: #1a1815;
-  --color-ink: #1a1815;
-  --color-ink-2: #5c574e;
-  --color-ink-3: #767066;
-  --color-stroke: #8c867a;
-  --color-iris: #5a45e8;
-  --color-iris-soft: #8b7bff;
-  --color-iris-deep: #3a2bb8;
-  --color-copper: #b0581c;
-  --color-green: #1e7a4f;
-  --color-red: #c4342f;
-  --color-slate: #6b6b76;
+.operator-context { max-height: min(180px, 25vh); overflow: auto; padding-bottom: var(--sp-2); }
+.operator-context summary { cursor: pointer; color: var(--color-accent); font-size: 12px; }
+.operator-context pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; margin: var(--sp-2) 0; }
+.lw-composer.expanded-actions { flex-wrap: wrap; padding: var(--sp-2); gap: var(--sp-2); }
+.lw-composer.expanded-actions .comp-mid { order: -1; flex: 1 0 100%; padding: var(--sp-2); box-sizing: border-box; }
+.lw-composer.expanded-actions .comp-note { display: block; line-height: 1.4; }
+.lw-composer.expanded-actions .mode-chip { min-height: 36px; padding: 0 var(--sp-2); border-right: 0; }
+.lw-composer.expanded-actions .comp-act { margin-left: auto; padding: 0; flex-wrap: wrap; max-width: 100%; }
+
+.operator-attention { border-left: 3px solid var(--color-accent); }
+
+/* An Attention alert states the problem, then offers the two things an operator can do about it:
+   go to where it is repaired, or go to what recorded it. Repair leads, because the run is a
+   record — the team that produced it is the only thing left to change. */
+.bar-stack .msg, .lw-shell .rt-strip .msg { overflow-wrap: anywhere; }
+.alert-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; width: 100%; }
+.alert-acts .link { padding: 0; border: 0; background: none; cursor: pointer; color: var(--color-ink-3); }
+.alert-acts .link:hover, .alert-acts .link:focus-visible { color: var(--color-ink); }
+.alert-acts .alert-fix { display: inline-flex; align-items: center; gap: 4px; margin-right: auto; color: var(--color-accent); font-weight: 500; }
+.alert-acts .alert-fix:hover, .alert-acts .alert-fix:focus-visible { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+
+/* Why the operator was sent to this agent's settings, said where they land rather than left
+   behind in the alert they clicked. */
+.inspector-fix-hint {
+  display: flex; align-items: flex-start; gap: 6px;
+  margin: 0 0 8px; padding: 8px 10px;
+  border: 1px solid var(--color-accent-dim); border-left-width: 3px; border-radius: var(--r-sm);
+  background: var(--color-accent-tint); color: var(--color-ink-2); overflow-wrap: anywhere;
 }
+.inspector-fix-hint > span { flex: 1; min-width: 0; }
+.inspector-fix-hint .iconbtn { flex: none; margin: -2px -2px 0 0; color: var(--color-ink-3); }
 
-.dark {
-  --color-canvas: #0e0e11;
-  --color-canvas-dot: #23232b;
-  --color-surface: #16161b;
-  --color-surface-solid: #191920;
-  --color-hairline: #ffffff;
-  --color-ink: #f2f1ee;
-  --color-ink-2: #a5a29b;
-  --color-ink-3: #85817b;
-  --color-stroke: #6e6b65;
-  --color-iris: #8b7bff;
-  --color-iris-soft: #b3a6ff;
-  --color-iris-deep: #6e5cf0;
-  --color-copper: #e8933f;
-  --color-green: #46c08a;
-  --color-red: #f0605b;
-  --color-slate: #8a8a96;
+/* Composer height changes with review context and follow-up controls. Keep every dock clear. */
+.lw-shell .lw-activity,
+.lw-shell .lw-inspector {
+  max-height: calc(100dvh - 2 * var(--lw-panel-inset) - var(--lw-composer-height, 56px) - var(--sp-3));
 }
-
-body {
-  margin: 0;
+.lw-shell .lw-history,
+.lw-shell .mode-pop {
+  bottom: calc(var(--lw-panel-inset) + var(--lw-composer-height, 56px) + var(--sp-3));
 }
-
-:root {
-  --canvas-bottom-offset: 1rem;
-}
-
-button:focus-visible,
-input:focus-visible,
-[tabindex]:focus-visible {
-  outline: 2px solid var(--color-iris);
-  outline-offset: 2px;
-}
-
-/* §12.1: controls must remain comfortably operable independently of their visual
-   treatment. This also covers the compact icon buttons in the Library and inspector. */
-button,
-[role='button'],
-input:not([type='checkbox']):not([type='radio']) {
-  min-height: 32px;
-}
-
-.react-flow__node {
-  transition: transform 240ms cubic-bezier(.2, 0, 0, 1);
-}
-
-.react-flow__node.dragging {
-  transition: none;
-}
-
-/* React Flow's focus targets are div/SVG wrappers, so give them an explicit ring in
-   addition to the shared interactive-element outline above. */
-.react-flow__node:focus-visible {
-  box-shadow: 0 0 0 2px var(--color-iris), 0 0 0 4px var(--color-surface-solid);
-}
-
-.react-flow__edge:focus-visible .react-flow__edge-path {
-  stroke: var(--color-iris);
-  stroke-width: 2.5;
-  filter: drop-shadow(0 0 2px var(--color-iris));
-}
-
-.react-flow__edge-interaction {
-  stroke-width: 12px;
-}
-
-/* Handles deliberately remain visually quiet, but their interaction box is the same
-   32px minimum as every other canvas control. */
-.react-flow__handle {
-  width: 32px !important;
-  height: 32px !important;
-  border: 0 !important;
-  background: transparent !important;
-}
-
-@keyframes mode-pill-switch {
-  0% { transform: scale(.98); box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-iris) 45%, transparent); }
-  55% { transform: scale(1.03); box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-iris) 16%, transparent); }
-  100% { transform: scale(1); box-shadow: 0 0 0 0 transparent; }
-}
-
-.mode-pill {
-  transition: width 300ms cubic-bezier(.2, .8, .2, 1), border-color 120ms ease, color 120ms ease;
-}
-
-.mode-pill-switch {
-  animation: mode-pill-switch 300ms cubic-bezier(.2, .8, .2, 1);
-}
-
-@keyframes mode-glyph-switch {
-  from { transform: rotate(-180deg); opacity: 0; }
-  to { transform: rotate(0); opacity: 1; }
-}
-
-@keyframes step-badge-in {
-  from { opacity: 0; transform: translateY(3px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.mode-glyph-switch {
-  animation: mode-glyph-switch 300ms cubic-bezier(.2, .8, .2, 1);
-}
-
-.step-badge {
-  animation: step-badge-in 300ms both cubic-bezier(.2, .8, .2, 1);
-}
-
-/* §13: medium windows retain the Library panel. At tablet widths it becomes a rail that
-   opens as a sheet; Canvas closes it whenever an inspector opens. */
-@media (min-width: 768px) and (max-width: 1023px) {
-  .canvas-library {
-    inset: 1rem;
-  }
-
-  .canvas-library > [role='toolbar'] {
-    box-shadow: 0 16px 48px rgb(0 0 0 / .18);
-  }
-
-  .library-scrim {
-    z-index: 20;
-    background: rgb(26 24 21 / .12);
-  }
-
-  .library-sheet {
-    box-shadow: 0 16px 48px rgb(0 0 0 / .18);
-  }
-}
-
 @media (max-width: 767px) {
-  .canvas-library {
-    display: none;
-  }
-
-  .canvas-inspector {
-    inset: auto .5rem .5rem .5rem;
-    justify-content: center;
-  }
-
-  .canvas-inspector > * {
-    width: min(100%, 32rem);
-    max-height: 70vh;
+  .lw-shell .lw-composer { background: var(--color-panel-solid); }
+  .lw-shell .lw-activity, .lw-shell .lw-inspector {
+    bottom: calc(var(--lw-panel-inset) + var(--lw-composer-height, 56px) + var(--sp-3));
+    min-height: 0;
+    z-index: 41;
+    background: var(--color-panel-solid);
   }
 }
 
-@media (max-height: 599px) {
-  :root {
-    --canvas-bottom-offset: .5rem;
-  }
-
-  .react-flow__controls {
-    bottom: .5rem;
-    right: .5rem;
-    left: auto;
-  }
-
-  .canvas-mode-control {
-    justify-content: flex-end;
-    padding-right: 3.5rem;
+/* Notices are a single stack above the measured composer, never independent bottom offsets. */
+.lw-composer-notices {
+  position: absolute;
+  z-index: 40;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--lw-panel-inset) + var(--lw-bottom-offset) + var(--lw-composer-height, 56px) + 12px);
+  width: min(var(--lw-composer-w), calc(100vw - 2 * var(--lw-panel-inset)));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 28dvh;
+  overflow: auto;
+}
+.lw-composer-notices > div:empty { display: none; }
+.lw-composer-notices .rt-strip, .lw-composer-notices .lw-notice {
+  background: var(--color-panel-solid);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-md);
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  gap: 10px;
+}
+.lw-composer-notices .rt-strip > span:first-child { flex: 1 0 100% !important; overflow-wrap: anywhere; }
+.lw-composer-notices .btn { white-space: normal; height: auto; min-height: 28px; text-align: left; }
+.lw-viewctl .organize-button { display: inline-flex; align-items: center; gap: 6px; }
+@media (min-width: 768px) and (max-width: 1179px) {
+  .lib-open .lw-composer-notices {
+    --lw-beside: calc(100vw - var(--lw-library-w) - 3 * var(--lw-panel-inset));
+    width: min(var(--lw-composer-w), var(--lw-beside));
+    left: calc(var(--lw-library-w) + 2 * var(--lw-panel-inset) + var(--lw-beside) / 2);
   }
 }
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: .01ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: .01ms !important;
-  }
-
-  /* §12.2: retain the explanatory mode change as one opacity-only cross-fade;
-     omit the standard rotation, scale, and staggered step motion. */
-  .mode-pill-switch {
-    animation: mode-pill-cross-fade 120ms ease-in both !important;
-  }
-
-  .mode-glyph-switch,
-  .step-badge {
-    animation: none !important;
-    transform: none;
-  }
+@media (min-width: 768px) and (max-width: 1399px) {
+  .lw-shell .lw-viewctl { top: 132px; bottom: auto; }
 }
 
-@keyframes mode-pill-cross-fade {
-  from { opacity: .72; }
-  to { opacity: 1; }
+.lw-shell .lw-viewctl { width: max-content; gap: 3px; padding-inline: 8px; max-width: calc(100vw - 40px); }
+@media (max-width: 767px) {
+  .lw-shell .lw-viewctl { top: 150px; bottom: auto; }
 }

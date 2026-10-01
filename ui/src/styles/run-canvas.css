@@ -1,0 +1,64 @@
+/* ---------------------------------------------------------------------------
+   ONE CANVAS ANATOMY — Build and Run ("Full trace") draw the same team, so they
+   draw the same cards. `.build-graph` is set on the shell by both surfaces and
+   carries everything that is about the graph rather than the page around it;
+   `.build-workspace` keeps only Build's own layout.
+
+   A run adds rows under the identity row it shares with Build: the projected
+   task state, the spend, and the routes into this agent's evidence and packet.
+   --------------------------------------------------------------------------- */
+
+/* The identity row is the whole card when there is no run, so an agent card with
+   no runtime must render exactly as it did before this wrapper existed. */
+.build-node-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.build-node-row { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.build-node-row > div { flex: 1; min-width: 0; }
+
+.build-node.has-run, .build-node.kind-operator { width: 248px; min-height: 88px; align-items: stretch; }
+
+/* Owner, state and the sentence the projection recorded for this stage. */
+.build-node-task {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--color-hairline);
+  color: var(--color-ink-2); font: 400 10px/14px var(--font-sans); white-space: nowrap;
+}
+.build-node-task b { flex: none; color: var(--color-ink); font: 550 8px/14px var(--font-sans); letter-spacing: .065em; text-transform: uppercase; }
+.build-node-task .task-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* TNG89 §15.2.3: folded evidence and "what it was given", on the card the operator placed. */
+.build-node-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; margin-top: 8px; }
+.build-node-chips .handover-chip, .build-node-chips .mem-chip { height: 18px; margin-top: 0; padding: 0 7px; font: 400 9px/18px var(--font-sans); }
+.build-node-chips .handover-chip svg { flex: none; }
+
+.build-node-meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 9px; color: var(--color-ink-3); font: 400 9px/13px var(--font-mono); }
+.build-node-meta .model { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.build-node-meta .cost { flex: none; color: var(--color-ink-2); }
+
+/* The budget lane is flush with the card's own perimeter, so it follows this card's padding. */
+.build-node .budget-lane { margin: 10px -13px -12px; border-radius: 0 0 6px 6px; }
+
+/* Pipeline ordinal, outside the card as on every other node that carries one. */
+.build-node .step {
+  position: absolute; left: -8px; top: -8px; width: 16px; height: 16px;
+  border-radius: var(--r-full); display: grid; place-items: center;
+  background: var(--color-panel-solid); border: 1px solid var(--color-hairline);
+  color: var(--color-ink-2); font: 600 10px/1 var(--font-sans);
+}
+
+/* Status owns the perimeter only while a run is shown; validity owns it in Build. */
+.build-node.has-run.st-starting, .build-node.has-run.st-running { border-color: var(--color-live); }
+.build-node.has-run.st-succeeded { border-color: color-mix(in srgb, var(--color-ok) 60%, transparent); }
+.build-node.has-run.st-failed { border-color: var(--color-alert); }
+.build-node.has-run.st-waiting { border-color: var(--color-halt); }
+.build-node.has-run.st-stopped { border-color: var(--color-halt); border-style: dashed; }
+.build-node.has-run.selected { border-color: var(--color-accent); }
+
+/* A review stop is a person, not a process: gold perimeter, a question, and the way to answer. */
+.build-node.kind-operator { border-color: var(--color-accent); }
+.build-node.kind-operator .build-node-icon { color: var(--color-accent); }
+.build-node.kind-operator small { white-space: normal; overflow: visible; }
+.build-node-answer.btn { height: 26px; margin-top: 10px; padding: 0 10px; font-size: 10px; align-self: flex-start; }
+
+/* Run-only nodes keep their own anatomy — an attempt, its evidence and the answer it produced
+   have no Build counterpart — but they sit on this canvas, so they take its corner radius. */
+.build-graph .rt, .build-graph .activity-ent, .build-graph .prior-branch { border-radius: 7px; }

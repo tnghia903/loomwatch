@@ -117,6 +117,7 @@ const SCHEMA_GATE = {
           name: { type: 'string', minLength: 1 },
           role: { type: 'string', minLength: 1 },
           model: { type: 'string', minLength: 1 },
+          thinkingEffort: { type: 'string', minLength: 1 },
           spawn: { type: 'object', required: ['cwd'], properties: { cwd: { type: 'string', minLength: 1 } } },
           budget: { type: 'object', required: ['limitUsd'], properties: { limitUsd: { type: 'number', minimum: 0 } } },
         },
@@ -143,6 +144,26 @@ afterEach(() => {
 })
 
 describe('useTeamDocument', () => {
+  it('switches harnesses without losing attached skills and clears incompatible model choices', async () => {
+    const yaml = TEAM_YAML.replace('    model: kimi-for-coding/k3-256k', '    capabilities: [{ kind: skill, name: claude-design }]\n    model: kimi-for-coding/k3-256k')
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) =>
+      String(input) === '/api/config/schema' ? jsonResponse(200, SCHEMA_GATE) : jsonResponse(200, { path: '/teams/research-team.yaml', yaml }),
+    ))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.nodes).toHaveLength(2))
+    const before = result.current.nodes[0].data.agent
+    act(() => result.current.updateAgentSpawn('researcher', { cmd: 'codex-acp', args: [], env: {}, cwd: '.' }))
+    const after = result.current.nodes[0].data.agent
+    expect(after.spawn?.cmd).toBe('codex-acp')
+    expect(before.capabilities).toEqual([{ kind: 'skill', name: 'claude-design' }])
+    expect(after.capabilities).toEqual(before.capabilities)
+    expect(after.model).toBe('')
+    expect(after.role).toBe(before.role)
+    expect(result.current.documentChipState).toBe('invalid')
+    act(() => result.current.updateAgentModel('researcher', 'gpt-5.6'))
+    expect(result.current.documentChipState).toBe('dirty')
+  })
+
   it('resolves a relative requested path against the canonical teams root for display', async () => {
     setPath('nested/research-team.yaml')
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
@@ -264,6 +285,49 @@ describe('useTeamDocument', () => {
     expect(result.current.saveState).toBe('error')
   })
 
+  it('uses daemon revisions when SubtleCrypto is unavailable on a LAN origin', async () => {
+    vi.stubGlobal('crypto', {})
+    const revision = 'sha256:' + 'a'.repeat(64)
+    const savedRevision = 'sha256:' + 'b'.repeat(64)
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
+      if (init?.method === 'PUT') {
+        expect(new Headers(init.headers).get('If-Match')).toBe(`"${revision}"`)
+        const { yaml } = JSON.parse(String(init.body))
+        return jsonResponse(200, { path: '/teams/research-team.yaml', yaml, revision: savedRevision })
+      }
+      return jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML, revision })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    act(() => result.current.renameAgent('researcher', 'name', 'LAN writer'))
+    await act(async () => { await result.current.save() })
+    expect(result.current.saveState).toBe('saved')
+  })
+
+  it('preserves edits when another writer wins after the preflight read', async () => {
+    let raced = false
+    const diskYaml = TEAM_YAML.replace('Protocol Researcher', 'Disk writer')
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
+      if (init?.method === 'PUT') {
+        expect(new Headers(init.headers).get('If-Match')).toMatch(/^"sha256:[a-f0-9]{64}"$/)
+        raced = true
+        return jsonResponse(412, { error: 'The team changed.' })
+      }
+      return jsonResponse(200, { path: '/teams/research-team.yaml', yaml: raced ? diskYaml : TEAM_YAML })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    act(() => result.current.renameAgent('researcher', 'name', 'Local writer'))
+    await act(async () => { await result.current.save() })
+    expect(result.current.saveState).toBe('conflict')
+    expect(result.current.externalChange?.diskYaml).toBe(diskYaml)
+    expect(result.current.nodes[0].data.agent.name).toBe('Local writer')
+  })
+
   it('recovers a deleted backing file by saving the in-memory document to a new path', async () => {
     let deleted = false
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -334,6 +398,21 @@ describe('useTeamDocument', () => {
     expect(result.current.nodes.map((node) => node.id).sort()).toEqual(['researcher', 'reviewer'])
     expect(result.current.entrypoint).toBe('researcher')
     expect(result.current.edges).toHaveLength(0)
+  })
+
+  it('stores an explicitly selected responder in the team YAML', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+    )
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+    act(() => result.current.promoteResponder('reviewer'))
+
+    expect(result.current.responder).toBe('reviewer')
+    expect(result.current.yamlPreview).toContain('responder: reviewer')
+    expect(result.current.saveState).toBe('dirty')
   })
 
   it('makes auto-layout undoable', async () => {
@@ -460,6 +539,21 @@ describe('useTeamDocument', () => {
     expect(result.current.saveState).toBe('dirty')
     const node = result.current.nodes.find((n) => n.id === 'researcher')
     expect(node?.data.agent.role).toBe('Investigate protocols')
+  })
+
+  it('stores thinking effort separately from the model in the team YAML', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+    )
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+    act(() => result.current.updateAgentThinkingEffort('researcher', 'high'))
+
+    expect(result.current.nodes.find((node) => node.id === 'researcher')?.data.agent.thinkingEffort).toBe('high')
+    expect(result.current.yamlPreview).toContain('thinkingEffort: high')
+    expect(result.current.yamlPreview).toContain('model: kimi-for-coding/k3-256k')
   })
 
   it('save() rechecks an unchanged disk revision, PUTs the mutated YAML, and settles on saved', async () => {

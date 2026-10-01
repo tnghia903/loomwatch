@@ -1,4 +1,4 @@
-import { Command, Search, type LucideIcon } from 'lucide-react'
+import { Command, type LucideIcon } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 export interface CommandAction {
@@ -9,78 +9,49 @@ export interface CommandAction {
   icon?: LucideIcon
 }
 
+// UX_REDESIGN §11: ⌘K is the menu. 560 px, e2, centred at 22% from the top, a filter field
+// and a flat ungrouped ranked list. Every primary flow is reachable without a pointer.
 export function CommandPalette({ actions, onClose }: { actions: CommandAction[]; onClose: () => void }) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
-  const filtered = useMemo(
-    () => rankActions(actions, query),
-    [actions, query],
-  )
+  const filtered = useMemo(() => rankActions(actions, query), [actions, query])
 
   function run(action: CommandAction | undefined) {
     if (!action || action.disabled) return
-    action.run()
     onClose()
+    action.run()
   }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      onClose()
-      return
-    }
+    if (event.key === 'Escape') { event.preventDefault(); onClose(); return }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       if (filtered.length === 0) return
-      const direction = event.key === 'ArrowDown' ? 1 : -1
-      setActiveIndex((current) => (current + direction + filtered.length) % filtered.length)
+      setActiveIndex((current) => (current + (event.key === 'ArrowDown' ? 1 : -1) + filtered.length) % filtered.length)
       return
     }
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      run(filtered[activeIndex])
-    }
+    if (event.key === 'Enter') { event.preventDefault(); run(filtered[activeIndex]) }
   }
 
   return (
-    <div className="absolute inset-0 z-40 bg-ink/10" onMouseDown={onClose}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-        className="mx-auto mt-[22vh] w-[min(560px,calc(100vw-32px))] overflow-hidden rounded-xl border border-hairline/10 bg-surface-solid shadow-[0_24px_80px_rgb(0_0_0/.2)]"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <label className="flex h-12 items-center gap-2 border-b border-hairline/10 px-4">
-          <Search className="size-4 text-ink-3" aria-hidden="true" />
-          <input
-            autoFocus
-            value={query}
-            onChange={(event) => { setQuery(event.target.value); setActiveIndex(0) }}
-            onKeyDown={onKeyDown}
-            placeholder="Type a command"
-            className="w-full bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-3"
-          />
+    <div className="lw-scrim" onMouseDown={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="Command palette" className="pop e2 lw-palette" onMouseDown={(event) => event.stopPropagation()}>
+        <label className="pop-search">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4.3-4.3" /></svg>
+          <input autoFocus value={query} onChange={(event) => { setQuery(event.target.value); setActiveIndex(0) }} onKeyDown={onKeyDown} placeholder="Type a command" aria-label="Command" />
         </label>
-        <div className="max-h-[360px] overflow-y-auto p-2">
+        <div className="pop-list" style={{ maxHeight: 360 }}>
           {filtered.map((action, index) => {
             const Icon = action.icon ?? Command
             return (
-            <button
-              key={action.label}
-              type="button"
-              disabled={action.disabled}
-              onMouseMove={() => setActiveIndex(index)}
-              onClick={() => run(action)}
-              className={`flex h-10 w-full items-center rounded-lg px-3 text-left text-[13px] text-ink hover:bg-iris/6 disabled:opacity-40 ${index === activeIndex ? 'bg-iris/6' : ''}`}
-            >
-              <Icon className="mr-2 size-3.5 text-ink-3" aria-hidden="true" />
-              <span className="flex-1">{action.label}</span>
-              {action.shortcut && <kbd className="font-mono text-[11px] text-ink-3">{action.shortcut}</kbd>}
-            </button>
+              <button key={action.label} type="button" disabled={action.disabled} onMouseMove={() => setActiveIndex(index)} onClick={() => run(action)} className={`pop-row ${index === activeIndex ? 'active' : ''}`}>
+                <Icon size={14} aria-hidden="true" style={{ color: 'var(--color-ink-3)', flex: 'none' }} />
+                <span className="name t-body">{action.label}</span>
+                {action.shortcut && <kbd className="kbd t-mono-sm">{action.shortcut}</kbd>}
+              </button>
             )
           })}
-          {filtered.length === 0 && <p className="px-3 py-6 text-center text-[13px] text-ink-3">No commands match.</p>}
+          {filtered.length === 0 && <p className="pop-empty t-meta">No commands match.</p>}
         </div>
       </div>
     </div>

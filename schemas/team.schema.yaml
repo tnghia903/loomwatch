@@ -31,6 +31,12 @@ properties:
   entrypoint:
     description: Agent that receives the initial goal in team or pipeline mode.
     $ref: "#/$defs/Identifier"
+  responder:
+    description: >-
+      Optional agent whose reply becomes the canonical team output. In pipeline mode it may name
+      any agent in the configured pipeline. In team mode it must match the entrypoint. When omitted,
+      the entrypoint responds in team mode and the final pipeline stage responds in pipeline mode.
+    $ref: "#/$defs/Identifier"
   agents:
     type: array
     minItems: 1
@@ -48,8 +54,304 @@ properties:
               const: configured
             kind:
               const: sequence
+  schedule:
+    description: >-
+      Optional routine: run this team on a cron schedule with a fixed prompt and deliver
+      the canonical reply to the operator's connected destination.
+    $ref: "#/$defs/Schedule"
+  conversation:
+    description: >-
+      How much a pipeline stage hands forward, and how much it may ask back. Defaults suit a
+      short chain; raise the brief bounds for stages whose output cannot be summarised, and the
+      ask budget for stages that genuinely need to interrogate their predecessor.
+    $ref: "#/$defs/Conversation"
+  memory:
+    description: >-
+      What the team knows before a run starts. The Brief is Markdown beside this file, so it is
+      diffable and reviewable like the rest of the design; Postgres holds only what agents write.
+      Omitting this block, or setting `enabled: false`, leaves every prompt byte-for-byte what it
+      was before memory existed. See docs/TEAM_MEMORY.md and ADR 0014.
+    $ref: "#/$defs/Memory"
 
 $defs:
+  Conversation:
+    type: object
+    additionalProperties: false
+    properties:
+      brief:
+        $ref: "#/$defs/Brief"
+      ask:
+        $ref: "#/$defs/Ask"
+      stop:
+        $ref: "#/$defs/Stop"
+
+  Stop:
+    description: >-
+      Bounds on a review stop or a parked `ask_user`. Only harnesses that do **not** advertise
+      `loadSession` read this: one that does is closed while the operator thinks and reopened with
+      `session/load` when they answer, so it costs no process and no window applies to it.
+    type: object
+    additionalProperties: false
+    properties:
+      keepAliveMinutes:
+        description: >-
+          Minutes a kept-alive session idles before LoomWatch asks it for a checkpoint and releases
+          it. A live process at zero token cost is still a live process.
+        type: integer
+        minimum: 1
+        default: 15
+
+  Brief:
+    description: >-
+      Bounds on the handover a stage writes for the stage after it. The successor reads this
+      instead of the transcript, so these bounds are what keep a long pipeline from carrying
+      every earlier stage's narration in its prompt.
+    type: object
+    additionalProperties: false
+    properties:
+      summaryChars:
+        description: Character budget for the summary section.
+        type: integer
+        minimum: 1
+        default: 1200
+      maxFindings:
+        description: How many standalone findings a stage may carry forward.
+        type: integer
+        minimum: 0
+        default: 8
+
+  Memory:
+    description: >-
+      The `memory:` block. This is executable configuration in ADR 0012's sense — it changes what
+      the daemon sends to a harness — so it lives here rather than in the layout sidecar.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled:
+        description: >-
+          An explicit off switch, so an operator can stop supplying memory without deleting the
+          block. `false` behaves exactly like no block at all.
+        type: boolean
+        default: true
+      brief:
+        description: >-
+          Standing notes from the operator, supplied at every session start within the packet
+          budget, in this order. Read only from under the teams root, symlinks included; a file
+          that cannot be read refuses the run rather than being skipped.
+        type: array
+        default: []
+        items:
+          $ref: "#/$defs/BriefEntry"
+      inherits:
+        description: >-
+          Other teams' memory this team reads. Read-only by construction: no token issued for this
+          team carries a write grant for an inherited scope, and a cycle is refused at load.
+        type: array
+        default: []
+        items:
+          $ref: "#/$defs/Inherit"
+      notebook:
+        $ref: "#/$defs/Notebook"
+      packet:
+        $ref: "#/$defs/Packet"
+      deliverAs:
+        description: >-
+          How the Brief reaches a harness. `native-file` also writes it as the harness's own
+          project memory file (CLAUDE.md, AGENTS.md, GEMINI.md) in a managed workspace under
+          `.loomwatch/<team>/<agent>/`, which is the one channel a harness-side context
+          compaction does not reach; it therefore moves the agent out of its declared `cwd`, as
+          wiring a skill already does. An agent that must run inside a repository opts out with
+          `packet-only` on the agent itself.
+        type: string
+        enum:
+          - native-file
+          - packet-only
+        default: native-file
+
+  BriefEntry:
+    type: object
+    additionalProperties: false
+    required:
+      - path
+    properties:
+      path:
+        description: >-
+          Markdown file, relative to this team file. Absolute paths and paths resolving outside
+          the teams root are refused.
+        type: string
+        minLength: 1
+      appliesTo:
+        description: >-
+          Agent ids this entry is supplied to. Omit for the whole team. An entry left out of an
+          agent's packet is still recorded in that packet, with the reason.
+        type: array
+        minItems: 1
+        items:
+          $ref: "#/$defs/Identifier"
+
+  Inherit:
+    description: >-
+      One inherited memory: another team on this daemon by `team`, or an imported pack folder by
+      `pack`. Exactly one of the two.
+    type: object
+    additionalProperties: false
+    oneOf:
+      - required: [team]
+        not:
+          required: [pack]
+      - required: [pack]
+        not:
+          required: [team]
+    properties:
+      team:
+        description: >-
+          The `id` of another team under the same teams root. Live: that team's later edits show up
+          at the next run start, and each run snapshots what it read.
+        $ref: "#/$defs/Identifier"
+      pack:
+        description: >-
+          A `<team>.memory/` folder under the teams root, exported from the Memory panel or by
+          `loomwatchd memory export`. An imported pack never updates on its own.
+        type: string
+        minLength: 1
+      include:
+        description: Which half of the origin's memory to read. Omit for both.
+        type: array
+        minItems: 1
+        items:
+          type: string
+          enum:
+            - brief
+            - kept
+            - both
+      appliesTo:
+        description: >-
+          Agent ids this inherited memory reaches. Omit for the whole team. Drawn on the canvas as
+          a `reads` edge from that agent to the memory card.
+        type: array
+        minItems: 1
+        items:
+          $ref: "#/$defs/Identifier"
+      exclude:
+        description: >-
+          Inherited Brief entries to leave out, by the path the origin team spells them with. The
+          receiving team cannot edit another team's Brief, so declining one entry is the only
+          control it has.
+        type: array
+        minItems: 1
+        items:
+          type: string
+          minLength: 1
+
+  Notebook:
+    description: Whether agents may write to the Notebook, and what may outlive a run.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled:
+        description: >-
+          Whether the four memory tools (`memory_search`, `memory_read`, `memory_write`,
+          `checkpoint`) are offered on the Team Bus. `false` withdraws them from `tools/list` and
+          also refuses a call, so a harness that cached the list cannot write.
+        type: boolean
+        default: true
+      keep:
+        description: >-
+          How a note outlives its run. `review` means the operator keeps what is worth keeping
+          after the run; `never` means notes are evidence for their own run and nothing else.
+          `auto` is deliberately absent — a run's notes becoming standing memory with nobody
+          reading them is how a team accumulates confident nonsense.
+        type: string
+        enum:
+          - review
+          - never
+        default: review
+
+  Packet:
+    type: object
+    additionalProperties: false
+    properties:
+      maxChars:
+        description: >-
+          Memory's share of an opening prompt, in characters — adapters do not report live context
+          occupancy, so characters are the only figure LoomWatch can state honestly. Pinned Brief
+          content that does not fit refuses the run before a harness spawns, naming the entries.
+        type: integer
+        minimum: 1
+        default: 8000
+
+  AgentMemory:
+    description: Per-agent memory overrides; the team's `memory:` block applies when absent.
+    type: object
+    additionalProperties: false
+    properties:
+      brief:
+        description: Whether this agent is supplied the team's Brief at all.
+        type: boolean
+        default: true
+      deliverAs:
+        description: >-
+          Overrides the team's `deliverAs` for this agent. `packet-only` keeps the agent in its
+          declared `cwd` — the choice for an agent that must run inside a repository — and costs
+          it the one delivery channel that survives a compaction.
+        type: string
+        enum:
+          - native-file
+          - packet-only
+
+  Ask:
+    type: object
+    additionalProperties: false
+    properties:
+      maxPerStage:
+        description: >-
+          How many questions a stage may put to the stage before it, which stays alive and
+          answerable while this one runs.
+        type: integer
+        minimum: 0
+        default: 3
+
+  Schedule:
+    type: object
+    additionalProperties: false
+    required:
+      - cron
+      - prompt
+    properties:
+      cron:
+        description: >-
+          Standard 5-field cron at minute resolution (0 or 7 = Sunday), or the 6/7-field
+          seconds form (1 = Sunday). Read in `timezone`.
+        type: string
+        minLength: 1
+      timezone:
+        description: IANA zone name such as Asia/Singapore; the daemon's local zone when absent.
+        type: string
+        minLength: 1
+      prompt:
+        description: >-
+          Prompt template. {{date}} expands to YYYY-MM-DD and {{weekday}} to the day name in
+          the schedule's zone at fire time; {{team}} to the team name.
+        type: string
+        minLength: 1
+      enabled:
+        description: Whether timed fires happen; "run now" ignores it.
+        type: boolean
+        default: true
+      deliver:
+        type: object
+        additionalProperties: false
+        properties:
+          notion:
+            description: Publish the reply as a child page of the connected destination.
+            type: object
+            additionalProperties: false
+            properties:
+              title:
+                description: Page title template with the same placeholders; default "{{team}} — {{date}}".
+                type: string
+                minLength: 1
+
   Identifier:
     type: string
     minLength: 1
@@ -127,22 +429,65 @@ $defs:
         default: 8
 
   Agent:
+    description: >-
+      One node of the team. A `harness` node runs an ACP harness and must say how (spawn, model,
+      budget). An `operator` node is the person at the keyboard standing in the pipeline: it has an
+      id, sits on edges and takes part in the topological order, and instead of a harness it has a
+      question — its `role` — which is what the panel shows when the pipeline reaches it. See
+      docs/TEAM_MEMORY.md, "The operator is a node".
     type: object
     additionalProperties: false
     required:
       - id
-      - name
       - role
-      - spawn
-      - model
-      - budget
+    oneOf:
+      - title: Harness node
+        description: Runs an ACP harness, so it must say how to start it and what it may spend.
+        properties:
+          kind:
+            const: harness
+        required:
+          - name
+          - spawn
+          - model
+          - budget
+      - title: Operator node
+        description: >-
+          A review stop. `spawn`, `model` and `budget` are not merely optional here but refused:
+          an operator node spawns nothing, selects no model and bills nobody, so declaring one
+          would make the file say something the daemon does not do. `name` defaults to "You".
+        properties:
+          kind:
+            const: operator
+        required:
+          - kind
+        not:
+          anyOf:
+            - required: [spawn]
+            - required: [model]
+            - required: [budget]
+            - required: [thinkingEffort]
     properties:
       id:
         $ref: "#/$defs/Identifier"
+      kind:
+        description: >-
+          `harness` (the default, and what every team file written before review stops is) or
+          `operator`. An operator node may sit anywhere in a pipeline except as the entrypoint —
+          the Prompt node is already the operator at the head of a run — and team mode has none,
+          both of which the loader enforces.
+        type: string
+        enum:
+          - harness
+          - operator
+        default: harness
       name:
         type: string
         minLength: 1
       role:
+        description: >-
+          What this node is for. For a harness node it is the agent's assigned role; for an
+          operator node it is the question the person at the keyboard is shown at the stop.
         type: string
         minLength: 1
       spawn:
@@ -151,12 +496,31 @@ $defs:
         description: Harness-specific model selector.
         type: string
         minLength: 1
+      thinkingEffort:
+        description: Optional harness-specific reasoning effort selected independently of the model.
+        type: string
+        minLength: 1
       budget:
         $ref: "#/$defs/Budget"
       allowRecruiting:
         description: Whether this agent may recruit helpers while executing its own step.
         type: boolean
         default: true
+      capabilities:
+        description: >-
+          Capabilities this agent may use. Before the run the daemon materialises each one into the
+          agent's workspace in the harness's own format, so the harness discovers it the way it
+          discovers any local capability. Naming one here does not grant access: the harness still
+          authorises every use, and a capability the daemon cannot find fails the run rather than
+          silently doing nothing.
+        type: array
+        default: []
+        items:
+          $ref: "#/$defs/Capability"
+      memory:
+        description: >-
+          Per-agent memory overrides. Absent means the team's `memory:` block applies unchanged.
+        $ref: "#/$defs/AgentMemory"
       status:
         description: Runtime-only status; team-file writers omit it and readers ignore it.
         type: string
@@ -170,6 +534,26 @@ $defs:
           - stopped
           - unavailable
         default: idle
+
+  Capability:
+    type: object
+    additionalProperties: false
+    required:
+      - kind
+      - name
+    properties:
+      kind:
+        description: >-
+          Only `skill` is executable today. Tools and knowledge sources are composed on the canvas
+          but reach an agent through mechanisms this schema does not yet model (an MCP grant and a
+          mounted source), so they stay out until each has its own contract.
+        type: string
+        enum:
+          - skill
+      name:
+        description: The capability's name as the Library reports it.
+        type: string
+        minLength: 1
 
   Edge:
     type: object
