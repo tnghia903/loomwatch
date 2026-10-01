@@ -1,0 +1,55 @@
+name: Container image
+
+# Proves the Dockerfile still builds (docs/decisions/0018). A full release build is the most
+# expensive check in the repository, so it runs only when an input the Dockerfile depends on
+# changes, once a month against fresh base images, or by hand. It never pushes an image.
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - rust-toolchain.toml
+      - ui/package.json
+      - ui/pnpm-lock.yaml
+      - .github/workflows/container.yml
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - rust-toolchain.toml
+      - ui/package.json
+      - ui/pnpm-lock.yaml
+      - .github/workflows/container.yml
+  schedule:
+    - cron: "17 3 1 * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: false
+          tags: loomwatch:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
