@@ -7,11 +7,12 @@ WebSocket at the end of Phase 03, incorporating the TNG-42 Phase 03 review (its 
 findings landed as TNG-45 and TNG-46). Phase 04 (Canvas) and Phase 05 (Watch & alert)
 build against it; any change requires a new ADR under `docs/decisions/`.
 
-**Frozen as a paper contract.** There is no WebSocket server in the repo yet — no
-transport, endpoint, or reconnect behavior exists to validate against. What is frozen
-is the message payload, and the payload is the Phase-02 `RunEvent` contract, unchanged:
-**a WebSocket message is one JSON-serialized `RunEvent`**. The WebSocket envelope and
-framing are the only genuinely new surface Phase 04/05 add.
+**Implemented by the local archive viewer.** `/api/session/stream` replays and follows
+PostgreSQL evidence using an exclusive `afterSeq` cursor. Its text frames preserve the
+Phase-02 contract unchanged: **a WebSocket message is one JSON-serialized `RunEvent`**.
+The browser catches up and recovers gaps through paginated REST evidence. See
+[WATCH.md](WATCH.md) for endpoint parameters and the loopback-only access boundary.
+These legacy session endpoints do not implement the proposed immutable run API.
 
 The machine-readable contract is
 [`schemas/team.schema.yaml`](../schemas/team.schema.yaml) — `$defs.RunEvent` plus the
@@ -32,6 +33,10 @@ payload shapes the JSON Schema leaves open and the Team Bus semantics on top.
   first pipeline node (pipeline mode) mints it from its ACP session; every other agent
   in the run — delegated, recruited, or a later pipeline node — appends to that same
   session. `agentId` (a team-config ID) distinguishes contributors.
+- Runs started through `POST /api/runs` ([ADR 0008](decisions/0008-run-control-api.md))
+  use a LoomWatch-minted `sessionId` equal to the `runId`, chosen before any process
+  exists; CLI runs keep the harness-minted id. Raw frames carry each harness's own ACP
+  session id either way. No frame field or event kind changes.
 - **No run-completion event exists in v1.** A run is over when every observed agent
   has a terminal `process` event (`exited`/`crashed`) and no `dispatch`/`handoff` tool
   call is outstanding. Delegated agents keep appending after the entrypoint's
@@ -88,8 +93,27 @@ returns it to the caller (§4). `toolKind` ∈ `read`/`edit`/`delete`/`move`/`se
 `session_meta` phases: `initialize` and `session_new` (`result` = negotiated
 response), `set_config_option` / `set_config_option_skipped` (model routing),
 `team_bus_unavailable` (the run has a Team Bus but this harness did not advertise
-HTTP MCP — the agent has no bus access), and `unprojected_session_update` (an update
-that could not be normalized; `warning` plus the raw update).
+HTTP MCP — the agent has no bus access), `context_packet` and `prompt_sections`
+(team memory — see below), and `unprojected_session_update` (an update that could
+not be normalized; `warning` plus the raw update).
+
+`session_meta` phases are an open set by construction — a reader must tolerate a phase it does
+not know — so adding one is additive and does **not** unfreeze this schema. Team memory added
+two, both archived immediately before the opening prompt they describe:
+
+The `kind` list inside `prompt_sections` is the same kind of open set, and the same rule applies to
+it: a reader must tolerate a kind it does not know. It is still extended in **one** change with
+`memory::PromptSectionKind` and `ui/src/lib/watch/events.ts`, because a section the daemon records
+and the client does not know is a section the packet inspector silently drops. `previous_output`
+was added that way in [ADR 0016](decisions/0016-sidecar-v2-followups-and-checkpoints.md).
+
+| Phase | Payload | Why |
+|---|---|---|
+| `context_packet` | `{heading, chars, budgetChars, sections}` | How much team memory this session was supplied, and the per-section selection rationale. The full text is read back from `GET /api/runs/{id}/context?agent=`; this event is the invalidation hint and the size. |
+| `prompt_sections` | `{sections: [{kind, heading, text}]}` | What the `LoomWatch`-composed opening prompt is made of: `role`, `capabilities`, `memory`, `task`, `stage_results`, `previous_output`, `ask_offer`. Replaces splitting the prompt on literal headings in the client, which silently mis-attributed text as soon as the daemon gained a section (`ui/src/lib/watch/events.ts`). |
+
+No new event *kind* was added, and `run_events` is unchanged. See
+[TEAM_MEMORY.md](TEAM_MEMORY.md) and [ADR 0014](decisions/0014-team-memory-brief-and-packets.md).
 
 ## 4. Team Bus events
 
@@ -111,7 +135,7 @@ is authoritative; see §4.5 for harness echoes.
 | `ask` | `{agent, question}` | `{agent, reply, sessionId}` — `reply` is the target's last agent message; `sessionId` is the shared run session |
 | `handoff` | `{agent, task}` | `{accepted:true, agent, mode:"handoff", callerStatus:"stopped"}` |
 | `report` | `{status}` | `{accepted:true, agent:<caller>, status}` |
-| `escalate` | `{reason}` | `{accepted:true, notify:"user", reason}` — Phase 05 fires a local notification on it |
+| `ask_user` | `{question, context?}` | `{parked:true, instruction}` — returns immediately; the answer is a later turn |
 
 Delegated targets (`dispatch`/`ask`/`handoff`) run full ACP turns in the same session
 under their own `agentId`, contributing their own `process`/`session_meta`/`message`/
@@ -155,7 +179,7 @@ harness-supplied `usage`/`turn_end` `costUsd` deltas.
 
 ### 4.5 Status and echoes
 
-Agent status — `idle`, `starting`, `running`, `waiting` (after `escalate`),
+Agent status — `idle`, `starting`, `running`, `waiting` (after `ask_user`),
 `succeeded`, `failed`, `stopped` (after `handoff`); `unavailable` is reserved — is
 carried inside `roster` and tool results. There is **no standalone status event**.
 `handoff` marks the caller `stopped` but cannot cancel the caller's active ACP turn;
@@ -170,7 +194,7 @@ frames with harness-specific names (e.g. `mcp__server__tool`) and different
 ## 5. Pipeline-mode sequencing
 
 - Mode comes from the team YAML: `edges: []` → team mode (all six tools exposed);
-  non-empty `edges` → pipeline mode (`roster`, `ask`, `report`, `escalate` exposed;
+  non-empty `edges` → pipeline mode (`roster`, `ask`, `report`, `ask_user` exposed;
   `dispatch`/`handoff` withdrawn and refused if called; `ask` refused for agents with
   `allowRecruiting: false`).
 - Configured edges are read from the YAML; they are not pushed as events. Execution
@@ -201,3 +225,69 @@ frames with harness-specific names (e.g. `mcp__server__tool`) and different
 
 A guard rejection is the same pair with `"status":"failed"` and
 `"rawOutput":{"error":"delegation cycle rejected: a -> b -> a"}`.
+
+
+### Additive operator/session metadata (2026-09-13)
+
+The RunEvent envelope and kind enum are unchanged. These `session_meta` payload phases are additive:
+
+- `awaiting_operator`: `kind: review_stop | question`, `node`, `question`, optional `context` and
+  `handoverFrom`. The authoritative open question is `RunRecord.waitingOn` from REST.
+- `session_loaded` and `session_replayed`: bracket harness history replay during `session/load`.
+  Raw replay remains archived. Projection ignores only that agent's frames within the bracket,
+  preserving concurrently arriving evidence from other agents.
+- `turn_purpose`: `purpose: checkpoint | handover | work`. Checkpoint/handover turns retain their
+  text, usage and order but do not replace the canonical answer. `work` ends the bracket.
+- `prompt_sections` gains `kind: direction`; it carries the operator's instruction separately
+  from `stage_results`. Review-stop nodes also record their received handover this way.
+
+Answers are ordinary user `message` events with `raw.source: loomwatch` and
+`raw.phase: operator_answer`, from the designed operator node or reserved `operator` id.
+No new WebSocket subscription or event kind is required. See [ADR 0017](decisions/0017-operator-stops-and-answers.md).
+
+
+### Additive required-skill and response metadata (2026-09-14)
+
+The envelope and event kinds are unchanged:
+
+- `prompt_sections` gains section kind `required_skill` and a `requiredSkills` list. Each entry has
+  `name`, `source`, `sourcePath`, `path`, `harness`, `sha256`, and `chars`. The fingerprint covers the
+  copied SKILL.md bytes, not the entire bundle. Missing list means legacy; empty list means no
+  configured requirements.
+- `required_skills_supplied` is emitted after a successful prompt send, with `skills` (the same
+  entries), `promptId`, and `method: session/prompt`. Both preparation and send metadata have
+  `raw.source: loomwatch`. The projector matches the send against preparation before marking it
+  supplied. A prepared snapshot is not a send receipt.
+- Agent `message` payloads may include `phase: commentary | final_answer`, normalized from explicit
+  Codex ACP `_meta.codex.phase`. The original raw frame remains intact. These phases separate
+  progress from delivered replies. Missing/unknown phases retain generic ACP behavior.
+
+See [ADR 0020](decisions/0020-delivery-lane-and-required-skill-receipts.md) for replay and legacy-row handling.
+
+
+### Additive skill-routing and skill-evidence metadata (2026-09-20)
+
+The envelope, the event kinds and every existing payload shape are unchanged.
+
+- `prompt_sections` gains section kind `skill_translation` — `## Reading <skill> on <Harness>`, the
+  mapping LoomWatch writes beside a skill whose instructions assume a harness facility the
+  receiving agent does not have. Its own kind, not more text inside `required_skill`, because it is
+  LoomWatch speaking and `required_skill` is the skill speaking. Added in one change with
+  `memory::PromptSectionKind` and `ui/src/lib/watch/events.ts`, per the rule above.
+- `requiredSkills` entries gain `route` (`native` / `inline` / `blocked`), `kind`
+  (`artifact` / `behavior` / `portable`), `needs` (the harness assumptions found in the skill's
+  text), `description`, and `bodySha256`. `sha256` is unchanged and still fingerprints the
+  **delivered file**; `bodySha256` covers the frontmatter-stripped body, which is the only text
+  that can enter a prompt. A missing `route` means a run archived before ADR 0021 — clients render
+  those with the pre-routing wording rather than guessing one.
+- `skill_opened`: `{skill, path, sha256, toolCallId}`, emitted once per skill per session when the
+  agent's own stream shows a tool call reading a delivered `SKILL.md` under a managed root, or
+  Claude Code's `Skill` tool naming a delivered skill. This is the explicit open event
+  [RUN_PROVENANCE_CONTRACT.md](RUN_PROVENANCE_CONTRACT.md) §12 requires before a skill counts as
+  used; prompt and filesystem presence still do not.
+- `skill_self_report`: `{text, chars}`, the agent's own list of required-skill instructions it
+  could not follow, taken from its reply. **A self-report, never provenance** — §8.2 forbids
+  labelling anything as used by inference from prose. Clients must show it as the agent's claim.
+
+Both new phases carry `raw.source: loomwatch`. See
+[ADR 0021](decisions/0021-skill-routing-by-portability.md).

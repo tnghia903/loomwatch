@@ -2,6 +2,8 @@ import type { Node } from '@xyflow/react'
 
 import { snapToGrid } from '../grid'
 import { offsetCollision } from '../team-file/layout'
+import type { WaitingOn } from '../runs/client'
+import type { AgentRuntime } from '../runs/graph'
 import type { AgentConfig } from '../team-file/types'
 import type { AgentFieldProblems } from '../team-file/validation'
 import { buildAgentFromSource } from './createAgent'
@@ -9,10 +11,15 @@ import type { LibrarySource } from './types'
 
 export type AgentNode = Node<{
   label: string
+  harnessLabel?: string
   agent: AgentConfig
   isEntrypoint?: boolean
+  waiting?: WaitingOn | null
+  onAnswer?: () => void
   /** docs/CANVAS_SPEC.md §5.2/§5.4: live per-field problems, already reveal-gated. */
   fieldProblems?: AgentFieldProblems
+  /** TNG-113: runtime task state while a run is shown. View state only. */
+  runtime?: AgentRuntime
 }>
 
 /**

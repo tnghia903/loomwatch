@@ -1,0 +1,130 @@
+# 0021 — Skills are routed by what they assume, not pasted whole
+
+- **Date:** 2026-09-20
+- **Status:** Accepted — implemented in `crates/loomwatch-backend/src/skill_routing.rs`,
+  `workspace.rs`, `memory.rs`, `acp.rs`, `capabilities.rs` and
+  `ui/src/components/canvas/CapabilityInspector.tsx`
+- **Amends:** [ADR 0019](0019-cross-harness-skill-delivery.md) — its final consequence only
+- **Does not change:** ADR 0019's decisions 1–5. Source and harness stay independent, bundles are
+  still copied whole and never rewritten, delivery is still per agent, both managed roots are
+  still rebuilt every run, and an unknown harness still fails before spawn.
+
+## Context
+
+ADR 0019 ends by saying the quiet part out loud:
+
+> A syntactically valid Agent Skill can therefore be delivered cross-harness even when its own
+> content still depends on tools that only one harness exposes; that is a property of the skill,
+> not its discovery source.
+
+True, and it left three problems in the tree.
+
+**It is not a rare case.** Measured over the 293 uniquely-named Agent Skills installed on this
+machine: 47% carry some harness-coupling marker and **25% carry an execution-level one** — 16.7%
+assume subagents or the Task tool, 12.3% shell out to a bundled script, 16.4% reference a slash
+command, 10.2% name a claude.ai or Claude Code surface, 7.8% name a sibling skill, 3.4% name a
+Claude tool such as `Read` or `TodoWrite`. A quarter of the library degrades silently the moment
+it is wired to a Codex, Gemini or OpenCode agent.
+
+**Delivery was doing two jobs badly.** The whole `SKILL.md` — YAML frontmatter included — was
+pasted into the opening prompt of every run and every pipeline stage, for every wired skill,
+regardless of the harness. On Claude Code, where the bundle is already discoverable at
+`.claude/skills`, the skill was double-exposed: once in the prompt and once on disk. The median
+installed skill is about 6k characters and 27 of them are over 20k.
+
+**Nothing in the run record could tell degradation from success.** `grep -rn used_skill crates
+ui/src` returned nothing. The archive proved that bytes were delivered and that a prompt carrying
+them was sent, which `docs/RUN_PROVENANCE_CONTRACT.md` §12 is explicit is *not* use: "prompt /
+filesystem presence is not use". The only defence in the UI was one passive sentence —
+"Skill-specific tools still need to be available in the receiving harness" — which named no skill,
+no tool and no harness.
+
+## Decisions
+
+1. **`LoomWatch` classifies a skill from its own text, and never edits it.** `skill_routing::analyse`
+   reports `needs` (a subset of `subagents | scripts | slash-commands | named-tools |
+   claude-surface | sibling-skills`), a `kind` (`artifact | behavior | portable`), and a short
+   evidence line for each need — the sentence in the skill that says so, so the operator can judge
+   the classification instead of trusting it. The first four needs are **execution-level**: they
+   require a facility the receiving harness may not have. The last two are advisory: they change
+   what the output should look like, not whether the steps can be performed.
+
+2. **Each (skill, agent) pair takes one of three routes.** Decided once, in
+   `workspace::materialise`, so the prompt, the archive and the inspector cannot disagree.
+
+   | Route | When | What the agent receives |
+   |---|---|---|
+   | `native` | the harness is Claude Code, or the skill has no execution-level coupling and is not behaviour-governing | bundle copied to the harness's skill directory, and in the prompt only the skill's `description` plus "before you start, read `<dir>/SKILL.md` in full" |
+   | `inline` | execution-level coupling on a non-Claude harness, or a behaviour-governing skill on one | bundle copied **and** the frontmatter-stripped body in the prompt, followed by a translation note as its own section |
+   | `blocked` | the harness has no project skill directory `LoomWatch` can write (Hermes, unknown) | the run is refused before spawn — unchanged from ADR 0019 decision 5 |
+
+   A fourth route, `sidecar` — running the skill in a helper session on its own harness — is phase
+   3 and is deliberately **not** in the type. An unimplemented variant is a route the router can
+   never return and the UI has to render anyway.
+
+3. **YAML frontmatter never reaches a model, on any route.** It is a manifest addressed to a skill
+   loader; pasting it into an opening prompt asks a model to read metadata as instruction. The
+   file on disk keeps it, byte for byte.
+
+4. **The delivery receipt still fingerprints the delivered file.** `sha256` is over the bytes
+   written into the workspace, exactly as before, because the receipt proves the bundle and not
+   the prompt. A second fingerprint, `bodySha256`, covers the stripped body — the only text that
+   can be injected — so the record can prove both halves. One hash could not say both.
+
+5. **The translation note advertises only tools the agent will actually be offered.** It is
+   generated by a pure function from `team_bus::tool_definitions` and `team_bus::refuse_by_mode`,
+   never guessed: `dispatch` and `handoff` exist only in team mode; `ask` exists in both but
+   pipeline mode refuses it to an agent with `allowRecruiting: false`; `ask_user` exists in both.
+   A harness `docs/ARCHITECTURE.md` does not record as advertising HTTP MCP — OpenClaw, pi —
+   is promised nothing at all and told to do the steps itself in sequence.
+
+6. **The note tells the truth about bundled scripts.** `LoomWatch` refuses every
+   `session/request_permission` (`acp.rs::build_client_response`), so a script may simply not run.
+   The note says exactly that and asks the agent to do the step by hand and say so. It does not
+   promise a permission channel this phase does not build.
+
+7. **Every note ends by asking the agent to list what it could not follow**, and that list is
+   archived as `skill_self_report` — **a self-report, never provenance.** CONTRACT §8.2 is
+   unambiguous: "no inference from prose can label a skill, command, or source as used." The UI
+   shows it as the agent's own account and labels it as such.
+
+8. **Opening a delivered skill is evidence and is recorded as such.** When the ACP stream shows a
+   tool call reading a delivered `SKILL.md` under either managed root, or Claude Code's `Skill`
+   tool naming a delivered skill, the run archives `session_meta` `{phase: "skill_opened", skill,
+   path, sha256, toolCallId}` — once per skill per session. A read of the operator's own installed
+   copy outside the managed workspace does not count: those are real bytes, but not this run's.
+   The run UI shows `delivered → opened` per skill per agent.
+
+## Schema
+
+No event kind, envelope field or WebSocket subscription changes. `docs/WEBSOCKET_SCHEMA.md` states
+that `session_meta` phases are an open set by construction and that adding one is additive; two are
+added (`skill_opened`, `skill_self_report`). The `prompt_sections` `kind` list is the same kind of
+open set, with the standing rule that it is extended in **one** change across
+`memory::PromptSectionKind` and `ui/src/lib/watch/events.ts`; `skill_translation` was added that
+way. `requiredSkills` entries gain `route`, `kind`, `needs`, `description` and `bodySha256`; a
+missing `route` means a run archived before this ADR and is rendered with the old wording.
+
+The team-file schema is **unchanged**. The brief for this work allowed an optional operator
+override of the classification as `kind:` on a `CapabilityRef` if the schema change was small. It
+is not small: `kind` on that object already means the capability's *type* (`kind: skill`), so a
+second `kind` is impossible and any other spelling would be a different contract from the one
+proposed. The heuristic ships alone; an override can be designed properly when there is evidence
+that operators need one.
+
+## Consequences
+
+- A Claude-authored skill wired to a Codex agent now arrives with a mapping from what it assumes
+  to what that agent has, instead of arriving as instructions a quarter of which cannot be
+  followed. The agent is asked to say which ones it could not follow, and the run records both the
+  question and the answer.
+- A skill on Claude Code stops being double-exposed. The prompt carries its description and a
+  pointer; the bundle is where Claude Code already looks.
+- Prompt characters are spent where they change behaviour. A `portable` skill on any harness and
+  any skill on Claude Code costs a short paragraph rather than its whole text.
+- The classification is a heuristic over prose and will be wrong sometimes. That is why every need
+  carries the line that produced it, and why `LoomWatch` never rewrites the skill: a wrong
+  classification changes framing and can be read and disagreed with, not content.
+- `skill_opened` depends on a harness reporting file paths on its read tools. A harness that
+  reports opaque tool input will show `delivered` and never `opened`; per CONTRACT §12 that is
+  `unavailable`, not a failure, and the UI says "not recorded" rather than "not opened".

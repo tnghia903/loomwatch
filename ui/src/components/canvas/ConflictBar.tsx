@@ -1,17 +1,22 @@
-import { TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 
+import { ChipDot } from '../ui/glyphs'
+
+// §16: the daemon is a local process; a disk conflict offers Compare / Keep mine / Use disk
+// and nothing cleverer. LoomWatch never merges.
 export function ConflictBar({ filename, onKeepMine, onUseDisk, onCompare }: { filename: string; onKeepMine: () => void; onUseDisk: () => void; onCompare: () => void }) {
   const [confirmDisk, setConfirmDisk] = useState(false)
   return (
-    <div role="alert" className="pointer-events-auto mx-4 mt-4 flex min-h-12 items-center gap-3 rounded-lg border border-copper bg-surface-solid px-4 text-[13px] text-ink shadow-lg">
-      <TriangleAlert className="size-4 shrink-0 text-copper" aria-hidden="true" />
-      <span className="flex-1"><strong>{filename}</strong> changed on disk while you had unsaved edits.</span>
-      <button type="button" onClick={onCompare} className="rounded-md px-2 py-1 hover:bg-hairline/10">Compare…</button>
-      <button type="button" onClick={onKeepMine} className="rounded-md px-2 py-1 hover:bg-hairline/10">Keep mine</button>
-      <button type="button" onClick={() => confirmDisk ? onUseDisk() : setConfirmDisk(true)} className="rounded-md px-2 py-1 text-red hover:bg-red/10">
-        {confirmDisk ? 'Discard my edits?' : 'Use disk'}
-      </button>
+    <div role="alert" className="bar alert">
+      <ChipDot state="invalid" />
+      <span className="msg t-body-m"><strong>{filename}</strong> changed on disk while you were editing.</span>
+      <span className="acts">
+        <button type="button" className="btn" onClick={onCompare}>Compare…</button>
+        <button type="button" className="btn" onClick={onKeepMine}>Keep mine</button>
+        <button type="button" className={`btn ${confirmDisk ? 'btn-danger' : ''}`} onClick={() => confirmDisk ? onUseDisk() : setConfirmDisk(true)} style={confirmDisk ? { color: 'var(--color-alert)' } : undefined}>
+          {confirmDisk ? 'Discard my edits?' : 'Use disk'}
+        </button>
+      </span>
     </div>
   )
 }

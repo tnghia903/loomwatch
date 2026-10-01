@@ -65,7 +65,7 @@ Eligible edges in the live/idle pipeline:
 |---|---|
 | `Run NN ─assigns lead─► Agent A` | new agent becomes lead; former lead is delegated to |
 | `Agent A ─delegates review─► Agent B` | `A ─delegates to─► C ─delegates review─► B` |
-| `Agent B ─responds with─► Output` | `B ─delegates to─► C ─responds with─► Output`; C becomes canonical responder |
+| `Agent B ─responds with─► Output` | `B ─delegates to─► C`; C becomes the inferred responder only when the team has no explicit `responder` |
 
 **Ineligible, and each must state its reason** (§1.4): the `Prompt` node and its outgoing
 edge, evidence nodes and evidence edges, the `Output` node interior, any `Previous branch`

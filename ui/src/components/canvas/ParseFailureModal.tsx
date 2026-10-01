@@ -1,13 +1,23 @@
 import type { LoadFailure } from '../../lib/team-file/useTeamDocument'
+import { ChipDot } from '../ui/glyphs'
 
-export function ParseFailureModal({ failure }: { failure: LoadFailure }) {
+// §9.5: the product's only modal, because there is no document to fall back to.
+export function ParseFailureModal({ failure, path }: { failure: LoadFailure; path?: string | null }) {
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-ink/15 p-4">
-      <div role="alertdialog" aria-modal="true" aria-label="Team file could not be parsed" className="w-full max-w-lg rounded-xl border border-red/30 bg-surface-solid p-5 shadow-[0_24px_80px_rgb(0_0_0/.25)]">
-        <h1 className="text-[18px] font-semibold text-ink">This team file could not be opened</h1>
-        <p className="mt-2 text-[13px] text-ink-2">{failure.message}</p>
-        {failure.line && <code className="mt-3 block rounded-md bg-canvas p-3 font-mono text-[12px] text-red">{failure.line}</code>}
-        <button type="button" onClick={() => { window.history.replaceState({}, '', '/'); window.location.reload() }} className="mt-4 rounded-full bg-iris px-4 py-2 text-[13px] font-medium text-white">Open another team…</button>
+    <div className="lw-modal-scrim">
+      <div role="alertdialog" aria-modal="true" aria-label="Team file could not be parsed" className="e2 lw-dialog">
+        <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
+          <ChipDot state="invalid" />
+          <span>
+            <div className="t-title">This file isn't valid YAML.</div>
+            <div className="t-meta" style={{ color: 'var(--color-ink-3)' }}>{failure.message}</div>
+          </span>
+        </div>
+        {failure.line && <pre className="code t-mono"><span className="bad">{failure.line}</span></pre>}
+        <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
+          <button type="button" className="btn btn-primary" onClick={() => { window.history.replaceState({}, '', '/'); window.location.reload() }}>Open another team…</button>
+          {path && <button type="button" className="btn" onClick={() => void navigator.clipboard?.writeText(path)}>Copy path</button>}
+        </div>
       </div>
     </div>
   )

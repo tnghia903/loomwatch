@@ -37,11 +37,12 @@ ChatGPT-UX-Planner (`6883bb08`) still has `reportsTo: null` — the orphan-root 
 in 0006 was not executed. Its correct tier under the new structure is undecided. Owner:
 Board / Chief Secretary.
 
-**Update 2026-09-10:** Tier now decided — directly under Chief Secretary (Tier 1), per
-approved TNG-98 plan revision 1; model `gpt-5.6-sol`. Summarizer and Reflection Coach
-verified compliant against the live DB (both Tier 1, `opencode_local`,
-`openrouter/z-ai/glm-5.3-flash`). Remaining mutation is blocked for agent callers
-(missing `agents:configure`; holders: Board user, Tony, Chief Secretary).
+**Update 2026-09-10:** Tier decided — directly under Chief Secretary (Tier 1), per
+approved TNG-98 plan revision 1. Mutation applied by Chief Secretary 2026-09-10T12:06Z
+(`reportsTo` set, `adapterConfig.model` = `gpt-5.6-sol`, `codex_local` kept) and
+DB-verified by the Scribe. Summarizer and Reflection Coach verified compliant (Tier 1,
+`opencode_local`, `openrouter/z-ai/glm-5.3-flash`). No open items remain from the
+restructure.
 
 ## Consequences
 

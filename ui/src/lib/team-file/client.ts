@@ -3,6 +3,7 @@
 export interface TeamFilePayload {
   path: string
   yaml: string
+  revision?: string
 }
 
 export interface TeamsDiscoveryPayload {
@@ -47,10 +48,13 @@ export async function fetchTeamsDiscovery(): Promise<TeamsDiscoveryPayload> {
 
 // The daemon re-validates and rejects (422) before touching the file on disk, so an
 // invalid in-memory edit never overwrites a good one (crates/loomwatch-backend/src/api.rs).
-export async function saveTeamFile(path: string, yaml: string): Promise<TeamFilePayload> {
+export async function saveTeamFile(path: string, yaml: string, revision: string | null): Promise<TeamFilePayload> {
   const response = await fetch('/api/team', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(revision === null ? { 'If-None-Match': '*' } : { 'If-Match': `"${revision}"` }),
+    },
     body: JSON.stringify({ path, yaml } satisfies TeamFilePayload),
   })
   return readTeamFileResponse(response)

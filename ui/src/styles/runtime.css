@@ -1,0 +1,333 @@
+/* ===========================================================================
+   LoomWatch — prompt composer, runtime overlay, provenance.
+   Ported from docs/mockups/prototype.css (TNG-89, TNG-113, TNG-119, TNG-121).
+   Vocabulary is taken verbatim from RUN_PROVENANCE_CONTRACT.md.
+   =========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   COMPOSER — TNG89 §1. 720 × 56, bottom-centre, absorbs the mode pill.
+   --------------------------------------------------------------------------- */
+.lw-composer {
+  width: min(var(--lw-composer-w), calc(100vw - 2 * var(--lw-panel-inset)));
+  min-height: 56px; padding: 0;
+  display: flex; align-items: stretch; overflow: visible;
+}
+.lw-composer.focused { border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
+.lw-composer .mode-chip {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 0 var(--sp-4);
+  border: 0; border-right: 1px solid var(--color-hairline); border-radius: var(--r-lg) 0 0 var(--r-lg);
+  color: var(--color-ink-2); cursor: pointer; flex: none; background: none; white-space: nowrap;
+}
+.lw-composer .mode-chip:hover { background: var(--color-accent-tint); }
+.lw-composer .mode-chip .glyph { color: var(--color-accent); display: grid; place-items: center; }
+.lw-composer .mode-chip.team .glyph { color: var(--color-ink-3); }
+.lw-composer .mode-chip .anomaly { color: var(--color-alert); display: inline-flex; align-items: center; gap: 3px; padding-left: var(--sp-2); border-left: 1px solid var(--color-hairline); }
+.lw-composer .comp-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: var(--sp-3) var(--sp-4); gap: 3px; }
+.lw-composer textarea {
+  width: 100%; border: 0; background: none; outline: none; resize: none;
+  color: var(--color-ink); font: 400 14px/20px var(--font-sans);
+  /* §1.1: grows to 5 lines, then scrolls internally — 5 × the 20px line above. */
+  max-height: 100px; padding: 0; margin: 0; display: block;
+}
+.lw-composer textarea::placeholder { color: var(--color-ink-3); }
+.lw-composer textarea:disabled { color: var(--color-ink-3); }
+.lw-composer .comp-note { color: var(--color-ink-3); display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.lw-composer .comp-note.block { color: var(--color-accent); }
+.lw-composer .comp-note.err { color: var(--color-alert); }
+.lw-composer .comp-note .link { font-size: 12px; line-height: 16px; }
+.lw-composer .comp-act { display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-2) 0 0; flex: none; }
+.lw-composer .comp-act .btn kbd { font: 500 11px/1 var(--font-mono); opacity: .75; }
+.lw-composer .comp-act .iconbtn { margin-right: 2px; }
+
+/* the §8.1 mode popover — the only place execution semantics are explained */
+.mode-pop { width: min(412px, calc(100vw - 32px)); left: 50%; bottom: calc(var(--lw-panel-inset) + 68px); transform: translateX(-50%); }
+.mode-pop .mp-body { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); color: var(--color-ink-2); }
+.mode-pop code { font: inherit; font-family: var(--font-mono); color: var(--color-ink); }
+.mode-pop .mp-order { list-style: none; display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: 0; }
+.mode-pop .mp-order li { display: flex; align-items: center; gap: var(--sp-3); color: var(--color-ink); }
+.mode-pop .mp-step { flex: none; width: 16px; height: 16px; border-radius: var(--r-full); display: grid; place-items: center; background: var(--color-accent-tint); color: var(--color-ink-2); }
+.mode-pop .mp-head { color: var(--color-ink-3); letter-spacing: .04em; text-transform: uppercase; }
+.mode-pop .mp-head.alert { color: var(--lw-edge-anomaly); }
+.mode-pop .mp-guards { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); }
+.mode-pop .mp-field { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); color: var(--color-ink-2); }
+.mode-pop .mp-field input {
+  width: 92px; height: 26px; padding: 0 var(--sp-2);
+  background: var(--color-ground); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--r-sm);
+  font: 500 12px/1 var(--font-mono); text-align: right;
+}
+.mode-pop .mp-note { color: var(--color-ink-3); }
+.mode-pop .mp-routine { display: flex; flex-direction: column; gap: 4px; color: var(--color-ink-2); }
+.mode-pop .mp-routine b { color: var(--color-ink); font-weight: 500; }
+.mode-pop .mp-routine .mp-prompt { color: var(--color-ink-3); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 72px; overflow: auto; }
+.mode-pop .mp-routine .mp-acts { display: flex; gap: var(--sp-2); align-items: center; margin-top: 4px; }
+.mode-switch-note { color: var(--color-ink-2); background: var(--color-panel-solid); border: 1px solid var(--color-hairline); border-radius: var(--r-sm); padding: 4px var(--sp-3); }
+@keyframes mode-pill-switch {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent); }
+  55% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-accent) 16%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.lw-composer.mode-switch { animation: mode-pill-switch 300ms var(--ease-out); }
+
+/* ---------------------------------------------------------------------------
+   RUNTIME OVERLAY — TNG89 §0, §3. Runtime nodes are tinted and ringed and are
+   NEVER written to the team file. Rendered as React Flow nodes.
+   --------------------------------------------------------------------------- */
+.rt {
+  position: relative;
+  border-radius: var(--r-lg);
+  background: var(--color-live-tint);
+  border: 1px solid var(--color-live-dim);
+  padding: var(--sp-3) var(--sp-4);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  color: inherit; text-align: left;
+}
+/* Runtime status owns the complete perimeter: active nodes are blue and failed nodes are red. */
+.rt.st-running, .rt.st-starting { border-color: var(--color-live); }
+.rt.st-failed { border-color: var(--color-alert); }
+.rt-head { display: flex; align-items: center; gap: var(--sp-2); color: var(--color-ink-3); }
+.rt-head .spacer { flex: 1; }
+.rt-body { color: var(--color-ink); }
+.story-prompt { width: 360px; min-height: 112px; background: var(--color-panel-solid); border-width: 1.5px; }
+.story-prompt .prompt-lock { color: var(--color-ok); text-transform: none; letter-spacing: 0; }
+.story-prompt .rt-body { max-height: 132px; overflow-y: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* §15.2.2: before a run the Prompt node is the composer's draft, so it is drawn as an invitation
+   rather than as a record — dashed while empty, and a button, because clicking it focuses the one
+   editor instead of opening a second one. */
+.story-draft { cursor: text; }
+.story-draft.empty { border-style: dashed; background: none; }
+.story-draft .rt-body.empty { color: var(--color-ink-3); font-style: italic; }
+.story-draft .prompt-draft-hint { color: var(--color-ink-3); text-transform: none; letter-spacing: 0; }
+.story-draft:hover { border-color: var(--color-accent-dim); }
+.run-node { width: 230px; min-height: 78px; justify-content: center; background: var(--color-live-tint); }
+.run-node .run-meta { color: var(--color-ink-2); }
+.run-node .run-meta b { color: var(--color-ink); font-weight: 500; }
+.story-label { color: var(--color-ink-2); }
+.story-output { border-width: 1.5px; }
+.prior-branch {
+  width: 330px; min-height: 62px; max-height: 284px; overflow-y: auto; padding: 10px 12px;
+  border: 1px dashed var(--color-halt); border-radius: var(--r-md);
+  background: var(--color-panel-solid); color: var(--color-ink-2);
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; cursor: pointer;
+}
+.prior-branch .prior-evidence { color: var(--color-ink-3); text-wrap: pretty; }
+
+/* Prompt and Response are matching pipeline bookends. Response keeps its extra runtime controls,
+   but the perimeter, dimensions, header rhythm and reading body come from the Prompt shell. */
+.rt-response { width: 360px; min-height: 112px; background: var(--color-panel-solid); padding: var(--sp-3) var(--sp-4); overflow: hidden; cursor: default; }
+.rt-response.clickable { cursor: pointer; }
+/* §15.2.2: the Output node is permanent, so it is on the canvas before it has anything to say.
+   Dashed is that state, and the answer then streams into the same node. */
+.rt-response.awaiting { border-style: dashed; background: none; }
+.rt-response .rt-head { min-width: 0; }
+.rt-response .response-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-response .response-phase { min-width: 0; max-width: 112px; display: inline-flex; align-items: center; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-ink-3); text-transform: none; letter-spacing: 0; }
+.rt-response .rr-toggle { flex: none; text-transform: none; letter-spacing: 0; color: var(--color-accent); font: 400 12px/16px var(--font-sans); }
+.rt-response .rr-body { padding: 0; color: var(--color-ink); overflow-y: auto; max-height: 132px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rt-response.compact .rr-body { max-height: 96px; }
+.rt-response .rr-body.empty { color: var(--color-ink-3); font-style: italic; }
+.rt-response .rr-body code { font: 400 12px/17px var(--font-mono); background: var(--color-hairline); padding: 1px 4px; border-radius: var(--r-xs); }
+.rt-response .rr-stream { height: 2px; margin: auto calc(-1 * var(--sp-4)) calc(-1 * var(--sp-3)); background: linear-gradient(90deg, transparent, var(--color-live), transparent); background-size: 40% 100%; animation: streamline 1600ms linear infinite; }
+@keyframes streamline { from { background-position: -40% 0 } to { background-position: 140% 0 } }
+.caret { display: inline-block; width: 2px; height: 15px; background: var(--color-live); vertical-align: -2px; animation: caret 1000ms steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0 } }
+.rt-strip { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--color-hairline); color: var(--color-ink-3); }
+.rt-strip.halt { box-shadow: inset 3px 0 0 var(--color-halt); }
+.rt-strip.alert { box-shadow: inset 3px 0 0 var(--color-alert); color: var(--color-ink-2); }
+.rt-strip.ok { box-shadow: inset 3px 0 0 var(--color-ok); color: var(--color-ink-2); }
+.rt-strip .msg .link { font: inherit; }
+.rt-strip .wm { font: 400 11px/15px var(--font-mono); color: var(--color-ink-2); flex: none; margin-left: auto; }
+.rt-strip .msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* §3.4: `[ Reuse ]` on a failed response node — the strip is the node, this is its action. */
+.rt-response > .rt-strip { margin-inline: calc(-1 * var(--sp-4)); }
+.rt-response .rr-reuse { display: block; width: calc(100% + 2 * var(--sp-4)); margin: 0 calc(-1 * var(--sp-4)) calc(-1 * var(--sp-3)); padding: var(--sp-2) var(--sp-4); background: none; border: 0; border-top: 1px solid var(--color-hairline); color: var(--color-accent); font: 400 12px/16px var(--font-sans); text-align: left; cursor: pointer; }
+.rt-response .rr-reuse:hover { background: var(--color-accent-tint); }
+
+/* live activity evidence cards — TNG-113 */
+.activity-ent {
+  position: relative; width: 190px; min-height: 68px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-md);
+  background: var(--color-panel-solid);
+  display: flex; flex-direction: column; gap: 2px;
+  color: inherit; text-align: left; cursor: pointer;
+}
+.activity-ent.st-running, .activity-ent.st-pending { border: 2px solid var(--color-live); padding: 7px 9px; }
+.activity-ent.st-succeeded { border-color: var(--color-ok); }
+.activity-ent.st-failed { border-color: var(--color-alert); }
+.activity-ent.selected { box-shadow: 0 0 0 3px var(--color-panel-solid), 0 0 0 5px var(--lw-node-ring); }
+.activity-ent.more { border-style: dashed; background: transparent; justify-content: center; }
+.activity-ent.more:hover { border-color: var(--color-accent); }
+.activity-ent .ae-order { color: var(--color-ink-3); }
+.activity-ent .ae-main { display: flex; align-items: center; gap: 6px; color: var(--color-ink); min-width: 0; }
+.activity-ent .ae-main .ae-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-ent .ae-sub { display: flex; align-items: center; gap: 5px; color: var(--color-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity-ent .ae-detail { color: var(--color-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity-ent .ae-drag { position: absolute; top: 5px; right: 7px; color: var(--color-ink-3); opacity: .55; letter-spacing: -1px; }
+.activity-ent:hover .ae-drag, .react-flow__node.dragging .activity-ent .ae-drag { opacity: 1; }
+
+/* lifecycle strip — three lifecycles, never collapsed */
+.life-strip { width: auto; min-height: 34px; padding: 5px 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.life-strip > span:not(.badge) { min-width: 0; display: flex; flex-direction: column; color: var(--color-ink-2); font: 500 10px/12px var(--font-sans); text-transform: uppercase; letter-spacing: .055em; }
+.life-strip > span:not(.badge) b { color: var(--color-ink-3); font-size: 8px; line-height: 10px; }
+.life-strip .badge { margin-left: auto; }
+
+/* provenance edges — ONE stroke for all kinds, never animated; live is blue */
+.react-flow__edge-path.prov { stroke: var(--color-warp); stroke-opacity: .6; stroke-width: 1; fill: none; }
+.react-flow__edge-path.prov.story-edge { stroke-width: 1.5; stroke-opacity: .82; }
+.react-flow__edge-path.prov.prov-live { stroke: var(--color-live); stroke-opacity: .78; stroke-width: 1.5; stroke-dasharray: 5 4; animation: flow var(--t-flow) linear infinite; }
+.react-flow__edge-path.prov.prior-edge { stroke: var(--color-halt); stroke-dasharray: 3 4; }
+.prov-label { position: absolute; transform: translate(-50%, -50%); color: var(--color-ink-3); pointer-events: none; background: var(--color-ground); padding: 0 4px; white-space: nowrap; }
+.prov-label.story-label { color: var(--color-ink-2); }
+.prov-label.prov-live-label { color: var(--color-live); }
+.prov-label.with-remove { display: flex; align-items: center; gap: 3px; pointer-events: auto; border-radius: var(--r-xs); padding-right: 2px; }
+.prov-edge-remove { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; padding: 0; color: var(--color-ink-2); background: var(--color-panel-solid); font: 600 13px/1 var(--font-sans); cursor: pointer; }
+.prov-edge-remove:hover, .prov-edge-remove:focus-visible { color: var(--color-halt); outline: 1px solid var(--color-halt); }
+
+/* ---------------------------------------------------------------------------
+   ACTIVITY PANEL — the compact inspection panel for one observed event
+   --------------------------------------------------------------------------- */
+.lw-activity { width: var(--lw-inspector-w); min-height: 260px; max-height: calc(100% - 40px - var(--lw-viewctl-clear)); padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-4); overflow-y: auto; }
+.lw-activity .proc-list { grid-template-columns: 64px 1fr; }
+.lw-activity .ent-out { background: var(--color-ground); border: 1px solid var(--color-hairline); border-radius: var(--r-xs); padding: 6px 8px; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-ink-2); margin: 0; }
+.lw-activity details summary { cursor: pointer; color: var(--color-ink-3); }
+.lw-activity details summary:hover { color: var(--color-ink); }
+
+/* ---------------------------------------------------------------------------
+   RUN HISTORY — reopening prior runs. Bounded list; long goals ellipsize.
+   --------------------------------------------------------------------------- */
+.lw-history { width: min(420px, calc(100vw - 32px)); left: 50%; bottom: calc(var(--lw-panel-inset) + 68px); transform: translateX(-50%); }
+.lw-history .pop-list { max-height: min(60vh, 360px); overflow-y: auto; }
+.lw-history .pop-row { min-height: 44px; padding: var(--sp-2) var(--sp-3); align-items: center; }
+.lw-history .pop-row .hrow-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.lw-history .pop-row .goal { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-ink); }
+.lw-history .pop-row .sub { color: var(--color-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lw-history .pop-row .when { color: var(--color-ink-3); flex: none; }
+
+/* provenance empty / offline */
+.prov-empty { width: 360px; padding: var(--sp-4); border: 1px dashed var(--color-hairline); border-radius: var(--r-md); color: var(--color-ink-3); display: flex; flex-direction: column; gap: var(--sp-2); }
+.prov-empty b { color: var(--color-ink-2); }
+
+/* the outline — a screen-reader friendly ordered reading of the graph */
+.lw-outline { position: absolute; left: var(--lw-panel-inset); bottom: calc(var(--lw-panel-inset) + 72px); width: 300px; max-height: 40vh; overflow: auto; padding: var(--sp-3); z-index: 45; }
+
+/* UX_REDESIGN §3: the composer is centred on the whole canvas at ≥ 1180 px; below that a
+   centred 720 px would run under the open Library, so it centres in the space beside it. */
+@media (min-width: 768px) and (max-width: 1179px) {
+  .lib-open .lw-composer {
+    --lw-beside: calc(100vw - var(--lw-library-w) - 3 * var(--lw-panel-inset));
+    width: min(var(--lw-composer-w), var(--lw-beside));
+    left: calc(var(--lw-library-w) + 2 * var(--lw-panel-inset) + var(--lw-beside) / 2);
+  }
+  .lib-open .mode-pop, .lib-open .lw-history { left: calc(var(--lw-library-w) + 2 * var(--lw-panel-inset) + (100vw - var(--lw-library-w) - 3 * var(--lw-panel-inset)) / 2); }
+  /* the view controls would sit under the composer's right end; stack them above it */
+  .lib-open .lw-viewctl { bottom: calc(var(--lw-panel-inset) + 68px); }
+  .lib-open .lw-legend { display: none; }
+}
+@media (max-width: 767px) {
+  .lw-composer { width: calc(100vw - 2 * var(--lw-panel-inset)); }
+  .lw-composer .mode-chip .label { display: none; }
+  .lw-activity { width: auto; left: var(--sp-3); right: var(--sp-3); top: auto; bottom: 88px; max-height: 60vh; }
+}
+/* CANVAS_SPEC §13: height < 600 px → the mode pill and view controls merge into a single
+   bottom-right cluster. §13 was written when the pill was its own element; TNG89 §9 delta 1
+   moved it INTO the composer, so here "merge" means collapse the two bottom bands into one
+   and reclaim vertical space — never remove the prompt or the run action. Dropping those
+   would be TNG89 §11.6 failures 21/22 (clipped composer, lost submission) in the height
+   direction, which is how TNG-201's first attempt at this rule regressed (TNG-203).
+   HEAD equivalent: ui/src/index.css @media (max-height: 599px), now obsolete selectors. */
+@media (max-height: 599px) {
+  /* One bottom band, not two. The composer keeps input and action; it just gets shorter. */
+  .lw-composer { min-height: 44px; }
+  .lw-composer .mode-chip { padding: 0 var(--sp-3); }
+  .lw-composer .comp-mid { padding: var(--sp-2) var(--sp-3); }
+  /* §1.1 grows the prompt to 5 lines; at this height 2 is what fits. It still scrolls. */
+  .lw-composer textarea { max-height: 40px; }
+  /* .comp-note stays: it carries the role="alert" preflight blocker (§6.3). */
+
+  /* The view controls join that band instead of stacking above it — the §13 merge. This
+     overrides the 768–1179 stacking rule, which would cost a second 68 px band. */
+  .lib-open .lw-viewctl { bottom: calc(var(--lw-panel-inset) + var(--lw-bottom-offset)); }
+
+  /* Popovers CAP to the viewport rather than disappearing. Hiding .mode-pop is what left
+     .mode-chip advertising aria-haspopup at a dialog that never paints — a dead affordance,
+     not a responsive rule — and the premise it rested on ("it cannot fit") is false once the
+     panel is bounded: capped here it fits at any height and scrolls.
+     The `bottom` anchor is deliberately NOT re-tightened to buy those pixels. The composer
+     band is ~57 px, not 44 px, whenever .comp-note carries the §6.3 preflight blocker, so
+     pulling the popovers down to inset + 52 px opened them *through* their own composer —
+     measured at 5 px of overlap. The base inset + 68 px clears it, and the cap is what buys
+     the height the re-anchor was reaching for.
+     .lw-outline is not listed: its base rule is already 40vh-bounded and fits here, and no
+     component in the shipped bundle renders that class at all. */
+  .mode-pop,
+  .lw-history {
+    max-height: calc(100vh - 2 * var(--lw-panel-inset) - 68px);
+    overflow: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__edge-path.prov.prov-live { animation: none !important; }
+  .rt-response .rr-stream { animation: none !important; }
+  .caret { animation: none !important; }
+}
+
+/* ---------------------------------------------------------------------------
+   NARROW RUN COLUMN — TNG-115. The causal sentence as a scrolling column.
+   --------------------------------------------------------------------------- */
+.run-column {
+  position: absolute; inset: 0; overflow-y: auto;
+  padding: 250px var(--sp-3) 240px;
+  display: flex; flex-direction: column; gap: var(--sp-3);
+}
+.run-column .rt, .run-column .node, .run-column .activity-ent, .run-column .rt-response { width: 100%; max-width: none; }
+.run-column .node { min-height: 0; }
+.run-column .node .node-task b { white-space: nowrap; }
+.run-column .rel { color: var(--color-ink-3); padding-left: var(--sp-4); }
+.run-column-agent { display: flex; flex-direction: column; gap: var(--sp-2); }
+.run-column-agent .activity-ent { margin-left: var(--sp-6); width: calc(100% - var(--sp-6)); }
+.run-column .story-prompt .rt-body { max-height: 180px; }
+.run-column .rt-response .rr-body { max-height: 40vh; }
+/* §5.1: capture quality is a word on the card face, not colour alone — the border treatments
+   the table pairs it with are the `.activity-ent` states already in this sheet. */
+.activity-ent .ae-cap { color: var(--color-ink-3); }
+.activity-ent .ae-cap.cap-redacted { color: var(--color-alert); }
+.activity-ent .ae-cap.cap-unavailable { color: var(--color-ink-3); font-style: italic; }
+
+/* §11.6's coverage → filters → summaries, the stages that follow the response in the narrow
+   order. The overlay panel keeps the entity detail; this is the run's honesty statement, its
+   filters, and the six fixed-order ways in. */
+.run-prov { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: var(--color-panel); }
+.run-prov .rt-head { display: flex; align-items: center; gap: 6px; color: var(--color-ink-2); margin: 0; }
+.run-prov-cov { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--color-ink-2); }
+.run-prov-filters { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.run-prov-filters .filter-chip {
+  display: inline-flex; align-items: center; gap: 5px; min-height: 44px; padding: 0 var(--sp-3);
+  border: 1px solid var(--color-hairline); border-radius: var(--r-sm);
+  background: transparent; color: var(--color-ink-3); cursor: pointer; white-space: nowrap;
+}
+.run-prov-filters .filter-chip[aria-pressed="true"] { background: var(--color-accent-tint); border-color: var(--color-accent); color: var(--color-ink); }
+.run-prov-empty { margin: 0; color: var(--color-ink-2); }
+.run-prov-sums { display: flex; flex-direction: column; gap: var(--sp-2); list-style: none; margin: 0; padding: 0; }
+.run-prov-sums .prov-sum {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--sp-2);
+  width: 100%; min-height: 44px; padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-hairline); border-radius: var(--r-sm);
+  background: transparent; color: var(--color-ink); cursor: pointer; text-align: left;
+}
+.run-prov-sums .prov-sum:hover { background: var(--color-accent-tint); }
+.run-prov-sums .ps-label { color: var(--color-ink-2); }
+.run-prov-sums .ps-count { color: var(--color-ink); font-variant-numeric: tabular-nums; }
+.run-prov-sums .ps-level { grid-column: 3; display: inline-flex; align-items: center; gap: 4px; color: var(--color-ink-3); text-transform: none; letter-spacing: 0; }
+
+@media (max-width: 767px) {
+  .lw-composer { flex-wrap: wrap; padding: var(--sp-2); gap: var(--sp-2); }
+  .lw-composer .comp-mid { flex: 1 0 100%; padding: var(--sp-1) var(--sp-2); }
+  /* §11.6 failure 21 again: the chip is a core action and was pinned under 44 px here. */
+  .lw-composer .mode-chip { border-right: 0; padding: 0 var(--sp-2); min-height: 44px; }
+  .lw-composer .comp-act { margin-left: auto; padding: 0; }
+  .lw-composer .comp-note { display: none; }
+  .life-strip { gap: 8px 12px; }
+  .life-strip .scrub input[type="range"] { width: 90px !important; }
+}

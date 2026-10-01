@@ -28,4 +28,11 @@ describe('YamlSheet', () => {
     expect(screen.getByRole('button', { name: 'Keep mine' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Use disk' })).toBeInTheDocument()
   })
+
+  it('focuses and marks a requested problem line', () => {
+    render(<YamlSheet title="YAML preview · line 2" yaml={'name: Demo\nunexpected: true\n'} highlightLine={2} onClose={vi.fn()} />)
+
+    expect(screen.getByLabelText('Problem at YAML line 2')).toHaveTextContent('unexpected: true')
+    expect(screen.getByLabelText('Problem at YAML line 2')).toHaveFocus()
+  })
 })

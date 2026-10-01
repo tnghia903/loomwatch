@@ -403,6 +403,13 @@ centre on the nearest free grid cell.
 
 ## 5. The agent node
 
+> **As built, 2026-09-16.** Both canvases now draw one card. Build and Run ("Full trace") render
+> the same `.build-node` agent card from [`BuildNodeCard.tsx`](../ui/src/components/canvas/BuildNodeCard.tsx);
+> a run layers its projected task state, spend and evidence routes under the identity row rather
+> than substituting a card of its own. The `.node` anatomy specified below is no longer rendered on
+> either canvas. Everything it says about *what an agent card must state* still holds — only the
+> box it is stated in changed.
+
 ### 5.1 Anatomy
 
 264 × 88 px, `lg` radius, `surface-solid` fill, 1 px `hairline`, no shadow when idle.
@@ -547,6 +554,12 @@ Everything else is the inspector.
   is inert, because the schema has no "no entrypoint" state to move to. You promote a
   different node instead. Hovering the checked box explains that: *"Every team starts
   somewhere. Check another agent to move the entry point."*
+- **Responder is explicit and radio-like in pipeline mode.** Checking “Produces the team output”
+  in an agent's Inspector, or drawing from that agent to the permanent Output node, writes the root
+  `responder` agent ID and moves the `responds with` edge immediately. Selecting another agent
+  replaces it; later pipeline stages still execute but do not replace its canonical reply. When
+  `responder` is absent, the unique terminal stage remains the compatibility default. Team mode's
+  responder is its entrypoint; create a pipeline before choosing another agent.
 - **Deleting the entrypoint node** is allowed and follows §4.5's rule, mirrored:
   - If **exactly one** agent remains, it is promoted automatically — one candidate, no
     decision.
@@ -774,10 +787,16 @@ that reviewers read is a real cost.
 | **B — `Agent.ui: {x, y}` in the team file** | one file, one save, always consistent | schema v1 change + ADR; every drag dirties the reviewed config; diffs get noisy |
 | **C — browser `localStorage`** | zero backend work | lost on another device, and the whole point of a daemon-served UI is that it opens from anywhere (ADR 0003) |
 
-**Recommendation: A.** Same basename, `.layout.json` extension, shape
-`{ "schemaVersion": 1, "nodes": { "<agentId>": { "x": 0, "y": 0 } } }`.
+**Recommendation: A.** Same basename, `.layout.json` extension.
 
-**This is flagged, not decided** — it needs a schema/backend call (§15.1).
+**Decided 2026-09-13: option A**, in
+[ADR 0016](decisions/0016-sidecar-v2-followups-and-checkpoints.md) decision 2. The file already
+existed for planned capability wiring ([ADR 0011](decisions/0011-planned-capability-sidecar.md)),
+so positions joined it rather than getting a second sidecar: the shape is
+`{ "version": 2, "nodes": [...], "edges": [...], "agents": { "<agentId>": { "x": 0, "y": 0 } } }`,
+and a version-1 file is upgraded on read. The recommended standalone shape above is not what
+shipped — one sidecar per team, holding all of the operator's editable intent, is the same
+decision with one fewer file to keep in sync.
 
 **The canvas must not depend on it either way.** When no layout is available, positions come
 from deterministic `dagre` auto-layout seeded by the team `id`, so the same file always
@@ -1274,7 +1293,9 @@ asks for it twice:
 
 The gaps below are what Phase 04 still needs *beyond* that.
 
-1. **Node layout persistence (§7.3).** Sidecar `<team>.layout.json` (recommended), an
+1. ~~**Node layout persistence (§7.3).**~~ **Decided 2026-09-13** — option A, the existing
+   `<team>.layout.json` sidecar (ADR 0016). The original wording follows: Sidecar
+   `<team>.layout.json` (recommended), an
    `Agent.ui` schema addition, or `localStorage`. Needs a schema/backend call. *Blocks:*
    position persistence only — deterministic auto-layout ships regardless.
 2. **Configured edge `kind` (§6.6).** The schema pins configured edges to `sequence`; the

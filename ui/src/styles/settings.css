@@ -1,0 +1,101 @@
+/* ===========================================================================
+   LoomWatch — settings surfaces.
+   The standard for every section that is NOT the canvas: Connections today,
+   and each integration or preference page added after it.
+
+   A settings surface is a READING COLUMN, not a workspace. Three rules make
+   it one system with the canvas rather than a second visual language:
+     1. It scrolls and keeps text selectable — the operator reads and copies
+        here, instead of manipulating nodes (app.css re-enables selection only
+        inside .lw-shell, which this surface deliberately does not use).
+     2. One elevation step per depth, never three: the page sits on the
+        ground, each integration is one `e1` section, and current state inside
+        a section is one `e2` row. DESIGN_LANGUAGE §7.
+     3. Type and colour come from the shared classes (`t-display`, `t-title`,
+        `t-body`, `t-meta`) and the semantic palette. DESIGN_LANGUAGE §6, §5.
+
+   Built strictly on tokens.css: no hex values and no --lw-* primitives.
+   =========================================================================== */
+
+/* The page root. Unlike .lw-shell this scrolls: settings are a document. */
+.lw-settings {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--color-ground);
+  color: var(--color-ink);
+  padding: var(--sp-8) var(--sp-5);
+}
+
+/* One centred column. 640px holds body text near the measure §6 asks for. */
+.lw-settings-column {
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+/* Every settings surface returns to the canvas the same way, top left. */
+.lw-settings-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  align-self: flex-start;
+}
+
+.lw-settings-head { display: flex; flex-direction: column; gap: var(--sp-2); }
+.lw-settings-head h1 { margin: 0; }
+.lw-settings-head p { margin: 0; color: var(--color-ink-2); }
+
+/* One section per integration. Sections are siblings and never nest. */
+.lw-settings-section {
+  padding: var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.lw-settings-section > h2 { margin: 0; }
+.lw-settings-section > p  { margin: 0; }
+
+/* Current state inside a section: what is connected, where it delivers. */
+.lw-settings-row {
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+/* Numbered setup a person performs in another product before returning.
+   Deliberately NOT a flex container: flex re-boxes each <li> away from
+   `display: list-item` and silently drops the numbers, and Tailwind's
+   preflight clears `list-style` besides — so an ordered sequence renders as
+   three anonymous paragraphs. Both are stated here because the next section
+   to copy this file will have the same two ways to lose its numbering. */
+.lw-settings-steps {
+  margin: 0;
+  padding-left: var(--sp-5);
+  color: var(--color-ink-2);
+  list-style: decimal;
+}
+.lw-settings-steps > li + li { margin-top: var(--sp-2); }
+.lw-settings-steps > li::marker { color: var(--color-ink-3); }
+
+.lw-settings-search { display: flex; gap: var(--sp-2); align-items: flex-end; }
+.lw-settings-search .field { flex: 1; }
+/* Match .input's 32px so the control and its field share a baseline. */
+.lw-settings-search .btn { height: 32px; }
+
+.lw-settings-results { display: flex; flex-direction: column; gap: var(--sp-2); }
+.lw-settings-results .pop-list { padding: 0; max-height: 288px; }
+
+/* Secondary voice, and the left-aligned placement standalone controls take. */
+.lw-settings-quiet { color: var(--color-ink-3); }
+.lw-settings-start { align-self: flex-start; }
+
+@media (max-width: 767px) {
+  .lw-settings { padding: var(--sp-6) var(--sp-4); }
+  .lw-settings-search { flex-direction: column; align-items: stretch; }
+  .lw-settings-search .btn { width: 100%; }
+}

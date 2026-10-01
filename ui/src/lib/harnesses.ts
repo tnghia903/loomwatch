@@ -11,7 +11,48 @@ export interface DetectedHarness {
   name: string
   command: string
   executablePath: string
+  acpAvailable?: boolean
+  /**
+   * Why this harness cannot be run over ACP, written by the daemon. Present exactly when
+   * `acpAvailable` is false. The client must print it rather than guess: a harness can be
+   * installed and still unrunnable (`pi` ships no ACP bridge at all), which the old
+   * client-side "not found on PATH" sentence got wrong.
+   */
+  unavailableReason?: string
   spawn: HarnessSpawn
+}
+
+/**
+ * `GET /api/harnesses` — what the daemon found, and where it looked (backend::HarnessReport).
+ *
+ * `searchedPath` and `knownIds` exist so the Library can tell "nothing is installed" apart from
+ * "the daemon's PATH does not include where it is installed" — the same empty list either way.
+ */
+export interface HarnessReport {
+  harnesses: DetectedHarness[]
+  searchedPath: string[]
+  knownIds: string[]
+  runnerError?: string
+}
+
+export interface HarnessModels {
+  harnessId: string
+  models: HarnessModel[]
+  currentModelId?: string
+  currentThinkingEffort?: string
+}
+
+export interface HarnessThinkingEffort {
+  id: string
+  name: string
+  description?: string
+}
+
+export interface HarnessModel {
+  id: string
+  name: string
+  description?: string
+  thinkingEfforts: HarnessThinkingEffort[]
 }
 
 export class HarnessesApiError extends Error {
@@ -23,20 +64,35 @@ export class HarnessesApiError extends Error {
   }
 }
 
-export async function fetchHarnesses(): Promise<DetectedHarness[]> {
+export async function fetchHarnesses(): Promise<HarnessReport> {
   const response = await fetch('/api/harnesses')
   if (!response.ok) {
     throw new HarnessesApiError(response.statusText, response.status)
   }
-  return (await response.json()) as DetectedHarness[]
+  return (await response.json()) as HarnessReport
+}
+
+export async function fetchHarnessModels(harnessId: string): Promise<HarnessModels> {
+  const response = await fetch(`/api/harnesses/${encodeURIComponent(harnessId)}/models`)
+  if (!response.ok) {
+    let message = response.statusText
+    try {
+      const body = (await response.json()) as { error?: unknown }
+      if (typeof body.error === 'string') message = body.error
+    } catch { /* the status text is still useful when the body is not JSON */ }
+    throw new HarnessesApiError(message, response.status)
+  }
+  return (await response.json()) as HarnessModels
 }
 
 /**
- * The four first-party harnesses LoomWatch supports (docs/CANVAS_SPEC.md §2.6). The daemon's
- * `GET /api/harnesses` reports only what it *found*, so this is the only vendor knowledge in
- * the client — used solely to diff against detected ids and render the "Not installed"
- * disclosure (§4.2). It changes only when `HARNESSES` in the backend does (§15.3 proposes
- * folding it into the endpoint so the two cannot drift).
+ * Presentation for each harness the daemon knows how to look for (docs/CANVAS_SPEC.md §2.6).
+ *
+ * This used to be the client's own copy of the vendor list, and it drifted: the backend catalog
+ * grew and this did not. §15.3's fix is now in place — `GET /api/harnesses` reports `knownIds`,
+ * so *which* harnesses exist comes from the daemon and this table supplies only a name and a
+ * monogram for one. `knownHarness` falls back to the id itself for anything it has not heard of,
+ * so a harness added to the backend alone still renders instead of disappearing.
  */
 export interface KnownHarness {
   id: string
@@ -49,7 +105,17 @@ export const KNOWN_HARNESSES: readonly KnownHarness[] = [
   { id: 'codex', name: 'Codex', monogram: 'Cx' },
   { id: 'gemini', name: 'Gemini', monogram: 'G' },
   { id: 'opencode', name: 'OpenCode', monogram: 'Oc' },
+  // `Ow` rather than a second `Oc`: OpenClaw and OpenCode are different products and the
+  // monogram is the only thing distinguishing their rows at a glance.
+  { id: 'openclaw', name: 'OpenClaw', monogram: 'Ow' },
+  { id: 'hermes', name: 'Hermes', monogram: 'H' },
+  { id: 'pi', name: 'pi', monogram: 'Pi' },
 ]
+
+/** Name and monogram for a harness id, whether or not this build has heard of it. */
+export function knownHarness(id: string): KnownHarness {
+  return KNOWN_HARNESSES.find((harness) => harness.id === id) ?? { id, name: id, monogram: '·' }
+}
 
 // docs/CANVAS_SPEC.md §2.6's harness table, keyed by the literal `spawn.cmd` each harness
 // writes into an agent (crates/loomwatch-backend/src/api.rs HARNESSES). An agent's node
@@ -60,8 +126,15 @@ const SPAWN_CMD_MONOGRAMS: Readonly<Record<string, string>> = {
   'codex-acp': 'Cx',
   gemini: 'G',
   opencode: 'Oc',
+  openclaw: 'Ow',
+  'hermes-acp': 'H',
+  pi: 'Pi',
 }
 
-export function monogramForSpawnCmd(cmd: string): string {
+export function monogramForSpawnCmd(cmd: string, args: readonly string[] = []): string {
+  if (cmd === 'loomwatchd' && args[0] === 'harness-client') {
+    const harnessIndex = args.indexOf('--harness')
+    if (harnessIndex >= 0 && args[harnessIndex + 1]) return knownHarness(args[harnessIndex + 1]).monogram
+  }
   return SPAWN_CMD_MONOGRAMS[cmd] ?? '·'
 }

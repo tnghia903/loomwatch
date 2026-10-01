@@ -1,6 +1,6 @@
 # LoomWatch — UX redesign delta
 
-Revision 2 · 2026-09-10 · **proposed — awaiting board approval (TNG-87)**
+Revision 2 · 2026-09-10 · **approved by the board 2026-09-10 (TNG-87); implemented in `ui/` 2026-09-11 — see [ADR 0009](decisions/0009-prompt-to-output-workspace-shipped.md)**
 
 This document is a **delta against [CANVAS_SPEC.md](CANVAS_SPEC.md)**, not a replacement.
 Sections are numbered to match it. Anything CANVAS_SPEC says that is not contradicted here
@@ -223,6 +223,13 @@ one border and it removes the "will it take?" hesitation.
 ---
 
 ## 5. The agent node — amended
+
+> **As built, 2026-09-16.** Both canvases now draw one card. Build and Run ("Full trace") render
+> the same `.build-node` agent card from [`BuildNodeCard.tsx`](../ui/src/components/canvas/BuildNodeCard.tsx);
+> a run layers its projected task state, spend and evidence routes under the identity row rather
+> than substituting a card of its own. The `.node` anatomy specified below is no longer rendered on
+> either canvas. Everything it says about *what an agent card must state* still holds — only the
+> box it is stated in changed.
 
 ### 5.1 Anatomy — 276 × 96
 

@@ -5,7 +5,7 @@ LoomWatch team files are YAML documents validated against
 version `1`; readers must reject a version they do not understand instead of guessing.
 
 The root document stores stable, user-authored configuration only: the team identity,
-entrypoint, budgets, guard policy, agents, and configured pipeline edges. Observed edges,
+entrypoint, optional responder, budgets, guard policy, agents, and configured pipeline edges. Observed edges,
 agent status, and run events are runtime records archived in Postgres. Their shared wire
 shapes are defined as `$defs.Edge` and `$defs.RunEvent` in the same schema so Phase 02 and
 later can reference one contract.
@@ -18,6 +18,15 @@ JSON Schema validates each value's shape. Loaders must additionally enforce the 
 depend on the document as a whole:
 
 - Agent IDs are unique, and `entrypoint` names an agent in `agents`.
+- Optional `responder` names the agent whose reply becomes the canonical team output. In pipeline
+  mode it may name any agent in the configured pipeline; later stages still run, but their replies
+  do not replace the selected output. In team mode it must equal `entrypoint`, because the entrypoint
+  owns the self-organizing root turn. When omitted, compatibility inference applies: `entrypoint`
+  responds in team mode and the last topological pipeline stage responds in pipeline mode.
+- An optional `schedule` block (`$defs.Schedule`) turns the team into a routine: `cron`
+  must parse (standard 5-field form with `0`/`7` = Sunday, or the 6/7-field seconds form),
+  `timezone` must be an IANA zone when present, and `prompt` must not be blank. Loaders
+  reject the document otherwise. See `WATCH.md` → *Routines* and ADR 0010.
 - An empty `edges` array selects team mode: the entrypoint receives the initial goal and
   self-organizes. A non-empty `edges` array selects pipeline mode: the backend executes the
   graph, and `entrypoint` must be a source node with no incoming configured edge.
@@ -46,6 +55,9 @@ depend on the document as a whole:
   applied on top as literal overrides; LoomWatch performs no shell expansion, and team
   files must not contain credentials. An override of `PATH` changes resolution of a bare
   `spawn.cmd`, so an untrusted team file must be treated with the same care as a script.
+- `Agent.model` stores the harness model id. Optional `Agent.thinkingEffort` stores the
+  harness's reasoning-effort id separately; at session start LoomWatch applies both through
+  ACP configuration. Older combined selectors such as `gpt-6-astra[high]` remain readable.
 - Each `budget.limitUsd` is a pre-delegation admission threshold and must be finite. A zero
   agent limit prevents that agent from being admitted through `dispatch`, `ask`, or
   `handoff`. When present, the team threshold is checked independently of agent thresholds,
@@ -89,6 +101,136 @@ resolved on the effective `PATH` after applying `spawn.env`, or an absolute path
 commands containing a path separator are rejected. The command is executed directly with
 `spawn.args`; it is never passed through a shell.
 
+## Capabilities
+
+`agents[].capabilities` lists what the daemon delivers into an agent's workspace before it runs.
+Only `kind: skill` is executable today; tools and knowledge sources are composed on the canvas but
+reach an agent through mechanisms the schema does not yet model.
+
+An agent that declares capabilities runs in `<team dir>/.loomwatch/<team>/<agent>/` instead of its
+declared `spawn.cwd`. LoomWatch copies each wired skill's whole bundle from whichever harness or
+shared location supplied it into the target harness's project-local discovery directory:
+`.claude/skills/` for Claude Code and `.agents/skills/` for Codex and the other supported Agent
+Skills harnesses. The declared cwd's `.claude/settings.json` is carried across. An agent that
+declares none keeps its `spawn.cwd` exactly as before. Naming a capability grants nothing: the
+harness still authorises every use. A skill that is not installed, or a harness whose project
+skill directory LoomWatch does not know, fails the run before anything spawns rather than silently
+doing nothing. See [ADR 0012](decisions/0012-capability-delivery.md) and
+[ADR 0019](decisions/0019-cross-harness-skill-delivery.md).
+
+Connected skills are required: their complete copied `SKILL.md` instructions are also supplied in
+the agent's opening prompt. Preparation fails if the instructions cannot be read or exceed the
+128 KiB aggregate limit for that agent. The archive records the source, receiving harness, exact
+instruction fingerprint, and a receipt after the prompt is sent. This verifies instruction delivery,
+not whether every instruction was followed. See [ADR 0020](decisions/0020-delivery-lane-and-required-skill-receipts.md).
+
+## Conversation
+
+`conversation` bounds what a pipeline stage hands forward and what it may ask back.
+
+```yaml
+conversation:
+  brief:
+    summaryChars: 1200   # character budget for the handover summary
+    maxFindings: 8       # standalone findings carried forward
+  ask:
+    maxPerStage: 3       # questions a stage may put to the stage before it
+```
+
+A stage does not receive its predecessor's transcript. When its own work is done, each non-final
+stage is asked — in the session it already built — to write a handover under fixed headings, and
+that is what the next stage reads. The predecessor then stays alive while its successor runs, so
+anything the brief left out can be pulled with the Team Bus `ask` tool and answered from the
+context that produced it. `allowRecruiting: false` does not block such a question: that flag
+governs recruiting a helper, not talking to the stage before you.
+
+Every field is optional and the defaults above apply. Raise them for a stage whose output genuinely
+cannot be summarised; the cost of raising them is paid by every stage downstream.
+See [ADR 0013](decisions/0013-pipeline-conversation.md).
+
+## Memory
+
+`memory` is what the team knows before a run starts. The Brief is Markdown beside this file, so it
+is diffable and reviewable like the rest of the design; Postgres holds only what agents write.
+
+```yaml
+memory:
+  brief:
+    - path: brief/constraints.md   # supplied to every agent
+    - path: brief/tone.md
+      appliesTo: [writer]          # optional; default is every agent
+  inherits:
+    - team: research-team          # another team under the same teams root, by id
+      include: [brief, kept]       # brief | kept | both; omit for both
+      appliesTo: [reviewer]        # optional; omit for the whole team
+      exclude: [brief/tone.md]     # optional; inherited entries this team declines
+    - pack: onboarding-pack.memory # an exported pack folder under the teams root
+  notebook:
+    enabled: true                  # agents get memory_search/read/write and checkpoint
+    keep: review                   # review | never; `auto` is deliberately absent
+  packet:
+    maxChars: 8000                 # memory's share of an opening prompt, in characters
+  deliverAs: native-file           # or packet-only, per agent
+```
+
+Omitting the block, or `enabled: false`, keeps every prompt byte-for-byte what it was before
+memory existed.
+
+Loader rules beyond the schema:
+
+- Brief paths are relative to the team file and must resolve — symlinks followed — under the team
+  file's own directory. An absolute path or an escape is refused, naming the entry.
+- A Brief file that is missing, unreadable, or not valid UTF-8 refuses the run rather than being
+  skipped.
+- The whole Brief is read once, at run acceptance, before any harness spawns. Every stage and
+  every delegated helper in one run is supplied the same bytes.
+- Pinned content exceeding `packet.maxChars` for any agent refuses the run, naming the entries and
+  the overage — the same contract an undeliverable capability has.
+- `deliverAs: native-file` (the default) also writes the Brief as the harness's own project memory
+  file in `<team dir>/.loomwatch/<team>/<agent>/`, so the agent runs there instead of its declared
+  `spawn.cwd` — exactly as declaring a capability already does. `packet-only` on an agent keeps
+  its `cwd` and costs it the one delivery channel that survives a harness-side compaction.
+- A harness LoomWatch does not recognise gets no native memory file at all, and reaches the Brief
+  through the context packet alone.
+
+Inheritance rules:
+
+- `inherits` entries name **exactly one** of `team` (an `id`, resolved among team files under the
+  teams root) or `pack` (a `<name>.memory/` folder under the teams root). Both, or neither, is
+  refused at load.
+- Inheritance is **transitive**, and a cycle is refused at load naming the chain
+  (`alpha → beta → alpha`). Depth is bounded at 8. Every inherited entry is attributed to the team
+  whose file declared it, not to whichever team passed it along.
+- Inherited memory is read-only by construction: no token issued for this team carries a write
+  grant for another team's scope, and `memory_write` always lands in the caller's own team.
+- An inherited Brief entry's `appliesTo` (the origin's) and the `inherits` entry's `appliesTo`
+  (this team's) are **intersected**: an agent is supplied it only if both scopes admit it.
+- Inherited Brief entries are read at run acceptance like the team's own, and are ordered after
+  them — so when the budget runs out, what a team wrote about itself survives and what it borrowed
+  is cut.
+- A `pack:` entry pins the pack's Brief. Its kept notes arrive by an explicit import
+  (`POST /api/memory/packs` with `action: import`), which copies them into this team's scope
+  carrying the origin id; a run start never imports anything.
+
+Notebook rules:
+
+- `notebook.enabled: false` withdraws `memory_search`, `memory_read`, `memory_write` and
+  `checkpoint` from `tools/list` **and** refuses a call, so a harness holding a cached list cannot
+  write. A team with no `memory:` block has no notebook and no memory tools at all.
+- A note is written scoped to its run and to the writing agent, attributed from the bus token.
+  Agents can never pin, never keep, and never write into an inherited scope.
+- `keep: review` means the operator promotes what is worth keeping after the run. There is no
+  `auto`: a run's observations becoming standing memory with nobody reading them is how a team
+  accumulates confident nonsense.
+
+The rendered section is `## What the team knows`, placed after the agent's role and before its
+task. See [TEAM_MEMORY.md](TEAM_MEMORY.md) and [ADR 0014](decisions/0014-team-memory-brief-and-packets.md).
+
+Two `session_meta` subtypes are archived immediately before each opening prompt: `context_packet`
+(how much memory was supplied, and the per-section selection rationale) and `prompt_sections`
+(what the composed prompt is made of). Both are additive; no event kind was added and
+`run_events` is unchanged. See [WEBSOCKET_SCHEMA.md](WEBSOCKET_SCHEMA.md) §3.
+
 ## Reusable runtime definitions
 
 Schema-aware consumers can validate runtime values directly with these references:
@@ -104,3 +246,20 @@ present. Plan, permission, session-metadata, usage, turn-end, and process events
 rest of the ACP and supervisor lifecycle. Every harness-originated event also stores the
 complete JSON-RPC frame in top-level `raw`, because ACP presentation and status metadata
 cannot be reconstructed safely from the normalized projection.
+
+
+## Operator review stops and questions
+
+A pipeline agent may declare `kind: operator` with `role` as its question and optional `name`
+(default `You`). It must omit `spawn`, `model`, `thinkingEffort` and `budget`. Operator nodes
+cannot be the entrypoint or appear in team mode; consecutive stops are allowed. The app must
+start a pipeline containing stops, so answers have a loopback operator endpoint.
+
+`conversation.stop.keepAliveMinutes` defaults to 15 (minimum 1). A harness advertising
+`agentCapabilities.loadSession` is closed and reloaded on demand. Other harnesses are kept alive
+until this window expires, then released with a coordinator checkpoint. No model call is made
+just because the timer expired. `ask_user` is available in either mode when the run has an operator
+desk; it records a question and instructs the agent to end its turn immediately.
+
+See [ADR 0017](decisions/0017-operator-stops-and-answers.md) for REST and archive details, and
+[operator-stop.yaml](../examples/operator-stop.yaml) for an offline example.

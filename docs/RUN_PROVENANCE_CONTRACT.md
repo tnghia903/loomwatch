@@ -193,9 +193,10 @@ stop reason, and stable machine-readable error code.
 
 The canonical responder is fixed from the immutable snapshot:
 
-- team mode: the configured entrypoint agent;
-- pipeline mode: the unique terminal configured agent. A valid pipeline for this feature
-  MUST have exactly one terminal; otherwise start returns `422`.
+- when the optional root `responder` is present, that configured agent;
+- otherwise, the entrypoint in team mode or the unique terminal configured agent in pipeline mode.
+  A team-mode `responder` must equal the entrypoint. A pipeline responder may be an earlier stage;
+  later stages still execute, but their messages remain evidence rather than replacing the output.
 
 For the canonical responder, partition its events into attempted turns. A normal turn ends
 at that agent's `turn_end`; a crash/protocol failure ends the open turn at its terminal

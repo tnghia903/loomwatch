@@ -275,8 +275,9 @@ being read and `e2`'s law applies: never blur or tint text the operator is readi
 └──────────────────────────────────────────┘
 ```
 
-- **`RESPONSE · <agent>` names the canonical responder** — the entrypoint in team mode, the
-  unique terminal node in pipeline mode (`CONTRACT §4`). Other agents' messages are
+- **`RESPONSE · <agent>` names the canonical responder** — the explicit root `responder` when
+  configured, otherwise the entrypoint in team mode or unique terminal node in pipeline mode
+  (`CONTRACT §4`). Other agents' messages are
   evidence only and are **never** concatenated into the answer. Naming the responder on the
   node is how the operator can tell the answer from the chatter.
 - **Streaming** appends text blocks in global `seq` order with no injected whitespace
@@ -1097,3 +1098,156 @@ Additional acceptance failures:
     or the observed projection does not arrive automatically from run events. **Fail.**
 39. The 390 px composition removes capability discovery/placement, omits relationship words,
     loses the prompt-first/output-last order, hides the theme control, or overflows. **Fail.**
+
+---
+
+## 15. Team-memory revision — one canvas for designing and watching
+
+This section **amends a board-approved surface.** §12 (TNG-119) made the prompt-to-output column
+the primary graph narrative, and the board approved it. This revision keeps §12's causal sentence
+and every one of its acceptance rows, but changes *where the cards sit while it is told*.
+
+**Status · 2026-09-13 · built, without the board pass decision 6 asked for.** The operator decided
+to build this now and to record that decision rather than wait: the board review on the default
+`canvas` screen that decision 6 made a precondition **did not happen**, and this line is the
+record of it. `storyLayout.ts` is retired (replaced by `ui/src/lib/runs/runOverlay.ts`), the
+`compose-view | run-view` shell class pair is gone, and rows 40 and 42–45 hold, with vitest
+coverage and a counterfactual for each. Row 41 holds in the only form the tree can express it —
+see the note under it. What is built and what is not is the ledger in
+[TEAM_MEMORY.md](TEAM_MEMORY.md#implementation-status), which is authoritative.
+
+### 15.1 What is wrong with two pictures
+
+The workspace has two views today. Compose shows the configured graph at the positions the
+operator arranged. Opening a run replaces it with a causal column computed by `storyLayout`:
+Prompt, Run, agents re-stacked in execution order, evidence, Output. The agent cards the operator
+placed move somewhere else the moment a run starts, and "Back to the team canvas" is the only way
+home.
+
+Two pictures describe the same team, so they should be the same picture. The rule that merges them
+is one §3.1 already stated and TNG-119 later set aside:
+
+> **The configured graph never moves; a run is drawn onto it.**
+
+### 15.2 What changes
+
+1. **Positions are the document's, in every state.** `runPositions` and the `storyLayout` column
+   go away. The run overlay uses `doc.nodes` positions plus two docked anchors. Dragging during a
+   run moves the design, which is correct, because it *is* the design — and the document goes
+   dirty exactly as it does when dragging outside a run.
+2. **The Prompt and Output nodes are permanent and docked.** Prompt docks left of the entrypoint;
+   Output docks right of the terminal stage, drawn dashed until it has something to say. The
+   schedule card already docks this way, so the mechanism exists. Before a run the Prompt node is
+   the composer's draft: the composer's text mirrors into it as the operator types, and clicking
+   the node focuses the composer. One editor, seen in two places, never two editors.
+3. **Evidence folds to a count, and fans out for one agent at a time.** Clicking a card's event
+   count fans its evidence out beside it; clicking another agent folds the first. The provenance
+   panel keeps the full list. This is the honest replacement for the column, which could afford to
+   show two rows under every agent because it owned the whole layout.
+4. **A run chip replaces the view switch.** Choose an attempt, scrub with ← →, or Clear to see
+   the design alone. There is no `compose-view | run-view` shell class pair and no "Back to the
+   team canvas". *Built in the **top-centre** stack, not the top-right one this sentence first
+   named: that stack already holds the document switcher and the lifecycle strip, and the chip is
+   the lifecycle strip — one element rather than the strip plus a second chip saying the same
+   things. The remaining shell state is the single class `run-shown`.*
+5. **Editing is never locked.** A run executes an immutable revision; the canvas may be edited
+   while it runs. TNG-121's live insertion (§13) becomes a normal edit followed by "Save & follow
+   up" rather than a special run-time command.
+6. **Team mode** has no configured order, so helpers that appear at run time are placed by the
+   existing seeded auto-layout around the entrypoint. Those positions are view state until the
+   operator drags one, at which point they are offered for saving. *Built 2026-09-13 (ADR 0016):
+   there is no offer, because there is nothing to ask — a dragged run-time helper is a node the
+   document owns from that point on, and its position is saved to the sidecar by the same path
+   every other agent's is.*
+7. **Narrow screens keep the reading column.** Below 768 px there is no canvas to merge, so
+   `RunColumn` stays exactly as §12.5 and §14.6 specify.
+
+### 15.3 What §12 keeps
+
+Every row of §12 still holds, and this revision is refused if any of them stops holding:
+
+- **The causal sentence survives.** Prompt → agents → Output reads left to right on any
+  auto-laid-out pipeline, because the auto-layout is left-to-right and the two docked anchors sit
+  at its ends. On a graph the operator has arranged by hand, the sentence is carried by the named
+  edges and the docked anchors rather than by the column — which is what §12.3 already requires of
+  every arrow.
+- **Prompt is first, Output is last** (rows 23, 24). Docking is what guarantees it, rather than a
+  computed column.
+- **Folding evidence is not removing it** (row 25). A fold is a disclosure with a count; the
+  ordinal, time, owner and state of every evidence card are unchanged when it is fanned, and the
+  provenance panel is unfiltered.
+- **Retention and branches** (rows 26, 27) are untouched: retry still snapshots the prior run and
+  creates a distinguishable next attempt. Positions are shared between attempts because they are
+  the document's, which does not merge branches — the evidence, ordinals and lineage stay separate.
+- **Exact ownership, order, time and state** (row 28) are properties of the evidence record, not
+  of the layout, so moving a card cannot affect them.
+
+### 15.4 What it costs, stated plainly
+
+- An operator who arranged their team in a shape that is not left-to-right will see a run drawn
+  in that shape. The causal sentence is then carried by edges and labels alone. §12.3 already
+  demands that every arrow read cause → effect, so this is a weaker *visual* guarantee with the
+  same *stated* guarantee.
+- Evidence is one agent at a time instead of two rows under every agent. Reading the whole story
+  is more clicks. The provenance panel is the mitigation and already exists.
+- Dragging during a run dirties the document. That is a deliberate consequence of positions being
+  the document's, and it is the same dirty-state the operator already knows.
+
+### 15.5 What it buys
+
+- Opening a run no longer re-lays-out every node, so React Flow reconciles runtime facts onto
+  existing nodes instead of rebuilding the graph.
+- Folded evidence caps what React Flow renders to the agents plus one fanned cluster, instead of
+  every event card.
+- One surface to maintain, and one set of positions to be correct.
+
+### 15.6 Assumptions — design only, not implemented
+
+*As of 2026-09-13 the section above is built; the three bullets here are still assumptions, and
+the third is still unauthorized. The first two held through the build: no schema change, no
+runtime node in YAML, no contract or WebSocket amendment, and the anchors are presentation
+computed from `doc.nodes` — `runOverlay.dockAnchors`, which nothing saves.*
+
+- No `team.schema.yaml` change, no runtime node written to YAML, no amendment to
+  `RUN_PROVENANCE_CONTRACT` or the frozen WebSocket schema.
+- The docked anchors are presentation, computed from `doc.nodes` and the pipeline order. They are
+  not document nodes and are not saved.
+- "Save & follow up" depends on `POST /api/runs` gaining `followsRunId`/`startAt`, which is a
+  later step (Canvas B) with its own dependency on the `runs` table. This revision does not
+  authorize it.
+
+Additional acceptance failures:
+
+40. Opening a run moves any configured node. **Fail.**
+41. A drag during a run does not persist, or is refused. **Fail.**
+
+    *Note, 2026-09-13, from the build; **superseded** by the note below.* A drag could not dirty
+    the document, because node positions were not in the team file and were not persisted
+    anywhere — `docs/CANVAS_SPEC.md` §7.3 flagged that and did not decide it. What was implemented
+    and tested was the clause that makes the row meaningful: a drag during a run is **the same edit
+    as a drag outside one** — it goes to `doc.onNodesChange` with
+    `capturePositionHistory`/`settleNodeCollision`, is never refused, and is never diverted into
+    run-local view state the way the retired `runPositions` diverted it.
+
+    *Note, 2026-09-13, second revision — the row is now literal.* §7.3's question is decided:
+    positions live in the `<team>.layout.json` sidecar
+    ([ADR 0016](decisions/0016-sidecar-v2-followups-and-checkpoints.md) decision 2), which is the
+    same rule ADR 0011/0012 already drew — **positions in the sidecar, contract in the team
+    file**. So a drag during a run now *persists*, exactly as a drag outside one does: it reaches
+    `doc.onNodesChange`, the Workspace mirrors the arrangement into the sidecar, and the sidecar's
+    600 ms debounce settles the gesture into one `PUT /api/team/layout`.
+
+    The row's wording is corrected from "dirty the document" to "persist", because the design's
+    intent — a drag is an edit, not view state — is satisfied *without* the team YAML going dirty,
+    and that is deliberate: position churn in the file reviewers read is a cost ARCHITECTURE §5
+    names. Every *other* edit during a run — rename, model, budget, `memory.*`, connect, delete —
+    still dirties the team file, exactly as it does outside one.
+    `Workspace.test.tsx` "saves an agent drag to the layout sidecar and never to the team file
+    (row 41)" asserts both halves: the sidecar `PUT` carries the position, and no team-file `PUT`
+    happens.
+42. The Prompt node is not docked first, or the Output node is not docked last, on an
+    auto-laid-out pipeline. **Fail.**
+43. Fanning one agent's evidence does not fold another's, or a fanned card loses its exact owner,
+    ordinal, time or state. **Fail.**
+44. A `compose-view`/`run-view` switch, or "Back to the team canvas", survives. **Fail.**
+45. Below 768 px the reading column is replaced by a canvas. **Fail.**

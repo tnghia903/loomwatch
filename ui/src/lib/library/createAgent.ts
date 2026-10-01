@@ -40,7 +40,8 @@ export function buildAgentFromSource(
 ): AgentConfig {
   const existingIds = new Set(existingAgents.map((agent) => agent.id))
   const id = uniqueId(slugify(source.label), existingIds)
-  const inheritedBudget = existingAgents.at(-1)?.budget.limitUsd
+  if (source.kind === 'operator') return { id, kind: 'operator', name: source.label, role: source.role ?? 'Review the work and say what should happen next.' }
+  const inheritedBudget = existingAgents.findLast((agent) => agent.kind !== 'operator')?.budget?.limitUsd
 
   return {
     id,

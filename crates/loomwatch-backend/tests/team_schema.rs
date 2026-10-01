@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use loomwatch_backend::config::TeamConfig;
+use loomwatch_backend::memory::{PacketSectionKind, TeamMemory};
 use serde_json::{Value, json};
 
 fn read_yaml(path: &Path) -> Value {
@@ -42,6 +43,62 @@ fn all_examples_load_and_validate_via_team_config() {
     }
 }
 
+/// The shipped memory example must actually load its Brief off disk, not merely validate.
+///
+/// A schema-valid `memory:` block whose paths are wrong is the easiest way for this feature to
+/// ship broken, and `TeamConfig::load` never opens a Brief file — so nothing else here would
+/// notice. This also pins the `appliesTo` behaviour an operator reads the example to learn:
+/// `tone.md` reaches the writer and is recorded as excluded for the researcher.
+#[test]
+fn the_memory_example_loads_its_brief_and_scopes_it_as_documented() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let team_path = workspace.join("examples/team-memory.yaml");
+    let team = TeamConfig::load(&team_path).expect("the memory example loads");
+    let memory = TeamMemory::load(
+        &loomwatch_backend::memory::MemoryRoots::for_team(&team_path, None),
+        &team_path,
+        team.memory.as_ref(),
+    )
+    .unwrap_or_else(|error| panic!("the memory example's Brief must load from disk: {error}"));
+
+    assert_eq!(
+        memory
+            .brief
+            .iter()
+            .map(|entry| entry.title.as_str())
+            .collect::<Vec<_>>(),
+        ["House constraints", "Audience and tone"]
+    );
+
+    let agent = |id: &str| {
+        team.agents
+            .iter()
+            .find(|agent| agent.id == id)
+            .unwrap_or_else(|| panic!("the example has an agent {id}"))
+    };
+    let writer = memory.packet_for(agent("writer")).expect("writer packet");
+    assert!(writer.text.contains("British spelling"), "{writer:?}");
+    assert!(writer.text.contains("Audience and tone"), "{writer:?}");
+
+    let researcher = memory
+        .packet_for(agent("researcher"))
+        .expect("researcher packet");
+    assert!(
+        researcher.text.contains("British spelling"),
+        "{researcher:?}"
+    );
+    assert!(
+        !researcher.text.contains("Audience and tone"),
+        "an appliesTo entry must not reach an agent outside its scope: {researcher:?}"
+    );
+    assert!(
+        researcher.sections.iter().any(|section| {
+            section.kind == PacketSectionKind::Excluded && section.rationale.contains("writer")
+        }),
+        "the researcher's packet must record why the scoped entry was left out: {researcher:?}"
+    );
+}
+
 #[test]
 fn schema_and_all_examples_are_valid() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -75,6 +132,79 @@ fn schema_and_all_examples_are_valid() {
             errors.join("\n")
         );
     }
+}
+
+#[test]
+fn responder_is_an_optional_identifier() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let schema = read_yaml(&workspace.join("schemas/team.schema.yaml"));
+    let validator = jsonschema::draft202012::new(&schema)
+        .unwrap_or_else(|error| panic!("failed to compile team schema: {error}"));
+    let mut team = read_yaml(&workspace.join("examples/research-team.yaml"));
+
+    team["responder"] = json!("researcher");
+    assert!(validator.is_valid(&team));
+
+    team["responder"] = json!("");
+    assert!(!validator.is_valid(&team));
+}
+
+/// `memory.inherits` entries name exactly one of `team` and `pack`, and the schema says so rather
+/// than leaving the loader as the only thing that knows.
+///
+/// Asserted here because no shipped example inherits anything, so the `oneOf` would otherwise be
+/// a rule nothing exercises. The loader refuses both combinations too — see
+/// `memory::tests` and `docs/TEAM_CONFIG.md`.
+#[test]
+fn an_inherits_entry_names_exactly_one_source() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let schema = read_yaml(&workspace.join("schemas/team.schema.yaml"));
+    let validator = jsonschema::draft202012::new(&schema)
+        .unwrap_or_else(|error| panic!("failed to compile team schema: {error}"));
+
+    let with_inherits = |entry: Value| {
+        let mut team = read_yaml(&workspace.join("examples/team-memory.yaml"));
+        team["memory"]["inherits"] = json!([entry]);
+        team
+    };
+    assert!(
+        validator.is_valid(&with_inherits(
+            json!({"team": "research-team", "include": ["brief", "kept"], "appliesTo": ["writer"]})
+        )),
+        "a team reference with a scope and an include list is valid"
+    );
+    assert!(
+        validator.is_valid(&with_inherits(json!({"pack": "onboarding-pack.memory"}))),
+        "a pack reference is valid"
+    );
+    assert!(
+        !validator.is_valid(&with_inherits(
+            json!({"team": "research-team", "pack": "p.memory"})
+        )),
+        "naming both a team and a pack must be rejected"
+    );
+    assert!(
+        !validator.is_valid(&with_inherits(json!({"include": ["brief"]}))),
+        "naming neither must be rejected"
+    );
+    assert!(
+        !validator.is_valid(&with_inherits(
+            json!({"team": "research-team", "include": ["everything"]})
+        )),
+        "include is brief | kept | both"
+    );
+    // And the notebook block is closed the same way every other block is.
+    let mut team = read_yaml(&workspace.join("examples/team-memory.yaml"));
+    team["memory"]["notebook"] = json!({"enabled": true, "keep": "auto"});
+    assert!(
+        !validator.is_valid(&team),
+        "`auto` is deliberately absent from keep, so the schema must reject it"
+    );
+    team["memory"]["notebook"] = json!({"enabled": false, "keep": "never"});
+    assert!(
+        validator.is_valid(&team),
+        "review and never are the two policies"
+    );
 }
 
 #[test]
@@ -183,4 +313,117 @@ fn review_regressions_are_covered() {
             "{rejected:?} is not RFC 3339 and must be rejected"
         );
     }
+}
+
+/// `$defs/Agent`'s two branches, which no shipped example can exercise from both sides at once.
+///
+/// An operator node is not "an agent with optional fields": the `oneOf` **refuses** `spawn`,
+/// `model`, `budget` and `thinkingEffort` on it, because an operator node starts nothing, selects
+/// no model and bills nobody, and a file that declared one would be saying something the daemon
+/// does not do. A harness node still requires all three, which is the half that would silently
+/// rot if the requirement were merely moved into a branch nothing tests.
+#[test]
+fn the_schema_takes_an_operator_node_without_spawn_model_or_budget_and_refuses_a_harness_without_them()
+ {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let schema = read_yaml(&workspace.join("schemas/team.schema.yaml"));
+    let validator = jsonschema::draft202012::new(&schema)
+        .unwrap_or_else(|error| panic!("failed to compile team schema: {error}"));
+
+    let with_agent = |agent: Value| {
+        let mut team = read_yaml(&workspace.join("examples/operator-stop.yaml"));
+        team["agents"] = json!([team["agents"][0].clone(), agent, team["agents"][2].clone()]);
+        team
+    };
+
+    let stop = with_agent(json!({
+        "id": "review",
+        "kind": "operator",
+        "name": "You",
+        "role": "Approve the findings, or say what to change."
+    }));
+    let errors: Vec<String> = validator
+        .iter_errors(&stop)
+        .map(|error| error.to_string())
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "an operator node needs no spawn, model or budget:\n{}",
+        errors.join("\n")
+    );
+    assert!(
+        validator.is_valid(&with_agent(json!({
+            "id": "review",
+            "kind": "operator",
+            "role": "Approve the findings, or say what to change."
+        }))),
+        "`name` defaults to You, so an operator node may omit it"
+    );
+    for refused in ["spawn", "model", "budget", "thinkingEffort"] {
+        let mut agent = json!({
+            "id": "review",
+            "kind": "operator",
+            "name": "You",
+            "role": "Approve the findings."
+        });
+        agent[refused] = match refused {
+            "spawn" => json!({"cmd": "/bin/sh", "cwd": "."}),
+            "budget" => json!({"limitUsd": 1}),
+            _ => json!("something"),
+        };
+        assert!(
+            !validator.is_valid(&with_agent(agent)),
+            "an operator node must not be allowed to declare {refused}"
+        );
+    }
+    assert!(
+        !validator.is_valid(&with_agent(json!({
+            "id": "review",
+            "name": "Review",
+            "role": "Approve the findings."
+        }))),
+        "a harness node (no `kind`, so the default) still requires spawn, model and budget"
+    );
+}
+
+/// The loader's own rules, which the schema deliberately does not express: a document can be
+/// schema-valid and still place a stop where it cannot work.
+#[test]
+fn the_loader_refuses_an_operator_entrypoint_and_an_operator_node_in_team_mode() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let source = fs::read_to_string(workspace.join("examples/operator-stop.yaml"))
+        .expect("the operator-stop example is readable");
+    TeamConfig::parse(&source).expect("the shipped example loads");
+
+    // The Prompt node is already the operator at the head of a run.
+    let as_entrypoint = source.replace("entrypoint: researcher", "entrypoint: review");
+    let error = format!(
+        "{:#}",
+        TeamConfig::parse(&as_entrypoint).expect_err("an operator entrypoint is refused")
+    );
+    assert!(error.contains("is an operator node"), "{error}");
+
+    // Team mode has no configured order for a stop to sit in.
+    let team_mode = source
+        .split("edges:")
+        .next()
+        .expect("the example has an edges block")
+        .to_owned()
+        + "edges: []\n";
+    let error = format!(
+        "{:#}",
+        TeamConfig::parse(&team_mode).expect_err("team mode cannot hold a stop")
+    );
+    assert!(error.contains("team mode"), "{error}");
+
+    // And the per-kind rules the `try_from` enforces, which produce a parse error naming the node.
+    let with_model = source.replace(
+        "    role: Researcher is done. Approve the findings, or say what to change.",
+        "    role: Researcher is done. Approve the findings, or say what to change.\n    model: claude/sonnet",
+    );
+    let error = format!(
+        "{:#}",
+        TeamConfig::parse(&with_model).expect_err("an operator node has no model")
+    );
+    assert!(error.contains("kind: operator"), "{error}");
 }

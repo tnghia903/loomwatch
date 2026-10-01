@@ -14,17 +14,29 @@ for why, so they don't get relitigated.
 Every agent LoomWatch runs is a **local child process speaking ACP (Agent Client Protocol)
 over stdio**. There is no second kind of agent and no vendor SDK anywhere in the system.
 
-| Agent | Spawned as | Reaches |
-|---|---|---|
-| Claude | `claude-agent-acp` | Claude models |
-| Codex | `codex-acp` | OpenAI models |
-| Gemini | Gemini CLI ACP mode | Gemini models |
-| **opencode** | `opencode acp` | **Everything else** — DeepSeek, Kimi, GLM, Qwen, Mistral… |
+| Agent | Spawned as | Reaches | ACP verified |
+|---|---|---|---|
+| Claude | `claude-agent-acp` (or `npx -y @agentclientprotocol/claude-agent-acp`) | Claude models | yes |
+| Codex | `codex-acp` (or `npx -y @agentclientprotocol/codex-acp`) | OpenAI models | yes |
+| Gemini | `gemini --acp` | Gemini models | yes |
+| **opencode** | `opencode acp` | **Everything else** — DeepSeek, Kimi, GLM, Qwen, Mistral… | yes |
+| Hermes | `hermes-acp` | Hermes' configured provider | yes — 0.21.1, `loadSession: true` |
+| OpenClaw | `openclaw acp` | its gateway's configured models | yes — 2026.8.1, `loadSession: true`, **no HTTP MCP** |
+| pi | — | — | **no**: `pi --mode rpc` is pi's own protocol, not ACP |
 
 `opencode` is the universal adapter: any model without a first-party harness is reached by
 pointing opencode at it. An agent's configuration is a spawn descriptor — command, args,
 env, cwd — plus the model to route through. "Reviewer = opencode + glm-5.3" is a config
 row, not code.
+
+Each row's ACP invocation is verified against the installed binary with a raw `initialize`
+frame before it is added to `HARNESSES` in `api.rs`. A `--help` listing an `acp` subcommand is not
+sufficient evidence: several of these CLIs ship a private JSON-RPC mode that is not ACP, which is
+why `pi` is detected and reported unrunnable rather than being given a spawn descriptor that
+would produce an agent LoomWatch cannot drive. OpenClaw's bridge advertises
+`mcpCapabilities.http: false`, so the Team Bus cannot be injected into an OpenClaw session and
+`acp.rs` archives `team_bus_unavailable` for it — delegation tools do not reach an OpenClaw
+agent.
 
 **Consequence: LoomWatch never stores, proxies, or sees an API key.** Each harness owns its
 own credentials. Do not add key handling to the backend.
@@ -154,7 +166,12 @@ install.
   **Explicitly not Paperclip's UI**, which is dense and complex and a poor experience. Few
   primary surfaces, generous whitespace, one obvious action per screen, progressive
   disclosure of everything else. The canvas is the product; the chrome recedes. The design
-  is specified in [CANVAS_SPEC.md](CANVAS_SPEC.md) and the build holds to it.
+  is specified in [CANVAS_SPEC.md](CANVAS_SPEC.md) as amended by
+  [UX_REDESIGN.md](UX_REDESIGN.md) and the “Obsidian & Gilt” token layer in
+  [DESIGN_LANGUAGE.md](DESIGN_LANGUAGE.md) (board-approved 2026-09-10, TNG-87); the
+  build holds to it. Its primary surface is the prompt-to-output story of
+  [TNG89_INTERACTION.md §12](TNG89_INTERACTION.md): a run is drawn as Prompt → Run →
+  agents → evidence → Output, projected from archived events, never from prose.
 - **Installable:** the UI ships a PWA manifest, so "install as an app" gives a dock /
   launcher icon and a standalone window with no wrapper.
 - **Multi-device:** because it is a page the daemon serves, it opens from any device that
@@ -177,7 +194,7 @@ pausing, or commenting on an agent mid-run — are deferred.
 | 02 | ACP spine | Backend spawns a real harness, speaks ACP, archives a full session to Postgres | Shipped |
 | 03 | Team Bus + modes | MCP delegation server, pipeline orchestrator, guards, two agents delegating | Shipped |
 | 04 | Canvas | Web UI served by `loomwatchd`: agent panel, drag-to-instantiate, edge drawing, YAML round-trip | Shipped 2026-09-07 |
-| 05 | Watch & alert | Observed-edge layer over the WebSocket stream, timeline scrubber, attention queue, notifications | Next |
+| 05 | Watch & alert | Archive viewer with live observed edges, timeline replay, attention queue, notifications | Implemented 2026-09-10; see [WATCH.md](WATCH.md) |
 | 06 | Live & polish | Run a real multi-vendor team against real work | Next |
 
 Contracts frozen between phases: the internal event schema after 02, the WebSocket message

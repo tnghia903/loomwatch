@@ -49,6 +49,16 @@ function document(overrides: Partial<TeamDocument> = {}): TeamDocument {
 }
 
 describe('compileTeamValidator', () => {
+  it('keeps the precise YAML path for schema problems outside dedicated controls', () => {
+    const validate = compileTeamValidator({ ...daemonSchema, additionalProperties: false })
+    const result = validate({ ...document(), unexpected: true } as TeamDocument)
+
+    expect(result.documentProblems).toContainEqual(expect.objectContaining({
+      message: '(document) must NOT have additional properties',
+      yamlPath: ['unexpected'],
+    }))
+  })
+
   it('turns daemon schema failures for empty inspector fields into incomplete field problems', () => {
     const validate = compileTeamValidator(daemonSchema)
     const result = validate(document({ agents: [{ ...document().agents[0], role: '', model: '', spawn: { cmd: 'agent', args: [], env: {}, cwd: '' } }] }))

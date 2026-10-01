@@ -1,63 +1,107 @@
 import { ReactFlowProvider } from '@xyflow/react'
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 
-import { Canvas } from './components/Canvas'
-import { Library } from './components/library'
+import { Workspace } from './components/Workspace'
 import { type DetectedHarness, fetchHarnesses } from './lib/harnesses'
+import { fetchCapabilities, type CapabilityInventory } from './lib/library/client'
+import { useTheme } from './lib/theme'
 
-function App() {
+const Connections = lazy(() => import('./components/Connections'))
+
+function useHarnesses() {
   const [harnesses, setHarnesses] = useState<DetectedHarness[]>([])
-  const [harnessesLoading, setHarnessesLoading] = useState(true)
-  const [harnessesError, setHarnessesError] = useState<string | null>(null)
-  const [documentOpen, setDocumentOpen] = useState(() => new URLSearchParams(window.location.search).has('path'))
-  const [libraryVisible, setLibraryVisible] = useState(true)
-  const [windowWidth, setWindowWidth] = useState(window.innerWidth)
-
-  useEffect(() => {
-    const onResize = () => setWindowWidth(window.innerWidth)
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-
+  // Where the daemon looked, and what for. Empty until the first reply; the Library only shows
+  // it on request, so an empty value never reads as "nowhere".
+  const [searchedPath, setSearchedPath] = useState<string[]>([])
+  const [knownIds, setKnownIds] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [generation, setGeneration] = useState(0)
   useEffect(() => {
     let cancelled = false
     fetchHarnesses()
-      .then((detected) => {
-        if (!cancelled) {
-          setHarnesses(detected)
-        }
+      .then((report) => {
+        if (cancelled) return
+        setHarnesses(report.harnesses ?? [])
+        setSearchedPath(report.searchedPath ?? [])
+        setKnownIds(report.knownIds ?? [])
+        setError(report.runnerError ?? null)
       })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setHarnessesError(error instanceof Error ? error.message : String(error))
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setHarnessesLoading(false)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+      .catch((caught: unknown) => { if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught)) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [generation])
+  const retry = useCallback(() => { setLoading(true); setGeneration((value) => value + 1) }, [])
+  return { harnesses, searchedPath, knownIds, loading, error, retry }
+}
 
+function useCapabilities() {
+  const [inventory, setInventory] = useState<CapabilityInventory>({ skills: [], tools: [], sources: [] })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [scannedAt, setScannedAt] = useState<Date | null>(null)
+  const [generation, setGeneration] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    fetchCapabilities()
+      .then((found) => {
+        if (!cancelled) {
+          setInventory(found)
+          setScannedAt(new Date())
+          setError(null)
+        }
+      })
+      .catch((caught: unknown) => { if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught)) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [generation])
+  const retry = useCallback(() => { setLoading(true); setGeneration((value) => value + 1) }, [])
+  return { inventory, loading, error, scannedAt, retry }
+}
+
+function Editor({ initialRunId, initialHistoryOpen }: { initialRunId: string | null; initialHistoryOpen: boolean }) {
+  const { harnesses, searchedPath, knownIds, loading, error, retry } = useHarnesses()
+  const capabilities = useCapabilities()
+  const [, setDocumentOpen] = useState(() => new URLSearchParams(window.location.search).has('path'))
   return (
-    <div className="relative h-screen w-screen bg-canvas">
-      <ReactFlowProvider>
-        {documentOpen && windowWidth >= 768 && (windowWidth < 1024 || libraryVisible) && <div className="pointer-events-none absolute inset-4 z-10 canvas-library">
-          <Library harnesses={harnesses} harnessesLoading={harnessesLoading} harnessesError={harnessesError} />
-        </div>}
-        <Canvas
-          harnessCount={harnesses.length}
-          harnessesLoading={harnessesLoading}
-          libraryVisible={libraryVisible}
-          onToggleLibrary={() => setLibraryVisible((visible) => !visible)}
-          onDocumentOpen={() => setDocumentOpen(true)}
-        />
-      </ReactFlowProvider>
-    </div>
+    <ReactFlowProvider>
+      <Workspace
+        harnesses={harnesses}
+        harnessSearchPath={searchedPath}
+        knownHarnessIds={knownIds}
+        harnessesLoading={loading}
+        harnessesError={error}
+        onRetryHarnesses={retry}
+        capabilityInventory={capabilities.inventory}
+        capabilitiesLoading={capabilities.loading}
+        capabilitiesError={capabilities.error}
+        capabilitiesScannedAt={capabilities.scannedAt}
+        onRetryCapabilities={capabilities.retry}
+        onDocumentOpen={() => setDocumentOpen(true)}
+        initialRunId={initialRunId}
+        initialHistoryOpen={initialHistoryOpen}
+      />
+    </ReactFlowProvider>
   )
 }
 
-export default App
+export default function App() {
+  useTheme()
+  const { pathname, search } = window.location
+  if (pathname === '/connections') {
+    return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading connections…</p>}><Connections /></Suspense>
+  }
+  // The old /watch route folds into the workspace: a session id opens that run in replay,
+  // and a bare /watch opens the run history.
+  const params = new URLSearchParams(search)
+  if (pathname === '/watch') {
+    const session = params.get('session')
+    const next = new URLSearchParams()
+    for (const [key, value] of params) if (key !== 'session') next.set(key, value)
+    if (session) next.set('run', session)
+    const query = next.toString()
+    window.history.replaceState({}, '', query ? `/?${query}` : '/')
+    return <Editor initialRunId={session} initialHistoryOpen={!session} />
+  }
+  return <Editor initialRunId={params.get('run')} initialHistoryOpen={false} />
+}

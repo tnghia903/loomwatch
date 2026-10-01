@@ -1,6 +1,6 @@
 # LoomWatch — Design language "Obsidian & Gilt"
 
-Revision 3 · 2026-09-10 · **proposed — awaiting board approval (TNG-87)**
+Revision 3 · 2026-09-10 · **approved by the board 2026-09-10 (TNG-87); implemented in `ui/` 2026-09-11 — see [ADR 0009](decisions/0009-prompt-to-output-workspace-shipped.md)**
 
 This document replaces [CANVAS_SPEC.md](CANVAS_SPEC.md) **§2 (Visual language)** in full. It
 does not change CANVAS_SPEC's interaction contracts; those are amended separately in

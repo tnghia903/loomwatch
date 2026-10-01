@@ -15,7 +15,54 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  loomwatch:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    user: "${LOOMWATCH_UID:-1000}:${LOOMWATCH_GID:-1000}"
+    read_only: true
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB in .env}
+      HOME: /home/node
+      LOOMWATCH_CAPABILITY_HOME: /opt/loomwatch/capabilities
+      LOOMWATCH_ALLOW_CONTAINER_LISTENER: "true"
+      # The optional native companion keeps host-installed harnesses and credentials on the host.
+      LOOMWATCH_HOST_RUNNER_ADDR: ${LOOMWATCH_HOST_RUNNER_ADDR:-host.docker.internal:3031}
+      LOOMWATCH_HOST_RUNNER_TOKEN: ${LOOMWATCH_HOST_RUNNER_TOKEN:-${POSTGRES_PASSWORD}}
+    command:
+      - serve
+      - --teams-root
+      - /data/teams
+      - --listen
+      - 0.0.0.0:3000
+      - --allow-host
+      - localhost
+      - --allow-host
+      - 127.0.0.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${LOOMWATCH_PORT:-3000}:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    tmpfs:
+      - /tmp
+    volumes:
+      - ${LOOMWATCH_TEAMS_DIR:-./teams}:/data/teams
+      - ${LOOMWATCH_WORKSPACES_DIR:-./container/workspaces}:/workspaces
+      - ${LOOMWATCH_CAPABILITIES_DIR:-./container/capabilities}:/opt/loomwatch/capabilities:ro
+      - loomwatch-home:/home/node
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
   dev:
+    profiles: ["dev"]
     build:
       context: .
       dockerfile: Dockerfile.dev
@@ -33,6 +80,7 @@ services:
 
 volumes:
   postgres-data:
+  loomwatch-home:
   cargo-registry:
   cargo-git:
   rust-target:

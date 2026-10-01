@@ -109,6 +109,19 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
     expect(model.snapshot().entrypoint).toBeUndefined()
   })
 
+  it('sets and clears the canonical responder without rewriting the rest of the team', () => {
+    const source = readExample('research-team.yaml')
+    const model = TeamFileModel.parse(source)
+
+    model.setResponder('researcher')
+    expect(model.snapshot().responder).toBe('researcher')
+    expect(model.toYaml()).toContain('responder: researcher')
+
+    model.clearResponder()
+    expect(model.snapshot().responder).toBeUndefined()
+    expect(model.toYaml()).toBe(source)
+  })
+
   it('adding then removing an agent nets an identical document', () => {
     const source = readExample('research-team.yaml')
     const model = TeamFileModel.parse(source)
@@ -184,4 +197,167 @@ describe('TeamFileModel error handling', () => {
     const model = TeamFileModel.parse(readExample('research-team.yaml'))
     expect(() => model.removeEdge('reviewer', 'researcher')).toThrow(TeamFileParseError)
   })
+})
+
+describe('memory.inherits editing', () => {
+  const bare = 'schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: r\n    spawn:\n      cmd: opencode\n      args: []\n      env: {}\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\nedges: []\n'
+
+  it('creates the block, then narrows an existing entry rather than adding a second one', () => {
+    const model = TeamFileModel.parse(bare)
+    model.addMemoryInherit({ team: 'research-team' })
+    expect(model.snapshot().memory?.inherits).toEqual([{ team: 'research-team' }])
+    // Wiring the same card to one agent narrows the entry that is already there. A second entry
+    // for the same team would supply its Brief twice and charge it twice against the budget.
+    model.addMemoryInherit({ team: 'research-team', appliesTo: ['a'] })
+    expect(model.snapshot().memory?.inherits).toEqual([{ team: 'research-team', appliesTo: ['a'] }])
+    // Dropping it on the whole team again clears the key rather than listing every agent: a
+    // frozen list would silently stop supplying an agent the team gains later.
+    model.addMemoryInherit({ team: 'research-team' })
+    expect(model.snapshot().memory?.inherits).toEqual([{ team: 'research-team' }])
+    // A pack is a separate entry, matched on its own key.
+    model.addMemoryInherit({ pack: 'onboarding-pack.memory' })
+    expect(model.snapshot().memory?.inherits).toEqual([
+      { team: 'research-team' },
+      { pack: 'onboarding-pack.memory' },
+    ])
+  })
+
+  it('refuses an entry that names both a team and a pack, or neither', () => {
+    const model = TeamFileModel.parse(bare)
+    expect(() => model.addMemoryInherit({ team: 't', pack: 'p.memory' })).toThrow(TeamFileParseError)
+    expect(() => model.addMemoryInherit({})).toThrow(TeamFileParseError)
+    expect(model.snapshot().memory?.inherits).toBeUndefined()
+  })
+
+  it('excludes one inherited Brief entry without touching the rest', () => {
+    const model = TeamFileModel.parse(bare)
+    model.addMemoryInherit({ team: 'research-team' })
+    model.addMemoryInherit({ team: 'house-style' })
+    model.excludeInheritedBrief({ team: 'research-team' }, 'brief/tone.md')
+    expect(model.snapshot().memory?.inherits).toEqual([
+      { team: 'research-team', exclude: ['brief/tone.md'] },
+      { team: 'house-style' },
+    ])
+    // Excluding the same path twice is a no-op, not a duplicate.
+    model.excludeInheritedBrief({ team: 'research-team' }, 'brief/tone.md')
+    expect(model.snapshot().memory?.inherits?.[0].exclude).toEqual(['brief/tone.md'])
+    // A source this team does not inherit is refused, rather than silently creating an entry
+    // that would start supplying a whole team's Brief as a side effect of declining one file.
+    expect(() => model.excludeInheritedBrief({ team: 'nobody' }, 'brief/x.md')).toThrow(TeamFileParseError)
+  })
+
+  it('removes an entry and drops the empty list with it', () => {
+    const model = TeamFileModel.parse(bare)
+    model.addMemoryInherit({ team: 'research-team' })
+    model.removeMemoryInherit({ team: 'research-team' })
+    expect(model.snapshot().memory?.inherits).toBeUndefined()
+    // Removing something absent is a no-op: the panel and the file can disagree for a moment.
+    model.removeMemoryInherit({ team: 'research-team' })
+  })
+
+  it('leaves a comment on a sibling key alone', () => {
+    const model = TeamFileModel.parse(`${bare}memory:\n  # the operator's own note\n  brief:\n    - path: brief/constraints.md\n`)
+    model.addMemoryInherit({ team: 'research-team' })
+    expect(model.toYaml()).toContain("# the operator's own note")
+    expect(model.toYaml()).toContain('brief/constraints.md')
+    expect(model.snapshot().memory?.inherits).toEqual([{ team: 'research-team' }])
+  })
+})
+
+describe('memory.brief editing', () => {
+  const bare = 'schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: r\n    spawn:\n      cmd: opencode\n      args: []\n      env: {}\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\nedges: []\n'
+
+  it('creates the memory block on the first entry and appends to it after that', () => {
+    const model = TeamFileModel.parse(bare)
+    model.addBriefEntry({ path: 'brief/constraints.md' })
+    expect(model.snapshot().memory?.brief).toEqual([{ path: 'brief/constraints.md' }])
+    model.addBriefEntry({ path: 'brief/tone.md', appliesTo: ['a'] })
+    expect(model.snapshot().memory?.brief).toEqual([
+      { path: 'brief/constraints.md' },
+      { path: 'brief/tone.md', appliesTo: ['a'] },
+    ])
+  })
+
+  // Two identical entries would be supplied twice and charged twice against the packet budget,
+  // so this is refused rather than deduplicated silently.
+  it('refuses a duplicate path', () => {
+    const model = TeamFileModel.parse(bare)
+    model.addBriefEntry({ path: 'brief/constraints.md' })
+    expect(() => model.addBriefEntry({ path: 'brief/constraints.md' })).toThrow(TeamFileParseError)
+  })
+
+  it('removes an entry by path and leaves the rest untouched', () => {
+    const model = TeamFileModel.parse(bare)
+    model.addBriefEntry({ path: 'brief/constraints.md' })
+    model.addBriefEntry({ path: 'brief/tone.md' })
+    model.removeBriefEntry('brief/constraints.md')
+    expect(model.snapshot().memory?.brief).toEqual([{ path: 'brief/tone.md' }])
+    // Removing something that is not there is a no-op, not a throw: the panel and the file can
+    // disagree for a moment after an external edit.
+    model.removeBriefEntry('brief/absent.md')
+    expect(model.snapshot().memory?.brief).toEqual([{ path: 'brief/tone.md' }])
+  })
+
+  it('keeps every untouched line of the team file byte-identical', () => {
+    const model = TeamFileModel.parse(bare)
+    model.addBriefEntry({ path: 'brief/constraints.md' })
+    const updated = model.toYaml()
+    expect(isOrderedSubsequence(bare.split('\n'), updated.split('\n'))).toBe(true)
+  })
+})
+
+// The Inspector's Behaviour-zone memory toggles (docs/TEAM_MEMORY.md §5). Both keys are
+// executable, so they go through the document model and wait for an explicit save.
+describe('per-agent memory overrides', () => {
+  const bare = 'schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: r\n    # keeps its own repository\n    spawn:\n      cmd: opencode\n      args: []\n      env: {}\n      cwd: .\n    model: m\n    budget:\n      limitUsd: 1\nedges: []\n'
+
+  it('creates the block on the first key and adds the second beside it', () => {
+    const model = TeamFileModel.parse(bare)
+    model.setAgentMemory('a', 'brief', false)
+    expect(model.snapshot().agents[0].memory).toEqual({ brief: false })
+    model.setAgentMemory('a', 'deliverAs', 'packet-only')
+    expect(model.snapshot().agents[0].memory).toEqual({ brief: false, deliverAs: 'packet-only' })
+  })
+
+  it('clears one key without disturbing the other, and drops an empty block entirely', () => {
+    const model = TeamFileModel.parse(bare)
+    model.setAgentMemory('a', 'brief', false)
+    model.setAgentMemory('a', 'deliverAs', 'packet-only')
+
+    model.setAgentMemory('a', 'brief', undefined)
+    expect(model.snapshot().agents[0].memory).toEqual({ deliverAs: 'packet-only' })
+
+    model.setAgentMemory('a', 'deliverAs', undefined)
+    // Not `memory: {}` — an empty mapping reads as a configured nothing rather than as absence.
+    expect(model.snapshot().agents[0].memory).toBeUndefined()
+    expect(model.toYaml()).not.toContain('memory')
+  })
+
+  it('is a no-op when the key was never there', () => {
+    const model = TeamFileModel.parse(bare)
+    model.setAgentMemory('a', 'deliverAs', undefined)
+    expect(model.snapshot().agents[0].memory).toBeUndefined()
+  })
+
+  it('refuses an agent the file does not have', () => {
+    const model = TeamFileModel.parse(bare)
+    expect(() => model.setAgentMemory('nobody', 'brief', false)).toThrow(TeamFileParseError)
+  })
+
+  it('keeps every untouched line, comments included, byte-identical', () => {
+    const model = TeamFileModel.parse(bare)
+    model.setAgentMemory('a', 'deliverAs', 'packet-only')
+    const updated = model.toYaml()
+    expect(isOrderedSubsequence(bare.split('\n'), updated.split('\n'))).toBe(true)
+    expect(updated).toContain('# keeps its own repository')
+  })
+})
+
+it('removes the last connected skill without serializing an invalid null capability list', () => {
+  const model = TeamFileModel.parse('schemaVersion: 1\nid: test\nname: Test\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: Work\nedges: []\n')
+  model.setAgentField('a', 'capabilities', [{kind: 'skill', name: 'claude-design'}])
+  expect(model.toYaml()).toContain('claude-design')
+  model.setAgentField('a', 'capabilities', undefined)
+  expect(model.toYaml()).not.toContain('capabilities:')
+  expect(TeamFileModel.parse(model.toYaml()).snapshot().agents[0].capabilities).toBeUndefined()
 })
