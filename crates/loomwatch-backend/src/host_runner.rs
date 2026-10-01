@@ -484,6 +484,9 @@ mod tests {
             executable_path: format!("/host/bin/{id}"),
             acp_available: available,
             unavailable_reason: (!available).then(|| "no adapter".to_owned()),
+            health: None,
+            health_reason: None,
+            health_detail: None,
             spawn: HarnessSpawn {
                 cmd: command.to_owned(),
                 args: vec!["acp".to_owned()],

@@ -78,6 +78,8 @@
   padding: var(--sp-4) var(--sp-7) var(--sp-5); color: var(--color-ink-3);
 }
 .home-foot .link { color: var(--color-accent); }
+.home-foot .link:disabled { color: var(--color-ink-3); }
+.home-foot-problems { flex-basis: 100%; margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-1); color: var(--color-alert); }
 
 @media (max-width: 720px) {
   .home-top, .home-main, .home-foot { padding-left: var(--sp-4); padding-right: var(--sp-4); }
@@ -125,6 +127,7 @@
 .nt-app .input { height: 36px; }
 .nt-note { margin: 0; font-size: 13px; line-height: 1.45; color: var(--color-ink-2); }
 .nt-note.warn { color: var(--color-accent); }
+.nt-problems { padding: 0; list-style: none; display: grid; gap: var(--sp-1); color: var(--color-alert); }
 .nt-error { margin: 0; font-size: 13px; line-height: 1.45; color: var(--color-alert); overflow-wrap: anywhere; }
 .nt-acts { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); }
 .nt-busy { margin-right: auto; font-size: 13px; color: var(--color-ink-3); }

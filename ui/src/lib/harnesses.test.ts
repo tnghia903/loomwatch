@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchHarnesses, fetchHarnessModels, HarnessesApiError, knownHarness, monogramForSpawnCmd } from './harnesses'
+import { fetchHarnesses, fetchHarnessModels, harnessProblem, HarnessesApiError, isHarnessRunnable, knownHarness, monogramForSpawnCmd, type DetectedHarness } from './harnesses'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -94,5 +94,28 @@ describe('harness presentation', () => {
     expect(monogramForSpawnCmd('opencode')).toBe('Oc')
     expect(monogramForSpawnCmd('loomwatchd', ['harness-client', '--harness', 'codex'])).toBe('Cx')
     expect(monogramForSpawnCmd('some-custom-acp')).toBe('·')
+  })
+})
+
+describe('harness readiness', () => {
+  const gemini: DetectedHarness = { id: 'gemini', name: 'Gemini', command: 'gemini', executablePath: '/bin/gemini', acpAvailable: true, spawn: { cmd: 'gemini', args: ['--acp'] } }
+
+  it('treats an app the daemon has not checked as runnable, as older daemons never report health', () => {
+    expect(isHarnessRunnable(gemini)).toBe(true)
+    expect(harnessProblem(gemini)).toBeNull()
+    expect(isHarnessRunnable({ ...gemini, health: 'ok' })).toBe(true)
+  })
+
+  it('prints the daemon\'s reason for an app that failed to start', () => {
+    const failing = { ...gemini, health: 'error' as const, healthReason: 'Gemini: sign-in or version problem — run "gemini" in Terminal to fix' }
+    expect(isHarnessRunnable(failing)).toBe(false)
+    expect(harnessProblem(failing)).toBe('Gemini: sign-in or version problem — run "gemini" in Terminal to fix')
+    expect(harnessProblem({ ...failing, healthReason: undefined })).toBe('Gemini: sign-in or version problem — run "gemini" in Terminal to fix')
+  })
+
+  it('reports a missing ACP bridge before any health verdict', () => {
+    const pi = { ...gemini, id: 'pi', name: 'pi', acpAvailable: false, unavailableReason: 'pi has no ACP adapter.', health: 'error' as const, healthReason: 'unused' }
+    expect(isHarnessRunnable(pi)).toBe(false)
+    expect(harnessProblem(pi)).toBe('pi has no ACP adapter.')
   })
 })

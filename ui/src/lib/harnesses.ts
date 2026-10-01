@@ -19,7 +19,29 @@ export interface DetectedHarness {
    * client-side "not found on PATH" sentence got wrong.
    */
   unavailableReason?: string
+  /**
+   * What the daemon saw the last time it asked this harness for its models. Absent until the
+   * daemon has tried (and from older daemons): being on PATH is not proof an app can start — it
+   * can be signed out or too old for its own service — and the list never spawns one to find out.
+   */
+  health?: 'ok' | 'error'
+  /** Why `health` is `error`, in words the UI prints verbatim. */
+  healthReason?: string
+  /** The harness's own error behind `healthReason`, for anyone who needs the exact message. */
+  healthDetail?: string
   spawn: HarnessSpawn
+}
+
+/** True when an app can be offered for new work: it speaks ACP and did not last fail to start. */
+export function isHarnessRunnable(harness: DetectedHarness): boolean {
+  return harness.acpAvailable !== false && harness.health !== 'error'
+}
+
+/** Why an app cannot be used right now, in plain words, or `null` when nothing is known wrong. */
+export function harnessProblem(harness: DetectedHarness): string | null {
+  if (harness.acpAvailable === false) return harness.unavailableReason ?? `${harness.spawn.cmd} not found on PATH`
+  if (harness.health === 'error') return harness.healthReason ?? `${harness.name}: sign-in or version problem — run "${harness.command}" in Terminal to fix`
+  return null
 }
 
 /**

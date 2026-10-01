@@ -1,6 +1,6 @@
 import { stringify } from 'yaml'
 
-import type { DetectedHarness } from '../harnesses'
+import { isHarnessRunnable, type DetectedHarness } from '../harnesses'
 import type { AgentConfig, EdgeConfig } from './types'
 import { slugifyTeamName } from './useTeamDocument'
 
@@ -53,9 +53,12 @@ export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
 /** Harnesses most people already have signed in, in the order a template should prefer them. */
 const PREFERRED_HARNESSES = ['claude', 'codex', 'opencode', 'gemini']
 
-/** The runnable harnesses, best first. A template is built on the first one that answers. */
+/**
+ * The runnable harnesses, best first. A template is built on the first one that answers, so an app
+ * the daemon last saw fail to start is left out rather than tried again on the operator's time.
+ */
 export function rankHarnesses(harnesses: readonly DetectedHarness[]): DetectedHarness[] {
-  const runnable = harnesses.filter((harness) => harness.acpAvailable !== false)
+  const runnable = harnesses.filter(isHarnessRunnable)
   const rank = (id: string) => {
     const index = PREFERRED_HARNESSES.indexOf(id)
     return index === -1 ? PREFERRED_HARNESSES.length : index

@@ -2,7 +2,7 @@ import { ArrowRight, Moon, Plus, Search, Sun, Users } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { relativeTime } from '../../lib/format'
-import type { DetectedHarness } from '../../lib/harnesses'
+import { fetchHarnessModels, harnessProblem, isHarnessRunnable, type DetectedHarness } from '../../lib/harnesses'
 import { teamDisplayName, type TeamSummary } from '../../lib/team-file/client'
 import { openTeam, useTeamList } from '../../lib/team-file/useTeamList'
 import { useTheme } from '../../lib/theme'
@@ -38,7 +38,11 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
   const { teams, error } = useTeamList()
   const [creating, setCreating] = useState(false)
   const [query, setQuery] = useState('')
-  const runnable = harnesses.filter((harness) => harness.acpAvailable !== false)
+  const [rechecking, setRechecking] = useState(false)
+  const runnable = harnesses.filter(isHarnessRunnable)
+  // Installed and ACP-capable, but the daemon's last attempt to start it failed. An app with no ACP
+  // bridge at all (`acpAvailable: false`) is the Library's to explain, not the first-run footer's.
+  const failing = harnesses.filter((harness) => harness.acpAvailable !== false && harness.health === 'error')
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase()
     if (!teams || !needle) return teams ?? []
@@ -52,11 +56,23 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
     return () => window.removeEventListener('loomwatch:new-team', open)
   }, [])
 
+  // The list itself never starts an app, so "Check again" for a failing one has to: asking for its
+  // models is the same check the daemon's verdict came from, and it records the new answer.
+  async function recheck() {
+    setRechecking(true)
+    await Promise.allSettled(failing.map((harness) => fetchHarnessModels(harness.id)))
+    setRechecking(false)
+    onRetryHarnesses()
+  }
+  const recheckAction = <button type="button" className="link" onClick={() => void recheck()} disabled={rechecking}>{rechecking ? 'Checking…' : 'Check again'}</button>
+
   let status: { state: 'dirty' | 'saved' | 'incomplete' | 'invalid'; text: string; action?: ReactNode }
   if (harnessesLoading) status = { state: 'dirty', text: 'Looking for AI apps on this computer…' }
   else if (harnessesError) status = { state: 'invalid', text: `Couldn't check which AI apps are installed: ${harnessesError}`, action: <button type="button" className="link" onClick={onRetryHarnesses}>Try again</button> }
+  else if (runnable.length === 0 && failing.length > 0) status = { state: 'incomplete', text: 'None of your AI apps can start right now.', action: recheckAction }
   else if (runnable.length === 0) status = { state: 'incomplete', text: 'No AI apps found. Install Claude Code, Codex or OpenCode, sign in, then try again.', action: <button type="button" className="link" onClick={onRetryHarnesses}>Check again</button> }
-  else status = { state: 'saved', text: `Ready to use: ${runnable.map((harness) => harness.name).join(', ')}` }
+  else status = { state: 'saved', text: `Ready to use: ${runnable.map((harness) => harness.name).join(', ')}`, ...(failing.length > 0 ? { action: recheckAction } : {}) }
+  const problems = harnessesLoading || harnessesError ? [] : failing
 
   return (
     <div className="lw-home">
@@ -121,6 +137,11 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
         <ChipDot state={status.state} size={10} />
         <span>{status.text}</span>
         {status.action}
+        {problems.length > 0 && (
+          <ul className="home-foot-problems" aria-label="Apps that need attention">
+            {problems.map((harness) => <li key={harness.id} title={harness.healthDetail}>{harnessProblem(harness)}</li>)}
+          </ul>
+        )}
       </footer>
 
       {creating && (

@@ -288,6 +288,14 @@ when its separate ACP adapter is missing. The Library shows the missing executab
 disables that drag source until the adapter is on the daemon's PATH. Discovery checks
 executable presence, not authentication or provider connectivity.
 
+Each harness may also carry `health` (`ok` | `error`), with `healthReason` (plain words, printed
+verbatim) and `healthDetail` (the harness's own error, truncated) when it is `error`. It is the
+outcome of the last `GET /api/harnesses/{id}/models` handshake, cached in the daemon for ten
+minutes and only for the same executable and spawn descriptor; listing never spawns a harness, so
+an unchecked harness simply has no `health`. The UI keeps a harness with `health: error` out of new
+team templates, names it with its reason on Home and in the New team dialog, and re-runs the
+models handshake when the operator chooses "Check again".
+
 ## Installation
 
 The manifest lets supporting browsers install LoomWatch as a standalone app. Its service
