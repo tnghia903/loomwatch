@@ -155,12 +155,10 @@ card({
       <div class="row"><button class="link">Run history</button><button class="link alert">Discard changes</button><button class="link muted">Not now</button>
       <button class="iconbtn" aria-label="Search">${icon('search')}</button><button class="iconbtn" aria-label="Theme">${icon('sun')}</button><button class="iconbtn" aria-pressed="true" aria-label="Layers">${icon('layers')}</button><button class="iconbtn" disabled aria-label="Menu">${icon('menu')}</button>
       <kbd class="key">⌘K</kbd><kbd class="key">⌘↵</kbd></div></div>
-    <div class="sect"><div class="label">Switches — view switch (shipped: solid accent), depth dial, tabs</div>
-      <div class="row"><nav class="view-switch"><button aria-pressed="true">${icon('play', 14)} Run</button><button>${icon('pencil', 14)} Build</button></nav>
-      <nav class="view-switch tinted"><button aria-pressed="true">${icon('play', 14)} Run</button><button>${icon('pencil', 14)} Build</button></nav></div>
+    <div class="sect"><div class="label">Switches — the selected segment is a tint, never a fill</div>
+      <div class="row"><nav class="view-switch"><button aria-pressed="true">${icon('play', 14)} Run</button><button>${icon('pencil', 14)} Build</button></nav></div>
       <div class="row"><div class="depth-dial" role="radiogroup"><button aria-checked="true">Story</button><button aria-checked="false">Team</button><button aria-checked="false">Trace</button></div>
-      <div class="tabs"><button aria-pressed="true">All</button><button>Skills</button><button>Tools</button></div></div>
-      <div class="label">Second switch: the Law-2 tint variant (delivery.css), for screens that already have a gold primary button.</div></div>`,
+      <div class="tabs"><button aria-pressed="true">All</button><button>Skills</button><button>Tools</button></div></div></div>`,
 })
 
 card({

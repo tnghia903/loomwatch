@@ -92,10 +92,9 @@ code, kbd, pre { font-family: var(--font-mono); }
 kbd.key { font: 500 10px/1 var(--font-mono); border: 1px solid var(--color-hairline); border-radius: var(--r-xs); padding: 1px 4px; color: var(--color-ink-2); }
 @media (max-width: 767px) { .btn { height: 44px; padding: 0 var(--sp-4); } .iconbtn { width: 44px; height: 44px; } }
 
-/* Run | Build view switch (top-centre of the workspace header), as shipped
-   (prototype-workspace.css .workspace-view-tabs). The pressed segment is a solid
-   `accent` plane — see DESIGN.md "Open conflicts": with a gold primary button on
-   the same screen this breaks Law 2, and delivery.css's tint variant does not. */
+/* Run | Build view switch (top-centre of the workspace header; prototype-workspace.css
+   .workspace-view-tabs). The pressed segment is a tint with gold text and a faint gold ring, never
+   a fill: the screen's one gold fill belongs to its primary action (Law 2). */
 .view-switch {
   display: inline-flex; align-items: center; gap: 3px; padding: 3px; border-radius: 7px;
   background: color-mix(in srgb, var(--color-panel-solid) 86%, transparent);
@@ -103,9 +102,7 @@ kbd.key { font: 500 10px/1 var(--font-mono); border: 1px solid var(--color-hairl
   backdrop-filter: blur(24px) saturate(140%); -webkit-backdrop-filter: blur(24px) saturate(140%);
 }
 .view-switch button { display: inline-flex; justify-content: center; align-items: center; gap: 8px; min-width: 100px; height: 34px; padding: 6px 18px; border: 0; border-radius: 5px; background: transparent; color: var(--color-ink); font: 500 13px/1 var(--font-sans); }
-.view-switch button[aria-pressed="true"] { background: var(--color-accent); color: var(--color-ground); font-weight: 600; }
-/* The Law-2-compliant variant (delivery.css): tint + gold text, not a fill. */
-.view-switch.tinted button[aria-pressed="true"] { background: var(--color-accent-tint); color: var(--color-accent); }
+.view-switch button[aria-pressed="true"] { background: var(--color-accent-tint); color: var(--color-accent); font-weight: 600; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent); }
 
 /* Story · Team · Trace depth dial (loom.css). A selected segment is tint + gold text, never a fill. */
 .depth-dial { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: 8px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid); }

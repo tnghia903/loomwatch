@@ -52,7 +52,9 @@
 .lw-shell .workspace-chrome .chip-l2 { font-size:12px; }
 .lw-shell .workspace-view-tabs { border-radius:7px; padding:3px; gap:3px; }
 .lw-shell .workspace-view-tabs button { min-width:100px; height:34px; font-size:13px; }
-.lw-shell .workspace-view-tabs button[aria-pressed=true] { background:var(--color-accent); color:var(--color-ground); font-weight:600; }
+/* Selected is a tint, not a fill: the screen's one gold fill belongs to its primary action (Run team,
+   Review output), DESIGN_LANGUAGE §8 Law 2. Same selected-segment look as the depth dial. */
+.lw-shell .workspace-view-tabs button[aria-pressed=true] { background:var(--color-accent-tint); color:var(--color-accent); font-weight:600; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent); }
 .delivery-shown .delivery-lane { inset:64px 0 0; grid-template-columns:minmax(0,60.7fr) minmax(0,39.3fr); gap:0; background:transparent; }
 .delivery-shown .delivery-work { padding:0 30px 24px; background:transparent; border:0; border-radius:0; box-shadow:none; backdrop-filter:none; }
 .delivery-heading { min-height:115px; padding:26px 0 22px; margin-bottom:0; border-bottom:1px solid var(--color-hairline); }

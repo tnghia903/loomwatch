@@ -387,8 +387,10 @@ states; `.btn-head` 42 px for workspace header actions (*Run team*, *Review outp
 *Edit team*). `.btn-danger` turns red on hover; `.btn-danger-fill` exists only inside an inline
 confirm. `.link` is gold text. `.iconbtn` 32 px; pressed = gold glyph. Touch: all become 44 px.
 
-**Switches.** Run | Build view switch (header centre); Story · Team · Trace depth dial (tint +
-gold text, never a fill); underline tabs (gold 2 px underline).
+**Switches.** The Run | Build view switch (header centre) and the Story · Team · Trace depth dial
+mark the selected segment the same way: `accent-tint`, gold text and a faint gold ring, never a
+fill. That keeps the screen's one gold fill free for its primary action. Underline tabs use a gold
+2 px underline.
 
 **Fields.** 32 px inputs on `panel-solid`. Focus = gold border. **Unfinished is gold, wrong is
 red:** a required field never filled gets a gold border and a gold hint ("Required"); an invalid
@@ -540,7 +542,6 @@ These are real differences between `DESIGN_LANGUAGE.md` and `ui/`. A design shou
 
 | Topic | Spec says | Shipped |
 |---|---|---|
-| Run/Build switch | gold as a line or tint only (Law 2) | pressed segment is a solid `accent` plane, so Build and Run screens show two gold fills next to *Run team* / *Review output* (`prototype-workspace.css` overrides the tint rule in `delivery.css`) |
 | Serif scope | wordmark and first-run headline only | the product's story voice: headlines, team sentence, timeline narration, output headings |
 | Canvas card | 276 × 96, 14 px radius, 15 px name | 220 × 76, 7 px radius, 12 px name (result-led workspace prototype, 2026-09-14) |
 | e1 glass | panel @ 72–76%, blur 20 px | panel @ 66%, blur 24 px + saturate 150% + sheen |
