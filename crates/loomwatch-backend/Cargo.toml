@@ -35,7 +35,7 @@ toml = { version = "1", default-features = false, features = ["parse", "serde", 
 
 [dev-dependencies]
 futures-util = "0.3"
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
 http-body-util = "0.1"
 jsonschema = { version = "0.53.0", default-features = false }
 tower = { version = "0.5", features = ["util"] }
