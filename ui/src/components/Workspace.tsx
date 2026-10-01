@@ -194,7 +194,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const [scheduleEditorOpen, setScheduleEditorOpen] = useState(false)
   const [scheduleSaveAttempt, setScheduleSaveAttempt] = useState(0)
   const [scheduleSaved, setScheduleSaved] = useState(false)
-  const handledScheduleSaveRef = useRef(0)
+  const [handledScheduleSave, setHandledScheduleSave] = useState(0)
   const scheduleWasOpenRef = useRef(false)
   const [schedulePath, setSchedulePath] = useState<string | null>(null)
   const [selectedCapabilities, setSelectedCapabilities] = useState<ReadonlySet<string>>(new Set())
@@ -532,21 +532,22 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   // "Save schedule" means: write the four editable fields into the document model, regenerate the
   // YAML, re-run validation — and only then close. Closing unconditionally (as it used to) hid the
   // case where a schedule problem outlives the save, leaving the operator staring at a red node and
-  // a blocked composer with no explanation. The effect below reads the *re-validated* problems.
+  // a blocked composer with no explanation. The check below reads the *re-validated* problems.
   const saveSchedule = useCallback((schedule: NonNullable<typeof visibleSchedule>) => {
     doc.updateTeamSchedule(schedule)
     setScheduleSaveAttempt((attempt) => attempt + 1)
   }, [doc])
-  useEffect(() => {
-    if (scheduleSaveAttempt === 0 || handledScheduleSaveRef.current === scheduleSaveAttempt) return
-    handledScheduleSaveRef.current = scheduleSaveAttempt
+  // Answered once per attempt, in the render that carries the document the attempt produced — the
+  // same values an effect would have seen, without a second render to announce them.
+  if (scheduleSaveAttempt !== 0 && handledScheduleSave !== scheduleSaveAttempt) {
+    setHandledScheduleSave(scheduleSaveAttempt)
     if (scheduleProblems.length > 0) {
       setStatusAnnouncement(`Schedule still needs attention: ${scheduleProblems[0].message}`)
-      return
+    } else {
+      setScheduleSaved(true)
+      setStatusAnnouncement('Schedule updated. Save the team file to finish.')
     }
-    setScheduleSaved(true)
-    setStatusAnnouncement('Schedule updated. Save the team file to finish.')
-  }, [scheduleSaveAttempt, scheduleProblems])
+  }
   const showScheduleYaml = useCallback(() => {
     setScheduleEditorOpen(false)
     setYamlHighlightLine(yamlLineForPath(doc.yamlPreview, ['schedule']))

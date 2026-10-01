@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { useLayoutEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useComposerLayout } from './useComposerLayout'
@@ -111,6 +112,31 @@ describe('useComposerLayout', () => {
     await new Promise((resolve) => setTimeout(resolve, 900))
 
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')).toBe(false)
+  })
+
+  // The regression: the reset lived in the load effect, so the first committed render for a newly
+  // opened team still held the previous team's cards (and its error) under the new path.
+  it('shows another team empty, with no error carried over, from the first render that opens it', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 500, statusText: 'boom', json: async () => ({ error: 'boom' }) } as Response)
+    const committed: { path: string; nodes: number; error: string | null }[] = []
+    const view = renderHook(({ p }: { p: string }) => {
+      const state = useComposerLayout(p, ['collector'])
+      useLayoutEffect(() => { committed.push({ path: p, nodes: state.nodes.length, error: state.error }) })
+      return state
+    }, { initialProps: { p: 'first.yaml' } })
+    mountedViews.push(view)
+    await waitFor(() => expect(view.result.current.error).toBe('boom'))
+    act(() => { view.result.current.place({ kind: 'tool', name: 'memory', source: 'Codex' }, { x: 1, y: 1 }) })
+    expect(view.result.current.nodes).toHaveLength(1)
+
+    fetchMock.mockReturnValueOnce(new Promise(() => {}))
+    view.rerender({ p: 'second.yaml' })
+
+    const second = committed.filter((entry) => entry.path === 'second.yaml')
+    expect(second.length).toBeGreaterThan(0)
+    expect(second).toEqual(second.map(() => ({ path: 'second.yaml', nodes: 0, error: null })))
+    expect(view.result.current.loadedFor).toBeNull()
+    expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining('second.yaml'), expect.anything())
   })
 
   it('starts empty and saves nothing when no document is open', async () => {

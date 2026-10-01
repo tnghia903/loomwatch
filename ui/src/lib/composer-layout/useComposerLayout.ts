@@ -72,6 +72,15 @@ export function useComposerLayout(path: string | null, agentIds: readonly string
   // The last path whose sidecar was read successfully. Never reset on a path change: comparing it
   // to the *current* path is what makes it null while a read is in flight, with no second write.
   const [loaded, setLoaded] = useState<string | null>(null)
+  // Another team's canvas starts empty, with no error carried over, in the render that brings the
+  // new path. Resetting from the load effect instead (as this used to) handed the canvas one render
+  // of the previous team's cards under the new team's path.
+  const [layoutPath, setLayoutPath] = useState(path)
+  if (layoutPath !== path) {
+    setLayoutPath(path)
+    setLayout(EMPTY_LAYOUT)
+    setError(null)
+  }
   const dirty = useRef(false)
   // Read by the load below without making the fetch depend on the agent list, which changes
   // identity on every render that rebuilds the canvas. Declared before the load effect so it is
@@ -81,8 +90,6 @@ export function useComposerLayout(path: string | null, agentIds: readonly string
 
   useEffect(() => {
     dirty.current = false
-    setLayout(EMPTY_LAYOUT)
-    setError(null)
     if (!path) {
       loadedPath.current = null
       return
