@@ -2508,14 +2508,6 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         let mut without = scheduled_document(&Value::Null);
         without.as_object_mut().unwrap().remove("schedule");
         assert_eq!(schema_errors(&without), Vec::<String>::new());
-
-        // The example routine shipped with the repository validates as well.
-        let example = fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../teams/daily-news.yaml"),
-        )
-        .expect("read teams/daily-news.yaml");
-        let example: Value = serde_yaml::from_str(&example).expect("parse example");
-        assert_eq!(schema_errors(&example), Vec::<String>::new());
     }
 
     #[test]

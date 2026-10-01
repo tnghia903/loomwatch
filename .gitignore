@@ -4,6 +4,10 @@ target/
 .build/
 *.xcuserstate
 node_modules/
+
+# Team files are operator data: each operator keeps them under their own teams root (outside this
+# repository). `scripts/dev.sh` defaults to ./teams, so keep a local one out of version control.
+teams/
 *.swp
 *.swo
 
