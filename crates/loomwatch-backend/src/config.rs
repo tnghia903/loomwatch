@@ -1473,20 +1473,17 @@ edges:
         assert_eq!(past.next_fire(utc("2026-09-11T00:00:00Z")).unwrap(), None);
     }
 
-    /// `teams/daily-news.yaml` is a live, operator-editable file, not a fixture: the canvas can
-    /// rewrite its schedule at any time. Pin the shape the routine must keep — a daily fire in a
-    /// named zone — not the hour someone happens to have chosen, or saving a new time from the UI
-    /// turns this suite red.
+    /// The shape of the daily-news routine: a daily fire in a named zone, delivered to Notion.
+    /// Team files are operator data kept under each operator's own teams root, outside this
+    /// repository, so the routine is pinned here rather than read from a live file.
     #[test]
-    fn the_shipped_daily_news_routine_parses() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../teams/daily-news.yaml");
-        let team = TeamConfig::load(&path).expect("teams/daily-news.yaml is a valid routine");
-        let schedule = team.schedule.expect("daily-news declares a schedule");
-        let description = schedule.describe();
-        assert!(
-            description.starts_with("daily at ") && description.ends_with(" Asia/Singapore"),
-            "expected a daily Asia/Singapore routine, got {description}"
-        );
+    fn a_daily_routine_in_a_named_zone_parses() {
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nschedule:\n  cron: \"0 8 * * *\"\n  timezone: Asia/Singapore\n  prompt: \"Prepare the {{date}} digest.\"\n  enabled: true\n  deliver:\n    notion:\n      title: \"AI, tech & business news — {{date}}\"\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    budget:\n      limitUsd: 1\n",
+        )
+        .expect("a daily routine is a valid team");
+        let schedule = team.schedule.expect("the routine declares a schedule");
+        assert_eq!(schedule.describe(), "daily at 08:00 Asia/Singapore");
         assert_eq!(
             schedule.notion_title(),
             Some("AI, tech & business news — {{date}}")
