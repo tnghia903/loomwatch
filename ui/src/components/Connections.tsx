@@ -69,8 +69,8 @@ export default function Connections() {
             <p className="t-meta lw-settings-quiet">Your token is stored in this Mac's Keychain. Disconnecting removes LoomWatch's saved credentials; existing Notion pages remain.</p>
             <div className="e2 lw-settings-row">
               <span className="t-body-m">Destination page</span>
-              <span className="t-meta">{connection.destination ? connection.destination.title : 'Choose the page that will contain your digests.'}</span>
-              <span className="t-meta lw-settings-quiet">This saves a destination. It does not start a pipeline or create a daily schedule.</span>
+              <span className="t-meta">{connection.destination ? connection.destination.title : 'Choose the page your teams’ answers go under.'}</span>
+              <span className="t-meta lw-settings-quiet">Each answer becomes a new page under it. To send a team’s answers here, open the team, select its <strong>Team response</strong> on the canvas, and turn on <strong>Send every answer to Notion</strong>.</span>
             </div>
             <form className="lw-settings-search" onSubmit={(event) => { event.preventDefault(); void act(() => search()) }}>
               <label className="field"><span className="t-meta">Find a page</span><input className="input" value={query} maxLength={200} onChange={(event) => setQuery(event.target.value)} placeholder="Search by title, or leave blank" /></label>
@@ -94,6 +94,7 @@ export default function Connections() {
               <li><a className="link" href="https://www.notion.so/profile/integrations" target="_blank" rel="noreferrer">Create an internal Notion integration</a> for your workspace. Enable Read, Insert and Update content.</li>
               <li>In Notion, open your destination page, choose <strong>••• → Connections</strong>, and add that integration.</li>
               <li>Copy its integration token and paste it below. A workspace owner may need to create the integration for you.</li>
+              <li>Choose the page answers go under. Then, on a team’s canvas, select its <strong>Team response</strong> and turn on <strong>Send every answer to Notion</strong>.</li>
             </ol>
             <form className="field" onSubmit={(event) => { event.preventDefault(); const submitted = token; setToken(''); void act(async () => {
               setConnection(await request<Connection>('connection', 'POST', { token: submitted })); setNotice('Connected. Search for your destination page below.')

@@ -32,6 +32,11 @@ pub struct TeamConfig {
     /// the canonical reply (see `docs/decisions/0010-routines-and-notion-delivery.md`).
     #[serde(default)]
     pub schedule: Option<ScheduleConfig>,
+    /// Where every successful run's canonical reply goes, whoever started it (see
+    /// `docs/decisions/0038-send-the-team-response-to-notion.md`). A routine prefers its own
+    /// `schedule.deliver`.
+    #[serde(default)]
+    pub deliver: Option<DeliverConfig>,
     /// How much a stage pushes to the next one, and how much it may pull back.
     #[serde(default)]
     pub conversation: ConversationConfig,
@@ -326,12 +331,24 @@ pub struct ScheduleConfig {
     pub deliver: Option<DeliverConfig>,
 }
 
-/// Where a routine's canonical reply goes once the run succeeds.
+/// Where a run's canonical reply goes once the run succeeds: a routine's (`schedule.deliver`)
+/// or every run's (the top-level `deliver`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeliverConfig {
     #[serde(default)]
     pub notion: Option<NotionDeliverConfig>,
+}
+
+impl DeliverConfig {
+    /// The Notion title template, or `default` when the block names none; `None` when this
+    /// block does not deliver to Notion.
+    #[must_use]
+    pub fn notion_title<'a>(&'a self, default: &'a str) -> Option<&'a str> {
+        self.notion
+            .as_ref()
+            .map(|notion| notion.title.as_deref().unwrap_or(default))
+    }
 }
 
 /// Notion delivery: a child page of the connected destination, titled from a template.
@@ -343,8 +360,14 @@ pub struct NotionDeliverConfig {
     pub title: Option<String>,
 }
 
-/// Title a delivered page gets when the team file names none.
+/// Title a routine's delivered page gets when the team file names none. One page a day: the
+/// duplicate-title guard turns a second fire on the same date into `skipped`.
 pub const DEFAULT_NOTION_TITLE: &str = "{{team}} — {{date}}";
+
+/// Title every run's delivered page gets (the top-level `deliver`) when the team file names
+/// none. It carries the minute, because a person running a team twice in a day means two
+/// answers, not a duplicate.
+pub const DEFAULT_RUN_NOTION_TITLE: &str = "{{team}} — {{date}} {{time}}";
 
 /// What kind of node an `agents[]` entry is.
 ///
@@ -741,11 +764,7 @@ impl ScheduleConfig {
     /// when the block names none); `None` when the routine delivers nowhere.
     #[must_use]
     pub fn notion_title(&self) -> Option<&str> {
-        self.deliver
-            .as_ref()?
-            .notion
-            .as_ref()
-            .map(|notion| notion.title.as_deref().unwrap_or(DEFAULT_NOTION_TITLE))
+        self.deliver.as_ref()?.notion_title(DEFAULT_NOTION_TITLE)
     }
 
     /// The first instant strictly after `after` at which the schedule fires, in UTC.
@@ -762,18 +781,11 @@ impl ScheduleConfig {
         })
     }
 
-    /// Expand `{{date}}`, `{{weekday}}` and `{{team}}` for a fire at `at`, reading the
-    /// calendar in the schedule's zone. A zone that does not parse falls back to local.
+    /// Expand `{{date}}`, `{{weekday}}`, `{{time}}` and `{{team}}` for a fire at `at`, reading
+    /// the calendar in the schedule's zone. A zone that does not parse falls back to local.
     #[must_use]
     pub fn expand(&self, template: &str, team_name: &str, at: DateTime<Utc>) -> String {
-        let (date, weekday) = match self.zone().ok().flatten() {
-            Some(zone) => calendar_stamp(&at.with_timezone(&zone)),
-            None => calendar_stamp(&at.with_timezone(&Local)),
-        };
-        template
-            .replace("{{date}}", &date)
-            .replace("{{weekday}}", &weekday)
-            .replace("{{team}}", team_name)
+        expand_template(template, team_name, at, self.zone().ok().flatten())
     }
 
     /// A one-line human summary — `daily at 08:00 Asia/Singapore`, `weekdays at 09:30
@@ -803,14 +815,36 @@ fn next_in_zone<Z: TimeZone>(
         .map(|next| next.with_timezone(&Utc))
 }
 
-fn calendar_stamp<Z: TimeZone>(at: &DateTime<Z>) -> (String, String)
+fn calendar_stamp<Z: TimeZone>(at: &DateTime<Z>) -> (String, String, String)
 where
     Z::Offset: Display,
 {
     (
         at.format("%Y-%m-%d").to_string(),
         at.format("%A").to_string(),
+        at.format("%H:%M").to_string(),
     )
+}
+
+/// Expand a schedule prompt or page-title template for `at`: `{{date}}` (YYYY-MM-DD),
+/// `{{weekday}}` (the day name), `{{time}}` (24-hour HH:MM) in `zone` — the daemon's local zone
+/// when `None` — and `{{team}}`.
+#[must_use]
+pub fn expand_template(
+    template: &str,
+    team_name: &str,
+    at: DateTime<Utc>,
+    zone: Option<Tz>,
+) -> String {
+    let (date, weekday, time) = match zone {
+        Some(zone) => calendar_stamp(&at.with_timezone(&zone)),
+        None => calendar_stamp(&at.with_timezone(&Local)),
+    };
+    template
+        .replace("{{date}}", &date)
+        .replace("{{weekday}}", &weekday)
+        .replace("{{time}}", &time)
+        .replace("{{team}}", team_name)
 }
 
 /// Turn the accepted forms into the `cron` crate's 6/7-field form. A 5-field expression
@@ -973,7 +1007,41 @@ impl TeamConfig {
         if let Some(schedule) = &team.schedule {
             schedule.validate()?;
         }
+        if let Some(title) = team
+            .deliver
+            .as_ref()
+            .and_then(|deliver| deliver.notion_title(DEFAULT_RUN_NOTION_TITLE))
+            && title.trim().is_empty()
+        {
+            bail!("deliver.notion.title must not be empty");
+        }
         Ok(team)
+    }
+
+    /// The Notion page title a run's reply is published under, expanded for `at`; `None` when
+    /// the run delivers nowhere. A routine (`scheduled`) uses its own `schedule.deliver` when it
+    /// has one; every run falls back to the top-level `deliver`. Dates are read in the schedule's
+    /// zone when the team has one, so a routine and a hand-started run name the same day alike.
+    #[must_use]
+    pub fn notion_delivery_title(
+        &self,
+        scheduled: bool,
+        team_name: &str,
+        at: DateTime<Utc>,
+    ) -> Option<String> {
+        let routine = scheduled
+            .then(|| self.schedule.as_ref()?.notion_title())
+            .flatten();
+        let template = routine.or_else(|| {
+            self.deliver
+                .as_ref()?
+                .notion_title(DEFAULT_RUN_NOTION_TITLE)
+        })?;
+        let zone = self
+            .schedule
+            .as_ref()
+            .and_then(|schedule| schedule.zone().ok().flatten());
+        Some(expand_template(template, team_name, at, zone))
     }
 
     /// Where a review stop may and may not sit (`docs/TEAM_MEMORY.md`, "Rules that keep this safe").
@@ -1537,6 +1605,64 @@ edges:
             .schedule
             .unwrap();
         assert_eq!(past.next_fire(utc("2026-09-11T00:00:00Z")).unwrap(), None);
+    }
+
+    /// ADR 0038: the top-level `deliver` covers every run, with a per-minute default title; a
+    /// routine's own `schedule.deliver` wins for scheduled runs only; dates follow the schedule's
+    /// zone when there is one; and a blank title is refused like the routine's.
+    #[test]
+    fn team_delivery_covers_every_run_and_a_routine_keeps_its_own_title() {
+        let at = utc("2026-09-10T23:30:00Z");
+        let team = |extra: &str| {
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nentrypoint: a\n{extra}agents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n"
+            ))
+        };
+        let plain = team("").expect("no deliver block");
+        assert_eq!(plain.deliver, None);
+        assert_eq!(plain.notion_delivery_title(false, "Desk", at), None);
+        assert_eq!(plain.notion_delivery_title(true, "Desk", at), None);
+
+        let every = team("deliver:\n  notion: {}\nschedule:\n  cron: \"0 8 * * *\"\n  timezone: Asia/Singapore\n  prompt: go\n")
+            .expect("team-level delivery");
+        // 23:30 UTC on the 10th is 07:30 on the 11th in Singapore, for both kinds of run.
+        assert_eq!(
+            every.notion_delivery_title(false, "Desk", at).as_deref(),
+            Some("Desk — 2026-09-11 07:30")
+        );
+        assert_eq!(
+            every.notion_delivery_title(true, "Desk", at).as_deref(),
+            Some("Desk — 2026-09-11 07:30"),
+            "a routine without its own deliver uses the team's"
+        );
+
+        let both = team("deliver:\n  notion:\n    title: \"Answer {{weekday}} {{time}}\"\nschedule:\n  cron: \"0 8 * * *\"\n  timezone: Asia/Singapore\n  prompt: go\n  deliver:\n    notion:\n      title: \"Digest — {{date}}\"\n")
+            .expect("both blocks");
+        assert_eq!(
+            both.notion_delivery_title(true, "Desk", at).as_deref(),
+            Some("Digest — 2026-09-11")
+        );
+        assert_eq!(
+            both.notion_delivery_title(false, "Desk", at).as_deref(),
+            Some("Answer Friday 07:30")
+        );
+
+        let routine_only =
+            team("schedule:\n  cron: \"0 8 * * *\"\n  prompt: go\n  deliver:\n    notion: {}\n")
+                .expect("routine-only delivery");
+        assert!(
+            routine_only
+                .notion_delivery_title(true, "Desk", at)
+                .is_some()
+        );
+        assert_eq!(
+            routine_only.notion_delivery_title(false, "Desk", at),
+            None,
+            "a routine's delivery is not every run's"
+        );
+
+        let blank = team("deliver:\n  notion:\n    title: \" \"\n").expect_err("blank title");
+        assert!(format!("{blank:#}").contains("deliver.notion.title must not be empty"));
     }
 
     /// The shape of the daily-news routine: a daily fire in a named zone, delivered to Notion.

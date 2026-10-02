@@ -58,6 +58,13 @@ properties:
       Optional routine: run this team on a cron schedule with a fixed prompt and deliver
       the canonical reply to the operator's connected destination.
     $ref: "#/$defs/Schedule"
+  deliver:
+    description: >-
+      Where every successful run's answer goes, whoever started it — a run from the canvas, a
+      routine, or Ask LoomWatch. With `notion`, the answer becomes a new child page of the
+      Notion destination chosen in Connections; the default title is "{{team}} — {{date}}
+      {{time}}". A routine's own `schedule.deliver` wins for scheduled runs. See ADR 0038.
+    $ref: "#/$defs/Deliver"
   conversation:
     description: >-
       How much a pipeline stage hands forward, and how much it may ask back. Defaults suit a
@@ -329,8 +336,9 @@ $defs:
         minLength: 1
       prompt:
         description: >-
-          Prompt template. {{date}} expands to YYYY-MM-DD and {{weekday}} to the day name in
-          the schedule's zone at fire time; {{team}} to the team name.
+          Prompt template. {{date}} expands to YYYY-MM-DD, {{weekday}} to the day name and
+          {{time}} to the 24-hour HH:MM in the schedule's zone at fire time; {{team}} to the team
+          name.
         type: string
         minLength: 1
       enabled:
@@ -338,18 +346,26 @@ $defs:
         type: boolean
         default: true
       deliver:
+        description: >-
+          Where this routine's answer goes. Overrides the team's top-level `deliver` for scheduled
+          runs; the default title here is "{{team}} — {{date}}", one page a day.
+        $ref: "#/$defs/Deliver"
+
+  Deliver:
+    type: object
+    additionalProperties: false
+    properties:
+      notion:
+        description: Publish the reply as a child page of the connected destination.
         type: object
         additionalProperties: false
         properties:
-          notion:
-            description: Publish the reply as a child page of the connected destination.
-            type: object
-            additionalProperties: false
-            properties:
-              title:
-                description: Page title template with the same placeholders; default "{{team}} — {{date}}".
-                type: string
-                minLength: 1
+          title:
+            description: >-
+              Page title template. {{date}} (YYYY-MM-DD), {{weekday}}, {{time}} (24-hour HH:MM) and
+              {{team}} expand when the page is made.
+            type: string
+            minLength: 1
 
   Identifier:
     type: string

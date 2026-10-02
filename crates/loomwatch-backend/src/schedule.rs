@@ -24,17 +24,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::api::{ApiError, normalized_relative_path, resolve_existing_team_path};
 use crate::archive::EventArchive;
+use crate::config::DEFAULT_RUN_NOTION_TITLE;
 use crate::config::{ScheduleConfig, TeamConfig};
-use crate::notion::{PublishError, Publisher};
-use crate::runs::{self, Delivery, DeliveryStatus, RunRecord, RunRegistry, RunStatus, RunTrigger};
+use crate::notion::Publisher;
+use crate::runs::{self, Delivery, RunRecord, RunRegistry, RunStatus, RunTrigger};
 use crate::watch_api::{ARCHIVE_DISABLED_MESSAGE, local_evidence};
 
 /// How often the teams root is rescanned and due routines are fired.
 const TICK: Duration = Duration::from_secs(30);
-/// How often a delivery task looks for its run to finish.
+/// How often a routine's follower looks for its run to finish and its reply to be delivered.
 const DELIVERY_POLL: Duration = Duration::from_millis(1000);
-/// Delivery message when the duplicate-title guard skipped publishing.
-pub(crate) const DUPLICATE_MESSAGE: &str = "A page with this title already exists.";
+/// How long a routine's follower waits for a succeeded run's delivery before it records the
+/// run without one. Publishing is bounded by the Notion client's own timeouts; this only stops
+/// a follower from outliving a delivery that will never come.
+const DELIVERY_WAIT: Duration = Duration::from_secs(600);
 
 /// Why a routine cannot, or did not, fire.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,29 +94,36 @@ impl Entry {
             problem: message.map(Problem::Parse),
         };
         if let Some(schedule) = schedule {
-            entry.copy_fields(&schedule);
+            entry.copy_fields(&schedule, None);
         }
         entry
     }
 
-    /// Mirror the block's text fields (parsed or not) so the API can show them.
-    fn copy_fields(&mut self, schedule: &ScheduleConfig) {
+    /// Mirror the block's text fields (parsed or not) so the API can show them. `team_title`
+    /// is the team's own `deliver` template, which a routine without `schedule.deliver` uses.
+    fn copy_fields(&mut self, schedule: &ScheduleConfig, team_title: Option<&str>) {
         self.cron.clone_from(&schedule.cron);
         self.timezone.clone_from(&schedule.timezone);
         self.prompt.clone_from(&schedule.prompt);
         self.enabled = schedule.enabled;
-        self.notion_title = schedule.notion_title().map(str::to_owned);
+        self.notion_title = schedule.notion_title().or(team_title).map(str::to_owned);
     }
 
     /// Adopt a validated schedule: recompute the next fire only when the timing changed
     /// (or the entry had no valid schedule before), so an edit to the prompt alone does not
     /// move a pending fire.
-    fn adopt(&mut self, team_name: &str, schedule: ScheduleConfig, now: DateTime<Utc>) {
+    fn adopt(
+        &mut self,
+        team_name: &str,
+        schedule: ScheduleConfig,
+        team_title: Option<&str>,
+        now: DateTime<Utc>,
+    ) {
         let timing_changed = self.schedule.as_ref().is_none_or(|current| {
             current.cron != schedule.cron || current.timezone != schedule.timezone
         });
         team_name.clone_into(&mut self.team_name);
-        self.copy_fields(&schedule);
+        self.copy_fields(&schedule, team_title);
         if timing_changed {
             self.next_at = schedule.next_fire(now).ok().flatten();
         }
@@ -218,6 +228,8 @@ enum Scanned {
     Scheduled {
         team_name: String,
         schedule: ScheduleConfig,
+        /// The team's own `deliver` title template, for a routine without `schedule.deliver`.
+        team_title: Option<String>,
     },
     /// Has a `schedule` key but does not load; `raw` is the block as written when it is
     /// at least structurally readable.
@@ -282,6 +294,11 @@ fn inspect(path: &Path) -> Scanned {
             Some(schedule) => Scanned::Scheduled {
                 team_name: display_name(&team.name, path),
                 schedule,
+                team_title: team
+                    .deliver
+                    .as_ref()
+                    .and_then(|deliver| deliver.notion_title(DEFAULT_RUN_NOTION_TITLE))
+                    .map(str::to_owned),
             },
             None => Scanned::Unscheduled,
         },
@@ -331,11 +348,12 @@ fn reconcile(
             Scanned::Scheduled {
                 team_name,
                 schedule,
+                team_title,
             } => {
                 entries
                     .entry(key.clone())
                     .or_insert_with(|| Entry::new(team_name.clone(), None, None))
-                    .adopt(&team_name, schedule, now);
+                    .adopt(&team_name, schedule, team_title.as_deref(), now);
                 keep.push(key);
             }
             Scanned::Broken {
@@ -348,7 +366,7 @@ fn reconcile(
                     .or_insert_with(|| Entry::new(team_name.clone(), None, None));
                 entry.team_name = team_name;
                 if let Some(raw) = &raw {
-                    entry.copy_fields(raw);
+                    entry.copy_fields(raw, None);
                 }
                 entry.schedule = None;
                 entry.next_at = None;
@@ -399,7 +417,9 @@ fn stamp(at: DateTime<Utc>) -> String {
     at.to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
-/// The routine registry plus the publisher deliveries go through.
+/// The routine registry plus the publisher deliveries go through. The publisher is installed on
+/// the run registry, which publishes every run's reply (ADR 0038); the scheduler only follows a
+/// routine's run to report the outcome on the routine.
 #[derive(Clone)]
 pub struct Scheduler {
     entries: Arc<RwLock<BTreeMap<String, Entry>>>,
@@ -418,6 +438,8 @@ pub fn spawn(
     teams_root: PathBuf,
 ) -> anyhow::Result<Scheduler> {
     let scheduler = Scheduler::with_publisher(Publisher::new()?);
+    // Every run delivers through the registry (ADR 0038), so the one publisher lives there.
+    registry.set_publisher(scheduler.publisher.clone());
     if let Some(archive) = archive {
         let teams_root = fs::canonicalize(&teams_root).unwrap_or(teams_root);
         let ticking = scheduler.clone();
@@ -530,7 +552,6 @@ impl Scheduler {
                     registry.clone(),
                     plan.key,
                     record.run_id.clone(),
-                    plan.title,
                 ));
             }
             Err(error) => eprintln!("schedule: {}: launch refused: {}", plan.key, error.message),
@@ -581,7 +602,14 @@ impl Scheduler {
                     .and_then(|run_id| registry.get(run_id))
                     .map_or(entry.last_status, |record| Some(record.status)),
                 last_fired_at: entry.last_fired_at.clone(),
-                last_delivery: entry.last_delivery.clone(),
+                // Live too: the run's delivery lands on the run first, and the follower that
+                // copies it here polls.
+                last_delivery: entry
+                    .last_run_id
+                    .as_deref()
+                    .and_then(|run_id| registry.get(run_id))
+                    .and_then(|record| record.delivery)
+                    .or_else(|| entry.last_delivery.clone()),
                 deliver: entry.notion_title.clone().map(|title| DeliverSnapshot {
                     notion: NotionSnapshot { title },
                 }),
@@ -591,71 +619,33 @@ impl Scheduler {
     }
 }
 
-/// Wait for a scheduled run to finish, publish its reply when it succeeded and the
-/// routine delivers to Notion, and record the outcome on the run and the routine.
+/// Wait for a scheduled run to finish and, when the run publishes its reply (it succeeded and
+/// was launched with a delivery title), for that delivery; then record the outcome on the
+/// routine. The run registry does the publishing, exactly as for a run started by hand.
 async fn deliver_when_finished(
     scheduler: Scheduler,
     registry: RunRegistry,
     key: String,
     run_id: String,
-    title: Option<String>,
 ) {
+    let mut finished_at: Option<tokio::time::Instant> = None;
     let record = loop {
         match registry.get(&run_id) {
-            Some(record) if record.status.is_terminal() => break record,
+            Some(record) if record.status.is_terminal() => {
+                let finished = *finished_at.get_or_insert_with(tokio::time::Instant::now);
+                let awaiting_delivery = record.status == RunStatus::Succeeded
+                    && record.deliver_title.is_some()
+                    && record.delivery.is_none();
+                if !awaiting_delivery || finished.elapsed() >= DELIVERY_WAIT {
+                    break record;
+                }
+                tokio::time::sleep(DELIVERY_POLL).await;
+            }
             Some(_) => tokio::time::sleep(DELIVERY_POLL).await,
             None => return,
         }
     };
-    let reply = record
-        .reply
-        .as_deref()
-        .filter(|reply| !reply.trim().is_empty());
-    let delivery = match (record.status, title, reply) {
-        (RunStatus::Succeeded, Some(title), Some(reply)) => {
-            Some(publish_outcome(&scheduler.publisher, &title, reply).await)
-        }
-        _ => None,
-    };
-    if let Some(delivery) = &delivery {
-        let _known = registry.set_delivery(&run_id, delivery.clone());
-        if let Err(error) = registry.persist(&run_id).await {
-            eprintln!("warning: could not persist run {run_id}: {error}");
-        }
-        println!(
-            "schedule: run {run_id} delivery {}: {}{}",
-            serde_json::to_value(delivery.status)
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_owned))
-                .unwrap_or_default(),
-            delivery.message,
-            delivery
-                .url
-                .as_deref()
-                .map_or_else(String::new, |url| format!(" {url}"))
-        );
-    }
-    scheduler.record_outcome(&key, &run_id, record.status, delivery);
-}
-
-async fn publish_outcome(publisher: &Publisher, title: &str, markdown: &str) -> Delivery {
-    match publisher.publish(title, markdown).await {
-        Ok(page) => Delivery::notion(
-            DeliveryStatus::Published,
-            Some(page.url),
-            Some(page.page_id),
-            format!("Published {title:?}."),
-        ),
-        Err(PublishError::Duplicate { page_id, url }) => Delivery::notion(
-            DeliveryStatus::Skipped,
-            Some(url),
-            Some(page_id),
-            DUPLICATE_MESSAGE.to_owned(),
-        ),
-        Err(PublishError::Failed(message)) => {
-            Delivery::notion(DeliveryStatus::Failed, None, None, message)
-        }
-    }
+    scheduler.record_outcome(&key, &run_id, record.status, record.delivery);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -678,6 +668,8 @@ pub fn router(
     teams_root: PathBuf,
 ) -> Router {
     let teams_root = fs::canonicalize(&teams_root).unwrap_or(teams_root);
+    // Already done by `spawn` in the daemon; a router built on its own (tests) still needs it.
+    registry.set_publisher(scheduler.publisher.clone());
     Router::new()
         .route("/api/schedules", get(list_schedules))
         .route("/api/schedules/run", post(run_now))
@@ -785,6 +777,7 @@ mod tests {
 
     use super::*;
     use crate::notion::NOT_CONNECTED_MESSAGE;
+    use crate::runs::DeliveryStatus;
     use crate::runs::tests::{COMPLETING_HARNESS, SLEEPING_HARNESS, TeamsDir};
 
     fn utc(rfc3339: &str) -> DateTime<Utc> {
@@ -812,6 +805,7 @@ mod tests {
         Scanned::Scheduled {
             team_name: name.to_owned(),
             schedule,
+            team_title: None,
         }
     }
 

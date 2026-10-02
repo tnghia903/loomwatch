@@ -1,5 +1,5 @@
 import { summarizeSchedule } from '../team-file/schedule'
-import type { ScheduleConfig } from '../team-file/types'
+import type { DeliverConfig, ScheduleConfig } from '../team-file/types'
 
 /**
  * The team, said as one sentence.
@@ -37,6 +37,8 @@ export interface SentenceInput {
   entrypoint: string
   responder: string | null
   schedule?: Partial<ScheduleConfig> | null
+  /** The team-wide `deliver` block (ADR 0038): every answer goes there, not only scheduled ones. */
+  deliver?: DeliverConfig | null
 }
 
 /** First match wins; the words are what the agent's name or instructions say it does. The second
@@ -157,8 +159,9 @@ export function teamSentence(input: SentenceInput): SentencePart[] {
     })
   }
 
-  const notion = input.schedule?.deliver && 'notion' in input.schedule.deliver
-  parts.push({ kind: 'text', text: notion ? '. Scheduled answers go to Notion.' : '.' })
+  const everyAnswer = Boolean(input.deliver?.notion)
+  const scheduledAnswers = Boolean(input.schedule?.deliver && 'notion' in input.schedule.deliver)
+  parts.push({ kind: 'text', text: everyAnswer ? '. Answers also go to Notion.' : scheduledAnswers ? '. Scheduled answers go to Notion.' : '.' })
   if (input.responder && byId.has(input.responder) && input.edges.length > 0 && reachable.has(input.responder)) {
     const finalStep = input.steps.filter((step) => reachable.has(step.id)).at(-1)
     if (finalStep && finalStep.id !== input.responder) {

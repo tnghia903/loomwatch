@@ -167,9 +167,13 @@ Response (`202 Accepted`):
   event is archived; the run record is the source of truth for terminal classification.
 - The registry is in memory: a daemon restart forgets `GET /api/runs`, while the archive
   keeps every event and `GET /api/sessions` still lists the session with its `prompt`.
-- `trigger` is `manual` for `POST /api/runs` and `schedule` for routine runs (below);
-  `delivery` stays `null` for manual runs and for routine runs until their delivery is
-  decided.
+- `trigger` is `manual` for `POST /api/runs` and `schedule` for routine runs (below).
+  `deliverTitle` is present when the run will publish its answer once it succeeds: the team's
+  top-level `deliver`, or a routine's `schedule.deliver` (ADR 0038). It is fixed at launch and not
+  stored. `delivery` stays `null` until a delivery is decided, automatically after such a run
+  succeeds, or by `POST /api/runs/{id}/deliver`, which sends any finished answer now: an optional
+  `{ "title": "…" }`, `200` with the record (a refusal is recorded in `delivery`), 404 for an
+  unknown run, 409 while it is live or already sending, 422 without an answer.
 
 ## Routines
 
@@ -189,8 +193,12 @@ schedule:
       title: "AI, tech & business news — {{date}}"   # optional, default "{{team}} — {{date}}"
 ```
 
-- **Templates** in `prompt` and `title`: `{{date}}` → `YYYY-MM-DD` and `{{weekday}}` →
-  `Thursday`, both read in the schedule's zone at fire time; `{{team}}` → the team `name`.
+- **Templates** in `prompt` and `title`: `{{date}}` → `YYYY-MM-DD`, `{{weekday}}` →
+  `Thursday` and `{{time}}` → `08:00`, all read in the schedule's zone at fire time; `{{team}}` →
+  the team `name`.
+- **Delivery** for a routine is `schedule.deliver` when present, else the team's top-level
+  `deliver` (ADR 0038). The run registry publishes it like any other run's, and the routine
+  reports the outcome as `lastDelivery`.
 - **Cron** uses the standard 5-field numbering (`0` or `7` = Sunday, so `1-5` is Mon–Fri;
   names such as `Mon-Fri` work too). A 6/7-field expression is handed to the `cron` crate
   as written, where `1` = Sunday. `@daily`-style shorthands are accepted.

@@ -174,10 +174,11 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
 }
 
 export function BuildOutputCard({ data, selected }: NodeProps<OutputNode>) {
-  return <article className={`build-node kind-output planned ${selected ? 'selected' : ''}`} aria-label="Output, No run yet.">
+  return <article className={`build-node kind-output planned ${selected ? 'selected' : ''}`} aria-label={`Output, No run yet.${data.sendsTo ? ` Also sent to ${data.sendsTo}.` : ''}`}>
     <CardPorts output={false} connectIn={data.configurable === true} />
     <span className="build-node-icon"><FileText size={18} /></span>
-    <div><span className="node-kind">Output</span><strong>{data.outputName || 'Team response'}</strong><small>{data.outputFormat || `Produced by ${data.producerLabel}`}</small></div>
+    <div><span className="node-kind">Output</span><strong>{data.outputName || 'Team response'}</strong><small>{data.outputFormat || `Produced by ${data.producerLabel}`}</small>
+      {data.sendsTo && <small className="build-output-sends">Also sent to {data.sendsTo}</small>}</div>
     <span className="visually-hidden">{data.placeholder}</span>
   </article>
 }

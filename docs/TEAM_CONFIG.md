@@ -27,6 +27,12 @@ depend on the document as a whole:
   must parse (standard 5-field form with `0`/`7` = Sunday, or the 6/7-field seconds form),
   `timezone` must be an IANA zone when present, and `prompt` must not be blank. Loaders
   reject the document otherwise. See `WATCH.md` → *Routines* and ADR 0010.
+- An optional top-level `deliver` block (`$defs.Deliver`) sends every successful run's answer
+  somewhere besides the Run view, whoever started the run. Today that is `notion: {title?}`, a new
+  child page of the Notion destination chosen in Connections. The default title is
+  `{{team}} — {{date}} {{time}}`, and a blank `title` is rejected. A routine's own
+  `schedule.deliver` wins for scheduled runs. The canvas writes it from the Team response's
+  **Send every answer to Notion**. See `NOTION.md` and ADR 0038.
 - An empty `edges` array selects team mode: the entrypoint receives the initial goal and
   self-organizes. A non-empty `edges` array selects pipeline mode: the backend executes the
   graph, and `entrypoint` must be a source node with no incoming configured edge.

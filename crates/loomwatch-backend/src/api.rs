@@ -3588,6 +3588,34 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         assert_eq!(schema_errors(&without), Vec::<String>::new());
     }
 
+    /// ADR 0038: the team-wide `deliver` block shares the routine's shape, refusals included.
+    #[test]
+    fn team_schema_accepts_a_team_wide_deliver_block_of_the_same_shape() {
+        let with = |deliver: Value| {
+            let mut document = scheduled_document(&Value::Null);
+            let object = document.as_object_mut().unwrap();
+            object.remove("schedule");
+            object.insert("deliver".to_owned(), deliver);
+            schema_errors(&document)
+        };
+        assert_eq!(with(json!({"notion": {}})), Vec::<String>::new());
+        assert_eq!(
+            with(json!({"notion": {"title": "{{team}} — {{date}} {{time}}"}})),
+            Vec::<String>::new()
+        );
+        for (deliver, expected) in [
+            (json!({"slack": {}}), "Additional properties"),
+            (json!({"notion": {"page": "x"}}), "Additional properties"),
+            (json!({"notion": {"title": ""}}), "shorter than 1"),
+        ] {
+            let errors = with(deliver.clone());
+            assert!(
+                errors.iter().any(|error| error.contains(expected)),
+                "{deliver}: expected an error mentioning {expected:?}, got {errors:?}"
+            );
+        }
+    }
+
     #[test]
     fn team_schema_rejects_malformed_schedule_blocks() {
         for (schedule, expected) in [

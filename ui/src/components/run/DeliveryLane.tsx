@@ -32,6 +32,7 @@ import { StripLine } from './StoryNodes'
 import { useCanvasActions } from '../canvas/CanvasActionsContext'
 import { buildReceipt } from '../../lib/story/receipt'
 import { RunReceipt } from './RunReceipt'
+import { NotionSend, type NotionSendRun } from './NotionSend'
 import { WeftBar } from './WeftBar'
 import { markState } from '../../lib/story/mark'
 import { AgentMark } from '../ui/AgentMark'
@@ -52,6 +53,10 @@ export interface DeliveryLaneProps extends RunColumnProps {
   onAllow?: (agentId: string, key: AllowSwitch) => void
   /** Leave this finished run for a blank request, for a task that is not a follow-up of it. */
   onNewRun?: () => void
+  /** The run's record, for where its answer went (ADR 0038). Absent for a plan or a replay the daemon forgot. */
+  run?: NotionSendRun | null
+  /** A plan only: where the answer will also go, from the team file (ADR 0038). */
+  sendsTo?: string | null
   /**
    * A stage to bring into view, raised from outside the lane — today, the operator clicking an
    * Attention alert to reach the agent it belongs to. It is a request, not the selection itself:
@@ -101,6 +106,8 @@ export function DeliveryLane({
   onAllow,
   onHistory,
   onNewRun,
+  run = null,
+  sendsTo = null,
   focusAgentId = null,
 }: DeliveryLaneProps) {
   // The answer is what this view exists for; fetch its renderer before the first token arrives.
@@ -756,6 +763,9 @@ export function DeliveryLane({
               ? `Written by ${agents.find((node) => node.id === output.producer)?.data.agent.name ?? output.producerLabel}`
               : `Assigned to ${output.producerLabel}`}
           </p>
+          {run && !planned && terminal && <NotionSend run={run} answered={Boolean(output.text) && !output.streaming} />}
+          {planned && sendsTo && <p className="notion-send-plan">Also sent to {sendsTo} once the team answers.</p>}
+          {!planned && !terminal && run?.deliverTitle && <p className="notion-send-plan">Goes to Notion as “{run.deliverTitle}” once the team answers.</p>}
           {/* A file the reply names is the deliverable: up here, ready to open, not buried as a path. */}
           {deliveredFiles.length > 0 && (
             <div className="delivery-files" role="group" aria-label="Files in this reply">

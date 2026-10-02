@@ -94,6 +94,7 @@ import { teamSentence } from '../lib/story/teamSentence'
 import { depthForZoom } from '../lib/story/depth'
 import { WorkspaceMenu } from './workspace/WorkspaceMenu'
 import { useAsk } from '../lib/ask/useAsk'
+import { DEFAULT_ROUTINE_NOTION_TITLE } from '../lib/notion/connection'
 import type { AskContext } from '../lib/ask/client'
 import { AskButton } from './ask/AskButton'
 import type { CardActions } from './ask/AskCards'
@@ -291,7 +292,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     entrypoint: doc.entrypoint ?? '',
     responder: responderFromDoc,
     schedule: doc.teamSchedule,
-  }), [doc.nodes, doc.edges, doc.pipelineSteps, doc.entrypoint, responderFromDoc, doc.teamSchedule])
+    deliver: doc.teamDeliver,
+  }), [doc.nodes, doc.edges, doc.pipelineSteps, doc.entrypoint, responderFromDoc, doc.teamSchedule, doc.teamDeliver])
   const storyShown = storyParts.length > 0
 
   /**
@@ -814,6 +816,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     provenanceOpen, composerText, visibleSchedule, scheduleInvalid: scheduleProblems.length > 0, scheduleEditorOpen, onOpenSchedule: openScheduleEditor,
     capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityCards, removeCapabilityEdge,
     harnesses, outputPlan: composerLayout.output, appProblems: appProblemByAgent,
+    sendsTo: doc.teamDeliver?.notion ? 'Notion' : null,
   })
 
   // Agents an Ask proposal adds or changes wear its dashes until it is applied (styles/ask.css).
@@ -1951,6 +1954,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             appProblems={appProblemByAgent}
             onHistory={() => setHistoryOpen(true)}
             onNewRun={() => { closeRun(); setRunSetup(true); window.setTimeout(focusComposer, 0) }}
+            run={record && !runSetup ? record : null}
+            sendsTo={runSetup && doc.teamDeliver?.notion ? 'Notion' : null}
             harnessLabels={new Map(doc.nodes.map((node) => [node.id, appLabelForAgent(node.data.agent, harnesses)]))}
             pipeline={(record?.mode ?? doc.mode) === 'pipeline'}
             linearPipeline={doc.edges.length === doc.nodes.length - 1 && doc.nodes.every((node) => doc.edges.filter((edge) => edge.source === node.id).length <= 1 && doc.edges.filter((edge) => edge.target === node.id).length <= 1)}
@@ -2090,6 +2095,17 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             output={composerLayout.output} onOutputChange={composerLayout.setOutput} saving={composerLayout.saving}
             responder={responderFromDoc} agents={doc.nodes} canChooseResponder={editable && doc.mode === 'pipeline'}
             onPromoteResponder={(id) => doc.promoteResponder(id)} onClose={() => setOutputEditorOpen(false)}
+            delivery={{
+              deliver: doc.teamDeliver,
+              readOnly: !editable,
+              teamName: doc.teamName ?? (doc.path?.split('/').pop() ?? 'team').replace(/\.ya?ml$/i, ''),
+              routineTitle: doc.teamSchedule?.deliver?.notion ? doc.teamSchedule.deliver.notion.title ?? DEFAULT_ROUTINE_NOTION_TITLE : null,
+              onChange: (deliver) => {
+                if (!editable) return
+                doc.updateTeamDeliver(deliver)
+                setStatusAnnouncement(deliver ? 'Answers will be sent to Notion. Save the team to keep this.' : 'Answers will stay in LoomWatch. Save the team to keep this.')
+              },
+            }}
           />
         )}
         {inspectedNode && !inspectedCapability && !inspectedEvidence && (

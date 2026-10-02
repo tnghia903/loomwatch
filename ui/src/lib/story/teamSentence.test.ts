@@ -41,6 +41,13 @@ describe('teamSentence', () => {
     expect(parts[0].kind).toBe('schedule')
   })
 
+  it('says every answer goes to Notion when the team sends them all (ADR 0038)', () => {
+    const base = { agents: [researcher], edges: [], steps: [{ id: 'researcher', joinFrom: [] }], entrypoint: 'researcher', responder: null }
+    expect(sentenceText(teamSentence({ ...base, deliver: { notion: {} } }))).toMatch(/Answers also go to Notion\.$/)
+    expect(sentenceText(teamSentence({ ...base, deliver: { notion: {} }, schedule: { cron: '0 8 * * *', prompt: 'Go', deliver: { notion: {} } } }))).toMatch(/Answers also go to Notion\.$/)
+    expect(sentenceText(teamSentence({ ...base, deliver: null }))).not.toMatch(/Notion/)
+  })
+
   it('ignores a paused schedule', () => {
     const parts = teamSentence({ agents: [researcher], edges: [], steps: [{ id: 'researcher', joinFrom: [] }], entrypoint: 'researcher', responder: null, schedule: { cron: '0 8 * * *', prompt: 'Go', enabled: false } })
     expect(sentenceText(parts)).toMatch(/^When you ask,/)

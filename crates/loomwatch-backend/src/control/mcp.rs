@@ -63,6 +63,7 @@ edges:                       # the order work is handed along
 To run it on a schedule, add a top-level block:
 schedule: {cron: "0 8 * * 1-5", timezone: "Asia/Singapore", prompt: "Prepare today's brief."}
 and, to send each scheduled answer to Notion, `deliver: {notion: {title: "Brief {{date}}"}}` inside `schedule`.
+To send every answer to Notion, whoever starts the run, add a top-level `deliver: {notion: {}}` (title placeholders: {{team}}, {{date}}, {{time}}, {{weekday}}). Pages go under the destination the person chose in Connections.
 
 When you change an existing team, call `read_team` first and propose the whole edited file, keeping everything you were not asked to change. A review stop can't be the first stage. If `propose_team` reports a problem, fix the file and propose it again before you answer."#;
 
