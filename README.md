@@ -742,11 +742,13 @@ Back up your teams folder and PostgreSQL database if you want to move or preserv
 
 To delete a team, choose **Delete team…** from its **…** menu on Home or from the team switcher.
 LoomWatch refuses while the team is running, or while another team reads its memory. Nothing is
-erased. The team file, its layout and its own notes folder (`<team>.brief`, if it has one) move to
-`.trash/<date>-<team>/` inside your teams folder. Its run history and Notebook entries stay in the
-database, and no new team takes its file name while it is in the trash. To restore it, move the
-files in that folder back to where `path` in its `deleted.json` says the team file was, and leave
-`deleted.json` behind. In Finder, press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>.</kbd> to show hidden folders. To remove a team for good,
+erased. The team file, its layout, its own notes folder (`<team>.brief`) and the folder of files
+added to its agents with **Add file…** (`<team>.files`) move to `.trash/<date>-<team>/` inside your
+teams folder; `moved` in that folder's `deleted.json` lists which of them the team had. Its run
+history and Notebook entries stay in the database, and no new team takes its file name while it is
+in the trash. To restore it, move everything in that folder except `deleted.json` back to the
+folder where `path` in `deleted.json` says the team file was. `<team>.files` must go back too, or
+its agents lose the files added to them. In Finder, press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>.</kbd> to show hidden folders. To remove a team for good,
 delete its folder from `.trash`.
 
 </details>
