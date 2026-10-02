@@ -46,6 +46,8 @@ describe('DeleteTeamDialog', () => {
     const { onDeleted } = renderDialog()
     const dialog = screen.getByRole('alertdialog', { name: 'Delete “Trip planner”?' })
     expect(dialog).toHaveTextContent('It leaves your teams list. Nothing is erased')
+    // Added files go to the trash with the team (ADR 0028, amended), so the copy names them.
+    expect(dialog).toHaveTextContent('any files you added to its agents move to a hidden .trash folder')
     expect(dialog).toHaveTextContent('.trash folder inside your teams folder')
     expect(dialog).toHaveTextContent('LoomWatch keeps its past runs')
     // The safe choice has the focus, so Enter on open never deletes.
