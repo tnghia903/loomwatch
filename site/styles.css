@@ -112,10 +112,6 @@ em { font-style: italic; }
 .say-live { color: var(--live); font-weight: 600; }
 .say-gold { color: var(--accent); font-weight: 600; }
 
-/* Depth: the page reads as Story, Team or Trace, the same dial the app has. */
-:root[data-depth="story"] .d-team,
-:root[data-depth="story"] .d-trace,
-:root[data-depth="team"] .d-trace { display: none !important; }
 
 /* ---------------------------------------------------------------- Buttons and chips */
 
@@ -231,9 +227,6 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .fine div::before { content: ''; grid-row: span 2; width: 11px; height: 2px; margin-top: 10px; background: var(--accent); border-radius: 2px; }
 .fine dt { font: 600 14px/1.45 var(--sans); color: var(--ink); }
 .fine dd { margin: 2px 0 0; font-size: 14px; line-height: 1.55; color: var(--ink-2); }
-.trace { margin: 22px 0 0; padding: 14px 16px; border: 1px dashed var(--hairline-2); border-radius: 10px; font: 400 12.5px/1.7 var(--mono); color: var(--ink-2); }
-.trace::before { content: 'Trace'; display: block; margin-bottom: 6px; font: 600 10.5px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
-.trace code { font-size: 1em; background: none; border: 0; padding: 0; color: var(--ink); white-space: normal; }
 
 /* The window every panel shares, so it reads as one app moving forward. */
 .win { background: var(--panel-solid); border: 1px solid var(--hairline-2); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
@@ -296,7 +289,7 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .propose .what { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); }
 .propose .what .micro { color: var(--accent); }
 .propose .acts { display: flex; gap: 8px; margin-left: auto; }
-.depth-views { margin-top: 18px; }
+.team-views { margin-top: 18px; }
 .canvas { position: relative; border: 1px solid var(--hairline); border-radius: 10px; padding: 34px 18px 22px; display: flex; align-items: center; justify-content: center; gap: 0; min-height: 170px; overflow-x: auto; }
 .card { position: relative; flex: 0 1 158px; min-width: 132px; padding: 10px 12px 11px; background: var(--panel-solid); border: 1px solid var(--hairline-2); border-radius: 7px; box-shadow: 0 6px 18px rgb(0 0 0 / .25); transition: border-color .24s var(--ease), box-shadow .24s var(--ease); }
 :root[data-theme="light"] .card { box-shadow: 0 1px 2px rgb(23 21 15 / .05), 0 6px 16px rgb(23 21 15 / .06); }
@@ -316,9 +309,9 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .yaml .c { color: var(--ink-3); }
 .yaml .v { color: var(--ink); }
 .yaml .hl { background: var(--accent-tint); box-shadow: -18px 0 0 var(--accent-tint), 18px 0 0 var(--accent-tint); color: var(--accent); }
-:root[data-depth="story"] .depth-views { display: none; }
-:root[data-depth="team"] .yaml, :root[data-depth="story"] .yaml { display: none; }
-:root[data-depth="trace"] .canvas { display: none; }
+/* The Build panel shows the team as its sentence only, the canvas, or the team file. */
+.team-views[data-view="story"] { display: none; }
+.team-views[data-view="team"] .yaml, .team-views[data-view="trace"] .canvas { display: none; }
 .build-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
 
 .dial, .seg { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--hairline-2); border-radius: 9px; background: var(--ground); }
@@ -574,15 +567,6 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .foot nav a:hover { color: var(--accent); }
 .foot-line { margin: 0 0 0 auto; font: 400 15px/1.3 var(--serif); font-style: italic; color: var(--ink-3); }
 
-/* The reading-depth dial, bottom right, as in the app. */
-.depth { position: fixed; right: 20px; bottom: 20px; z-index: 25; display: flex; align-items: center; gap: 2px; padding: 4px 4px 4px 12px; border-radius: 12px; border: 1px solid var(--hairline-2); background: var(--glass); backdrop-filter: blur(24px) saturate(150%); -webkit-backdrop-filter: blur(24px) saturate(150%); box-shadow: var(--shadow); }
-.depth-label { font: 600 10.5px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); margin-right: 8px; }
-.depth button { height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font: 500 12.5px/1 var(--sans); cursor: pointer; }
-.depth button:hover { color: var(--ink); }
-.depth button[aria-checked="true"] { background: var(--accent-tint); color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
-.depth.nudge { animation: nudge .9s var(--ease) 2; }
-@keyframes nudge { 40% { transform: translateY(-4px); } }
-
 /* ---------------------------------------------------------------- Responsive */
 
 @media (max-width: 1100px) {
@@ -637,19 +621,14 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
   .stage { padding: 8px; }
   .stage .top-line .word { display: none; }
   .narration { font-size: 18px; }
-  .btn, .dial button, .seg button, .depth button, .tabs button { min-height: 44px; }
+  .btn, .dial button, .seg button, .tabs button { min-height: 44px; }
   .chip select { height: 30px; }
   .fabric-wrap { padding: 16px; }
   .needs div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .pillars { grid-template-columns: minmax(0, 1fr); }
   .pillars li, .pillars li:nth-child(even) { padding-left: 0; border-left: 0; }
   .filecard .acts { display: none; }
-  .depth { left: 50%; right: auto; transform: translateX(-50%); bottom: 12px; padding-left: 10px; transition: transform .24s var(--ease), opacity .24s var(--ease); }
-  .depth.tuck { transform: translate(-50%, 140%); opacity: 0; }
   .open-cue { display: none; }
-  .depth.nudge { animation: none; }
-  .depth-label { display: none; }
-  .depth button { min-height: 36px; height: 36px; }
   .rv-acts .btn { flex: 1; }
 }
 

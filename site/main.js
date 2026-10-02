@@ -120,7 +120,7 @@
   const seq = (team) => (team.review ? ['researcher', 'you', 'writer'] : ['researcher', 'writer'])
   const LANE = { researcher: 'Researcher', you: 'You', writer: 'Writer' }
 
-  /* ================================================================ Theme, depth, progress */
+  /* ================================================================ Theme and progress */
 
   const themeButton = $('#theme')
   function paintShots() {
@@ -139,20 +139,21 @@
     applyTheme(next)
   })
 
-  function setDepth(depth) {
-    root.dataset.depth = depth
-    $$('[role="radio"][data-depth]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.depth === depth)))
-    store.set('loomwatch-site-depth', depth)
+  // The Build panel's Story · Team · Trace switch: the team as its sentence, its canvas, or its file.
+  const teamViews = $('#team-views')
+  const viewButtons = $$('.dial [data-view]')
+  function setView(view) {
+    teamViews.dataset.view = view
+    viewButtons.forEach((b) => b.setAttribute('aria-checked', String(b.dataset.view === view)))
   }
-  $$('[role="radio"][data-depth]').forEach((b) => b.addEventListener('click', () => setDepth(b.dataset.depth)))
-  $$('.dial, .depth').forEach((group) => group.addEventListener('keydown', (event) => {
+  viewButtons.forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)))
+  $('.dial').addEventListener('keydown', (event) => {
     if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
-    const buttons = $$('[data-depth]', group)
-    const at = buttons.findIndex((b) => b.dataset.depth === root.dataset.depth)
-    const next = buttons[(at + (event.key === 'ArrowRight' ? 1 : buttons.length - 1)) % buttons.length]
-    setDepth(next.dataset.depth); next.focus(); event.preventDefault()
-  }))
-  setDepth(root.dataset.depth || 'team')
+    const at = viewButtons.findIndex((b) => b.dataset.view === teamViews.dataset.view)
+    const next = viewButtons[(at + (event.key === 'ArrowRight' ? 1 : viewButtons.length - 1)) % viewButtons.length]
+    setView(next.dataset.view); next.focus(); event.preventDefault()
+  })
+  setView('team')
 
   const progress = $('.progress')
   let progressQueued = false
@@ -163,17 +164,6 @@
     paintOpen()
   }
   window.addEventListener('scroll', () => { if (!progressQueued) { progressQueued = true; window.requestAnimationFrame(paintProgress) } }, { passive: true })
-
-  // On a phone the depth dial steps out of the way while you read down the page, and comes back
-  // as soon as you scroll up.
-  const depthDial = $('.depth')
-  let lastY = window.scrollY
-  window.addEventListener('scroll', () => {
-    const y = window.scrollY
-    if (Math.abs(y - lastY) < 8) return
-    depthDial.classList.toggle('tuck', window.innerWidth <= 640 && y > lastY && y > 200)
-    lastY = y
-  }, { passive: true })
 
   /* ================================================================ Cold open: from glue to loom */
 
@@ -1180,14 +1170,12 @@
 
   /* ================================================================ Scroll-driven moments */
 
-  let nudged = false
   if ('IntersectionObserver' in window) {
     const seen = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue
         const target = entry.target
         target.classList.add('seen')
-        if (target.id === 'threads' && !nudged) { nudged = true; $('.depth').classList.add('nudge') }
         if (target.id === 'start') typeCommands()
       }
     }, { rootMargin: '0px 0px -30% 0px' })
