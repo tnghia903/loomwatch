@@ -37,4 +37,21 @@ describe('CommandPalette', () => {
     fireEvent.keyDown(screen.getByPlaceholderText('Type a command'), { key: 'Enter' })
     expect(save).not.toHaveBeenCalled()
   })
+
+  it('hands words no command matches to the fallback, and keeps commands first when one does', () => {
+    const ask = vi.fn()
+    const save = vi.fn()
+    const fallback = vi.fn((query: string) => ({ label: `Ask LoomWatch: “${query}”`, run: () => ask(query) }))
+    render(<CommandPalette onClose={vi.fn()} fallback={fallback} actions={[{ label: 'Save', run: save }]} />)
+    const input = screen.getByPlaceholderText('Type a command')
+
+    fireEvent.change(input, { target: { value: 'save' } })
+    expect(screen.queryByRole('button', { name: /Ask LoomWatch/ })).not.toBeInTheDocument()
+
+    fireEvent.change(input, { target: { value: 'add a fact-checker' } })
+    expect(screen.getByRole('button', { name: 'Ask LoomWatch: “add a fact-checker”' })).toBeInTheDocument()
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(ask).toHaveBeenCalledWith('add a fact-checker')
+    expect(save).not.toHaveBeenCalled()
+  })
 })

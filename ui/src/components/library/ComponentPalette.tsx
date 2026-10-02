@@ -43,6 +43,12 @@ export function ComponentPalette({ harnesses, capabilityInventory, capabilitiesL
   const [removeError, setRemoveError] = useState<string | null>(null)
   const saved = useSavedJobs()
   useEffect(() => { onCollapsedChange?.(collapsed) }, [collapsed, onCollapsedChange])
+  // Something else needs the canvas for a moment — an Ask proposal to review — so the list folds.
+  useEffect(() => {
+    const fold = () => setCollapsed(true)
+    window.addEventListener('loomwatch:collapse-palette', fold)
+    return () => window.removeEventListener('loomwatch:collapse-palette', fold)
+  }, [])
   const builtIn = { name: BUILT_IN, items: [
     // Jobs first: a newcomer knows they need a researcher, not which app to run one on. Each job is
     // placed with working instructions on the best installed app, which stays changeable in its

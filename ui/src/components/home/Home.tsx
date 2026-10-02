@@ -29,7 +29,39 @@ export interface HomeProps {
   topActions?: ReactNode
   /** Every run the daemon knows, for each team card's run fabric. */
   runs?: readonly RunRecord[]
+  /** Ask LoomWatch: describe the job and the assistant sets the team up (ADR 0033). */
+  ask?: { unavailable: string | null; onAsk: (text: string) => void }
   children?: ReactNode
+}
+
+/** "Describe the job": the other way to start, for someone who would rather say than build. */
+function DescribeTheJob({ unavailable, onAsk }: { unavailable: string | null; onAsk: (text: string) => void }) {
+  const [text, setText] = useState('')
+  const send = () => {
+    if (!text.trim() || unavailable) return
+    onAsk(text.trim())
+    setText('')
+  }
+  return (
+    <>
+      <form className="home-ask" data-tour="ask" onSubmit={(event) => { event.preventDefault(); send() }}>
+        <label>
+          <span>Or describe the job</span>
+          <textarea
+            rows={1}
+            value={text}
+            maxLength={8000}
+            disabled={Boolean(unavailable)}
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }}
+            placeholder="Every weekday at 8, brief me on AI and chip news"
+          />
+        </label>
+        <button type="submit" className="btn" disabled={!text.trim() || Boolean(unavailable)}>Ask<ArrowRight size={15} aria-hidden="true" /></button>
+      </form>
+      <p className="home-ask-note">{unavailable ?? 'Ask LoomWatch sets the team up on the canvas for you to check. Nothing is saved or run until you say so.'}</p>
+    </>
+  )
 }
 
 const PROBLEM_LABEL: Record<NonNullable<TeamSummary['problem']>, string> = {
@@ -48,7 +80,7 @@ function describeTeam(team: TeamSummary): string {
  * one obvious way to start. It replaces a screen whose only paths were "New team" and a dialog
  * that asked for a YAML path relative to the daemon's teams directory.
  */
-export function Home({ notice = null, harnesses, harnessesLoading, harnessesError, onRetryHarnesses, onCreateBlank, onPalette, topActions, runs = [], children }: HomeProps) {
+export function Home({ notice = null, harnesses, harnessesLoading, harnessesError, onRetryHarnesses, onCreateBlank, onPalette, topActions, runs = [], ask, children }: HomeProps) {
   const { resolved, toggle } = useTheme()
   const { teams, trashed, error, retry: retryTeams, forget } = useTeamList()
   const [creating, setCreating] = useState(false)
@@ -121,6 +153,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
             <button type="button" className="btn btn-primary btn-lg" data-tour="new-team" onClick={() => setCreating(true)}><Plus size={16} aria-hidden="true" />New team</button>
             <button type="button" className="link home-tour" onClick={startTour}>New here? Take the 3-minute guide</button>
           </div>
+          {ask && <DescribeTheJob unavailable={ask.unavailable} onAsk={ask.onAsk} />}
           <ol className="home-steps" aria-label="How it works">
             <li><b>1</b><span><strong>Build</strong> a team from the AI apps on this computer.</span></li>
             <li><b>2</b><span><strong>Ask</strong> it to do something, in plain words.</span></li>

@@ -1,6 +1,6 @@
 import { Background, getNodesBounds, getViewportForBounds, ReactFlow, useNodesInitialized, useReactFlow, useStore, type EdgeChange, type Node, type NodeChange, type OnNodeDrag } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { DetectedHarness } from '../lib/harnesses'
 import { briefFileNameFor, exportPack, fetchMemory, fetchNoteHistory, fetchNotes, fetchRunCheckpoints, fetchRunContext, reviseNote, writeMemoryFile, type Checkpoint, type ContextPacket, type MemoryView, type Note, type NotebookView } from '../lib/memory/client'
@@ -49,7 +49,7 @@ import { BuildAgentCard, BuildCapabilityCard, BuildOutputCard } from './canvas/B
 import { BuildResourceInspector } from './canvas/BuildResourceInspector'
 import { BuildInspector } from './canvas/BuildInspector'
 import { ComponentPalette } from './library/ComponentPalette'
-import { Play, Wrench } from 'lucide-react'
+import { MessageSquareText, Play, Wrench } from 'lucide-react'
 import { Composer, type ComposerState } from './composer/Composer'
 import { ModePopover } from './composer/ModePopover'
 import { RunHistory } from './composer/RunHistory'
@@ -89,6 +89,14 @@ import { OPERATOR_SOURCE } from '../lib/library/fixtures'
 import { teamSentence } from '../lib/story/teamSentence'
 import { depthForZoom } from '../lib/story/depth'
 import { WorkspaceMenu } from './workspace/WorkspaceMenu'
+import { useAsk } from '../lib/ask/useAsk'
+import type { AskContext } from '../lib/ask/client'
+import { AskButton } from './ask/AskButton'
+import type { CardActions } from './ask/AskCards'
+import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './ask/useAskActions'
+
+// The Ask panel is code-split like the Markdown stack: most visits never open it.
+const AskPanel = lazy(() => import('./ask/AskPanel').then((module) => ({ default: module.AskPanel })))
 
 // One canvas anatomy for both surfaces. Run ("Full trace") draws the team the operator composed,
 // so it must be recognisably the same object: the agent and capability cards are the Build cards,
@@ -386,6 +394,53 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     window.addEventListener('loomwatch:compose', compose)
     return () => window.removeEventListener('loomwatch:compose', compose)
   }, [setComposerText, focusComposer])
+
+  // ---- Ask LoomWatch (ADR 0033) ------------------------------------------------------------
+  // One conversation for every screen: it is told where the person is with each message, and what
+  // it makes comes back through here — a proposal onto the canvas, a run to start, a note to send.
+  const askContext = useMemo<AskContext>(() => ({
+    view: !doc.path ? 'home' : runView || runSetup ? 'run' : 'build',
+    teamPath: doc.saveState === 'new' ? null : teamFileForAsk(doc.path, doc.teamsRoot),
+    runId: activeRunId,
+  }), [doc.path, doc.saveState, doc.teamsRoot, runView, runSetup, activeRunId])
+  const ask = useAsk(askContext)
+  const askActions = useAskActions({
+    doc, conversationId: ask.conversationId, activeRunId, waiting: Boolean(waiting),
+    toBuild: () => { if (activeRunId || runSetup) showRun(null) },
+    showRun, applyRecord: session.applyRecord, onDocumentOpen,
+    // Framed clear of the Ask panel when it is open, so the proposed agents are not behind it.
+    frame: (ids) => { void flow.fitView({ ...(ids.length > 0 ? { nodes: ids.map((id) => ({ id })) } : {}), padding: { top: '48px', bottom: '140px', left: '64px', right: ask.open ? '400px' : '64px' }, maxZoom: 1, duration: 420 }) },
+  })
+  const askCards: CardActions = {
+    previewingId: askActions.preview?.proposal.id ?? null,
+    savedYamlFor: (file) => (sameTeamFile(doc.path, file) && doc.saveState !== 'new' ? doc.loadedYaml : null),
+    busyCard: askActions.busyCard, cardError: askActions.cardError,
+    onShowProposal: (id, card) => void askActions.showProposal(id, card),
+    onApply: () => void askActions.applyProposal(),
+    onDiscard: askActions.discardProposal,
+    onStartRun: (card) => void askActions.startRequestedRun(card),
+    onDeclineRun: (card) => void askActions.declineRequestedRun(card),
+    onOpenRun: askActions.openRun,
+    // The note goes into the run's own answer box; the panel steps aside so the whole box shows.
+    onUseNote: (card) => { ask.setOpen(false); askActions.takeNote(card) },
+  }
+  // A proposal made in answer to a message sent from this page goes straight onto the canvas when
+  // nothing of the person's would be in the way; otherwise its card waits for "Show on canvas".
+  const autoShown = useRef(new Set<string>())
+  const showProposal = askActions.showProposal
+  const previewing = askActions.preview !== null
+  useEffect(() => {
+    const since = ask.sentAt
+    if (!since || previewing) return
+    const fresh = ask.thread.items.flatMap((item) => item.kind === 'assistant' ? item.cards : [])
+      .filter((card) => card.kind === 'proposal' && !card.superseded && !card.outcome && !autoShown.current.has(card.id) && Date.parse(card.at) >= since - 2000)
+    const card = fresh.at(-1)
+    if (!card || card.kind !== 'proposal') return
+    for (const each of fresh) autoShown.current.add(each.id)
+    // Not over unsaved work, and not over a run the person is watching: the card is right there.
+    const unsaved = ['dirty', 'invalid', 'conflict', 'saving'].includes(doc.saveState) || (doc.saveState === 'new' && doc.nodes.length > 0)
+    if (!doc.path || (!unsaved && !runView)) void showProposal(card.id, card)
+  }, [ask.thread, ask.sentAt, previewing, doc.path, doc.saveState, doc.nodes.length, runView, showProposal])
 
   const runRoutineNow = useCallback(async () => {
     if (!routine || routineBusy) return
@@ -755,6 +810,13 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityCards, removeCapabilityEdge,
     harnesses, outputPlan: composerLayout.output, appProblems: appProblemByAgent,
   })
+
+  // Agents an Ask proposal adds or changes wear its dashes until it is applied (styles/ask.css).
+  const askMarks = askActions.marks
+  const markedNodes = useMemo(() => (askMarks.size === 0 || runView ? canvasNodes : canvasNodes.map((node) => {
+    const mark = askMarks.get(node.id)
+    return mark ? { ...node, className: [node.className, `ask-${mark}`].filter(Boolean).join(' ') } : node
+  })), [canvasNodes, askMarks, runView])
 
   const observedCount = projection.delegations.length
   // UX_REDESIGN §6.7: solo is conditional chrome — the legend is its only readout and click-path
@@ -1203,6 +1265,39 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   /** Whether the deliverable, rather than the canvas, is the surface on screen. */
   const deliveryShown = (runView || runSetup) && runPresentation === 'delivery'
   const inspecting = Boolean(inspectedNode || inspectedCapability || inspectedEvidence || provenanceOpen || scheduleOpen || memoryPanelOpen)
+  // Ask docks where the inspector does. It waits behind whatever holds the dock, and asking for it
+  // again — the header button, ⌘J, the palette — clears the dock for it.
+  const askDockBusy = inspecting || Boolean(handover)
+  const askSetOpen = ask.setOpen
+  const askSend = ask.ask
+  const askOpen = ask.open
+  const askFor = useCallback((text?: string) => {
+    if (askDockBusy) {
+      clearSelection()
+      setProvenanceOpen(false)
+      setMemoryOpen(false)
+      setScheduleEditorOpen(false)
+      setHandoverAgentId(null)
+    }
+    if (text) askSend(text)
+    else askSetOpen(true)
+  }, [askDockBusy, clearSelection, askSend, askSetOpen])
+  const toggleAsk = useCallback(() => {
+    if (askOpen && !askDockBusy) askSetOpen(false)
+    else askFor()
+  }, [askOpen, askDockBusy, askSetOpen, askFor])
+  const toggleAskRef = useRef(toggleAsk)
+  useEffect(() => { toggleAskRef.current = toggleAsk })
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
+        event.preventDefault()
+        toggleAskRef.current()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
   // Kind and name identify a card; its recorded source can lag the Library's (see the card-select handler).
   const inspectedCapabilityNode = inspectedCapability ? composerLayout.nodes.find((node) => node.kind === inspectedCapability.kind && node.name === inspectedCapability.item.name && node.source === inspectedCapability.item.source)
     ?? composerLayout.nodes.find((node) => node.kind === inspectedCapability.kind && node.name.toLowerCase() === inspectedCapability.item.name.toLowerCase()) ?? null : null
@@ -1613,6 +1708,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const openNewTeam = useCallback(() => { if (doc.path) setNewTeamSheet(true); else window.dispatchEvent(new Event('loomwatch:new-team')) }, [doc.path])
   const toggleLibrary = useCallback(() => window.dispatchEvent(new Event('loomwatch:toggle-library')), [])
   const actions = useMemo<CommandAction[]>(() => [
+    { label: 'Ask LoomWatch…', shortcut: '⌘J', icon: MessageSquareText, run: () => askFor() },
     // §1.2: the palette advertises ⌘↵, so it must do what ⌘↵ does. With nothing typed there is
     // no goal to run yet, and focusing the field is the honest half of the promise.
     { label: 'Run the team…', shortcut: '⌘↵', run: () => { if (composerText.trim()) void submit(); else document.querySelector<HTMLTextAreaElement>('.lw-composer textarea')?.focus() }, disabled: !doc.path },
@@ -1636,7 +1732,14 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     { label: 'Show YAML', run: () => setYamlOpen(true), disabled: !doc.path },
     { label: 'Connections…', run: () => window.location.assign('/connections') },
     { label: 'Getting started guide', run: startTour },
-  ], [doc, editable, composerText, submit, openNewTeam, toggleLibrary, windowWidth, runView, closeRun, cycleProblem, problems.length, theme, notificationsOn, enableNotifications, layersVisible, fitCanvas, organize, canOrganize])
+  ], [doc, editable, composerText, submit, openNewTeam, toggleLibrary, windowWidth, runView, closeRun, cycleProblem, problems.length, theme, notificationsOn, enableNotifications, layersVisible, fitCanvas, organize, canOrganize, askFor])
+  // Words the palette has no command for are a request: hand them to Ask LoomWatch.
+  const askUnavailable = ask.unavailable
+  const askFallback = useCallback((query: string): CommandAction | null => {
+    const request = query.trim()
+    if (request.startsWith('/') || request.split(/\s+/).length < 2) return null
+    return { label: `Ask LoomWatch: “${request}”`, icon: MessageSquareText, disabled: Boolean(askUnavailable), run: () => askFor(request) }
+  }, [askUnavailable, askFor])
 
   // ⌘K's second dialect: plain words or /commands become one proposed action (lib/story/intent.ts).
   // The operator's saved jobs are named there too, so "add a release notes writer" places one.
@@ -1775,6 +1878,14 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const loadedYaml = doc.loadedYaml ?? ''
   const differ = doc.documentChipState === 'dirty' ? linesDiffer(loadedYaml, doc.yamlPreview) : 0
 
+  const askNotice = askActions.notice && (
+    <div role="status" className="ask-notice e2">
+      <span>{askActions.notice.text}</span>
+      {askActions.notice.undo && <button type="button" className="btn" onClick={() => { const undo = askActions.notice?.undo; askActions.dismissNotice(); undo?.() }}>Undo</button>}
+      <button type="button" className="iconbtn" aria-label="Dismiss" onClick={askActions.dismissNotice}>×</button>
+    </div>
+  )
+
   // §9.5: a failed load has no canvas to return to — the only modal.
   if (doc.loadFailure) return <ParseFailureModal failure={doc.loadFailure} path={doc.path} />
 
@@ -1794,11 +1905,14 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         onRetryHarnesses={onRetryHarnesses}
         onCreateBlank={(name, path) => { doc.createNewDocument(name, path); onDocumentOpen() }}
         onPalette={() => setPaletteOpen(true)}
-        topActions={needsYouTray}
+        topActions={<><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray}</>}
         runs={needsYou.records}
+        ask={{ unavailable: ask.unavailable, onAsk: askFor }}
       >
-        {paletteOpen && <CommandPalette actions={actions} interpret={interpret} onClose={() => setPaletteOpen(false)} />}
+        {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
         {openPathOpen && <OpenTeamSheet onClose={() => setOpenPathOpen(false)} />}
+        {ask.open && <Suspense fallback={null}><AskPanel ask={ask} view="home" cards={askCards} onHome /></Suspense>}
+        {askNotice}
       </Home>
     )
   }
@@ -1812,6 +1926,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     'lw-shell', !runView && !runSetup ? 'build-workspace' : '', runPresentation === 'trace' || (!runView && !runSetup) ? 'build-graph' : '', `mode-${doc.mode}`, libraryDragging ? 'dragging' : '', nodeDragging ? 'node-dragging' : '', inspecting ? 'inspecting' : '', sweeping ? 'sweeping' : '',
     soloActive === 'configured' ? 'solo-configured' : soloActive === 'observed' ? 'solo-observed' : '', runView ? 'run-shown' : '', deliveryShown ? 'delivery-shown' : '',
     !runView || windowWidth >= 768 ? (libraryCollapsed ? 'lib-collapsed' : 'lib-open') : 'lib-hidden',
+    ask.open && !askDockBusy ? 'ask-docked' : '',
   ].filter(Boolean).join(' ')
 
   return (
@@ -1842,7 +1957,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         ) : (
         <div ref={canvasRef} role="application" aria-label={runView ? 'Run graph' : 'Team canvas'} className="lw-canvas" data-depth={depth}>
           <ReactFlow
-            nodes={canvasNodes}
+            nodes={markedNodes}
             edges={runView ? visibleEdges : visibleEdges.filter(edge => edge.source !== '__prompt' || allWiringEdges.some(wire => wire.from === '__prompt'))}
             nodeTypes={runView ? nodeTypes : buildNodeTypes}
             edgeTypes={runView ? edgeTypes : buildEdgeTypes}
@@ -1881,7 +1996,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
-        {!runView && !runSetup && <BuildHeading agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} documentChipState={doc.documentChipState} appProblem={appProblemDetail} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onSave={() => void doc.save()} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); window.setTimeout(focusComposer, 0) }} />}
+        {!runView && !runSetup && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} documentChipState={doc.documentChipState} appProblem={appProblemDetail} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onSave={() => void doc.save()} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); window.setTimeout(focusComposer, 0) }} />}
 
         <div aria-live="polite" aria-atomic="true" className="visually-hidden">{politeAnnouncement}</div>
         <div aria-live="assertive" className="visually-hidden">{assertiveAnnouncement}</div>
@@ -1914,7 +2029,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             onHistory={() => setHistoryOpen(true)} onMemory={() => { clearSelection(); setMemoryOpen(true) }} onRunSettings={() => setModeOpen(true)}
             onOrganize={organize} onUndoOrganize={undoOrganize} onFullTrace={() => setRunPresentation('trace')} onShowYaml={() => setYamlOpen(true)}
           />
-          <div className="needs-you-anchor">{needsYouTray}</div>
+          <div className="needs-you-anchor"><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
             <SegmentThumb />
             <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); if (activeRunId) setRunPresentation('delivery'); else if (lastOpenedRun?.path === doc.path) showRun(lastOpenedRun.id); else { setRunSetup(true); setRunPresentation('delivery') } }}><Play size={15} />Run</button>
@@ -2064,6 +2179,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           onDismiss={(alert) => setDismissedAlerts((ids) => new Set([...ids, alert.id]))}
         />
 
+        {ask.open && <Suspense fallback={null}><AskPanel ask={ask} view={askContext.view} cards={askCards} hidden={askDockBusy} /></Suspense>}
+        {askNotice}
+
         {layersVisible && runPresentation === 'trace' && <LayerLegend configured={doc.edges.length} observed={observedCount} solo={soloActive} onSolo={setSolo} />}
         {(!runView && !runSetup || runPresentation === 'trace') && <ViewControls prototype={!runView} onFit={fitCanvas} onOrganize={windowWidth >= 768 ? organize : undefined} organizeDisabled={!canOrganize} onUndoOrganize={canOrganize && previousArrangement?.key === arrangementKey ? undoOrganize : undefined} />}
 
@@ -2145,7 +2263,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           )}
         </Composer>
 
-        {paletteOpen && <CommandPalette actions={actions} interpret={interpret} onClose={() => setPaletteOpen(false)} />}
+        {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
         {discardConfirm && <InlineConfirm message="Discard changes and reload from disk?" confirmLabel="Discard changes" onConfirm={() => { setDiscardConfirm(false); void doc.reloadFromDisk() }} onCancel={() => setDiscardConfirm(false)} />}
         {pendingNodeDelete.length > 0 && <InlineConfirm message={`Delete ${pendingNodeDelete.length === 1 ? `${nodeNames.has(pendingNodeDelete[0]) ? `“${nodeNames.get(pendingNodeDelete[0])}”` : 'this card'} and its connections` : `${pendingNodeDelete.length} cards and their connections`}?`} confirmLabel="Delete" onConfirm={() => { deleteNodes(pendingNodeDelete); setPendingNodeDelete([]) }} onCancel={() => setPendingNodeDelete([])} />}
         {openPathOpen && <OpenTeamSheet onClose={() => setOpenPathOpen(false)} />}

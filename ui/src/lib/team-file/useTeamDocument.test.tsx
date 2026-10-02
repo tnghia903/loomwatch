@@ -1018,3 +1018,65 @@ describe('useTeamDocument', () => {
     })
   })
 })
+
+// Ask LoomWatch puts a proposed team file on the canvas whole (ADR 0033).
+describe('useTeamDocument.applyYaml', () => {
+  const loaded = async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
+      String(input) === '/api/config/schema' ? jsonResponse(200, SCHEMA_GATE) : jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })))
+    const hook = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(hook.result.current.saveState).toBe('clean'))
+    return hook
+  }
+
+  it('applies a proposed file as one undoable edit, keeping where the person put each agent', async () => {
+    const { result } = await loaded()
+    act(() => result.current.onNodesChange([{ id: 'researcher', type: 'position', position: { x: 999, y: 999 } }]))
+    let applied = false
+    act(() => { applied = result.current.applyYaml(TEAM_YAML.replace('role: Review research findings', 'role: Review it twice')) })
+    expect(applied).toBe(true)
+    expect(result.current.saveState).toBe('dirty')
+    expect(result.current.nodes.find((node) => node.id === 'reviewer')?.data.agent.role).toBe('Review it twice')
+    expect(result.current.nodes.find((node) => node.id === 'researcher')?.position).toEqual({ x: 999, y: 999 })
+    expect(result.current.yamlPreview).toContain('Review it twice')
+
+    act(() => result.current.undo())
+    expect(result.current.nodes.find((node) => node.id === 'reviewer')?.data.agent.role).toBe('Review research findings')
+    expect(result.current.yamlPreview).not.toContain('Review it twice')
+  })
+
+  it('lays the team out again when the file adds an agent, and refuses text that is not a team', async () => {
+    const { result } = await loaded()
+    act(() => { result.current.applyYaml(THREE_AGENT_YAML) })
+    expect(result.current.nodes.map((node) => node.id)).toEqual(['researcher', 'reviewer', 'editor'])
+    const editor = result.current.nodes.find((node) => node.id === 'editor')
+    expect(editor?.position).toBeDefined()
+
+    let refused = true
+    act(() => { refused = result.current.applyYaml('just: some notes\n') })
+    expect(refused).toBe(false)
+    expect(result.current.nodes).toHaveLength(3)
+  })
+
+  it('opens a proposed new team unsaved, with nothing to undo back to, and closes it to no team', async () => {
+    window.history.pushState({}, '', '/')
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
+      String(input) === '/api/config/schema' ? jsonResponse(200, SCHEMA_GATE) : jsonResponse(404, { error: 'not found' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.checking).toBe(false))
+
+    act(() => { result.current.applyYaml(TEAM_YAML, 'research-team.yaml') })
+    expect(result.current.path).toBe('research-team.yaml')
+    expect(result.current.saveState).toBe('new')
+    expect(result.current.nodes).toHaveLength(2)
+    expect(result.current.canUndo).toBe(false)
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+
+    act(() => result.current.closeDocument())
+    expect(result.current.path).toBeNull()
+    expect(result.current.saveState).toBe('no-file')
+    expect(result.current.nodes).toHaveLength(0)
+    expect(window.location.search).toBe('')
+  })
+})
