@@ -115,41 +115,32 @@ describe('CapabilityInspector', () => {
     expect(screen.queryByRole('button', { name: 'Connect to Research' })).not.toBeInTheDocument()
   })
 
-  it('shows what a knowledge source holds, which is what a connected agent receives', async () => {
+  it('shows what team memory holds', async () => {
     serve({
-      id: 'source-project', kind: 'knowledge',
-      definitions: [
-        { source: 'LoomWatch · folder', path: '/work/loomwatch', content: 'crates/\nui/\nREADME.md' },
-        { source: 'OpenCode · sessions in this project', path: '/work/loomwatch', content: '2026-09-30 10:00  Fix the canvas' },
-      ],
+      id: 'memory-team', kind: 'knowledge',
+      definitions: [{ source: 'Brief · Constraints', path: 'brief/constraints.md', content: '# Constraints\nACP v1 only.' }],
     })
-    const source = { id: 'source-project', name: 'loomwatch project', source: 'LoomWatch + OpenCode', detail: 'Previously used project context', status: 'Ready' as const }
-    render(<CapabilityInspector item={source} kind="knowledge" placed connectedAgents={['Research']} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
+    const memory = { id: 'memory-team', name: 'Research team · memory', source: 'LoomWatch', detail: '1 brief entry', status: 'Ready' as const, memory: { team: 'research-team', brief: 1 } }
+    render(<CapabilityInspector item={memory} kind="knowledge" placed connectedAgents={['Research']} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
 
-    expect(await screen.findByText(/Fix the canvas/)).toBeInTheDocument()
+    expect(await screen.findByText(/ACP v1 only/)).toBeInTheDocument()
     expect(screen.getByText('Contents')).toBeInTheDocument()
-    expect(screen.getByText('LoomWatch · folder')).toBeInTheDocument()
-    expect(screen.getByText(/crates\//)).toBeInTheDocument()
-    expect(screen.getByText(/receives exactly these contents in its opening prompt/)).toBeInTheDocument()
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/capabilities/source-project'))
+    expect(screen.getByText('Brief · Constraints')).toBeInTheDocument()
+    expect(screen.getByText(/kept notes are listed in its Memory panel/)).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/capabilities/memory-team'))
   })
 
-  /** ADR 0029: knowledge and tools are connected to agents like skills, through the team file. */
-  it('connects a knowledge source or a tool to an agent, but not team memory', async () => {
-    serve({ id: 'source-project', kind: 'knowledge', definitions: [{ source: 'LoomWatch · folder', path: '/work', content: 'README.md' }] })
-    const onToggleAgent = vi.fn()
-    const agents = [{ id: 'research', name: 'Research', harness: 'Claude Code', connected: true }]
-    const source = { id: 'source-project', name: 'loomwatch project', source: 'LoomWatch', detail: 'Project folder', status: 'Ready' as const }
-    const view = render(<CapabilityInspector item={source} kind="knowledge" placed connectedAgents={['Research']} agents={agents} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
-    await screen.findByText(/README.md/)
-    expect(screen.getByText('Connected')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Use loomwatch project with Research (Claude Code)' }))
-    expect(onToggleAgent).toHaveBeenCalledWith('research', false)
-    expect(screen.getByText(/supply its contents to an agent in the next run/)).toBeInTheDocument()
-
+  /**
+   * ADR 0029: tools are connected to agents like skills, through the team file. Team memory is
+   * wired on the canvas instead, and since ADR 0036 a knowledge card that is not memory names
+   * nothing the daemon can read: knowledge is a folder or file chosen in the agent's Context.
+   */
+  it('connects a tool to an agent, but neither team memory nor a knowledge card', async () => {
     serve({ id: 'tool-memory', kind: 'tool', definitions: [] })
+    const onToggleAgent = vi.fn()
+    const agents = [{ id: 'research', name: 'Research', harness: 'Claude Code', connected: false }]
     const tool = { id: 'tool-memory', name: 'Agent Memory', source: 'Claude Code', detail: 'Local MCP connector', status: 'Compatible' as const }
-    view.rerender(<CapabilityInspector item={tool} kind="tool" placed={false} connectedAgents={[]} agents={[{ ...agents[0], connected: false }]} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
+    const view = render(<CapabilityInspector item={tool} kind="tool" placed={false} connectedAgents={[]} agents={agents} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('checkbox', { name: 'Use Agent Memory with Research (Claude Code)' }))
     expect(onToggleAgent).toHaveBeenLastCalledWith('research', true)
     expect(screen.getByText(/give an agent its MCP server in the next run/)).toBeInTheDocument()
@@ -158,12 +149,22 @@ describe('CapabilityInspector', () => {
     const memory = { id: 'memory-team', name: 'Research team · memory', source: 'LoomWatch', detail: '1 brief entry', status: 'Ready' as const, memory: { team: 'research-team', brief: 1 } }
     view.rerender(<CapabilityInspector item={memory} kind="knowledge" placed={false} connectedAgents={[]} agents={agents} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.queryByText('Not delivered')).not.toBeInTheDocument()
+
+    vi.mocked(fetch).mockClear()
+    const card = { id: 'knowledge:loomwatch-project', name: 'loomwatch project', source: 'LoomWatch + OpenCode', detail: 'Planned capability on this canvas.', status: 'Compatible' as const }
+    view.rerender(<CapabilityInspector item={card} kind="knowledge" placed connectedAgents={['Research']} agents={agents} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.getByText('Not delivered')).toBeInTheDocument()
+    expect(screen.getByText(/use Add folder… or Add file… in its Context/)).toBeInTheDocument()
+    expect(screen.queryByText('Contents')).not.toBeInTheDocument()
+    expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('says so when a knowledge source has nothing readable', async () => {
-    serve({ id: 'source-empty', kind: 'knowledge', definitions: [] })
-    const source = { id: 'source-empty', name: 'Empty project', source: 'OpenCode', detail: 'Previously used project context', status: 'Ready' as const }
-    render(<CapabilityInspector item={source} kind="knowledge" placed={false} connectedAgents={[]} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
+  it('says so when team memory has nothing readable', async () => {
+    serve({ id: 'memory-empty', kind: 'knowledge', definitions: [] })
+    const memory = { id: 'memory-empty', name: 'Empty team · memory', source: 'LoomWatch', detail: '0 brief entries', status: 'Ready' as const, memory: { team: 'empty-team', brief: 0 } }
+    render(<CapabilityInspector item={memory} kind="knowledge" placed={false} connectedAgents={[]} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
 
     expect(await screen.findByText('Nothing readable was found for this source.')).toBeInTheDocument()
   })

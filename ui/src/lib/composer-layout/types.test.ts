@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { CAPABILITY_CARD, RELATION, capabilityNodeId, freeCapabilitySlot, refuseCapabilityEdge } from './types'
+import { CAPABILITY_CARD, RELATION, capabilityIsCard, capabilityNodeId, freeCapabilitySlot, refuseCapabilityEdge, teamFileKind } from './types'
 
 describe('capabilityNodeId', () => {
   it('is stable, so dropping the same Library row twice is one card', () => {
@@ -11,6 +11,22 @@ describe('capabilityNodeId', () => {
 
   it('keeps the kinds apart, so a skill and a tool of the same name are two cards', () => {
     expect(capabilityNodeId('skill', 'memory')).not.toBe(capabilityNodeId('tool', 'memory'))
+  })
+})
+
+// ADR 0036: knowledge is a folder or file chosen in the agent's Context, so no knowledge card is
+// ever written to `agents[].capabilities` — memory goes through `memory.inherits` instead.
+describe('teamFileKind', () => {
+  it('wires skills and tools by name, and no knowledge card at all', () => {
+    expect(teamFileKind({ kind: 'skill' })).toBe('skill')
+    expect(teamFileKind({ kind: 'tool' })).toBe('tool')
+    expect(teamFileKind({ kind: 'knowledge' })).toBeNull()
+    expect(teamFileKind({ kind: 'knowledge', memory: { team: 'research' } })).toBeNull()
+  })
+
+  it('never matches a chosen folder to a knowledge card that happens to share its label', () => {
+    expect(capabilityIsCard({ kind: 'knowledge', name: 'Reports' }, { kind: 'knowledge', name: 'Reports' })).toBe(false)
+    expect(capabilityIsCard({ kind: 'tool', name: 'Computer' }, { kind: 'tool', name: 'Computer' })).toBe(true)
   })
 })
 

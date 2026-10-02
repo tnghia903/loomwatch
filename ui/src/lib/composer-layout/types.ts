@@ -140,12 +140,13 @@ export function refuseCapabilityEdge(
 }
 
 /**
- * The `agents[].capabilities` kind a card is wired as, or `null` for a memory card, which is wired
- * through `memory.inherits` instead (ADR 0016). Skills since ADR 0012; knowledge and tools since
- * ADR 0029, when each gained a delivery contract.
+ * The `agents[].capabilities` kind a card is wired as, or `null` for a knowledge card. Skills since
+ * ADR 0012, tools since ADR 0029. A memory card is wired through `memory.inherits` instead (ADR
+ * 0016), and any other knowledge card is one the Library placed before ADR 0036: knowledge is now a
+ * folder or file chosen in the agent's Context, and a card's name alone points at nothing.
  */
-export function teamFileKind(card: Pick<CapabilityNodeConfig, 'kind' | 'memory'>): CapabilityKind | null {
-  return card.kind === 'knowledge' && card.memory ? null : card.kind
+export function teamFileKind(card: Pick<CapabilityNodeConfig, 'kind' | 'memory'>): Exclude<CapabilityKind, 'knowledge'> | null {
+  return card.kind === 'knowledge' ? null : card.kind
 }
 
 /** Whether a team-file capability entry is this card. Kind and name both: a tool and a skill may share a name. */

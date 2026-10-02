@@ -158,7 +158,7 @@ describe('Inspector context', () => {
     })
     const list = screen.getByRole('list', { name: 'Connected to this agent' })
     expect(list).toHaveTextContent('claude-design')
-    expect(list).toHaveTextContent('Knowledge · supplied as source material')
+    expect(list).toHaveTextContent('No folder or file · disconnect it and add one below')
     expect(list).toHaveTextContent('research · memory')
     fireEvent.click(screen.getByRole('button', { name: 'Disconnect loomwatch project' }))
     expect(props.onRemoveCapability).toHaveBeenCalledWith({ kind: 'knowledge', name: 'loomwatch project' })
@@ -166,7 +166,7 @@ describe('Inspector context', () => {
 
   it('says how to connect something when nothing is', () => {
     renderInspector()
-    expect(screen.getByText(/Nothing connected\. Drag a skill, knowledge source or tool/)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing connected\. Drag a skill, tool or team memory/)).toBeInTheDocument()
   })
 
   it('never offers a disconnect in read-only mode', () => {

@@ -1,19 +1,20 @@
-//! Read-only discovery of local skills, MCP tools and knowledge sources.
+//! Read-only discovery of local skills, MCP tools and team memory.
 //!
 //! The Library inventory deliberately returns metadata only: names, provenance and compatibility.
-//! A separate, on-demand detail lookup can return a selected skill's local `SKILL.md`, or what a
-//! selected knowledge source holds: a project folder's top-level listing and README, the titles of
-//! `OpenCode` sessions run there, or a memory source's Brief and kept notes. Connector
-//! configuration values and `OpenCode` conversation contents are never returned.
+//! A separate, on-demand detail lookup can return a selected skill's local `SKILL.md`, or a memory
+//! source's Brief and kept notes. Connector configuration values are never returned.
+//!
+//! Team memory is the only knowledge the Library lists. Other knowledge is a folder or file the
+//! operator chooses (`chosen_knowledge`, ADR 0035); the Library no longer infers it from other
+//! apps' session history (ADR 0036).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 
 /// Root used for capability discovery and delivery.
@@ -262,28 +263,12 @@ pub fn detect_capabilities(home: Option<&Path>, teams_root: &Path) -> Capability
             "mcp",
             &mut tools,
         );
-
-        scan_opencode_sources(home, &mut sources);
     }
 
     // Every team with memory, and every imported pack. A team's Brief plus its kept Notebook is a
     // knowledge source in exactly the Library's sense — something an agent reads — which is why it
     // belongs here rather than in a second inventory nobody would think to look in.
     scan_team_memory_sources(teams_root, &mut sources);
-
-    if let Some(name) = project_folder(teams_root)
-        .as_deref()
-        .and_then(Path::file_name)
-        .and_then(|name| name.to_str())
-    {
-        add_capability(
-            &mut sources,
-            &project_label(name),
-            "LoomWatch",
-            "The folder containing this team's files",
-            RANK_PERSONAL,
-        );
-    }
 
     CapabilityInventory {
         skills: finish_map(skills, "skill"),
@@ -323,7 +308,7 @@ pub fn detect_capability_details(
 
     let definitions = match kind {
         "skill" => skill_definitions(home, teams_root, item),
-        "knowledge" => knowledge_contents(home, teams_root, item),
+        "knowledge" => knowledge_contents(teams_root, item),
         _ => Vec::new(),
     };
     // The first definition is the one `workspace::materialise` would copy, so its text is the one
@@ -1027,84 +1012,8 @@ fn collect_json_connector_keys(
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct OpenCodeProject {
-    worktree: String,
-    name: Option<String>,
-}
-
-fn scan_opencode_sources(home: &Path, sources: &mut BTreeMap<String, CapabilityBuilder>) {
-    let database = home.join(".local/share/opencode/opencode.db");
-    if !database.is_file() {
-        return;
-    }
-    add_capability(
-        sources,
-        OPENCODE_HISTORY,
-        "OpenCode",
-        "Previous sessions and tool sources",
-        RANK_PINNED,
-    );
-
-    let Some(projects) = query_opencode::<OpenCodeProject>(
-        &database,
-        "SELECT worktree, name FROM project ORDER BY time_updated DESC;",
-    ) else {
-        return;
-    };
-    for project in projects {
-        let Some(label) = opencode_project_label(home, &project.worktree, project.name) else {
-            continue;
-        };
-        add_capability(
-            sources,
-            &label,
-            "OpenCode",
-            "Previously used project context",
-            RANK_INSTALLED,
-        );
-    }
-}
-
-/// The name `OpenCode`'s whole session history is listed under.
-const OPENCODE_HISTORY: &str = "OpenCode history";
-
-/// The Library name for one `OpenCode` project, or `None` for a row that is not a project.
-fn opencode_project_label(home: &Path, worktree: &str, name: Option<String>) -> Option<String> {
-    // OpenCode records a row for every directory a session ever ran in, including `/` and the
-    // home directory. Those listed as "Project project" and "tnghia project" — neither is a
-    // knowledge source anyone would drag onto a canvas.
-    let worktree = Path::new(worktree);
-    if worktree.parent().is_none() || worktree == home {
-        return None;
-    }
-    let fallback = worktree.file_name().and_then(|name| name.to_str())?;
-    let name = name
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or_else(|| fallback.to_owned());
-    Some(project_label(&name))
-}
-
-/// Run one read-only query against `OpenCode`'s database. `None` when `sqlite3` is missing, the
-/// database cannot be opened, or the rows do not have the expected shape.
-fn query_opencode<T: serde::de::DeserializeOwned>(database: &Path, sql: &str) -> Option<Vec<T>> {
-    let uri = format!("file:{}?mode=ro", database.to_string_lossy());
-    let output = Command::new("sqlite3")
-        .args(["-readonly", "-json", &uri, sql])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    // `sqlite3 -json` prints nothing at all for a query with no rows.
-    if output.stdout.iter().all(u8::is_ascii_whitespace) {
-        return Some(Vec::new());
-    }
-    serde_json::from_slice(&output.stdout).ok()
-}
-
-/// The folder the Library lists as "<name> project": the teams root's parent when the root is a
-/// plain `teams` folder inside a project, and the root itself otherwise.
+/// The project the teams live in, whose own skill folders the Library lists: the teams root's
+/// parent when the root is a plain `teams` folder inside a project, and the root itself otherwise.
 fn project_folder(teams_root: &Path) -> Option<PathBuf> {
     if teams_root.file_name().and_then(|name| name.to_str()) == Some("teams") {
         teams_root.parent().map(Path::to_path_buf)
@@ -1113,24 +1022,20 @@ fn project_folder(teams_root: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Entries listed from a project folder before the listing says how many more there are.
+/// Entries listed from a linked folder before the listing says how many more there are.
 const FOLDER_LISTING_LIMIT: usize = 200;
 /// Lines of a README shown before it is cut off.
 const README_LINE_LIMIT: usize = 120;
-/// `OpenCode` sessions listed for one project, or across the whole history.
-const SESSION_LIMIT: usize = 30;
 
-/// What one knowledge source holds, read on demand: the inspector's Contents, and — since ADR 0029
-/// — exactly what an agent wired to the source is handed in its opening prompt.
+/// What one chosen folder or file holds (ADR 0035): the inspector's Contents, and exactly what an
+/// agent wired to it is handed in its opening prompt.
 ///
-/// One function serves both on purpose. "What you see in the panel is what the agent gets" holds
+/// One reader serves both on purpose. "What you see in the panel is what the agent gets" holds
 /// only while there is one reader.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct KnowledgeSnapshot {
     pub contents: Vec<CapabilityDefinition>,
-    /// The folders the source is, for a source that is one: a project folder, or the worktree an
-    /// `OpenCode` project ran in. Canonical, existing and de-duplicated. Empty for `OpenCode`
-    /// history and for memory, which are records rather than places.
+    /// The folder the source is, for a linked folder. Canonical and existing.
     pub folders: Vec<PathBuf>,
     /// Single files the agent may read: a file the operator added (ADR 0035). Canonical.
     pub files: Vec<PathBuf>,
@@ -1147,64 +1052,13 @@ pub struct TextCopy {
     pub text: String,
 }
 
-/// Read one knowledge source. See [`KnowledgeSnapshot`].
-#[must_use]
-pub fn knowledge_snapshot(
-    home: Option<&Path>,
-    teams_root: &Path,
-    item: &DetectedCapability,
-) -> KnowledgeSnapshot {
-    if let Some(reference) = &item.memory {
-        return KnowledgeSnapshot {
-            contents: memory_contents(teams_root, reference),
-            ..KnowledgeSnapshot::default()
-        };
-    }
-    let mut snapshot = KnowledgeSnapshot::default();
-    let mut folders = Vec::new();
-    if capability_has_source(&item.source, "LoomWatch")
-        && let Some(folder) = project_folder(teams_root)
-        && folder
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| project_label(name) == item.name)
-    {
-        snapshot
-            .contents
-            .extend(folder_contents(&folder, "LoomWatch"));
-        folders.push(folder);
-    }
-    if let Some(home) = home
-        && capability_has_source(&item.source, "OpenCode")
-    {
-        let sessions = opencode_contents(home, &item.name);
-        if item.name != OPENCODE_HISTORY {
-            // A project's sessions are filed under the worktree they ran in, which is the folder.
-            folders.extend(
-                sessions
-                    .iter()
-                    .map(|definition| PathBuf::from(&definition.path)),
-            );
-        }
-        snapshot.contents.extend(sessions);
-    }
-    for folder in folders {
-        if let Ok(canonical) = fs::canonicalize(&folder)
-            && canonical.is_dir()
-            && !snapshot.folders.contains(&canonical)
-        {
-            snapshot.folders.push(canonical);
-        }
-    }
-    snapshot
-}
-
-fn knowledge_contents(
-    home: Option<&Path>,
-    teams_root: &Path,
-    item: &DetectedCapability,
-) -> Vec<CapabilityDefinition> {
-    knowledge_snapshot(home, teams_root, item).contents
+/// What a Library knowledge source holds. Every one is team memory (ADR 0036), which reaches an
+/// agent through `memory.inherits`, so this is the inspector's view of it and never a prompt.
+fn knowledge_contents(teams_root: &Path, item: &DetectedCapability) -> Vec<CapabilityDefinition> {
+    item.memory
+        .as_ref()
+        .map(|reference| memory_contents(teams_root, reference))
+        .unwrap_or_default()
 }
 
 /// Which config format a [`ToolDefinition`] is written in. The three name the same facts
@@ -1388,101 +1242,6 @@ pub(crate) fn folder_contents(folder: &Path, provider: &str) -> Vec<CapabilityDe
         });
     }
     contents
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenCodeSession {
-    worktree: String,
-    name: Option<String>,
-    title: Option<String>,
-    directory: Option<String>,
-    time_updated: Option<i64>,
-}
-
-/// The titles of the `OpenCode` sessions behind one source, newest first. Titles and dates only —
-/// never a message from the conversation.
-fn opencode_contents(home: &Path, name: &str) -> Vec<CapabilityDefinition> {
-    let database = home.join(".local/share/opencode/opencode.db");
-    if !database.is_file() {
-        return Vec::new();
-    }
-    let Some(rows) = query_opencode::<OpenCodeSession>(
-        &database,
-        "SELECT p.worktree, p.name, s.title, s.directory, s.time_updated \
-         FROM project p LEFT JOIN session s ON s.project_id = p.id AND s.parent_id IS NULL \
-         ORDER BY s.time_updated DESC;",
-    ) else {
-        return Vec::new();
-    };
-    session_contents(home, name, &database, &rows)
-}
-
-/// `rows` is every project, joined to its top-level sessions newest first.
-fn session_contents(
-    home: &Path,
-    name: &str,
-    database: &Path,
-    rows: &[OpenCodeSession],
-) -> Vec<CapabilityDefinition> {
-    if name == OPENCODE_HISTORY {
-        let lines = rows
-            .iter()
-            .filter(|row| row.title.is_some())
-            .take(SESSION_LIMIT)
-            .map(|row| {
-                let mut line = session_line(row);
-                if let Some(directory) = &row.directory {
-                    let _ = write!(line, "\n    {directory}");
-                }
-                line
-            })
-            .collect::<Vec<_>>();
-        return vec![CapabilityDefinition {
-            source: "OpenCode · recent sessions".to_owned(),
-            path: database.to_string_lossy().into_owned(),
-            content: if lines.is_empty() {
-                "No sessions recorded yet.".to_owned()
-            } else {
-                lines.join("\n")
-            },
-        }];
-    }
-    let mut projects = BTreeMap::<String, Vec<String>>::new();
-    for row in rows {
-        if opencode_project_label(home, &row.worktree, row.name.clone()).as_deref() != Some(name) {
-            continue;
-        }
-        let sessions = projects.entry(row.worktree.clone()).or_default();
-        if row.title.is_some() && sessions.len() < SESSION_LIMIT {
-            sessions.push(session_line(row));
-        }
-    }
-    projects
-        .into_iter()
-        .map(|(worktree, sessions)| CapabilityDefinition {
-            source: "OpenCode · sessions in this project".to_owned(),
-            path: worktree,
-            content: if sessions.is_empty() {
-                "No sessions recorded for this project.".to_owned()
-            } else {
-                sessions.join("\n")
-            },
-        })
-        .collect()
-}
-
-fn session_line(row: &OpenCodeSession) -> String {
-    let when = row
-        .time_updated
-        .and_then(chrono::DateTime::from_timestamp_millis)
-        .map(|time| {
-            time.with_timezone(&chrono::Local)
-                .format("%Y-%m-%d %H:%M")
-                .to_string()
-        })
-        .unwrap_or_default();
-    let title = row.title.as_deref().unwrap_or_default();
-    format!("{when}  {title}").trim().to_owned()
 }
 
 /// A memory source's pinned Brief and, for a pack, its kept notes.
@@ -1964,44 +1723,50 @@ mod tests {
         );
     }
 
-    /// The card the operator clicks on is a folder, so its contents are the folder's names and its
-    /// README — and never the bytes of anything else in it, a `.env` least of all.
+    /// A linked folder's contents are its names and its README — and never the bytes of anything
+    /// else in it, a `.env` least of all.
     #[test]
-    fn a_project_knowledge_source_shows_its_folder_and_readme_but_no_other_file() {
+    fn a_folder_shows_its_names_and_readme_but_no_other_file() {
         let directory = TempDirectory::new();
         let project = directory.0.join("demo");
-        let root = project.join("teams");
-        fs::create_dir_all(&root).expect("teams root");
         fs::create_dir_all(project.join("src")).expect("source folder");
         fs::write(project.join("README.md"), "# Demo\nWhat this project is.\n").expect("readme");
         fs::write(project.join(".env"), "TOKEN=do-not-show\n").expect("env file");
 
-        let inventory = detect_capabilities(None, &root);
-        let source = inventory
-            .sources
-            .iter()
-            .find(|source| source.name == "demo project")
-            .expect("the project folder is a knowledge source");
-        let details =
-            detect_capability_details(None, &root, &source.id).expect("details for the source");
+        let contents = folder_contents(&project, "Linked");
 
-        assert_eq!(details.kind, "knowledge");
-        let [listing, readme] = details.definitions.as_slice() else {
-            panic!("a listing and a README: {:?}", details.definitions);
+        let [listing, readme] = contents.as_slice() else {
+            panic!("a listing and a README: {contents:?}");
         };
-        assert_eq!(listing.source, "LoomWatch · folder");
+        assert_eq!(listing.source, "Linked · folder");
         assert_eq!(listing.path, project.to_string_lossy());
-        assert_eq!(listing.content, "src/\nteams/\n.env\nREADME.md");
-        assert_eq!(readme.source, "LoomWatch · README.md");
+        assert_eq!(listing.content, "src/\n.env\nREADME.md");
+        assert_eq!(readme.source, "Linked · README.md");
         assert_eq!(readme.content, "# Demo\nWhat this project is.");
         assert!(
-            details
-                .definitions
+            contents
                 .iter()
                 .all(|definition| !definition.content.contains("do-not-show")),
-            "{:?}",
-            details.definitions
+            "{contents:?}"
         );
+    }
+
+    /// ADR 0036: the Library lists team memory as knowledge and nothing else — not the project the
+    /// teams live in, and not another app's session history — however much of either is on disk.
+    #[test]
+    fn the_library_lists_no_project_folder_or_app_history_as_knowledge() {
+        let directory = TempDirectory::new();
+        let home = directory.0.join("home");
+        let project = directory.0.join("demo");
+        let root = project.join("teams");
+        fs::create_dir_all(&root).expect("teams root");
+        fs::write(project.join("README.md"), "# Demo\n").expect("readme");
+        fs::create_dir_all(home.join(".local/share/opencode")).expect("opencode data");
+        fs::write(home.join(".local/share/opencode/opencode.db"), "").expect("opencode database");
+
+        let inventory = detect_capabilities(Some(&home), &root);
+
+        assert!(inventory.sources.is_empty(), "{:?}", inventory.sources);
     }
 
     #[test]
@@ -2037,64 +1802,8 @@ mod tests {
         assert!(entry.content.contains("ACP v1 only."), "{entry:?}");
     }
 
-    /// A project lists its own sessions and nobody else's; the history lists everyone's. Titles
-    /// and dates only — the rows never carry a message to leak.
     #[test]
-    fn opencode_sources_list_session_titles_for_their_own_project() {
-        let home = PathBuf::from("/home/operator");
-        let row = |worktree: &str, title: Option<&str>, time: i64| OpenCodeSession {
-            worktree: worktree.to_owned(),
-            name: None,
-            title: title.map(str::to_owned),
-            directory: Some(worktree.to_owned()),
-            time_updated: Some(time),
-        };
-        let rows = [
-            row("/work/loomwatch", Some("Fix the canvas"), 1_790_000_000_000),
-            row(
-                "/work/paperclip",
-                Some("Paperclip session"),
-                1_789_000_000_000,
-            ),
-            row(
-                "/work/loomwatch",
-                Some("Plan the release"),
-                1_788_000_000_000,
-            ),
-            row("/work/empty", None, 0),
-            row("/", Some("A global session"), 1_787_000_000_000),
-        ];
-        let database = Path::new("/home/operator/opencode.db");
-
-        let project = session_contents(&home, "loomwatch project", database, &rows);
-        let [sessions] = project.as_slice() else {
-            panic!("one project: {project:?}");
-        };
-        assert_eq!(sessions.path, "/work/loomwatch");
-        let titles = sessions
-            .content
-            .lines()
-            .map(|line| line.split("  ").nth(1).unwrap_or_default())
-            .collect::<Vec<_>>();
-        assert_eq!(titles, ["Fix the canvas", "Plan the release"]);
-
-        let empty = session_contents(&home, "empty project", database, &rows);
-        assert_eq!(empty[0].content, "No sessions recorded for this project.");
-
-        let history = session_contents(&home, OPENCODE_HISTORY, database, &rows);
-        assert_eq!(history[0].source, "OpenCode · recent sessions");
-        assert!(
-            history[0].content.contains("A global session"),
-            "{history:?}"
-        );
-        assert!(
-            history[0].content.contains("Paperclip session"),
-            "{history:?}"
-        );
-    }
-
-    #[test]
-    fn names_a_project_source_without_repeating_the_word_project() {
+    fn names_a_project_without_repeating_the_word_project() {
         assert_eq!(project_label("loomwatch"), "loomwatch project");
         assert_eq!(
             project_label("Optimization Group Project"),

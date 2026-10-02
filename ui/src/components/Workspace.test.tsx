@@ -299,8 +299,12 @@ describe('Workspace', () => {
     }
   })
 
-  /** ADR 0029: a tool or a knowledge source is executable configuration, like a skill. */
-  it('wires a tool and a knowledge source into the team file, not the sidecar', async () => {
+  /**
+   * ADR 0029: a tool is executable configuration, like a skill. A knowledge card that is not memory
+   * was placed from the Library before ADR 0036; its name points at nothing the daemon can read, so
+   * wiring it is refused with where knowledge is chosen now, and the team file is left alone.
+   */
+  it('wires a tool into the team file, and refuses a knowledge card that names no folder', async () => {
     composerLayoutState.nodes = [
       { id: 'tool:computer', kind: 'tool', name: 'Computer', source: 'Claude Code', position: { x: 10, y: 20 } },
       { id: 'knowledge:demo', kind: 'knowledge', name: 'demo project', source: 'LoomWatch', position: { x: 10, y: 120 } },
@@ -310,8 +314,10 @@ describe('Workspace', () => {
       await screen.findByLabelText(/^Computer, .*from Claude Code/)
       act(() => flowRuntime.onConnect?.({ source: 'reviewer', target: 'tool:computer' }))
       expect(documentState.setAgentCapabilities).toHaveBeenLastCalledWith('reviewer', [{ kind: 'tool', name: 'Computer' }])
+      vi.mocked(documentState.setAgentCapabilities).mockClear()
       act(() => flowRuntime.onConnect?.({ source: 'reviewer', target: 'knowledge:demo' }))
-      expect(documentState.setAgentCapabilities).toHaveBeenLastCalledWith('reviewer', [{ kind: 'knowledge', name: 'demo project' }])
+      expect(screen.getByText(/Knowledge is a folder or file you choose/)).toBeInTheDocument()
+      expect(documentState.setAgentCapabilities).not.toHaveBeenCalled()
     } finally {
       view.unmount()
     }
@@ -320,24 +326,26 @@ describe('Workspace', () => {
   /**
    * Wiring drawn before ADR 0029 lives only in the sidecar: drawn, never delivered. The canvas says
    * so and one click writes it to the team file — and redrawing it is not refused as a duplicate.
+   * A knowledge card's edge is not offered: it could only fail the run (ADR 0036).
    */
   it('offers to deliver sidecar-only wiring and lets it be redrawn', async () => {
     composerLayoutState.nodes = [
-      { id: 'knowledge:demo', kind: 'knowledge', name: 'demo project', source: 'LoomWatch', position: { x: 10, y: 20 } },
-      { id: 'knowledge:memory', kind: 'knowledge', name: 'Research · memory', source: 'LoomWatch', position: { x: 10, y: 120 }, memory: { team: 'research' } },
+      { id: 'tool:computer', kind: 'tool', name: 'Computer', source: 'Claude Code', position: { x: 10, y: 20 } },
+      { id: 'knowledge:demo', kind: 'knowledge', name: 'demo project', source: 'LoomWatch', position: { x: 10, y: 120 } },
+      { id: 'knowledge:memory', kind: 'knowledge', name: 'Research · memory', source: 'LoomWatch', position: { x: 10, y: 220 }, memory: { team: 'research' } },
     ]
-    composerLayoutState.edges = [{ from: 'reviewer', to: 'knowledge:demo' }]
+    composerLayoutState.edges = [{ from: 'reviewer', to: 'tool:computer' }, { from: 'reviewer', to: 'knowledge:demo' }]
     const view = renderWorkspace()
     try {
       const deliver = await screen.findByRole('button', { name: 'Deliver on the next run' })
       expect(deliver.closest('p')).toHaveTextContent('One connection on the canvas is drawn but not delivered to agents yet.')
       fireEvent.click(deliver)
-      expect(documentState.setAgentCapabilities).toHaveBeenLastCalledWith('reviewer', [{ kind: 'knowledge', name: 'demo project' }])
+      expect(documentState.setAgentCapabilities).toHaveBeenLastCalledWith('reviewer', [{ kind: 'tool', name: 'Computer' }])
 
       vi.mocked(documentState.setAgentCapabilities).mockClear()
-      act(() => flowRuntime.onConnect?.({ source: 'reviewer', target: 'knowledge:demo' }))
+      act(() => flowRuntime.onConnect?.({ source: 'reviewer', target: 'tool:computer' }))
       expect(screen.queryByText('That agent already reaches this capability.')).not.toBeInTheDocument()
-      expect(documentState.setAgentCapabilities).toHaveBeenCalledWith('reviewer', [{ kind: 'knowledge', name: 'demo project' }])
+      expect(documentState.setAgentCapabilities).toHaveBeenCalledWith('reviewer', [{ kind: 'tool', name: 'Computer' }])
     } finally {
       view.unmount()
     }

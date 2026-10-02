@@ -18,7 +18,8 @@ const openCode: DetectedHarness = {
 const capabilities: CapabilityInventory = {
   skills: [{ id: 'skill-notebooklm', name: 'notebooklm', source: 'Claude Code + Codex', detail: 'Research notebooks', status: 'Ready' }],
   tools: [{ id: 'tool-memory', name: 'Agent Memory', source: 'Claude Code + Codex', detail: 'Local MCP connector', status: 'Compatible' }],
-  sources: [{ id: 'source-opencode', name: 'OpenCode history', source: 'OpenCode', detail: 'Previous sessions and tool sources', status: 'Ready' }],
+  // Team memory is the only knowledge the daemon lists (ADR 0036).
+  sources: [{ id: 'memory-research', name: 'Research team · memory', source: 'LoomWatch', detail: '1 brief entry · this team’s kept notes travel with it', status: 'Ready', memory: { team: 'research-team', brief: 1 } }],
 }
 
 function recordedEvidence(overrides: Partial<Evidence> & Pick<Evidence, 'id' | 'kind' | 'name'>): Evidence {
@@ -171,7 +172,7 @@ describe('Library', () => {
     for (const [label, payload] of [
       ['notebooklm, skill from Claude Code + Codex, click for details or drag onto the canvas', '"kind":"skill"'],
       ['Agent Memory, tool or connector from Claude Code + Codex, click for details or drag onto the canvas', '"kind":"tool"'],
-      ['OpenCode history, knowledge source from OpenCode, click for details or drag onto the canvas', '"kind":"knowledge"'],
+      ['Research team · memory, knowledge source from LoomWatch, click for details or drag onto the canvas', '"memory":{"team":"research-team"}'],
     ] as const) {
       const row = screen.getByLabelText(label)
       expect(row).toHaveAttribute('draggable', 'true')
@@ -201,7 +202,7 @@ describe('Library', () => {
     render(<Library harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={capabilities} />)
     expect(screen.getByLabelText(/^notebooklm, skill/)).toHaveTextContent('skill · uses skill')
     expect(screen.getByLabelText(/^Agent Memory, tool/)).toHaveTextContent('tool or connector · invokes')
-    expect(screen.getByLabelText(/^OpenCode history, knowledge/)).toHaveTextContent('knowledge source · reads')
+    expect(screen.getByLabelText(/^Research team · memory, knowledge/)).toHaveTextContent('knowledge source · reads')
   })
 
   it('lists evidence-backed skills and tools and lets their cards be revealed or repositioned', () => {
@@ -229,9 +230,16 @@ describe('Library', () => {
     expect(screen.getByLabelText('Skills')).toHaveTextContent('notebooklm')
     expect(screen.getByLabelText('Skills')).toHaveTextContent('Claude Code + Codex')
     expect(screen.getByLabelText('Tools & connectors')).toHaveTextContent('Agent Memory')
-    expect(screen.getByLabelText('Knowledge sources')).toHaveTextContent('OpenCode history')
+    expect(screen.getByLabelText('Knowledge sources')).toHaveTextContent('Research team · memory')
     fireEvent.click(screen.getByRole('button', { name: /scan again/i }))
     expect(scanAgain).toHaveBeenCalledOnce()
+  })
+
+  /** ADR 0036: with no team memory the group is empty, and says where a folder or file is added. */
+  it('points an empty knowledge group at Add folder and Add file', () => {
+    render(<Library harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={{ ...capabilities, sources: [] }} />)
+    expect(screen.getByLabelText('Knowledge sources')).toHaveTextContent('Teams with memory appear here. To give an agent a folder or file, select the agent and use Add folder… or Add file… in its Context.')
+    expect(screen.getByLabelText('Skills')).not.toHaveTextContent('Teams with memory appear here')
   })
 
   it('uses a collapsed rail and scrim-backed sheet at tablet widths', () => {

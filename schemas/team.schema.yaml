@@ -533,10 +533,11 @@ $defs:
       kind:
         description: >-
           `skill` is copied into the agent's workspace and required in its prompt (ADR 0012, 0019,
-          0021). `knowledge` supplies a knowledge source's contents in the prompt as source
-          material, and a folder source is a read grant for that folder (ADR 0029). `tool` passes
-          the operator's own MCP server definition to the harness in ACP `session/new` (ADR 0029).
-          Team memory is wired through `memory.inherits`, never as `knowledge`.
+          0021). `knowledge` is a folder or file the operator chose, named by `path`: its contents
+          are supplied in the prompt as source material and it is a read grant for that folder or
+          file (ADR 0029, 0035, 0036). `tool` passes the operator's own MCP server definition to the
+          harness in ACP `session/new` (ADR 0029). Team memory is wired through `memory.inherits`,
+          never as `knowledge`.
         type: string
         enum:
           - skill
@@ -544,16 +545,16 @@ $defs:
           - tool
       name:
         description: >-
-          The capability's name as the Library reports it. For a knowledge source with a `path`,
-          only its label.
+          The capability's name as the Library reports it. For knowledge, only the label of its
+          `path`.
         type: string
         minLength: 1
       path:
         description: >-
-          Knowledge only (ADR 0035): a folder or file the operator chose, read from here instead of
-          being looked up in the Library. A folder is linked where it is; an added file is copied
-          beside the team file under `<team>.files/` and named relative to the team file's
-          directory.
+          Knowledge only, and required for it (ADR 0035, 0036): the folder or file the operator
+          chose. A folder is linked where it is; an added file is copied beside the team file under
+          `<team>.files/` and named relative to the team file's directory. Knowledge without a path
+          fails the run, because the Library no longer lists folders a name could point at.
         type: string
         minLength: 1
     if:

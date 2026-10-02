@@ -590,6 +590,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
    * Sidecar edges to a card the team file can deliver, from an agent whose team-file entry does not
    * name it: wiring drawn before its kind was executable (ADR 0029). The canvas draws it, but no
    * run receives it until it is written to the team file — which `deliverLegacyWiring` offers.
+   * A knowledge card is never one: knowledge is a chosen folder or file (ADR 0036).
    */
   const legacyWiring = useMemo(() => composerLayout.edges.filter((edge) => {
     const card = composerLayout.nodes.find((node) => node.id === edge.to)
@@ -1373,15 +1374,21 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         : `${nodeNames.get(source) ?? source} reads ${targetCapability.name}.`)
       return
     }
+    // A knowledge card that is not memory was placed from the Library before ADR 0036. Its name
+    // points at nothing the daemon can read, so wiring it would only fail the next run.
+    if (targetCapability.kind === 'knowledge') {
+      setPlanRefusal('Knowledge is a folder or file you choose. Select the agent and use Add folder… or Add file… in its Context.')
+      return
+    }
     const kind = teamFileKind(targetCapability)
     const agent = doc.nodes.find((node) => node.id === source)?.data.agent
     if (!kind || !agent) {
-      setPlanRefusal('Connect skills, knowledge and tools to the agent that should use them.')
+      setPlanRefusal('Connect skills and tools to the agent that should use them.')
       return
     }
     // Executable configuration, like a skill (ADR 0012): the daemon copies a skill into the
-    // agent's workspace, supplies a knowledge source's contents in its prompt, and hands a tool to
-    // its harness as an MCP server (ADR 0029). Provenance and the agent's harness are independent.
+    // agent's workspace and hands a tool to its harness as an MCP server (ADR 0029). Provenance
+    // and the agent's harness are independent.
     const already = agent.capabilities ?? []
     if (!already.some((capability) => capabilityIsCard(capability, targetCapability))) {
       doc.setAgentCapabilities(source, [...already, { kind, name: targetCapability.name }])

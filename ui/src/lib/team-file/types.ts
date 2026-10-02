@@ -33,15 +33,16 @@ export type AgentStatus =
 
 /**
  * What the daemon delivers to an agent before it runs; see `schemas/team.schema.yaml`
- * `$defs/Capability`. A skill is copied into its workspace (ADR 0012), a knowledge source's contents
- * are supplied in its prompt and a tool is handed to its harness as an MCP server (ADR 0029). Team
- * memory is never a capability: it is wired through `memory.inherits`.
+ * `$defs/Capability`. A skill is copied into its workspace (ADR 0012), a chosen folder or file's
+ * contents are supplied in its prompt and a tool is handed to its harness as an MCP server (ADR
+ * 0029). Team memory is never a capability: it is wired through `memory.inherits`.
  */
 export interface CapabilityRef {
   kind: 'skill' | 'knowledge' | 'tool'
   name: string
-  /** Knowledge only (ADR 0035): a folder linked where it is, or a file added beside the team
-      file (`<team>.files/…`, relative to the team file's folder). `name` is then only a label. */
+  /** Knowledge only, and required for it (ADR 0035, 0036): a folder linked where it is, or a file
+      added beside the team file (`<team>.files/…`, relative to the team file's folder). `name` is
+      then only a label. Knowledge without a path fails the run. */
   path?: string
 }
 

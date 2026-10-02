@@ -326,7 +326,7 @@ function CapabilityGroup({ label, kind, items, observed, total, open, searching,
       </div>
       {expanded && <div role="list" className="lib-rows">
         {loading && total === 0 && [44, 58].map((width) => <div key={width} className="skel-row" aria-hidden="true"><span className="skel-sq" /><span className="skel-bars"><i className="skel-bar" style={{ width: `${width}%` }} /><i className="skel-bar" style={{ width: `${100 - width}%` }} /></span></div>)}
-        {!loading && visible.length === 0 && observedOnly.length === 0 && <EmptyState><span>Nothing detected in this category yet.</span></EmptyState>}
+        {!loading && visible.length === 0 && observedOnly.length === 0 && <EmptyState><span>{kind === 'knowledge' ? 'Teams with memory appear here. To give an agent a folder or file, select the agent and use Add folder… or Add file… in its Context.' : 'Nothing detected in this category yet.'}</span></EmptyState>}
         {visible.map((item) => <MachineCapabilityRow key={item.id} item={item} kind={kind} onDragStateChange={onDragStateChange} onInspect={onInspect} />)}
         {observedOnly.map((item) => <ObservedCapabilityRow key={`${item.kind}:${item.name}`} item={item} onDragStateChange={onDragStateChange} onReveal={onReveal} />)}
         {!searching && hidden > 0 && <button type="button" className="lib-more t-meta" onClick={() => setShowAll(true)}>Show {hidden} more {label.toLowerCase().replace(' & connectors', '')}…</button>}

@@ -102,6 +102,8 @@ describe('chosenKnowledge', () => {
     expect(chosenKnowledge({ kind: 'knowledge', name: 'memo', path: 'desk.files/memo.pdf' })?.label).toMatch(/^Added file/)
     expect(chosenKnowledge({ kind: 'knowledge', name: 'Reports', path: '/Users/me/Reports' })?.label).toMatch(/^Linked folder/)
     expect(chosenKnowledge({ kind: 'knowledge', name: 'q3', path: '/Users/me/q3.csv' })?.label).toMatch(/^Added file/)
-    expect(chosenKnowledge({ kind: 'knowledge', name: 'loomwatch project' })).toBeNull()
+    // ADR 0036: a name alone points at nothing the daemon can read, and the list says so.
+    expect(chosenKnowledge({ kind: 'knowledge', name: 'loomwatch project' })?.label).toBe('No folder or file · disconnect it and add one below')
+    expect(chosenKnowledge({ kind: 'skill', name: 'claude-design' })).toBeNull()
   })
 })
