@@ -43,8 +43,6 @@ export interface WorkspaceShortcutContext {
   setPaletteOpen: Setter<boolean>
   historyOpen: boolean
   setHistoryOpen: Setter<boolean>
-  modeOpen: boolean
-  setModeOpen: Setter<boolean>
   problemsOpen: boolean
   setProblemsOpen: Setter<boolean>
   yamlOpen: boolean
@@ -98,7 +96,7 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
     editable, doc, flow, theme, windowWidth, runView, layersVisible, session, submit, openNewTeam,
     toggleLibrary, cycleProblem, clearSelection, closeRun, organize, fitCanvas, pendingNodeDelete,
     setPendingNodeDelete, requestNodeDelete, deleteNodes, discardConfirm, setDiscardConfirm, paletteOpen,
-    setPaletteOpen, historyOpen, setHistoryOpen, modeOpen, setModeOpen, problemsOpen, setProblemsOpen,
+    setPaletteOpen, historyOpen, setHistoryOpen, problemsOpen, setProblemsOpen,
     yamlOpen, setYamlOpen, compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
     handoverAgentId, setHandoverAgentId, inspectedCapability, provenanceOpen, setProvenanceOpen, memoryOpen,
     setMemoryOpen, fannedAgentId, setFannedAgentId, setSolo, setSweeping, selectedNodes, selectedEdges,
@@ -127,7 +125,6 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
       else if (discardConfirm) setDiscardConfirm(false)
       else if (paletteOpen) setPaletteOpen(false)
       else if (historyOpen) setHistoryOpen(false)
-      else if (modeOpen) setModeOpen(false)
       else if (problemsOpen) setProblemsOpen(false)
       else if (yamlOpen) setYamlOpen(false)
       else if (compareOpen) setCompareOpen(false)

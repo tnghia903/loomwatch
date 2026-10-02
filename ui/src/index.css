@@ -52,8 +52,7 @@
 .lw-shell .lw-inspector {
   max-height: calc(100dvh - var(--lw-below-header) - var(--lw-panel-inset) - var(--lw-composer-height, 56px) - var(--sp-3));
 }
-.lw-shell .lw-history,
-.lw-shell .mode-pop {
+.lw-shell .lw-history {
   bottom: calc(var(--lw-panel-inset) + var(--lw-composer-height, 56px) + var(--sp-3));
 }
 @media (max-width: 767px) {

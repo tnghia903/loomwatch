@@ -20,7 +20,7 @@ const documentState = vi.hoisted(() => ({
     { id: 'reviewer', type: 'agent', position: { x: 300, y: 0 }, selected: false, data: { label: 'Reviewer', agent: { id: 'reviewer', name: 'Reviewer', role: 'Review', model: 'demo', status: 'idle', spawn: { cmd: 'fake', args: [] as string[], env: {}, cwd: '.' } } } },
   ],
   edges: [{ id: 'researcher->reviewer', source: 'researcher', target: 'reviewer', data: { kind: 'sequence', ts: '' }, selected: false }],
-  entrypoint: 'researcher', responder: null as string | null, entrypointProblem: null, teamGuards: null, teamSchedule: null,
+  entrypoint: 'researcher', responder: null as string | null, entrypointProblem: null, teamSchedule: null,
   saveState: 'clean', documentChipState: 'clean', saveError: null, documentProblems: [], fieldProblemsByAgent: new Map(), isValid: true,
   readOnlyReason: null, fileGone: false, loadFailure: null, externalChange: null, diskNotice: null, yamlPreview: 'a: 1', loadedYaml: 'a: 1',
   canUndo: false, canRedo: false, refusal: null, mode: 'pipeline',
@@ -30,7 +30,7 @@ const documentState = vi.hoisted(() => ({
   settleNodeCollision: vi.fn(), capturePositionHistory: vi.fn(), undo: vi.fn(), redo: vi.fn(), onNodesChange: vi.fn(), onEdgesChange: vi.fn(),
   onConnect: vi.fn(), addAgentFromDrop: vi.fn(), save: vi.fn(async () => true), touchField: vi.fn(), renameAgent: vi.fn(), updateAgentModel: vi.fn(),
   updateAgentCwd: vi.fn(), updateAgentAllowRecruiting: vi.fn(), promoteEntrypoint: vi.fn(), promoteResponder: vi.fn(),
-  removeAgent: vi.fn(), updateTeamGuards: vi.fn(), updateTeamSchedule: vi.fn(), dismissRefusal: vi.fn(), keepLastEdgeRemoval: vi.fn(), undoLastEdgeRemoval: vi.fn(),
+  removeAgent: vi.fn(), updateTeamSchedule: vi.fn(), dismissRefusal: vi.fn(), keepLastEdgeRemoval: vi.fn(), undoLastEdgeRemoval: vi.fn(),
   updateAgentMemory: vi.fn(), addBriefEntry: vi.fn(), removeBriefEntry: vi.fn(),
   // ADR 0016: `memory.inherits` is what the canvas draws memory cards from, and agent positions
   // arrive from the sidecar through `applyPositions` — neither dirties the document.

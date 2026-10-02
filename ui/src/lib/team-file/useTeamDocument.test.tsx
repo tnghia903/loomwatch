@@ -593,20 +593,6 @@ describe('useTeamDocument', () => {
       .toEqual({ cmd: 'opencode', args: ['acp'], env: {}, cwd: 'work' })
   })
 
-  it('shows each team guard edit in the YAML preview at once, keeping the other guard', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })))
-    const { result } = renderHook(() => useTeamDocument())
-    await waitFor(() => expect(result.current.saveState).toBe('clean'))
-
-    act(() => result.current.updateTeamGuards('maxDispatchDepth', 3))
-    expect(result.current.yamlPreview).toContain('maxDispatchDepth: 3')
-
-    act(() => result.current.updateTeamGuards('maxConcurrentDispatches', 4))
-    expect(result.current.teamGuards).toEqual({ maxDispatchDepth: 3, maxConcurrentDispatches: 4 })
-    expect(result.current.yamlPreview).toContain('maxDispatchDepth: 3')
-    expect(result.current.yamlPreview).toContain('maxConcurrentDispatches: 4')
-  })
-
   it('save() rechecks an unchanged disk revision, PUTs the mutated YAML, and settles on saved', async () => {
     const fetchMock = vi.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (!init) {
@@ -990,10 +976,12 @@ describe('useTeamDocument', () => {
       vi.useRealTimers()
     })
 
-    it('edits team guards through the mode-pill affordance', async () => {
+    // The canvas no longer edits `guards` (CANVAS_SPEC §8.1), so the file is their only home: a
+    // limit someone wrote by hand must survive every save the canvas makes.
+    it('keeps hand-written team guards through an edit and save', async () => {
       const fetchMock = vi.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
         if (!init) {
-          return jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })
+          return jsonResponse(200, { path: '/teams/research-team.yaml', yaml: `${TEAM_YAML.trimEnd()}\nguards:\n  maxDispatchDepth: 3\n` })
         }
         return jsonResponse(200, JSON.parse(init.body as string))
       })
@@ -1001,10 +989,9 @@ describe('useTeamDocument', () => {
       const { result } = renderHook(() => useTeamDocument())
       await waitFor(() => expect(result.current.saveState).toBe('clean'))
 
-      expect(result.current.teamGuards).toBeNull()
-
-      act(() => result.current.updateTeamGuards('maxDispatchDepth', 3))
-      expect(result.current.teamGuards).toEqual({ maxDispatchDepth: 3, maxConcurrentDispatches: 8 })
+      act(() => {
+        result.current.onConnect({ source: 'researcher', target: 'reviewer', sourceHandle: null, targetHandle: null })
+      })
       expect(result.current.saveState).toBe('dirty')
 
       await act(async () => {

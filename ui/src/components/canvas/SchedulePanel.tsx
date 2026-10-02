@@ -1,5 +1,5 @@
 import { AlertCircle, ChevronDown, ChevronRight, Clock3, Globe2, Save, X } from 'lucide-react'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 
 import { cronFor, normalizeSchedule, scheduleParts, unsupportedScheduleKeys, type ScheduleFrequency } from '../../lib/team-file/schedule'
 import type { ScheduleConfig } from '../../lib/team-file/types'
@@ -21,9 +21,12 @@ export interface SchedulePanelProps {
   onSaveFile: () => void
   onAdvanced: () => void
   onClose: () => void
+  /** How the saved routine is doing, as the daemon reports it, with a way to run it now. Absent
+   * until the team file on disk has a schedule the daemon has picked up. */
+  status?: ReactNode
 }
 
-export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile, savedInEditor, onSave, onSaveFile, onAdvanced, onClose }: SchedulePanelProps) {
+export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile, savedInEditor, onSave, onSaveFile, onAdvanced, onClose, status }: SchedulePanelProps) {
   const initial = scheduleParts(schedule.cron)
   const [frequency, setFrequency] = useState<ScheduleFrequency>(initial.frequency)
   const [time, setTime] = useState(initial.time)
@@ -76,6 +79,8 @@ export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile
           <strong className="t-title">When should this team run?</strong>
           <span className="t-body">Set a schedule to start this pipeline.</span>
         </header>
+
+        {status && <div className="schedule-routine t-meta" aria-label="Routine status">{status}</div>}
 
         {problems.length > 0 && (
           <div className="schedule-problems" role="alert">

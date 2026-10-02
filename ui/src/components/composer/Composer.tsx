@@ -39,9 +39,7 @@ export interface ComposerProps {
   onStop: () => void
   onRetry: () => void
   onNewRun: () => void
-  onOpenMode: () => void
   onOpenHistory: () => void
-  modeOpen: boolean
   historyOpen: boolean
   switchBanner?: boolean
   /** Pinned Brief entries this team will supply. 0 hides the chip's count, not the chip. */
@@ -69,11 +67,13 @@ export interface ComposerProps {
   children?: ReactNode
 }
 
-// TNG89 §1: 720 × 56, bottom-centre. It absorbs the mode pill: the pill explains how the
-// document will execute, and that fact is worth most at the moment you execute it.
+// TNG89 §1: 720 × 56, bottom-centre. It absorbs the mode pill: the pill says how the document
+// will execute, and that fact is worth most at the moment you execute it. The pill is a label,
+// not a button — the popover it once opened explained tool names and guard limits an operator
+// never needs, and the canvas already numbers the steps (CANVAS_SPEC §8.1).
 // ↵ sends and ⇧↵ inserts a newline, the convention of every chat app an operator already uses;
 // ⌘↵ also sends. There is no "run without saving".
-export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, state, value, onChange, onSubmit, onStop, onRetry, onNewRun, onOpenMode, onOpenHistory, modeOpen, historyOpen, switchBanner, memoryCount = 0, memoryOpen = false, onOpenMemory, followUpStages = [], followUpTarget = null, onFollowUpTargetChange, onFollowUp, dirty = false, onAnswer, replyAgents = [], onReply, replySending = false, reviewContext, agentNames, note, children }: ComposerProps) {
+export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, state, value, onChange, onSubmit, onStop, onRetry, onNewRun, onOpenHistory, historyOpen, switchBanner, memoryCount = 0, memoryOpen = false, onOpenMemory, followUpStages = [], followUpTarget = null, onFollowUpTargetChange, onFollowUp, dirty = false, onAnswer, replyAgents = [], onReply, replySending = false, reviewContext, agentNames, note, children }: ComposerProps) {
   const textarea = useRef<HTMLTextAreaElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const [focused, setFocused] = useState(false)
@@ -107,6 +107,9 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
 
   const canSubmit = value.trim().length > 0 && (state.kind === 'ready' || state.kind === 'dirty')
   const modeLabel = mode === 'pipeline' ? `${stepCount} step${stepCount === 1 ? '' : 's'} in order` : 'Lead agent delegates'
+  const modeHint = mode === 'pipeline'
+    ? 'Your agents work one after another, in the order you connected them. Each one picks up where the last one left off.'
+    : 'Your lead agent gets the request and decides who else to bring in.'
   // "When the Output arrives the composer does not go dark. It offers Follow up." Available only
   // on a terminal run, because a follow-up is a child of a run that is over.
   const canFollowUp = terminal && onFollowUp !== undefined
@@ -217,11 +220,11 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
       {children}
       <div ref={panel} className={`panel bottom cx e1 lw-composer ${slim ? 'prototype-composer' : ''} ${focused ? 'focused' : ''} ${switchBanner ? 'mode-switch' : ''} ${answering || replyTo || canFollowUp ? 'expanded-actions' : ''}`} role="group" aria-label="Prompt composer" data-tour="composer">
         {slim && <MessageSquare className="composer-message-icon" size={17} />}
-        <button type="button" className={`mode-chip t-body-m ${mode}`} onClick={onOpenMode} aria-haspopup="dialog" aria-expanded={modeOpen} title="How this team works through a request">
+        <span className={`mode-chip mode-summary t-body-m ${mode}`} title={modeHint}>
           <span className="glyph" aria-hidden="true">{mode === 'pipeline' ? <Workflow size={15} /> : <Asterisk size={15} />}</span>
           <span className="label">{modeLabel}</span>
-          {anomalyCount > 0 && <span className="anomaly t-micro" title={`${anomalyCount} observed delegation${anomalyCount === 1 ? '' : 's'} with no configured counterpart`}>⚠ {anomalyCount}</span>}
-        </button>
+          {anomalyCount > 0 && <span className="anomaly t-micro" title={`In the last run, an agent passed work to someone it isn’t connected to (${anomalyCount} time${anomalyCount === 1 ? '' : 's'}). The Run view marks where.`}>⚠ {anomalyCount}</span>}
+        </span>
         {/* Memory sits beside the mode chip because both explain what the run will be made of.
             The count is honest about state: these entries are pinned and *will* be supplied,
             within the budget — not "eligible". docs/TEAM_MEMORY.md, "The Memory panel". */}

@@ -9,7 +9,7 @@ import { TeamFileModel, TeamFileParseError } from './document'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
 import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
-import type { AgentConfig, BriefEntryConfig, CapabilityRef, EdgeConfig, GuardsConfig, ScheduleConfig, SpawnConfig, TeamDocument } from './types'
+import type { AgentConfig, BriefEntryConfig, CapabilityRef, EdgeConfig, ScheduleConfig, SpawnConfig, TeamDocument } from './types'
 import {
   loadTeamValidator,
   displayFieldProblems,
@@ -222,7 +222,6 @@ export function useTeamDocument() {
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [edges, setEdges] = useState<ConfiguredEdge[]>([])
   const [entrypoint, setEntrypointState] = useState<string | null>(null)
-  const [teamGuards, setTeamGuards] = useState<GuardsConfig | null>(null)
   const [teamSchedule, setTeamSchedule] = useState<ScheduleConfig | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('no-file')
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -290,7 +289,6 @@ export function useTeamDocument() {
     setDocumentSnapshot(snapshot)
     setYamlPreview(entry.yaml)
     setEntrypointState(snapshot.entrypoint || null)
-    setTeamGuards(snapshot.guards ?? null)
     setTeamSchedule(snapshot.schedule ?? null)
     setTeamSchedule(snapshot.schedule ?? null)
     setNodes(
@@ -343,7 +341,6 @@ export function useTeamDocument() {
     setNodes([])
     setEdges([])
     setEntrypointState(null)
-    setTeamGuards(null)
     setTeamSchedule(null)
     setDocumentSnapshot(model.snapshot())
     setYamlPreview(model.toYaml())
@@ -370,7 +367,6 @@ export function useTeamDocument() {
     setNodes([])
     setEdges([])
     setEntrypointState(null)
-    setTeamGuards(null)
     setTeamSchedule(null)
     setDocumentSnapshot(null)
     setYamlPreview('')
@@ -426,7 +422,6 @@ export function useTeamDocument() {
     setDocumentSnapshot(snapshot)
     setYamlPreview(model.toYaml())
     setEntrypointState(snapshot.entrypoint || null)
-    setTeamGuards(snapshot.guards ?? null)
     setTeamSchedule(snapshot.schedule ?? null)
     setNodes(agents.map((agent) => nodeFromAgent(agent, laidOut[agent.id] ?? { x: 0, y: 0 }, agent.id === snapshot.entrypoint)))
     setEdges(configured.map(edgeFromConfig))
@@ -476,7 +471,6 @@ export function useTeamDocument() {
         if (discovery) setTeamsRoot(discovery.root)
         setPath(discovery ? absoluteTeamPath(discovery.root, requestedPath) : requestedPath)
         setEntrypointState(snapshot.entrypoint)
-        setTeamGuards(snapshot.guards ?? null)
         setTeamSchedule(snapshot.schedule ?? null)
         setTeamSchedule(snapshot.schedule ?? null)
         setNodes(
@@ -555,7 +549,6 @@ export function useTeamDocument() {
       loadedRevisionRef.current = revision ?? await hashTeamYaml(yaml)
       isNewRef.current = false
       setEntrypointState(snapshot.entrypoint)
-      setTeamGuards(snapshot.guards ?? null)
       setTeamSchedule(snapshot.schedule ?? null)
       setTeamSchedule(snapshot.schedule ?? null)
       setNodes(
@@ -1055,24 +1048,6 @@ export function useTeamDocument() {
     [markDirty, captureHistory],
   )
 
-  // §8.1: the mode-pill popover's edit affordance for team-level `guards` — the only
-  // home these fields have, per TEAM_CONFIG.md's default-to-8 rule when a guard is absent.
-  const updateTeamGuards = useCallback(
-    (field: keyof GuardsConfig, value: number) => {
-      captureHistory()
-      const next: GuardsConfig = {
-        maxDispatchDepth: teamGuards?.maxDispatchDepth ?? 8,
-        maxConcurrentDispatches: teamGuards?.maxConcurrentDispatches ?? 8,
-        [field]: value,
-      }
-      // Before the setter, not inside it, as in `updateAgentCwd`: `markDirty` reads the model now.
-      modelRef.current?.setGuards(next)
-      setTeamGuards(next)
-      markDirty()
-    },
-    [teamGuards, markDirty, captureHistory],
-  )
-
   const updateTeamSchedule = useCallback(
     (schedule: ScheduleConfig) => {
       captureHistory()
@@ -1422,7 +1397,6 @@ export function useTeamDocument() {
     edges,
     entrypoint,
     entrypointProblem,
-    teamGuards,
     teamSchedule,
     /**
      * The team's `memory.inherits` entries as the document holds them.
@@ -1491,7 +1465,6 @@ export function useTeamDocument() {
     setAgentCapabilities,
     promoteEntrypoint,
     promoteResponder,
-    updateTeamGuards,
     updateTeamSchedule,
     addBriefEntry,
     removeBriefEntry,

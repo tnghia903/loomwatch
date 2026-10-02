@@ -822,17 +822,26 @@ that explains the whole document.
    ink-2 text, ink-3 glyph            ink text, iris glyph
 ```
 
-Clicking it opens an `e2` popover — the only place execution semantics are explained, and
-it is disclosed, not resident:
+The pill is a **label, not a control**. It explains itself in one plain sentence on hover:
 
-- **Team:** "`edges` is empty, so `researcher` receives the goal and decides who else to
-  involve. All six Team Bus tools are available." + a `Guards` summary
-  (`maxDispatchDepth 8 · maxConcurrentDispatches 8` — both default to `8` when absent,
-  TEAM_CONFIG.md) with an edit affordance for
-  `guards` — a team-level field with no other home.
-- **Pipeline:** "Four steps run in the order you drew. `dispatch` and `handoff` are
-  withdrawn; the backend sequences the run." + the resolved order as a numbered list, and a
-  note on any join node ("`d` receives replies from `b` and `c`").
+- **Team:** "Your lead agent gets the request and decides who else to bring in."
+- **Pipeline:** "Your agents work one after another, in the order you connected them. Each
+  one picks up where the last one left off."
+
+**Retired 2026-10-02: the mode popover.** Clicking the pill used to open an `e2` popover
+naming the Team Bus tools each mode withdraws, listing the resolved step order, and editing
+`guards`. Operators don't need any of that to run a team, and the popover had no visible way
+to close. It was removed, and nothing should bring it back without a user need:
+
+- The step order is already on the canvas: every node carries its step number.
+- `guards` (`maxDispatchDepth`, `maxConcurrentDispatches`, both defaulting to `8`,
+  TEAM_CONFIG.md) live in the team file only. The canvas keeps them on save but no longer
+  edits them. `maxConcurrentDispatches` has no effect in pipeline mode anyway, because
+  `dispatch` and `handoff` are withdrawn there.
+- Observed delegations with no configured counterpart stay as the pill's `⚠ n` count, with
+  a plain hover hint, and are drawn on the canvas in the Run view.
+- A team's `schedule:` routine (its timing, delivery, last problem and **Run now**) moved
+  to the composer's note line, and to **Run routine now** in the workspace menu.
 
 ### 8.2 The two canvas states
 

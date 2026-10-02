@@ -6,7 +6,7 @@ import type { DetectedHarness } from '../lib/harnesses'
 import { briefFileNameFor, exportPack, fetchMemory, fetchNoteHistory, fetchNotes, fetchRunCheckpoints, fetchRunContext, reviseNote, writeMemoryFile, type Checkpoint, type ContextPacket, type MemoryView, type Note, type NotebookView } from '../lib/memory/client'
 import type { AgentNode } from '../lib/library/nodeFromDrop'
 import type { CapabilityInventory, DetectedCapability } from '../lib/library/client'
-import { describeNextFire, isTerminalRun, runScheduleNow, scheduleForPath, useSchedules } from '../lib/runs/client'
+import { isTerminalRun, runScheduleNow, scheduleForPath, useSchedules } from '../lib/runs/client'
 import { ownerLabelFor } from '../lib/runs/graph'
 import { appLabelForAgent, harnessIdForAgent, modelOptionsForAgent } from '../lib/models'
 import type { OutputNode } from '../lib/runs/graph'
@@ -53,7 +53,7 @@ import { BuildInspector } from './canvas/BuildInspector'
 import { ComponentPalette } from './library/ComponentPalette'
 import { MessageSquareText, Play, Wrench } from 'lucide-react'
 import { Composer, type ComposerState } from './composer/Composer'
-import { ModePopover } from './composer/ModePopover'
+import { RoutineNote } from './composer/RoutineNote'
 import { RunHistory } from './composer/RunHistory'
 import { CAPABILITY_DRAG_MIME, EVIDENCE_DRAG_MIME, Library, LIBRARY_DRAG_MIME } from './library'
 import { BriefEditStrip } from './memory/BriefEditStrip'
@@ -187,7 +187,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   // ---- chrome state --------------------------------------------------------------------
   const [outputEditorOpen, setOutputEditorOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [modeOpen, setModeOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(initialHistoryOpen)
   const [problemsOpen, setProblemsOpen] = useState(false)
   const [yamlOpen, setYamlOpen] = useState(false)
@@ -452,7 +451,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       const created = await runScheduleNow(routine.teamPath)
       session.applyRecord(created)
       showRun(created.runId)
-      setModeOpen(false)
       schedules.refresh()
       void history.refresh()
     } catch (caught) {
@@ -1785,7 +1783,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     editable, doc, flow, theme, windowWidth, runView, layersVisible, session,
     submit, openNewTeam, toggleLibrary, cycleProblem, clearSelection, closeRun, organize, fitCanvas,
     pendingNodeDelete, setPendingNodeDelete, requestNodeDelete, deleteNodes, discardConfirm, setDiscardConfirm,
-    paletteOpen, setPaletteOpen, historyOpen, setHistoryOpen, modeOpen, setModeOpen, problemsOpen, setProblemsOpen,
+    paletteOpen, setPaletteOpen, historyOpen, setHistoryOpen, problemsOpen, setProblemsOpen,
     yamlOpen, setYamlOpen, compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
     handoverAgentId, setHandoverAgentId, inspectedCapability, provenanceOpen, setProvenanceOpen, memoryOpen, setMemoryOpen,
     fannedAgentId, setFannedAgentId, setSolo, setSweeping,
@@ -2030,7 +2028,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           <a className="delivery-brand" href="/" aria-label="LoomWatch — all teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}>LoomWatch</a>
           <WorkspaceMenu
             canOrganize={canOrganize} canUndoOrganize={Boolean(previousArrangement)} runView={runView}
-            onHistory={() => setHistoryOpen(true)} onMemory={() => { clearSelection(); setMemoryOpen(true) }} onRunSettings={() => setModeOpen(true)}
+            onHistory={() => setHistoryOpen(true)} onMemory={() => { clearSelection(); setMemoryOpen(true) }} onRunRoutine={routine && !routineBusy ? () => void runRoutineNow() : undefined}
             onOrganize={organize} onUndoOrganize={undoOrganize} onFullTrace={() => setRunPresentation('trace')} onShowYaml={() => setYamlOpen(true)}
           />
           <div className="needs-you-anchor"><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray}</div>
@@ -2053,7 +2051,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           )}
           {doc.diskNotice && <p className="lw-notice t-meta" style={{ margin: 0 }}>{doc.diskNotice}</p>}
           {doc.entrypointProblem && doc.entrypointProblem.candidates.length > 0 && editable && <EntrypointProblemBar problem={doc.entrypointProblem} onPromote={doc.promoteEntrypoint} />}
-          {doc.modeSwitchBanner && <p className="mode-switch-note t-meta" style={{ margin: 0, pointerEvents: 'auto' }}><span title="Configured edges sequence the run; dispatch and handoff are withdrawn.">Your agents now hand work along in the order you connected them.</span></p>}
+          {doc.modeSwitchBanner && <p className="mode-switch-note t-meta" style={{ margin: 0, pointerEvents: 'auto' }}>Your agents now hand work along in the order you connected them.</p>}
           {doc.pendingEdgeRemoval && (
             <div role="alert" className="e2 pop-inline t-body" style={{ pointerEvents: 'auto', borderRadius: 'var(--r-md)' }}>
               <span>With no connections left, the first agent now decides who to bring in.</span>
@@ -2151,6 +2149,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             onSaveFile={() => void doc.save()}
             onAdvanced={showScheduleYaml}
             onClose={() => setScheduleEditorOpen(false)}
+            status={routine ? <RoutineNote schedule={routine} onRunNow={() => void runRoutineNow()} busy={routineBusy} /> : undefined}
           />
         )}
         {inspectedEvidence && <ActivityPanel evidence={inspectedEvidence} ownerLabel={ownerLabels.get(inspectedEvidence.agentId) ?? inspectedEvidence.agentId} onClose={() => setInspectedEvidenceId(null)} />}
@@ -2253,12 +2252,12 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           replyAgents={(record?.replyableAgents ?? []).map((id) => ({ id, name: nodeNames.get(id) ?? id }))}
           onReply={(id) => void replyToAgent(id)} replySending={answerSending}
           dirty={['dirty', 'new'].includes(doc.documentChipState)} onAnswer={(sendBack) => void sendAnswer(sendBack)}
-          note={!runView && composerState.kind === 'ready' && routine ? `Routine: ${routine.enabled ? routine.describe : 'paused'} · next ${describeNextFire(routine.nextAt)}${routine.deliver?.notion ? ' · delivers to Notion' : ''}` : undefined}
+          note={!runView && composerState.kind === 'ready' && routine ? <RoutineNote schedule={routine} onRunNow={() => void runRoutineNow()} busy={routineBusy} /> : undefined}
           mode={doc.mode} stepCount={doc.pipelineSteps.length || doc.nodes.length} anomalyCount={anomalies.length} state={composerState}
           value={composerText} onChange={setComposerText} onSubmit={() => void submit()} onStop={() => void stop()} onRetry={retry} onNewRun={() => void submit()}
           followUpStages={followUpStages} followUpTarget={followUpTarget} onFollowUpTargetChange={setFollowUpTarget}
           onFollowUp={runView && activeRunId ? () => void followUp() : undefined}
-          onOpenMode={() => { setModeOpen((open) => !open); setHistoryOpen(false) }} onOpenHistory={() => { setHistoryOpen((open) => !open); setModeOpen(false) }} modeOpen={modeOpen} historyOpen={historyOpen} switchBanner={doc.modeSwitchBanner}
+          onOpenHistory={() => setHistoryOpen((open) => !open)} historyOpen={historyOpen} switchBanner={doc.modeSwitchBanner}
           memoryCount={memory?.entries.length ?? 0} memoryOpen={memoryPanelOpen} onOpenMemory={() => {
             // Opening Memory clears the selection, because the right dock holds one panel and a
             // selected node owns it (§13's mutual exclusion, enforced in `memoryPanelOpen`).
@@ -2269,9 +2268,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             setMemoryOpen((open) => !open)
           }}
         >
-          {modeOpen && (
-            <ModePopover mode={doc.mode} steps={doc.pipelineSteps} nodeNames={nodeNames} entrypointName={doc.entrypoint ? nodeNames.get(doc.entrypoint) ?? doc.entrypoint : null} guards={doc.teamGuards} anomalies={anomalies} readOnly={!editable} onUpdateGuards={doc.updateTeamGuards} onClose={() => setModeOpen(false)} schedule={routine} onRunRoutineNow={() => void runRoutineNow()} routineBusy={routineBusy} />
-          )}
           {historyOpen && (
             <RunHistory entries={historyEntries} currentId={activeRunId} loading={!history.loaded} error={history.error ?? history.unavailable} onOpen={(entry) => {
               setHistoryOpen(false)

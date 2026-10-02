@@ -100,8 +100,10 @@ const shortCss = shortBlocks(runtimeCss, RUNTIME_CSS)
 // The premise of H2-H5: these are the elements §13's rule acts on. If the composer stops
 // rendering them, every contract below is measuring a shape that no longer exists.
 anchor('Composer prompt textarea inside .comp-mid', composer.match(/className="comp-mid"[\s\S]{0,400}?<textarea/))
-// The opening tag is what carries the popup ARIA H4 reads; the button's children do not.
-const modeChip = anchor('Composer mode chip', composer.match(/<button[^>]*className=\{`mode-chip[^>]*>/))
+// The opening tag is what carries the popup ARIA H4 reads; the chip's children do not. The chip
+// became a non-interactive <span> when the mode popover was retired (CANVAS_SPEC §8.1); either
+// tag is anchored so a chip that grows a popup again is still read by H4.
+const modeChip = anchor('Composer mode chip', composer.match(/<(?:button|span)[^>]*className=\{`mode-chip[^>]*>/))
 anchor('Composer action group', composer.match(/className="comp-act"/))
 
 /** Does `selector` get `display: none` inside the short-viewport block? */

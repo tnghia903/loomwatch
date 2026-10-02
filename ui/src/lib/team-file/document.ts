@@ -1,6 +1,6 @@
 import { type Document, isMap, isScalar, isSeq, parseDocument, stringify } from 'yaml'
 
-import type { AgentConfig, BriefEntryConfig, EdgeConfig, GuardsConfig, ScheduleConfig, TeamDocument } from './types'
+import type { AgentConfig, BriefEntryConfig, EdgeConfig, ScheduleConfig, TeamDocument } from './types'
 
 /** The document could not be parsed as YAML, or does not shape up as a team file. */
 export class TeamFileParseError extends Error {
@@ -99,14 +99,6 @@ export class TeamFileModel {
   /** Unset `entrypoint` (§5.4: deleting it with 2+ agents left picks no automatic survivor). */
   clearEntrypoint(): void {
     this.doc.delete('entrypoint')
-  }
-
-  setGuards(guards: GuardsConfig | undefined): void {
-    if (guards === undefined) {
-      this.doc.delete('guards')
-      return
-    }
-    this.doc.set('guards', this.doc.createNode(guards))
   }
 
   setSchedule(schedule: ScheduleConfig): void {
