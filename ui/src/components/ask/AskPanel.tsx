@@ -5,6 +5,7 @@ import type { AskContext, InboxItem } from '../../lib/ask/client'
 import type { AskStep, AssistantTurn } from '../../lib/ask/thread'
 import type { AskController } from '../../lib/ask/useAsk'
 import { Markdown } from '../ui/Markdown'
+import { AskAppPicker } from './AskAppPicker'
 import { AskCardView, type CardActions } from './AskCards'
 
 const SUGGESTIONS: Record<AskContext['view'], string[]> = {
@@ -158,7 +159,12 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: A
   }
 
   if (hidden) return null
-  const appLine = ask.unavailable ?? (thread.appName ? `Using ${thread.appName} on this computer` : ask.apps?.defaultApp ? `Uses ${ask.apps.apps.find((app) => app.id === ask.apps?.defaultApp)?.name ?? 'your AI app'} on this computer` : 'Looking for an AI app…')
+  // A live conversation keeps the app and model it started with; otherwise the next one's are shown.
+  const liveApp = !finished && thread.appId ? ask.apps?.apps.find((app) => app.id === thread.appId) : undefined
+  const shownApp = liveApp ?? ask.selectedApp
+  const shownModel = liveApp
+    ? thread.model ? (thread.model === ask.selectedModel?.id ? ask.selectedModel : { id: thread.model, name: thread.model }) : null
+    : ask.selectedModel
 
   return (
     <aside className={`ask-panel ${onHome ? 'on-home' : ''}`} aria-labelledby={titleId} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); ask.setOpen(false) } }}>
@@ -166,7 +172,25 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: A
       <header className="ask-head">
         <div className="ask-head-text">
           <h2 id={titleId}>Ask LoomWatch</h2>
-          <p className={ask.unavailable ? 'unavailable' : ''}>{appLine}</p>
+          {ask.unavailable
+            ? <p className="unavailable">{ask.unavailable}</p>
+            : shownApp && ask.apps
+              ? (
+                // A div, not a p: the picker's list opens inside it.
+                <div className="ask-app-line">
+                  Using{' '}
+                  <AskAppPicker
+                    apps={ask.apps.apps}
+                    app={shownApp}
+                    model={shownModel}
+                    inConversation={items.length > 0 && !finished}
+                    disabled={ask.sending}
+                    onChoose={ask.chooseApp}
+                  />
+                  {' '}on this computer
+                </div>
+              )
+              : <p>{thread.appName ? `Using ${thread.appName} on this computer` : 'Looking for an AI app…'}</p>}
         </div>
         {items.length > 0 && <button type="button" className="iconbtn" onClick={ask.startOver} aria-label="Start a new conversation" title="New conversation"><RotateCcw size={15} aria-hidden="true" /></button>}
         <button type="button" className="iconbtn" onClick={() => ask.setOpen(false)} aria-label="Close Ask LoomWatch" title="Close (Esc)"><X size={15} aria-hidden="true" /></button>

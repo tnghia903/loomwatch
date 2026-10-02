@@ -126,6 +126,9 @@ struct Conversation {
 struct AskApp {
     id: String,
     name: String,
+    /// The model the person chose for this conversation; `None` is the app's own default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -409,8 +412,59 @@ async fn apps(State(control): State<Control>) -> Json<Value> {
 struct StartConversation {
     #[serde(default)]
     app: Option<String>,
+    /// A model id from the app's own list; empty or absent uses the app's default.
+    #[serde(default)]
+    model: Option<String>,
     #[serde(default)]
     ask_before_run: Option<bool>,
+}
+
+/// The longest model id the panel may name. Real ids are a few dozen characters; this only keeps a
+/// pasted paragraph out of the app's `session/set_model`.
+const MAX_MODEL_CHARS: usize = 200;
+
+/// The chosen model, trimmed, or `None` for the app's default. A model that can't be an id is
+/// refused here rather than handed to the app.
+fn chosen_model(model: Option<&str>) -> Result<Option<String>, String> {
+    let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) else {
+        return Ok(None);
+    };
+    if model.chars().count() > MAX_MODEL_CHARS || model.chars().any(char::is_control) {
+        return Err(
+            "That isn't a model this app lists. Choose one from the list, or its default."
+                .to_owned(),
+        );
+    }
+    Ok(Some(model.to_owned()))
+}
+
+/// The app the person asked for, or the first one here that can run Ask; why not, in plain words.
+fn chosen_app<'a>(
+    apps: &'a [crate::api::DetectedHarness],
+    requested: Option<&str>,
+) -> Result<&'a crate::api::DetectedHarness, String> {
+    let chosen = match requested {
+        Some(id) => Some(apps.iter().find(|app| app.id == id).ok_or_else(|| {
+            format!("{id} isn't an AI app Ask can use on this computer. Choose another app.")
+        })?),
+        None => apps.iter().find(|app| app.acp_available),
+    };
+    let Some(app) = chosen else {
+        return Err(
+            "No AI app that can run Ask was found on this computer. Install and sign in to Claude \
+             Code, Codex, Gemini CLI or OpenCode, then start LoomWatch again from a terminal where \
+             it works."
+                .to_owned(),
+        );
+    };
+    if !app.acp_available {
+        return Err(format!(
+            "{} can't run Ask here: {}",
+            app.name,
+            app.unavailable_reason.clone().unwrap_or_default()
+        ));
+    }
+    Ok(app)
 }
 
 async fn start_conversation(
@@ -424,29 +478,15 @@ async fn start_conversation(
             crate::watch_api::ARCHIVE_DISABLED_MESSAGE,
         );
     };
+    let model = match chosen_model(request.model.as_deref()) {
+        Ok(model) => model,
+        Err(message) => return error(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
     let apps = ask_apps(&control);
-    let chosen = match request.app.as_deref() {
-        Some(id) => apps.iter().find(|app| app.id == id),
-        None => apps.iter().find(|app| app.acp_available),
+    let app = match chosen_app(&apps, request.app.as_deref()) {
+        Ok(app) => app,
+        Err(message) => return error(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    let Some(app) = chosen else {
-        return error(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "No AI app that can run Ask was found on this computer. Install and sign in to Claude \
-             Code, Codex, Gemini CLI or OpenCode, then start LoomWatch again from a terminal where \
-             it works.",
-        );
-    };
-    if !app.acp_available {
-        return error(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            format!(
-                "{} can't run Ask here: {}",
-                app.name,
-                app.unavailable_reason.clone().unwrap_or_default()
-            ),
-        );
-    }
     let workspace = match prepare_workspace(&control.inner.teams_root) {
         Ok(path) => path,
         Err(message) => return error(StatusCode::INTERNAL_SERVER_ERROR, message),
@@ -458,6 +498,7 @@ async fn start_conversation(
         app: AskApp {
             id: app.id.clone(),
             name: app.name.clone(),
+            model,
         },
         token: token.clone(),
         event_log: EventLog::new(archive, id.clone()),
@@ -492,6 +533,7 @@ async fn start_conversation(
             json!({"state": "starting", "app": conversation.app}),
         )
         .await;
+    let model = conversation.app.model.clone();
     tokio::spawn(converse(control.clone(), conversation, spec, receiver));
     // Most first requests are "make me a team", which needs every app's models; finding them
     // starts each app, so it begins now rather than when the assistant first asks.
@@ -503,6 +545,7 @@ async fn start_conversation(
             "id": id,
             "app": app.id,
             "appName": app.name,
+            "model": model,
             "state": "starting",
         })),
     )
@@ -607,14 +650,23 @@ async fn converse(
         }
     };
     let mut process = process;
-    let mut recorder = match process.open_live(AGENT_ID, "", &mut context).await {
+    let model = conversation.app.model.as_deref().unwrap_or_default();
+    let mut recorder = match process.open_live(AGENT_ID, model, &mut context).await {
         Ok(recorder) => recorder,
         Err(failure) => {
-            let message = format!(
-                "{} started but did not answer LoomWatch: {}",
-                conversation.app.name,
-                first_line(&format!("{failure:#}"))
-            );
+            let reason = first_line(&format!("{failure:#}"));
+            // A model the app turned down is the person's choice to change, so say so.
+            let message = if reason.contains("rejected configured model") {
+                format!(
+                    "{} wouldn't use {model}: {reason}. Choose another model, or its default.",
+                    conversation.app.name
+                )
+            } else {
+                format!(
+                    "{} started but did not answer LoomWatch: {reason}",
+                    conversation.app.name
+                )
+            };
             fail(&control, &conversation, &message).await;
             return;
         }
@@ -771,6 +823,7 @@ async fn conversation_status(
         "id": conversation.id,
         "app": conversation.app.id,
         "appName": conversation.app.name,
+        "model": conversation.app.model,
         "state": status.state,
         "error": status.error,
         "askBeforeRun": status.ask_before_run,

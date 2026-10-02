@@ -1,7 +1,8 @@
 # 0033 — Ask LoomWatch: your own AI app builds and runs teams, you keep the decisions
 
 - **Date:** 2026-10-02
-- **Status:** Accepted. Proposal reviewed as the "Ask LoomWatch" page, 2026-10-02.
+- **Status:** Accepted. Proposal reviewed as the "Ask LoomWatch" page, 2026-10-02. Amended
+  2026-10-02: the person chooses the app and model (see *Choosing the app*).
 
 ## Context
 
@@ -20,9 +21,9 @@ so a person, not an AI, decides whether work goes further.
 1. **Inside LoomWatch, with no setup.** An *Ask* panel (header button on every screen, a
    *Describe the job* box on Home, *Ask LoomWatch…* in ⌘K) talks to one of the user's own AI apps.
    LoomWatch starts that app over ACP outside any run and hands it the LoomWatch Control tools at
-   `session/new`, the same way every agent already receives the Team Bus. The app is the first one
-   found of Claude, Codex, Gemini, OpenCode and Hermes, and the panel says which. OpenClaw cannot
-   receive HTTP tool servers and is not offered.
+   `session/new`, the same way every agent already receives the Team Bus. The app is the one the
+   person chose in the panel, else the first one found of Claude, Codex, Gemini, OpenCode and
+   Hermes, and the panel says which. OpenClaw cannot receive HTTP tool servers and is not offered.
 2. **From another app, one click.** Settings → Connections lists the AI apps found on this computer.
    *Connect* registers LoomWatch with that app's own command (`claude mcp add`, `codex mcp add`,
    `gemini mcp add`, `code --add-mcp`), shown (token masked) before it runs; *Disconnect* runs the
@@ -97,3 +98,25 @@ Motion follows the motion tokens and stops under reduced motion: the panel slide
 stays put, messages and cards rise in, a step's spinner turns into a check, the thinking dots
 breathe, a proposal's dashed edge travels while a gold arc circles each proposed agent, and applied
 agents settle with one glow.
+
+## Choosing the app
+
+The panel's "Using Claude on this computer" names the app as a button. It opens a list of the apps
+Ask can use (one that can't run here is shown, with why, but can't be picked) and, under it, that
+app's models: *Its default* first, then the rest of what the app lists through
+`GET /api/harnesses/{id}/models`. Finding them starts the app, so the list says it is looking and
+keeps what it read for the page. Choosing an app keeps the list open on its models; choosing a model
+closes it.
+
+- The choice is kept for the browser, like *Ask me before starting a run*. A chosen app that later
+  can't run gives way to the first app that can, without forgetting the choice.
+- `POST /api/ask/conversations` takes `model` beside `app`. Empty or absent is the app's default;
+  anything that can't be a model id (over 200 characters, or a control character) is refused before
+  the app starts. The model is set when the session opens, the same way a team agent's is, and is
+  recorded with the conversation's status, so the transcript says which model answered. An app that
+  turns the model down fails the conversation with a sentence saying to choose another model or the
+  default.
+- A conversation is one session of one app, so changing the app or model ends the conversation and
+  starts the next message in a new one. The list says so while a conversation is under way. A
+  conversation kept from another tab shows the app it started with until the person changes it.
+- There is no per-conversation thinking-effort choice; the app's own default applies.

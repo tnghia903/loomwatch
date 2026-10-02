@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSessionEvents } from '../watch/useSessionEvents'
 import {
   AskApiError, fetchAskApps, fetchConversation, fetchInbox, sendAskMessage, setAskBeforeRun as saveAskBeforeRun,
-  startConversation, endConversation, type AskApps, type AskContext, type InboxItem,
+  startConversation, endConversation, type AskApp, type AskApps, type AskContext, type InboxItem,
 } from './client'
 import { currentActivity, EMPTY_THREAD, projectAskThread, type AskThread } from './thread'
 
@@ -14,6 +14,7 @@ const CONVERSATION_KEY = 'loomwatch:ask:conversation'
 const OPEN_KEY = 'loomwatch:ask:open'
 const ASK_FIRST_KEY = 'loomwatch:ask:ask-before-run'
 const INBOX_SEEN_KEY = 'loomwatch:ask:inbox-seen'
+const CHOICE_KEY = 'loomwatch:ask:app'
 const INBOX_POLL_MS = 20_000
 /** A day is long enough to come back to something a connected app did; after that it is history. */
 const INBOX_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -32,10 +33,47 @@ function writeStore(store: () => Storage, key: string, value: string | null) {
 const session = () => window.sessionStorage
 const local = () => window.localStorage
 
+/** A model of the chosen app, by the id the app takes and the name it lists it under. */
+export interface AskModel {
+  id: string
+  name: string
+}
+
+/** The app and model the person chose for Ask, kept for the browser like "ask me before a run". */
+interface AskChoice {
+  app: string
+  /** Null is the app's own default model. */
+  model: AskModel | null
+}
+
+function readChoice(): AskChoice | null {
+  const raw = readStore(local, CHOICE_KEY)
+  if (!raw) return null
+  try {
+    const value = JSON.parse(raw) as { app?: unknown; model?: { id?: unknown; name?: unknown } | null }
+    if (typeof value.app !== 'string' || !value.app) return null
+    const model = value.model && typeof value.model.id === 'string' && value.model.id
+      ? { id: value.model.id, name: typeof value.model.name === 'string' && value.model.name ? value.model.name : value.model.id }
+      : null
+    return { app: value.app, model }
+  } catch {
+    // Anything else in the key is no choice at all: Ask uses the first app it finds.
+    return null
+  }
+}
+
 export interface AskController {
   open: boolean
   setOpen: (open: boolean) => void
   apps: AskApps | null
+  /** The app the next conversation starts with: the person's choice while it can run, else the
+      first app found. */
+  selectedApp: AskApp | null
+  /** The model the next conversation asks for; null is the app's own default. */
+  selectedModel: AskModel | null
+  /** Use this app and model from now on. A conversation with a different one is ended, because a
+      conversation is one session of one app. */
+  chooseApp: (app: string, model: AskModel | null) => void
   conversationId: string | null
   /** Why Ask can't be used here, in plain words, or null when it can. */
   unavailable: string | null
@@ -81,6 +119,9 @@ export function useAsk(context: AskContext): AskController {
   const [focusRequest, setFocusRequest] = useState(0)
   const [inbox, setInbox] = useState<InboxItem[]>([])
   const [inboxSeen, setInboxSeen] = useState(() => readStore(local, INBOX_SEEN_KEY) ?? '')
+  const [choice, setChoice] = useState<AskChoice | null>(readChoice)
+  /** The app and model the live conversation was started with, as the daemon reported them. */
+  const [conversationApp, setConversationApp] = useState<{ app: string; model: string | null } | null>(null)
   // Read when a message is sent, so a send always carries where the person is at that moment.
   const contextRef = useRef(context)
   useEffect(() => { contextRef.current = context })
@@ -115,7 +156,10 @@ export function useAsk(context: AskContext): AskController {
     if (!conversationId) return
     const controller = new AbortController()
     fetchConversation(conversationId, controller.signal)
-      .then((info) => { if (!info) setEnded(true) })
+      .then((info) => {
+        if (!info) setEnded(true)
+        else if (info.app) setConversationApp({ app: info.app, model: info.model ?? null })
+      })
       .catch(() => {})
     return () => controller.abort()
   }, [conversationId])
@@ -134,13 +178,21 @@ export function useAsk(context: AskContext): AskController {
     return () => { controller.abort(); window.clearTimeout(first); window.clearInterval(timer) }
   }, [])
 
+  // A chosen app that is no longer here, or can't run now, gives way to the first one that can.
+  // Before the list arrives the choice is sent as it is, and the daemon says if it can't be used.
+  const chosenApp = choice ? apps?.apps.find((app) => app.id === choice.app) : undefined
+  const choiceHolds = Boolean(choice && (apps === null || chosenApp?.available))
+  const selectedApp = (choiceHolds ? chosenApp : undefined) ?? apps?.apps.find((app) => app.id === apps.defaultApp) ?? null
+  const selectedModel = choiceHolds ? choice?.model ?? null : null
+
   const begin = useCallback(async (): Promise<string> => {
-    const info = await startConversation(askBeforeRun)
+    const info = await startConversation(askBeforeRun, choiceHolds ? choice?.app : null, choiceHolds ? choice?.model?.id : null)
+    setConversationApp({ app: info.app, model: info.model ?? null })
     setConversationId(info.id)
     writeStore(session, CONVERSATION_KEY, info.id)
     setEnded(false)
     return info.id
-  }, [askBeforeRun])
+  }, [askBeforeRun, choiceHolds, choice])
 
   const finished = ended || thread.state === 'ended' || thread.state === 'failed'
   const send = useCallback(async (text: string): Promise<boolean> => {
@@ -179,12 +231,22 @@ export function useAsk(context: AskContext): AskController {
   const startOver = useCallback(() => {
     if (conversationId && !finished) void endConversation(conversationId).catch(() => {})
     setConversationId(null)
+    setConversationApp(null)
     writeStore(session, CONVERSATION_KEY, null)
     setEnded(false)
     setPending(null)
     setError(null)
     setFocusRequest((count) => count + 1)
   }, [conversationId, finished])
+
+  const chooseApp = useCallback((app: string, model: AskModel | null) => {
+    const next: AskChoice = { app, model }
+    setChoice(next)
+    writeStore(local, CHOICE_KEY, JSON.stringify(next))
+    if (!conversationId) return
+    const live = conversationApp ?? (thread.appId ? { app: thread.appId, model: thread.model } : null)
+    if (!live || live.app !== app || live.model !== (model?.id ?? null)) startOver()
+  }, [conversationId, conversationApp, thread.appId, thread.model, startOver])
 
   const setAskBeforeRun = useCallback((value: boolean) => {
     setAskBeforeRunState(value)
@@ -208,7 +270,7 @@ export function useAsk(context: AskContext): AskController {
       : null
 
   return {
-    open, setOpen, apps, conversationId, unavailable, thread,
+    open, setOpen, apps, selectedApp, selectedModel, chooseApp, conversationId, unavailable, thread,
     activity: currentActivity(thread) ?? (shownPending ? 'Sending' : null),
     pending: shownPending, ended: ended && !sending, sending, sentAt, error, dismissError: () => setError(null),
     askBeforeRun, setAskBeforeRun, draft, setDraft, focusRequest, ask, send, startOver,

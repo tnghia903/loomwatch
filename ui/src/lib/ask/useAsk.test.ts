@@ -14,11 +14,18 @@ const CONTEXT = { view: 'build' as const, teamPath: 'brief.yaml', runId: null }
 
 let conversations: string[]
 let posts: Array<{ url: string; body: unknown }>
+let deletes: string[]
 let gone: Set<string>
+const APPS = [
+  { id: 'claude', name: 'Claude', available: true, reason: null },
+  { id: 'codex', name: 'Codex', available: true, reason: null },
+  { id: 'gemini', name: 'Gemini', available: false, reason: 'not signed in' },
+]
 
 beforeEach(() => {
   conversations = []
   posts = []
+  deletes = []
   gone = new Set()
   archive.events.clear()
   window.sessionStorage.clear()
@@ -27,12 +34,15 @@ beforeEach(() => {
     const url = String(input)
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     if (init?.method === 'POST') posts.push({ url, body })
-    if (url === '/api/ask/apps') return json(200, { apps: [{ id: 'claude', name: 'Claude', available: true, reason: null }], defaultApp: 'claude' })
+    if (init?.method === 'DELETE') { deletes.push(url); return json(204, null) }
+    if (url === '/api/ask/apps') return json(200, { apps: APPS, defaultApp: 'claude' })
     if (url === '/api/ask/inbox') return json(200, { items: [] })
     if (url === '/api/ask/conversations' && init?.method === 'POST') {
       const id = `ask-${conversations.length + 1}`
       conversations.push(id)
-      return json(201, { id, app: 'claude', appName: 'Claude', state: 'starting' })
+      const chosen = (body as { app?: string; model?: string } | undefined) ?? {}
+      const app = APPS.find((item) => item.id === (chosen.app ?? 'claude'))
+      return json(201, { id, app: app?.id, appName: app?.name, model: chosen.model ?? null, state: 'starting' })
     }
     const message = url.match(/^\/api\/ask\/conversations\/([^/]+)\/messages$/)
     if (message) return gone.has(message[1]) ? json(410, { error: 'This conversation has ended. Start a new one.' }) : json(202, { state: 'working' })
@@ -96,6 +106,49 @@ describe('useAsk', () => {
       String(input) === '/api/ask/apps' ? json(200, { apps: [], defaultApp: null }) : json(200, { items: [] }))
     const { result } = renderHook(() => useAsk(CONTEXT))
     await waitFor(() => expect(result.current.unavailable).toMatch(/needs Claude Code, Codex, Gemini CLI or OpenCode/))
+  })
+
+  it('starts the next conversation with the app and model the person chose, and remembers them', async () => {
+    const { result } = renderHook(() => useAsk(CONTEXT))
+    await waitFor(() => expect(result.current.selectedApp?.id).toBe('claude'))
+    act(() => result.current.chooseApp('codex', { id: 'gpt-5.5', name: 'GPT-5.5' }))
+    expect(result.current.selectedApp?.name).toBe('Codex')
+    expect(result.current.selectedModel).toEqual({ id: 'gpt-5.5', name: 'GPT-5.5' })
+    await act(async () => { await result.current.send('Hello') })
+    expect(posts[0]).toEqual({ url: '/api/ask/conversations', body: { askBeforeRun: true, app: 'codex', model: 'gpt-5.5' } })
+    const again = renderHook(() => useAsk(CONTEXT))
+    await waitFor(() => expect(again.result.current.selectedApp?.id).toBe('codex'))
+    expect(again.result.current.selectedModel?.name).toBe('GPT-5.5')
+  })
+
+  it('ends a conversation when the person switches to another app or model, and keeps it for the same one', async () => {
+    const { result } = renderHook(() => useAsk(CONTEXT))
+    await waitFor(() => expect(result.current.apps).not.toBeNull())
+    await act(async () => { await result.current.send('Hello') })
+    expect(result.current.conversationId).toBe('ask-1')
+    act(() => result.current.chooseApp('claude', null))
+    expect(result.current.conversationId).toBe('ask-1')
+    expect(deletes).toEqual([])
+    act(() => result.current.chooseApp('claude', { id: 'opus', name: 'Opus' }))
+    expect(result.current.conversationId).toBeNull()
+    await waitFor(() => expect(deletes).toEqual(['/api/ask/conversations/ask-1']))
+    expect(window.sessionStorage.getItem('loomwatch:ask:conversation')).toBeNull()
+  })
+
+  it('falls back to the first app found when the chosen one cannot run here any more', async () => {
+    window.localStorage.setItem('loomwatch:ask:app', JSON.stringify({ app: 'gemini', model: { id: 'pro', name: 'Pro' } }))
+    const { result } = renderHook(() => useAsk(CONTEXT))
+    await waitFor(() => expect(result.current.apps).not.toBeNull())
+    expect(result.current.selectedApp?.id).toBe('claude')
+    expect(result.current.selectedModel).toBeNull()
+    await act(async () => { await result.current.send('Hello') })
+    expect(posts[0].body).toEqual({ askBeforeRun: true })
+  })
+
+  it('ignores a remembered choice it cannot read', async () => {
+    window.localStorage.setItem('loomwatch:ask:app', '{not json')
+    const { result } = renderHook(() => useAsk(CONTEXT))
+    await waitFor(() => expect(result.current.selectedApp?.id).toBe('claude'))
   })
 
   it('keeps the panel open across pages in the same tab', () => {

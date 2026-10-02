@@ -50,6 +50,8 @@
   -webkit-backdrop-filter: blur(32px) saturate(125%);
 }
 .ask-head, .ask-scroll, .ask-compose { position: relative; z-index: 1; }
+/* Above the conversation, so the app picker's list opens over it. */
+.ask-head { z-index: 2; }
 
 .ask-head {
   display: flex; align-items: flex-start; gap: var(--sp-1);
@@ -58,8 +60,32 @@
 }
 .ask-head-text { flex: 1; min-width: 0; }
 .ask-head h2 { margin: 0; font: 600 15px/20px var(--font-sans); letter-spacing: -.01em; }
-.ask-head p { margin: 2px 0 0; font: 400 12px/16px var(--font-sans); color: var(--color-ink-3); }
-.ask-head p.unavailable { color: var(--color-alert); }
+.ask-head-text > p, .ask-app-line { margin: 2px 0 0; font: 400 12px/16px var(--font-sans); color: var(--color-ink-3); }
+.ask-head-text > p.unavailable { color: var(--color-alert); }
+
+/* ---- App picker: "Using [Claude ⌄] on this computer" ----------------------------- */
+
+.ask-app { display: inline; }
+.ask-app-toggle {
+  display: inline-flex; align-items: center; gap: 2px; max-width: 100%; vertical-align: bottom;
+  margin: -1px -2px; padding: 1px 4px; border: 0; border-radius: var(--r-sm);
+  background: none; color: var(--color-ink-2); font: 500 12px/16px var(--font-sans); cursor: pointer;
+}
+.ask-app-toggle:hover, .ask-app-toggle[aria-expanded="true"] { background: var(--color-accent-tint); color: var(--color-ink); }
+.ask-app-toggle:disabled { cursor: default; opacity: .6; }
+.ask-app-name { min-width: 0; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Placed against the header, not the button, so it spans the panel whatever the app's name. */
+.ask-app-pop {
+  left: var(--sp-3); right: var(--sp-3); top: calc(100% - var(--sp-2));
+  max-height: min(440px, 60vh); overflow-y: auto; overscroll-behavior: contain;
+}
+.ask-app-pop-label { margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-1); color: var(--color-ink-3); }
+.ask-app-pop-list { display: flex; flex-direction: column; gap: 2px; padding: 0 var(--sp-2) var(--sp-2); }
+.ask-app-pop .pop-row .aside { font-size: 12px; }
+.ask-app-check { flex: none; color: var(--color-accent); }
+.ask-app-finding { display: flex; align-items: center; gap: var(--sp-2); margin: 0; }
+.ask-app-pop p.pop-empty { margin: 0; padding: var(--sp-2) var(--sp-3); }
+.ask-app-note { margin: 0; padding: var(--sp-3) var(--sp-4); }
 
 .ask-scroll {
   flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;

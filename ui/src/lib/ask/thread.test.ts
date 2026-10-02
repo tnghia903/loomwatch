@@ -66,6 +66,13 @@ describe('projectAskThread', () => {
     expect(turn.done).toBe(true)
     expect(thread.state).toBe('ready')
     expect(thread.appName).toBe('Claude')
+    expect(thread.appId).toBe('claude')
+    expect(thread.model).toBeNull()
+  })
+
+  it('says which model the person chose for the conversation', () => {
+    const thread = projectAskThread([status('starting', { app: { id: 'codex', name: 'Codex', model: 'gpt-5.5' } })])
+    expect([thread.appName, thread.appId, thread.model]).toEqual(['Codex', 'codex', 'gpt-5.5'])
   })
 
   it('records what the person did with a proposal, and marks an earlier draft of the same file replaced', () => {

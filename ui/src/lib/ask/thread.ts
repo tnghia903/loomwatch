@@ -93,9 +93,13 @@ export interface AskThread {
   state: AskState | null
   error: string | null
   appName: string | null
+  /** The app's id, to tell whether the conversation still matches the person's choice. */
+  appId: string | null
+  /** The model the person chose for this conversation; null is the app's own default. */
+  model: string | null
 }
 
-export const EMPTY_THREAD: AskThread = { items: [], state: null, error: null, appName: null }
+export const EMPTY_THREAD: AskThread = { items: [], state: null, error: null, appName: null, appId: null, model: null }
 
 /** The tools LoomWatch's tool server offers, by the words the panel uses for them. */
 const STEP_WORDS: Record<string, { running: string; done: string; failed: string }> = {
@@ -161,6 +165,8 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
   let state: AskState | null = null
   let error: string | null = null
   let appName: string | null = null
+  let appId: string | null = null
+  let model: string | null = null
   let current: Building | null = null
   const proposals = new Map<string, ProposalCard>()
   const requests = new Map<string, RunRequestCard>()
@@ -188,7 +194,11 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
         const phase = text(payload.phase)
         if (phase === 'ask_status') {
           state = (text(payload.state) || state) as AskState
-          if (object(payload.app) && typeof payload.app.name === 'string') appName = payload.app.name
+          if (object(payload.app) && typeof payload.app.name === 'string') {
+            appName = payload.app.name
+            appId = text(payload.app.id) || null
+            model = text(payload.app.model) || null
+          }
           error = state === 'failed' ? text(payload.error) || 'The assistant stopped.' : null
           if (state === 'failed' || state === 'ended') finish()
         } else if (phase === 'ask_message') {
@@ -282,7 +292,7 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
         break
     }
   }
-  return { items, state, error, appName }
+  return { items, state, error, appName, appId, model }
 }
 
 /** What the assistant is doing right now, in a few words, or null when it is not working. */
