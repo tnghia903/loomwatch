@@ -1,17 +1,27 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import type { AskApp } from '../../lib/ask/client'
+
 import { EMPTY_THREAD, type AskThread, type ProposalCard, type ReviewNoteCard, type RunRequestCard } from '../../lib/ask/thread'
 import type { AskController } from '../../lib/ask/useAsk'
 import type { CardActions } from './AskCards'
 import { AskButton } from './AskButton'
 import { AskPanel } from './AskPanel'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
+const CLAUDE: AskApp = { id: 'claude', name: 'Claude', available: true, reason: null }
+const CODEX: AskApp = { id: 'codex', name: 'Codex', available: true, reason: null }
+const GEMINI: AskApp = { id: 'gemini', name: 'Gemini', available: false, reason: 'gemini is not signed in' }
 
 function controller(overrides: Partial<AskController> = {}): AskController {
   return {
-    open: true, setOpen: vi.fn(), apps: { apps: [{ id: 'claude', name: 'Claude', available: true, reason: null }], defaultApp: 'claude' },
+    open: true, setOpen: vi.fn(), apps: { apps: [CLAUDE, CODEX, GEMINI], defaultApp: 'claude' },
+    selectedApp: CLAUDE, selectedModel: null, chooseApp: vi.fn(),
     conversationId: null, unavailable: null, thread: EMPTY_THREAD, activity: null, pending: null, ended: false, sending: false, sentAt: null,
     error: null, dismissError: vi.fn(), askBeforeRun: true, setAskBeforeRun: vi.fn(), draft: '', setDraft: vi.fn(), focusRequest: 0,
     ask: vi.fn(), send: vi.fn(async () => true), startOver: vi.fn(), inbox: [], inboxUnseen: 0, markInboxSeen: vi.fn(),
@@ -34,7 +44,7 @@ const note: ReviewNoteCard = { kind: 'review-note', id: 'n1', runId: 'run-1', fi
 
 function threadWith(...cardsInTurn: (ProposalCard | RunRequestCard | ReviewNoteCard)[]): AskThread {
   return {
-    state: 'ready', error: null, appName: 'Claude',
+    state: 'ready', error: null, appName: 'Claude', appId: 'claude', model: null,
     items: [
       { kind: 'person', id: 'm1', text: 'Make me a brief team' },
       { kind: 'assistant', id: 'a1', steps: [{ id: 's1', label: 'Checked your AI apps', status: 'done', detail: null }], text: 'Here it is.', cards: cardsInTurn, done: true, thinking: false },
@@ -47,7 +57,7 @@ describe('AskPanel', () => {
     const ask = controller()
     render(<AskPanel ask={ask} view="home" cards={cards()} />)
     expect(screen.getByRole('heading', { name: 'Ask LoomWatch' })).toBeInTheDocument()
-    expect(screen.getByText('Uses Claude on this computer')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'AI app: Claude. Change' }).closest('.ask-app-line')).toHaveTextContent('Using Claude on this computer')
     expect(screen.getByText(/Nothing is saved or run until you say so/)).toBeInTheDocument()
     const suggestions = within(screen.getByRole('list', { name: 'Try asking' })).getAllByRole('button')
     expect(suggestions).toHaveLength(3)
@@ -140,6 +150,86 @@ describe('AskPanel', () => {
     expect(section).toHaveTextContent('OpenCode proposed a new team “Evening wrap-up”')
     fireEvent.click(within(section).getByRole('button', { name: 'Show' }))
     expect(actions.onShowProposal).toHaveBeenCalledWith('p9')
+  })
+})
+
+describe('Choosing the AI app', () => {
+  function stubModels() {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/harnesses/claude/models') {
+        return new Response(JSON.stringify({
+          harnessId: 'claude', currentModelId: 'default',
+          models: [
+            { id: 'default', name: 'Default (recommended)', thinkingEfforts: [] },
+            { id: 'opus', name: 'Opus', thinkingEfforts: [] },
+            { id: 'haiku', name: 'Haiku', thinkingEfforts: [] },
+          ],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ error: `unknown harness ${url}` }), { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetch)
+    return fetch
+  }
+
+  it('lists the apps Ask can use, and an app that cannot run here is shown but not offered', async () => {
+    stubModels()
+    const ask = controller()
+    render(<AskPanel ask={ask} view="home" cards={cards()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'AI app: Claude. Change' }))
+    const apps = within(screen.getByRole('group', { name: 'AI app' }))
+    expect(apps.getByRole('button', { name: 'Claude' })).toHaveAttribute('aria-pressed', 'true')
+    const gemini = apps.getByRole('button', { name: /Gemini/ })
+    expect(gemini).toBeDisabled()
+    expect(gemini).toHaveTextContent('Can’t run here')
+    expect(gemini).toHaveAttribute('title', 'gemini is not signed in')
+    fireEvent.click(apps.getByRole('button', { name: 'Codex' }))
+    expect(ask.chooseApp).toHaveBeenCalledWith('codex', null)
+    // Choosing an app keeps the list open, for its models.
+    expect(screen.getByRole('dialog', { name: 'Choose the AI app Ask uses' })).toBeInTheDocument()
+    // No conversation yet, so nothing warns about starting a new one.
+    expect(screen.queryByText(/starts a new conversation/)).not.toBeInTheDocument()
+  })
+
+  it('offers the app’s models, its default first, and closes on a choice', async () => {
+    stubModels()
+    const ask = controller()
+    render(<AskPanel ask={ask} view="build" cards={cards()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'AI app: Claude. Change' }))
+    const models = within(screen.getByRole('group', { name: 'Model' }))
+    const opus = await models.findByRole('button', { name: 'Opus' })
+    expect(models.getByRole('button', { name: /Its default/ })).toHaveTextContent('Default (recommended)')
+    // The app's current model is "Its default", so it is not listed twice.
+    expect(models.queryByRole('button', { name: 'Default (recommended)' })).not.toBeInTheDocument()
+    fireEvent.click(opus)
+    expect(ask.chooseApp).toHaveBeenCalledWith('claude', { id: 'opus', name: 'Opus' })
+    expect(screen.queryByRole('dialog', { name: 'Choose the AI app Ask uses' })).not.toBeInTheDocument()
+  })
+
+  it('names the chosen model, and says a change starts a new conversation', () => {
+    stubModels()
+    render(<AskPanel ask={controller({ selectedModel: { id: 'opus', name: 'Opus' }, thread: { ...threadWith(), model: 'opus' } })} view="build" cards={cards()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'AI app: Claude · Opus. Change' }))
+    expect(screen.getByText('Changing the app or model starts a new conversation.')).toBeInTheDocument()
+  })
+
+  it('shows the app a live conversation started with, even when another is chosen for the next one', () => {
+    render(<AskPanel ask={controller({ selectedApp: CLAUDE, thread: { ...threadWith(), appName: 'Codex', appId: 'codex', model: 'gpt-5.5' } })} view="build" cards={cards()} />)
+    expect(screen.getByRole('button', { name: 'AI app: Codex · gpt-5.5. Change' })).toBeInTheDocument()
+  })
+
+  it('cannot be changed while a message is on its way', () => {
+    render(<AskPanel ask={controller({ sending: true })} view="build" cards={cards()} />)
+    expect(screen.getByRole('button', { name: 'AI app: Claude. Change' })).toBeDisabled()
+  })
+
+  it('says it could not list the models and keeps the default', async () => {
+    stubModels()
+    render(<AskPanel ask={controller({ selectedApp: CODEX })} view="build" cards={cards()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'AI app: Codex. Change' }))
+    expect(await screen.findByText('Codex will use its own default. LoomWatch couldn’t list its other models.')).toBeInTheDocument()
+    expect(within(screen.getByRole('group', { name: 'Model' })).getByRole('button', { name: /Its default/ })).toHaveAttribute('aria-pressed', 'true')
   })
 })
 

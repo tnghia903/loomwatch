@@ -22,6 +22,8 @@ export interface ConversationInfo {
   id: string
   app: string
   appName: string
+  /** The model chosen for this conversation; absent or null is the app's own default. */
+  model?: string | null
   state: AskState
   error?: string | null
   askBeforeRun?: boolean
@@ -126,8 +128,9 @@ export async function fetchAskApps(signal?: AbortSignal): Promise<AskApps> {
   return read(await daemonFetch('/api/ask/apps', { signal, cache: 'no-store' }))
 }
 
-export async function startConversation(askBeforeRun: boolean, app?: string): Promise<ConversationInfo> {
-  return read(await post('/api/ask/conversations', { askBeforeRun, ...(app ? { app } : {}) }))
+/** Starts a conversation with `app` (else the daemon's default) and `model` (else the app's own). */
+export async function startConversation(askBeforeRun: boolean, app?: string | null, model?: string | null): Promise<ConversationInfo> {
+  return read(await post('/api/ask/conversations', { askBeforeRun, ...(app ? { app } : {}), ...(app && model ? { model } : {}) }))
 }
 
 /** The conversation's current state, or null once the daemon no longer has it (ended, or restarted). */

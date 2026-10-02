@@ -369,6 +369,81 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note(po
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn the_person_chooses_the_app_and_model_a_conversation_uses(pool: PgPool) {
+    let fixture = Fixture::start(Some(EventArchive::from_pool(pool)), None).await;
+
+    let (status, refused) = fixture
+        .post("/api/ask/conversations", &json!({"app": "nope"}))
+        .await;
+    assert_eq!(status, 422, "{refused}");
+    assert!(
+        refused["error"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("nope isn't an AI app Ask can use")),
+        "{refused}"
+    );
+    let (status, refused) = fixture
+        .post(
+            "/api/ask/conversations",
+            &json!({"app": "custom", "model": "a\nb"}),
+        )
+        .await;
+    assert_eq!(
+        status, 422,
+        "a model with a line break is not an id: {refused}"
+    );
+
+    let (status, started) = fixture
+        .post(
+            "/api/ask/conversations",
+            &json!({"app": "custom", "model": "  fake-model-2  "}),
+        )
+        .await;
+    assert_eq!(status, 201, "{started}");
+    assert_eq!(started["app"], "custom");
+    assert_eq!(started["model"], "fake-model-2");
+    let id = started["id"].as_str().expect("id").to_owned();
+    let (_, status) = fixture.get(&format!("/api/ask/conversations/{id}")).await;
+    assert_eq!(status["model"], "fake-model-2");
+
+    // The app is asked for that model when its session opens, and the transcript says which.
+    fixture.say(&id, "Which teams do I have?").await;
+    let events = fixture.events(&id).await;
+    let asked_for = events
+        .iter()
+        .filter(|event| event.kind == crate::EventKind::SessionMeta)
+        .any(|event| {
+            event.payload["configId"] == "model" && event.payload["value"] == "fake-model-2"
+        });
+    assert!(asked_for, "the model reached the app: {}", dump(&events));
+    let recorded = phases(&events, "ask_status");
+    assert!(
+        recorded
+            .iter()
+            .all(|status| status["app"]["model"] == "fake-model-2"),
+        "{}",
+        dump(&events)
+    );
+
+    // No model means the app's own default, and the status leaves the model out.
+    let (status, default) = fixture
+        .post("/api/ask/conversations", &json!({"model": ""}))
+        .await;
+    assert_eq!(status, 201, "{default}");
+    assert_eq!(default["model"], Value::Null);
+    for conversation in [id, default["id"].as_str().expect("id").to_owned()] {
+        let _ = fixture
+            .client
+            .delete(format!(
+                "{}/api/ask/conversations/{conversation}",
+                fixture.base
+            ))
+            .send()
+            .await;
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn the_tool_server_needs_a_live_token_and_lists_only_its_tools(pool: PgPool) {
     let fixture = Fixture::start(
         Some(EventArchive::from_pool(pool)),
