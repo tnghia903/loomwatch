@@ -16,7 +16,9 @@ esac
 
 rm -rf "$out"
 mkdir -p "$out/assets/readme" "$out/assets/fonts"
-cp "$root"/site/index.html "$root"/site/styles.css "$root"/site/main.js "$root"/site/favicon.svg "$out/"
+cp "$root"/site/index.html "$root"/site/styles.css "$root"/site/main.js "$out/"
+# favicon.ico and apple-touch-icon.png are rendered from favicon.svg by site/icons.mjs.
+cp "$root"/site/favicon.svg "$root"/site/favicon.ico "$root"/site/apple-touch-icon.png "$out/"
 cp "$root"/docs/assets/readme/*.png "$out/assets/readme/"
 cp "$root"/docs/design-system/fonts/fonts.css "$root"/docs/design-system/fonts/*.woff2 "$out/assets/fonts/"
 echo "Built the landing page in $out"
