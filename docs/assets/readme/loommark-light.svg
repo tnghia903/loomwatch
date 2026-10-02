@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="102" height="44" viewBox="0 0 102 44" fill="none" stroke="#8A6A16" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="LoomWatch">
+<style>
+  .warp, .weft { stroke-dasharray: 100 100; animation-duration: 7s; animation-iteration-count: infinite; animation-timing-function: ease-in-out; }
+  .warp { animation-name: warp; }
+  .weft { opacity: .34; animation-name: weft; }
+  @keyframes warp { 0%, 58% { stroke-dashoffset: 0; opacity: 1; } 66% { stroke-dashoffset: 0; opacity: 0; } 67% { stroke-dashoffset: 100; opacity: 1; } 92%, 100% { stroke-dashoffset: 0; opacity: 1; } }
+  @keyframes weft { 0%, 58% { stroke-dashoffset: 0; opacity: .34; } 66% { stroke-dashoffset: 0; opacity: 0; } 72% { stroke-dashoffset: -100; opacity: .34; } 97%, 100% { stroke-dashoffset: 0; opacity: .34; } }
+  @media (prefers-reduced-motion: reduce) { .warp, .weft { animation: none; } }
+</style>
+<path class="weft" pathLength="100" d="M6 10 24 34 42 10 60 34 78 10 96 34"/>
+<path class="warp" pathLength="100" d="M6 34 24 10 42 34 60 10 78 34 96 10"/>
+</svg>
