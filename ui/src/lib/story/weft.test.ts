@@ -96,7 +96,7 @@ describe('describeEvidence', () => {
 
 describe('shortName and clock', () => {
   it('keeps the file name from a long command, the host from a URL, and drops a title verb', () => {
-    expect(shortName("cat '/Users/tnghia/teams/daily-news/notes.md'")).toBe('notes.md')
+    expect(shortName("cat '/Users/me/teams/daily-news/notes.md'")).toBe('notes.md')
     expect(shortName('Fetch https://www.usnews.com/news/world/articles/2026-09-19/story')).toBe('usnews.com')
     expect(shortName('Read README.md')).toBe('README.md')
     expect(shortName('Search "AI chip export rules"')).toBe('AI chip export rules')
