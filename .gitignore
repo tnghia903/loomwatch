@@ -1,15 +1,38 @@
 .DS_Store
 .env
+# Any other .env variant (.env.local, .env.backup, ...) is a secrets file too; only the template is committed.
+.env.*
+!.env.example
 target/
 .build/
 *.xcuserstate
 node_modules/
+__pycache__/
 
 # Team files are operator data: each operator keeps them under their own teams root (outside this
 # repository). `scripts/dev.sh` defaults to ./teams, so keep a local one out of version control.
 teams/
 *.swp
 *.swo
+
+# Operator data the daemon writes beside team files (.loomwatch/) and under the teams root (.jobs/,
+# .trash/). Ignored everywhere because docs/TAKEOVER_QA.md runs with `--teams-root examples`.
+.loomwatch/
+.jobs/
+.trash/
+
+# Container bind mounts (defaults in .env.example): repositories and imported capabilities are
+# per-machine data. Only the READMEs that explain each mount are committed.
+container/workspaces/*
+!container/workspaces/README.md
+container/capabilities/*
+!container/capabilities/README.md
+
+# Claude Code per-machine state: local settings, session worktrees, and a preview launch config that
+# hard-codes this machine's PATH.
+.claude/settings.local.json
+.claude/worktrees/
+.claude/launch.json
 
 # build cache for docs/mockups/build-standalone.mjs (fetched woff2 subsets)
 docs/mockups/.font-cache/

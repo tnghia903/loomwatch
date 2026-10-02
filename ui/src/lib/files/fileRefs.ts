@@ -68,9 +68,9 @@ export function fileNoun(path: string): string {
 }
 
 /**
- * A file name read as a title: `enterprise-knowledge-systems-design-report.docx` →
- * "Enterprise knowledge systems design report". Names that already carry their own capitals
- * ("Q3 Board Pack") keep them; only separators become spaces.
+ * A file name read as a title: `market-research-report.docx` → "Market research report".
+ * Names that already carry their own capitals ("Q3 Board Pack") keep them; only separators
+ * become spaces.
  */
 export function fileTitle(path: string): string {
   const stem = baseName(path).replace(EXTENSION, '')
@@ -96,7 +96,7 @@ export function formatBytes(bytes: number): string {
 
 /**
  * Where the file sits, in words: the team and agent for a managed workspace
- * (`.loomwatch/sutd-final-project/writer` → `sutd-final-project › writer`), else the folder path.
+ * (`.loomwatch/launch-plan/writer` → `launch-plan › writer`), else the folder path.
  */
 export function folderWords(folder: string | null | undefined, path: string): string {
   const relative = folder ?? path.split(/[\\/]/).slice(-3, -1).join('/')

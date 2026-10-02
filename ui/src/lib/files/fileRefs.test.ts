@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { fileLabel, fileNoun, filePathFrom, fileRefsIn, fileTitle, folderWords, formatBytes, workspaceAgent } from './fileRefs'
 
-const REPORT = '/Users/tnghia/Developer/loomwatch/teams/.loomwatch/sutd-final-project/writer/enterprise-knowledge-systems-design-report.docx'
+const REPORT = '/Users/me/loomwatch/teams/.loomwatch/launch-plan/writer/market-research-report.docx'
 
 describe('filePathFrom', () => {
   it('recognises an absolute path to a file, a Windows path, and a file:// URL', () => {
@@ -39,12 +39,12 @@ describe('describing a file in words', () => {
   })
 
   it('says where a managed workspace file sits as team › agent', () => {
-    expect(folderWords('.loomwatch/sutd-final-project/writer', REPORT)).toBe('sutd-final-project › writer')
+    expect(folderWords('.loomwatch/launch-plan/writer', REPORT)).toBe('launch-plan › writer')
     expect(folderWords('reports/2026', '/teams/reports/2026/a.pdf')).toBe('reports › 2026')
   })
 
   it('reads a file name as a title, keeping capitals a person chose', () => {
-    expect(fileTitle(REPORT)).toBe('Enterprise knowledge systems design report')
+    expect(fileTitle(REPORT)).toBe('Market research report')
     expect(fileTitle('/x/Q3_Board-Pack.pptx')).toBe('Q3 Board Pack')
     expect(fileNoun(REPORT)).toBe('document')
     expect(fileNoun('/x/a.xlsx')).toBe('spreadsheet')
@@ -52,8 +52,8 @@ describe('describing a file in words', () => {
   })
 
   it('credits a file in a managed workspace to its agent, and nothing else', () => {
-    expect(workspaceAgent('.loomwatch/sutd-final-project/writer')).toEqual({ team: 'sutd-final-project', agent: 'writer' })
-    expect(workspaceAgent('.loomwatch/sutd-final-project/writer/drafts')).toEqual({ team: 'sutd-final-project', agent: 'writer' })
+    expect(workspaceAgent('.loomwatch/launch-plan/writer')).toEqual({ team: 'launch-plan', agent: 'writer' })
+    expect(workspaceAgent('.loomwatch/launch-plan/writer/drafts')).toEqual({ team: 'launch-plan', agent: 'writer' })
     expect(workspaceAgent('reports/2026')).toBeNull()
     expect(workspaceAgent(null)).toBeNull()
   })

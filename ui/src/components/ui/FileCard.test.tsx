@@ -4,11 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileCard } from './FileCard'
 
-const REPORT = '/teams/.loomwatch/sutd-final-project/writer/design-report.docx'
+const REPORT = '/teams/.loomwatch/launch-plan/writer/design-report.docx'
 const facts = (overrides: Record<string, unknown> = {}) => ({
   path: REPORT, name: 'design-report.docx', exists: true, isDir: false, sizeBytes: 48_213,
   modifiedAt: new Date(Date.now() - 5 * 60_000).toISOString(), kind: 'document',
-  folder: '.loomwatch/sutd-final-project/writer', openable: true, ...overrides,
+  folder: '.loomwatch/launch-plan/writer', openable: true, ...overrides,
 })
 const respond = (status: number, body: unknown) => Promise.resolve(new Response(status === 204 ? null : JSON.stringify(body), { status }))
 let fetchMock: ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promise<Response>>>
@@ -27,7 +27,7 @@ describe('FileCard', () => {
     render(<FileCard path={REPORT} />)
     expect(screen.getByText('Checking…')).toBeInTheDocument()
     expect(await screen.findByText('Word document · 47 KB · changed 5 minutes ago')).toBeInTheDocument()
-    expect(screen.getByText('sutd-final-project › writer')).toBeInTheDocument()
+    expect(screen.getByText('launch-plan › writer')).toBeInTheDocument()
     expect(screen.getByText('Design report')).toBeInTheDocument()
     expect(screen.getByText('Ready to open')).toBeInTheDocument()
     expect(screen.getByText('DOCX')).toBeInTheDocument()

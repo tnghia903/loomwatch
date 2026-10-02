@@ -25,7 +25,7 @@ Each file appears in two places, each doing a different job:
 
 | Where | Shows | Click |
 | --- | --- | --- |
-| Output header, "Files in this reply" (`FileCard`) | the deliverable, drawn as a sheet of paper stamped with its type. A status ("Ready to open"), the name read as a title ("Enterprise knowledge systems design report"), the real file name, the kind in words, size, age, and the maker's agent mark ("Made by Writer") when the file sits in that agent's workspace | **Open document** (the noun follows the type) · Show in folder · Copy path |
+| Output header, "Files in this reply" (`FileCard`) | the deliverable, drawn as a sheet of paper stamped with its type. A status ("Ready to open"), the name read as a title ("Market research report"), the real file name, the kind in words, size, age, and the maker's agent mark ("Made by Writer") when the file sits in that agent's workspace | **Open document** (the noun follows the type) · Show in folder · Copy path |
 | In the reply's sentence (`FileChip`) | the file's icon, name and type tag on a gilt tab, in place of the path | opens it (or shows it in its folder) |
 
 The card's left edge is a two-gold basket weave, a selvedge: the finished edge of woven cloth, for
