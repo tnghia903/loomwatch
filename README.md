@@ -834,7 +834,7 @@ teams folder's `.jobs`.
 | `permission denied: ./loomwatch` | Run `chmod +x loomwatch` once, or start it with `bash loomwatch`. |
 | Docker did not start within two minutes | Open Docker Desktop yourself, finish any first-start steps it shows, wait until it says it is running, then run `./loomwatch` again. |
 | Another program is using port 5433 | Change `POSTGRES_PORT` in `.env` to a free port such as `5434`, then run `./loomwatch` again. |
-| Password authentication failed | Use the credentials from the database's first initialization. Editing `.env` does not change the password in an existing database volume. |
+| `password authentication failed for user "loomwatch"` | The database of an earlier LoomWatch copy on this computer kept its first password. `./loomwatch` now fixes this on its own: run `./loomwatch update`, then `./loomwatch`. If you set up the database by hand, editing `.env` does not change an existing database's password. |
 | Archive disabled / Run unavailable | LoomWatch was started without its database. Stop it and start it with `./loomwatch`. |
 | Another program is using port 3000 | Start LoomWatch on another port with `LOOMWATCH_PORT=3001 ./loomwatch`. |
 | Team file not found | Confirm the file is in your teams folder (`~/LoomWatch/teams` unless you set `LOOMWATCH_TEAMS_ROOT`). The demo link uses `?path=operator-stop.yaml`, relative to that folder. |
