@@ -64,7 +64,7 @@ export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose
 
   return (
     <div className="lw-scrim dim" onMouseDown={() => { if (!busy) onClose() }}>
-      <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="pop e2 lw-newteam" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) { event.stopPropagation(); onClose() } }}>
+      <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="pop e2 lw-newteam" data-tour="new-team-dialog" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) { event.stopPropagation(); onClose() } }}>
         <form onSubmit={(event) => { event.preventDefault(); void create() }}>
           <h2 id={titleId}>Create a team</h2>
           <label className="field">

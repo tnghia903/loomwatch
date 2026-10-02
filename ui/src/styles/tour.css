@@ -1,0 +1,80 @@
+/* ---------------------------------------------------------------------------
+   GETTING-STARTED GUIDE — components/tour/GettingStarted.tsx.
+
+   One opaque e2 card (it is read carefully, so never blurred) beside a gold ring around what it
+   explains. The layer above everything takes no clicks: the guide asks the operator to use the
+   page, so the dim and the ring let every press through and only the card itself is interactive.
+   A card that explains dims the rest of the screen; a card that waits for an action does not, so
+   the operator sees the page change as they act. 320 px wide at most, like every panel over the
+   canvas (DESIGN.md).
+   --------------------------------------------------------------------------- */
+
+.lw-tour { position: fixed; inset: 0; z-index: 120; pointer-events: none; }
+
+.tour-backdrop { position: absolute; inset: 0; background: color-mix(in srgb, var(--color-ground) 55%, transparent); }
+
+.tour-spot {
+  position: absolute;
+  border-radius: var(--r-md);
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+.tour-spot.dim { box-shadow: 0 0 0 2px var(--color-accent), 0 0 0 200vmax color-mix(in srgb, var(--color-ground) 50%, transparent); }
+/* A waiting step's ring: static under reduced motion, breathing otherwise (below). */
+.tour-spot.act::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: calc(var(--r-md) + 4px);
+  border: 2px solid var(--color-accent);
+  opacity: 0;
+}
+
+.tour-card {
+  position: absolute;
+  pointer-events: auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-5) var(--sp-5) var(--sp-4);
+  overflow: hidden;
+}
+.tour-progress { position: absolute; inset: 0 0 auto; height: 3px; background: var(--color-hairline); }
+.tour-progress i { display: block; height: 100%; background: var(--color-accent-fill); }
+.tour-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin: calc(var(--sp-2) * -1) calc(var(--sp-3) * -1) 0 0; }
+.tour-eyebrow { color: var(--color-ink-3); }
+.tour-card h2 { margin: 0; font: 400 22px/1.2 var(--font-serif); color: var(--color-ink); }
+.tour-card p { margin: 0; font: 400 14px/1.5 var(--font-sans); color: var(--color-ink-2); }
+
+.tour-example {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--sp-3);
+  border: 1px dashed color-mix(in srgb, var(--color-accent) 55%, transparent);
+  border-radius: var(--r-md);
+  background: var(--color-accent-tint);
+  color: var(--color-ink);
+  font: 400 13px/1.45 var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+.tour-example:hover { border-style: solid; }
+.tour-example .t-micro { color: var(--color-accent); }
+
+.tour-acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
+.tour-acts .btn { gap: 6px; }
+.tour-waiting { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; color: var(--color-ink-3); }
+.tour-waiting i { width: 6px; height: 6px; border-radius: var(--r-full); background: var(--color-accent); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .tour-card { animation: tour-in var(--t-quick) var(--ease-out) both; }
+  .tour-backdrop { animation: tour-fade var(--t-quick) var(--ease-out) both; }
+  /* Follows a target that moves under it (a canvas fitting its cards) instead of jumping. */
+  .tour-spot { transition: top var(--t-quick) var(--ease-out), left var(--t-quick) var(--ease-out), width var(--t-quick) var(--ease-out), height var(--t-quick) var(--ease-out); }
+  .tour-spot.act::after { animation: tour-ring var(--t-breathe) ease-in-out infinite; }
+}
+
+@keyframes tour-in { from { opacity: 0; translate: 0 4px; } }
+@keyframes tour-fade { from { opacity: 0; } }
+@keyframes tour-ring { 0%, 100% { opacity: 0; } 50% { opacity: .55; } }
