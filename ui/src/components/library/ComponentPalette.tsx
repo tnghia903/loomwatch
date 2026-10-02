@@ -83,7 +83,7 @@ export function ComponentPalette({ harnesses, capabilityInventory, capabilitiesL
     </div>
   }
   if (collapsed) return <button className="palette-reopen" onClick={() => setCollapsed(false)}><PanelLeftOpen size={16} />Add agents</button>
-  return <aside className="node-palette" aria-label="Add to your team">
+  return <aside className="node-palette" aria-label="Add to your team" data-tour="palette">
     <div className="palette-head"><div><span className="eyebrow">Add to your team</span><p>Click + or drag onto the canvas</p></div><button className="icon-button" onClick={() => setCollapsed(true)} aria-label="Collapse the library"><PanelLeftClose size={16} /></button></div>
     <div className="palette-search"><Search size={12} /><input aria-label="Search agents, skills and tools" placeholder="Search" value={query} onChange={e => setQuery(e.target.value)} /><button className="icon-button" onClick={onRetryCapabilities} disabled={capabilitiesLoading} aria-label="Scan this computer again"><RefreshCw size={12} /></button></div>
     {capabilitiesError && <p role="alert">{capabilitiesError}</p>}

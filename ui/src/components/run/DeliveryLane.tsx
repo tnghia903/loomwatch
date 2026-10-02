@@ -315,7 +315,7 @@ export function DeliveryLane({
               : 'Select an agent to see its work'}
           </span>
         </div>
-        <div className="delivery-stages" role="list" aria-label="Team stages">
+        <div className="delivery-stages" role="list" aria-label="Team stages" data-tour="stages">
           {agents.map((node, index) => {
             const { agent, runtime } = node.data
             // A planned stage whose app is not on this computer is not ready: the run would fail
@@ -339,6 +339,7 @@ export function DeliveryLane({
                 <article
                   id={`delivery-stage-${node.id}`}
                   className={`delivery-stage ${selected?.id === node.id ? 'selected' : ''} ${working ? 'working' : ''}`}
+                  data-tour="stage"
                 >
                   <button
                     className="delivery-stage-select"
@@ -698,7 +699,7 @@ export function DeliveryLane({
           </footer>
         </section>
       </section>
-      <aside className="delivery-output" aria-label="Team output">
+      <aside className="delivery-output" aria-label="Team output" data-tour="output">
         <header>
           <div className="delivery-output-kicker">
             <span className="delivery-eyebrow">

@@ -45,7 +45,7 @@ export function BuildHeading({ agentCount, isValid, checking, saveState, documen
       </div>
       <div className="build-workspace-actions">
         <button className="btn" disabled={!['dirty', 'new'].includes(documentChipState) || !isValid} onClick={onSave}>Save</button>
-        <button className="btn btn-primary" onClick={onRun}><Play size={15} />Run team</button>
+        <button className="btn btn-primary" data-tour="run-team" onClick={onRun}><Play size={15} />Run team</button>
       </div>
     </header>
   )

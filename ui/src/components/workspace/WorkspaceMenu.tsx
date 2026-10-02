@@ -1,6 +1,8 @@
 import { Menu as MenuIcon } from 'lucide-react'
 import { useState } from 'react'
 
+import { startTour } from '../../lib/tour/store'
+
 interface WorkspaceMenuProps {
   canOrganize: boolean
   /** An earlier Organize can be undone. */
@@ -38,6 +40,7 @@ export function WorkspaceMenu({ canOrganize, canUndoOrganize, runView, onHistory
           {canUndoOrganize && <button role="menuitem" onClick={item(onUndoOrganize)}>Undo organize</button>}
           {runView && <button role="menuitem" onClick={item(onFullTrace)}>Full trace</button>}
           <button role="menuitem" onClick={item(onShowYaml)}>View as YAML (advanced)</button>
+          <button role="menuitem" onClick={item(startTour)}>Getting started guide</button>
         </div>
       )}
     </div>

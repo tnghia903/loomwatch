@@ -1,8 +1,9 @@
 import { ReactFlowProvider } from '@xyflow/react'
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 
+import { GettingStarted } from './components/tour/GettingStarted'
 import { Workspace } from './components/Workspace'
-import { type DetectedHarness, fetchHarnesses } from './lib/harnesses'
+import { type DetectedHarness, fetchHarnesses, isHarnessRunnable } from './lib/harnesses'
 import { fetchCapabilities, type CapabilityInventory } from './lib/library/client'
 import { useTheme } from './lib/theme'
 
@@ -63,8 +64,11 @@ function Editor({ initialRunId, initialHistoryOpen }: { initialRunId: string | n
   const { harnesses, searchedPath, knownIds, loading, error, retry } = useHarnesses()
   const capabilities = useCapabilities()
   const [, setDocumentOpen] = useState(() => new URLSearchParams(window.location.search).has('path'))
+  const readyApps = useMemo(() => harnesses.filter(isHarnessRunnable).map((harness) => harness.name), [harnesses])
   return (
     <ReactFlowProvider>
+      {/* Above Home and the workspace alike: the guide carries on across the page load a new team causes. */}
+      <GettingStarted readyApps={readyApps} appsLoading={loading} />
       <Workspace
         harnesses={harnesses}
         harnessSearchPath={searchedPath}

@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DetectedHarness } from '../../lib/harnesses'
+import { readTourState, resetTourForTests } from '../../lib/tour/store'
 import { Home } from './Home'
 
 const claude: DetectedHarness = { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/bin/claude', acpAvailable: true, spawn: { cmd: 'npx', args: ['-y', '@agentclientprotocol/claude-agent-acp'] } }
@@ -161,5 +162,28 @@ describe('Home', () => {
     expect(within(dialog).getByRole('radio', { name: /Empty team/ })).toBeChecked()
     expect(within(dialog).getByText(/None of your AI apps can start right now/)).toBeInTheDocument()
     expect(within(dialog).getByText(geminiReason)).toBeInTheDocument()
+  })
+})
+
+describe('Home and the getting-started guide', () => {
+  beforeEach(() => resetTourForTests())
+
+  const demoTeam = { root: '/teams', files: ['operator-stop.yaml'], teams: [{ path: 'operator-stop.yaml', name: 'Review stop demo', agentCount: 3, modifiedAt: null }] }
+
+  it('offers the guide to someone who has never run a team, though the demo team is there', async () => {
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/runs' ? [] : demoTeam))
+    renderHome()
+    await screen.findByText('Review stop demo')
+    await waitFor(() => expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' }))
+  })
+
+  it('leaves someone who has run a team alone, but lets them start it', async () => {
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/runs' ? [{ runId: 'run-1', teamPath: 'operator-stop.yaml', status: 'succeeded' }] : demoTeam))
+    renderHome()
+    await screen.findByText('Review stop demo')
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/runs')).toBe(true))
+    expect(readTourState()).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Take the 3-minute guide/ }))
+    expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' })
   })
 })

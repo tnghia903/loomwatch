@@ -24,6 +24,7 @@ import { organizePipeline, type Positions } from '../lib/composer-layout/organiz
 import { useComposerLayout } from '../lib/composer-layout/useComposerLayout'
 import { RELATION, capabilityIsCard, capabilityNodeId, freeCapabilitySlot, refuseCapabilityEdge, teamFileKind, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
 import { setThemeMode, useTheme } from '../lib/theme'
+import { startTour } from '../lib/tour/store'
 import { useAnnouncementQueue } from '../lib/useAnnouncementQueue'
 import type { AgentField } from '../lib/team-file/validation'
 import { recordedReplyText, formatElapsed, isNotebookWrite, type Attention, type Evidence, type RunPhase } from '../lib/watch/events'
@@ -372,6 +373,19 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     doc, session, history, activeRunId, record, waiting, projectionPrompt: projection.prompt, showRun, followUpTarget,
     output: composerLayout.output, announce: setStatusAnnouncement,
   })
+
+  // The getting-started guide's "Use this example": the request goes in the box, never straight to
+  // a run, so the operator still reads it and presses Enter themselves.
+  useEffect(() => {
+    const compose = (event: Event) => {
+      const text = (event as CustomEvent<unknown>).detail
+      if (typeof text !== 'string') return
+      setComposerText(text)
+      window.setTimeout(focusComposer, 0)
+    }
+    window.addEventListener('loomwatch:compose', compose)
+    return () => window.removeEventListener('loomwatch:compose', compose)
+  }, [setComposerText, focusComposer])
 
   const runRoutineNow = useCallback(async () => {
     if (!routine || routineBusy) return
@@ -1621,6 +1635,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     { label: 'Copy file path', run: () => { if (doc.path) void navigator.clipboard?.writeText(doc.path) }, disabled: !doc.path },
     { label: 'Show YAML', run: () => setYamlOpen(true), disabled: !doc.path },
     { label: 'Connections…', run: () => window.location.assign('/connections') },
+    { label: 'Getting started guide', run: startTour },
   ], [doc, editable, composerText, submit, openNewTeam, toggleLibrary, windowWidth, runView, closeRun, cycleProblem, problems.length, theme, notificationsOn, enableNotifications, layersVisible, fitCanvas, organize, canOrganize])
 
   // ⌘K's second dialect: plain words or /commands become one proposed action (lib/story/intent.ts).
@@ -1801,7 +1816,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
 
   return (
     <CanvasActionsContext.Provider value={canvasActions}>
-      <div className={shellClass} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME) || event.dataTransfer.types.includes(EVIDENCE_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) setLibraryDragging(false) }}>
+      <div className={shellClass} data-tour="workspace" data-tour-agents={doc.nodes.length} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME) || event.dataTransfer.types.includes(EVIDENCE_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) setLibraryDragging(false) }}>
         {deliveryShown ? (
           <DeliveryLane
             key={activeRunId ?? 'new-run'}
@@ -1900,7 +1915,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             onOrganize={organize} onUndoOrganize={undoOrganize} onFullTrace={() => setRunPresentation('trace')} onShowYaml={() => setYamlOpen(true)}
           />
           <div className="needs-you-anchor">{needsYouTray}</div>
-          <nav className="workspace-view-tabs" aria-label="Workspace view">
+          <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
             <SegmentThumb />
             <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); if (activeRunId) setRunPresentation('delivery'); else if (lastOpenedRun?.path === doc.path) showRun(lastOpenedRun.id); else { setRunSetup(true); setRunPresentation('delivery') } }}><Play size={15} />Run</button>
             <button type="button" aria-pressed={!runView && !runSetup} onClick={() => { clearSelection(); closeRun() }}><Wrench size={15} />Build</button>

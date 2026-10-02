@@ -12,6 +12,7 @@
 @import './styles/chrome.css';
 @import './styles/loom.css';
 @import './styles/motion.css';
+@import './styles/tour.css';
 
 .operator-context { max-height: min(180px, 25vh); overflow: auto; padding-bottom: var(--sp-2); }
 .operator-context summary { cursor: pointer; color: var(--color-accent); font-size: 12px; }

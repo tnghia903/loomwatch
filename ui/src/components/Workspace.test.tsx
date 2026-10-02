@@ -361,6 +361,13 @@ describe('Workspace', () => {
     expect(screen.getByRole('button', { name: /Solo edge layer/ })).toBeInTheDocument()
   })
 
+  it('puts the getting-started guide’s example in the request box without running it', () => {
+    renderWorkspace()
+    act(() => { window.dispatchEvent(new CustomEvent('loomwatch:compose', { detail: 'Give me three ideas' })) })
+    expect(screen.getByLabelText('What should the team do?')).toHaveValue('Give me three ideas')
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+  })
+
   it('starts a run from the composer and rewires the canvas into the prompt-to-output story', async () => {
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
