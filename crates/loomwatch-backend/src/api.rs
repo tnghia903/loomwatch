@@ -553,6 +553,7 @@ fn router_with(
         .route("/api/memory", get(get_memory))
         .route("/api/memory/file", axum::routing::put(put_memory_file))
         .route("/api/config/schema", get(get_config_schema))
+        .route("/api/about", get(get_about))
         .route("/api/files/stat", get(get_file_stat))
         .route("/api/files/open", axum::routing::post(post_file_open))
         .route("/api/jobs", get(get_jobs))
@@ -2033,6 +2034,38 @@ async fn get_config_schema() -> Result<Json<Value>, ApiError> {
     Ok(Json(schema))
 }
 
+/// `GET /api/about`: which `LoomWatch` this is and what it runs on, the details a bug report
+/// needs. The commit is the checkout `./loomwatch` built and started (`LOOMWATCH_COMMIT`); a
+/// daemon started another way has none. Nothing here names the operator or their files.
+async fn get_about() -> Json<Value> {
+    let commit = std::env::var("LOOMWATCH_COMMIT")
+        .ok()
+        .map(|commit| commit.trim().to_owned())
+        .filter(|commit| !commit.is_empty());
+    Json(json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "commit": commit,
+        "os": std::env::consts::OS,
+        "osVersion": os_version().await,
+        "arch": std::env::consts::ARCH,
+    }))
+}
+
+/// The macOS release, such as `26.0`. Other systems, and a `sw_vers` that fails, report none.
+async fn os_version() -> Option<String> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let output = tokio::process::Command::new("/usr/bin/sw_vers")
+        .arg("-productVersion")
+        .output()
+        .await
+        .ok()
+        .filter(|output| output.status.success())?;
+    let version = String::from_utf8(output.stdout).ok()?;
+    Some(version.trim().to_owned()).filter(|version| !version.is_empty())
+}
+
 /// Scan a `PATH` value for every harness in [`HARNESSES`].
 #[must_use]
 pub fn detect_harnesses(search_path: Option<&std::ffi::OsStr>) -> Vec<DetectedHarness> {
@@ -3474,6 +3507,40 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             "https://loomwatch.dev/schemas/team.schema.yaml"
         );
         assert_eq!(schema["properties"]["schemaVersion"]["const"], 1);
+    }
+
+    #[tokio::test]
+    async fn about_names_the_build_and_system_but_not_the_operator() {
+        let directory = TempDirectory::new();
+        let router = test_router(&directory.0);
+        let (status, about) = get_json(&router, "/api/about").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(about["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(about["os"], std::env::consts::OS);
+        assert_eq!(about["arch"], std::env::consts::ARCH);
+        // Present even when unknown, so the report says so rather than leaving a gap.
+        assert!(about.get("commit").is_some());
+        assert!(about.get("osVersion").is_some());
+        if cfg!(target_os = "macos") {
+            assert!(about["osVersion"].is_string(), "{about}");
+        }
+        let text = about.to_string();
+        if let Some(home) = std::env::var_os("HOME") {
+            assert!(!text.contains(&*home.to_string_lossy()), "{text}");
+        }
+
+        // Another site reaching the daemon through a rebound name is refused, like every route.
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/about")
+                    .header(header::HOST, "attacker.example")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     /// Validate a team document against the embedded schema, returning its error texts.

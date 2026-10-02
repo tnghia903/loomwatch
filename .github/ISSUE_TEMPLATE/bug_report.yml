@@ -1,0 +1,51 @@
+# Opened by "Send feedback → Something went wrong" in LoomWatch (ui/src/lib/feedback/report.ts),
+# which fills `details` from the URL. Keep that id: the UI's tests read this file to check it.
+name: Something went wrong
+description: Report a problem, an error, or something that did not do what you expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying LoomWatch. A screenshot helps a lot: paste or drag it into any box below.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you see? Include any message LoomWatch showed.
+      placeholder: I clicked Run team and the Researcher card said "Can't start".
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+    validations:
+      required: false
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we see it too?
+      description: The steps that lead to it, if you know them.
+      placeholder: |
+        1. Open the Review stop demo
+        2. Click Run team
+        3. …
+    validations:
+      required: false
+  - type: textarea
+    id: details
+    attributes:
+      label: Details from LoomWatch
+      description: Filled in by LoomWatch. It names your LoomWatch version, system, browser and AI apps, nothing from your teams or runs. Edit anything you'd rather not share.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: terminal
+    attributes:
+      label: Terminal output (optional)
+      description: If LoomWatch printed an error in the terminal window where you started it, paste the last lines here.
+      render: text
+    validations:
+      required: false

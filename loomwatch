@@ -297,6 +297,9 @@ start() {
   # Compose-mode settings in the operator's own shell would point this native daemon at a
   # container runner or a container-only capability folder.
   unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN
+  # Which checkout is running, for the "Send feedback" report. `-dirty` marks local edits.
+  LOOMWATCH_COMMIT=$(git describe --always --dirty --abbrev=7 2>/dev/null || true)
+  export LOOMWATCH_COMMIT
 
   # Open the browser once the server answers. This runs beside the daemon, which replaces this
   # script below so Ctrl-C reaches it exactly as if it had been started by hand.

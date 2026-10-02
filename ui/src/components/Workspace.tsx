@@ -26,6 +26,7 @@ import { useComposerLayout } from '../lib/composer-layout/useComposerLayout'
 import { RELATION, capabilityIsCard, capabilityNodeId, freeCapabilitySlot, refuseCapabilityEdge, teamFileKind, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
 import { setThemeMode, useTheme } from '../lib/theme'
 import { startTour } from '../lib/tour/store'
+import { openFeedback } from '../lib/feedback/report'
 import { useAnnouncementQueue } from '../lib/useAnnouncementQueue'
 import { useNow } from '../lib/useNow'
 import type { AgentField } from '../lib/team-file/validation'
@@ -1741,6 +1742,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     { label: 'Show YAML', run: () => setYamlOpen(true), disabled: !doc.path },
     { label: 'Connections…', run: () => window.location.assign('/connections') },
     { label: 'Getting started guide', run: startTour },
+    { label: 'Send feedback…', run: () => openFeedback({ screen: !doc.path ? 'home' : runView ? 'run' : 'build' }) },
   ], [doc, editable, composerText, submit, openNewTeam, toggleLibrary, windowWidth, runView, closeRun, cycleProblem, problems.length, theme, notificationsOn, enableNotifications, layersVisible, fitCanvas, organize, canOrganize, askFor])
   // Words the palette has no command for are a request: hand them to Ask LoomWatch.
   const askUnavailable = ask.unavailable

@@ -1,6 +1,7 @@
 import { Menu as MenuIcon } from 'lucide-react'
 import { useState } from 'react'
 
+import { openFeedback } from '../../lib/feedback/report'
 import { startTour } from '../../lib/tour/store'
 
 interface WorkspaceMenuProps {
@@ -42,6 +43,7 @@ export function WorkspaceMenu({ canOrganize, canUndoOrganize, runView, onHistory
           {runView && <button role="menuitem" onClick={item(onFullTrace)}>Full trace</button>}
           <button role="menuitem" onClick={item(onShowYaml)}>View as YAML (advanced)</button>
           <button role="menuitem" onClick={item(startTour)}>Getting started guide</button>
+          <button role="menuitem" onClick={item(() => openFeedback({ screen: runView ? 'run' : 'build' }))}>Send feedback…</button>
         </div>
       )}
     </div>

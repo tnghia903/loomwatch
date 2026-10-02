@@ -1,6 +1,7 @@
-import { ArrowRight, Moon, Plus, Search, Sun, Users } from 'lucide-react'
+import { ArrowRight, MessageSquareWarning, Moon, Plus, Search, Sun, Users } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
+import { openFeedback } from '../../lib/feedback/report'
 import { relativeTime } from '../../lib/format'
 import { fetchHarnessModels, harnessProblem, isHarnessRunnable, type DetectedHarness } from '../../lib/harnesses'
 import { teamDisplayName, type DeletedTeam, type TeamSummary } from '../../lib/team-file/client'
@@ -139,6 +140,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
         <span className="home-brand"><LoomMark width={46} height={20} /><span>LoomWatch</span></span>
         <span className="home-top-acts">
           {topActions}
+          <button type="button" className="home-feedback" onClick={() => openFeedback({ screen: 'home' })} aria-label="Send feedback" title="Report a problem or share an idea"><MessageSquareWarning size={15} aria-hidden="true" /><span className="home-feedback-label">Feedback</span></button>
           <button type="button" className="iconbtn" onClick={onPalette} aria-label="Open the command palette" title="Commands (⌘K)"><Search size={15} aria-hidden="true" /></button>
           <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title="Theme (⌘⇧L)">{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
         </span>
