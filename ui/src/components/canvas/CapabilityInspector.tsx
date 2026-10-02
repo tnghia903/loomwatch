@@ -40,15 +40,13 @@ const ROUTE_NOTE: Record<SkillRoute, (harness: string) => string> = {
 }
 
 /** What connecting means for each kind, in the words the run will bear out (ADR 0012, 0029). */
-const PICKER_NOTE: Record<CapabilityKind, string> = {
+const PICKER_NOTE: Record<Exclude<CapabilityKind, 'knowledge'>, string> = {
   skill: 'Connect this skill to require it in the next run. Its discovery source can differ from the agent’s harness.',
-  knowledge: 'Connect this source to supply its contents to an agent in the next run.',
   tool: 'Connect this tool to give an agent its MCP server in the next run. Its config source can differ from the agent’s harness.',
 }
 
-const DELIVERY_NOTE: Record<CapabilityKind, string> = {
+const DELIVERY_NOTE: Record<Exclude<CapabilityKind, 'knowledge'>, string> = {
   skill: 'Save the team to keep these connections. LoomWatch delivers the bundle to every connected agent and adapts how the prompt introduces it: a harness that cannot be relied on to run the skill as written gets its text inlined with a note mapping what it assumes onto what that agent actually has.',
-  knowledge: 'Save the team to keep these connections. Each connected agent gets the contents shown below in its prompt as source material, and the folder’s path. On Claude Code, LoomWatch also grants read access to that folder; other apps apply their own rules.',
   tool: 'Save the team to keep these connections. LoomWatch hands this MCP server to each connected agent’s app when the run starts, using your own server settings. On Claude Code it also allows the server’s tools; other apps apply their own rules. A run fails up front if an app cannot take the server.',
 }
 
@@ -64,11 +62,13 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
   const glyph = kind === 'knowledge' ? 'source' : kind
   const [retry, setRetry] = useState(0)
   const [detailState, setDetailState] = useState<{ id: string; details: CapabilityDetails | null; error: string | null }>({ id: '', details: null, error: null })
-  // Skills load their SKILL.md and knowledge sources load what they hold; a tool has nothing to read.
-  const readsDetails = kind === 'skill' || kind === 'knowledge'
+  // Skills load their SKILL.md and memory loads what it holds; a tool has nothing to read, and a
+  // knowledge card that is not memory names nothing the daemon can read (ADR 0036).
+  const readsDetails = kind === 'skill' || (kind === 'knowledge' && Boolean(item.memory))
   // What an agent can be connected to through the team file (ADR 0012, 0029). Memory is wired
-  // through `memory.inherits` on the canvas instead, so it has no picker here.
-  const wireable = kind !== 'knowledge' || !item.memory
+  // through `memory.inherits` on the canvas instead, and other knowledge is a folder or file chosen
+  // in the agent's Context, so neither has a picker here.
+  const wireable = kind !== 'knowledge'
   const noun = kind === 'skill' ? 'skill' : kind === 'tool' ? 'tool' : 'source'
   useEffect(() => {
     if (!readsDetails) return
@@ -148,6 +148,13 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
           </div>
         )}
 
+        {kind === 'knowledge' && !item.memory && (
+          <div className="zone capability-knowledge-moved">
+            <div className="zone-head t-micro">Not delivered</div>
+            <p className="capability-description t-meta">Knowledge is now a folder or file you choose, so this card no longer reaches an agent. Select the agent and use Add folder… or Add file… in its Context, then remove this card.</p>
+          </div>
+        )}
+
         {wireable && (
           <div className="zone capability-agent-picker">
             <div className="zone-head t-micro">Use with agents</div>
@@ -194,11 +201,7 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
               <span className="hint t-meta">
                 {kind === 'skill'
                   ? `Loaded locally on demand from ${details.definitions.length === 1 ? 'this skill file' : `${details.definitions.length} matching skill files`}.`
-                  : item.memory
-                    ? 'Read locally on demand. A live team’s kept notes are listed in its Memory panel.'
-                    // ADR 0012: a knowledge source that is not memory has no delivery contract yet.
-                    // ADR 0029: the snapshot shown here is the one a connected agent's prompt carries.
-                    : 'Read locally on demand. An agent connected to this source receives exactly these contents in its opening prompt.'}
+                  : 'Read locally on demand. A live team’s kept notes are listed in its Memory panel.'}
               </span>
             )}
           </div>
@@ -217,7 +220,7 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
           <button type="button" className="btn btn-primary capability-action" disabled={readOnly && !placed} onClick={placed ? onReveal : onAdd}>
             {placed ? 'Show on canvas' : <><Plus size={14} aria-hidden="true" /> Add to canvas</>}
           </button>
-          <span className="hint t-meta">{wireable ? `Placing a card alone delivers nothing. Connect the ${noun} to an agent above or on the canvas.` : 'Connect this memory to an agent, or to the Prompt node for the whole team, on the canvas.'}</span>
+          <span className="hint t-meta">{wireable ? `Placing a card alone delivers nothing. Connect the ${noun} to an agent above or on the canvas.` : item.memory ? 'Connect this memory to an agent, or to the Prompt node for the whole team, on the canvas.' : 'This card delivers nothing, connected or not.'}</span>
         </div>
       </div>
     </aside>

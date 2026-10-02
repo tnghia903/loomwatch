@@ -3,9 +3,9 @@
 //! Skills are delivered by `workspace` (ADR 0012, 0019, 0021). This module does the same for the
 //! other two Library kinds, and `workspace::materialise` calls it once per agent:
 //!
-//! * A **knowledge source** is supplied as the snapshot the inspector's Contents shows
-//!   ([`capabilities::knowledge_snapshot`]) — what the operator sees is what the agent gets — and a
-//!   source that is a folder is also a read grant for that folder.
+//! * A **knowledge source** is a folder or file the operator chose (ADR 0035, 0036), supplied as
+//!   the snapshot the panel previews ([`crate::chosen_knowledge::snapshot`]) — what the operator
+//!   sees is what the agent gets — and a read grant for that folder or file.
 //! * A **tool** is the operator's own MCP server definition, passed to the harness in ACP's
 //!   `mcpServers` beside the Team Bus.
 //!
@@ -104,41 +104,36 @@ impl Delivery {
 /// The Team Bus's own server name, which no delivered tool may take.
 pub const RESERVED_SERVER: &str = "loomwatch-team-bus";
 
-/// Read one knowledge capability: from its `path` when the operator chose a folder or file
-/// (ADR 0035), where the name is only a label, or from the Library by name. `chars` and `sha256`
-/// are left for [`prepare_for`], which measures the knowledge budget across all of them.
+/// Read one knowledge capability from its `path`, the folder or file the operator chose (ADR 0035);
+/// the name is only a label. A knowledge entry with no path is refused (ADR 0036): the Library no
+/// longer lists folders or other apps' history, so a name alone points at nothing. `chars` and
+/// `sha256` are left for [`prepare_for`], which measures the knowledge budget across all of them.
 fn resolve_knowledge(
-    home: Option<&Path>,
-    teams_root: &Path,
     team_dir: &Path,
     inventory: &CapabilityInventory,
     capability: &crate::config::CapabilityRef,
 ) -> Result<DeliveredKnowledge, String> {
     let name = capability.name.as_str();
-    let (label, source, snapshot) = if let Some(path) = &capability.path {
-        let snapshot = crate::chosen_knowledge::snapshot(team_dir, path)
-            .map_err(|reason| format!("cannot use the knowledge {name}: {reason}."))?;
-        let source = if snapshot.folders.is_empty() {
-            "Added file"
-        } else {
-            "Linked folder"
-        };
-        (name.to_owned(), source.to_owned(), snapshot)
-    } else {
-        let item = find(&inventory.sources, name).ok_or_else(|| {
-            format!("cannot use the knowledge source {name}: no source by that name was found on this machine.")
-        })?;
-        if item.memory.is_some() {
+    let Some(path) = &capability.path else {
+        if find(&inventory.sources, name).is_some_and(|item| item.memory.is_some()) {
             return Err(format!(
                 "cannot use {name} as a knowledge capability: it is team memory, which reaches an agent through the team's memory settings (memory.inherits), not through capabilities."
             ));
         }
-        let snapshot = capabilities::knowledge_snapshot(home, teams_root, item);
-        (item.name.clone(), item.source.clone(), snapshot)
+        return Err(format!(
+            "cannot use the knowledge {name}: it names no folder or file. Remove it from the agent's Context, then use Add folder… or Add file… to choose what the agent should read."
+        ));
+    };
+    let snapshot = crate::chosen_knowledge::snapshot(team_dir, path)
+        .map_err(|reason| format!("cannot use the knowledge {name}: {reason}."))?;
+    let source = if snapshot.folders.is_empty() {
+        "Added file"
+    } else {
+        "Linked folder"
     };
     if snapshot.contents.is_empty() {
         return Err(format!(
-            "cannot use the knowledge source {name}: nothing readable was found for it."
+            "cannot use the knowledge {name}: nothing readable was found in it."
         ));
     }
     let paths = |paths: &[std::path::PathBuf]| {
@@ -148,8 +143,8 @@ fn resolve_knowledge(
             .collect::<Vec<_>>()
     };
     Ok(DeliveredKnowledge {
-        name: label,
-        source,
+        name: name.to_owned(),
+        source: source.to_owned(),
         folders: paths(&snapshot.folders),
         files: paths(&snapshot.files),
         read_access: (!snapshot.folders.is_empty() || !snapshot.files.is_empty())
@@ -165,12 +160,12 @@ fn resolve_knowledge(
 ///
 /// # Errors
 ///
-/// Returns one sentence naming the capability and what to do: not found, a memory source wired as
-/// knowledge, nothing readable, over the knowledge budget, a tool with no usable definition, or two
-/// tools that would take the same server name.
+/// Returns one sentence naming the capability and what to do: knowledge with no folder or file, a
+/// memory source wired as knowledge, a path that is gone or unreadable, over the knowledge budget,
+/// a tool not found or with no usable definition, or two tools that would take the same server
+/// name.
 pub fn prepare_for(
     home: Option<&Path>,
-    teams_root: &Path,
     team_dir: &Path,
     inventory: &CapabilityInventory,
     agent: &AgentConfig,
@@ -183,19 +178,15 @@ pub fn prepare_for(
         match capability.kind {
             CapabilityKind::Skill => {}
             CapabilityKind::Knowledge => {
+                // Two chosen paths can share a label, and skipping the second would drop it
+                // without a word.
                 if delivery.knowledge.iter().any(|item| item.name == name) {
-                    // Two Library entries cannot share a name, but two chosen paths can share a
-                    // label, and skipping the second would drop it without a word.
-                    if capability.path.is_some() {
-                        return Err(format!(
-                            "two knowledge sources connected to {} are both called {name}; rename one in the team file.",
-                            agent.name
-                        ));
-                    }
-                    continue;
+                    return Err(format!(
+                        "two knowledge sources connected to {} are both called {name}; rename one in the team file.",
+                        agent.name
+                    ));
                 }
-                let mut knowledge =
-                    resolve_knowledge(home, teams_root, team_dir, inventory, capability)?;
+                let mut knowledge = resolve_knowledge(team_dir, inventory, capability)?;
                 let rendered = knowledge.rendered_contents();
                 knowledge_bytes += rendered.len();
                 if knowledge_bytes > KNOWLEDGE_BUDGET_BYTES {
@@ -809,6 +800,31 @@ mod tests {
         agent
     }
 
+    /// `agent`, with every knowledge entry linked to `folder` (ADR 0035).
+    fn linked(mut agent: AgentConfig, folder: &Path) -> AgentConfig {
+        for capability in &mut agent.capabilities {
+            if capability.kind == CapabilityKind::Knowledge {
+                capability.path = Some(folder.to_path_buf());
+            }
+        }
+        agent
+    }
+
+    /// A Claude Code agent with the demo project folder linked as knowledge and the `agentmemory`
+    /// server as a tool.
+    fn demo_agent(teams: &Path) -> AgentConfig {
+        linked(
+            agent(
+                "claude-agent-acp",
+                &[
+                    (CapabilityKind::Knowledge, "demo project"),
+                    (CapabilityKind::Tool, "Agent Memory"),
+                ],
+            ),
+            teams.parent().expect("project"),
+        )
+    }
+
     /// A machine with one project folder (the teams root's parent) and one MCP server configured
     /// for Claude Code.
     fn machine() -> (TempDirectory, PathBuf, PathBuf) {
@@ -834,15 +850,17 @@ mod tests {
         let delivery = prepare_for(
             Some(&home),
             &teams,
-            &teams,
             &inventory,
-            &agent(
-                "claude-agent-acp",
-                &[
-                    (CapabilityKind::Knowledge, "demo project"),
-                    (CapabilityKind::Tool, "Agent Memory"),
-                    (CapabilityKind::Skill, "not-resolved-here"),
-                ],
+            &linked(
+                agent(
+                    "claude-agent-acp",
+                    &[
+                        (CapabilityKind::Knowledge, "demo project"),
+                        (CapabilityKind::Tool, "Agent Memory"),
+                        (CapabilityKind::Skill, "not-resolved-here"),
+                    ],
+                ),
+                teams.parent().expect("project"),
             ),
             &|_| None,
         )
@@ -873,10 +891,11 @@ mod tests {
         let (_directory, home, teams) = machine();
         let inventory = capabilities::detect_capabilities(Some(&home), &teams);
         for (kind, name, expected) in [
+            // ADR 0036: a name alone no longer points at a folder.
             (
                 CapabilityKind::Knowledge,
                 "nowhere project",
-                "no source by that name",
+                "names no folder or file",
             ),
             (
                 CapabilityKind::Tool,
@@ -886,7 +905,6 @@ mod tests {
         ] {
             let error = prepare_for(
                 Some(&home),
-                &teams,
                 &teams,
                 &inventory,
                 &agent("claude-agent-acp", &[(kind, name)]),
@@ -906,15 +924,8 @@ mod tests {
         let mut delivery = prepare_for(
             Some(&home),
             &teams,
-            &teams,
             &inventory,
-            &agent(
-                "claude-agent-acp",
-                &[
-                    (CapabilityKind::Knowledge, "demo project"),
-                    (CapabilityKind::Tool, "Agent Memory"),
-                ],
-            ),
+            &demo_agent(&teams),
             &|_| None,
         )
         .expect("deliverable");
@@ -958,15 +969,9 @@ mod tests {
     fn knowledge_and_tools_are_composed_into_the_prompt_in_order() {
         let (_directory, home, teams) = machine();
         let inventory = capabilities::detect_capabilities(Some(&home), &teams);
-        let wired = agent(
-            "claude-agent-acp",
-            &[
-                (CapabilityKind::Knowledge, "demo project"),
-                (CapabilityKind::Tool, "Agent Memory"),
-            ],
-        );
-        let delivery = prepare_for(Some(&home), &teams, &teams, &inventory, &wired, &|_| None)
-            .expect("deliverable");
+        let wired = demo_agent(&teams);
+        let delivery =
+            prepare_for(Some(&home), &teams, &inventory, &wired, &|_| None).expect("deliverable");
         let composed = crate::compose_prompt(
             &wired,
             &crate::memory::ContextPacket::default(),
@@ -1074,7 +1079,6 @@ mod tests {
         let inventory = capabilities::detect_capabilities(Some(&home), &teams);
         let error = prepare_for(
             Some(&home),
-            &teams,
             &teams,
             &inventory,
             &agent(

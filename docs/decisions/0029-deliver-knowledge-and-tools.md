@@ -1,7 +1,9 @@
 # 0029 — A wired knowledge source or tool is delivered to the agent
 
 - **Date:** 2026-10-01
-- **Status:** Accepted. Daemon: `crates/loomwatch-backend/src/delivery.rs` (new),
+- **Status:** Accepted; delivering a Library knowledge source by name superseded by
+  [`0036-knowledge-is-chosen-not-discovered.md`](0036-knowledge-is-chosen-not-discovered.md).
+  Daemon: `crates/loomwatch-backend/src/delivery.rs` (new),
   `capabilities.rs` (`knowledge_snapshot`, `tool_definitions_for`), `config.rs` (`CapabilityKind`),
   `workspace.rs` (`materialise`, `prepare_root`), `acp.rs` (`ProcessSpec::tools`,
   `wired_tool_servers`), `memory.rs` (`ComposedPrompt::with_delivery`, two section kinds), `lib.rs`

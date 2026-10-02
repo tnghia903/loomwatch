@@ -436,7 +436,6 @@ pub fn materialise(
     }
     let delivery = deliver_knowledge_and_tools(
         home,
-        teams_root,
         team_path.parent().unwrap_or(Path::new(".")),
         &inventory,
         agent,
@@ -470,7 +469,6 @@ pub fn materialise(
 /// write the grant that wiring implies into the workspace's settings.
 fn deliver_knowledge_and_tools(
     home: Option<&Path>,
-    teams_root: &Path,
     team_dir: &Path,
     inventory: &capabilities::CapabilityInventory,
     agent: &AgentConfig,
@@ -479,7 +477,6 @@ fn deliver_knowledge_and_tools(
 ) -> Result<crate::delivery::Delivery, String> {
     let mut delivery = crate::delivery::prepare_for(
         home,
-        teams_root,
         team_dir,
         inventory,
         agent,
@@ -783,7 +780,7 @@ mod tests {
         let knowledge = vec![CapabilityRef {
             kind: CapabilityKind::Knowledge,
             name: "demo project".to_owned(),
-            path: None,
+            path: Some(project.clone()),
         }];
 
         let workspace = materialise(

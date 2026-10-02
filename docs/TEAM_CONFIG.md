@@ -92,22 +92,21 @@ commands containing a path separator are rejected. The command is executed direc
 
 ## Capabilities
 
-`agents[].capabilities` lists what the daemon delivers to an agent before it runs. Each entry is
-`{ kind, name }`, where `name` is the capability's name in the Library:
+`agents[].capabilities` lists what the daemon delivers to an agent before it runs. A skill or a
+tool is `{ kind, name }`, where `name` is the capability's name in the Library:
 
 ```yaml
 capabilities:
-  - { kind: skill, name: claude-design }        # copied into the workspace, required in the prompt
-  - { kind: knowledge, name: loomwatch project } # contents in the prompt; a folder is readable
-  - { kind: tool, name: Agent Memory }           # your MCP server, handed to the harness
+  - { kind: skill, name: claude-design } # copied into the workspace, required in the prompt
+  - { kind: tool, name: Agent Memory }    # your MCP server, handed to the harness
 ```
 
 Team memory is not a capability: wire another team's memory or an imported pack through
 `memory.inherits` (see [Team memory](TEAM_MEMORY.md)).
 
-**A folder or file you chose** is knowledge with a `path`, which the agent panel's **Add folder…**
-and **Add file…** write ([ADR 0035](decisions/0035-folders-and-files-as-knowledge.md)). It is read
-from that path instead of being looked up in the Library, so `name` is only its label:
+**Knowledge** is a folder or file you chose, so it always has a `path`. The agent panel's
+**Add folder…** and **Add file…** write it ([ADR 0035](decisions/0035-folders-and-files-as-knowledge.md)),
+and `name` is only its label:
 
 ```yaml
 capabilities:
@@ -115,8 +114,12 @@ capabilities:
   - { kind: knowledge, name: Q3 memo.pdf, path: news-desk.files/Q3 memo.pdf }              # added
 ```
 
-A **folder** is linked where it is: the agent gets the same listing and README a Library folder
-gets, plus a read grant for the folder, so each run sees what is in it then. A **file** added in
+Knowledge without a `path` fails the run and says to add it again. The Library used to list the
+project the teams live in and the folders OpenCode had worked in, and an entry could name one of
+those; it no longer does ([ADR 0036](decisions/0036-knowledge-is-chosen-not-discovered.md)).
+
+A **folder** is linked where it is: the agent gets its top-level listing and README, plus a read
+grant for the folder, so each run sees what is in it then. A **file** added in
 the panel is copied beside the team file under `<team>.files/`, and a relative `path` resolves
 against the team file's folder (`~/` against your home folder). The agent gets the file's text,
 up to 12,000 characters, and a read grant for that one file. A PDF's text is extracted with
@@ -124,10 +127,9 @@ up to 12,000 characters, and a read grant for that one file. A PDF's text is ext
 PDF is. When a file is longer than that, the prompt carries its opening, and the full text is put
 in the agent's working folder as `knowledge/<file>`. Only `knowledge` may have a `path`.
 
-**Knowledge** is supplied in the agent's opening prompt as the same snapshot the Library's
-**Contents** panel shows: for a project folder, its top-level listing and README; for an OpenCode
-project, its recent session titles. It is framed as source material, never as instructions. A
-source that is a folder is also a read grant for that folder. On Claude Code, LoomWatch writes
+**Knowledge** is supplied in the agent's opening prompt as the snapshot described above: a
+folder's top-level listing and README, or a file's text. It is framed as source material, never as
+instructions. A folder or file is also a read grant for it. On Claude Code, LoomWatch writes
 `permissions.additionalDirectories` and a `Read(//<folder>/**)` allow rule into the workspace's
 `.claude/settings.json`; other apps apply their own rules. One agent's knowledge is capped at
 64 KiB, and a run over the cap fails rather than shortening it.

@@ -333,3 +333,8 @@ The envelope, the event kinds and every existing payload shape are unchanged.
   the Library provenance a discovered source carries.
 
 See [ADR 0035](decisions/0035-folders-and-files-as-knowledge.md).
+
+Since [ADR 0036](decisions/0036-knowledge-is-chosen-not-discovered.md), every delivered knowledge
+entry is one the operator chose, so new records only carry `Linked folder` or `Added file`. Records
+from earlier runs may still carry a discovered source's provenance (`LoomWatch`, `OpenCode`, or
+both joined with ` + `); readers must keep accepting them.

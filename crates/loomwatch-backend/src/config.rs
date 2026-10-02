@@ -507,10 +507,10 @@ impl TryFrom<RawAgent> for AgentConfig {
 pub struct CapabilityRef {
     pub kind: CapabilityKind,
     pub name: String,
-    /// A folder or file the operator chose, for `knowledge` only (ADR 0035). When set, the source
-    /// is read from here instead of being looked up in the Library by `name`, which is then only
+    /// A folder or file the operator chose, for `knowledge` only (ADR 0035). `name` is then only
     /// its label. A relative path resolves against the team file's directory, which is where an
-    /// added file is copied to.
+    /// added file is copied to. Knowledge without a path fails the run with what to do instead:
+    /// the Library no longer lists folders a name could point at (ADR 0036).
     #[serde(default)]
     pub path: Option<PathBuf>,
 }
@@ -520,8 +520,8 @@ pub struct CapabilityRef {
 pub enum CapabilityKind {
     /// Copied into the workspace and required in the prompt (ADR 0012, 0019, 0021).
     Skill,
-    /// A knowledge source that is not memory: its contents are supplied in the prompt and a folder
-    /// source is a read grant for that folder (ADR 0029). Memory is wired through
+    /// A folder or file the operator chose (ADR 0035, 0036): its contents are supplied in the
+    /// prompt, and it is a read grant for that folder or file (ADR 0029). Memory is wired through
     /// `memory.inherits`, not here.
     Knowledge,
     /// An MCP server from the operator's own harness config, passed to the harness in

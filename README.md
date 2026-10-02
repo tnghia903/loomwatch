@@ -541,14 +541,15 @@ with the canvas layout; organizing does not change the workflow or start a run.
 <details>
 <summary><strong>Connect skills, knowledge and tools</strong></summary>
 
-The library on the left of **Build** lists the skills, MCP tools and knowledge sources found on your
-computer. Add one to the canvas, then drag from an agent to it, or open the card's
-**Details & connections** and tick the agents that should use it. Save the team, and the next run
-delivers it:
+The library on the left of **Build** lists the skills and MCP tools found on your computer, and
+the teams whose memory you can share. Add one to the canvas, then drag from an agent to it, or open
+the card's **Details & connections** and tick the agents that should use it. To give an agent a
+folder or a file, select the agent and use **Add folder…** or **Add file…** under **Context**. Save
+the team, and the next run delivers it:
 
 - A **skill** is copied into the agent's working folder and its instructions are given to the agent.
-- A **knowledge source**, such as a project folder, is given to the agent as reference material:
-  the same contents you see under **Contents** in its details. The agent can also read the folder.
+- A **folder or file** is given to the agent as reference material: a folder's listing and README,
+  or a file's text (a PDF's too, when `pdftotext` is installed). The agent can also read it.
 - A **tool** is your own MCP server, handed to that agent's app with the settings you already gave it
   in Claude Code, Codex or OpenCode.
 

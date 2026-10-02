@@ -1,7 +1,9 @@
 # 0035 — A folder or file the operator chooses is knowledge
 
 - **Date:** 2026-10-02
-- **Status:** Accepted. Daemon: `crates/loomwatch-backend/src/chosen_knowledge.rs` (new),
+- **Status:** Accepted; `path` made required for knowledge by
+  [`0036-knowledge-is-chosen-not-discovered.md`](0036-knowledge-is-chosen-not-discovered.md).
+  Daemon: `crates/loomwatch-backend/src/chosen_knowledge.rs` (new),
   `config.rs` (`CapabilityRef::path`), `capabilities.rs` (`KnowledgeSnapshot::{files, text_copy}`),
   `delivery.rs` (`resolve_knowledge`, file grants), `workspace.rs` (`knowledge/` in the working
   folder), `memory.rs` (the file sentence in a knowledge section), `api.rs` (`GET /api/folders`,

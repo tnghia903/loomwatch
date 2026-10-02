@@ -112,7 +112,7 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
         : <div className="t-meta agent-context-empty">No team Brief yet. Notes you add in Memory are supplied to every agent.</div>)}
 
       {nothingConnected
-        ? <div className="t-meta agent-context-empty">Nothing connected. {canAdd ? 'Add a folder or file below, or drag' : 'Drag'} a skill, knowledge source or tool from the Library onto this agent.</div>
+        ? <div className="t-meta agent-context-empty">Nothing connected. {canAdd ? 'Add a folder or file below, or drag' : 'Drag'} a skill, tool or team memory from the Library onto this agent.</div>
         : (
           <ul className="agent-context-list" aria-label="Connected to this agent">
             {capabilities.map((capability) => {
