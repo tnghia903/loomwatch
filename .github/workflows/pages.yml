@@ -1,0 +1,53 @@
+name: Pages
+
+# Publishes the landing page in site/ to GitHub Pages. It runs when the page, the screenshots it
+# borrows from docs/assets/readme, the design-system fonts or this workflow change on main, and by
+# hand. Pages must be turned on once, with "GitHub Actions" as its source (Settings → Pages).
+on:
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - docs/assets/readme/**
+      - docs/design-system/fonts/**
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+# One deployment at a time. A newer push waits rather than cancelling one that is mid-deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Assemble the site
+        run: site/build.sh _site
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

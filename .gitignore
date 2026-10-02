@@ -37,6 +37,9 @@ container/capabilities/*
 # build cache for docs/mockups/build-standalone.mjs (fetched woff2 subsets)
 docs/mockups/.font-cache/
 
+# The landing page as site/build.sh assembles it for GitHub Pages
+_site/
+
 # pnpm content-addressable store, when pnpm is run with a local store-dir
 .pnpm-store/
 

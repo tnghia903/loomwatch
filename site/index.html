@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-depth="team">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LoomWatch — Put AI agents to work as a team</title>
+  <meta name="description" content="LoomWatch turns the AI apps already on your computer, such as Claude, Codex, Gemini, OpenCode, Hermes and OpenClaw, into one team. Ask in plain words, watch every step, and decide before the next agent builds on it.">
+  <meta name="theme-color" content="#08080A">
+  <meta property="og:title" content="LoomWatch — Put AI agents to work as a team">
+  <meta property="og:description" content="You already have the AI. LoomWatch makes it one team: mix the apps you use, watch every thread, and stay a step in the work.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="assets/readme/home-dark.png">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="assets/fonts/instrument-serif-2.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="assets/fonts/fonts.css">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    // Theme and reading depth are restored before the first paint, so nothing flashes.
+    try {
+      const t = localStorage.getItem('loomwatch-site-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
+      const d = localStorage.getItem('loomwatch-site-depth'); if (d === 'story' || d === 'team' || d === 'trace') document.documentElement.dataset.depth = d
+    } catch {}
+    document.documentElement.classList.add('js')
+  </script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 102 44"><g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10 24 34 42 10 60 34 78 10 96 34" opacity=".36"/><path d="M6 34 24 10 42 34 60 10 78 34 96 10"/></g></symbol>
+</svg>
+
+<header class="top">
+  <div class="top-row">
+    <a class="brand" href="#top" aria-label="LoomWatch, back to top"><svg aria-hidden="true"><use href="#mark"/></svg>LoomWatch</a>
+    <nav class="top-nav" aria-label="Sections">
+      <a href="#threads">The run</a>
+      <a href="#tomorrow">Tomorrow</a>
+      <a href="#why">Why a loom</a>
+      <a href="#start">Start</a>
+    </nav>
+    <div class="top-actions">
+      <a class="btn" href="#start">Get LoomWatch</a>
+      <button class="iconbtn" type="button" id="theme" aria-label="Switch to the light theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="progress" aria-hidden="true"><i></i></div>
+</header>
+
+<main id="main">
+
+<!-- ================= Cold open: the apps you have, before and after the loom ================= -->
+<section class="open" id="top" aria-labelledby="open-h">
+  <div class="open-stage">
+    <div class="open-copy">
+      <div class="open-before" aria-hidden="true">
+        <span class="micro">Today, on your computer</span>
+        <p class="open-line">You already have the AI.<br><em>You are still the glue.</em></p>
+        <p class="open-sub">One app researches, another writes, a third double-checks, and you carry every answer between them by hand, hoping the first step was right.</p>
+      </div>
+      <div class="open-after">
+        <span class="micro">LoomWatch · runs on your computer</span>
+        <h1 id="open-h">Put the AI apps you have to work <em>as one team.</em></h1>
+        <p class="open-sub">Mix the apps you already use on one team. Ask in plain words, watch every step as it happens, and decide before the next agent builds on it.</p>
+        <div class="cta">
+          <a class="btn btn-primary btn-lg" href="#threads">Weave a team, right here</a>
+          <a class="link" href="#start">Or install it ↓</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="open-field" aria-hidden="true">
+      <svg class="open-paste" preserveAspectRatio="none"><path id="paste-path"/><circle r="3.5" id="paste-dot"/></svg>
+      <span class="paste-label">you, copying answers between apps</span>
+      <div class="term" data-app="claude"><div class="term-bar"><i></i><i></i><i></i><span>claude</span></div><pre><b>›</b> find today's AI news, with sources
+Found 4 items. 1 has no source.
+<b>›</b> <span class="caret"></span></pre></div>
+      <div class="term" data-app="codex"><div class="term-bar"><i></i><i></i><i></i><span>codex</span></div><pre><b>›</b> write a digest from this:
+<span class="dim">(paste the research here)</span>
+<b>›</b> <span class="caret"></span></pre></div>
+      <div class="term" data-app="gemini"><div class="term-bar"><i></i><i></i><i></i><span>gemini</span></div><pre><b>›</b> check every claim in this draft
+<span class="dim">(paste the draft here)</span>
+<b>›</b> <span class="caret"></span></pre></div>
+      <div class="term" data-app="opencode"><div class="term-bar"><i></i><i></i><i></i><span>opencode</span></div><pre><b>›</b> what did the other one change?
+I can't see the other app's work.
+<b>›</b> <span class="caret"></span></pre></div>
+      <span class="open-you">you</span>
+      <svg class="open-weft" preserveAspectRatio="none"></svg>
+    </div>
+
+    <p class="open-cue" aria-hidden="true"><span>Scroll, and watch them become a team</span><i></i></p>
+  </div>
+</section>
+
+<!-- ================= The run: the visitor operates one team, chapter by chapter ================= -->
+<div class="story" id="story">
+
+  <div class="story-intro">
+    <span class="micro eyebrow">One run, start to finish</span>
+    <p class="story-lede">This page is a LoomWatch run, and you're the operator. Choose your apps, build a team, ask it for something, and decide what happens when it stops for you.</p>
+    <p class="story-note d-team">Everything below runs in your browser. Nothing calls a model, and nothing you type leaves this page.</p>
+  </div>
+
+  <!-- 01 · Threads -->
+  <article class="chapter" id="threads" data-chapter="1" aria-labelledby="threads-h">
+    <div class="ch-copy">
+      <span class="ch-n"><b>01</b> Threads</span>
+      <h2 id="threads-h">Start with the threads you already have.</h2>
+      <p class="ch-body d-team">LoomWatch finds the AI apps on your computer and puts each one on the loom as a thread. Tick the ones you use, and the rest of this page weaves with them.</p>
+      <dl class="fine d-team">
+        <div><dt>No API key</dt><dd>Each agent runs on an app you've already signed in to.</dd></div>
+        <div><dt>Your plans, as they are</dt><dd>Runs count against those apps' own plans, as if you'd used them yourself.</dd></div>
+        <div><dt>Mix them on one team</dt><dd>Each agent has its own app and model. Through OpenCode, open models such as DeepSeek, Kimi, GLM, Qwen or Mistral too.</dd></div>
+      </dl>
+      <p class="trace d-trace">Each app is started on your computer as its own process and driven over ACP, the Agent Client Protocol: <code>claude-agent-acp</code>, <code>codex-acp</code>, <code>gemini --acp</code>, <code>opencode acp</code>, <code>hermes-acp</code>, <code>openclaw acp</code>.</p>
+    </div>
+    <div class="ch-panel">
+      <div class="win">
+        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>AI apps on this computer</b></span><span class="badge" id="apps-count">3 on the loom</span></div>
+        <div class="win-body">
+          <ul class="apps" id="apps" aria-label="AI apps. Choose the ones you use."></ul>
+          <div class="warp-preview">
+            <svg id="warp-preview" viewBox="0 0 520 112" role="img" aria-label="The threads on your loom"></svg>
+          </div>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- 02 · Build -->
+  <article class="chapter" id="build" data-chapter="2" aria-labelledby="build-h">
+    <div class="ch-copy">
+      <span class="ch-n"><b>02</b> Build</span>
+      <h2 id="build-h">Hire by job. Read the team back as one sentence.</h2>
+      <p class="ch-body d-team">Put agents on a canvas and connect them in order. LoomWatch reads the whole team back to you as one plain sentence, so you can check the plan before anything runs. Change an app in the sentence and the canvas follows.</p>
+      <dl class="fine d-team">
+        <div><dt>Ask LoomWatch</dt><dd>Describe the team you want. One of your own AI apps proposes it on the canvas, and nothing changes until you press Apply.</dd></div>
+        <div><dt>One agent, a pipeline, or a lead</dt><dd>Steps in order with stops where you want them, or a lead that hands out work and asks its teammates questions as it goes.</dd></div>
+        <div><dt>Skills, tools and files</dt><dd>Give an agent the skills and MCP tools already on your computer, or a folder or file to read, PDFs included.</dd></div>
+      </dl>
+      <p class="trace d-trace">A team is a plain YAML file on your computer, checked against a schema. Read it, diff it, keep it in git. The canvas is an editor over that file, not a separate store.</p>
+    </div>
+    <div class="ch-panel">
+      <div class="win">
+        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono">research-and-write.yaml</span></span><span class="badge">Build</span></div>
+        <div class="win-body">
+          <p class="sentence" id="sentence" aria-live="polite"></p>
+          <div class="propose" id="propose" hidden></div>
+          <div class="depth-views">
+            <div class="canvas dots" id="canvas" aria-label="The team on the canvas"></div>
+            <pre class="yaml" id="yaml" aria-label="The team file"></pre>
+          </div>
+          <div class="build-foot">
+            <button class="btn" type="button" id="describe">Describe it instead</button>
+            <div class="dial" role="radiogroup" aria-label="Show the team as">
+              <button type="button" role="radio" data-depth="story">Story</button>
+              <button type="button" role="radio" data-depth="team">Team</button>
+              <button type="button" role="radio" data-depth="trace">Trace</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- 03 · Ask -->
+  <article class="chapter" id="ask" data-chapter="3" aria-labelledby="ask-h">
+    <div class="ch-copy">
+      <span class="ch-n"><b>03</b> Ask</span>
+      <h2 id="ask-h">Say what you need, in plain words.</h2>
+      <p class="ch-body d-team">No prompt chains and no glue code. Type the job, press <span class="kbd">↵</span>, and the first agent starts. Each step starts when the one before it hands over.</p>
+      <dl class="fine d-team">
+        <div><dt>Every agent knows its place</dt><dd>Each one is told its step, who hands work to it, and who gets its answer.</dd></div>
+        <div><dt>A Brief they all read</dt><dd>Shared instructions and files every run of the team starts from.</dd></div>
+      </dl>
+      <p class="trace d-trace">Only the first agent receives your words. Each later step is prompted with the replies of the steps wired into it; a step with two inputs receives both, labelled.</p>
+    </div>
+    <div class="ch-panel">
+      <div class="win">
+        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono">research-and-write.yaml</span></span><span class="badge" data-run-badge>Ready</span></div>
+        <div class="win-body ask-body">
+          <h3 class="serif-h">What should the team do?</h3>
+          <div class="requests" id="requests" role="radiogroup" aria-label="Requests this page can play"></div>
+          <form class="composer" id="composer">
+            <label class="sr" for="request-text">Your request</label>
+            <textarea id="request-text" rows="2" readonly></textarea>
+            <div class="composer-row">
+              <span class="hint"><span class="kbd">↵</span> runs the team</span>
+              <button class="btn btn-primary" type="submit" id="run-team">Run team</button>
+            </div>
+          </form>
+          <p class="sim-note">This page plays a recorded run for each request, so it can't take free text.</p>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- 04 · Watch -->
+  <article class="chapter" id="watch" data-chapter="4" aria-labelledby="watch-h">
+    <div class="ch-copy">
+      <span class="ch-n"><b>04</b> Watch</span>
+      <h2 id="watch-h">Watch every thread as it's woven.</h2>
+      <p class="ch-body d-team">Every message, tool call and handover lands on a live timeline: <span class="say-live">blue</span> while an agent works, <span class="say-gold">gold</span> where it worked, a dashed outline while the team waits for you. When it's done, drag back to replay any moment.</p>
+      <dl class="fine d-team">
+        <div><dt>Evidence, not guesses</dt><dd>A skill shows as loaded only when it was actually sent, and a file as opened only when the agent's own stream read it.</dd></div>
+        <div><dt>Agents ask each other</dt><dd>Teammates hand over and ask questions through LoomWatch, so every handover is on the record, not buried in chat.</dd></div>
+        <div><dt>One place to look</dt><dd>No more scrolling back through four terminals to find out what happened.</dd></div>
+      </dl>
+      <p class="trace d-trace">Handovers, dispatches and questions are calls to the Team Bus, an MCP server LoomWatch gives every agent. The team graph is a by-product of those calls, never a guess read out of a transcript. Every event is archived in a database on your computer.</p>
+    </div>
+    <div class="ch-panel">
+      <div class="win">
+        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono" id="watch-clock">0:00</span></span><span class="badge" data-run-badge>Ready</span></div>
+        <div class="win-body watch-body">
+          <ol class="stages" id="stages" aria-label="The team's steps"></ol>
+          <p class="narration" id="narration" aria-live="polite">The team starts when you ask.</p>
+          <div class="lanes-wrap">
+            <svg class="lanes" id="lanes" viewBox="0 0 560 120" role="img" aria-label="Timeline, one lane per step"></svg>
+          </div>
+          <div class="scrub" id="scrub" hidden>
+            <label><span class="micro">Replay</span><input type="range" id="scrub-input" min="0" max="100" value="100" step="0.1" aria-label="Drag to replay the run"></label>
+          </div>
+          <ol class="events" id="events" aria-label="Events"></ol>
+          <a class="needs-you" id="needs-you" href="#review" hidden>The team is waiting for you <span aria-hidden="true">↓</span></a>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- 05 · Review -->
+  <article class="chapter" id="review" data-chapter="5" aria-labelledby="review-h">
+    <div class="ch-copy">
+      <span class="ch-n"><b>05</b> Review</span>
+      <h2 id="review-h">Nothing moves on until you decide.</h2>
+      <p class="ch-body d-team">Put yourself on the team as a step. When the run reaches you, it stops and shows what was handed over. Approve it, or say what to change and send it back, so a weak first step never quietly shapes everything after it.</p>
+      <dl class="fine d-team">
+        <div><dt>Easy answers stay easy</dt><dd>Approve without a comment, or send it back with one line.</dd></div>
+        <div><dt>Agents can ask you, too</dt><dd>Mid-run, an agent can stop and put a question to you.</dd></div>
+        <div><dt>It waits, even on a schedule</dt><dd>A review step in a 10:00 run still waits for you.</dd></div>
+        <div><dt>Never decided for you</dt><dd>Ask LoomWatch can propose teams and start runs, but it can never answer a review step.</dd></div>
+      </dl>
+      <p class="trace d-trace">The review step is an <code>agents[]</code> entry with <code>kind: operator</code>. An app that supports <code>session/load</code> is closed while you think and reopened when you answer, so a long wait holds no process open.</p>
+    </div>
+    <div class="ch-panel">
+      <div class="win win-review" id="review-win">
+        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Review step</b><span class="mono">You</span></span><span class="badge" data-run-badge>Ready</span></div>
+        <div class="win-body" id="review-body"></div>
+      </div>
+    </div>
+  </article>
+
+  <!-- 06 · Result -->
+  <article class="chapter" id="result" data-chapter="6" aria-labelledby="result-h">
+    <div class="ch-copy">
+      <span class="ch-n"><b>06</b> Result</span>
+      <h2 id="result-h">The answer comes with its receipt.</h2>
+      <p class="ch-body d-team">The team's answer opens in a reader, beside a run receipt: what you asked, who did what, how long it took, and anything worth a second look. Not quite right? Follow up, or redo from the step that went wrong.</p>
+      <dl class="fine d-team">
+        <div><dt>Follow up</dt><dd>Ask for another pass on the result, and the team picks up from there.</dd></div>
+        <div><dt>Redo from a step</dt><dd>Run again from the step that went wrong. The steps before it keep their work.</dd></div>
+        <div><dt>Files, not paths</dt><dd>A file the team made opens as a card: open it, show it in its folder, or copy its path.</dd></div>
+      </dl>
+      <p class="trace d-trace">The receipt is built from the archived events, so it can't claim anything the run didn't record. Copy it as Markdown, or open every event behind it.</p>
+    </div>
+    <div class="ch-panel">
+      <div class="win">
+        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Team response</b><span class="mono" id="result-file">digest.md</span></span><span class="badge" data-run-badge>Ready</span></div>
+        <div class="win-body" id="result-body"></div>
+      </div>
+    </div>
+  </article>
+</div>
+
+<!-- ================= Tomorrow: two weeks of one scheduled team ================= -->
+<section class="band" id="tomorrow" aria-labelledby="tomorrow-h">
+  <div class="wrap">
+    <div class="band-head">
+      <span class="ch-n"><b>07</b> Tomorrow</span>
+      <h2 id="tomorrow-h">A team you trust becomes a habit.</h2>
+      <p class="ch-body d-team">Put a team on a schedule and the answer is waiting when you start work. Its Notebook keeps what you taught it, so the work gets better every morning. Here are two weeks of one team, one thread per run. Pick a day.</p>
+    </div>
+    <div class="fabric-wrap">
+      <div class="fabric-top">
+        <span class="sched"><span class="chip outline">Every day at 10:00</span><span class="to">→</span><span class="chip">Collector</span><span class="to">→</span><span class="chip">Editor</span><span class="to">→</span><span class="chip dashed">You</span><span class="to">→</span><span class="chip">Writer</span><span class="to">→</span><span class="chip outline">Notion</span></span>
+        <span class="legend" aria-hidden="true"><span><i class="lg-done"></i>finished</span><span><i class="lg-fail"></i>failed</span><span><i class="lg-wait"></i>waited for you</span><span><i class="lg-live"></i>working now</span></span>
+      </div>
+      <div class="fabric" id="fabric" role="listbox" aria-label="Two weeks of runs. Choose a day to read what happened."></div>
+      <div class="day-story" id="day-story" aria-live="polite"></div>
+    </div>
+    <p class="trace d-trace">A schedule is a <code>schedule:</code> block in the team file: a cron line, a timezone and the prompt. The Notebook holds notes and checkpoints that later runs read; the Brief holds instructions and files every run starts with.</p>
+  </div>
+</section>
+
+<!-- ================= Why a loom: the position nobody else holds ================= -->
+<section class="band band-why" id="why" aria-labelledby="why-h">
+  <div class="wrap">
+    <div class="why-grid">
+      <div class="band-head">
+        <span class="ch-n"><b>08</b> Why a loom</span>
+        <h2 id="why-h">Most team features come from one AI company. <em>A loom takes anyone's thread.</em></h2>
+        <p class="ch-body">AI apps leapfrog each other every few months. LoomWatch doesn't belong to any of them, so each job gets the app that does it best. When a better one ships, you change one thread, not your whole setup.</p>
+        <div class="seg" role="radiogroup" aria-label="Compare">
+          <button type="button" role="radio" aria-checked="false" data-loom="one">One company's team</button>
+          <button type="button" role="radio" aria-checked="true" data-loom="any">LoomWatch</button>
+        </div>
+      </div>
+      <figure class="swatch" aria-labelledby="swatch-cap">
+        <svg id="swatch" viewBox="0 0 480 300" role="img" aria-label="Threads woven into cloth"></svg>
+        <figcaption id="swatch-cap"></figcaption>
+      </figure>
+    </div>
+
+    <ol class="pillars">
+      <li><span class="p-n">i</span><h3>Any app, one team</h3><p>Claude, Codex, Gemini, OpenCode, Hermes and OpenClaw, side by side, each on the job it does best.</p></li>
+      <li><span class="p-n">ii</span><h3>On your computer</h3><p>LoomWatch serves on 127.0.0.1 and keeps run history in a database on your computer. Your teams are plain files.</p></li>
+      <li><span class="p-n">iii</span><h3>On the plans you have</h3><p>No API key and nothing new to sign up for. Runs use the sign-ins you already have.</p></li>
+      <li><span class="p-n">iv</span><h3>With you in it</h3><p>You're a step on the team, not a spectator. It stops wherever you put yourself.</p></li>
+      <li><span class="p-n">v</span><h3>Proof, not a guess</h3><p>Handovers are recorded as calls, not read out of chat, so the receipt only says what happened.</p></li>
+      <li><span class="p-n">vi</span><h3>Memory that outlives a switch</h3><p>The Brief, the Notebook and every run stay with your team, whichever app you swap in.</p></li>
+    </ol>
+    <p class="footnote d-team">To be exact about privacy: LoomWatch itself sends nothing anywhere, but each agent's own app still sends prompts and files to its model provider, as it does when you use it directly.</p>
+  </div>
+</section>
+
+<!-- ================= Start ================= -->
+<section class="band" id="start" aria-labelledby="start-h">
+  <div class="wrap">
+    <div class="start-grid">
+      <div class="band-head">
+        <span class="ch-n"><b>09</b> Start</span>
+        <h2 id="start-h">One command, and your first team is already waiting.</h2>
+        <p class="ch-body">The first start takes a few minutes. Then LoomWatch opens in your browser with an offline demo team you can run before you connect any AI app.</p>
+        <dl class="needs d-team">
+          <div><dt>Docker</dt><dd>Docker Desktop, OrbStack or Docker Engine, for the database that keeps your run history.</dd></div>
+          <div><dt>Node.js 22.12+ and Rust</dt><dd>To build it. The exact Rust version downloads on its own.</dd></div>
+          <div><dt>Access to the repository</dt><dd>It's private for now, so clone it with a GitHub account that has access.</dd></div>
+          <div><dt>An AI app, signed in</dt><dd>For real runs. The demo team needs none.</dd></div>
+        </dl>
+      </div>
+      <div class="termbox">
+        <div class="termbox-bar"><span class="micro">Terminal</span><button class="btn" type="button" id="copy-cmds">Copy</button></div>
+<pre id="cmds"><span class="p">$ </span><span class="cmd">git clone git@github.com:tnghia903/loomwatch.git</span>
+<span class="p">$ </span><span class="cmd">cd loomwatch</span>
+<span class="p">$ </span><span class="cmd">./loomwatch</span>
+<span class="c"><b>==&gt; LoomWatch is starting at http://127.0.0.1:3000</b>
+Keep this window open while you use LoomWatch. Press Ctrl-C to stop it.</span></pre>
+        <p class="termbox-foot"><code>./loomwatch</code> lists anything missing and how to install it. <code>./loomwatch stop</code> stops it, <code>./loomwatch update</code> gets the latest version, and your teams and history are kept either way.</p>
+      </div>
+    </div>
+
+    <div class="real">
+      <div class="real-head">
+        <p class="real-line">This page is a sketch. <em>This is the app.</em></p>
+        <div class="tabs" role="tablist" aria-label="Screens">
+          <button role="tab" aria-selected="true" aria-controls="real-shot" id="tab-home" data-screen="home">Home</button>
+          <button role="tab" aria-selected="false" aria-controls="real-shot" id="tab-build" data-screen="build" tabindex="-1">Build</button>
+          <button role="tab" aria-selected="false" aria-controls="real-shot" id="tab-run" data-screen="run" tabindex="-1">Run</button>
+        </div>
+      </div>
+      <figure class="real-shot" id="real-shot" role="tabpanel" aria-labelledby="tab-home">
+        <img id="real-img" data-shot="home" width="2880" height="1240" alt="" loading="lazy">
+        <figcaption id="real-cap"></figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ================= Closing ================= -->
+<section class="close" aria-label="What LoomWatch is">
+  <div class="wrap">
+    <p class="stanza">
+      <span>Not a <s>chatbot</s>.</span>
+      <span>Not a <s>cloud</s>.</span>
+      <span>Not a <s>model</s>.</span>
+      <span>Not <s>autopilot</s>.</span>
+    </p>
+    <p class="stanza-end">A loom, for the AI <em>you already have.</em></p>
+    <a class="btn btn-primary btn-lg" href="#start">Get LoomWatch</a>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-row">
+    <a class="brand" href="#top"><svg aria-hidden="true"><use href="#mark"/></svg>LoomWatch</a>
+    <nav aria-label="Project">
+      <a href="https://github.com/tnghia903/loomwatch">Repository</a>
+      <a href="https://github.com/tnghia903/loomwatch#readme">README</a>
+      <a href="https://github.com/tnghia903/loomwatch/blob/main/docs/TEAM_CONFIG.md">Team files</a>
+      <a href="https://github.com/tnghia903/loomwatch/blob/main/docs/TEAM_MEMORY.md">Team memory</a>
+      <a href="https://agentclientprotocol.com">Agent Client Protocol</a>
+    </nav>
+    <p class="foot-line">Woven with Rust, React and ACP. Watch every thread.</p>
+  </div>
+</footer>
+
+<div class="depth" role="radiogroup" aria-label="How much detail this page shows">
+  <span class="depth-label">Read at</span>
+  <button type="button" role="radio" data-depth="story" title="Just the story">Story</button>
+  <button type="button" role="radio" data-depth="team" title="The story and what you get">Team</button>
+  <button type="button" role="radio" data-depth="trace" title="Everything, including how it works">Trace</button>
+</div>
+
+<script src="main.js" defer></script>
+</body>
+</html>
