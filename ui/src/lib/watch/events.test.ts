@@ -308,6 +308,48 @@ describe('final answer phases', () => {
   })
 })
 
+/** Run 820bb0e8: the writer's notes between tool calls read "…build and render it.Draft builds…". */
+describe('message boundaries', () => {
+  const say = (seq: number, text: string, messageId?: string) => event(seq, 'message', { role: 'agent', content: { type: 'text', text }, ...(messageId ? { messageId } : {}) })
+  const narrated = (ids: boolean) => [
+    event(0, 'message', { role: 'user', content: { type: 'text', text: 'Write the report' } }),
+    say(1, 'Then I will build ', ids ? 'msg-1' : undefined),
+    say(2, 'and render it.', ids ? 'msg-1' : undefined),
+    event(3, 'tool_call', { callId: 'c1', title: 'Terminal', toolKind: 'execute', status: 'pending' }),
+    event(4, 'tool_update', { callId: 'c1', status: 'completed' }),
+    say(5, 'Draft builds and renders.', ids ? 'msg-2' : undefined),
+    event(6, 'turn_end', { stopReason: 'end_turn' }),
+  ]
+  const joined = 'Then I will build and render it.\n\nDraft builds and renders.'
+
+  it.each([true, false])('keeps messages on either side of a tool call apart (messageId=%s)', (ids) => {
+    const agent = projectRun(narrated(ids)).agents[0]
+    expect(agent.reply).toBe(joined)
+    expect(agent.text).toBe(joined)
+    // Mid-stream, the reply already reads the way it will be delivered.
+    expect(projectRun(narrated(ids), 5).agents[0].reply).toBe(joined)
+    expect(projectRun(narrated(ids), 2).agents[0].reply).toBe('Then I will build and render it.')
+  })
+
+  it('presents an old row that ran its messages together with the breaks, and a new row as saved', () => {
+    expect(recordedReplyText(narrated(true), 'lead', 'Then I will build and render it.Draft builds and renders.')).toBe(joined)
+    expect(recordedReplyText(narrated(true), 'lead', joined)).toBe(joined)
+    expect(recordedReplyText(narrated(true), 'lead', 'A reply this archive never streamed')).toBe('A reply this archive never streamed')
+  })
+
+  it('separates final-answer messages by the same rule', () => {
+    const final = (seq: number, text: string, messageId: string) => event(seq, 'message', { role: 'agent', content: { type: 'text', text }, messageId, phase: 'final_answer' })
+    const events = [
+      event(0, 'message', { role: 'agent', content: { type: 'text', text: 'Checking.' }, messageId: 'm-0', phase: 'commentary' }),
+      final(1, 'Part one.', 'm-1'), event(2, 'tool_call', { callId: 'c1', title: 'Read', status: 'completed' }), final(3, 'Part two.', 'm-2'),
+      event(4, 'turn_end', {}),
+    ]
+    expect(projectRun(events).agents[0].reply).toBe('Part one.\n\nPart two.')
+    expect(recordedReplyText(events, 'lead', 'Checking.Part one.Part two.')).toBe('Part one.\n\nPart two.')
+    expect(recordedReplyText(events, 'lead', 'Part one.Part two.')).toBe('Part one.\n\nPart two.')
+  })
+})
+
 it('cleans only the exact canonical turn, preserving later answers as agent activity', () => {
   const chunks = [event(0, 'message', {role: 'agent', content: {type: 'text', text: 'Working'}, phase: 'commentary'}), event(1, 'message', {role: 'agent', content: {type: 'text', text: 'Report'}, phase: 'final_answer'}), event(2, 'turn_end', {}), event(3, 'message', {role: 'agent', content: {type: 'text', text: 'Answer to a helper question'}, phase: 'final_answer'}), event(4, 'turn_end', {})]
   expect(recordedReplyText(chunks, 'lead', 'WorkingReport')).toBe('Report')

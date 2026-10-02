@@ -1866,8 +1866,9 @@ async fn record_abandoned_checkpoints(
     };
     // Every agent the archive saw, and the last thing each of them said. `agent_message` chunks
     // land as `Message` events with `role: "agent"`; the last one is the closest thing to "what
-    // this stage had produced when the run died".
-    let mut last_reply: BTreeMap<String, String> = BTreeMap::new();
+    // this stage had produced when the run died". They are joined by the live reply's rule, so
+    // separate messages and turns stay separate paragraphs.
+    let mut last_reply: BTreeMap<String, crate::acp::ReplyText> = BTreeMap::new();
     let mut seen: Vec<String> = Vec::new();
     for event in &events {
         if event.agent_id.is_empty() {
@@ -1876,17 +1877,25 @@ async fn record_abandoned_checkpoints(
         if !seen.iter().any(|id| id == &event.agent_id) {
             seen.push(event.agent_id.clone());
         }
-        if event.kind == EventKind::Message
-            && event.payload["role"] == "agent"
-            && let Some(text) = event
-                .payload
-                .pointer("/content/text")
-                .and_then(Value::as_str)
-        {
-            last_reply
-                .entry(event.agent_id.clone())
-                .and_modify(|reply| reply.push_str(text))
-                .or_insert_with(|| text.to_owned());
+        let reply = last_reply.entry(event.agent_id.clone()).or_default();
+        match event.kind {
+            EventKind::Message if event.payload["role"] == "agent" => {
+                if let Some(text) = event
+                    .payload
+                    .pointer("/content/text")
+                    .and_then(Value::as_str)
+                {
+                    reply.push(text, event.payload["messageId"].as_str());
+                }
+            }
+            EventKind::Message => reply.end_message(),
+            EventKind::ToolCall
+            | EventKind::ToolUpdate
+            | EventKind::Plan
+            | EventKind::Permission => {
+                reply.note_activity();
+            }
+            _ => {}
         }
     }
     for agent_id in seen {
@@ -1896,7 +1905,10 @@ async fn record_abandoned_checkpoints(
         let request = crate::memory::CheckpointWrite {
             run_id: run_id.to_owned(),
             agent_id: agent_id.clone(),
-            done: last_reply.get(&agent_id).cloned().unwrap_or_default(),
+            done: last_reply
+                .get_mut(&agent_id)
+                .map(crate::acp::ReplyText::take)
+                .unwrap_or_default(),
             // Deliberately empty. The run ended abnormally, so nothing said what came next, and
             // a sentence here would be the daemon's guess wearing a stage's voice.
             next: String::new(),
