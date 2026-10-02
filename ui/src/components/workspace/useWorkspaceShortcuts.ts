@@ -148,7 +148,7 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
     if (mod && key === '0') { event.preventDefault(); void flow.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 300 }); return }
     if (mod && (key === '+' || key === '=')) { event.preventDefault(); void flow.zoomIn({ duration: 200 }); return }
     if (mod && key === '-') { event.preventDefault(); void flow.zoomOut({ duration: 200 }); return }
-    if (event.altKey && mod && key === 'l') { event.preventDefault(); organize(); return }
+    if (event.altKey && mod && optionLetter(event, 'l')) { event.preventDefault(); organize(); return }
     if (layersVisible && key === 'l' && !mod && !event.altKey) { event.preventDefault(); setSolo((current) => (current === 'both' ? 'configured' : current === 'configured' ? 'observed' : 'both')); return }
     if ((event.key === 'Delete' || event.key === 'Backspace') && editable) {
       const selectedNodeIds = doc.nodes.filter((node) => node.selected).map((node) => node.id)
@@ -198,4 +198,15 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
       if (event.shiftKey && selected.length > 0) void flow.fitView({ nodes: selected, padding: 0.2, maxZoom: 1, duration: 300 })
       else fitCanvas()
     }
+}
+
+/**
+ * Whether an Option (Alt) chord presses `letter`. Option changes the character a key types: on
+ * macOS ⌥L reports `key: '¬'`, and AltGr+L types `ł` on Polish layouts. When the layout no longer
+ * reports a plain letter, the physical key decides; while it still does (Colemak's L, which sits on
+ * QWERTY's U), `event.key` decides, as it does for every other shortcut here.
+ */
+function optionLetter(event: KeyboardEvent, letter: string) {
+  const key = event.key.toLowerCase()
+  return /^[a-z]$/.test(key) ? key === letter : event.code === `Key${letter.toUpperCase()}`
 }
