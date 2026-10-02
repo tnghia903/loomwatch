@@ -127,8 +127,7 @@ composer after a run, and per-team note folder. Each failed, and the fix was the
 - The review box shows the handover as raw Markdown (`## Summary`).
 - On a run stopped at a review step, the checkpoint strip reads "Done: nothing was recorded. Next:
   not recorded." The wording is a deliberate, tested contract (`CheckpointStrip`) and was left alone.
-- The Memory panel header leads with the full absolute path and some internal terms ("packet
-  snapshots", "Export as pack").
+- The Memory panel header leads with the full absolute path.
 - At phone width the bell badge spills below the header. LoomWatch serves only `127.0.0.1`, so
   phones are not a supported client.
 - In the browser automation used here, ⌘A does not select text in a textarea. This was confirmed

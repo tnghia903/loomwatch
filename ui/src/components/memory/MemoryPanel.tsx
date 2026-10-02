@@ -83,6 +83,7 @@ export function MemoryPanel({
   const [writeError, setWriteError] = useState<string | null>(null)
   const [tab, setTab] = useState<'brief' | 'notebook'>('brief')
   const [exported, setExported] = useState<string | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
   useEffect(() => { closeButton.current?.focus() }, [])
 
   const entries = view?.entries ?? []
@@ -219,25 +220,12 @@ export function MemoryPanel({
         </div>
       ))}
 
-      {!loading && !error && (inherited.length > 0 || onExportPack) && (
-        <div className="rt-strip t-meta" style={{ borderTop: 0, padding: '8px 10px', borderRadius: 'var(--r-sm)', background: 'var(--color-panel-solid)', border: '1px solid var(--color-hairline)', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
-          <span style={{ flex: 1, minWidth: 0 }}>
-            Inherited memory is read: this team's notes never write back, and a run's packet
-            snapshots what it read.
-          </span>
-          {onExportPack && (
-            <button type="button" className="btn" disabled={busy}
-              onClick={() => { setBusy(true); onExportPack().then(setExported).catch((caught: unknown) => setWriteError(caught instanceof Error ? caught.message : String(caught))).finally(() => setBusy(false)) }}>
-              <PackageOpen size={13} aria-hidden="true" /> Export as pack
-            </button>
-          )}
-        </div>
-      )}
-
-      {exported && (
+      {/* Said once, under the inherited groups, and only when there are some: the zone heads
+          already say "read-only", so this only adds what read-only means for a run. */}
+      {!loading && !error && inherited.length > 0 && (
         <p className="hint t-meta" style={{ margin: 0 }}>
-          Written to <code>{exported}</code>. Another team reads it with a
-          <code> memory.inherits</code> entry naming that folder.
+          Nothing this team writes goes back to an inherited entry. Each run is supplied them as
+          they were when it started.
         </p>
       )}
 
@@ -297,6 +285,26 @@ export function MemoryPanel({
           <button type="button" className="btn" disabled={!editable} title={editable ? undefined : 'This team cannot be edited here.'} onClick={() => { setWriteError(null); setDraft({ kind: 'file', path: '' }) }}>
             <FilePlus2 size={13} aria-hidden="true" /> Add a file
           </button>
+        </div>
+      )}
+
+      {/* A section of its own, after this team's own actions: exporting is about other teams, and
+          as a bordered box beside the entries it read as one more Brief row. */}
+      {!loading && !error && !draft && onExportPack && (
+        <div className="zone">
+          <div className="zone-head t-micro"><span>Share with another team</span></div>
+          <p className="hint t-meta" style={{ margin: 0 }}>
+            {exported
+              ? <>Written to <code>{exported}</code>. Another team reads it with a <code>memory.inherits</code> entry naming that folder.</>
+              : "Copies this team's Brief and kept notes into a folder another team can inherit."}
+          </p>
+          {exportError && <p className="hint t-meta" role="alert" style={{ margin: 0, color: 'var(--color-alert)' }}>{exportError}</p>}
+          <span>
+            <button type="button" className="btn" disabled={busy}
+              onClick={() => { setBusy(true); setExportError(null); onExportPack().then(setExported).catch((caught: unknown) => setExportError(caught instanceof Error ? caught.message : String(caught))).finally(() => setBusy(false)) }}>
+              <PackageOpen size={13} aria-hidden="true" /> {busy ? 'Exporting…' : 'Export memory'}
+            </button>
+          </span>
         </div>
       )}
 
