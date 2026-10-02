@@ -55,10 +55,29 @@ function outOfView(box: Box, viewport: Viewport): boolean {
   return box.top < 0 || box.left < 0 || box.top + Math.min(box.height, viewport.height) > viewport.height || box.left + Math.min(box.width, viewport.width) > viewport.width
 }
 
-function advanceFrom(index: number) {
-  const following = TOUR_STEPS[index + 1]
+function advanceFrom(index: number, to = index + 1) {
+  const following = TOUR_STEPS[to]
   if (following) goToStep(following.id)
   else endTour('finished')
+}
+
+/**
+ * "Skip this step" goes to the next step this screen can show. A step whose target is not on screen
+ * is passed over too: it would point at nothing and, with a `whenMissing`, send the operator straight
+ * back to the step they skipped. Skipping New team would otherwise land on the dialog New team opens,
+ * and skipping Run team on the request box that Build does not have. A step for the other screen
+ * stops the search; the guide already knows how to wait there for a team to open.
+ */
+function skipFrom(index: number, context: TourContext) {
+  const screen = readScreen()
+  let to = index + 1
+  for (; to < TOUR_STEPS.length; to++) {
+    const candidate = TOUR_STEPS[to]
+    if (candidate.screen !== 'any' && candidate.screen !== screen) break
+    const target = candidate.view(context).target
+    if (!target || findTarget(target)) break
+  }
+  advanceFrom(index, to)
 }
 
 export interface GettingStartedProps {
@@ -144,7 +163,7 @@ export function GettingStarted({ readyApps, appsLoading }: GettingStartedProps) 
         key="resume"
         corner
         eyebrow="Getting started"
-        view={{ title: 'Pick up where you left off', body: 'Open one of your teams to carry on with the guide, or start again by creating a new team.', advance: 'next' }}
+        view={{ title: 'Open a team to carry on', body: 'The rest of the guide happens inside a team. Open one of your teams to carry on, or start again by creating a new team.', advance: 'next' }}
         target={null}
         viewport={snapshot.viewport}
         actions={<button type="button" className="btn" onClick={() => goToStep('new-team')}>Start again</button>}
@@ -172,7 +191,7 @@ export function GettingStarted({ readyApps, appsLoading }: GettingStartedProps) 
   } else if (view.advance === 'action') {
     actions = <>
       <span className="tour-waiting t-meta"><i aria-hidden="true" />Waiting for you</span>
-      <button type="button" className="link tour-skip" onClick={() => advanceFrom(index)}>Skip this step</button>
+      <button type="button" className="link tour-skip" onClick={() => skipFrom(index, context.current)}>Skip this step</button>
     </>
   } else {
     actions = <>
