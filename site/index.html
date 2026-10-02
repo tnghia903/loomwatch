@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-depth="team">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,10 +18,9 @@
   <link rel="stylesheet" href="assets/fonts/fonts.css">
   <link rel="stylesheet" href="styles.css">
   <script>
-    // Theme and reading depth are restored before the first paint, so nothing flashes.
+    // The theme is restored before the first paint, so nothing flashes.
     try {
       const t = localStorage.getItem('loomwatch-site-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
-      const d = localStorage.getItem('loomwatch-site-depth'); if (d === 'story' || d === 'team' || d === 'trace') document.documentElement.dataset.depth = d
     } catch {}
     document.documentElement.classList.add('js')
   </script>
@@ -103,7 +102,7 @@ I can't see the other app's work.
   <div class="story-intro">
     <span class="micro eyebrow">One run, start to finish</span>
     <p class="story-lede">This page is a LoomWatch run, and you're the operator. Choose your apps, build a team, ask it for something, and decide what happens when it stops for you.</p>
-    <p class="story-note d-team">Everything below runs in your browser. Nothing calls a model, and nothing you type leaves this page.</p>
+    <p class="story-note">Everything below runs in your browser. Nothing calls a model, and nothing you type leaves this page.</p>
   </div>
 
   <!-- 01 · Threads -->
@@ -111,13 +110,12 @@ I can't see the other app's work.
     <div class="ch-copy">
       <span class="ch-n"><b>01</b> Threads</span>
       <h2 id="threads-h">Start with the threads you already have.</h2>
-      <p class="ch-body d-team">LoomWatch finds the AI apps on your computer and puts each one on the loom as a thread. Tick the ones you use, and the rest of this page weaves with them.</p>
-      <dl class="fine d-team">
+      <p class="ch-body">LoomWatch finds the AI apps on your computer and puts each one on the loom as a thread. Tick the ones you use, and the rest of this page weaves with them.</p>
+      <dl class="fine">
         <div><dt>No API key</dt><dd>Each agent runs on an app you've already signed in to.</dd></div>
         <div><dt>Your plans, as they are</dt><dd>Runs count against those apps' own plans, as if you'd used them yourself.</dd></div>
         <div><dt>Mix them on one team</dt><dd>Each agent has its own app and model. Through OpenCode, open models such as DeepSeek, Kimi, GLM, Qwen or Mistral too.</dd></div>
       </dl>
-      <p class="trace d-trace">Each app is started on your computer as its own process and driven over ACP, the Agent Client Protocol: <code>claude-agent-acp</code>, <code>codex-acp</code>, <code>gemini --acp</code>, <code>opencode acp</code>, <code>hermes-acp</code>, <code>openclaw acp</code>.</p>
     </div>
     <div class="ch-panel">
       <div class="win">
@@ -137,13 +135,12 @@ I can't see the other app's work.
     <div class="ch-copy">
       <span class="ch-n"><b>02</b> Build</span>
       <h2 id="build-h">Hire by job. Read the team back as one sentence.</h2>
-      <p class="ch-body d-team">Put agents on a canvas and connect them in order. LoomWatch reads the whole team back to you as one plain sentence, so you can check the plan before anything runs. Change an app in the sentence and the canvas follows.</p>
-      <dl class="fine d-team">
+      <p class="ch-body">Put agents on a canvas and connect them in order. LoomWatch reads the whole team back to you as one plain sentence, so you can check the plan before anything runs. Change an app in the sentence and the canvas follows.</p>
+      <dl class="fine">
         <div><dt>Ask LoomWatch</dt><dd>Describe the team you want. One of your own AI apps proposes it on the canvas, and nothing changes until you press Apply.</dd></div>
         <div><dt>One agent, a pipeline, or a lead</dt><dd>Steps in order with stops where you want them, or a lead that hands out work and asks its teammates questions as it goes.</dd></div>
         <div><dt>Skills, tools and files</dt><dd>Give an agent the skills and MCP tools already on your computer, or a folder or file to read, PDFs included.</dd></div>
       </dl>
-      <p class="trace d-trace">A team is a plain YAML file on your computer, checked against a schema. Read it, diff it, keep it in git. The canvas is an editor over that file, not a separate store.</p>
     </div>
     <div class="ch-panel">
       <div class="win">
@@ -151,16 +148,16 @@ I can't see the other app's work.
         <div class="win-body">
           <p class="sentence" id="sentence" aria-live="polite"></p>
           <div class="propose" id="propose" hidden></div>
-          <div class="depth-views">
+          <div class="team-views" id="team-views" data-view="team">
             <div class="canvas dots" id="canvas" aria-label="The team on the canvas"></div>
             <pre class="yaml" id="yaml" aria-label="The team file"></pre>
           </div>
           <div class="build-foot">
             <button class="btn" type="button" id="describe">Describe it instead</button>
             <div class="dial" role="radiogroup" aria-label="Show the team as">
-              <button type="button" role="radio" data-depth="story">Story</button>
-              <button type="button" role="radio" data-depth="team">Team</button>
-              <button type="button" role="radio" data-depth="trace">Trace</button>
+              <button type="button" role="radio" data-view="story">Story</button>
+              <button type="button" role="radio" data-view="team">Team</button>
+              <button type="button" role="radio" data-view="trace">Trace</button>
             </div>
           </div>
         </div>
@@ -173,12 +170,11 @@ I can't see the other app's work.
     <div class="ch-copy">
       <span class="ch-n"><b>03</b> Ask</span>
       <h2 id="ask-h">Say what you need, in plain words.</h2>
-      <p class="ch-body d-team">No prompt chains and no glue code. Type the job, press <span class="kbd">↵</span>, and the first agent starts. Each step starts when the one before it hands over.</p>
-      <dl class="fine d-team">
+      <p class="ch-body">No prompt chains and no glue code. Type the job, press <span class="kbd">↵</span>, and the first agent starts. Each step starts when the one before it hands over.</p>
+      <dl class="fine">
         <div><dt>Every agent knows its place</dt><dd>Each one is told its step, who hands work to it, and who gets its answer.</dd></div>
         <div><dt>A Brief they all read</dt><dd>Shared instructions and files every run of the team starts from.</dd></div>
       </dl>
-      <p class="trace d-trace">Only the first agent receives your words. Each later step is prompted with the replies of the steps wired into it; a step with two inputs receives both, labelled.</p>
     </div>
     <div class="ch-panel">
       <div class="win">
@@ -205,13 +201,12 @@ I can't see the other app's work.
     <div class="ch-copy">
       <span class="ch-n"><b>04</b> Watch</span>
       <h2 id="watch-h">Watch every thread as it's woven.</h2>
-      <p class="ch-body d-team">Every message, tool call and handover lands on a live timeline: <span class="say-live">blue</span> while an agent works, <span class="say-gold">gold</span> where it worked, a dashed outline while the team waits for you. When it's done, drag back to replay any moment.</p>
-      <dl class="fine d-team">
+      <p class="ch-body">Every message, tool call and handover lands on a live timeline: <span class="say-live">blue</span> while an agent works, <span class="say-gold">gold</span> where it worked, a dashed outline while the team waits for you. When it's done, drag back to replay any moment.</p>
+      <dl class="fine">
         <div><dt>Evidence, not guesses</dt><dd>A skill shows as loaded only when it was actually sent, and a file as opened only when the agent's own stream read it.</dd></div>
         <div><dt>Agents ask each other</dt><dd>Teammates hand over and ask questions through LoomWatch, so every handover is on the record, not buried in chat.</dd></div>
         <div><dt>One place to look</dt><dd>No more scrolling back through four terminals to find out what happened.</dd></div>
       </dl>
-      <p class="trace d-trace">Handovers, dispatches and questions are calls to the Team Bus, an MCP server LoomWatch gives every agent. The team graph is a by-product of those calls, never a guess read out of a transcript. Every event is archived in a database on your computer.</p>
     </div>
     <div class="ch-panel">
       <div class="win">
@@ -237,14 +232,13 @@ I can't see the other app's work.
     <div class="ch-copy">
       <span class="ch-n"><b>05</b> Review</span>
       <h2 id="review-h">Nothing moves on until you decide.</h2>
-      <p class="ch-body d-team">Put yourself on the team as a step. When the run reaches you, it stops and shows what was handed over. Approve it, or say what to change and send it back, so a weak first step never quietly shapes everything after it.</p>
-      <dl class="fine d-team">
+      <p class="ch-body">Put yourself on the team as a step. When the run reaches you, it stops and shows what was handed over. Approve it, or say what to change and send it back, so a weak first step never quietly shapes everything after it.</p>
+      <dl class="fine">
         <div><dt>Easy answers stay easy</dt><dd>Approve without a comment, or send it back with one line.</dd></div>
         <div><dt>Agents can ask you, too</dt><dd>Mid-run, an agent can stop and put a question to you.</dd></div>
         <div><dt>It waits, even on a schedule</dt><dd>A review step in a 10:00 run still waits for you.</dd></div>
         <div><dt>Never decided for you</dt><dd>Ask LoomWatch can propose teams and start runs, but it can never answer a review step.</dd></div>
       </dl>
-      <p class="trace d-trace">The review step is an <code>agents[]</code> entry with <code>kind: operator</code>. An app that supports <code>session/load</code> is closed while you think and reopened when you answer, so a long wait holds no process open.</p>
     </div>
     <div class="ch-panel">
       <div class="win win-review" id="review-win">
@@ -259,13 +253,12 @@ I can't see the other app's work.
     <div class="ch-copy">
       <span class="ch-n"><b>06</b> Result</span>
       <h2 id="result-h">The answer comes with its receipt.</h2>
-      <p class="ch-body d-team">The team's answer opens in a reader, beside a run receipt: what you asked, who did what, how long it took, and anything worth a second look. Not quite right? Follow up, or redo from the step that went wrong.</p>
-      <dl class="fine d-team">
+      <p class="ch-body">The team's answer opens in a reader, beside a run receipt: what you asked, who did what, how long it took, and anything worth a second look. Not quite right? Follow up, or redo from the step that went wrong.</p>
+      <dl class="fine">
         <div><dt>Follow up</dt><dd>Ask for another pass on the result, and the team picks up from there.</dd></div>
         <div><dt>Redo from a step</dt><dd>Run again from the step that went wrong. The steps before it keep their work.</dd></div>
         <div><dt>Files, not paths</dt><dd>A file the team made opens as a card: open it, show it in its folder, or copy its path.</dd></div>
       </dl>
-      <p class="trace d-trace">The receipt is built from the archived events, so it can't claim anything the run didn't record. Copy it as Markdown, or open every event behind it.</p>
     </div>
     <div class="ch-panel">
       <div class="win">
@@ -282,7 +275,7 @@ I can't see the other app's work.
     <div class="band-head">
       <span class="ch-n"><b>07</b> Tomorrow</span>
       <h2 id="tomorrow-h">A team you trust becomes a habit.</h2>
-      <p class="ch-body d-team">Put a team on a schedule and the answer is waiting when you start work. Its Notebook keeps what you taught it, so the work gets better every morning. Here are two weeks of one team, one thread per run. Pick a day.</p>
+      <p class="ch-body">Put a team on a schedule and the answer is waiting when you start work. Its Notebook keeps what you taught it, so the work gets better every morning. Here are two weeks of one team, one thread per run. Pick a day.</p>
     </div>
     <div class="fabric-wrap">
       <div class="fabric-top">
@@ -292,7 +285,6 @@ I can't see the other app's work.
       <div class="fabric" id="fabric" role="listbox" aria-label="Two weeks of runs. Choose a day to read what happened."></div>
       <div class="day-story" id="day-story" aria-live="polite"></div>
     </div>
-    <p class="trace d-trace">A schedule is a <code>schedule:</code> block in the team file: a cron line, a timezone and the prompt. The Notebook holds notes and checkpoints that later runs read; the Brief holds instructions and files every run starts with.</p>
   </div>
 </section>
 
@@ -323,7 +315,7 @@ I can't see the other app's work.
       <li><span class="p-n">v</span><h3>Proof, not a guess</h3><p>Handovers are recorded as calls, not read out of chat, so the receipt only says what happened.</p></li>
       <li><span class="p-n">vi</span><h3>Memory that outlives a switch</h3><p>The Brief, the Notebook and every run stay with your team, whichever app you swap in.</p></li>
     </ol>
-    <p class="footnote d-team">To be exact about privacy: LoomWatch itself sends nothing anywhere, but each agent's own app still sends prompts and files to its model provider, as it does when you use it directly.</p>
+    <p class="footnote">To be exact about privacy: LoomWatch itself sends nothing anywhere, but each agent's own app still sends prompts and files to its model provider, as it does when you use it directly.</p>
   </div>
 </section>
 
@@ -335,7 +327,7 @@ I can't see the other app's work.
         <span class="ch-n"><b>09</b> Start</span>
         <h2 id="start-h">One command, and your first team is already waiting.</h2>
         <p class="ch-body">The first start takes a few minutes. Then LoomWatch opens in your browser with an offline demo team you can run before you connect any AI app.</p>
-        <dl class="needs d-team">
+        <dl class="needs">
           <div><dt>Docker</dt><dd>Docker Desktop, OrbStack or Docker Engine, for the database that keeps your run history.</dd></div>
           <div><dt>Node.js 22.12+ and Rust</dt><dd>To build it. The exact Rust version downloads on its own.</dd></div>
           <div><dt>Access to the repository</dt><dd>It's private for now, so clone it with a GitHub account that has access.</dd></div>
@@ -399,13 +391,6 @@ Keep this window open while you use LoomWatch. Press Ctrl-C to stop it.</span></
     <p class="foot-line">Woven with Rust, React and ACP. Watch every thread.</p>
   </div>
 </footer>
-
-<div class="depth" role="radiogroup" aria-label="How much detail this page shows">
-  <span class="depth-label">Read at</span>
-  <button type="button" role="radio" data-depth="story" title="Just the story">Story</button>
-  <button type="button" role="radio" data-depth="team" title="The story and what you get">Team</button>
-  <button type="button" role="radio" data-depth="trace" title="Everything, including how it works">Trace</button>
-</div>
 
 <script src="main.js" defer></script>
 </body>
