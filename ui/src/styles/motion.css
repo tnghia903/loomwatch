@@ -69,7 +69,7 @@
   /* Popovers settle 4 px toward the control that opened them. */
   .pop, .needs-you-panel { animation: pop-in var(--t-quick) var(--ease-out) both; }
   /* These open upward, from the composer or a card's foot. */
-  .pop:is(.home-card-menu, .mode-pop, .lw-history) { animation-name: pop-in-up; }
+  .pop:is(.home-card-menu, .lw-history) { animation-name: pop-in-up; }
 
   /* Dialogs grow from 98% while they fade; the dimmed page behind them fades on its own. */
   .pop:is(.lw-newteam, .lw-deleteteam),

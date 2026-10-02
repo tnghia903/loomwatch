@@ -20,6 +20,9 @@
   color: var(--color-ink-2); cursor: pointer; flex: none; background: none; white-space: nowrap;
 }
 .lw-composer .mode-chip:hover { background: var(--color-accent-tint); }
+/* The execution-mode chip is a label with a hover hint, not a control (CANVAS_SPEC §8.1). */
+.lw-composer .mode-chip.mode-summary { cursor: default; }
+.lw-composer .mode-chip.mode-summary:hover { background: none; }
 .lw-composer .mode-chip .glyph { color: var(--color-accent); display: grid; place-items: center; }
 .lw-composer .mode-chip.team .glyph { color: var(--color-ink-3); }
 .lw-composer .mode-chip .anomaly { color: var(--color-alert); display: inline-flex; align-items: center; gap: 3px; padding-left: var(--sp-2); border-left: 1px solid var(--color-hairline); }
@@ -36,32 +39,17 @@
 .lw-composer .comp-note.block { color: var(--color-accent); }
 .lw-composer .comp-note.err { color: var(--color-alert); }
 .lw-composer .comp-note .link { font-size: 12px; line-height: 16px; }
+/* A routine's line: the summary yields width first, so a long schedule never pushes Run now off. */
+.lw-composer .comp-note .routine-summary,
+.lw-composer .comp-note .routine-trouble { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lw-composer .comp-note .link { flex: none; }
+.routine-trouble { color: var(--color-alert); }
+/* The same line in the Schedule panel, where there is room to wrap instead of truncate. */
+.schedule-routine { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px var(--sp-2); color: var(--color-ink-2); }
 .lw-composer .comp-act { display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-2) 0 0; flex: none; }
 .lw-composer .comp-act .btn kbd { font: 500 11px/1 var(--font-mono); opacity: .75; }
 .lw-composer .comp-act .iconbtn { margin-right: 2px; }
 
-/* the §8.1 mode popover — the only place execution semantics are explained */
-.mode-pop { width: min(412px, calc(100vw - 32px)); left: 50%; bottom: calc(var(--lw-panel-inset) + 68px); transform: translateX(-50%); }
-.mode-pop .mp-body { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); color: var(--color-ink-2); }
-.mode-pop code { font: inherit; font-family: var(--font-mono); color: var(--color-ink); }
-.mode-pop .mp-order { list-style: none; display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: 0; }
-.mode-pop .mp-order li { display: flex; align-items: center; gap: var(--sp-3); color: var(--color-ink); }
-.mode-pop .mp-step { flex: none; width: 16px; height: 16px; border-radius: var(--r-full); display: grid; place-items: center; background: var(--color-accent-tint); color: var(--color-ink-2); }
-.mode-pop .mp-head { color: var(--color-ink-3); letter-spacing: .04em; text-transform: uppercase; }
-.mode-pop .mp-head.alert { color: var(--lw-edge-anomaly); }
-.mode-pop .mp-guards { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); }
-.mode-pop .mp-field { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); color: var(--color-ink-2); }
-.mode-pop .mp-field input {
-  width: 92px; height: 26px; padding: 0 var(--sp-2);
-  background: var(--color-ground); color: var(--color-ink);
-  border: 1px solid var(--color-hairline); border-radius: var(--r-sm);
-  font: 500 12px/1 var(--font-mono); text-align: right;
-}
-.mode-pop .mp-note { color: var(--color-ink-3); }
-.mode-pop .mp-routine { display: flex; flex-direction: column; gap: 4px; color: var(--color-ink-2); }
-.mode-pop .mp-routine b { color: var(--color-ink); font-weight: 500; }
-.mode-pop .mp-routine .mp-prompt { color: var(--color-ink-3); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 72px; overflow: auto; }
-.mode-pop .mp-routine .mp-acts { display: flex; gap: var(--sp-2); align-items: center; margin-top: 4px; }
 .mode-switch-note { color: var(--color-ink-2); background: var(--color-panel-solid); border: 1px solid var(--color-hairline); border-radius: var(--r-sm); padding: 4px var(--sp-3); }
 @keyframes mode-pill-switch {
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent); }
@@ -222,7 +210,7 @@
     width: min(var(--lw-composer-w), var(--lw-beside));
     left: calc(var(--lw-library-w) + 2 * var(--lw-panel-inset) + var(--lw-beside) / 2);
   }
-  .lib-open .mode-pop, .lib-open .lw-history { left: calc(var(--lw-library-w) + 2 * var(--lw-panel-inset) + (100vw - var(--lw-library-w) - 3 * var(--lw-panel-inset)) / 2); }
+  .lib-open .lw-history { left: calc(var(--lw-library-w) + 2 * var(--lw-panel-inset) + (100vw - var(--lw-library-w) - 3 * var(--lw-panel-inset)) / 2); }
   /* the view controls would sit under the composer's right end; stack them above it */
   .lib-open .lw-viewctl { bottom: calc(var(--lw-panel-inset) + 68px); }
   .lib-open .lw-legend { display: none; }
@@ -252,10 +240,10 @@
      overrides the 768–1179 stacking rule, which would cost a second 68 px band. */
   .lib-open .lw-viewctl { bottom: calc(var(--lw-panel-inset) + var(--lw-bottom-offset)); }
 
-  /* Popovers CAP to the viewport rather than disappearing. Hiding .mode-pop is what left
-     .mode-chip advertising aria-haspopup at a dialog that never paints — a dead affordance,
-     not a responsive rule — and the premise it rested on ("it cannot fit") is false once the
-     panel is bounded: capped here it fits at any height and scrolls.
+  /* Popovers CAP to the viewport rather than disappearing. Hiding the (since retired) mode
+     popover is what left its chip advertising aria-haspopup at a dialog that never paints — a
+     dead affordance, not a responsive rule — and the premise it rested on ("it cannot fit") is
+     false once the panel is bounded: capped here it fits at any height and scrolls.
      The `bottom` anchor is deliberately NOT re-tightened to buy those pixels. The composer
      band is ~57 px, not 44 px, whenever .comp-note carries the §6.3 preflight blocker, so
      pulling the popovers down to inset + 52 px opened them *through* their own composer —
@@ -263,7 +251,6 @@
      the height the re-anchor was reaching for.
      .lw-outline is not listed: its base rule is already 40vh-bounded and fits here, and no
      component in the shipped bundle renders that class at all. */
-  .mode-pop,
   .lw-history {
     max-height: calc(100vh - 2 * var(--lw-panel-inset) - 68px);
     overflow: auto;

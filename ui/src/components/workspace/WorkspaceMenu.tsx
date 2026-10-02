@@ -11,7 +11,8 @@ interface WorkspaceMenuProps {
   runView: boolean
   onHistory: () => void
   onMemory: () => void
-  onRunSettings: () => void
+  /** Runs the team's `schedule:` routine now. Absent when the team has no routine. */
+  onRunRoutine?: () => void
   onOrganize: () => void
   onUndoOrganize: () => void
   onFullTrace: () => void
@@ -22,7 +23,7 @@ interface WorkspaceMenuProps {
  * The workspace's overflow menu. Its open state lives here rather than in the workspace, so
  * opening and closing it re-renders the menu alone.
  */
-export function WorkspaceMenu({ canOrganize, canUndoOrganize, runView, onHistory, onMemory, onRunSettings, onOrganize, onUndoOrganize, onFullTrace, onShowYaml }: WorkspaceMenuProps) {
+export function WorkspaceMenu({ canOrganize, canUndoOrganize, runView, onHistory, onMemory, onRunRoutine, onOrganize, onUndoOrganize, onFullTrace, onShowYaml }: WorkspaceMenuProps) {
   const [open, setOpen] = useState(false)
   // Every item closes the menu before it acts.
   const item = (action: () => void) => () => { setOpen(false); action() }
@@ -34,7 +35,7 @@ export function WorkspaceMenu({ canOrganize, canUndoOrganize, runView, onHistory
           <button role="menuitem" onClick={item(() => window.location.assign('/'))}>All teams</button>
           <button role="menuitem" onClick={item(onHistory)}>Run history</button>
           <button role="menuitem" onClick={item(onMemory)}>Team memory</button>
-          <button role="menuitem" onClick={item(onRunSettings)}>Run settings</button>
+          {onRunRoutine && <button role="menuitem" onClick={item(onRunRoutine)}>Run routine now</button>}
           <button role="menuitem" onClick={item(() => window.location.assign('/connections'))}>Connections…</button>
           <button role="menuitem" disabled={!canOrganize} onClick={item(onOrganize)}>Organize</button>
           {canUndoOrganize && <button role="menuitem" onClick={item(onUndoOrganize)}>Undo organize</button>}
