@@ -71,7 +71,7 @@ export function DeleteTeamDialog({ path, name, onDeleted, onClose }: DeleteTeamD
     <div className="lw-scrim dim" onMouseDown={() => { if (!busy) onClose() }}>
       <div role="alertdialog" aria-modal="true" aria-labelledby={titleId} className="pop e2 lw-deleteteam" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) { event.stopPropagation(); onClose() } }}>
         <h2 id={titleId}>Delete “{name}”?</h2>
-        <p>It leaves your teams list. Nothing is erased: its file, layout and notes move to a hidden <code>.trash</code> folder inside your teams folder, and moving them back restores the team.</p>
+        <p>It leaves your teams list. Nothing is erased: its file, layout, notes and any files you added to its agents move to a hidden <code>.trash</code> folder inside your teams folder, and moving them back restores the team.</p>
         <p>LoomWatch keeps its past runs, so they come back if you restore it.</p>
         {live && <p role="alert" className="dt-alert">“{name}” is running right now. Stop the run or wait for it to finish, then delete the team.</p>}
         {error && <p role="alert" className="dt-alert">{error}</p>}

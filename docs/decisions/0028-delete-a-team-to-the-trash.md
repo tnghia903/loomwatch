@@ -11,6 +11,7 @@
 - **Amended 2026-10-02:** the trash also takes `<team>.files/`, the folder ADR 0035's **Add file…**
   copies files into (`chosen_knowledge::files_folder`). Before this, a deleted team left that folder
   in the teams folder, and a new team with the same file stem would have been handed its files.
+  The dialog's copy (decision 7) now names them too.
 
 ## Context
 
@@ -103,9 +104,10 @@ too.
    not repeat on every card. The menu has one item, **Delete team…**. The team switcher's footer
    also gets **Delete team…**. Both open `DeleteTeamDialog`:
 
-   > **Delete "Trip planner"?** It leaves your teams list. Nothing is erased: its file, layout and
-   > notes move to a hidden .trash folder inside your teams folder, and moving them back restores
-   > the team. LoomWatch keeps its past runs, so they come back if you restore it.
+   > **Delete "Trip planner"?** It leaves your teams list. Nothing is erased: its file, layout,
+   > notes and any files you added to its agents move to a hidden .trash folder inside your teams
+   > folder, and moving them back restores the team. LoomWatch keeps its past runs, so they come
+   > back if you restore it.
 
    **Cancel** has the focus. When the team is running, the dialog says so and **Delete team** stays
    disabled until the run ends. When the daemon refuses, its message is shown as written. The
