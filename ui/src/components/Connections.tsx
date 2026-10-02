@@ -1,6 +1,8 @@
 import { ArrowLeft } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { ConnectAiApps } from './ask/ConnectAiApps'
+
 type Page = { id: string; title: string }
 type Connection = { connected: boolean; name?: string; destination?: Page | null }
 type Results = { pages: Page[]; nextCursor: string | null }
@@ -55,6 +57,7 @@ export default function Connections() {
           <h1 className="t-display">Connections</h1>
           <p className="t-body">Connect your tools and choose where your work belongs.</p>
         </div>
+        <ConnectAiApps />
         <section className="e1 lw-settings-section" aria-labelledby="notion-heading" aria-busy={busy}>
           <h2 id="notion-heading" className="t-title">Notion</h2>
           {error && <p role="alert" className="inline-error t-body"><span className="detail">{error}</span></p>}

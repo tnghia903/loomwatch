@@ -358,6 +358,82 @@ export function useTeamDocument() {
     resetHistory()
   }, [resetHistory])
 
+  /**
+   * Back to no team at all, dropping the document unsaved — what discarding a proposed new team
+   * does, so the person lands on Home where they asked for it rather than on an empty canvas.
+   */
+  const closeDocument = useCallback(() => {
+    modelRef.current = null
+    loadedRevisionRef.current = null
+    isNewRef.current = false
+    setPath(null)
+    setNodes([])
+    setEdges([])
+    setEntrypointState(null)
+    setTeamGuards(null)
+    setTeamSchedule(null)
+    setDocumentSnapshot(null)
+    setYamlPreview('')
+    setLoadedYaml(null)
+    setSaveError(null)
+    setReadOnlyReason(null)
+    setFileGone(false)
+    setLoadFailure(null)
+    setExternalChange(null)
+    setAttemptedSave(false)
+    setSaveState('no-file')
+    resetHistory()
+    window.history.replaceState({}, '', '/')
+  }, [resetHistory])
+
+  /**
+   * Replace the document with a whole team file as one undoable edit — how an Ask LoomWatch
+   * proposal reaches the canvas (ADR 0033). Nothing is saved: the person applies it with Save, and
+   * one undo puts back what was there. Agents keep their places unless the file adds one, which lays
+   * the team out again the way a loaded file is. With `newFile`, the text becomes a new, unsaved
+   * team at that path instead, with nothing to undo back to. Returns false, changing nothing, when
+   * the text is not a team.
+   */
+  const applyYaml = useCallback((yaml: string, newFile?: string): boolean => {
+    let model: TeamFileModel
+    try {
+      model = TeamFileModel.parse(yaml)
+    } catch {
+      return false
+    }
+    const snapshot = model.snapshot()
+    const { agents, configured } = drawableParts(snapshot)
+    const placed = new Map(newFile ? [] : nodes.map((node) => [node.id, node.position]))
+    const laidOut = agents.some((agent) => !placed.has(agent.id))
+      ? seededLayout(agents.map((agent) => agent.id), configured.map((edge) => ({ from: edge.from, to: edge.to })), snapshot.id)
+      : Object.fromEntries(placed)
+    if (newFile) {
+      loadedRevisionRef.current = null
+      isNewRef.current = true
+      setPath(newFile)
+      setLoadedYaml(null)
+      setSaveError(null)
+      setReadOnlyReason(null)
+      setFileGone(false)
+      setLoadFailure(null)
+      setExternalChange(null)
+      setAttemptedSave(false)
+      resetHistory()
+    } else {
+      captureHistory()
+    }
+    modelRef.current = model
+    setDocumentSnapshot(snapshot)
+    setYamlPreview(model.toYaml())
+    setEntrypointState(snapshot.entrypoint || null)
+    setTeamGuards(snapshot.guards ?? null)
+    setTeamSchedule(snapshot.schedule ?? null)
+    setNodes(agents.map((agent) => nodeFromAgent(agent, laidOut[agent.id] ?? { x: 0, y: 0 }, agent.id === snapshot.entrypoint)))
+    setEdges(configured.map(edgeFromConfig))
+    setSaveState(isNewRef.current ? 'new' : 'dirty')
+    return true
+  }, [captureHistory, resetHistory, nodes])
+
   useEffect(() => {
     const requestedPath = new URLSearchParams(window.location.search).get('path')
     let cancelled = false
@@ -1361,6 +1437,8 @@ export function useTeamDocument() {
     responder: documentSnapshot?.responder ?? null,
     /** The team's display `name`, for chrome that should not show a file path. */
     teamName: documentSnapshot?.name?.trim() || null,
+    /** The daemon's teams folder, once a load or save has learned it; null before. */
+    teamsRoot,
     renameTeam,
     /** True until the daemon's schema is compiled; validity is unknown, not failed, meanwhile. */
     checking: schemaLoading,
@@ -1385,6 +1463,8 @@ export function useTeamDocument() {
     modeSwitchBanner,
     pendingEdgeRemoval,
     createNewDocument,
+    applyYaml,
+    closeDocument,
     reloadFromDisk,
     keepMine,
     useDisk,

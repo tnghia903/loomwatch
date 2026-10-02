@@ -186,4 +186,22 @@ describe('Home and the getting-started guide', () => {
     fireEvent.click(screen.getByRole('button', { name: /Take the 3-minute guide/ }))
     expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' })
   })
+
+  it('takes the job in plain words for Ask LoomWatch, and says why when it cannot', async () => {
+    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
+    const onAsk = vi.fn()
+    const { unmount } = render(<Home harnesses={[claude]} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onCreateBlank={vi.fn()} onPalette={vi.fn()} ask={{ unavailable: null, onAsk }} />)
+    const box = screen.getByRole('textbox', { name: /Or describe the job/ })
+    fireEvent.change(box, { target: { value: '  Brief me on chip news every weekday  ' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(onAsk).toHaveBeenCalledWith('Brief me on chip news every weekday')
+    expect(box).toHaveValue('')
+    // New team stays the one gold button.
+    expect(screen.getByRole('button', { name: 'Ask' })).not.toHaveClass('btn-primary')
+    unmount()
+
+    render(<Home harnesses={[]} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onCreateBlank={vi.fn()} onPalette={vi.fn()} ask={{ unavailable: 'Ask needs Claude Code, Codex, Gemini CLI or OpenCode on this computer.', onAsk }} />)
+    expect(screen.getByRole('textbox', { name: /Or describe the job/ })).toBeDisabled()
+    expect(screen.getByText(/Ask needs Claude Code/)).toBeInTheDocument()
+  })
 })

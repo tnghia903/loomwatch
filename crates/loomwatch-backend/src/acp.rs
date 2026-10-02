@@ -196,6 +196,10 @@ pub struct AcpProcess {
     supports_load_session: bool,
     /// Wired MCP servers, from [`ProcessSpec::tools`].
     tools: Vec<crate::delivery::DeliveredTool>,
+    /// The one MCP server whose tool calls this session may approve when the app asks: the Ask
+    /// assistant's own `LoomWatch` Control server (ADR 0033). `None` everywhere else, so every other
+    /// permission prompt is still refused.
+    approved_tool_server: Option<String>,
 }
 
 impl AcpProcess {
@@ -247,7 +251,15 @@ impl AcpProcess {
             request_timeout: REQUEST_TIMEOUT,
             supports_load_session: false,
             tools: spec.tools.clone(),
+            approved_tool_server: None,
         })
+    }
+
+    /// Approve permission prompts for `server`'s tools in this session only (ADR 0033).
+    #[must_use]
+    pub(crate) fn approving_tools_of(mut self, server: &str) -> Self {
+        self.approved_tool_server = Some(server.to_owned());
+        self
     }
 
     #[cfg(test)]
@@ -881,6 +893,11 @@ impl AcpProcess {
         negotiated: &NegotiatedSession,
         recorder: &mut Recorder,
     ) -> Result<()> {
+        // No model means the app's own default: the Ask assistant (ADR 0033) is not a team agent
+        // and has no `model` field.
+        if model.trim().is_empty() {
+            return record_default_model(recorder).await;
+        }
         // Current ACP adapters expose model and reasoning effort as separate config options.
         // Older team files may still carry Codex's combined `model[effort]` selector, so split
         // only suffixes that are known reasoning levels (Claude's `model[1m]` remains intact).
@@ -1166,7 +1183,8 @@ impl AcpProcess {
             }
 
             if message.get("method").is_some() && message.get("id").is_some() {
-                let response = build_client_response(&message)?;
+                let response =
+                    build_client_response(&message, self.approved_tool_server.as_deref())?;
                 if let Some(recorder) = recorder.as_deref_mut() {
                     recorder.record_frame(&response).await?;
                 }
@@ -1685,7 +1703,7 @@ fn with_archive_failure_context(
 /// prompt turn was cancelled, which is wrong for an observer merely declining one tool call.
 /// Prefer an advertised `reject_once` option so the agent denies that call and keeps going,
 /// then `reject_always`, falling back to `cancelled` only when the harness offered neither.
-fn build_client_response(request: &Value) -> Result<Value> {
+fn build_client_response(request: &Value, approved_server: Option<&str>) -> Result<Value> {
     let id = request
         .get("id")
         .cloned()
@@ -1694,6 +1712,17 @@ fn build_client_response(request: &Value) -> Result<Value> {
         .get("method")
         .and_then(Value::as_str)
         .context("client request omitted method")?;
+    if method == "session/request_permission"
+        && let Some(option_id) = approved_server
+            .filter(|server| asks_about_server_tool(request, server))
+            .and_then(|_| allow_once_option(request))
+    {
+        return Ok(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {"outcome": {"outcome": "selected", "optionId": option_id}}
+        }));
+    }
     let response = if method == "session/request_permission" {
         let rejection = request
             .pointer("/params/options")
@@ -1728,6 +1757,59 @@ fn build_client_response(request: &Value) -> Result<Value> {
         })
     };
     Ok(response)
+}
+
+/// Record that a session kept its app's default model, so the archive still says what was chosen.
+async fn record_default_model(recorder: &mut Recorder) -> Result<()> {
+    recorder
+        .append(
+            EventKind::SessionMeta,
+            json!({
+                "phase": "set_config_option_skipped",
+                "configId": "model",
+                "value": "",
+                "reason": "no model was configured, so the app's default model is used"
+            }),
+            Some(json!({"source": "loomwatch", "phase": "set_config_option_skipped"})),
+        )
+        .await
+}
+
+/// Whether a permission prompt is about one of `server`'s MCP tools.
+///
+/// Apps title an MCP tool call in one of three shapes: Claude Code `mcp__<server>__<tool>`, Gemini
+/// `<tool> (<server> MCP Server)`, and `<server>.<tool>`. Only those exact shapes count, so a file
+/// named after the server, a shell command, or another server whose name merely starts the same
+/// never does.
+fn asks_about_server_tool(request: &Value, server: &str) -> bool {
+    let title = request
+        .pointer("/params/toolCall/title")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let server = server.to_ascii_lowercase();
+    let tool_name = |name: &str| {
+        !name.is_empty()
+            && name
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    };
+    title
+        .strip_prefix(&format!("mcp__{server}__"))
+        .or_else(|| title.strip_prefix(&format!("{server}.")))
+        .or_else(|| title.strip_suffix(&format!(" ({server} mcp server)")))
+        .is_some_and(tool_name)
+}
+
+/// The prompt's one-time allow option, when the app offered one.
+fn allow_once_option(request: &Value) -> Option<Value> {
+    request
+        .pointer("/params/options")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|option| option.get("kind").and_then(Value::as_str) == Some("allow_once"))
+        .and_then(|option| option.get("optionId").cloned())
 }
 
 /// One dense, serialized event stream shared by every ACP process in a team run.
@@ -2526,29 +2608,81 @@ mod tests {
 
     #[test]
     fn permission_response_uses_each_supported_rejection_fallback() {
-        let response = build_client_response(&json!({
-            "jsonrpc": "2.0",
-            "id": "permission-1",
-            "method": "session/request_permission",
-            "params": {"options": [
-                {"optionId": "always", "kind": "reject_always"},
-                {"optionId": "once", "kind": "reject_once"}
-            ]}
-        }))
+        let response = build_client_response(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": "permission-1",
+                "method": "session/request_permission",
+                "params": {"options": [
+                    {"optionId": "always", "kind": "reject_always"},
+                    {"optionId": "once", "kind": "reject_once"}
+                ]}
+            }),
+            None,
+        )
         .expect("response");
         assert_eq!(response["result"]["outcome"]["optionId"], "once");
 
-        let response = build_client_response(&json!({
-            "jsonrpc": "2.0",
-            "id": "permission-2",
-            "method": "session/request_permission",
-            "params": {"options": [
-                {"optionId": "always", "kind": "reject_always"}
-            ]}
-        }))
+        let response = build_client_response(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": "permission-2",
+                "method": "session/request_permission",
+                "params": {"options": [
+                    {"optionId": "always", "kind": "reject_always"}
+                ]}
+            }),
+            None,
+        )
         .expect("response");
         assert_eq!(response["result"]["outcome"]["outcome"], "selected");
         assert_eq!(response["result"]["outcome"]["optionId"], "always");
+    }
+
+    /// ADR 0033: an Ask session approves prompts for its own tool server's calls, whichever way
+    /// the app spells the tool, and still refuses everything else — shell, edits, other servers.
+    #[test]
+    fn ask_sessions_approve_only_their_own_tool_server() {
+        let prompt = |title: &str| {
+            json!({
+                "jsonrpc": "2.0",
+                "id": "permission-ask",
+                "method": "session/request_permission",
+                "params": {
+                    "toolCall": {"toolCallId": "call-1", "title": title},
+                    "options": [
+                        {"optionId": "yes", "kind": "allow_once"},
+                        {"optionId": "always", "kind": "allow_always"},
+                        {"optionId": "no", "kind": "reject_once"}
+                    ]
+                }
+            })
+        };
+        let chosen = |title: &str, server: Option<&str>| {
+            build_client_response(&prompt(title), server).expect("response")["result"]["outcome"]
+                ["optionId"]
+                .clone()
+        };
+        for title in [
+            "mcp__loomwatch__propose_team",
+            "propose_team (loomwatch MCP Server)",
+            "loomwatch.start_run",
+        ] {
+            assert_eq!(chosen(title, Some("loomwatch")), "yes", "{title}");
+            assert_eq!(
+                chosen(title, None),
+                "no",
+                "a run's agents never get this: {title}"
+            );
+        }
+        for title in [
+            "Bash: rm -rf ~/LoomWatch",
+            "Write loomwatch.yaml",
+            "mcp__loomwatch-team-bus__dispatch",
+            "mcp__other__loomwatch_clone",
+        ] {
+            assert_eq!(chosen(title, Some("loomwatch")), "no", "{title}");
+        }
     }
 
     #[test]
