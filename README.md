@@ -1,37 +1,252 @@
-# LoomWatch
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/banner-dark.png">
+    <img src="docs/assets/readme/banner-light.png" width="880" alt="LoomWatch. Put AI agents to work as a team. Build a team from the AI apps already on your computer, ask in plain words, and review every step before you use the result.">
+  </picture>
+</p>
 
-**Build a team of AI agents. Give them a task. Watch the work happen.**
+<p align="center">
+  <a href="#quickstart"><strong>Quickstart</strong></a> &middot;
+  <a href="#how-a-run-works"><strong>How it works</strong></a> &middot;
+  <a href="#features"><strong>Features</strong></a> &middot;
+  <a href="#try-your-first-run"><strong>First run</strong></a> &middot;
+  <a href="#faq"><strong>FAQ</strong></a> &middot;
+  <a href="#more-guides"><strong>Guides</strong></a>
+</p>
 
-LoomWatch runs on your computer and opens in your browser. Arrange agents on a canvas,
-connect them into a workflow, and see their progress, tool calls, handovers, and final
-answer in one place. Add a **You** step when the team needs your review before continuing.
+<p align="center">
+  <img src="https://img.shields.io/badge/runs%20on-your%20computer-AD8A20" alt="Runs on your computer">
+  <img src="https://img.shields.io/badge/first%20run-offline%20demo%2C%20no%20API%20key-17724A" alt="First run: offline demo, no API key">
+  <img src="https://img.shields.io/badge/agents%20over-ACP-56524A" alt="Agents over ACP">
+  <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20React-56524A" alt="Built with Rust and React">
+</p>
 
-You can:
+<p align="center">
+  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: a three-step team is built, the request is typed, the team pauses for the operator's review, the operator approves, and the team response appears with a run receipt.">
+  <br>
+  <sub>The bundled offline demo: build a team, ask in plain words, approve at the review step, read the result.</sub>
+</p>
 
-- Run a single agent, a step-by-step pipeline, or a team that delegates work as it goes.
-- Mix supported agent tools from different providers.
-- Give the team shared instructions and reusable notes through **Memory**.
-- Review findings, send work back for changes, and answer an agent's questions.
-- Reopen earlier runs, inspect their evidence, and start a follow-up from a selected stage.
+<br>
 
-The recommended installation runs LoomWatch itself on your computer and keeps only PostgreSQL in
-Docker. This lets LoomWatch use the agent harnesses, skills, MCP tools, credentials, memory, and
-workspace paths already installed for your user account. The first run uses a bundled offline demo:
-no AI account, API key, or model usage is needed. Installation still requires internet access.
+## Your AI apps are the threads. LoomWatch is the loom.
 
-## What you need
+LoomWatch runs on your computer and opens in your browser. Arrange agents on a canvas, connect them
+into a workflow, and watch their progress, tool calls, handovers and final answer in one place. Run a
+single agent, a step-by-step pipeline, or a team that delegates work as it goes. When the team needs
+you, it stops and asks.
 
-LoomWatch is built on your computer the first time you start it, so it needs a few free tools.
-You don't have to check for them yourself: the start command lists anything missing and how to
-install it.
+| | Step | What you do |
+| :-: | --- | --- |
+| **01** | **Build** | Pick agents from the AI apps on this computer and connect them on a canvas. |
+| **02** | **Ask** | Describe the job in plain words: _"Prepare today's AI and tech news digest, and link every claim."_ |
+| **03** | **Review** | Watch each step happen, approve or send work back, and check the evidence before you use the result. |
 
-- [Docker Desktop](https://docs.docker.com/desktop/) (or OrbStack, or Docker Engine with Compose):
-  runs the database that keeps your run history.
-- [Node.js](https://nodejs.org/) 22.12 or newer: builds the browser app.
-- [Rust](https://rustup.rs/): builds the LoomWatch program. The exact version it needs downloads on
-  its own during the first build.
-- [Git](https://git-scm.com/downloads), plus access to this private repository: downloads LoomWatch.
-- Python 3: runs the offline demo. Usually already installed on macOS.
+<p align="center">
+  <sub>WORKS WITH THE AI APPS YOU ALREADY USE</sub><br>
+  <strong>Claude Code</strong> &nbsp;·&nbsp; <strong>Codex</strong> &nbsp;·&nbsp; <strong>Gemini CLI</strong> &nbsp;·&nbsp;
+  <strong>OpenCode</strong> &nbsp;·&nbsp; <strong>Hermes</strong> &nbsp;·&nbsp; <strong>OpenClaw</strong><br>
+  <sub>and, through OpenCode, models such as DeepSeek, Kimi, GLM, Qwen and Mistral</sub>
+</p>
+
+## LoomWatch is right for you if
+
+- ✅ You use one or more AI apps, such as Claude Code, Codex, Gemini CLI or OpenCode, and want them
+  to **work on one job together**.
+- ✅ You want to **see what each agent did**, not just read a final answer: every tool call, file and
+  handover is recorded.
+- ✅ You want to **approve or redirect work** before the next agent builds on it.
+- ✅ You want it **on your own computer**, with the skills, MCP tools and sign-ins you already have.
+- ✅ You run the same kind of job again and again, such as a daily digest or a research brief, and
+  want it **repeatable, or scheduled**.
+
+## How a run works
+
+```mermaid
+flowchart LR
+    ask(["You ask, in plain words"]) --> researcher["Researcher<br/>on Claude Code"]
+    researcher -- "hands over" --> review{{"You review"}}
+    review -- "approve" --> writer["Writer<br/>on Codex"]
+    review -. "send back" .-> researcher
+    writer --> response[["Team response<br/>with its evidence"]]
+    classDef stop stroke:#AD8A20,stroke-width:2px
+    class review stop
+```
+
+Each agent is its own AI app, started by LoomWatch on your computer and driven over
+[ACP](https://agentclientprotocol.com) (the Agent Client Protocol). Agents can hand work to each
+other, or ask each other questions, through LoomWatch's Team Bus. Every message, tool call and
+handover is recorded in a local database, so you can watch a run live, replay it later, and follow
+up from any step.
+
+## Features
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+### 🧵 One team, many apps
+
+Each agent runs on its own app and model: Claude Code researches, Codex reviews, Gemini writes. Real
+runs use the sign-in and plan you already have.
+
+</td>
+<td width="33%" valign="top">
+
+### 🗺️ Build on a canvas
+
+Drag agents in from the library, connect them in order, and read your team back as one plain
+sentence. **Organize** tidies the layout in one click.
+
+</td>
+<td width="33%" valign="top">
+
+### 👀 Watch every step
+
+Live stages, tool calls, handovers and a run receipt. Drag the timeline to replay what happened, and
+when.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### ✋ You stay in the loop
+
+Add a **You** step to approve the work or send it back with changes. Agents can also stop and ask you
+a question mid-run.
+
+</td>
+<td valign="top">
+
+### 🧾 Evidence you can check
+
+A skill shows as loaded only when it was actually sent, and as opened only when the agent's own
+stream read it. Nothing is guessed from a title.
+
+</td>
+<td valign="top">
+
+### 🧰 Your skills, tools and files
+
+Wire in the skills, MCP tools and project folders already on your computer. LoomWatch delivers each
+one to the agents you choose.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🧠 Team memory
+
+A **Brief** of shared instructions and files, and a **Notebook** of reusable notes and checkpoints
+that carry from one run to the next.
+
+</td>
+<td valign="top">
+
+### 🔁 Follow up or redo
+
+Ask for another pass on the result, or **Redo from** a chosen step, without starting the whole team
+again.
+
+</td>
+<td valign="top">
+
+### ⏰ Schedules and Notion
+
+Run a team every morning and send the answer to Notion. A review stop still waits for you.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 💼 Saved jobs
+
+Save an agent that works as a job, with its instructions, app, model and skills, and add it to any
+team.
+
+</td>
+<td valign="top">
+
+### 🎓 Guided first run
+
+An offline demo team and a three-minute guide. You can learn the whole app before you connect an AI
+account.
+
+</td>
+<td valign="top">
+
+### 🔒 Runs on your computer
+
+The app, your teams and your run history stay on this computer. Agents' apps still talk to their own
+model providers, as they always do.
+
+</td>
+</tr>
+</table>
+
+## See it
+
+<table>
+<tr>
+<td align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/build-dark.png">
+  <img src="docs/assets/readme/build-light.png" alt="Build view: a daily news team on the canvas. A schedule trigger feeds News Collector, News Editor and Digest Writer, which produce the team response. Above the canvas, the team is described in one sentence.">
+</picture>
+<br><sub><strong>Build.</strong> A news team that runs every morning, with the whole pipeline summed up in one sentence.</sub>
+</td>
+</tr>
+<tr>
+<td align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/run-dark.png">
+  <img src="docs/assets/readme/run-light.png" alt="Run view of a finished run: the request, a run receipt listing each step, a replay timeline, and the team response with Retry and Follow up controls.">
+</picture>
+<br><sub><strong>Run.</strong> The receipt says who did what, the timeline replays it, and the answer sits beside it, ready for review.</sub>
+</td>
+</tr>
+<tr>
+<td align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/home-dark.png">
+  <img src="docs/assets/readme/home-light.png" alt="Home: Put AI agents to work as a team. A New team button, the Build, Ask, Review steps, and three team cards with their last run.">
+</picture>
+<br><sub><strong>Home.</strong> Your teams at a glance, each with a woven mark of how its recent runs went.</sub>
+</td>
+</tr>
+</table>
+
+## Quickstart
+
+```sh
+git clone git@github.com:tnghia903/loomwatch.git
+cd loomwatch
+./loomwatch
+```
+
+The first start takes a few minutes, then opens **<http://127.0.0.1:3000>** with an offline demo team
+ready to run. No AI account, API key or model usage is needed for the demo, though installing does
+need internet access. Then follow [Try your first run](#try-your-first-run).
+
+This recommended setup runs LoomWatch itself on your computer and keeps only its database
+(PostgreSQL) in Docker. That way LoomWatch can use the agent apps, skills, MCP tools, sign-ins,
+memory and workspace folders already set up for your user account.
+
+### What you need
+
+LoomWatch is built on your computer the first time you start it, so it needs a few free tools. You
+don't have to check for them yourself: `./loomwatch` lists anything missing and how to install it.
+
+| Tool | Why |
+| --- | --- |
+| [Docker Desktop](https://docs.docker.com/desktop/) (or OrbStack, or Docker Engine with Compose) | Runs the database that keeps your run history |
+| [Node.js](https://nodejs.org/) 22.12 or newer | Builds the browser app |
+| [Rust](https://rustup.rs/) | Builds the LoomWatch program. The exact version it needs downloads on its own during the first build |
+| [Git](https://git-scm.com/downloads), plus access to this private repository | Downloads LoomWatch |
+| Python 3 | Runs the offline demo. Usually already installed on macOS |
 
 On a Mac with [Homebrew](https://brew.sh/), these two commands install everything:
 
@@ -47,10 +262,6 @@ Codex, Gemini CLI or OpenCode. You do **not** need one for the demo.
 
 Everything below is typed in a terminal (Terminal on macOS). Use a terminal where your AI app's
 command already works, because LoomWatch finds your apps, skills and tools through it.
-
-## Install and run LoomWatch
-
-Two steps: download it, then start it with one command.
 
 ### 1. Download LoomWatch
 
@@ -86,47 +297,30 @@ The first start takes a few minutes. It sets everything up for you:
 4. Builds LoomWatch. This happens only the first time and after an update.
 5. Starts LoomWatch and opens **<http://127.0.0.1:3000>** in your browser.
 
-Then follow [Try your first run](#try-your-first-run).
-
 Keep this terminal window open while you use LoomWatch. To stop LoomWatch, press **Ctrl-C** in it.
 
 LoomWatch looks for your skills and tools in the usual places in your home folder (`.claude`,
 `.codex`, `.agents`, `.config/opencode` and similar) and for AI apps on the terminal's `PATH`. It
 reads them only on your computer; nothing is uploaded.
 
-### Start it again later
+### Every day
 
-After a restart, or any time LoomWatch is not running:
+| To | Run, from the `loomwatch` folder |
+| --- | --- |
+| Start LoomWatch, or open it if it is already running | `./loomwatch` |
+| Stop LoomWatch | Press **Ctrl-C** in its window |
+| Also stop the database, for example before quitting Docker Desktop | `./loomwatch stop` |
+| Update to the latest version (stop it first) | `./loomwatch update` |
+| See every option | `./loomwatch help` |
 
-```sh
-cd loomwatch
-./loomwatch
-```
+Your teams and history are kept in every case. `./loomwatch update` downloads the latest version,
+rebuilds it and starts it. If you installed LoomWatch with the older step-by-step instructions,
+`./loomwatch` keeps using your existing settings, teams folder and database.
 
-Use the path where you downloaded LoomWatch in the first line. If LoomWatch is already running, this
-just opens it in your browser. If you installed LoomWatch with the older step-by-step instructions,
-it keeps using your existing settings, teams folder and database.
-
-### Stop LoomWatch
-
-Press **Ctrl-C** in the window running LoomWatch. To stop the database too, for example before
-quitting Docker Desktop:
-
-```sh
-./loomwatch stop
-```
-
-Your teams and history are kept.
-
-### Update to a newer version
-
-Stop LoomWatch with **Ctrl-C**, then:
-
-```sh
-./loomwatch update
-```
-
-This downloads the latest version, rebuilds it and starts it. Your teams and history are kept.
+To stop one run, click **Stop** in the composer. Closing the browser tab does not stop LoomWatch or
+its runs. Scheduled teams run only while LoomWatch and its database are running and the computer is
+awake. For scheduled runs and optional Notion delivery, see [Routines](docs/WATCH.md#routines) and
+[Notion setup](docs/NOTION.md).
 
 ### Change the defaults
 
@@ -160,94 +354,15 @@ settings meant for the Docker Compose mode below out of a local run.
 
 </details>
 
-## Optional: run everything with Docker Compose
-
-Use this mode for CI, demos, or an intentionally isolated Linux deployment. It is not the
-recommended desktop setup: a container cannot automatically see host executables, skills, MCP
-configuration, credentials, or arbitrary host workspace paths.
-
-Create your settings file with `cp .env.example .env` and replace both `replace-with-…` values with
-long random letters and numbers (or run `./loomwatch` once, which does this for you). Then create a
-repository-local teams folder, and build and start the complete stack:
-
-```sh
-mkdir -p teams
-cp -n examples/operator-stop.yaml examples/operator-stop-harness.py teams/
-docker compose up --build --detach --wait
-```
-
-Open the [offline review-stop demo](http://127.0.0.1:3000/?path=operator-stop.yaml). The UI is embedded in the `loomwatch` image, PostgreSQL
-holds run history, context packets, Notebook entries, and checkpoints, and both services are
-published only on host loopback. `docker compose stop` preserves both named volumes.
-
-The defaults mount these explicit roots:
-
-| Container path | Default host path | Access | Purpose |
-| --- | --- | --- | --- |
-| `/data/teams` | `./teams` | Read/write | Team YAML, Brief files, layouts, and managed `.loomwatch` workspaces |
-| `/workspaces` | `./container/workspaces` | Read/write | Repositories used by container-native agents |
-| `/opt/loomwatch/capabilities` | `./container/capabilities` | Read-only | Skills and plugin metadata intentionally imported for discovery |
-| `/home/node` | `loomwatch-home` volume | Read/write | Harness credentials and mutable CLI state |
-
-### Use harnesses installed on the host
-
-A Linux container cannot execute a macOS or Windows binary, so LoomWatch uses a narrow native
-runner instead of mounting your home directory or Docker socket. Set a random
-`LOOMWATCH_HOST_RUNNER_TOKEN` in `.env`, then start the companion from the repository in a host
-terminal:
-
-```sh
-./container/run-host-runner.sh
-```
-
-Keep that terminal open and start the Compose stack normally in another terminal. The Library now
-shows the harnesses found on the host. Agents added from those rows use an internal
-`loomwatchd harness-client` command: model discovery and runs stream over the same authenticated
-connection to the native ACP adapter. The runner accepts only LoomWatch's known ACP harnesses and
-maps working directories only beneath `/data/teams` and `/workspaces` back to their configured host
-bind mounts.
-
-The runner listens on `0.0.0.0:3031` so Docker Desktop's `host.docker.internal` gateway can reach
-it. It requires the token on every connection. If port 3031 is already used, change both
-`LOOMWATCH_HOST_RUNNER_LISTEN` and `LOOMWATCH_HOST_RUNNER_ADDR` in `.env`.
-
-Override the three bind-mounted host directories in `.env`. Do not point the capability import at
-your complete home directory. Its README documents the expected `.codex`, `.claude`, `.agents`, and
-OpenCode subdirectories.
-
-### Harnesses and skills in the container
-
-The Library combines harness commands executable inside the container with harnesses reported by a
-reachable native companion; host entries win when both environments provide the same app. The base
-image includes Node.js, Python, Git, curl, and everything needed by the offline demo, but it does
-not bundle third-party provider CLIs. Without the native companion, build a derived image with the
-required Linux harnesses or install user-scoped CLI packages into the persistent runtime home. The
-image's `PATH` includes `/home/node/.local/bin`.
-
-Authenticate from the same runtime after installing a harness:
-
-```sh
-docker compose exec loomwatch sh
-npm config set prefix "$HOME/.local"
-# Install and authenticate only the provider CLIs you intend to use.
-```
-
-Import skill definitions through `container/capabilities`, preserving their conventional paths.
-Imports are read-only; LoomWatch copies only a skill explicitly wired to an agent into that team's
-managed workspace. Do not put provider tokens, SSH keys, or other credentials in the import.
-
-Team files running against a mounted repository should use a path below `/workspaces`. Absolute
-host paths such as `/Users/name/project` do not exist inside the Linux container.
-
 ## Try your first run
 
 The first time you open LoomWatch, a short guide offers to walk you through creating a team and
 running it with one of your own AI apps. Reopen it any time from the menu in a team, or press
 **⌘K** and choose **Getting started guide**.
 
-To try a team without calling a model provider, pick **Review stop demo** under **Your teams**. The demo is a three-step
-workflow: **Researcher → You → Writer**. Its agents produce fixed responses so you can learn the
-interface without calling a model provider.
+To try a team without calling a model provider, pick **Review stop demo** under **Your teams**. The
+demo is a three-step workflow: **Researcher → You → Writer**. Its agents produce fixed responses so
+you can learn the interface without calling a model provider.
 
 1. Click **Run team**, type `Prepare a short getting-started guide for new users.` in the box at
    the bottom right, and press **Enter** (**Shift+Enter** adds a new line).
@@ -304,14 +419,18 @@ account and its usage limits or billing. The offline demo does not consume that 
 Agent apps may send prompts and files to their configured model providers; running
 LoomWatch locally does not make cloud models offline.
 
-### Keep the pipeline easy to follow
+<details>
+<summary><strong>Keep the pipeline easy to follow</strong></summary>
 
 Click **Organize** in the canvas controls (or press **⌥⌘L**) to arrange stages from left to
 right and group skills and sources below their agents. The view fits the arranged pipeline
 above the composer. **Undo organize** restores the previous arrangement. Positions are saved
 with the canvas layout; organizing does not change the workflow or start a run.
 
-### Connect skills, knowledge and tools
+</details>
+
+<details>
+<summary><strong>Connect skills, knowledge and tools</strong></summary>
 
 The library on the left of **Build** lists the skills, MCP tools and knowledge sources found on your
 computer. Add one to the canvas, then drag from an agent to it, or open the card's
@@ -328,7 +447,10 @@ If something cannot be delivered (for example, a tool that is turned off in your
 the run stops before it starts and says what to change. If an older team shows "drawn but not
 delivered to agents yet" at the top of Build, click **Deliver on the next run**, then save.
 
-### Give the team context and review its work
+</details>
+
+<details>
+<summary><strong>Give the team context and review its work</strong></summary>
 
 Open **Memory** to add shared instructions or reference files to the **Brief**. Use the
 **Notebook** to review reusable notes and checkpoints. An agent's **What it was given**
@@ -339,31 +461,152 @@ what you want to review in its role. **Continue** passes your answer to the next
 **Send back** requests a revision while the previous session is available. An agent can
 also ask you a question during its work. Answer it in the composer when prompted.
 
-## Stop and start again
+</details>
 
-To stop one run, click **Stop** in the composer. Closing the browser tab does not stop the
-server or its runs.
+## FAQ
 
-For the optional full-Compose installation, stop active runs and then stop the stack:
+<details>
+<summary><strong>Do I need an API key?</strong></summary>
+
+No. LoomWatch drives the AI apps you have already signed in to, such as Claude Code, Codex, Gemini
+CLI or OpenCode, with their own sign-in. The offline demo needs no AI account at all.
+
+</details>
+
+<details>
+<summary><strong>What does a run cost?</strong></summary>
+
+Real runs use your AI apps' own accounts, so they count against those plans' usage limits or
+billing, as if you had used the apps yourself. The offline demo uses none.
+
+</details>
+
+<details>
+<summary><strong>Is my work sent anywhere?</strong></summary>
+
+LoomWatch serves everything on `127.0.0.1` and keeps your run history in a database on this
+computer. It reads your skills and tools only on your computer. The agents' own apps still send
+prompts and files to their model providers, as they do when you use them directly.
+
+</details>
+
+<details>
+<summary><strong>Can different agents in one team use different apps and models?</strong></summary>
+
+Yes. Each agent card has its own app and model. A team can research with Claude Code, review with
+Codex and write with Gemini. Through OpenCode, an agent can also use models such as DeepSeek, Kimi,
+GLM, Qwen or Mistral.
+
+</details>
+
+<details>
+<summary><strong>What happens when an agent asks for permission to do something?</strong></summary>
+
+LoomWatch declines interactive permission requests, and the run records each one, so nothing happens
+behind your back. Give the agent app the specific permissions the task needs in its own settings.
+
+</details>
+
+<details>
+<summary><strong>Can I run it on a server, or entirely in Docker?</strong></summary>
+
+Yes. See [Run everything with Docker Compose](#optional-run-everything-with-docker-compose). The
+recommended desktop setup runs LoomWatch itself on your computer so it can use the apps, skills and
+sign-ins already there.
+
+</details>
+
+## Optional: run everything with Docker Compose
+
+Use this mode for CI, demos, or an intentionally isolated Linux deployment. It is not the
+recommended desktop setup: a container cannot automatically see host executables, skills, MCP
+configuration, credentials, or arbitrary host workspace paths.
+
+<details>
+<summary>Set up the Compose stack</summary>
+
+Create your settings file with `cp .env.example .env` and replace both `replace-with-…` values with
+long random letters and numbers (or run `./loomwatch` once, which does this for you). Then create a
+repository-local teams folder, and build and start the complete stack:
 
 ```sh
-docker compose stop
+mkdir -p teams
+cp -n examples/operator-stop.yaml examples/operator-stop-harness.py teams/
+docker compose up --build --detach --wait
 ```
 
-For the recommended local run, press **Ctrl-C** in the terminal running LoomWatch, then stop the
-database if you do not need it:
+Open the [offline review-stop demo](http://127.0.0.1:3000/?path=operator-stop.yaml). The UI is
+embedded in the `loomwatch` image, PostgreSQL holds run history, context packets, Notebook entries,
+and checkpoints, and both services are published only on host loopback. To stop, finish or stop
+active runs, then run `docker compose stop`: it preserves both named volumes, and
+`docker compose up --detach --wait` resumes the stack.
+
+The defaults mount these explicit roots:
+
+| Container path | Default host path | Access | Purpose |
+| --- | --- | --- | --- |
+| `/data/teams` | `./teams` | Read/write | Team YAML, Brief files, layouts, and managed `.loomwatch` workspaces |
+| `/workspaces` | `./container/workspaces` | Read/write | Repositories used by container-native agents |
+| `/opt/loomwatch/capabilities` | `./container/capabilities` | Read-only | Skills and plugin metadata intentionally imported for discovery |
+| `/home/node` | `loomwatch-home` volume | Read/write | Harness credentials and mutable CLI state |
+
+</details>
+
+<details>
+<summary>Use harnesses installed on the host</summary>
+
+A Linux container cannot execute a macOS or Windows binary, so LoomWatch uses a narrow native
+runner instead of mounting your home directory or Docker socket. Set a random
+`LOOMWATCH_HOST_RUNNER_TOKEN` in `.env`, then start the companion from the repository in a host
+terminal:
 
 ```sh
-./loomwatch stop
+./container/run-host-runner.sh
 ```
 
-Your teams and database remain on disk. Resume the full-Compose installation with
-`docker compose up --detach --wait`, or resume the local install with
-[Start it again later](#start-it-again-later).
+Keep that terminal open and start the Compose stack normally in another terminal. The Library now
+shows the harnesses found on the host. Agents added from those rows use an internal
+`loomwatchd harness-client` command: model discovery and runs stream over the same authenticated
+connection to the native ACP adapter. The runner accepts only LoomWatch's known ACP harnesses and
+maps working directories only beneath `/data/teams` and `/workspaces` back to their configured host
+bind mounts.
 
-Scheduled teams run only while the server and database are running and the computer is
-awake. For scheduled runs and optional Notion delivery, see [Routines](docs/WATCH.md#routines)
-and [Notion setup](docs/NOTION.md).
+The runner listens on `0.0.0.0:3031` so Docker Desktop's `host.docker.internal` gateway can reach
+it. It requires the token on every connection. If port 3031 is already used, change both
+`LOOMWATCH_HOST_RUNNER_LISTEN` and `LOOMWATCH_HOST_RUNNER_ADDR` in `.env`.
+
+Override the three bind-mounted host directories in `.env`. Do not point the capability import at
+your complete home directory. Its README documents the expected `.codex`, `.claude`, `.agents`, and
+OpenCode subdirectories.
+
+</details>
+
+<details>
+<summary>Harnesses and skills in the container</summary>
+
+The Library combines harness commands executable inside the container with harnesses reported by a
+reachable native companion; host entries win when both environments provide the same app. The base
+image includes Node.js, Python, Git, curl, and everything needed by the offline demo, but it does
+not bundle third-party provider CLIs. Without the native companion, build a derived image with the
+required Linux harnesses or install user-scoped CLI packages into the persistent runtime home. The
+image's `PATH` includes `/home/node/.local/bin`.
+
+Authenticate from the same runtime after installing a harness:
+
+```sh
+docker compose exec loomwatch sh
+npm config set prefix "$HOME/.local"
+# Install and authenticate only the provider CLIs you intend to use.
+```
+
+Import skill definitions through `container/capabilities`, preserving their conventional paths.
+Imports are read-only; LoomWatch copies only a skill explicitly wired to an agent into that team's
+managed workspace. Do not put provider tokens, SSH keys, or other credentials in the import.
+
+Team files running against a mounted repository should use a path below `/workspaces`. Absolute
+host paths such as `/Users/name/project` do not exist inside the Linux container.
+
+</details>
 
 ## Where your work is saved
 
@@ -377,6 +620,13 @@ and [Notion setup](docs/NOTION.md).
 | Database settings | `.env` in the source repository |
 | Provider sign-in | Managed by each host agent app; Compose-only deployments use `loomwatch-home` |
 
+Back up your teams folder and PostgreSQL database if you want to move or preserve your work.
+`docker compose stop` preserves data. Avoid `docker compose down -v` for normal shutdown:
+it deletes the database volume, including history and Notebook entries.
+
+<details>
+<summary>Deleting and restoring a team</summary>
+
 To delete a team, choose **Delete team…** from its **…** menu on Home or from the team switcher.
 LoomWatch refuses while the team is running, or while another team reads its memory. Nothing is
 erased. The team file, its layout and its own notes folder (`<team>.brief`, if it has one) move to
@@ -386,17 +636,23 @@ files in that folder back to where `path` in its `deleted.json` says the team fi
 `deleted.json` behind. In Finder, press ⌘⇧. to show hidden folders. To remove a team for good,
 delete its folder from `.trash`.
 
+</details>
+
+<details>
+<summary>Reusing an agent as a saved job</summary>
+
 To reuse an agent that works, select it in Build and choose **Save as job**. It appears under
 **Your jobs** at the top of the palette, with its instructions, app, model and skills, and can be
 added to any team. Placing a job copies it into the team, so changing or removing the job later
 leaves existing teams alone. A job is one small file, so you can share it by copying it into another
 teams folder's `.jobs`.
 
-Back up your teams folder and PostgreSQL database if you want to move or preserve your work.
-`docker compose stop` preserves data. Avoid `docker compose down -v` for normal shutdown:
-it deletes the database volume, including history and Notebook entries.
+</details>
 
 ## Troubleshooting
+
+<details>
+<summary>Something did not work? Find what you see in this table.</summary>
 
 | What you see | What to check |
 | --- | --- |
@@ -418,6 +674,18 @@ it deletes the database volume, including history and Notebook entries.
 | UI assets are missing or look out of date | Stop LoomWatch, then start it with `./loomwatch --rebuild`. |
 | Cannot connect from another device | This setup serves runs and history only on your own computer at `127.0.0.1`. Use the browser on that computer. |
 
+</details>
+
+## Under the hood
+
+| Piece | What it does |
+| --- | --- |
+| `loomwatchd` | One Rust program that starts each agent's app, supervises it, and serves the browser app |
+| [ACP](https://agentclientprotocol.com) | How LoomWatch talks to every agent app, over its standard input and output |
+| Team Bus | A tool server the agents call back into to hand work over, ask each other questions, or report |
+| Event archive | PostgreSQL, holding every message, tool call and handover, so runs can be replayed |
+| Browser app | React, streamed live over a WebSocket and packed into the program |
+
 ## More guides
 
 - [Team configuration](docs/TEAM_CONFIG.md) — roles, models, working directories, and workflow rules.
@@ -425,3 +693,9 @@ it deletes the database volume, including history and Notebook entries.
 - [Watch and replay](docs/WATCH.md) — inspecting runs, routines, and the local API.
 - [Architecture](docs/ARCHITECTURE.md) — technical details for developers.
 - [Container runtime decision](docs/decisions/0018-container-native-compose.md) — execution, mount, and trust boundaries.
+
+<br>
+
+<p align="center">
+  <sub>Woven with Rust, React and ACP. Watch every thread.</sub>
+</p>
