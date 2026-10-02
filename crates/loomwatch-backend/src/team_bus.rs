@@ -978,15 +978,20 @@ impl TeamBus {
         let cwd = workspace
             .as_ref()
             .map_or(declared_cwd, |workspace| workspace.cwd.clone());
+        let delivery = workspace
+            .as_ref()
+            .map(|workspace| workspace.delivery.clone())
+            .unwrap_or_default();
+        // A helper is held to its own switches, like any other agent of the team (ADR 0037).
+        let permissions =
+            crate::permissions::PermissionPolicy::for_agent(agent.allow, &cwd, &delivery);
         let spec = ProcessSpec {
             cmd: agent.spawn.cmd.clone(),
             args: agent.spawn.args.clone(),
             env: agent.spawn.env.clone(),
             cwd,
-            tools: workspace
-                .as_ref()
-                .map(|workspace| workspace.delivery.tools.clone())
-                .unwrap_or_default(),
+            tools: delivery.tools,
+            permissions: Some(permissions),
         };
         let mut packet = self.state.memory.packet_for(agent)?;
         // A delegated helper's lineage is the server-owned `delegation_path` on its caller's
@@ -2495,6 +2500,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
             tools: Vec::new(),
+            permissions: None,
         };
         let mut process = AcpProcess::spawn(&spec)?;
         let event_log = EventLog::new(archive.clone(), "live-ask-run".into());
@@ -2690,6 +2696,7 @@ mod tests {
             capabilities: Vec::new(),
             memory: None,
             allow_recruiting: true,
+            allow: crate::config::AgentAllow::default(),
         }
     }
 

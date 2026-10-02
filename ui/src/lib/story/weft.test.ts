@@ -126,6 +126,37 @@ describe('buildReceipt', () => {
     expect(receipt.lines[3].evidenceId).toBe('e2')
   })
 
+  // ADR 0037: a refused request says what the agent could not do, once per switch, and offers
+  // the switch that would allow it next time.
+  it('says what an agent was not allowed to do, and offers the switch that covers it', () => {
+    const refused = (id: string, kind: string | null, name: string) => evidence(id, 'collector', 10, { kind: 'permission', relation: 'asked permission for', name, status: 'rejected', rawInput: kind ? { toolCall: { kind, title: name } } : {} })
+    const byAgent = new Map(Object.entries({
+      collector: [evidence('e1', 'collector', 4), refused('p1', 'fetch', 'Web search'), refused('p2', 'fetch', 'Fetch https://x.test'), refused('p3', 'fetch', 'Web search'), refused('p4', 'execute', 'Bash: ls'), refused('p5', null, 'Mystery tool')],
+      editor: [],
+    }))
+    const lines = (allow?: { web?: boolean; edits?: boolean; commands?: boolean }) => buildReceipt({ ...base, agents: [{ id: 'collector', name: 'News Collector', operator: false, allow }], evidenceByAgent: byAgent, projection: projection() })
+    const receipt = lines()
+    expect(receipt.lines.map((line) => [line.text, line.allow ?? null, line.allowed ?? null])).toEqual([
+      ['News Collector finished · read 1 source', null, null],
+      ['News Collector wasn’t allowed to search the web (asked 3 times), and carried on without it', 'web', false],
+      ['News Collector wasn’t allowed to run commands, and carried on without it', 'commands', false],
+      ['News Collector asked permission for “Mystery tool”, and it was refused, and carried on without it', null, null],
+    ])
+    expect(receipt.lines[1].evidenceId).toBe('p1')
+    expect(receipt.checks.map((line) => line.text)).toContain('LoomWatch can’t ask you during a run, so it says no to anything an agent isn’t allowed to do. Change what each agent may do in its panel in Build.')
+
+    // Switched on since: the same refusal now says so instead of offering the switch again.
+    expect(lines({ web: true }).lines[1]).toMatchObject({ allow: 'web', allowed: true })
+  })
+
+  it('does not offer edits for a change outside the folder when edits are already on', () => {
+    const outside = evidence('p1', 'collector', 10, { kind: 'permission', relation: 'asked permission for', name: 'Write /etc/hosts', status: 'rejected', rawInput: { toolCall: { kind: 'edit' } } })
+    const receipt = buildReceipt({ ...base, agents: [{ id: 'collector', name: 'News Collector', operator: false, allow: { edits: true } }], evidenceByAgent: new Map([['collector', [outside]]]), projection: projection() })
+    const line = receipt.lines.find((item) => item.evidenceId === 'p1')
+    expect(line).toMatchObject({ text: 'News Collector wasn’t allowed to edit files outside its own folder, and carried on without it' })
+    expect(line?.allow).toBeUndefined()
+  })
+
   it('flags what is worth a second look, and never counts a supplied skill as used', () => {
     const editor = agent('editor', 112, 165, { openCalls: 1, requiredSkills: [{ name: 'newsletter-style', state: 'supplied' }] } as unknown as Partial<ProjectedAgent>)
     const receipt = buildReceipt({ ...base, answered: false, projection: projection({ agents: [agent('collector', 0, 110), editor], coverage: { ...projection().coverage, tools: { level: 'partial', reason: 'unpaired_calls', observed: 2 } } }) })

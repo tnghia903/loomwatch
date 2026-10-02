@@ -9,7 +9,7 @@ import { TeamFileModel, TeamFileParseError } from './document'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
 import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
-import type { AgentConfig, BriefEntryConfig, CapabilityRef, EdgeConfig, ScheduleConfig, SpawnConfig, TeamDocument } from './types'
+import type { AgentAllow, AgentConfig, AllowSwitch, BriefEntryConfig, CapabilityRef, EdgeConfig, ScheduleConfig, SpawnConfig, TeamDocument } from './types'
 import {
   loadTeamValidator,
   displayFieldProblems,
@@ -964,6 +964,32 @@ export function useTeamDocument() {
     [nodes, markDirty, captureHistory],
   )
 
+  /**
+   * ADR 0037: one of the agent's "Allowed without asking" switches. Only switches that are on are
+   * written, and an agent with none on has no `allow:` block, so a team that never used them saves
+   * byte for byte as before.
+   */
+  const updateAgentAllow = useCallback(
+    (id: string, key: AllowSwitch, on: boolean) => {
+      const target = nodes.find((node) => node.id === id)
+      if (!target || target.data.agent.kind === 'operator') return
+      captureHistory()
+      const merged = { ...target.data.agent.allow, [key]: on }
+      const kept = Object.fromEntries(Object.entries(merged).filter(([, value]) => value === true)) as AgentAllow
+      const allow = Object.keys(kept).length > 0 ? kept : undefined
+      modelRef.current?.setAgentField(id, 'allow', allow)
+      setNodes((current) =>
+        current.map((node) => {
+          if (node.id !== id) return node
+          const { allow: _previous, ...agent } = node.data.agent
+          return { ...node, data: { ...node.data, agent: allow ? { ...agent, allow } : agent } }
+        }),
+      )
+      markDirty()
+    },
+    [nodes, markDirty, captureHistory],
+  )
+
   const updateAgentAllowRecruiting = useCallback(
     (id: string, allowRecruiting: boolean) => {
       captureHistory()
@@ -1461,6 +1487,7 @@ export function useTeamDocument() {
     updateAgentThinkingEffort,
     updateAgentCwd,
     updateAgentAllowRecruiting,
+    updateAgentAllow,
     updateAgentMemory,
     setAgentCapabilities,
     promoteEntrypoint,

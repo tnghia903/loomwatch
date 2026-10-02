@@ -33,6 +33,15 @@ describe('team templates', () => {
     }
   })
 
+  // ADR 0037: a researcher that cannot search the web can only guess, so it starts allowed to;
+  // nothing else is switched on for anyone.
+  it('lets only the researcher search the web, and nothing more', () => {
+    const doc = parse(templateTeamYaml('research-review-write', 'Report', harness('claude'), 'sonnet')) as TeamDocument
+    expect(Object.fromEntries(doc.agents.map((agent) => [agent.id, agent.allow ?? null]))).toEqual({ researcher: { web: true }, review: null, writer: null })
+    const single = parse(templateTeamYaml('single', 'Solo', harness('claude'), 'sonnet')) as TeamDocument
+    expect(single.agents[0].allow).toBeUndefined()
+  })
+
   it('wires the review template as researcher → you → writer', () => {
     const doc = parse(templateTeamYaml('research-review-write', 'Report', harness('codex'), 'gpt')) as TeamDocument
     expect(doc.agents.map((agent) => agent.kind ?? 'harness')).toEqual(['harness', 'operator', 'harness'])

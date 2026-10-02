@@ -26,6 +26,7 @@ import {
   type RunCapability,
 } from '../../lib/runs/capabilityEvidence'
 import { formatOffset } from '../../lib/watch/events'
+import type { AllowSwitch } from '../../lib/team-file/types'
 import type { RunColumnProps } from './RunColumn'
 import { StripLine } from './StoryNodes'
 import { useCanvasActions } from '../canvas/CanvasActionsContext'
@@ -47,6 +48,8 @@ export interface DeliveryLaneProps extends RunColumnProps {
   linearPipeline?: boolean
   onTrace: () => void
   onHistory?: () => void
+  /** ADR 0037: allow what a refused receipt line names, for that agent's next runs. */
+  onAllow?: (agentId: string, key: AllowSwitch) => void
   /** Leave this finished run for a blank request, for a task that is not a follow-up of it. */
   onNewRun?: () => void
   /**
@@ -95,6 +98,7 @@ export function DeliveryLane({
   onInspectEvidence,
   onSelectAgent,
   onTrace,
+  onAllow,
   onHistory,
   onNewRun,
   focusAgentId = null,
@@ -208,7 +212,7 @@ export function DeliveryLane({
     prompt,
     phase,
     elapsed,
-    agents: agents.map((node) => ({ id: node.id, name: node.data.agent.name, operator: node.data.agent.kind === 'operator', runtime: node.data.runtime })),
+    agents: agents.map((node) => ({ id: node.id, name: node.data.agent.name, operator: node.data.agent.kind === 'operator', runtime: node.data.runtime, allow: node.data.agent.allow })),
     projection,
     evidenceByAgent,
     harnessLabels: new Map(agents.map((node) => [node.id, snapshots.get(node.id)?.[0]?.harness ?? harnessLabels.get(node.id) ?? ''])),
@@ -303,7 +307,7 @@ export function DeliveryLane({
                 : 'No original prompt was captured.')}
           </p>
         </article>
-        {runReceipt && <RunReceipt receipt={runReceipt} onInspectEvidence={onInspectEvidence} onSelectAgent={showStage} onTrace={onTrace} />}
+        {runReceipt && <RunReceipt receipt={runReceipt} onInspectEvidence={onInspectEvidence} onSelectAgent={showStage} onTrace={onTrace} onAllow={onAllow} />}
         {!planned && projection.startedAt && <WeftBar projection={projection} order={weftOrder} relay={pipeline} onInspectEvidence={onInspectEvidence} />}
         <div className="delivery-section-head">
           <h2>

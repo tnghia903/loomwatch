@@ -1,5 +1,6 @@
 import { rankHarnesses } from '../team-file/templates'
 import type { DetectedHarness } from '../harnesses'
+import type { AgentAllow } from '../team-file/types'
 import type { LibrarySource } from './types'
 
 /**
@@ -36,6 +37,9 @@ export interface RolePreset {
   model?: string
   /** Skill names the agent is given, on whichever app it runs (ADR 0031). */
   skills?: readonly string[]
+  /** What the agent may do without asking from the start (ADR 0037). Only what the job cannot be
+      done without: a researcher that cannot search the web can only guess. */
+  allow?: AgentAllow
 }
 
 const WRITING = ['claude', 'codex', 'opencode', 'gemini']
@@ -46,6 +50,7 @@ const lines = (...text: string[]) => text.join('\n')
 export const ROLE_PRESETS: readonly RolePreset[] = [
   {
     id: 'researcher', label: 'Researcher', does: 'Finds and checks sources', icon: 'research', prefers: WRITING,
+    allow: { web: true },
     role: lines(
       'You are the team’s researcher. Gather the facts the request needs. Do not write the final piece; the next step does that.',
       '',
@@ -191,5 +196,6 @@ export function roleSource(preset: RolePreset, harnesses: readonly DetectedHarne
     spawn: { cmd: harness.spawn.cmd, args: [...harness.spawn.args] },
     ...(preset.model && harness.id === preset.prefers[0] ? { model: preset.model } : {}),
     ...(preset.skills?.length ? { capabilities: preset.skills.map((name) => ({ kind: 'skill' as const, name })) } : {}),
+    ...(preset.allow ? { allow: { ...preset.allow } } : {}),
   }
 }

@@ -574,6 +574,31 @@ describe('useTeamDocument', () => {
     expect(result.current.yamlPreview).toContain('model: kimi-for-coding/k3-256k')
   })
 
+  // ADR 0037: only switches that are on are written, and the block goes when the last one does,
+  // so a team that never used them saves exactly as before.
+  it('writes only the allow switches that are on, and drops the block when none is', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+    )
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    const allow = () => result.current.nodes.find((node) => node.id === 'researcher')?.data.agent.allow
+
+    act(() => result.current.updateAgentAllow('researcher', 'web', true))
+    expect(allow()).toEqual({ web: true })
+    expect(result.current.yamlPreview).toMatch(/allow:\n\s+web: true/)
+    expect(result.current.saveState).toBe('dirty')
+
+    act(() => result.current.updateAgentAllow('researcher', 'commands', true))
+    expect(allow()).toEqual({ web: true, commands: true })
+
+    act(() => result.current.updateAgentAllow('researcher', 'web', false))
+    act(() => result.current.updateAgentAllow('researcher', 'commands', false))
+    expect(allow()).toBeUndefined()
+    expect(result.current.yamlPreview).not.toContain('allow:')
+  })
+
   it('shows a working-folder edit in the YAML preview and validation at once, keeping the rest of spawn', async () => {
     const yaml = TEAM_YAML.replace('      cwd: .\n    model: kimi-for-coding/k3-256k', '      cwd: ""\n    model: kimi-for-coding/k3-256k')
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>

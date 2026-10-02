@@ -65,6 +65,11 @@ pub struct ProcessSpec {
     /// again in `session/load` beside the Team Bus. Part of the spec rather than the prompt so a
     /// respawned stage reopens with exactly the tools it started with.
     pub tools: Vec<crate::delivery::DeliveredTool>,
+    /// How `LoomWatch` answers this agent's permission requests (ADR 0037). `Some` for a run's
+    /// agents, whose sessions are also put in the app's ask-first mode so every action reaches
+    /// the policy; `None` declines every request and leaves the app's mode alone, as the Ask
+    /// assistant and model discovery always have. Part of the spec so a respawn keeps it.
+    pub permissions: Option<crate::permissions::PermissionPolicy>,
 }
 
 struct RpcResult {
@@ -200,6 +205,8 @@ pub struct AcpProcess {
     /// assistant's own `LoomWatch` Control server (ADR 0033). `None` everywhere else, so every other
     /// permission prompt is still refused.
     approved_tool_server: Option<String>,
+    /// From [`ProcessSpec::permissions`].
+    permissions: Option<crate::permissions::PermissionPolicy>,
 }
 
 impl AcpProcess {
@@ -252,6 +259,7 @@ impl AcpProcess {
             supports_load_session: false,
             tools: spec.tools.clone(),
             approved_tool_server: None,
+            permissions: spec.permissions.clone(),
         })
     }
 
@@ -530,6 +538,9 @@ impl AcpProcess {
                 Some(loaded.response),
             )
             .await?;
+        // A fresh process may reopen the session in the app's own default mode.
+        self.ensure_ask_first(acp_session_id, &loaded.result, &mut recorder)
+            .await?;
         Ok(recorder)
     }
 
@@ -740,7 +751,81 @@ impl AcpProcess {
             .await?;
         self.configure_model(model, &negotiated, &mut recorder)
             .await?;
+        self.ensure_ask_first(
+            &negotiated.session_id,
+            &negotiated.created.result,
+            &mut recorder,
+        )
+        .await?;
         Ok(recorder)
+    }
+
+    /// ADR 0037: put a run agent's session in its app's ask-first mode, so every action the
+    /// operator has not allowed reaches `LoomWatch`'s policy instead of the app deciding alone.
+    ///
+    /// Only for a session with a [`ProcessSpec::permissions`] policy. An app that offers no such
+    /// mode, or refuses it, is recorded as deciding for itself and the run goes on: that is what
+    /// every run did before, and the record lets the run say so.
+    async fn ensure_ask_first(
+        &mut self,
+        session_id: &str,
+        session: &Value,
+        recorder: &mut Recorder,
+    ) -> Result<()> {
+        if self.permissions.is_none() {
+            return Ok(());
+        }
+        let current = session
+            .pointer("/modes/currentModeId")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let available = session
+            .pointer("/modes/availableModes")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let target = crate::permissions::ASK_FIRST_MODES.into_iter().find(|id| {
+            available
+                .iter()
+                .any(|mode| mode.get("id").and_then(Value::as_str) == Some(*id))
+        });
+        let unavailable = |reason: String| {
+            (
+                json!({"phase": "permission_mode_unavailable", "from": current, "reason": reason}),
+                json!({"source": "loomwatch", "phase": "permission_mode_unavailable"}),
+            )
+        };
+        let (payload, raw) = match target {
+            None => unavailable(
+                "This app offers no ask-first mode, so it decides for itself what it does \
+                 without asking. LoomWatch still answers whatever it does ask."
+                    .to_owned(),
+            ),
+            Some(target) if current.as_deref() == Some(target) => (
+                json!({"phase": "permission_mode", "modeId": target, "changed": false}),
+                json!({"source": "loomwatch", "phase": "permission_mode"}),
+            ),
+            Some(target) => match self
+                .request(
+                    "session/set_mode",
+                    &json!({"sessionId": session_id, "modeId": target}),
+                    Some(recorder),
+                )
+                .await
+            {
+                Ok(set) => (
+                    json!({"phase": "permission_mode", "modeId": target, "from": current, "changed": true}),
+                    set.response,
+                ),
+                Err(error) => unavailable(format!(
+                    "This app refused its ask-first mode ({error:#}), so it decides for itself \
+                     what it does without asking."
+                )),
+            },
+        };
+        recorder
+            .append(EventKind::SessionMeta, payload, Some(raw))
+            .await
     }
 
     async fn start_recorder(
@@ -1183,8 +1268,11 @@ impl AcpProcess {
             }
 
             if message.get("method").is_some() && message.get("id").is_some() {
-                let response =
-                    build_client_response(&message, self.approved_tool_server.as_deref())?;
+                let response = build_client_response(
+                    &message,
+                    self.approved_tool_server.as_deref(),
+                    self.permissions.as_ref(),
+                )?;
                 if let Some(recorder) = recorder.as_deref_mut() {
                     recorder.record_frame(&response).await?;
                 }
@@ -1703,7 +1791,15 @@ fn with_archive_failure_context(
 /// prompt turn was cancelled, which is wrong for an observer merely declining one tool call.
 /// Prefer an advertised `reject_once` option so the agent denies that call and keeps going,
 /// then `reject_always`, falling back to `cancelled` only when the harness offered neither.
-fn build_client_response(request: &Value, approved_server: Option<&str>) -> Result<Value> {
+///
+/// A run agent's request is first put to its [`PermissionPolicy`](crate::permissions) (ADR 0037).
+/// An approval selects `allow_once` only, never `allow_always`, which some apps would write into
+/// their own settings and so outlive the switch that granted it.
+fn build_client_response(
+    request: &Value,
+    approved_server: Option<&str>,
+    policy: Option<&crate::permissions::PermissionPolicy>,
+) -> Result<Value> {
     let id = request
         .get("id")
         .cloned()
@@ -1712,10 +1808,11 @@ fn build_client_response(request: &Value, approved_server: Option<&str>) -> Resu
         .get("method")
         .and_then(Value::as_str)
         .context("client request omitted method")?;
+    let approved = approved_server.is_some_and(|server| asks_about_server_tool(request, server))
+        || policy.is_some_and(|policy| policy.approves(request));
     if method == "session/request_permission"
-        && let Some(option_id) = approved_server
-            .filter(|server| asks_about_server_tool(request, server))
-            .and_then(|_| allow_once_option(request))
+        && approved
+        && let Some(option_id) = allow_once_option(request)
     {
         return Ok(json!({
             "jsonrpc": "2.0",
@@ -1781,7 +1878,7 @@ async fn record_default_model(recorder: &mut Recorder) -> Result<()> {
 /// `<tool> (<server> MCP Server)`, and `<server>.<tool>`. Only those exact shapes count, so a file
 /// named after the server, a shell command, or another server whose name merely starts the same
 /// never does.
-fn asks_about_server_tool(request: &Value, server: &str) -> bool {
+pub(crate) fn asks_about_server_tool(request: &Value, server: &str) -> bool {
     let title = request
         .pointer("/params/toolCall/title")
         .and_then(Value::as_str)
@@ -2619,6 +2716,7 @@ mod tests {
                 ]}
             }),
             None,
+            None,
         )
         .expect("response");
         assert_eq!(response["result"]["outcome"]["optionId"], "once");
@@ -2632,6 +2730,7 @@ mod tests {
                     {"optionId": "always", "kind": "reject_always"}
                 ]}
             }),
+            None,
             None,
         )
         .expect("response");
@@ -2659,7 +2758,7 @@ mod tests {
             })
         };
         let chosen = |title: &str, server: Option<&str>| {
-            build_client_response(&prompt(title), server).expect("response")["result"]["outcome"]
+            build_client_response(&prompt(title), server, None).expect("response")["result"]["outcome"]
                 ["optionId"]
                 .clone()
         };
@@ -2767,6 +2866,7 @@ mod tests {
                 env: BTreeMap::new(),
                 cwd: std::env::current_dir().expect("cwd"),
                 tools: Vec::new(),
+                permissions: None,
             };
             let archive = EventArchive::from_pool(pool.clone());
             let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -2842,6 +2942,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
             tools: Vec::new(),
+            permissions: None,
         };
         let archive = EventArchive::from_pool(pool.clone());
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -2934,6 +3035,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
             tools: Vec::new(),
+            permissions: None,
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -2955,6 +3057,114 @@ mod tests {
             .expect("set_model metadata");
         assert_eq!(configured.payload["value"], "vendor/deep");
         assert_eq!(configured.raw.as_ref().unwrap()["id"], 3);
+    }
+
+    /// ADR 0037: a run agent's app is moved to its ask-first mode before the prompt, and what it
+    /// then asks is answered by the operator's switches: the web was switched on, commands not.
+    /// The fake app exits 9, failing the session, unless all three happen.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_run_agent_asks_first_and_loomwatch_answers_by_its_switches(pool: PgPool) {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"asks-first","modes":{"currentModeId":"auto","availableModes":[{"id":"default","name":"Manual"},{"id":"auto","name":"Auto"}]}}}'
+            IFS= read -r request
+            case "$request" in
+              *'"method":"session/set_mode"'*'"modeId":"default"'*) ;;
+              *) exit 9 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":"web","method":"session/request_permission","params":{"sessionId":"asks-first","toolCall":{"toolCallId":"c1","title":"Web search","kind":"fetch"},"options":[{"optionId":"yes","kind":"allow_once"},{"optionId":"always","kind":"allow_always"},{"optionId":"no","kind":"reject_once"}]}}'
+            IFS= read -r answer
+            case "$answer" in *'"optionId":"yes"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":"shell","method":"session/request_permission","params":{"sessionId":"asks-first","toolCall":{"toolCallId":"c2","title":"Bash: rm -rf ~","kind":"execute"},"options":[{"optionId":"yes","kind":"allow_once"},{"optionId":"no","kind":"reject_once"}]}}'
+            IFS= read -r answer
+            case "$answer" in *'"optionId":"no"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
+        "#;
+        let cwd = std::env::current_dir().expect("cwd");
+        let web = crate::config::AgentAllow {
+            web: true,
+            ..Default::default()
+        };
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: cwd.clone(),
+            tools: Vec::new(),
+            permissions: Some(crate::permissions::PermissionPolicy::new(web, &cwd, [], [])),
+        };
+        let archive = EventArchive::from_pool(pool);
+        let mut process = AcpProcess::spawn(&spec).expect("spawn");
+        process
+            .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
+            .await
+            .expect("session");
+
+        let events = archive.load_session("asks-first").await.expect("events");
+        let mode = events
+            .iter()
+            .find(|event| event.payload["phase"] == "permission_mode")
+            .expect("permission_mode metadata");
+        assert_eq!(mode.payload["modeId"], "default");
+        assert_eq!(mode.payload["from"], "auto");
+        assert_eq!(mode.payload["changed"], true);
+    }
+
+    /// An app with no ask-first mode still runs, and the record says it decides for itself.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn an_app_without_an_ask_first_mode_is_recorded_as_deciding_for_itself(pool: PgPool) {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"never-asks"}}'
+            IFS= read -r request
+            case "$request" in *'"method":"session/prompt"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
+        "#;
+        let cwd = std::env::current_dir().expect("cwd");
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: cwd.clone(),
+            tools: Vec::new(),
+            permissions: Some(crate::permissions::PermissionPolicy::new(
+                crate::config::AgentAllow::default(),
+                &cwd,
+                [],
+                [],
+            )),
+        };
+        let archive = EventArchive::from_pool(pool);
+        let mut process = AcpProcess::spawn(&spec).expect("spawn");
+        process
+            .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
+            .await
+            .expect("an app that cannot be held to the switches still runs");
+
+        let events = archive.load_session("never-asks").await.expect("events");
+        let unavailable = events
+            .iter()
+            .find(|event| event.payload["phase"] == "permission_mode_unavailable")
+            .expect("permission_mode_unavailable metadata");
+        assert!(
+            unavailable.payload["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("decides for itself")),
+            "{}",
+            unavailable.payload
+        );
     }
 
     fn wired_tool(definition: serde_json::Value) -> crate::delivery::DeliveredTool {
@@ -2999,6 +3209,7 @@ mod tests {
             tools: vec![wired_tool(
                 serde_json::json!({"command": "npx", "args": ["-y", "@agentmemory/mcp"]}),
             )],
+            permissions: None,
         };
         let archive = EventArchive::from_pool(pool);
         AcpProcess::spawn(&spec)
@@ -3051,6 +3262,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
             tools: Vec::new(),
+            permissions: None,
         };
         let skill = crate::workspace::PreparedSkill::fixture(
             "claude-design",
@@ -3203,6 +3415,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
             tools: Vec::new(),
+            permissions: None,
         };
         let skill = crate::workspace::PreparedSkill::fixture(
             "claude-design",
@@ -3367,6 +3580,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
             tools: Vec::new(),
+            permissions: None,
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -3444,6 +3658,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
             tools: Vec::new(),
+            permissions: None,
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -3488,6 +3703,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
             tools: Vec::new(),
+            permissions: None,
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -3538,6 +3754,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
             tools: Vec::new(),
+            permissions: None,
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -3586,6 +3803,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
             tools: Vec::new(),
+            permissions: None,
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
@@ -3633,6 +3851,7 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
             tools: Vec::new(),
+            permissions: None,
         };
         let archive = EventArchive::from_pool(pool);
         let mut process = AcpProcess::spawn(&spec)

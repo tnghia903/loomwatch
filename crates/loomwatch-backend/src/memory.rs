@@ -3358,6 +3358,7 @@ mod tests {
             allow_recruiting: true,
             capabilities: Vec::new(),
             memory: None,
+            allow: crate::config::AgentAllow::default(),
         }
     }
 

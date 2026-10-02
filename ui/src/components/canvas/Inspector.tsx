@@ -5,10 +5,11 @@ import type { HarnessModel } from '../../lib/harnesses'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { splitModelSelector } from '../../lib/models'
 import type { AgentPlace } from '../../lib/team-file/agentPlace'
-import type { CapabilityRef } from '../../lib/team-file/types'
+import type { AllowSwitch, CapabilityRef } from '../../lib/team-file/types'
 import type { AgentField, AgentFieldProblems } from '../../lib/team-file/validation'
 import { StatusGlyph } from '../ui/glyphs'
 import { AgentContext } from './AgentContext'
+import { AgentPermissions } from './AgentPermissions'
 import { roleGlyph } from './roleGlyph'
 
 export interface InspectorProps {
@@ -26,6 +27,8 @@ export interface InspectorProps {
   onThinkingEffortChange?: (value: string) => void
   onCwdChange: (value: string) => void
   onAllowRecruitingChange: (allow: boolean) => void
+  /** ADR 0037: one "Allowed without asking" switch. */
+  onAllowChange?: (key: AllowSwitch, on: boolean) => void
   /** docs/TEAM_MEMORY.md §5: per-agent `memory.brief` / `memory.deliverAs`. */
   onMemoryBriefChange?: (readsBrief: boolean) => void
   onDeliverAsChange?: (deliverAs: 'native-file' | 'packet-only') => void
@@ -54,7 +57,7 @@ export interface InspectorProps {
 // between a drop and a valid save), CONTEXT (what the agent is given; ADR 0034 replaced
 // BEHAVIOUR with it), PROCESS (collapsed).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
-export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false }: InspectorProps) {
+export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false }: InspectorProps) {
   const { agent, runtime } = node.data
   const [processOpen, setProcessOpen] = useState(false)
   const status = runtime?.status ?? agent.status ?? 'idle'
@@ -165,6 +168,11 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
           onPromoteEntrypoint={onPromoteEntrypoint} onAllowRecruitingChange={onAllowRecruitingChange} onMemoryBriefChange={onMemoryBriefChange} onRemoveCapability={onRemoveCapability}
           teamPath={teamPath} onAddKnowledge={onAddKnowledge}
         />
+      </div>
+
+      <div className="zone">
+        <div className="zone-head t-micro">Allowed without asking</div>
+        <AgentPermissions agent={agent} readOnly={readOnly} onChange={onAllowChange} />
       </div>
 
       <div className="zone">

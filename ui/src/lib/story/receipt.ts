@@ -1,4 +1,5 @@
 import type { AgentRuntime } from '../runs/graph'
+import type { AgentAllow, AllowSwitch } from '../team-file/types'
 import type { Evidence, RunPhase, RunProjection } from '../watch/events'
 import { describeEvidence } from './weft'
 
@@ -17,6 +18,10 @@ export interface ReceiptLine {
   text: string
   agentId?: string
   evidenceId?: string
+  /** A refusal one of the agent's switches covers (ADR 0037), so the line can offer it. */
+  allow?: AllowSwitch
+  /** That switch is on now, so the next run will not be refused. */
+  allowed?: boolean
 }
 
 export interface Receipt {
@@ -34,6 +39,8 @@ export interface ReceiptAgent {
   name: string
   operator: boolean
   runtime?: Pick<AgentRuntime, 'status'> | null
+  /** Its switches as they are now, which may be newer than the run. */
+  allow?: AgentAllow
 }
 
 export interface ReceiptInput {
@@ -67,6 +74,43 @@ function workSummary(items: readonly Evidence[]): string {
   return parts.length ? ` · ${parts.join(', ')}` : ''
 }
 
+/**
+ * The switch that covers a refused permission request, from the kind its app gave the tool call:
+ * the same mapping the daemon decides by (`permissions.rs`). `null` for a kind no switch covers.
+ */
+export function switchForRequest(item: Pick<Evidence, 'rawInput'>): AllowSwitch | null {
+  const request = item.rawInput as { toolCall?: { kind?: unknown } } | null
+  const kind = request?.toolCall?.kind
+  return kind === 'fetch' ? 'web' : kind === 'edit' ? 'edits' : kind === 'execute' ? 'commands' : null
+}
+
+const REFUSED: Record<AllowSwitch, string> = { web: 'search the web', edits: 'edit files', commands: 'run commands' }
+
+/** Refused requests as the agent's lines: one per switch, so ten refused searches read as one. */
+function refusalLines(agent: ReceiptAgent, items: readonly Evidence[], carriedOn: boolean): ReceiptLine[] {
+  const refused = items.filter((item) => item.kind === 'permission' && item.status === 'rejected')
+  const groups = new Map<AllowSwitch | null, Evidence[]>()
+  for (const item of refused) {
+    const key = switchForRequest(item)
+    groups.set(key, [...(groups.get(key) ?? []), item])
+  }
+  const carried = carriedOn ? ', and carried on without it' : ''
+  const lines: ReceiptLine[] = []
+  for (const [key, group] of groups) {
+    const evidenceId = group[0].id
+    const times = group.length > 1 ? ` (asked ${group.length} times)` : ''
+    if (key === null) {
+      for (const item of group.slice(0, 3)) lines.push({ tone: 'bad', text: `${describeEvidence(agent.name, item).replace(/\.$/, '')}${carried}`, agentId: agent.id, evidenceId: item.id })
+    } else if (key === 'edits' && agent.allow?.edits) {
+      // Edits are on, so what was refused was a change outside its own folder: no switch covers it.
+      lines.push({ tone: 'bad', text: `${agent.name} wasn’t allowed to edit files outside its own folder${times}${carried}`, agentId: agent.id, evidenceId })
+    } else {
+      lines.push({ tone: 'bad', text: `${agent.name} wasn’t allowed to ${REFUSED[key]}${times}${carried}`, agentId: agent.id, evidenceId, allow: key, allowed: agent.allow?.[key] === true })
+    }
+  }
+  return lines
+}
+
 const PHASE_HEADING: Partial<Record<RunPhase, string>> = {
   succeeded: 'Finished',
   partial: 'Finished with gaps',
@@ -82,6 +126,7 @@ export function buildReceipt(input: ReceiptInput): Receipt {
   // "waiting": whoever had not finished was stopped with the run.
   const terminal = ['succeeded', 'partial', 'failed', 'cancelled'].includes(input.phase)
   const stoppedByYou = input.phase === 'cancelled'
+  let anyRefused = false
   for (const agent of input.agents) {
     if (agent.operator) {
       const status = agent.runtime?.status
@@ -104,12 +149,16 @@ export function buildReceipt(input: ReceiptInput): Receipt {
     else lines.push({ tone: 'wait', text: `${agent.name} is still working`, agentId: agent.id })
 
     // Failures say what happened instead, so the reader knows whether the result is affected.
-    const failed = items.filter((item) => item.status === 'failed' || item.status === 'rejected')
+    // Refused permission requests are told apart below, by what the agent was not allowed to do.
+    const failed = items.filter((item) => (item.status === 'failed' || item.status === 'rejected') && item.kind !== 'permission')
     for (const item of failed.slice(0, 3)) {
       const sentence = describeEvidence(agent.name, item).replace(/\.$/, '')
       lines.push({ tone: 'bad', text: `${sentence}${run.status === 'succeeded' ? ', and carried on without it' : ''}`, agentId: agent.id, evidenceId: item.id })
     }
     if (failed.length > 3) lines.push({ tone: 'bad', text: `…and ${plural(failed.length - 3, 'more failed call')} from ${agent.name}`, agentId: agent.id })
+    const refusals = refusalLines(agent, items, run.status === 'succeeded')
+    lines.push(...refusals)
+    anyRefused ||= refusals.length > 0
 
     for (const skill of run.requiredSkills ?? []) {
       if (skill.state !== 'opened') checks.push({ tone: 'warn', text: `${agent.name} was given the skill “${skill.name}” but the record never shows it opened`, agentId: agent.id })
@@ -119,6 +168,7 @@ export function buildReceipt(input: ReceiptInput): Receipt {
   for (const alert of input.projection.attention) {
     checks.push({ tone: 'warn', text: alert.message, agentId: alert.agentId, evidenceId: alert.evidenceId })
   }
+  if (anyRefused) checks.push({ tone: 'warn', text: 'LoomWatch can’t ask you during a run, so it says no to anything an agent isn’t allowed to do. Change what each agent may do in its panel in Build.' })
   if (terminal && !input.answered) checks.push({ tone: 'bad', text: 'The run ended without an answer' })
   const gaps = Object.entries(input.projection.coverage).filter(([, value]) => value.level !== 'complete' && value.reason !== 'none_recorded')
   if (gaps.length) checks.push({ tone: 'warn', text: `Not everything was recorded: ${gaps.map(([key]) => key).join(', ')}` })

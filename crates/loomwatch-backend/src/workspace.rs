@@ -355,7 +355,11 @@ pub fn materialise(
     // in its own `cwd`, or LoomWatch does not know which file this harness reads. In every one of
     // those cases the Brief still reaches the agent through the context packet.
     let brief_file = native_memory_file(agent, memory);
-    if agent.capabilities.is_empty() && brief_file.is_none() {
+    // ADR 0037: an agent allowed to edit files edits only inside its own folder. When the folder it
+    // declared holds its team file (`cwd: .`, every template's default), that folder is the teams
+    // folder, so it is given a managed one instead and the team files stay out of its reach.
+    let edits_need_own_folder = agent.allow.edits && holds(declared_cwd, team_path);
+    if agent.capabilities.is_empty() && brief_file.is_none() && !edits_need_own_folder {
         return Ok(None);
     }
     let fail = |message: String| CapabilityError {
@@ -643,6 +647,17 @@ fn native_memory_file(agent: &AgentConfig, memory: &TeamMemory) -> Option<&'stat
     Harness::of(agent).memory_file()
 }
 
+/// Whether `path` lies inside `folder`, both resolved as far as they exist.
+fn holds(folder: &Path, path: &Path) -> bool {
+    let resolved = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let folder = resolved(folder);
+    let path = path.parent().map_or_else(
+        || resolved(path),
+        |parent| resolved(parent).join(path.file_name().unwrap_or_default()),
+    );
+    path.starts_with(folder)
+}
+
 fn read_settings(declared_cwd: &Path) -> Option<Vec<u8>> {
     fs::read(declared_cwd.join(".claude/settings.json")).ok()
 }
@@ -749,6 +764,7 @@ mod tests {
             allow_recruiting: true,
             capabilities,
             memory: None,
+            allow: crate::config::AgentAllow::default(),
         }
     }
 
@@ -957,6 +973,47 @@ mod tests {
         )
         .expect("no capabilities is not an error");
         assert!(materialised.is_none());
+    }
+
+    /// ADR 0037: edits are allowed only in the agent's own folder, so an agent that would otherwise
+    /// work beside its team file is given one; web and commands alone change nothing.
+    #[test]
+    fn an_agent_allowed_to_edit_never_works_in_the_folder_holding_its_team_file() {
+        let temp = TempDirectory::new();
+        let team = temp.path().join("team.yaml");
+        let project = temp.path().join("project");
+        fs::create_dir_all(&project).expect("project folder");
+        let with = |allow: crate::config::AgentAllow, cwd: &Path| {
+            let mut agent = agent("npx", &["claude-agent-acp"], Vec::new());
+            agent.allow = allow;
+            materialise(
+                None,
+                temp.path(),
+                &team,
+                "team",
+                &agent,
+                cwd,
+                &no_memory(),
+                BusMode::Pipeline,
+            )
+            .expect("materialise")
+        };
+        let edits = crate::config::AgentAllow {
+            edits: true,
+            ..Default::default()
+        };
+        let moved = with(edits, temp.path()).expect("a folder of its own");
+        assert_eq!(moved.cwd, temp.path().join(".loomwatch/team/writer"));
+        assert!(
+            with(edits, &project).is_none(),
+            "a folder the operator chose, without the team file in it, stays the agent's"
+        );
+        let web_and_commands = crate::config::AgentAllow {
+            web: true,
+            commands: true,
+            ..Default::default()
+        };
+        assert!(with(web_and_commands, temp.path()).is_none());
     }
 
     #[test]

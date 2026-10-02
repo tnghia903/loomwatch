@@ -157,6 +157,26 @@ skill directory LoomWatch does not know, fails the run before anything spawns ra
 doing nothing. See [ADR 0012](decisions/0012-capability-delivery.md) and
 [ADR 0019](decisions/0019-cross-harness-skill-delivery.md).
 
+`agents[].allow` says what an agent may do without asking. LoomWatch cannot ask the operator in the
+middle of a run, so it puts each run agent's app in its ask-first mode (`default` on Claude Code and
+Gemini CLI, `read-only` on Codex) and answers every `session/request_permission` itself. It always
+approves the Team Bus, the agent's connected tools and reads of its connected folders and files.
+Otherwise it approves only what a switch allows, by the kind the app gives the tool call, and
+declines the rest:
+
+```yaml
+allow:
+  web: true       # `fetch`: search the web and read web pages
+  edits: false    # `edit`: change files inside the agent's own folder, never `.claude/`, `.git/` and the like
+  commands: false # `execute`: run commands in a terminal
+```
+
+Every switch defaults to `false`, and an absent block means all off. An approval selects the app's
+one-time option, never "always". An agent allowed to edit whose declared `spawn.cwd` holds its own
+team file (`cwd: .`) runs in its managed folder instead. An operator node takes no `allow:`. An app
+that offers no ask-first mode, OpenCode among them, decides for itself, and the run records that.
+See [ADR 0037](decisions/0037-loomwatch-decides-what-agents-may-do.md).
+
 Connected skills are required: their complete copied `SKILL.md` instructions are also supplied in
 the agent's opening prompt. Preparation fails if the instructions cannot be read or exceed the
 128 KiB aggregate limit for that agent. The archive records the source, receiving harness, exact
