@@ -26,6 +26,7 @@ import { RELATION, capabilityIsCard, capabilityNodeId, freeCapabilitySlot, refus
 import { setThemeMode, useTheme } from '../lib/theme'
 import { startTour } from '../lib/tour/store'
 import { useAnnouncementQueue } from '../lib/useAnnouncementQueue'
+import { useNow } from '../lib/useNow'
 import type { AgentField } from '../lib/team-file/validation'
 import { recordedReplyText, formatElapsed, isNotebookWrite, type Attention, type Evidence, type RunPhase } from '../lib/watch/events'
 import { CanvasActionsContext, type CanvasActions } from './canvas/CanvasActionsContext'
@@ -748,9 +749,11 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   }, [activeRunId, history.records, history.sessions])
   // A finished run ends when the daemon says it did. The last recorded event can be much earlier: a
   // run stopped while it waited for you records nothing after the handover, and read "took 63ms".
+  const runningNow = live && !isTerminalRun(record?.status)
+  const now = useNow(runningNow)
   const elapsedEnd = isTerminalRun(record?.status)
     ? record?.finishedAt ?? projection.updatedAt ?? null
-    : !live ? projection.updatedAt ?? record?.finishedAt ?? null : new Date().toISOString()
+    : !live ? projection.updatedAt ?? record?.finishedAt ?? null : new Date(now).toISOString()
   const elapsed = formatElapsed(projection.startedAt ?? record?.startedAt ?? record?.createdAt ?? null, elapsedEnd)
 
   /**

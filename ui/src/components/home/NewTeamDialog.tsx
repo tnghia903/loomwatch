@@ -51,7 +51,7 @@ export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose
         const catalog = await fetchHarnessModels(harness.id)
         const model = catalog.currentModelId ?? catalog.models[0]?.id
         if (!model) { failures.push(`${harness.name} did not offer any models`); continue }
-        await saveTeamFile(path, templateTeamYaml(template, trimmed, harness, model, new Date(), teamIdForPath(path)), null)
+        await saveTeamFile(path, templateTeamYaml(template, trimmed, harness, model, undefined, teamIdForPath(path)), null)
         window.location.assign(`/?path=${encodeURIComponent(path)}`)
         return
       } catch (caught) {
