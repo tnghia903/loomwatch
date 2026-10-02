@@ -98,10 +98,11 @@ span.story-schedule { cursor: default; }
 .lw-canvas[data-depth="story"] .schedule-node .t-node { font-size: 22px; line-height: 1.15; }
 .lw-canvas[data-depth="story"] .schedule-node .t-meta { font: 400 19px/1.2 var(--font-serif); color: var(--color-ink-2); }
 
-/* Trace: the same card plus the facts an expert checks, in mono, and the full instructions. */
+/* Trace: the same card plus what the agent panel would tell (model, what it may do, what it is
+   given), in plain words, and the full instructions. */
 .lw-canvas[data-depth="trace"] .build-node .depth-trace-facts {
-  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; margin: 10px 0 0; padding-top: 8px;
-  border-top: 1px solid var(--color-hairline); font: 400 9.5px/1.4 var(--font-mono);
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; margin: 10px 0 0; padding-top: 8px;
+  border-top: 1px solid var(--color-hairline); font: 400 10.5px/1.4 var(--font-sans);
 }
 .lw-canvas[data-depth="trace"] .depth-trace-facts dt { color: var(--color-ink-3); }
 .lw-canvas[data-depth="trace"] .depth-trace-facts dd { margin: 0; color: var(--color-ink-2); overflow-wrap: anywhere; }

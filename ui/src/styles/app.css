@@ -714,6 +714,9 @@ textarea.input { padding: 6px var(--sp-3); resize: vertical; min-height: 84px; }
 .agent-context-add .link:disabled { color: var(--color-ink-3); cursor: default; }
 .agent-context-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); color: var(--color-ink-2); }
 .agent-context-notes .failed { color: var(--color-alert); }
+.agent-work-folder-row { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: var(--sp-2); align-items: start; }
+.agent-work-folder-row > svg { margin-top: 3px; color: var(--color-ink-3); }
+.agent-work-folder-row .t-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder-picker-scrim { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: var(--sp-4); background: color-mix(in srgb, var(--color-ground) 55%, transparent); }
 .folder-picker.pop { position: relative; z-index: auto; width: min(560px, 100%); max-height: min(640px, calc(100dvh - 32px)); padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-3); }
 .folder-picker h2 { margin: 0; color: var(--color-ink); }

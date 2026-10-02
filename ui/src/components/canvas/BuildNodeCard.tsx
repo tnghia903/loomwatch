@@ -7,6 +7,9 @@ import type { OutputNode } from '../../lib/runs/graph'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import type { AgentConfig, AgentStatus, CapabilityRef } from '../../lib/team-file/types'
 import { monogramForSpawnCmd } from '../../lib/harnesses'
+import { splitModelSelector } from '../../lib/models'
+import { allowedSummary } from '../../lib/team-file/allow'
+import { ownFolderReason, workFolder } from '../../lib/team-file/workFolder'
 import { StatusGlyph } from '../ui/glyphs'
 import { useCanvasActions } from './CanvasActionsContext'
 import { CardPorts } from './CardPorts'
@@ -16,9 +19,17 @@ import { depthForZoom, storyLine } from '../../lib/story/depth'
 import { markState } from '../../lib/story/mark'
 import { AgentMark } from '../ui/AgentMark'
 
-/** The names of one kind of capability an agent is wired to, for the trace depth's facts. */
-function wiredNames(agent: Pick<AgentConfig, 'capabilities'>, kind: CapabilityRef['kind']): string {
-  return (agent.capabilities ?? []).filter((capability) => capability.kind === kind).map((capability) => capability.name).join(', ')
+/** The model and its thinking effort, for the trace depth's facts: "sonnet · high effort". */
+function modelLine(agent: Pick<AgentConfig, 'model' | 'thinkingEffort'>): string {
+  const { modelId, thinkingEffort } = splitModelSelector(agent.model ?? '')
+  const effort = agent.thinkingEffort ?? thinkingEffort
+  return `${modelId || 'App default'}${effort ? ` · ${effort} effort` : ''}`
+}
+
+/** Everything connected to an agent, by name; a skill or a tool says which it is. */
+function givenLine(agent: Pick<AgentConfig, 'capabilities'>): string {
+  const named = (capability: CapabilityRef) => (capability.kind === 'knowledge' ? capability.name : `${capability.name} ${capability.kind}`)
+  return (agent.capabilities ?? []).map(named).join(', ') || 'Nothing connected'
 }
 
 function cx(...classes: Array<string | false | null | undefined>): string {
@@ -80,6 +91,9 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
   const givenNotes = runtime?.givenNotes ?? 0
   // The job the instructions describe, when they name one; a generic agent keeps the robot.
   const named = roleGlyph(`${agent.name} ${agent.role}`)
+  // A folder chosen for it, unless something connected moves it into its own (lib/team-file/workFolder.ts).
+  const folder = workFolder(agent.spawn?.cwd)
+  const chosenFolder = folder.kind === 'chosen' && ownFolderReason(agent) !== 'connected' ? folder : null
   return (
     <article
       className={cx('build-node kind-harness', runtime && 'has-run', runtime && `st-${status}`, selected && 'selected')}
@@ -139,17 +153,16 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
             </span>
           </>
         )}
-        {/* Trace depth: what an expert checks, without opening the inspector. Hidden by CSS at the
-            other depths, so it is never announced twice. */}
+        {/* Trace depth: what the agent panel would tell, without opening it (ADR 0039): its model,
+            what it may do without asking, what it is given and a folder chosen for it. The command
+            and id stay in Show YAML and the panel's header. Hidden by CSS at the other depths, so
+            it is never announced twice. */}
         {depth === 'trace' && <dl className="depth-trace-facts">
-          <dt>id</dt><dd>{agent.id}</dd>
-          <dt>model</dt><dd>{agent.model || 'app default'}</dd>
-          <dt>command</dt><dd>{[agent.spawn?.cmd, ...(agent.spawn?.args ?? [])].filter(Boolean).join(' ') || '—'}</dd>
-          <dt>folder</dt><dd>{agent.spawn?.cwd || '.'}</dd>
-          <dt>skills</dt><dd>{wiredNames(agent, 'skill') || 'none'}</dd>
-          {wiredNames(agent, 'knowledge') && <><dt>knowledge</dt><dd>{wiredNames(agent, 'knowledge')}</dd></>}
-          {wiredNames(agent, 'tool') && <><dt>tools</dt><dd>{wiredNames(agent, 'tool')}</dd></>}
-          {runtime && <><dt>events</dt><dd>{eventCount}{runtime.openCalls ? ` · ${runtime.openCalls} still open` : ''}</dd></>}
+          <dt>Model</dt><dd>{modelLine(agent)}</dd>
+          <dt>Allowed</dt><dd>{allowedSummary(agent)}</dd>
+          <dt>Given</dt><dd>{givenLine(agent)}</dd>
+          {chosenFolder && <><dt>Works in</dt><dd title={chosenFolder.path}>{chosenFolder.name}</dd></>}
+          {runtime && <><dt>Events</dt><dd>{eventCount}{runtime.openCalls ? ` · ${runtime.openCalls} still open` : ''}</dd></>}
         </dl>}
       </div>
       {data.isEntrypoint && <span className="primary-chip">Start</span>}

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Puzzle, Trash2, X } from 'lucide-react'
 import { AgentContext } from './AgentContext'
 import { AgentPermissions } from './AgentPermissions'
+import { AgentWorkFolder } from './AgentWorkFolder'
 import { Inspector, type InspectorProps } from './Inspector'
 import { SaveAsJob } from './SaveAsJob'
 import type { DetectedHarness } from '../../lib/harnesses'
@@ -32,6 +33,10 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
               onPromoteEntrypoint={props.onPromoteEntrypoint} onMemoryBriefChange={props.onMemoryBriefChange} onRemoveCapability={props.onRemoveCapability}
               teamPath={props.teamPath} onAddKnowledge={props.onAddKnowledge}
             />
+          </section>
+          <section className="build-context" aria-label="Works in">
+            <span className="build-context-head">Works in</span>
+            <AgentWorkFolder agent={node.data.agent} readOnly={readOnly} onChange={props.onCwdChange} problem={props.fieldProblems?.cwd} />
           </section>
           <section className="build-context" aria-label="Allowed without asking">
             <span className="build-context-head">Allowed without asking</span>

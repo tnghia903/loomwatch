@@ -1,5 +1,5 @@
 import { X } from 'lucide-react'
-import { createElement, useState } from 'react'
+import { createElement } from 'react'
 
 import type { HarnessModel } from '../../lib/harnesses'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
@@ -10,6 +10,7 @@ import type { AgentField, AgentFieldProblems } from '../../lib/team-file/validat
 import { StatusGlyph } from '../ui/glyphs'
 import { AgentContext } from './AgentContext'
 import { AgentPermissions } from './AgentPermissions'
+import { AgentWorkFolder } from './AgentWorkFolder'
 import { roleGlyph } from './roleGlyph'
 
 export interface InspectorProps {
@@ -53,13 +54,13 @@ export interface InspectorProps {
   pipeline?: boolean
 }
 
-// UX_REDESIGN §5.4: three zones in the order the operator thinks — IDENTITY (what stands
-// between a drop and a valid save), CONTEXT (what the agent is given; ADR 0034 replaced
-// BEHAVIOUR with it), PROCESS (collapsed).
+// UX_REDESIGN §5.4: zones in the order the operator thinks — IDENTITY (what stands between a
+// drop and a valid save), CONTEXT (what the agent is given; ADR 0034 replaced BEHAVIOUR with
+// it), WORKS IN and ALLOWED WITHOUT ASKING (where it works and what it may do there; ADR 0039
+// replaced PROCESS, whose command, arguments and environment stay in Show YAML).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
 export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false }: InspectorProps) {
   const { agent, runtime } = node.data
-  const [processOpen, setProcessOpen] = useState(false)
   const status = runtime?.status ?? agent.status ?? 'idle'
   const parsedSelector = splitModelSelector(agent.model ?? '')
   const selectableModelsById = new Map<string, HarnessModel>(modelOptions.map((model) => [model.id, model]))
@@ -171,38 +172,21 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
       </div>
 
       <div className="zone">
-        <div className="zone-head t-micro">Allowed without asking</div>
-        <AgentPermissions agent={agent} readOnly={readOnly} onChange={onAllowChange} />
+        <div className="zone-head t-micro">Works in</div>
+        <AgentWorkFolder agent={agent} readOnly={readOnly} onChange={onCwdChange} problem={fieldProblems?.cwd} />
+        {/* docs/TEAM_MEMORY.md channel 2: `deliverAs` only decides anything for an agent with a
+            Brief and nothing connected — with either missing, the folder is already settled. */}
+        {onDeliverAsChange && briefCount > 0 && !connected && (
+          <button type="button" className={`check ${nativeFile ? '' : 'on'}`} disabled={readOnly} onClick={() => onDeliverAsChange(nativeFile ? 'packet-only' : 'native-file')} aria-pressed={!nativeFile}>
+            <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
+            <span className="txt"><b className="t-body">Work in this folder</b><span className="t-meta">{nativeFile ? 'Off: it works in its own folder, where the Brief is kept in its AI app’s memory file for the whole session.' : 'On: it works in the folder above. In a long session its AI app may summarise the Brief away.'}</span></span>
+          </button>
+        )}
       </div>
 
       <div className="zone">
-        <button type="button" className="zone-head toggle t-micro" onClick={() => setProcessOpen((open) => !open)} aria-expanded={processOpen}>
-          <span aria-hidden="true">{processOpen ? '▾' : '▸'}</span> Process
-        </button>
-        {processOpen && (
-          <>
-            <dl className="proc-list t-mono-sm">
-              <dt>cmd</dt><dd>{agent.spawn?.cmd ?? ''}</dd>
-              <dt>args</dt><dd>{agent.spawn?.args?.join(' ') || '—'}</dd>
-              <dt>env</dt><dd>{Object.keys(agent.spawn?.env ?? {}).length > 0 ? Object.keys(agent.spawn?.env ?? {}).join(', ') : '—'}</dd>
-            </dl>
-            <div className={`field ${zoneClass('cwd')}`}>
-              <label className="t-meta" htmlFor="insp-cwd">Working folder</label>
-              <input id="insp-cwd" className="input mono" data-agent-field="cwd" value={agent.spawn?.cwd ?? '.'} readOnly={readOnly} onChange={(event) => onCwdChange(event.target.value)} onBlur={() => onFieldBlur('cwd')} />
-              {/* ADR 0012 decision 4 / ADR 0029: anything connected moves the agent into its own
-                  workspace folder, so the declared one is not where it works. */}
-              <span className="hint t-meta">{hint('cwd', connected ? 'Not used while something is connected: the agent works in its own folder, which LoomWatch prepares.' : 'Relative to the team file')}</span>
-            </div>
-            {/* docs/TEAM_MEMORY.md channel 2: `deliverAs` only decides anything for an agent with a
-                Brief and nothing connected — with either missing, the folder is already settled. */}
-            {onDeliverAsChange && briefCount > 0 && !connected && (
-              <button type="button" className={`check ${nativeFile ? '' : 'on'}`} disabled={readOnly} onClick={() => onDeliverAsChange(nativeFile ? 'packet-only' : 'native-file')} aria-pressed={!nativeFile}>
-                <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
-                <span className="txt"><b className="t-body">Work in this folder</b><span className="t-meta">{nativeFile ? 'Off: it works in its own folder, where the Brief is kept in its AI app’s memory file for the whole session.' : 'On: it works in the folder above. In a long session its AI app may summarise the Brief away.'}</span></span>
-              </button>
-            )}
-          </>
-        )}
+        <div className="zone-head t-micro">Allowed without asking</div>
+        <AgentPermissions agent={agent} readOnly={readOnly} onChange={onAllowChange} />
       </div>
 
       {!readOnly && (
