@@ -1,6 +1,7 @@
 import { ReactFlowProvider } from '@xyflow/react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 
+import { Feedback } from './components/feedback/Feedback'
 import { GettingStarted } from './components/tour/GettingStarted'
 import { Workspace } from './components/Workspace'
 import { type DetectedHarness, fetchHarnesses, isHarnessRunnable } from './lib/harnesses'
@@ -69,6 +70,7 @@ function Editor({ initialRunId, initialHistoryOpen }: { initialRunId: string | n
     <ReactFlowProvider>
       {/* Above Home and the workspace alike: the guide carries on across the page load a new team causes. */}
       <GettingStarted readyApps={readyApps} appsLoading={loading} />
+      <Feedback harnesses={harnesses} />
       <Workspace
         harnesses={harnesses}
         harnessSearchPath={searchedPath}

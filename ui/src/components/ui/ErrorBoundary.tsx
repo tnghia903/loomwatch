@@ -1,30 +1,34 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 
+import { describeSystem, fetchAbout, issueUrl, type AboutLoomWatch } from '../../lib/feedback/report'
 import { ChipDot } from './glyphs'
 
 interface State {
   error: Error | null
+  /** Which LoomWatch crashed, for the report link; `null` until the server answers. */
+  about: AboutLoomWatch | null
 }
 
 /**
  * The last line of defence: a render error anywhere below used to unmount the whole app and leave
  * a blank page with no way out but the address bar. This says what happened in plain words and
- * offers the two ways back. Saved teams and runs are on disk and in the archive, so neither
- * button can lose them.
+ * offers the two ways back, plus a prefilled report. Saved teams and runs are on disk and in the
+ * archive, so no button can lose them.
  */
 export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
-  state: State = { error: null }
+  state: State = { error: null, about: null }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { error }
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('LoomWatch hit an unexpected error', error, info.componentStack)
+    fetchAbout().then((about) => this.setState({ about }), () => { /* The report says the server did not answer. */ })
   }
 
   render() {
-    const { error } = this.state
+    const { error, about } = this.state
     if (!error) return this.props.children
     return (
       <div className="lw-modal-scrim">
@@ -45,6 +49,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
           <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
             <button type="button" className="btn btn-primary" onClick={() => window.location.assign('/')}>Back to your teams</button>
             <button type="button" className="btn" onClick={() => window.location.reload()}>Reload</button>
+            {/* The app below is gone, so this is a plain link rather than the feedback dialog. */}
+            <a className="btn" style={{ textDecoration: 'none' }} href={issueUrl('problem', describeSystem(about, null, { error: error.message }), `Error: ${error.message}`)} target="_blank" rel="noreferrer">Report this problem</a>
           </div>
         </div>
       </div>

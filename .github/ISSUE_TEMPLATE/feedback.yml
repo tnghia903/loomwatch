@@ -1,0 +1,27 @@
+# Opened by "Send feedback → An idea or suggestion" in LoomWatch (ui/src/lib/feedback/report.ts),
+# which fills `details` from the URL. Keep that id: the UI's tests read this file to check it.
+name: An idea or suggestion
+description: Something that would make LoomWatch better, easier, or more useful to you.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like LoomWatch to do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What were you trying to get done?
+      description: The job behind the idea helps us find the best way to do it.
+    validations:
+      required: false
+  - type: textarea
+    id: details
+    attributes:
+      label: Details from LoomWatch
+      description: Filled in by LoomWatch. It names your LoomWatch version, system, browser and AI apps, nothing from your teams or runs.
+      render: text
+    validations:
+      required: false
