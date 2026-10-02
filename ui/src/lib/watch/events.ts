@@ -455,6 +455,12 @@ export function toolDisplayName(name: string | null, title: string): string {
  */
 export type PromptSectionKind =
   | 'role'
+  /**
+   * `## Your place in the team` — who comes before the agent, who reads its work after it, and
+   * whether its reply is the team's answer (ADR 0034). Added here and in `memory::PromptSectionKind`
+   * in the same change, which is the rule.
+   */
+  | 'team'
   | 'capabilities'
   | 'required_skill'
   | 'memory'

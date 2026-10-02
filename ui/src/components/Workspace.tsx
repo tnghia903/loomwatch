@@ -18,6 +18,7 @@ import { snapToGrid } from '../lib/grid'
 import { reviewProblems, yamlLineForPath, type ReviewProblem } from '../lib/team-file/problems'
 import { appProblemsFor, appProblemSummary, useAppChecks } from '../lib/team-file/appChecks'
 import { pipelineTerminal } from '../lib/team-file/pipelineOrder'
+import { agentPlace } from '../lib/team-file/agentPlace'
 import { unifiedYamlDiff } from '../lib/team-file/diff'
 import { useTeamDocument } from '../lib/team-file/useTeamDocument'
 import { organizePipeline, type Positions } from '../lib/composer-layout/organize'
@@ -2080,11 +2081,19 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           <WorkspaceInspector
             startAdvanced={forcedInspectorField?.agentId === inspectedNode.id} fixHint={forcedInspectorField?.agentId === inspectedNode.id ? forcedInspectorField.hint : undefined} onDismissFixHint={() => setForcedInspectorField(null)}
             harnesses={harnesses} harnessId={inspectedHarnessId ?? undefined} onHarnessChange={(id: string) => { const harness = harnesses.find(item => item.id === id); if (harness) doc.updateAgentSpawn(inspectedNode.id, { env: {}, cwd: '.', ...inspectedNode.data.agent.spawn, ...harness.spawn }) }}
-            node={inspectedNode} isEntrypoint={inspectedNode.id === doc.entrypoint} isResponder={inspectedNode.id === responderFromDoc} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} pipeline={doc.mode === 'pipeline'}
+            node={inspectedNode} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} pipeline={doc.mode === 'pipeline'}
+            place={agentPlace({ agentId: inspectedNode.id, nodes: doc.nodes.map((node) => ({ id: node.id, name: node.data.agent.name, kind: node.data.agent.kind })), edges: doc.edges.map((edge) => ({ from: edge.source, to: edge.target })), steps: doc.pipelineSteps, entrypoint: doc.entrypoint, responder: responderFromDoc, pipeline: doc.mode === 'pipeline' })}
+            inheritedMemory={doc.memoryInherits.filter((entry) => !entry.appliesTo || entry.appliesTo.includes(inspectedNode.id)).map((entry) => entry.team ? `${entry.team} · memory` : entry.pack ?? '')}
+            onRemoveCapability={(removed) => {
+              if (!editable) return
+              const remaining = (inspectedNode.data.agent.capabilities ?? []).filter((capability) => !(capability.kind === removed.kind && capability.name === removed.name))
+              doc.setAgentCapabilities(inspectedNode.id, remaining)
+              setStatusAnnouncement(`${removed.name} was disconnected from ${inspectedNode.data.agent.name}. Save the team to keep this change.`)
+            }}
             modelOptions={modelOptionsForAgent(inspectedNode.data.agent, doc.nodes.map((node) => node.data.agent), harnesses, modelCatalog.models)} defaultThinkingEffort={modelCatalog.defaultThinkingEffort} modelOptionsLoading={modelCatalog.loading} modelOptionsError={modelCatalog.error} onRetryModelOptions={modelCatalog.retry}
             onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)}
             onCwdChange={(value) => doc.updateAgentCwd(inspectedNode.id, value)}
-            onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onPromoteResponder={() => doc.promoteResponder(inspectedNode.id)} onDelete={() => requestNodeDelete([inspectedNode.id])}
+            onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onDelete={() => requestNodeDelete([inspectedNode.id])}
             briefCount={memory?.entries.length ?? 0} teamDeliverAs={memory?.deliverAs}
             onMemoryBriefChange={(reads) => doc.updateAgentMemory(inspectedNode.id, 'brief', reads ? undefined : false)}
             onDeliverAsChange={(deliverAs) => doc.updateAgentMemory(inspectedNode.id, 'deliverAs', deliverAs === (memory?.deliverAs ?? 'native-file') ? undefined : deliverAs)}

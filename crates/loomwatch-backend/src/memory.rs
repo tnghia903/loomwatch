@@ -404,6 +404,10 @@ pub struct PromptSection {
 pub enum PromptSectionKind {
     /// `## Your assigned role`.
     Role,
+    /// `## Your place in the team` — who comes before this agent, who reads its work after it, and
+    /// whether its reply is the team's answer (ADR 0034). Absent for a team of one. Added here and
+    /// in `ui/src/lib/watch/events.ts` in one change.
+    Team,
     /// `## Capabilities wired for you`.
     Capabilities,
     /// One required skill, loaded before the task starts.
@@ -525,6 +529,7 @@ impl ComposedPrompt {
                 !matches!(
                     section.kind,
                     PromptSectionKind::Role
+                        | PromptSectionKind::Team
                         | PromptSectionKind::Capabilities
                         | PromptSectionKind::RequiredSkill
                         | PromptSectionKind::SkillTranslation
@@ -576,7 +581,20 @@ impl ComposedPrompt {
             .sections
             .iter()
             .position(|section| section.kind == PromptSectionKind::Capabilities)
-            .map_or(self.sections.len().min(1), |index| index + 1);
+            .map_or_else(
+                || {
+                    self.sections
+                        .iter()
+                        .take_while(|section| {
+                            matches!(
+                                section.kind,
+                                PromptSectionKind::Role | PromptSectionKind::Team
+                            )
+                        })
+                        .count()
+                },
+                |index| index + 1,
+            );
         let additions = skills
             .iter()
             .flat_map(|skill| {

@@ -1009,12 +1009,18 @@ impl TeamBus {
                 .await
                 .map_err(|error| anyhow::anyhow!("{error}"))?;
         }
-        let composed = crate::compose_for(
-            agent,
-            &packet,
-            &crate::NodeTask::goal(prompt),
-            workspace.as_ref(),
-        );
+        // The path ends with this helper; the agent before it is the one that brought it in.
+        let caller = context
+            .path
+            .iter()
+            .rev()
+            .find(|id| **id != agent.id)
+            .map(String::as_str);
+        let task = crate::NodeTask {
+            place: crate::orientation::for_helper(&self.state.team, agent, caller),
+            ..crate::NodeTask::goal(prompt)
+        };
+        let composed = crate::compose_for(agent, &packet, &task, workspace.as_ref());
         let connection = self.connection_with_context(&agent.id, context).await?;
         let process = AcpProcess::spawn(&spec)
             .with_context(|| format!("failed to spawn ACP harness for agent {}", agent.id))?;

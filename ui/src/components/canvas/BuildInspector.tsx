@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Puzzle, Trash2, X } from 'lucide-react'
+import { AgentContext } from './AgentContext'
 import { Inspector, type InspectorProps } from './Inspector'
 import { SaveAsJob } from './SaveAsJob'
 import type { DetectedHarness } from '../../lib/harnesses'
@@ -23,6 +24,13 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
         ? <p>The team pauses here and waits for you to approve the work or ask for changes.</p>
         : <>
           <label>AI app<select value={harnessId ?? ''} disabled={readOnly} onChange={e => onHarnessChange?.(e.target.value)}><option value="" disabled>Choose an app</option>{harnesses.map(h => <option key={h.id} value={h.id} disabled={h.acpAvailable === false}>{h.name}</option>)}</select></label>
+          <section className="build-context" aria-label="Context">
+            <span className="build-context-head">Context</span>
+            <AgentContext
+              agent={node.data.agent} place={props.place} briefCount={props.briefCount} inheritedMemory={props.inheritedMemory} readOnly={readOnly}
+              onPromoteEntrypoint={props.onPromoteEntrypoint} onMemoryBriefChange={props.onMemoryBriefChange} onRemoveCapability={props.onRemoveCapability}
+            />
+          </section>
           <p><Puzzle size={13} />Skills you connect work with any AI app.</p>
           <button className="btn" onClick={() => setAdvanced(true)}>Model and more settings</button>
           <SaveAsJob key={node.id} agent={node.data.agent} appId={harnessId} />

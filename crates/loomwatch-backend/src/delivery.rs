@@ -957,6 +957,40 @@ mod tests {
             "the record names env vars, never their values"
         );
 
+        // With a place in the team (ADR 0034), it stays directly under the role, and knowledge and
+        // tools still follow the capabilities list — the text is still exactly the sections.
+        let placed = crate::compose_prompt(
+            &wired,
+            &crate::memory::ContextPacket::default(),
+            &crate::NodeTask {
+                place: Some("You are Research, step 1 of 2.".to_owned()),
+                ..crate::NodeTask::goal("Research the market")
+            },
+        )
+        .with_delivery(&delivery, true);
+        assert_eq!(
+            placed
+                .sections
+                .iter()
+                .map(|section| section.kind)
+                .collect::<Vec<_>>(),
+            [
+                Kind::Role,
+                Kind::Team,
+                Kind::Capabilities,
+                Kind::Knowledge,
+                Kind::Tool,
+                Kind::Task
+            ]
+        );
+        let joined = placed
+            .sections
+            .iter()
+            .map(|section| format!("{}\n{}", section.heading, section.text))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        assert_eq!(placed.text, joined);
+
         // Nothing wired, nothing changed.
         let plain = agent("claude-agent-acp", &[]);
         let before = crate::compose_prompt(
