@@ -230,8 +230,9 @@ enum Scanned {
     Unscheduled,
 }
 
-/// Every `*.yaml` / `*.yml` below `teams_root` (hidden directories skipped, directory
-/// symlinks not followed) with what its `schedule` block says.
+/// Every `*.yaml` / `*.yml` below `teams_root` (hidden directories and a team's own
+/// `<team>.brief/` and `<team>.files/` skipped, directory symlinks not followed) with what its
+/// `schedule` block says.
 fn scan(teams_root: &Path) -> Vec<(String, Scanned)> {
     let mut directories = vec![teams_root.to_path_buf()];
     let mut found = Vec::new();
@@ -252,7 +253,9 @@ fn scan(teams_root: &Path) -> Vec<(String, Scanned)> {
                 continue;
             }
             if file_type.is_dir() {
-                directories.push(path);
+                if !crate::api::is_team_sidecar_folder(&path) {
+                    directories.push(path);
+                }
                 continue;
             }
             let is_team = path
@@ -1032,6 +1035,37 @@ mod tests {
         let tomorrow = collect_due(&mut entries, utc("2026-09-12T00:00:01Z"), |_| false);
         assert_eq!(tomorrow.plans.len(), 3, "{tomorrow:?}");
         assert!(tomorrow.skipped.is_empty());
+    }
+
+    /// A routine's team file added to another team as knowledge, or kept in its Brief, is a copy:
+    /// scanned, the routine would fire twice. A folder that only happens to end in `.files` has no
+    /// team file beside it and is still scanned.
+    #[test]
+    fn scan_leaves_out_the_folders_a_team_keeps_beside_it() {
+        let dir = TeamsDir::new();
+        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let routine = scheduled_team_yaml(&harness, DAILY);
+        fs::write(dir.0.join("routine.yaml"), &routine).unwrap();
+        let added = crate::chosen_knowledge::store_file(
+            &dir.0.join("routine.yaml"),
+            "copy.yaml",
+            routine.as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(added.path, "routine.files/copy.yaml");
+        // An upper-case extension is a team too, and its folders are its own.
+        fs::create_dir_all(dir.0.join("nested/deep.brief")).unwrap();
+        fs::write(dir.0.join("nested/deep.YAML"), &routine).unwrap();
+        fs::write(dir.0.join("nested/deep.brief/copy.yaml"), &routine).unwrap();
+        fs::create_dir_all(dir.0.join("archive.files")).unwrap();
+        fs::write(dir.0.join("archive.files/old.yaml"), &routine).unwrap();
+
+        let scanned = scan(&dir.0);
+        let keys: Vec<&str> = scanned.iter().map(|(key, _)| key.as_str()).collect();
+        assert_eq!(
+            keys,
+            ["archive.files/old.yaml", "nested/deep.YAML", "routine.yaml"]
+        );
     }
 
     #[test]

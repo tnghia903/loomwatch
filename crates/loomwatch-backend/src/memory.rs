@@ -1111,7 +1111,11 @@ impl TeamIndex {
                 if meta.is_dir() {
                     // A deleted team is not one to inherit: reading it would bring back memory
                     // the operator removed, and a new team reusing its id would read as a clash.
-                    if entry.file_name() != crate::api::TRASH_DIR {
+                    // A team file added to another team as knowledge is that team's material,
+                    // and indexed it would clash with the team it is a copy of.
+                    if entry.file_name() != crate::api::TRASH_DIR
+                        && !crate::api::is_team_sidecar_folder(&path)
+                    {
                         stack.push((path, depth + 1));
                     }
                     continue;
@@ -4521,6 +4525,45 @@ mod tests {
                 .contains("is not a team file under the teams root"),
             "{}",
             error.message
+        );
+    }
+
+    /// A copy of a team file added to another team as knowledge sits in `<team>.files/` with the
+    /// original's id. The index does not look there, so the original stays the one team with that
+    /// id instead of resolving to two files.
+    #[test]
+    fn a_team_file_added_as_knowledge_does_not_clash_with_the_team_it_copies() {
+        let directory = TempDirectory::new();
+        let root = directory.0.join("teams");
+        fs::create_dir_all(&root).expect("create root");
+        let origin = write_team_with_brief(&root, "research-team", "We ship on ACP v1 only.", &[]);
+        let borrower =
+            write_team_with_brief(&root, "daily-news", "British spelling.", &["research-team"]);
+        let added = crate::chosen_knowledge::store_file(
+            &borrower,
+            "research-team.yaml",
+            &fs::read(&origin).expect("read origin"),
+        )
+        .expect("add the origin's team file as knowledge");
+        assert_eq!(added.path, "team.files/research-team.yaml");
+        let config = crate::config::TeamConfig::load(&borrower).expect("borrower loads");
+
+        let memory = TeamMemory::load(
+            &MemoryRoots {
+                team_dir: borrower.parent().expect("team directory"),
+                teams_root: &root,
+            },
+            &borrower,
+            config.memory.as_ref(),
+        )
+        .expect("the inherited id names one team");
+        assert_eq!(
+            memory
+                .inherited
+                .iter()
+                .map(|entry| entry.title.as_str())
+                .collect::<Vec<_>>(),
+            ["research-team constraints"]
         );
     }
 
