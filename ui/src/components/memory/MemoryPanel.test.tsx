@@ -147,4 +147,20 @@ describe('MemoryPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save team' }))
     expect(onSaveTeam).toHaveBeenCalledOnce()
   })
+
+  it('says nothing about inherited entries when the team inherits none', () => {
+    render(panel({ onExportPack: vi.fn() }))
+    expect(screen.queryByText(/inherited entry/)).not.toBeInTheDocument()
+    expect(screen.getByText('Share with another team')).toBeInTheDocument()
+  })
+
+  it('reports where an export landed, and an export failure with no draft open', async () => {
+    const onExportPack = vi.fn().mockRejectedValueOnce(new Error('teams root is read-only')).mockResolvedValueOnce('research-team.memory')
+    render(panel({ onExportPack }))
+    fireEvent.click(screen.getByRole('button', { name: 'Export memory' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('teams root is read-only')
+    fireEvent.click(screen.getByRole('button', { name: 'Export memory' }))
+    expect(await screen.findByText('research-team.memory')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
 })
