@@ -1226,8 +1226,8 @@ pub struct DeletedTeam {
     pub name: Option<String>,
     /// The folder the team now lives in, relative to the teams root.
     pub trash: String,
-    /// File names inside `trash`: the team's own `<team>.brief` folder and `<team>.layout.json`
-    /// sidecar when it had them, then the YAML.
+    /// File names inside `trash`: the team's own `<team>.brief` folder, `<team>.layout.json`
+    /// sidecar and `<team>.files` folder when it had them, then the YAML.
     pub moved: Vec<String>,
     /// RFC 3339.
     pub deleted_at: String,
@@ -1370,8 +1370,9 @@ fn teams_inheriting(teams_root: &Path, team: &Path, relative: &str) -> io::Resul
         .collect())
 }
 
-/// Move the team's own `<team>.brief/` folder, its `<team>.layout.json` sidecar and its YAML into
-/// a new folder under `.trash/`, the YAML last.
+/// Move the team's own `<team>.brief/` folder, its `<team>.layout.json` sidecar, the
+/// `<team>.files/` folder its added files were copied into and its YAML into a new folder under
+/// `.trash/`, the YAML last.
 ///
 /// A rename never copies, so nothing is lost if this stops part-way, and a failure puts back what
 /// already moved: the team leaves the list only once its YAML has gone, which is the last step.
@@ -1398,8 +1399,8 @@ fn move_team_to_trash(
         Err(error) => return Err(error),
     }
 
-    // `trip.yaml` and `trip.yml` side by side share `trip.brief/` and `trip.layout.json`; those
-    // stay for the team that remains.
+    // `trip.yaml` and `trip.yml` side by side share `trip.brief/`, `trip.layout.json` and
+    // `trip.files/`; those stay for the team that remains.
     let shares_sidecars = ["yaml", "yml"]
         .iter()
         .map(|extension| team.with_extension(extension))
@@ -1407,9 +1408,13 @@ fn move_team_to_trash(
     let mut sources = Vec::new();
     if !shares_sidecars {
         sources.extend(
-            [team.with_extension("brief"), layout_path(team)]
-                .into_iter()
-                .filter(|sidecar| fs::symlink_metadata(sidecar).is_ok()),
+            [
+                team.with_extension("brief"),
+                layout_path(team),
+                crate::chosen_knowledge::files_folder(team),
+            ]
+            .into_iter()
+            .filter(|sidecar| fs::symlink_metadata(sidecar).is_ok()),
         );
     }
     sources.push(team.to_path_buf());
@@ -4185,6 +4190,74 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         assert_eq!(body["trashed"], json!(["trip.yaml"]));
     }
 
+    /// "Add file…" copies a file into `<team>.files/` beside the team (ADR 0035). That folder is
+    /// the team's own, so it goes to the trash with the rest: left behind, a new team of the same
+    /// name would be handed the old team's files.
+    #[tokio::test]
+    async fn delete_moves_the_files_added_to_the_team_into_the_trash() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        fs::write(root.0.join("trip.layout.json"), "{\"version\":2}").expect("write layout");
+        fs::create_dir(root.0.join("trip.brief")).expect("create Brief folder");
+        fs::write(root.0.join("trip.brief/style.md"), "# Style\n").expect("write Brief");
+        let added = crate::chosen_knowledge::store_file(
+            &root.0.join("trip.yaml"),
+            "itinerary.md",
+            b"# Day 1\nKyoto\n",
+        )
+        .expect("add a file to the team");
+        assert_eq!(added.path, "trip.files/itinerary.md");
+        fs::write(root.0.join("other.yaml"), VALID_TEAM).expect("write other team");
+        crate::chosen_knowledge::store_file(
+            &root.0.join("other.yaml"),
+            "itinerary.md",
+            b"# Elsewhere\n",
+        )
+        .expect("add a file to the other team");
+
+        let response = delete_request(test_router(&root.0), "trip.yaml").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let deleted: DeletedTeam =
+            serde_json::from_value(response_json(response).await).expect("deleted team");
+        assert_eq!(
+            deleted.moved,
+            ["trip.brief", "trip.layout.json", "trip.files", "trip.yaml"]
+        );
+
+        let folder = root.0.join(&deleted.trash);
+        assert_eq!(
+            fs::read(folder.join("trip.files/itinerary.md")).expect("trashed added file"),
+            b"# Day 1\nKyoto\n"
+        );
+        assert!(
+            fs::symlink_metadata(root.0.join("trip.files")).is_err(),
+            "trip.files is still beside the teams"
+        );
+        // The rest of the team moves as it did before, unchanged.
+        assert_eq!(
+            fs::read_to_string(folder.join("trip.yaml")).expect("trashed team"),
+            TRIP_TEAM
+        );
+        assert_eq!(
+            fs::read_to_string(folder.join("trip.layout.json")).expect("trashed layout"),
+            "{\"version\":2}"
+        );
+        assert_eq!(
+            fs::read_to_string(folder.join("trip.brief/style.md")).expect("trashed Brief"),
+            "# Style\n"
+        );
+        let manifest: DeletedTeam =
+            serde_json::from_slice(&fs::read(folder.join(TRASH_MANIFEST)).expect("read manifest"))
+                .expect("manifest JSON");
+        assert_eq!(manifest, deleted);
+        // Another team's added files are its own.
+        assert!(root.0.join("other.yaml").is_file());
+        assert_eq!(
+            fs::read(root.0.join("other.files/itinerary.md")).expect("other team's file"),
+            b"# Elsewhere\n"
+        );
+    }
+
     #[tokio::test]
     async fn delete_is_confined_to_the_teams_the_list_shows() {
         let directory = TempDirectory::new();
@@ -4340,8 +4413,8 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         assert_eq!(response.status(), StatusCode::OK);
     }
 
-    /// `trip.yaml` and `trip.yml` resolve to the same `trip.layout.json` and `trip.brief/`, so
-    /// deleting one leaves them for the other.
+    /// `trip.yaml` and `trip.yml` resolve to the same `trip.layout.json`, `trip.brief/` and
+    /// `trip.files/`, so deleting one leaves them for the other.
     #[tokio::test]
     async fn delete_leaves_sidecars_a_same_named_team_still_uses() {
         let root = TempDirectory::new();
@@ -4349,6 +4422,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         fs::write(root.0.join("trip.yml"), VALID_TEAM).expect("write sibling");
         fs::write(root.0.join("trip.layout.json"), "{}").expect("write layout");
         fs::create_dir(root.0.join("trip.brief")).expect("create Brief folder");
+        fs::create_dir(root.0.join("trip.files")).expect("create added-files folder");
 
         let response = delete_request(test_router(&root.0), "trip.yaml").await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -4358,6 +4432,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         assert!(root.0.join("trip.yml").is_file());
         assert!(root.0.join("trip.layout.json").is_file());
         assert!(root.0.join("trip.brief").is_dir());
+        assert!(root.0.join("trip.files").is_dir());
     }
 
     #[test]
