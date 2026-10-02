@@ -17,8 +17,8 @@ const node: AgentNode = {
 
 function renderInspectorProps(overrides: Partial<InspectorProps> = {}): InspectorProps {
   return {
-    node, isEntrypoint: false, isResponder: false, onRename: vi.fn(), onModelChange: vi.fn(), onCwdChange: vi.fn(),
-    onAllowRecruitingChange: vi.fn(), onPromoteEntrypoint: vi.fn(), onPromoteResponder: vi.fn(),
+    node, onRename: vi.fn(), onModelChange: vi.fn(), onCwdChange: vi.fn(),
+    onAllowRecruitingChange: vi.fn(), onPromoteEntrypoint: vi.fn(), onRemoveCapability: vi.fn(),
     onDelete: vi.fn(), onClose: vi.fn(), onFieldBlur: vi.fn(),
     onMemoryBriefChange: vi.fn(), onDeliverAsChange: vi.fn(),
     modelOptions: [
@@ -108,32 +108,85 @@ describe('Inspector model picker', () => {
   })
 })
 
-describe('Inspector responder control', () => {
-  it('lets a pipeline agent become the canonical responder', () => {
-    const props = renderInspector({ pipeline: true })
-    fireEvent.click(screen.getByRole('button', { name: /Produces the team output/ }))
-    expect(props.onPromoteResponder).toHaveBeenCalledOnce()
+// ADR 0034: CONTEXT replaced BEHAVIOUR. It says what the agent is given — its place in the team,
+// the Brief, and what is connected — rather than offering switches that repeated the canvas or did
+// nothing in team mode.
+describe('Inspector context', () => {
+  const withAgent = (agent: Partial<AgentNode['data']['agent']>): AgentNode => ({
+    ...node, data: { ...node.data, agent: { ...node.data.agent, ...agent } },
+  })
+  const zone = (container: HTMLElement) => [...container.querySelectorAll('.zone')].find((candidate) => candidate.querySelector('.zone-head')?.textContent === 'Context')!
+
+  it('replaces the old behaviour switches', () => {
+    const { container } = render(<Inspector {...renderInspectorProps({ pipeline: true })} />)
+    expect(zone(container)).toBeTruthy()
+    expect(screen.queryByText('Behaviour')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Produces the team output/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Starts the team/ })).not.toBeInTheDocument()
   })
 
-  it('keeps a different responder unavailable in self-organizing team mode', () => {
-    renderInspector({ pipeline: false, isEntrypoint: false, isResponder: false })
-    const control = screen.getByRole('button', { name: /Produces the team output/ })
-    expect(control).toBeDisabled()
-    expect(control).toHaveAttribute('title', expect.stringContaining('Create a pipeline'))
+  it('states the place the agent is told about, and offers to make it the start only where it can be', () => {
+    const place = { summary: 'Step 2 of 3 · after Researcher · hands its work to Writer.', final: false, canStart: false }
+    const { rerender } = render(<Inspector {...renderInspectorProps({ place })} />)
+    expect(screen.getByText(place.summary)).toBeInTheDocument()
+    expect(screen.getByText('The agent is told this at the start of every run.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Make this the starting agent' })).not.toBeInTheDocument()
+
+    const props = renderInspectorProps({ place: { ...place, canStart: true } })
+    rerender(<Inspector {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Make this the starting agent' }))
+    expect(props.onPromoteEntrypoint).toHaveBeenCalledOnce()
+  })
+
+  // `allowRecruiting` is read only in pipeline mode (team_bus::refuse_by_mode); in team mode the
+  // switch changed nothing, so it is not offered there.
+  it('offers the helpers switch only where it does something', () => {
+    renderInspector({ pipeline: false })
+    expect(screen.queryByRole('button', { name: /Can bring in helpers/ })).not.toBeInTheDocument()
+    cleanup()
+    const props = renderInspector({ pipeline: true })
+    const toggle = screen.getByRole('button', { name: /Can bring in helpers/ })
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(toggle)
+    expect(props.onAllowRecruitingChange).toHaveBeenCalledWith(false)
+  })
+
+  it('lists what is connected and disconnects one by kind and name', () => {
+    const props = renderInspector({
+      node: withAgent({ capabilities: [{ kind: 'skill', name: 'claude-design' }, { kind: 'knowledge', name: 'loomwatch project' }] }),
+      inheritedMemory: ['research · memory'],
+    })
+    const list = screen.getByRole('list', { name: 'Connected to this agent' })
+    expect(list).toHaveTextContent('claude-design')
+    expect(list).toHaveTextContent('Knowledge · supplied as source material')
+    expect(list).toHaveTextContent('research · memory')
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect loomwatch project' }))
+    expect(props.onRemoveCapability).toHaveBeenCalledWith({ kind: 'knowledge', name: 'loomwatch project' })
+  })
+
+  it('says how to connect something when nothing is', () => {
+    renderInspector()
+    expect(screen.getByText(/Nothing connected\. Drag a skill, knowledge source or tool/)).toBeInTheDocument()
+  })
+
+  it('never offers a disconnect in read-only mode', () => {
+    renderInspector({ readOnly: true, node: withAgent({ capabilities: [{ kind: 'tool', name: 'Agent Memory' }] }) })
+    expect(screen.queryByRole('button', { name: 'Disconnect Agent Memory' })).not.toBeInTheDocument()
   })
 })
 
-// docs/TEAM_MEMORY.md §5: the two per-agent memory keys. Until this zone existed only the YAML
-// could set them, and the composer chip could promise a Brief the Inspector could not scope.
+// docs/TEAM_MEMORY.md §5: the two per-agent memory keys.
 describe('Inspector memory toggles', () => {
   const withMemory = (memory: AgentNode['data']['agent']['memory']): AgentNode => ({
     ...node, data: { ...node.data, agent: { ...node.data.agent, memory } },
   })
+  const openProcess = () => fireEvent.click(screen.getByRole('button', { name: /Process/ }))
 
   it('clears the key rather than writing the default when an agent is put back on the brief', () => {
     const props = renderInspector({ node: withMemory({ brief: false }), briefCount: 2 })
-    const toggle = screen.getByRole('button', { name: /Reads the team Brief/ })
+    const toggle = screen.getByRole('button', { name: /Team Brief/ })
     expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    expect(toggle).toHaveTextContent('Not supplied — 2 entries left out')
 
     fireEvent.click(toggle)
 
@@ -144,50 +197,55 @@ describe('Inspector memory toggles', () => {
 
   it('opts one agent out, and says how many entries it will stop being supplied', () => {
     const props = renderInspector({ briefCount: 2 })
-    const toggle = screen.getByRole('button', { name: /Reads the team Brief/ })
+    const toggle = screen.getByRole('button', { name: /Team Brief/ })
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
-    expect(toggle).toHaveTextContent('Supplied 2 entries at the start of every session')
+    expect(toggle).toHaveTextContent('2 entries supplied at the start of every session')
 
     fireEvent.click(toggle)
     expect(props.onMemoryBriefChange).toHaveBeenCalledWith(false)
   })
 
-  it('says what packet-only costs instead of leaving deliverAs unexplained', () => {
-    const props = renderInspector({ node: withMemory({ deliverAs: 'packet-only' }), briefCount: 1 })
-    const toggle = screen.getByRole('button', { name: /Brief in its own memory file/ })
-    expect(toggle).toHaveAttribute('aria-pressed', 'false')
-    expect(toggle).toHaveTextContent('keeps its declared folder')
-    expect(toggle).toHaveTextContent('compaction can summarise the Brief away')
+  it('offers no switch over a Brief that does not exist, and says so', () => {
+    renderInspector({ briefCount: 0 })
+    expect(screen.queryByRole('button', { name: /Team Brief/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/No team Brief yet/)).toBeInTheDocument()
+    openProcess()
+    expect(screen.queryByRole('button', { name: /Work in this folder/ })).not.toBeInTheDocument()
+  })
 
+  // `deliverAs` moved into PROCESS beside the folder it decides, in plain words.
+  it('says what working in the folder costs, and narrows from the team default', () => {
+    const props = renderInspector({ node: withMemory({ deliverAs: 'packet-only' }), briefCount: 1 })
+    openProcess()
+    const toggle = screen.getByRole('button', { name: /Work in this folder/ })
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    expect(toggle).toHaveTextContent('may summarise the Brief away')
     fireEvent.click(toggle)
     expect(props.onDeliverAsChange).toHaveBeenCalledWith('native-file')
   })
 
-  it('inherits the team default, and narrows from it', () => {
+  it('inherits the team default', () => {
     const props = renderInspector({ briefCount: 1, teamDeliverAs: 'packet-only' })
-    expect(screen.getByRole('button', { name: /Brief in its own memory file/ })).toHaveAttribute('aria-pressed', 'false')
-    fireEvent.click(screen.getByRole('button', { name: /Brief in its own memory file/ }))
+    openProcess()
+    expect(screen.getByRole('button', { name: /Work in this folder/ })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: /Work in this folder/ }))
     expect(props.onDeliverAsChange).toHaveBeenCalledWith('native-file')
   })
 
-  it('offers no switch over a Brief that does not exist, and says so', () => {
-    renderInspector({ briefCount: 0 })
-    const toggle = screen.getByRole('button', { name: /Reads the team Brief/ })
-    expect(toggle).toBeDisabled()
-    expect(toggle).toHaveTextContent('This team has no Brief yet')
-    // Neither switch may read as on: there is nothing to be supplied, so "on" would be a
-    // promise about nothing — and a checked-but-disabled control says the opposite.
-    expect(toggle).toHaveAttribute('aria-pressed', 'false')
-    const deliver = screen.getByRole('button', { name: /Brief in its own memory file/ })
-    expect(deliver).toBeDisabled()
-    expect(deliver).toHaveAttribute('aria-pressed', 'false')
+  // With anything connected the agent works in its own folder whatever `deliverAs` says, so the
+  // switch would decide nothing — and the folder field says it is not used.
+  it('drops the folder switch, and says the folder is unused, once something is connected', () => {
+    renderInspector({ briefCount: 1, node: { ...node, data: { ...node.data, agent: { ...node.data.agent, capabilities: [{ kind: 'skill', name: 'claude-design' }] } } } })
+    openProcess()
+    expect(screen.queryByRole('button', { name: /Work in this folder/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/Not used while something is connected/)).toBeInTheDocument()
   })
 
   it('never claims the agent knows, remembers or has read anything', () => {
-    const { container } = render(<Inspector {...renderInspectorProps({ briefCount: 2 })} />)
-    const behaviour = [...container.querySelectorAll('.zone')].find((zone) => zone.textContent?.includes('Reads the team Brief'))!
-    expect(behaviour.textContent).not.toMatch(/knows|remembers|has read/i)
-    expect(behaviour.textContent).toMatch(/Supplied/)
+    const { container } = render(<Inspector {...renderInspectorProps({ briefCount: 2, inheritedMemory: ['research · memory'] })} />)
+    const context = [...container.querySelectorAll('.zone')].find((candidate) => candidate.textContent?.includes('Team Brief'))!
+    expect(context.textContent).not.toMatch(/knows|remembers|has read/i)
+    expect(context.textContent).toMatch(/supplied/)
   })
 })
 

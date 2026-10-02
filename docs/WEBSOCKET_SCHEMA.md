@@ -110,7 +110,7 @@ was added that way in [ADR 0016](decisions/0016-sidecar-v2-followups-and-checkpo
 | Phase | Payload | Why |
 |---|---|---|
 | `context_packet` | `{heading, chars, budgetChars, sections}` | How much team memory this session was supplied, and the per-section selection rationale. The full text is read back from `GET /api/runs/{id}/context?agent=`; this event is the invalidation hint and the size. |
-| `prompt_sections` | `{sections: [{kind, heading, text}]}` | What the `LoomWatch`-composed opening prompt is made of: `role`, `capabilities`, `memory`, `task`, `stage_results`, `previous_output`, `ask_offer`. Replaces splitting the prompt on literal headings in the client, which silently mis-attributed text as soon as the daemon gained a section (`ui/src/lib/watch/events.ts`). |
+| `prompt_sections` | `{sections: [{kind, heading, text}]}` | What the `LoomWatch`-composed opening prompt is made of: `role`, `team`, `capabilities`, `memory`, `task`, `stage_results`, `previous_output`, `ask_offer`. Replaces splitting the prompt on literal headings in the client, which silently mis-attributed text as soon as the daemon gained a section (`ui/src/lib/watch/events.ts`). |
 
 No new event *kind* was added, and `run_events` is unchanged. See
 [TEAM_MEMORY.md](TEAM_MEMORY.md) and [ADR 0014](decisions/0014-team-memory-brief-and-packets.md).
@@ -307,3 +307,17 @@ The envelope, the event kinds and every existing payload shape are unchanged.
   harness in `session/new` and are never archived.
 
 See [ADR 0029](decisions/0029-deliver-knowledge-and-tools.md).
+
+
+### Additive team-orientation metadata (2026-10-02)
+
+The envelope, the event kinds and every existing payload shape are unchanged.
+
+- `prompt_sections` gains section kind `team` — `## Your place in the team`, written directly under
+  `## Your assigned role` for every agent on a team of two or more: who comes before it, who reads
+  its work after it, and whether its reply is the team's answer. A team of one records no `team`
+  section, so its record is byte-identical to before. Added in one change with
+  `memory::PromptSectionKind` and `ui/src/lib/watch/events.ts`, per the rule above.
+
+See [ADR 0034](decisions/0034-agent-context-and-team-orientation.md).
+

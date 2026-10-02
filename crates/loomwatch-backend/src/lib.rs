@@ -17,6 +17,7 @@ pub mod memory;
 pub mod notebook_api;
 pub mod notion;
 pub mod operator;
+pub mod orientation;
 pub mod runs;
 pub mod schedule;
 pub mod skill_routing;
@@ -339,7 +340,11 @@ async fn run_team_mode(
     }
     .supply(&agent.id, vec![agent.id.clone()], None, &mut packet)
     .await?;
-    let composed = compose_for(agent, &packet, &NodeTask::goal(prompt), workspace.as_ref());
+    let task = NodeTask {
+        place: orientation::for_lead(team, agent),
+        ..NodeTask::goal(prompt)
+    };
+    let composed = compose_for(agent, &packet, &task, workspace.as_ref());
     let cwd = workspace
         .as_ref()
         .map_or(declared_cwd, |workspace| workspace.cwd.clone());
@@ -572,7 +577,7 @@ async fn run_pipeline_nodes(
             previous.release(archive, exit_timeout).await?;
         }
         let (spec, required_skills, delivery) = node_process_spec(team, team_path, agent, memory)?;
-        let node_prompt = stage_task(
+        let mut node_prompt = stage_task(
             team,
             agent_id,
             index,
@@ -582,6 +587,7 @@ async fn run_pipeline_nodes(
             lineage,
             first_executed,
         );
+        node_prompt.place = orientation::for_stage(team, agent, order, index, &responder);
         let mut packet = memory.packet_for(agent)?;
         if first_executed {
             supply_checkpoint(&mut packet, lineage, agent_id);
@@ -1803,6 +1809,7 @@ fn node_task(
         stage_results: (!results.trim().is_empty()).then_some(results),
         previous_output: None,
         ask_offer: ask_offer(team, agent_id),
+        place: None,
     }
 }
 
@@ -2045,8 +2052,9 @@ fn pipeline_node_prompt(
 
 /// Compose one opening prompt, and the record of what it is made of.
 ///
-/// Section order is the contract: role, then capabilities, then `## What the team knows`, then the
-/// task, then — for a later pipeline stage — its predecessors' results and the ask offer.
+/// Section order is the contract: role, then the agent's place in the team (ADR 0034), then
+/// capabilities, then `## What the team knows`, then the task, then — for a later pipeline stage —
+/// its predecessors' results and the ask offer.
 ///
 /// One function builds the text and the record so they cannot drift: the text is assembled *from*
 /// the sections, so a section that is in the prompt is in the record by construction. `packet` is
@@ -2067,6 +2075,18 @@ pub(crate) fn compose_prompt(
         text: agent.role.clone(),
     }];
     let mut text = format!("## Your assigned role\n{}", agent.role);
+    // Directly under the role: who the agent is, then where it sits, before anything it is handed.
+    if let Some(place) = &task.place {
+        text.push_str("\n\n");
+        text.push_str(orientation::HEADING);
+        text.push('\n');
+        text.push_str(place);
+        sections.push(PromptSection {
+            kind: PromptSectionKind::Team,
+            heading: orientation::HEADING.to_owned(),
+            text: place.clone(),
+        });
+    }
     if let Some(capabilities) = wired_capabilities(agent) {
         text.push_str("\n\n## Capabilities wired for you\n");
         text.push_str(&capabilities);
@@ -2167,6 +2187,9 @@ pub(crate) fn compose_for(
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct NodeTask {
     pub(crate) goal: String,
+    /// `## Your place in the team`, already rendered by [`orientation`]. `None` for a team of one,
+    /// which keeps that prompt byte-for-byte what it was before ADR 0034.
+    pub(crate) place: Option<String>,
     /// What the operator answered at a review stop before this stage. The one part of a prompt
     /// that is rendered as instruction rather than as source material.
     pub(crate) direction: Option<String>,
@@ -2985,11 +3008,16 @@ mod tests {
                 .map(|section| section.kind)
                 .collect::<Vec<_>>()
         };
-        assert_eq!(kinds("a"), [Kind::Role, Kind::Memory, Kind::Task]);
+        // A two-stage pipeline: each stage is told its place in it (ADR 0034).
+        assert_eq!(
+            kinds("a"),
+            [Kind::Role, Kind::Team, Kind::Memory, Kind::Task]
+        );
         assert_eq!(
             kinds("b"),
             [
                 Kind::Role,
+                Kind::Team,
                 Kind::Memory,
                 Kind::Task,
                 Kind::StageResults,
@@ -3018,6 +3046,24 @@ mod tests {
                 section.kind
             );
         }
+        // Stage b is the last stage, so it is the responder and is told its reply is the answer.
+        let place = sections_for("b")
+            .into_iter()
+            .find(|section| section.kind == Kind::Team)
+            .expect("a place section");
+        assert!(
+            place.text.contains("step 2 of 2") && place.text.contains("the team's final answer"),
+            "{}",
+            place.text
+        );
+        assert!(
+            b_prompt.contains(&format!(
+                "\n\n{}\n{}\n\n",
+                crate::orientation::HEADING,
+                place.text
+            )),
+            "the place section sits under its own heading in the prompt"
+        );
         let task = sections_for("b")
             .into_iter()
             .find(|section| section.kind == Kind::Task)

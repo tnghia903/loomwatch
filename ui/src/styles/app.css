@@ -613,7 +613,7 @@ kbd.key {
 .sysdot { position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%); width: 3px; height: 3px; border-radius: var(--r-full); background: var(--color-ink-3); display: none; }
 
 /* ---------------------------------------------------------------------------
-   INSPECTOR — UX_REDESIGN §5.4. Three zones: IDENTITY, BEHAVIOUR, PROCESS.
+   INSPECTOR — UX_REDESIGN §5.4. Three zones: IDENTITY, CONTEXT (ADR 0034), PROCESS.
    --------------------------------------------------------------------------- */
 .lw-inspector {
   width: var(--lw-inspector-w);
@@ -694,6 +694,20 @@ textarea.input { padding: 6px var(--sp-3); resize: vertical; min-height: 84px; }
 .proc-list dt { color: var(--color-ink-3); }
 .proc-list dd { color: var(--color-ink-2); overflow-wrap: anywhere; margin: 0; }
 .insp-foot { margin-top: auto; padding-top: var(--sp-4); border-top: 1px solid var(--color-hairline); display: flex; justify-content: space-between; gap: var(--sp-2); }
+/* CONTEXT (ADR 0034) — what one agent is given. Shared by the full inspector and the short Build
+   panel, so it carries its own spacing and colours rather than inheriting either panel's. */
+.agent-context { display: flex; flex-direction: column; gap: var(--sp-3); color: var(--color-ink-2); }
+.agent-context-place { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+.agent-context-place .t-body { color: var(--color-ink); }
+.agent-context-note, .agent-context-empty { color: var(--color-ink-3); }
+.agent-context-place .link { margin-top: var(--sp-1); font-size: 12px; }
+.agent-context-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.agent-context-list li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: var(--sp-2); align-items: start; }
+.agent-context-list li > svg { margin-top: 3px; color: var(--color-ink-3); }
+.agent-context-list .iconbtn { width: 22px; height: 22px; }
+.agent-context-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.agent-context-name b { color: var(--color-ink); font-weight: 500; overflow-wrap: anywhere; }
+.agent-context-name .t-meta { color: var(--color-ink-3); }
 .capability-description { margin: 0; color: var(--color-ink-2); overflow-wrap: anywhere; }
 .capability-facts { grid-template-columns: 64px 1fr; }
 /* A need's name is two words at most ("slash commands"); its evidence is the line from the skill

@@ -340,6 +340,9 @@ Three zones, in the order the operator actually thinks:
   (CANVAS_SPEC §4.5), first, above the fold, because they are what stands between a drop and
   a valid save.
 - **BEHAVIOUR** — entrypoint, recruiting, budget. What the agent is *allowed* to do.
+  *Superseded 2026-10-02 by **CONTEXT** — what the agent is given: its place in the team, the
+  Brief, and everything connected to it. See
+  [ADR 0034](decisions/0034-agent-context-and-team-orientation.md).*
 - **PROCESS** — `spawn.cmd/args/cwd/env`. Collapsed, read-only 4-line summary when closed.
   Renamed from `SPAWN` because "process" is what it means to someone who has not read the
   ACP spec, and the field labels inside are still the schema's names.

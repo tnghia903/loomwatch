@@ -762,14 +762,17 @@ describe('Workspace', () => {
       }
     })
 
-    it('lets the operator choose the responder from an agent Inspector', () => {
+    // ADR 0034: the Inspector no longer repeats the Output wire, the Output editor and "Final
+    // response owner" with a fourth responder control. It says where the agent sits instead.
+    it('says in the agent Inspector where the agent sits, instead of a fourth responder control', () => {
       const researcher = documentState.nodes[0]
       researcher.selected = true
       const view = renderWorkspace()
       try {
+        expect(screen.getByRole('region', { name: 'Context' })).toHaveTextContent(/Step 1 of \d · receives your request first/)
         fireEvent.click(screen.getByRole('button', { name: 'Model and more settings' }))
-        fireEvent.click(screen.getByRole('button', { name: /Produces the team output/ }))
-        expect(documentState.promoteResponder).toHaveBeenCalledWith('researcher')
+        expect(screen.queryByRole('button', { name: /Produces the team output/ })).not.toBeInTheDocument()
+        expect(screen.getByText(/Step 1 of \d · receives your request first/)).toBeInTheDocument()
       } finally {
         view.unmount()
         researcher.selected = false

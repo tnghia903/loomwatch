@@ -4,14 +4,20 @@ import { createElement, useState } from 'react'
 import type { HarnessModel } from '../../lib/harnesses'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { splitModelSelector } from '../../lib/models'
+import type { AgentPlace } from '../../lib/team-file/agentPlace'
+import type { CapabilityRef } from '../../lib/team-file/types'
 import type { AgentField, AgentFieldProblems } from '../../lib/team-file/validation'
 import { StatusGlyph } from '../ui/glyphs'
+import { AgentContext } from './AgentContext'
 import { roleGlyph } from './roleGlyph'
 
 export interface InspectorProps {
   node: AgentNode
-  isEntrypoint: boolean
-  isResponder: boolean
+  /** Where this agent sits in the team — the panel's mirror of `## Your place in the team`. */
+  place?: AgentPlace
+  /** Other teams' memory and imported packs supplied to this agent, by display name. */
+  inheritedMemory?: readonly string[]
+  onRemoveCapability?: (capability: CapabilityRef) => void
   onRename: (field: 'name' | 'role', value: string) => void
   onModelChange: (value: string) => void
   onThinkingEffortChange?: (value: string) => void
@@ -25,7 +31,6 @@ export interface InspectorProps {
   /** The team-level default a per-agent `deliverAs` narrows. */
   teamDeliverAs?: 'native-file' | 'packet-only'
   onPromoteEntrypoint: () => void
-  onPromoteResponder: () => void
   onDelete: () => void
   onClose: () => void
   onFieldBlur: (field: AgentField) => void
@@ -43,9 +48,10 @@ export interface InspectorProps {
 }
 
 // UX_REDESIGN §5.4: three zones in the order the operator thinks — IDENTITY (what stands
-// between a drop and a valid save), BEHAVIOUR (what the agent may do), PROCESS (collapsed).
+// between a drop and a valid save), CONTEXT (what the agent is given; ADR 0034 replaced
+// BEHAVIOUR with it), PROCESS (collapsed).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
-export function Inspector({ node, isEntrypoint, isResponder, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onPromoteResponder, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false }: InspectorProps) {
+export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false }: InspectorProps) {
   const { agent, runtime } = node.data
   const [processOpen, setProcessOpen] = useState(false)
   const status = runtime?.status ?? agent.status ?? 'idle'
@@ -58,10 +64,8 @@ export function Inspector({ node, isEntrypoint, isResponder, onRename, onModelCh
   const thinkingOptions = selectedModel?.thinkingEfforts ?? []
   const selectedEffortIndex = Math.max(0, thinkingOptions.findIndex((effort) => effort.id === configuredEffort))
   const selectedEffort = thinkingOptions[selectedEffortIndex]
-  // A team with no Brief supplies nothing, so neither switch may read as "on": that would be a
-  // promise about nothing, and both are disabled in that state anyway.
-  const readsBrief = agent.memory?.brief !== false && briefCount > 0
-  const nativeFile = (agent.memory?.deliverAs ?? teamDeliverAs) === 'native-file' && briefCount > 0
+  const nativeFile = (agent.memory?.deliverAs ?? teamDeliverAs) === 'native-file'
+  const connected = (agent.capabilities ?? []).length > 0
   const zoneClass = (field: AgentField) => fieldProblems?.[field] ? (fieldProblems[field]?.weight === 'error' ? 'error' : 'needs') : ''
   const hint = (field: AgentField, fallback = '') => fieldProblems?.[field]?.message ?? fallback
   // A catalog failure outranks the field problem it causes. Switching harness clears the model,
@@ -152,42 +156,11 @@ export function Inspector({ node, isEntrypoint, isResponder, onRename, onModelCh
       </div>
 
       <div className="zone">
-        <div className="zone-head t-micro">Behaviour</div>
-        <button type="button" className={`check round ${isEntrypoint ? 'on' : ''}`} disabled={isEntrypoint || readOnly} onClick={onPromoteEntrypoint} aria-pressed={isEntrypoint} title={isEntrypoint ? 'Every team starts somewhere. Pick another agent to move the entry point.' : undefined}>
-          <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
-          <span className="txt"><b className="t-body">Starts the team</b><span className="t-meta">Receives your request first</span></span>
-        </button>
-        <button
-          type="button"
-          className={`check round ${isResponder ? 'on' : ''}`}
-          disabled={isResponder || readOnly || (!pipeline && !isEntrypoint)}
-          onClick={onPromoteResponder}
-          aria-pressed={isResponder}
-          title={!pipeline && !isEntrypoint ? 'Create a pipeline to choose a responder other than the entrypoint.' : isResponder ? 'Pick another pipeline agent to move the team output.' : undefined}
-        >
-          <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
-          <span className="txt"><b className="t-body">Produces the team output</b><span className="t-meta">Its answer becomes the team’s final answer</span></span>
-        </button>
-        <button type="button" className={`check ${agent.allowRecruiting !== false ? 'on' : ''}`} disabled={readOnly} onClick={() => onAllowRecruitingChange(agent.allowRecruiting === false)} aria-pressed={agent.allowRecruiting !== false}>
-          <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
-          <span className="txt"><b className="t-body">Can ask other agents for help</b><span className="t-meta">{pipeline ? 'Off when steps run in order — it can still ask others questions' : 'Can hand parts of the task to other agents and ask them questions'}</span></span>
-        </button>
-        {/* docs/TEAM_MEMORY.md §5: the two per-agent memory keys. The copy uses only the four
-            sanctioned words — supplied, retrieved, kept, eligible — and never says the agent
-            "knows" or "has read" anything. A team with no Brief says so rather than offering a
-            switch over nothing. */}
-        {onMemoryBriefChange && (
-          <button type="button" className={`check ${readsBrief ? 'on' : ''}`} disabled={readOnly || briefCount === 0} onClick={() => onMemoryBriefChange(agent.memory?.brief === false)} aria-pressed={readsBrief}>
-            <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
-            <span className="txt"><b className="t-body">Reads the team Brief</b><span className="t-meta">{briefCount === 0 ? 'This team has no Brief yet — add one in Memory' : `Supplied ${briefCount} ${briefCount === 1 ? 'entry' : 'entries'} at the start of every session`}</span></span>
-          </button>
-        )}
-        {onDeliverAsChange && (
-          <button type="button" className={`check ${nativeFile ? 'on' : ''}`} disabled={readOnly || briefCount === 0} onClick={() => onDeliverAsChange(nativeFile ? 'packet-only' : 'native-file')} aria-pressed={nativeFile}>
-            <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
-            <span className="txt"><b className="t-body">Brief in its own memory file</b><span className="t-meta">{nativeFile ? "Written into the managed workspace as the harness's own memory file, which a compaction does not reach" : 'Packet only — it keeps its declared folder, and a compaction can summarise the Brief away'}</span></span>
-          </button>
-        )}
+        <div className="zone-head t-micro">Context</div>
+        <AgentContext
+          agent={agent} place={place} pipeline={pipeline} briefCount={briefCount} inheritedMemory={inheritedMemory} readOnly={readOnly}
+          onPromoteEntrypoint={onPromoteEntrypoint} onAllowRecruitingChange={onAllowRecruitingChange} onMemoryBriefChange={onMemoryBriefChange} onRemoveCapability={onRemoveCapability}
+        />
       </div>
 
       <div className="zone">
@@ -204,8 +177,18 @@ export function Inspector({ node, isEntrypoint, isResponder, onRename, onModelCh
             <div className={`field ${zoneClass('cwd')}`}>
               <label className="t-meta" htmlFor="insp-cwd">Working folder</label>
               <input id="insp-cwd" className="input mono" data-agent-field="cwd" value={agent.spawn?.cwd ?? '.'} readOnly={readOnly} onChange={(event) => onCwdChange(event.target.value)} onBlur={() => onFieldBlur('cwd')} />
-              <span className="hint t-meta">{hint('cwd', 'Relative to the team file')}</span>
+              {/* ADR 0012 decision 4 / ADR 0029: anything connected moves the agent into its own
+                  workspace folder, so the declared one is not where it works. */}
+              <span className="hint t-meta">{hint('cwd', connected ? 'Not used while something is connected: the agent works in its own folder, which LoomWatch prepares.' : 'Relative to the team file')}</span>
             </div>
+            {/* docs/TEAM_MEMORY.md channel 2: `deliverAs` only decides anything for an agent with a
+                Brief and nothing connected — with either missing, the folder is already settled. */}
+            {onDeliverAsChange && briefCount > 0 && !connected && (
+              <button type="button" className={`check ${nativeFile ? '' : 'on'}`} disabled={readOnly} onClick={() => onDeliverAsChange(nativeFile ? 'packet-only' : 'native-file')} aria-pressed={!nativeFile}>
+                <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
+                <span className="txt"><b className="t-body">Work in this folder</b><span className="t-meta">{nativeFile ? 'Off: it works in its own folder, where the Brief is kept in its AI app’s memory file for the whole session.' : 'On: it works in the folder above. In a long session its AI app may summarise the Brief away.'}</span></span>
+              </button>
+            )}
           </>
         )}
       </div>
