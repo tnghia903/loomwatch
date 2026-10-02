@@ -1,11 +1,5 @@
-import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
+import { actsWithoutAsking, ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import type { AgentConfig, AllowSwitch } from '../../lib/team-file/types'
-
-/** Apps that act without asking whatever mode they are in, so no switch can hold them back. */
-function decidesForItself(agent: AgentConfig): string | null {
-  const command = `${agent.spawn?.cmd ?? ''} ${(agent.spawn?.args ?? []).join(' ')}`
-  return /(^|[\s/])opencode(\s|$)/.test(command) ? 'OpenCode' : null
-}
 
 export interface AgentPermissionsProps {
   agent: AgentConfig
@@ -20,7 +14,7 @@ export interface AgentPermissionsProps {
  * folders, the team's own handovers) never needs a switch.
  */
 export function AgentPermissions({ agent, readOnly = false, onChange }: AgentPermissionsProps) {
-  const app = decidesForItself(agent)
+  const app = actsWithoutAsking(agent)
   return (
     <div className="agent-context agent-permissions">
       <div className="t-meta agent-context-note">LoomWatch can’t ask you during a run, so it says no to anything else this agent asks to do.</div>

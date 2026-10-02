@@ -346,6 +346,9 @@ Three zones, in the order the operator actually thinks:
 - **PROCESS** — `spawn.cmd/args/cwd/env`. Collapsed, read-only 4-line summary when closed.
   Renamed from `SPAWN` because "process" is what it means to someone who has not read the
   ACP spec, and the field labels inside are still the schema's names.
+  *Removed 2026-10-03: the command, arguments and environment live in Show YAML, and the folder
+  is chosen in **WORKS IN**, placed before ALLOWED WITHOUT ASKING. See
+  [ADR 0039](decisions/0039-agent-panel-drops-process.md).*
 
 Unchanged from CANVAS_SPEC §5.4 and restated so the folding-in is lossless: live per-field
 validation against `GET /api/config/schema` plus the TEAM_CONFIG.md semantic rules; the two

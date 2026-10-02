@@ -180,7 +180,6 @@ describe('Inspector memory toggles', () => {
   const withMemory = (memory: AgentNode['data']['agent']['memory']): AgentNode => ({
     ...node, data: { ...node.data, agent: { ...node.data.agent, memory } },
   })
-  const openProcess = () => fireEvent.click(screen.getByRole('button', { name: /Process/ }))
 
   it('clears the key rather than writing the default when an agent is put back on the brief', () => {
     const props = renderInspector({ node: withMemory({ brief: false }), briefCount: 2 })
@@ -209,14 +208,12 @@ describe('Inspector memory toggles', () => {
     renderInspector({ briefCount: 0 })
     expect(screen.queryByRole('button', { name: /Team Brief/ })).not.toBeInTheDocument()
     expect(screen.getByText(/No team Brief yet/)).toBeInTheDocument()
-    openProcess()
     expect(screen.queryByRole('button', { name: /Work in this folder/ })).not.toBeInTheDocument()
   })
 
-  // `deliverAs` moved into PROCESS beside the folder it decides, in plain words.
+  // `deliverAs` sits in WORKS IN beside the folder it decides, in plain words (ADR 0039).
   it('says what working in the folder costs, and narrows from the team default', () => {
     const props = renderInspector({ node: withMemory({ deliverAs: 'packet-only' }), briefCount: 1 })
-    openProcess()
     const toggle = screen.getByRole('button', { name: /Work in this folder/ })
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
     expect(toggle).toHaveTextContent('may summarise the Brief away')
@@ -226,19 +223,18 @@ describe('Inspector memory toggles', () => {
 
   it('inherits the team default', () => {
     const props = renderInspector({ briefCount: 1, teamDeliverAs: 'packet-only' })
-    openProcess()
     expect(screen.getByRole('button', { name: /Work in this folder/ })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(screen.getByRole('button', { name: /Work in this folder/ }))
     expect(props.onDeliverAsChange).toHaveBeenCalledWith('native-file')
   })
 
   // With anything connected the agent works in its own folder whatever `deliverAs` says, so the
-  // switch would decide nothing — and the folder field says it is not used.
-  it('drops the folder switch, and says the folder is unused, once something is connected', () => {
+  // switch would decide nothing — and WORKS IN says it has a folder of its own.
+  it('drops the folder switch, and says it works in its own folder, once something is connected', () => {
     renderInspector({ briefCount: 1, node: { ...node, data: { ...node.data, agent: { ...node.data.agent, capabilities: [{ kind: 'skill', name: 'claude-design' }] } } } })
-    openProcess()
     expect(screen.queryByRole('button', { name: /Work in this folder/ })).not.toBeInTheDocument()
-    expect(screen.getByText(/Not used while something is connected/)).toBeInTheDocument()
+    expect(screen.getByText('Its own folder')).toBeInTheDocument()
+    expect(screen.getByText(/Something is connected/)).toBeInTheDocument()
   })
 
   it('never claims the agent knows, remembers or has read anything', () => {
@@ -263,4 +259,55 @@ it('edits a review question without offering a model or entrypoint', () => {
   expect(props.onRename).toHaveBeenCalledWith('role', 'What should change?')
   expect(screen.queryByRole('combobox', { name: 'Model' })).not.toBeInTheDocument()
   expect(screen.queryByText(/Make entrypoint/)).not.toBeInTheDocument()
+})
+
+// ADR 0039: PROCESS is gone; the folder it held is chosen in WORKS IN.
+describe('Inspector works in', () => {
+  const withSpawn = (spawn: Partial<NonNullable<AgentNode['data']['agent']['spawn']>>, agent: Partial<AgentNode['data']['agent']> = {}): AgentNode => ({
+    ...node, data: { ...node.data, agent: { ...node.data.agent, ...agent, spawn: { ...node.data.agent.spawn!, ...spawn } } },
+  })
+
+  it('shows no command, arguments or environment', () => {
+    renderInspector({ node: withSpawn({ cmd: 'npx', args: ['-y', '@agentclientprotocol/claude-agent-acp'], env: { TOKEN: 'x' } }) })
+    expect(screen.queryByRole('button', { name: /Process/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/claude-agent-acp/)).not.toBeInTheDocument()
+    expect(screen.queryByText('TOKEN')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: /Working folder/ })).not.toBeInTheDocument()
+  })
+
+  it('names the team’s folder by default and offers to choose another', () => {
+    renderInspector()
+    expect(screen.getByText('The team’s folder')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Choose folder…' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Use the team’s folder' })).not.toBeInTheDocument()
+  })
+
+  it('names a chosen folder and puts the team’s folder back', () => {
+    const props = renderInspector({ node: withSpawn({ cwd: '/Users/me/Projects/website' }) })
+    expect(screen.getByText('website')).toBeInTheDocument()
+    expect(screen.getByText('/Users/me/Projects/website')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Use the team’s folder' }))
+    expect(props.onCwdChange).toHaveBeenCalledWith('.')
+  })
+
+  it('says an editing agent beside its team file gets its own folder', () => {
+    renderInspector({ node: withSpawn({}, { allow: { edits: true } }) })
+    expect(screen.getByText('Its own folder')).toBeInTheDocument()
+    expect(screen.getByText(/never changes your team files/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Choose folder…' })).toBeInTheDocument()
+  })
+
+  it('offers no choice where nothing can be changed', () => {
+    renderInspector({ readOnly: true, node: withSpawn({ cwd: '/Users/me/Projects/website' }) })
+    expect(screen.queryByRole('button', { name: /folder…/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Use the team’s folder' })).not.toBeInTheDocument()
+  })
+
+  it('reports a missing folder and offers the default', () => {
+    const props = renderInspector({ node: withSpawn({ cwd: '' }), fieldProblems: { cwd: { weight: 'incomplete', message: 'Required' } } })
+    expect(screen.getByText('Required')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Choose folder…' })).toHaveAttribute('data-agent-field', 'cwd')
+    fireEvent.click(screen.getByRole('button', { name: 'Use the team’s folder' }))
+    expect(props.onCwdChange).toHaveBeenCalledWith('.')
+  })
 })

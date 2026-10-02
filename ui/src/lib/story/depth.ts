@@ -8,8 +8,9 @@ import { verbFor } from './teamSentence'
  * - **Story** (zoomed out, which is where "fit the team" usually lands on a large team): each card
  *   is a name and one plain sentence, in type big enough to read at that zoom.
  * - **Team** (around 100%): today's card — app, name, instructions, run state.
- * - **Trace** (zoomed in): the same card plus what an expert checks — id, model, command, folder,
- *   skills and the full instructions.
+ * - **Trace** (zoomed in): the same card plus what the agent panel would tell — its model, what it
+ *   may do without asking, what it is given, a folder chosen for it — and the full instructions.
+ *   The id and command it showed until ADR 0039 are in the panel's header and Show YAML.
  *
  * Nothing is hidden behind a mode: depth is a place on the zoom slider, so a newcomer never has to
  * find a setting and an expert reaches the detail with the gesture they already use.
@@ -30,7 +31,7 @@ export function depthForZoom(zoom: number): Depth {
 export const DEPTH_LABEL: Record<Depth, { name: string; hint: string }> = {
   story: { name: 'Story', hint: 'Each helper in one sentence' },
   team: { name: 'Team', hint: 'Cards with app, instructions and status' },
-  trace: { name: 'Trace', hint: 'Ids, models, commands, folders and full instructions' },
+  trace: { name: 'Trace', hint: 'Model, what each may do, what it is given, and full instructions' },
 }
 
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)

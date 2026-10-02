@@ -210,15 +210,41 @@ describe('BuildAgentCard at each depth', () => {
     expect(document.querySelector('.depth-story-line')).toHaveTextContent('Writing the reply')
   })
 
-  it('adds the facts an expert checks when zoomed in to Trace', () => {
+  // ADR 0039: what the agent panel would tell, not the id and the command line.
+  const facts = () => Object.fromEntries([...document.querySelectorAll('.depth-trace-facts dt')].map((term) => [term.textContent, term.nextElementSibling?.textContent]))
+
+  it('adds what the agent may do and is given when zoomed in to Trace', () => {
+    view.zoom = 1.4
+    renderCard({ ...nodeData, agent: { ...nodeData.agent, spawn: { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '.' }, model: 'sonnet', thinkingEffort: 'high', allow: { web: true, commands: true }, capabilities: [{ kind: 'knowledge', name: 'brand.pdf' }, { kind: 'skill', name: 'claude-design' }] } })
+    expect(facts()).toEqual({
+      Model: 'sonnet · high effort',
+      Allowed: 'Search the web, run commands',
+      Given: 'brand.pdf, claude-design skill',
+    })
+    expect(document.querySelector('.depth-trace-facts')).not.toHaveTextContent('claude-agent-acp')
+    expect(document.querySelector('.depth-story-line')).toBeNull()
+  })
+
+  it('says plainly when an agent is allowed and given nothing extra', () => {
+    view.zoom = 1.4
+    renderCard({ ...nodeData, agent: { ...nodeData.agent, spawn: { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '.' }, model: undefined } })
+    expect(facts()).toEqual({ Model: 'App default', Allowed: 'Reading only', Given: 'Nothing connected' })
+  })
+
+  it('says an app that never asks is not held back by the switches', () => {
     view.zoom = 1.4
     renderCard(nodeData)
-    const facts = document.querySelector('.depth-trace-facts') as HTMLElement
-    expect(facts).not.toBeNull()
-    expect(facts).toHaveTextContent('ada')
-    expect(facts).toHaveTextContent('openai/gpt-5.4')
-    expect(facts).toHaveTextContent('opencode')
-    expect(document.querySelector('.depth-story-line')).toBeNull()
+    expect(facts().Allowed).toBe('Anything: OpenCode doesn’t ask')
+  })
+
+  it('names a folder chosen for the agent, unless something connected overrides it', () => {
+    view.zoom = 1.4
+    const chosen = { ...nodeData.agent, spawn: { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '/Users/me/Projects/website' } }
+    renderCard({ ...nodeData, agent: chosen })
+    expect(facts()['Works in']).toBe('website')
+    cleanup()
+    renderCard({ ...nodeData, agent: { ...chosen, capabilities: [{ kind: 'tool', name: 'search' }] } })
+    expect(facts()['Works in']).toBeUndefined()
   })
 
   it('adds nothing at Team depth', () => {

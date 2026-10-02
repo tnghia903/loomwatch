@@ -7,16 +7,26 @@ import { listFolder, type FolderEntry, type FolderListing } from '../../lib/know
 export interface FolderPickerProps {
   onChoose: (folder: FolderEntry) => void
   onClose: () => void
+  /** The dialog's heading and what choosing a folder does; adding knowledge is the default. */
+  title?: string
+  note?: string
+  /** The choose button's verb: "Add “docs”", or "Use “site”" for a working folder. */
+  verb?: string
+  /** Open here rather than in the home folder. */
+  start?: string
 }
 
+const KNOWLEDGE_NOTE = 'The agent is given the folder’s list of files and its README, and may open the files in it. The folder is linked, not copied, so every run sees what is in it then.'
+
 /**
- * Choose a folder on this computer to link as knowledge (ADR 0035).
+ * Choose a folder on this computer: to link as knowledge (ADR 0035), or for an agent to work in
+ * (ADR 0039).
  *
  * A browser cannot hand a page a real folder path, so the daemon — which runs on this computer —
  * lists folders and this dialog walks them. Portalled to the body: the inspector it opens from
  * clips its own overflow.
  */
-export function FolderPicker({ onChoose, onClose }: FolderPickerProps) {
+export function FolderPicker({ onChoose, onClose, title = 'Add a folder', note = KNOWLEDGE_NOTE, verb = 'Add', start }: FolderPickerProps) {
   const titleId = useId()
   const [listing, setListing] = useState<FolderListing | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -37,13 +47,13 @@ export function FolderPicker({ onChoose, onClose }: FolderPickerProps) {
     load(path)
   }
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(start) }, [load, start])
 
   return createPortal(
     <div className="folder-picker-scrim" onMouseDown={onClose}>
       <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="pop e2 folder-picker" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
-        <h2 id={titleId} className="t-title">Add a folder</h2>
-        <p className="t-meta">The agent is given the folder’s list of files and its README, and may open the files in it. The folder is linked, not copied, so every run sees what is in it then.</p>
+        <h2 id={titleId} className="t-title">{title}</h2>
+        <p className="t-meta">{note}</p>
         {listing && listing.places.length > 0 && (
           <nav className="folder-picker-places" aria-label="Places">
             {listing.places.map((place) => (
@@ -71,7 +81,7 @@ export function FolderPicker({ onChoose, onClose }: FolderPickerProps) {
         <footer className="folder-picker-foot">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
           <button type="button" className="btn btn-primary" disabled={!listing || loading} onClick={() => listing && onChoose({ name: listing.name, path: listing.path })}>
-            {listing ? `Add “${listing.name}”` : 'Add'}
+            {listing ? `${verb} “${listing.name}”` : verb}
           </button>
         </footer>
       </div>
