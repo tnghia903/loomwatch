@@ -1089,6 +1089,41 @@ fn is_skipped_team_directory(name: &std::ffi::OsStr) -> bool {
         .is_some_and(|name| name.starts_with('.') || name == "node_modules")
 }
 
+/// What a team keeps beside its file `<stem>.yaml`: its Brief in `<stem>.brief/` and the files
+/// "Add file…" copied for its agents in `<stem>.files/` (ADR 0035).
+const TEAM_FOLDER_SUFFIXES: [&str; 2] = [".brief", ".files"];
+
+/// Whether `folder` is one a team keeps beside its file: `<stem>.brief/` or `<stem>.files/` with
+/// the team file `<stem>.yaml` or `<stem>.yml` next to it. A YAML in there is the team's
+/// material, not a team, so the team list, `DELETE /api/team`, the scheduler and the memory index
+/// never look inside. Without the team file beside it, a folder that only happens to end in
+/// `.files` is the operator's own and is searched like any other.
+pub(crate) fn is_team_sidecar_folder(folder: &Path) -> bool {
+    let (Some(parent), Some(name)) = (
+        folder.parent(),
+        folder.file_name().and_then(|name| name.to_str()),
+    ) else {
+        return false;
+    };
+    let Some(stem) = TEAM_FOLDER_SUFFIXES
+        .iter()
+        .find_map(|suffix| name.strip_suffix(suffix))
+        .filter(|stem| !stem.is_empty())
+    else {
+        return false;
+    };
+    // Listed rather than probed by name, so a `trip.YAML` team is matched on a case-sensitive
+    // disk the way discovery matches it.
+    fs::read_dir(parent).is_ok_and(|siblings| {
+        siblings.flatten().any(|sibling| {
+            let path = sibling.path();
+            is_team_file(&path)
+                && path.file_stem().and_then(|stem| stem.to_str()) == Some(stem)
+                && path.is_file()
+        })
+    })
+}
+
 pub(crate) fn discover_team_files(teams_root: &Path) -> io::Result<Vec<String>> {
     let mut directories = vec![teams_root.to_path_buf()];
     let mut files = Vec::new();
@@ -1102,7 +1137,8 @@ pub(crate) fn discover_team_files(teams_root: &Path) -> io::Result<Vec<String>> 
             // Directory symlinks are deliberately not followed. This both avoids cycles and
             // makes it impossible for traversal to leave the configured tree while scanning.
             if file_type.is_dir() {
-                if !is_skipped_team_directory(&entry.file_name()) {
+                if !is_skipped_team_directory(&entry.file_name()) && !is_team_sidecar_folder(&path)
+                {
                     directories.push(path);
                 }
                 continue;
@@ -1317,17 +1353,23 @@ async fn delete_team(
 
 /// `team` (canonical) as `GET /api/teams` lists it, or `None` when the list never would: not a
 /// `.yaml`/`.yml` file, or inside a hidden folder — the trash itself, `.loomwatch` workspaces —
-/// or a package cache. A team already in the trash cannot be deleted again.
+/// a package cache, or a team's own `<team>.brief/` or `<team>.files/`. A team already in the
+/// trash cannot be deleted again, and a file added to a team is not a team to delete.
 fn listed_team_path(teams_root: &Path, team: &Path) -> Option<String> {
     if !team.is_file() || !is_team_file(team) {
         return None;
     }
     let relative = normalized_relative_path(teams_root, team)?;
     let folders = relative.rsplit_once('/').map_or("", |(folders, _)| folders);
-    let hidden = folders
+    let mut folder = teams_root.to_path_buf();
+    let unlisted = folders
         .split('/')
-        .any(|folder| is_skipped_team_directory(std::ffi::OsStr::new(folder)));
-    (!hidden).then_some(relative)
+        .filter(|name| !name.is_empty())
+        .any(|name| {
+            folder.push(name);
+            is_skipped_team_directory(std::ffi::OsStr::new(name)) || is_team_sidecar_folder(&folder)
+        });
+    (!unlisted).then_some(relative)
 }
 
 /// Names of the listed teams, other than `relative` itself, whose enabled `memory.inherits` names
@@ -3665,6 +3707,54 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
     }
 
+    /// "Add file…" copies a file into `<team>.files/` beside the team (ADR 0035), and an operator
+    /// may keep any file in the team's `<team>.brief/`. A YAML among them is the team's material,
+    /// not a team, so the list leaves both folders out. A folder of the operator's own that only
+    /// happens to end in `.files` has no team file beside it and is still searched.
+    #[tokio::test]
+    async fn teams_endpoint_leaves_out_the_folders_a_team_keeps_beside_it() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), VALID_TEAM).expect("write team");
+        let added = crate::chosen_knowledge::store_file(
+            &root.0.join("trip.yaml"),
+            "config.yaml",
+            b"region: eu\n",
+        )
+        .expect("add a YAML file to the team");
+        assert_eq!(added.path, "trip.files/config.yaml");
+        fs::create_dir(root.0.join("trip.brief")).expect("create Brief folder");
+        fs::write(root.0.join("trip.brief/glossary.yaml"), "terms: []\n").expect("write Brief");
+        // One level down, beside a `.yml` team.
+        fs::create_dir(root.0.join("nested")).expect("create nested folder");
+        fs::write(root.0.join("nested/desk.yml"), VALID_TEAM).expect("write nested team");
+        crate::chosen_knowledge::store_file(
+            &root.0.join("nested/desk.yml"),
+            "copy-of-a-team.yaml",
+            VALID_TEAM.as_bytes(),
+        )
+        .expect("add a team-shaped YAML file to the nested team");
+        // No `archive.yaml` or `archive.yml` beside it: an ordinary folder.
+        fs::create_dir(root.0.join("archive.files")).expect("create the operator's folder");
+        fs::write(root.0.join("archive.files/old.yaml"), VALID_TEAM).expect("write old team");
+
+        let response = test_router(&root.0)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/teams")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(response).await["files"],
+            json!(["archive.files/old.yaml", "nested/desk.yml", "trip.yaml"])
+        );
+    }
+
     #[test]
     fn teams_discovery_rejects_lexical_escape_paths() {
         let root = Path::new("/teams");
@@ -4306,6 +4396,36 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
                 .count(),
             1
         );
+    }
+
+    /// A YAML added to a team, or kept in its Brief, is not in the team list, so it is not a team
+    /// to delete either: moving it would take a file an agent of that team is reading.
+    #[tokio::test]
+    async fn delete_refuses_a_file_a_team_keeps_beside_it() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), VALID_TEAM).expect("write team");
+        crate::chosen_knowledge::store_file(
+            &root.0.join("trip.yaml"),
+            "config.yaml",
+            VALID_TEAM.as_bytes(),
+        )
+        .expect("add a YAML file to the team");
+        fs::create_dir(root.0.join("trip.brief")).expect("create Brief folder");
+        fs::write(root.0.join("trip.brief/glossary.yaml"), VALID_TEAM).expect("write Brief");
+
+        for path in ["trip.files/config.yaml", "trip.brief/glossary.yaml"] {
+            let response = delete_request(test_router(&root.0), path).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+            assert!(root.0.join(path).is_file(), "{path} was moved");
+        }
+        assert!(root.0.join("trip.yaml").is_file());
+        assert!(fs::symlink_metadata(root.0.join(TRASH_DIR)).is_err());
+
+        // Without a team file beside it, the folder is the operator's own and its team is listed.
+        fs::create_dir(root.0.join("archive.files")).expect("create the operator's folder");
+        fs::write(root.0.join("archive.files/old.yaml"), VALID_TEAM).expect("write old team");
+        let response = delete_request(test_router(&root.0), "archive.files/old.yaml").await;
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[cfg(unix)]

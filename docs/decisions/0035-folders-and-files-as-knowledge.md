@@ -3,6 +3,8 @@
 - **Date:** 2026-10-02
 - **Status:** Accepted; `path` made required for knowledge by
   [`0036-knowledge-is-chosen-not-discovered.md`](0036-knowledge-is-chosen-not-discovered.md).
+  Decision 8 added 2026-10-02: team discovery does not look inside `<team>.files/` or
+  `<team>.brief/` (`api.rs` `is_team_sidecar_folder`, used by `schedule.rs` and `memory.rs` too).
   Daemon: `crates/loomwatch-backend/src/chosen_knowledge.rs` (new),
   `config.rs` (`CapabilityRef::path`), `capabilities.rs` (`KnowledgeSnapshot::{files, text_copy}`),
   `delivery.rs` (`resolve_knowledge`, file grants), `workspace.rs` (`knowledge/` in the working
@@ -84,6 +86,21 @@ Three facts shaped the design.
    several files at once is one team-file change, so they cannot overwrite each other. A failure
    names the file. A team that has never been saved cannot take a file yet, because there is no
    folder to copy it into, and the panel says so.
+
+8. **A team's own folders are not searched for teams.** Four things walk the teams root for
+   `.yaml`/`.yml` files: the team list (`GET /api/teams`, and the `list_teams` tool of ADR 0033),
+   `DELETE /api/team`, the scheduler and the `memory.inherits` index. All four skip a folder named
+   `<stem>.files` or `<stem>.brief` when a team file `<stem>.yaml` or `<stem>.yml` sits beside
+   it. Before this rule, a YAML added with Add file showed up as a team and could be deleted as
+   one. A copy of a routine's team file fired the routine twice. A copy of a team file that
+   other teams inherit made each of them fail to load, because its id was then declared by more
+   than one file.
+   - **The team file must be there.** A folder of the operator's own that only happens to end in
+     `.files` or `.brief` has no team file beside it, so it is still searched.
+   - **The match ignores the extension's case**, the way discovery does. `trip.YAML` keeps
+     `trip.files/` on a case-sensitive disk too.
+   - **Only discovery changes.** `GET /api/team` and `PUT /api/team` still open a file in there
+     when given its path.
 
 ## Consequences
 

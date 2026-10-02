@@ -122,7 +122,7 @@ too.
 | --- | --- |
 | `DELETE /api/team?path=<relative or absolute>` | `200` with `{path, name?, trash, moved[], deletedAt}` |
 | Outside the teams root, or the root itself | `403` |
-| Missing, not `.yaml`/`.yml`, or inside a hidden folder or `node_modules` | `404` |
+| Missing, not `.yaml`/`.yml`, or inside a hidden folder, `node_modules`, or a team's own `<team>.files/` or `<team>.brief/` (ADR 0035 decision 8) | `404` |
 | A symlink, a team with an unfinished run, or one another team inherits | `409`, with a sentence the operator can act on |
 | The move failed | `500`; nothing moved |
 | `GET /api/teams` | gains `trashed: string[]`, sorted. Older clients ignore it, and the UI treats its absence as `[]` |

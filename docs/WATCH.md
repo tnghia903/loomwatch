@@ -198,10 +198,10 @@ schedule:
   prompt is a 422 from `PUT /api/team` and `POST /api/runs`, and the schema
   (`$defs.Schedule`) rejects unknown keys.
 
-The scheduler is in memory. Every 30 s it rescans the teams root (hidden directories are
-skipped), recomputes a routine's next fire only when its cron or timezone changed or it
-fired, and starts every enabled routine whose time has passed through the same path as
-`POST /api/runs`. Fires missed while the daemon was down are skipped — `nextAt` is
+The scheduler is in memory. Every 30 s it rescans the teams root (hidden directories and a
+team's own `<team>.files/` and `<team>.brief/` are skipped), recomputes a routine's next fire
+only when its cron or timezone changed or it fired, and starts every enabled routine whose
+time has passed through the same path as `POST /api/runs`. Fires missed while the daemon was down are skipped — `nextAt` is
 computed from "now" at start. A routine whose previous scheduled run is still live skips
 that fire and reports `problem: previous scheduled run <id> is still running`. A file whose
 schedule does not parse stays listed with `problem` set and no `nextAt`. Nothing about a
