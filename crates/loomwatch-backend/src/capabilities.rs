@@ -1132,6 +1132,19 @@ pub struct KnowledgeSnapshot {
     /// `OpenCode` project ran in. Canonical, existing and de-duplicated. Empty for `OpenCode`
     /// history and for memory, which are records rather than places.
     pub folders: Vec<PathBuf>,
+    /// Single files the agent may read: a file the operator added (ADR 0035). Canonical.
+    pub files: Vec<PathBuf>,
+    /// A file's full text when the prompt carries only its opening, to be written into the agent's
+    /// working folder so any app can read the rest (ADR 0035).
+    pub text_copy: Option<TextCopy>,
+}
+
+/// The full text of one added file, written into the agent's working folder as
+/// `knowledge/<file_name>` when its prompt section is only an excerpt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextCopy {
+    pub file_name: String,
+    pub text: String,
 }
 
 /// Read one knowledge source. See [`KnowledgeSnapshot`].
@@ -1144,7 +1157,7 @@ pub fn knowledge_snapshot(
     if let Some(reference) = &item.memory {
         return KnowledgeSnapshot {
             contents: memory_contents(teams_root, reference),
-            folders: Vec::new(),
+            ..KnowledgeSnapshot::default()
         };
     }
     let mut snapshot = KnowledgeSnapshot::default();
@@ -1304,7 +1317,7 @@ fn json_definitions(value: &Value, collection_key: &str) -> Vec<(String, Value)>
 ///
 /// Names only for the listing: a file's contents are never read here, so a `.env` beside the
 /// teams shows as a name and nothing more.
-fn folder_contents(folder: &Path, provider: &str) -> Vec<CapabilityDefinition> {
+pub(crate) fn folder_contents(folder: &Path, provider: &str) -> Vec<CapabilityDefinition> {
     let Ok(entries) = fs::read_dir(folder) else {
         return Vec::new();
     };

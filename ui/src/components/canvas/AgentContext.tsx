@@ -1,7 +1,11 @@
-import { Box, BookOpen, Puzzle, Wrench, X } from 'lucide-react'
+import { Box, BookOpen, FilePlus2, FolderPlus, Puzzle, Wrench, X } from 'lucide-react'
+import { useRef, useState } from 'react'
 
+import { chosenKnowledge } from '../../lib/knowledge/chosen'
+import { addTeamFile } from '../../lib/knowledge/client'
 import type { AgentPlace } from '../../lib/team-file/agentPlace'
 import type { AgentConfig, CapabilityRef } from '../../lib/team-file/types'
+import { FolderPicker } from './FolderPicker'
 
 export interface AgentContextProps {
   agent: AgentConfig
@@ -16,12 +20,26 @@ export interface AgentContextProps {
   onAllowRecruitingChange?: (allow: boolean) => void
   onMemoryBriefChange?: (readsBrief: boolean) => void
   onRemoveCapability?: (capability: CapabilityRef) => void
+  /** The open team file, relative to the teams root. An added file is copied beside it, so a team
+      that has never been saved cannot take one yet. */
+  teamPath?: string | null
+  /** Connect knowledge the operator chose (ADR 0035). Called once per pick with everything added,
+      so several files added together cannot overwrite each other. */
+  onAddKnowledge?: (added: CapabilityRef[]) => void
 }
 
 const KIND: Record<CapabilityRef['kind'], { Icon: typeof Puzzle; label: string }> = {
   skill: { Icon: Puzzle, label: 'Skill · its instructions are supplied' },
   knowledge: { Icon: Box, label: 'Knowledge · supplied as source material' },
   tool: { Icon: Wrench, label: 'Tool · available while it works' },
+}
+
+/** `report.pdf`, or `report.pdf (2)` when this agent already has knowledge by that name. */
+function uniqueLabel(name: string, taken: Set<string>): string {
+  let label = name
+  for (let counter = 2; taken.has(label); counter += 1) label = `${name} (${counter})`
+  taken.add(label)
+  return label
 }
 
 /**
@@ -33,11 +51,37 @@ const KIND: Record<CapabilityRef['kind'], { Icon: typeof Puzzle; label: string }
  * The copy keeps docs/TEAM_MEMORY.md's rule: things are *supplied*; the agent is never said to
  * know, remember or have read them.
  */
-export function AgentContext({ agent, place, pipeline = false, briefCount = 0, inheritedMemory = [], readOnly = false, onPromoteEntrypoint, onAllowRecruitingChange, onMemoryBriefChange, onRemoveCapability }: AgentContextProps) {
+export function AgentContext({ agent, place, pipeline = false, briefCount = 0, inheritedMemory = [], readOnly = false, onPromoteEntrypoint, onAllowRecruitingChange, onMemoryBriefChange, onRemoveCapability, teamPath, onAddKnowledge }: AgentContextProps) {
   const capabilities = agent.capabilities ?? []
   // A team with no Brief supplies nothing, so the switch may not read as "on".
   const readsBrief = agent.memory?.brief !== false && briefCount > 0
   const nothingConnected = capabilities.length === 0 && inheritedMemory.length === 0
+  const canAdd = Boolean(onAddKnowledge) && !readOnly
+  const [picking, setPicking] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [notes, setNotes] = useState<{ text: string; failed: boolean }[]>([])
+  const fileInput = useRef<HTMLInputElement>(null)
+  const taken = () => new Set(capabilities.filter((capability) => capability.kind === 'knowledge').map((capability) => capability.name))
+
+  const addFiles = async (files: readonly File[]) => {
+    if (!teamPath || !onAddKnowledge || files.length === 0) return
+    setAdding(true)
+    const names = taken()
+    const added: CapabilityRef[] = []
+    const next: { text: string; failed: boolean }[] = []
+    for (const file of files) {
+      try {
+        const stored = await addTeamFile(teamPath, file)
+        added.push({ kind: 'knowledge', name: uniqueLabel(stored.name, names), path: stored.path })
+        if (stored.note) next.push({ text: `${stored.name}: ${stored.note}`, failed: false })
+      } catch (caught) {
+        next.push({ text: `${file.name} was not added: ${caught instanceof Error ? caught.message : String(caught)}`, failed: true })
+      }
+    }
+    if (added.length > 0) onAddKnowledge(added)
+    setNotes(next)
+    setAdding(false)
+  }
 
   return (
     <div className="agent-context">
@@ -68,13 +112,13 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
         : <div className="t-meta agent-context-empty">No team Brief yet. Notes you add in Memory are supplied to every agent.</div>)}
 
       {nothingConnected
-        ? <div className="t-meta agent-context-empty">Nothing connected. Drag a skill, knowledge source or tool from the Library onto this agent.</div>
+        ? <div className="t-meta agent-context-empty">Nothing connected. {canAdd ? 'Add a folder or file below, or drag' : 'Drag'} a skill, knowledge source or tool from the Library onto this agent.</div>
         : (
           <ul className="agent-context-list" aria-label="Connected to this agent">
             {capabilities.map((capability) => {
-              const { Icon, label } = KIND[capability.kind]
+              const { Icon, label } = chosenKnowledge(capability) ?? KIND[capability.kind]
               return (
-                <li key={`${capability.kind}:${capability.name}`}>
+                <li key={`${capability.kind}:${capability.name}`} title={capability.path}>
                   <Icon size={14} aria-hidden="true" />
                   <span className="agent-context-name"><b className="t-body">{capability.name}</b><span className="t-meta">{label}</span></span>
                   {onRemoveCapability && !readOnly && (
@@ -91,6 +135,30 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
             ))}
           </ul>
         )}
+
+      {canAdd && (
+        <div className="agent-context-add">
+          <button type="button" className="link t-meta" onClick={() => setPicking(true)}><FolderPlus size={13} aria-hidden="true" />Add folder…</button>
+          <button type="button" className="link t-meta" disabled={!teamPath || adding} onClick={() => fileInput.current?.click()}><FilePlus2 size={13} aria-hidden="true" />{adding ? 'Adding…' : 'Add file…'}</button>
+          <input ref={fileInput} type="file" multiple hidden aria-label="Files to add" onChange={(event) => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files) }} />
+        </div>
+      )}
+      {canAdd && !teamPath && <div className="t-meta agent-context-empty">Save the team to add a file: it is copied next to the team file.</div>}
+      {notes.length > 0 && (
+        <ul className="agent-context-notes" aria-live="polite">
+          {notes.map((note) => <li key={note.text} className={`t-meta ${note.failed ? 'failed' : ''}`} role={note.failed ? 'alert' : undefined}>{note.text}</li>)}
+        </ul>
+      )}
+      {picking && onAddKnowledge && (
+        <FolderPicker
+          onClose={() => setPicking(false)}
+          onChoose={(folder) => {
+            setPicking(false)
+            if (capabilities.some((capability) => capability.kind === 'knowledge' && capability.path === folder.path)) return
+            onAddKnowledge([{ kind: 'knowledge', name: uniqueLabel(folder.name, taken()), path: folder.path }])
+          }}
+        />
+      )}
     </div>
   )
 }

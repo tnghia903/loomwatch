@@ -560,6 +560,14 @@ fn router_with(
             "/api/jobs/{id}",
             axum::routing::put(put_job).delete(delete_job),
         )
+        // ADR 0035: the folder picker, and adding a file to a team as knowledge.
+        .route("/api/folders", get(get_folders))
+        .route(
+            "/api/team/files",
+            axum::routing::put(put_team_file).layer(axum::extract::DefaultBodyLimit::max(
+                crate::chosen_knowledge::MAX_FILE_BYTES,
+            )),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             enforce_allowed_host,
@@ -856,6 +864,76 @@ async fn post_file_open(
 ) -> Result<StatusCode, ApiError> {
     crate::files::open(&state.teams_root, &request).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+struct FolderQuery {
+    /// An absolute folder. Absent lists the home folder.
+    path: Option<PathBuf>,
+}
+
+/// One folder's subfolders and file names, for the "Add folder" picker (ADR 0035). Read-only and
+/// names only — a file's contents are never read here — and behind the same host check as every
+/// other route, so another site cannot browse through a rebound name.
+async fn get_folders(
+    State(state): State<ApiState>,
+    Query(query): Query<FolderQuery>,
+) -> Result<Json<crate::chosen_knowledge::FolderListing>, ApiError> {
+    let home = state.home_dir.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::chosen_knowledge::list_folder(query.path.as_deref(), home.as_deref())
+    })
+    .await
+    .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+    .map(Json)
+    .map_err(|message| ApiError::new(StatusCode::BAD_REQUEST, message))
+}
+
+#[derive(Debug, Deserialize)]
+struct TeamFileUpload {
+    /// The team file, relative to the teams root.
+    path: PathBuf,
+    /// The file's own name, as the browser reports it.
+    name: String,
+}
+
+/// Add a file to a team as knowledge (ADR 0035): the body is the file's bytes, copied to
+/// `<team>.files/` beside the team file. `application/octet-stream` only, so a page on another
+/// site cannot send it without a preflight the daemon never answers — the same protection the
+/// JSON-only routes rely on.
+async fn put_team_file(
+    State(state): State<ApiState>,
+    Query(query): Query<TeamFileUpload>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<crate::chosen_knowledge::StoredFile>, ApiError> {
+    let octet_stream = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/octet-stream"));
+    if !octet_stream {
+        return Err(ApiError::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "send the file as application/octet-stream".into(),
+        ));
+    }
+    let team = {
+        let _guard = state.writes.lock().map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "team write lock unavailable".into(),
+            )
+        })?;
+        resolve_existing_team_path(&state.teams_root, &query.path)?
+    };
+    // Extracting a PDF's text can take a moment, so it runs off the async workers.
+    tokio::task::spawn_blocking(move || {
+        crate::chosen_knowledge::store_file(&team, &query.name, &body)
+    })
+    .await
+    .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+    .map(Json)
+    .map_err(|message| ApiError::new(StatusCode::BAD_REQUEST, message))
 }
 
 /// The jobs the operator saved (`crate::jobs`, ADR 0030), and the files in the jobs folder that

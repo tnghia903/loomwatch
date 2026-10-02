@@ -29,6 +29,7 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
             <AgentContext
               agent={node.data.agent} place={props.place} briefCount={props.briefCount} inheritedMemory={props.inheritedMemory} readOnly={readOnly}
               onPromoteEntrypoint={props.onPromoteEntrypoint} onMemoryBriefChange={props.onMemoryBriefChange} onRemoveCapability={props.onRemoveCapability}
+              teamPath={props.teamPath} onAddKnowledge={props.onAddKnowledge}
             />
           </section>
           <p><Puzzle size={13} />Skills you connect work with any AI app.</p>

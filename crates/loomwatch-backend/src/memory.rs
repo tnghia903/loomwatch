@@ -499,6 +499,15 @@ impl ComposedPrompt {
                     _ => "\nRead further files in it when they help the task, where your permissions allow.",
                 });
             }
+            // ADR 0035: a file the operator added. Its text, or its opening, is below.
+            if !knowledge.files.is_empty() {
+                text.push_str("\nFile: ");
+                text.push_str(&knowledge.files.join(", "));
+                text.push_str(match knowledge.read_access {
+                    Some(Permission::Granted) => "\nYou have read access to this file.",
+                    _ => "\nOpen it directly where your permissions allow.",
+                });
+            }
             text.push_str("\n\n");
             text.push_str(&knowledge.rendered_contents());
             additions.push(PromptSection {
