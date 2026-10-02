@@ -104,6 +104,6 @@ boundaries. People who never write a prompt should get that by default, not by k
 - `InspectorProps` loses `isEntrypoint`, `isResponder` and `onPromoteResponder`, and gains
   `place`, `inheritedMemory` and `onRemoveCapability`. Choosing the responder stays where it
   already was: the Output wire, the Output editor and Final response owner.
-- Not covered: connecting a folder or file the Library did not discover ("Add folder…",
-  "Add file…") needs a daemon-side knowledge source of its own. It is the next step, and the
-  CONTEXT zone is where it will appear.
+- Connecting a folder or file the Library did not discover ("Add folder…", "Add file…") lives in
+  the CONTEXT zone and is decided in
+  [ADR 0035](0035-folders-and-files-as-knowledge.md).

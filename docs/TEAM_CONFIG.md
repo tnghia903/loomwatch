@@ -105,6 +105,25 @@ capabilities:
 Team memory is not a capability: wire another team's memory or an imported pack through
 `memory.inherits` (see [Team memory](TEAM_MEMORY.md)).
 
+**A folder or file you chose** is knowledge with a `path`, which the agent panel's **Add folder…**
+and **Add file…** write ([ADR 0035](decisions/0035-folders-and-files-as-knowledge.md)). It is read
+from that path instead of being looked up in the Library, so `name` is only its label:
+
+```yaml
+capabilities:
+  - { kind: knowledge, name: Market research, path: /Users/me/Documents/Market research } # linked
+  - { kind: knowledge, name: Q3 memo.pdf, path: news-desk.files/Q3 memo.pdf }              # added
+```
+
+A **folder** is linked where it is: the agent gets the same listing and README a Library folder
+gets, plus a read grant for the folder, so each run sees what is in it then. A **file** added in
+the panel is copied beside the team file under `<team>.files/`, and a relative `path` resolves
+against the team file's folder (`~/` against your home folder). The agent gets the file's text,
+up to 12,000 characters, and a read grant for that one file. A PDF's text is extracted with
+`pdftotext` when it is installed (`brew install poppler`); without it, the agent is told where the
+PDF is. When a file is longer than that, the prompt carries its opening, and the full text is put
+in the agent's working folder as `knowledge/<file>`. Only `knowledge` may have a `path`.
+
 **Knowledge** is supplied in the agent's opening prompt as the same snapshot the Library's
 **Contents** panel shows: for a project folder, its top-level listing and README; for an OpenCode
 project, its recent session titles. It is framed as source material, never as instructions. A

@@ -321,3 +321,15 @@ The envelope, the event kinds and every existing payload shape are unchanged.
 
 See [ADR 0034](decisions/0034-agent-context-and-team-orientation.md).
 
+
+### Additive chosen-knowledge metadata (2026-10-02)
+
+The envelope, the event kinds and every existing payload shape are unchanged.
+
+- `prompt_sections.knowledge[]` entries gain `files` — absolute paths of single files the agent may
+  read: a file the operator added to the team. Omitted when empty, so a record from a run that
+  added none is byte-identical to before. `readAccess` now covers `files` as well as `folders`.
+- A knowledge source the operator chose has `source` `Linked folder` or `Added file`, in place of
+  the Library provenance a discovered source carries.
+
+See [ADR 0035](decisions/0035-folders-and-files-as-knowledge.md).

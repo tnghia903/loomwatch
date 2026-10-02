@@ -18,6 +18,9 @@ export interface InspectorProps {
   /** Other teams' memory and imported packs supplied to this agent, by display name. */
   inheritedMemory?: readonly string[]
   onRemoveCapability?: (capability: CapabilityRef) => void
+  /** The open team file, so an added file can be copied beside it (ADR 0035). */
+  teamPath?: string | null
+  onAddKnowledge?: (added: CapabilityRef[]) => void
   onRename: (field: 'name' | 'role', value: string) => void
   onModelChange: (value: string) => void
   onThinkingEffortChange?: (value: string) => void
@@ -51,7 +54,7 @@ export interface InspectorProps {
 // between a drop and a valid save), CONTEXT (what the agent is given; ADR 0034 replaced
 // BEHAVIOUR with it), PROCESS (collapsed).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
-export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false }: InspectorProps) {
+export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false }: InspectorProps) {
   const { agent, runtime } = node.data
   const [processOpen, setProcessOpen] = useState(false)
   const status = runtime?.status ?? agent.status ?? 'idle'
@@ -160,6 +163,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         <AgentContext
           agent={agent} place={place} pipeline={pipeline} briefCount={briefCount} inheritedMemory={inheritedMemory} readOnly={readOnly}
           onPromoteEntrypoint={onPromoteEntrypoint} onAllowRecruitingChange={onAllowRecruitingChange} onMemoryBriefChange={onMemoryBriefChange} onRemoveCapability={onRemoveCapability}
+          teamPath={teamPath} onAddKnowledge={onAddKnowledge}
         />
       </div>
 

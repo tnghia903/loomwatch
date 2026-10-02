@@ -2090,6 +2090,12 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               doc.setAgentCapabilities(inspectedNode.id, remaining)
               setStatusAnnouncement(`${removed.name} was disconnected from ${inspectedNode.data.agent.name}. Save the team to keep this change.`)
             }}
+            teamPath={doc.path}
+            onAddKnowledge={(added) => {
+              if (!editable || added.length === 0) return
+              doc.setAgentCapabilities(inspectedNode.id, [...(inspectedNode.data.agent.capabilities ?? []), ...added])
+              setStatusAnnouncement(`${added.map((capability) => capability.name).join(', ')} ${added.length === 1 ? 'is' : 'are'} now supplied to ${inspectedNode.data.agent.name}. Save the team to keep this change.`)
+            }}
             modelOptions={modelOptionsForAgent(inspectedNode.data.agent, doc.nodes.map((node) => node.data.agent), harnesses, modelCatalog.models)} defaultThinkingEffort={modelCatalog.defaultThinkingEffort} modelOptionsLoading={modelCatalog.loading} modelOptionsError={modelCatalog.error} onRetryModelOptions={modelCatalog.retry}
             onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)}
             onCwdChange={(value) => doc.updateAgentCwd(inspectedNode.id, value)}

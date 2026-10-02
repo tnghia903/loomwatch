@@ -507,6 +507,12 @@ impl TryFrom<RawAgent> for AgentConfig {
 pub struct CapabilityRef {
     pub kind: CapabilityKind,
     pub name: String,
+    /// A folder or file the operator chose, for `knowledge` only (ADR 0035). When set, the source
+    /// is read from here instead of being looked up in the Library by `name`, which is then only
+    /// its label. A relative path resolves against the team file's directory, which is where an
+    /// added file is copied to.
+    #[serde(default)]
+    pub path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -923,6 +929,18 @@ impl TeamConfig {
         // than as the incoming-edge violation it also happens to be.
         team.validate_operator_nodes()?;
         team.responder_id()?;
+        for agent in &team.agents {
+            for capability in &agent.capabilities {
+                if capability.path.is_some() && capability.kind != CapabilityKind::Knowledge {
+                    bail!(
+                        "agent {:?}: {} is a {} with a path, but only knowledge can be read from a path",
+                        agent.id,
+                        capability.name,
+                        capability.kind.as_str()
+                    );
+                }
+            }
+        }
         if let Some(schedule) = &team.schedule {
             schedule.validate()?;
         }

@@ -6,6 +6,7 @@ pub mod acp;
 pub mod api;
 pub mod archive;
 pub mod capabilities;
+pub mod chosen_knowledge;
 pub mod composer;
 pub mod config;
 pub mod control;

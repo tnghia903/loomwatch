@@ -434,9 +434,16 @@ pub fn materialise(
         required_skills.push(prepare_skill(agent, name, &definition, &path, text, bus));
         delivered.push(directory);
     }
-    let delivery =
-        deliver_knowledge_and_tools(home, teams_root, &inventory, agent, &root, declared_cwd)
-            .map_err(&fail)?;
+    let delivery = deliver_knowledge_and_tools(
+        home,
+        teams_root,
+        team_path.parent().unwrap_or(Path::new(".")),
+        &inventory,
+        agent,
+        &root,
+        declared_cwd,
+    )
+    .map_err(&fail)?;
     // Written after the skills so a failed skill delivery does not leave a Brief file behind for a
     // run that never starts. Rewritten on every run, like the skills tree, so an edited Brief is
     // picked up and a removed one stops being delivered.
@@ -464,6 +471,7 @@ pub fn materialise(
 fn deliver_knowledge_and_tools(
     home: Option<&Path>,
     teams_root: &Path,
+    team_dir: &Path,
     inventory: &capabilities::CapabilityInventory,
     agent: &AgentConfig,
     root: &Path,
@@ -472,10 +480,25 @@ fn deliver_knowledge_and_tools(
     let mut delivery = crate::delivery::prepare_for(
         home,
         teams_root,
+        team_dir,
         inventory,
         agent,
         &crate::delivery::process_env,
     )?;
+    // ADR 0035: an added file whose prompt section is only its opening has its full text put in
+    // the working folder, where every app can read it without a grant or a PDF reader.
+    for knowledge in &delivery.knowledge {
+        if let Some(copy) = &knowledge.text_copy {
+            let directory = root.join(crate::chosen_knowledge::TEXT_COPY_DIR);
+            fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+            fs::write(directory.join(&copy.file_name), &copy.text).map_err(|error| {
+                format!(
+                    "cannot put the full text of {} in the working folder: {error}",
+                    knowledge.name
+                )
+            })?;
+        }
+    }
     if Harness::of(agent) == Harness::Claude {
         let base = read_settings(declared_cwd);
         crate::delivery::grant_claude_access(root, base.as_deref(), &mut delivery)?;
@@ -493,7 +516,13 @@ fn prepare_root(
     agent: &AgentConfig,
     declared_cwd: &Path,
 ) -> Result<Option<PathBuf>, String> {
-    for relative in [".claude/skills", ".agents/skills"] {
+    // `knowledge/` holds full texts of added files (ADR 0035), rebuilt on every run for the same
+    // reason as the skill trees: a file disconnected since must not linger.
+    for relative in [
+        ".claude/skills",
+        ".agents/skills",
+        crate::chosen_knowledge::TEXT_COPY_DIR,
+    ] {
         let directory = root.join(relative);
         if directory.exists() {
             fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
@@ -736,6 +765,7 @@ mod tests {
         CapabilityRef {
             kind: CapabilityKind::Skill,
             name: name.to_owned(),
+            path: None,
         }
     }
 
@@ -753,6 +783,7 @@ mod tests {
         let knowledge = vec![CapabilityRef {
             kind: CapabilityKind::Knowledge,
             name: "demo project".to_owned(),
+            path: None,
         }];
 
         let workspace = materialise(
@@ -803,6 +834,113 @@ mod tests {
         assert_eq!(
             moved.delivery.knowledge[0].read_access,
             Some(crate::delivery::Permission::HarnessPolicy)
+        );
+    }
+
+    /// ADR 0035: a folder the operator linked and a file they added are delivered from their
+    /// paths, not looked up in the Library. The file is granted on its own — not its folder, which
+    /// holds every file added to the team — and a long file's full text is put in the working
+    /// folder, then removed once the file is disconnected.
+    #[test]
+    fn a_linked_folder_and_an_added_file_are_delivered_from_their_paths() {
+        let temp = TempDirectory::new();
+        let teams = temp.path().join("teams");
+        let reports = temp.path().join("reports");
+        fs::create_dir_all(teams.join("team.files")).expect("files");
+        fs::create_dir_all(&reports).expect("reports");
+        fs::write(reports.join("q3.csv"), "a,b\n").expect("csv");
+        let long = "a line of the memo\n".repeat(1_000);
+        fs::write(teams.join("team.files/memo.md"), &long).expect("memo");
+        fs::write(teams.join("team.files/other.md"), "not this one").expect("other");
+        let team = teams.join("team.yaml");
+        let chosen = |name: &str, path: &Path| CapabilityRef {
+            kind: CapabilityKind::Knowledge,
+            name: name.to_owned(),
+            path: Some(path.to_path_buf()),
+        };
+        let wired = vec![
+            chosen("reports", &reports),
+            chosen("memo.md", Path::new("team.files/memo.md")),
+        ];
+
+        let workspace = materialise(
+            None,
+            &teams,
+            &team,
+            "team",
+            &agent("npx", &["@agentclientprotocol/claude-agent-acp"], wired),
+            &teams,
+            &no_memory(),
+            BusMode::Pipeline,
+        )
+        .expect("delivered")
+        .expect("a workspace");
+        let [folder, file] = workspace.delivery.knowledge.as_slice() else {
+            panic!("two sources: {:?}", workspace.delivery.knowledge);
+        };
+        assert_eq!(folder.source, "Linked folder");
+        let memo = fs::canonicalize(teams.join("team.files/memo.md")).expect("memo");
+        assert_eq!(file.source, "Added file");
+        assert_eq!(file.files, [memo.to_string_lossy()]);
+        assert_eq!(file.read_access, Some(crate::delivery::Permission::Granted));
+        let settings =
+            fs::read_to_string(workspace.cwd.join(".claude/settings.json")).expect("grants");
+        assert!(
+            settings.contains(&format!("Read(/{})", memo.display())),
+            "{settings}"
+        );
+        assert!(
+            !settings.contains("team.files/**"),
+            "only the added file is granted, never its folder: {settings}"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.cwd.join("knowledge/memo.md")).expect("full text"),
+            long
+        );
+        // The prompt carries the opening, says where the rest is, and names the grant.
+        let prompt = crate::compose_prompt(
+            &agent(
+                "npx",
+                &["@agentclientprotocol/claude-agent-acp"],
+                Vec::new(),
+            ),
+            &crate::memory::ContextPacket::default(),
+            &crate::NodeTask::goal("Summarise the memo"),
+        )
+        .with_delivery(&workspace.delivery, true);
+        assert!(
+            prompt.text.contains(&format!(
+                "File: {}\nYou have read access to this file.",
+                memo.display()
+            )),
+            "{}",
+            prompt.text
+        );
+        assert!(
+            prompt
+                .text
+                .contains("The full text is in knowledge/memo.md in your working folder")
+        );
+
+        let without = materialise(
+            None,
+            &teams,
+            &team,
+            "team",
+            &agent(
+                "npx",
+                &["@agentclientprotocol/claude-agent-acp"],
+                vec![chosen("reports", &reports)],
+            ),
+            &teams,
+            &no_memory(),
+            BusMode::Pipeline,
+        )
+        .expect("delivered")
+        .expect("a workspace");
+        assert!(
+            !without.cwd.join("knowledge").exists(),
+            "a disconnected file's full text must not linger"
         );
     }
 

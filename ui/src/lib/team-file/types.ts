@@ -40,6 +40,9 @@ export type AgentStatus =
 export interface CapabilityRef {
   kind: 'skill' | 'knowledge' | 'tool'
   name: string
+  /** Knowledge only (ADR 0035): a folder linked where it is, or a file added beside the team
+      file (`<team>.files/…`, relative to the team file's folder). `name` is then only a label. */
+  path?: string
 }
 
 export interface AgentConfig {

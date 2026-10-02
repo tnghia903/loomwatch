@@ -543,9 +543,26 @@ $defs:
           - knowledge
           - tool
       name:
-        description: The capability's name as the Library reports it.
+        description: >-
+          The capability's name as the Library reports it. For a knowledge source with a `path`,
+          only its label.
         type: string
         minLength: 1
+      path:
+        description: >-
+          Knowledge only (ADR 0035): a folder or file the operator chose, read from here instead of
+          being looked up in the Library. A folder is linked where it is; an added file is copied
+          beside the team file under `<team>.files/` and named relative to the team file's
+          directory.
+        type: string
+        minLength: 1
+    if:
+      required:
+        - path
+    then:
+      properties:
+        kind:
+          const: knowledge
 
   Edge:
     type: object
