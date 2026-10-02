@@ -1,14 +1,15 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/banner-dark.png">
-    <img src="docs/assets/readme/banner-light.png" width="880" alt="LoomWatch. Put AI agents to work as a team. Build a team from the AI apps already on your computer, ask in plain words, and review every step before you use the result.">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/banner-dark.svg">
+    <img src="docs/assets/readme/banner-light.svg" width="880" alt="LoomWatch. Put AI agents to work as a team. Build a team from the AI apps already on your computer, ask in plain words, and review every step before you use the result.">
   </picture>
 </p>
 
 <p align="center">
   <a href="#quickstart"><strong>Quickstart</strong></a> &middot;
-  <a href="#how-a-run-works"><strong>How it works</strong></a> &middot;
+  <a href="#how-it-works"><strong>How it works</strong></a> &middot;
   <a href="#features"><strong>Features</strong></a> &middot;
+  <a href="#teams-you-can-build"><strong>Recipes</strong></a> &middot;
   <a href="#try-your-first-run"><strong>First run</strong></a> &middot;
   <a href="#faq"><strong>FAQ</strong></a> &middot;
   <a href="#more-guides"><strong>Guides</strong></a>
@@ -36,18 +37,67 @@ into a workflow, and watch their progress, tool calls, handovers and final answe
 single agent, a step-by-step pipeline, or a team that delegates work as it goes. When the team needs
 you, it stops and asks.
 
-| | Step | What you do |
-| :-: | --- | --- |
-| **01** | **Build** | Pick agents from the AI apps on this computer and connect them on a canvas. |
-| **02** | **Ask** | Describe the job in plain words: _"Prepare today's AI and tech news digest, and link every claim."_ |
-| **03** | **Review** | Watch each step happen, approve or send work back, and check the evidence before you use the result. |
-
 <p align="center">
   <sub>WORKS WITH THE AI APPS YOU ALREADY USE</sub><br>
   <strong>Claude Code</strong> &nbsp;·&nbsp; <strong>Codex</strong> &nbsp;·&nbsp; <strong>Gemini CLI</strong> &nbsp;·&nbsp;
   <strong>OpenCode</strong> &nbsp;·&nbsp; <strong>Hermes</strong> &nbsp;·&nbsp; <strong>OpenClaw</strong><br>
   <sub>and, through OpenCode, models such as DeepSeek, Kimi, GLM, Qwen and Mistral</sub>
 </p>
+
+## How it works
+
+<table>
+<tr>
+<td width="50%" valign="middle">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-build-dark.png">
+  <img src="docs/assets/readme/step-build-light.png" alt="Your team, in one sentence: every day at 10:00 AM and whenever you ask, News Collector collects what is needed, then News Editor edits, and finally Digest Writer writes the answer. Scheduled answers go to Notion.">
+</picture>
+</td>
+<td width="50%" valign="middle">
+
+### 01 &nbsp;Build
+
+Pick agents from the AI apps on this computer and connect them on a canvas. LoomWatch reads the
+team back to you in **one plain sentence**, so you can check the plan before anything runs.
+
+</td>
+</tr>
+<tr>
+<td valign="middle">
+
+### 02 &nbsp;Ask, and watch
+
+Describe the job in plain words: _"Prepare today's AI and tech news digest, and link every claim."_
+Each stage starts when the one before it hands over, and every handover lands on a **live
+timeline** you can drag back to replay.
+
+</td>
+<td valign="middle">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-watch-dark.png">
+  <img src="docs/assets/readme/step-watch-light.png" alt="A live timeline with rows for Researcher, You and Writer, and the latest event: Researcher handed the work to you.">
+</picture>
+</td>
+</tr>
+<tr>
+<td valign="middle">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-review-dark.png">
+  <img src="docs/assets/readme/step-review-light.png" alt="The review stop: Researcher is done. Approve the findings, or say what to change. Buttons: Send back to Researcher, Approve, Stop.">
+</picture>
+</td>
+<td valign="middle">
+
+### 03 &nbsp;Review
+
+A **You** step pauses the team and shows what was handed over. Approve it, or type what should
+change and send it back. **Nothing moves on until you decide**, and the finished answer comes with
+the evidence to check before you use it.
+
+</td>
+</tr>
+</table>
 
 ## LoomWatch is right for you if
 
@@ -59,6 +109,16 @@ you, it stops and asks.
 - ✅ You want it **on your own computer**, with the skills, MCP tools and sign-ins you already have.
 - ✅ You run the same kind of job again and again, such as a daily digest or a research brief, and
   want it **repeatable, or scheduled**.
+
+## What changes when your apps work as a team
+
+| Without LoomWatch | With LoomWatch |
+| --- | --- |
+| You copy one app's answer into the next app's prompt. | Agents hand work to each other, and every handover is on the timeline. |
+| You find out what an agent did by scrolling back through its terminal. | Every message, tool call and file it touched is recorded, and you can replay it. |
+| A weak first step quietly shapes everything after it. | A review step stops the team until you approve, or send the work back. |
+| Each app has its own skills, tools and folders. | Skills, MCP tools and project folders are delivered to whichever agent needs them. |
+| Doing the job again means retyping the prompt. | Saved teams, follow-ups, **Redo from** any step, and daily schedules. |
 
 ## How a run works
 
@@ -78,6 +138,31 @@ Each agent is its own AI app, started by LoomWatch on your computer and driven o
 other, or ask each other questions, through LoomWatch's Team Bus. Every message, tool call and
 handover is recorded in a local database, so you can watch a run live, replay it later, and follow
 up from any step.
+
+### Three ways to run a team
+
+```mermaid
+flowchart LR
+    subgraph single["One assistant"]
+        solo["Assistant<br/>does the whole job"]
+    end
+    subgraph pipeline["A pipeline"]
+        direction LR
+        step1["Researcher"] --> step2{{"You"}} --> step3["Writer"]
+    end
+    subgraph delegating["A team that delegates"]
+        direction LR
+        lead["Lead"] -- "dispatch" --> worker["Worker"]
+        lead -- "ask" --> expert["Expert"]
+    end
+    single ~~~ pipeline ~~~ delegating
+    classDef stop stroke:#AD8A20,stroke-width:2px
+    class step2 stop
+```
+
+**One assistant** does the whole job. **A pipeline** runs its stages in order, each one receiving
+the last one's handover, with review stops wherever you put them. **A team that delegates** starts
+with a lead that hands out work and asks its teammates questions as it goes.
 
 ## Features
 
@@ -187,6 +272,19 @@ model providers, as they always do.
 </tr>
 </table>
 
+## Teams you can build
+
+Every team below is made from the jobs in Build's library, each on the AI app it suits. Start from
+**New team**, then add, connect and rename agents to match.
+
+| Team | The steps | Good for |
+| --- | --- | --- |
+| **Morning briefing** | ⏰ Every day at 10:00 → Collector → Editor → Writer → Notion | A digest that is waiting when you start work |
+| **Research and review** | Researcher *(OpenCode)* → Reviewer *(Claude Code)* | Answers whose sources a second agent has checked |
+| **Approve before writing** | Researcher → ✋ **You** → Writer | Anything where a wrong first step is costly |
+| **Code with a second opinion** | Coder *(Codex)* → Reviewer *(Claude Code)* → ✋ **You** | Changes in a folder, checked before you keep them |
+| **From numbers to slides** | Analyst *(Codex)* → Designer *(Claude Code)* | A deck or page built from real data |
+
 ## See it
 
 <table>
@@ -219,6 +317,13 @@ model providers, as they always do.
 </tr>
 </table>
 
+## What LoomWatch is not
+
+- **Not a chatbot.** It runs teams of the AI apps you already have, one app per agent.
+- **Not a cloud service.** It runs on your computer and keeps your run history there.
+- **Not a model provider.** Your agents use your own AI apps, sign-ins and plans.
+- **Not autopilot.** You choose where the team stops for your review, and it waits for you.
+
 ## Quickstart
 
 ```sh
@@ -228,8 +333,11 @@ cd loomwatch
 ```
 
 The first start takes a few minutes, then opens **<http://127.0.0.1:3000>** with an offline demo team
-ready to run. No AI account, API key or model usage is needed for the demo, though installing does
-need internet access. Then follow [Try your first run](#try-your-first-run).
+ready to run. Then follow [Try your first run](#try-your-first-run).
+
+> [!TIP]
+> No AI account yet? The offline demo needs no API key and no model usage, so you can learn the whole
+> app first. Installing does need internet access.
 
 This recommended setup runs LoomWatch itself on your computer and keeps only its database
 (PostgreSQL) in Docker. That way LoomWatch can use the agent apps, skills, MCP tools, sign-ins,
@@ -297,7 +405,7 @@ The first start takes a few minutes. It sets everything up for you:
 4. Builds LoomWatch. This happens only the first time and after an update.
 5. Starts LoomWatch and opens **<http://127.0.0.1:3000>** in your browser.
 
-Keep this terminal window open while you use LoomWatch. To stop LoomWatch, press **Ctrl-C** in it.
+Keep this terminal window open while you use LoomWatch. To stop LoomWatch, press <kbd>Ctrl</kbd>+<kbd>C</kbd> in it.
 
 LoomWatch looks for your skills and tools in the usual places in your home folder (`.claude`,
 `.codex`, `.agents`, `.config/opencode` and similar) and for AI apps on the terminal's `PATH`. It
@@ -308,7 +416,7 @@ reads them only on your computer; nothing is uploaded.
 | To | Run, from the `loomwatch` folder |
 | --- | --- |
 | Start LoomWatch, or open it if it is already running | `./loomwatch` |
-| Stop LoomWatch | Press **Ctrl-C** in its window |
+| Stop LoomWatch | Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in its window |
 | Also stop the database, for example before quitting Docker Desktop | `./loomwatch stop` |
 | Update to the latest version (stop it first) | `./loomwatch update` |
 | See every option | `./loomwatch help` |
@@ -358,14 +466,14 @@ settings meant for the Docker Compose mode below out of a local run.
 
 The first time you open LoomWatch, a short guide offers to walk you through creating a team and
 running it with one of your own AI apps. Reopen it any time from the menu in a team, or press
-**⌘K** and choose **Getting started guide**.
+<kbd>⌘</kbd><kbd>K</kbd> and choose **Getting started guide**.
 
 To try a team without calling a model provider, pick **Review stop demo** under **Your teams**. The
 demo is a three-step workflow: **Researcher → You → Writer**. Its agents produce fixed responses so
 you can learn the interface without calling a model provider.
 
 1. Click **Run team**, type `Prepare a short getting-started guide for new users.` in the box at
-   the bottom right, and press **Enter** (**Shift+Enter** adds a new line).
+   the bottom right, and press <kbd>Enter</kbd> (<kbd>Shift</kbd>+<kbd>Enter</kbd> adds a new line).
 2. When the team pauses for you, open **What Researcher handed over** to read it.
 3. To ask for changes, type `Use the short guide and remove the detailed walkthrough.` and click
    **Send back to Researcher**. The researcher revises its work and asks again.
@@ -392,7 +500,7 @@ new instructions and choose **Follow up**; **Redo from** can start again at a se
 
    Ready-made teams are saved straight away with your AI app's own default model, so you can
    run them immediately.
-4. Click **Run team**, describe what you want in plain words, and press **Enter**.
+4. Click **Run team**, describe what you want in plain words, and press <kbd>Enter</kbd>.
 5. To customise, open **Build**: click **+** next to an AI app to add an agent, select a card to
    edit its instructions, app and model, and drag from the dot on a card's right edge to the next
    card to make them work in order. Add **You (review step)** wherever you want to approve work
@@ -414,15 +522,16 @@ Bridge fallbacks may download a package on first use. Availability in the Librar
 the required commands were found; it does not confirm that your account is signed in or
 has model access. Delegation and session-resume support vary by integration.
 
-Provider authentication stays with your agent app. Real runs use your existing provider
-account and its usage limits or billing. The offline demo does not consume that usage.
-Agent apps may send prompts and files to their configured model providers; running
-LoomWatch locally does not make cloud models offline.
+> [!IMPORTANT]
+> Provider authentication stays with your agent app. Real runs use your existing provider account
+> and its usage limits or billing. The offline demo does not consume that usage. Agent apps may send
+> prompts and files to their configured model providers; running LoomWatch locally does not make
+> cloud models offline.
 
 <details>
 <summary><strong>Keep the pipeline easy to follow</strong></summary>
 
-Click **Organize** in the canvas controls (or press **⌥⌘L**) to arrange stages from left to
+Click **Organize** in the canvas controls (or press <kbd>⌥</kbd><kbd>⌘</kbd><kbd>L</kbd>) to arrange stages from left to
 right and group skills and sources below their agents. The view fits the arranged pipeline
 above the composer. **Undo organize** restores the previous arrangement. Positions are saved
 with the canvas layout; organizing does not change the workflow or start a run.
@@ -621,8 +730,11 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Provider sign-in | Managed by each host agent app; Compose-only deployments use `loomwatch-home` |
 
 Back up your teams folder and PostgreSQL database if you want to move or preserve your work.
-`docker compose stop` preserves data. Avoid `docker compose down -v` for normal shutdown:
-it deletes the database volume, including history and Notebook entries.
+`docker compose stop` preserves data.
+
+> [!WARNING]
+> Avoid `docker compose down -v` for normal shutdown: it deletes the database volume, including
+> history and Notebook entries.
 
 <details>
 <summary>Deleting and restoring a team</summary>
@@ -633,7 +745,7 @@ erased. The team file, its layout and its own notes folder (`<team>.brief`, if i
 `.trash/<date>-<team>/` inside your teams folder. Its run history and Notebook entries stay in the
 database, and no new team takes its file name while it is in the trash. To restore it, move the
 files in that folder back to where `path` in its `deleted.json` says the team file was, and leave
-`deleted.json` behind. In Finder, press ⌘⇧. to show hidden folders. To remove a team for good,
+`deleted.json` behind. In Finder, press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>.</kbd> to show hidden folders. To remove a team for good,
 delete its folder from `.trash`.
 
 </details>
@@ -697,5 +809,10 @@ teams folder's `.jobs`.
 <br>
 
 <p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/loommark-dark.svg">
+    <img src="docs/assets/readme/loommark-light.svg" width="72" alt="The LoomWatch mark: two strands woven across each other.">
+  </picture>
+  <br>
   <sub>Woven with Rust, React and ACP. Watch every thread.</sub>
 </p>
