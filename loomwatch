@@ -242,7 +242,34 @@ start_database() {
   if ! docker compose up --detach --wait postgres; then
     fail "the database did not start. If the message above says port ${db_port:-5433} is already in use, change POSTGRES_PORT in .env to a free port such as 5434, then run ./loomwatch again."
   fi
+  match_database_password
   DATABASE_URL="postgres://$user:$password@127.0.0.1:${db_port:-5433}/$db"
+}
+
+# PostgreSQL keeps the password it was created with, and Compose names the database after this
+# folder. So LoomWatch downloaded again into a folder named like an earlier copy finds that copy's
+# database, which refuses the new random password in .env. The database is LoomWatch's own and
+# its history goes with the teams every copy shares, so it takes this folder's password instead.
+match_database_password() {
+  local refused
+  # Inside the container a connection through its network address is password-checked exactly
+  # like LoomWatch's own; one through the local socket is trusted, which is what lets this fix it.
+  refused=$(docker compose exec -T postgres sh -c \
+    'PGPASSWORD=$POSTGRES_PASSWORD psql -h "$(hostname)" -U "$POSTGRES_USER" -d postgres -tAc "select 1"' 2>&1 >/dev/null) &&
+    return 0
+  case $refused in
+    *'password authentication failed'*) ;;
+    *) return 0 ;; # Anything else is left for LoomWatch itself to report.
+  esac
+  if docker compose exec -T postgres sh -c \
+    'psql -v ON_ERROR_STOP=1 -v user="$POSTGRES_USER" -v password="$POSTGRES_PASSWORD" -U "$POSTGRES_USER" -d postgres -q' \
+    >/dev/null <<'SQL'; then
+ALTER ROLE :"user" WITH PASSWORD :'password';
+SQL
+    say "Found the database of an earlier LoomWatch copy on this computer. It now uses the password in this folder's .env, so its run history is kept."
+    return 0
+  fi
+  fail "the database Docker kept from an earlier LoomWatch copy refuses the password in .env, and LoomWatch could not change it. To start over with an empty run history, run: docker compose down --volumes (this deletes the earlier history; your teams are kept), then ./loomwatch again."
 }
 
 # What the build depends on: the commit plus any local edits. An unchanged checkout never rebuilds.
