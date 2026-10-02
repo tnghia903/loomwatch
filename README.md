@@ -21,15 +21,26 @@ no AI account, API key, or model usage is needed. Installation still requires in
 
 ## What you need
 
-Install these once, before you start:
+LoomWatch is built on your computer the first time you start it, so it needs a few free tools.
+You don't have to check for them yourself: the start command lists anything missing and how to
+install it.
 
-| Requirement | Why | Check it with |
-| --- | --- | --- |
-| [Docker Desktop](https://docs.docker.com/desktop/) (or Docker Engine with Compose) | Runs the database that keeps your run history. Open it and leave it running. | `docker compose version` |
-| [Git](https://git-scm.com/downloads), plus access to this private repository | Downloads LoomWatch. | `git --version` |
-| [Node.js 24](https://nodejs.org/) | Builds the browser app. | `node --version` |
-| [Rust via rustup](https://rustup.rs/) | Builds the LoomWatch program. The exact Rust version this project needs (pinned in `rust-toolchain.toml`) downloads on its own the first time you build. | `cargo --version` |
-| Python 3 | Runs the offline demo. Usually already installed on macOS. | `python3 --version` |
+- [Docker Desktop](https://docs.docker.com/desktop/) (or OrbStack, or Docker Engine with Compose):
+  runs the database that keeps your run history.
+- [Node.js](https://nodejs.org/) 22.12 or newer: builds the browser app.
+- [Rust](https://rustup.rs/): builds the LoomWatch program. The exact version it needs downloads on
+  its own during the first build.
+- [Git](https://git-scm.com/downloads), plus access to this private repository: downloads LoomWatch.
+- Python 3: runs the offline demo. Usually already installed on macOS.
+
+On a Mac with [Homebrew](https://brew.sh/), these two commands install everything:
+
+```sh
+brew install --cask docker-desktop && brew install node
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+```
+
+Then open a new terminal window so it finds the new tools.
 
 To run real agents, you also need at least one AI app installed and signed in, such as Claude Code,
 Codex, Gemini CLI or OpenCode. You do **not** need one for the demo.
@@ -39,8 +50,7 @@ command already works, because LoomWatch finds your apps, skills and tools throu
 
 ## Install and run LoomWatch
 
-LoomWatch runs on your own computer and opens in your browser. Only the database runs in Docker.
-The first install takes a few minutes, most of it downloads and the one-time build.
+Two steps: download it, then start it with one command.
 
 ### 1. Download LoomWatch
 
@@ -59,63 +69,24 @@ gh repo clone tnghia903/loomwatch
 cd loomwatch
 ```
 
-Run every remaining command from inside this `loomwatch` folder.
+### 2. Start LoomWatch
 
-### 2. Set up and start the database
-
-Create your settings file:
+From inside the `loomwatch` folder:
 
 ```sh
-cp .env.example .env
+./loomwatch
 ```
 
-Open `.env` in a text editor and replace `replace-with-a-local-password` with a long password of
-letters and numbers only. Leave the other values alone unless port 5433 is already in use on your
-computer. Then start the database:
+The first start takes a few minutes. It sets everything up for you:
 
-```sh
-docker compose up -d --wait postgres
-```
+1. Creates your settings file (`.env`) with a random database password.
+2. Creates your teams folder, `~/LoomWatch/teams`, with an offline demo team in it.
+3. Opens Docker Desktop if it is not running, then starts the database. The database keeps your
+   run history, notes and checkpoints in a Docker volume, so they survive restarts.
+4. Builds LoomWatch. This happens only the first time and after an update.
+5. Starts LoomWatch and opens **<http://127.0.0.1:3000>** in your browser.
 
-It is ready when the output ends with `Healthy`. The database keeps your run history, notes and
-checkpoints in a Docker volume, so they survive restarts.
-
-### 3. Build LoomWatch
-
-```sh
-cd ui
-npx --yes pnpm@12 install --frozen-lockfile
-npx --yes pnpm@12 run build
-cd ..
-cargo build --release --locked
-```
-
-The order matters: the browser app is built first because it is packed into the LoomWatch program.
-The last command takes a couple of minutes the first time.
-
-### 4. Create your teams folder
-
-Your teams live in their own folder, outside the source code. Create it and copy in the offline
-demo:
-
-```sh
-mkdir -p "$HOME/LoomWatch/teams"
-cp -n examples/operator-stop.yaml examples/operator-stop-harness.py "$HOME/LoomWatch/teams/"
-```
-
-### 5. Start LoomWatch
-
-```sh
-set -a; . ./.env; set +a
-export DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
-unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN
-./target/release/loomwatchd serve --teams-root "$HOME/LoomWatch/teams" --listen 127.0.0.1:3000
-```
-
-When the terminal shows `loomwatchd listening on http://127.0.0.1:3000`, open
-**<http://127.0.0.1:3000>** in your browser, or go straight to the
-[offline demo](http://127.0.0.1:3000/?path=operator-stop.yaml) and follow
-[Try your first run](#try-your-first-run).
+Then follow [Try your first run](#try-your-first-run).
 
 Keep this terminal window open while you use LoomWatch. To stop LoomWatch, press **Ctrl-C** in it.
 
@@ -125,39 +96,69 @@ reads them only on your computer; nothing is uploaded.
 
 ### Start it again later
 
-After a restart, or any time LoomWatch is not running: make sure Docker Desktop is open, then in a
-terminal:
+After a restart, or any time LoomWatch is not running:
 
 ```sh
 cd loomwatch
-docker compose up -d --wait postgres
-set -a; . ./.env; set +a
-export DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
-unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN
-./target/release/loomwatchd serve --teams-root "$HOME/LoomWatch/teams" --listen 127.0.0.1:3000
+./loomwatch
 ```
 
-Use the path where you cloned LoomWatch in the first line. To stop the database too when you are
-done (your data is kept):
+Use the path where you downloaded LoomWatch in the first line. If LoomWatch is already running, this
+just opens it in your browser. If you installed LoomWatch with the older step-by-step instructions,
+it keeps using your existing settings, teams folder and database.
+
+### Stop LoomWatch
+
+Press **Ctrl-C** in the window running LoomWatch. To stop the database too, for example before
+quitting Docker Desktop:
 
 ```sh
-docker compose stop postgres
+./loomwatch stop
 ```
+
+Your teams and history are kept.
 
 ### Update to a newer version
 
 Stop LoomWatch with **Ctrl-C**, then:
 
 ```sh
-git pull
-cd ui
-npx --yes pnpm@12 install --frozen-lockfile
-npx --yes pnpm@12 run build
-cd ..
-cargo build --release --locked
+./loomwatch update
 ```
 
-Start it again as in [Start it again later](#start-it-again-later). Your teams and history are kept.
+This downloads the latest version, rebuilds it and starts it. Your teams and history are kept.
+
+### Change the defaults
+
+| Setting | Default | For example |
+| --- | --- | --- |
+| Browser port | `3000` (or `LOOMWATCH_PORT` in `.env`) | `LOOMWATCH_PORT=3001 ./loomwatch` |
+| Teams folder | `~/LoomWatch/teams` | `LOOMWATCH_TEAMS_ROOT=~/Work/teams ./loomwatch` |
+| Database | PostgreSQL in Docker | `LOOMWATCH_DATABASE_URL=postgres://… ./loomwatch` uses your own PostgreSQL, and Docker is not needed |
+
+`./loomwatch --no-open` starts without opening the browser, `./loomwatch --rebuild` builds again
+even when nothing changed, and `./loomwatch help` lists everything.
+
+<details>
+<summary>What <code>./loomwatch</code> runs, if you prefer to do it by hand</summary>
+
+```sh
+cp .env.example .env   # then replace both replace-with-… values with long random letters and numbers
+docker compose up -d --wait postgres
+(cd ui && npx --yes pnpm@12 install --frozen-lockfile && npx --yes pnpm@12 run build)
+cargo build --release --locked --bin loomwatchd
+mkdir -p "$HOME/LoomWatch/teams"
+cp -n examples/operator-stop.yaml examples/operator-stop-harness.py "$HOME/LoomWatch/teams/"
+set -a; . ./.env; set +a
+export DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
+unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN
+./target/release/loomwatchd serve --teams-root "$HOME/LoomWatch/teams" --listen 127.0.0.1:3000
+```
+
+The browser app is built before the program because it is packed into it. The `unset` line keeps
+settings meant for the Docker Compose mode below out of a local run.
+
+</details>
 
 ## Optional: run everything with Docker Compose
 
@@ -165,7 +166,9 @@ Use this mode for CI, demos, or an intentionally isolated Linux deployment. It i
 recommended desktop setup: a container cannot automatically see host executables, skills, MCP
 configuration, credentials, or arbitrary host workspace paths.
 
-Create a repository-local teams folder, then build and start the complete stack:
+Create your settings file with `cp .env.example .env` and replace both `replace-with-…` values with
+long random letters and numbers (or run `./loomwatch` once, which does this for you). Then create a
+repository-local teams folder, and build and start the complete stack:
 
 ```sh
 mkdir -p teams
@@ -238,7 +241,11 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 
 ## Try your first run
 
-Open LoomWatch and pick **Review stop demo** under **Your teams**. The demo is a three-step
+The first time you open LoomWatch, a short guide offers to walk you through creating a team and
+running it with one of your own AI apps. Reopen it any time from the menu in a team, or press
+**⌘K** and choose **Getting started guide**.
+
+To try a team without calling a model provider, pick **Review stop demo** under **Your teams**. The demo is a three-step
 workflow: **Researcher → You → Writer**. Its agents produce fixed responses so you can learn the
 interface without calling a model provider.
 
@@ -343,11 +350,11 @@ For the optional full-Compose installation, stop active runs and then stop the s
 docker compose stop
 ```
 
-For the recommended local run, press **Ctrl-C** in the terminal running `loomwatchd`, then stop the
+For the recommended local run, press **Ctrl-C** in the terminal running LoomWatch, then stop the
 database if you do not need it:
 
 ```sh
-docker compose stop postgres
+./loomwatch stop
 ```
 
 Your teams and database remain on disk. Resume the full-Compose installation with
@@ -394,20 +401,21 @@ it deletes the database volume, including history and Notebook entries.
 | What you see | What to check |
 | --- | --- |
 | `git clone` asks for a username, or says the repository is not found | The repository is private. Clone with SSH or `gh repo clone` as in step 1, using a GitHub account that has access. |
-| `command not found: cargo`, `node` or `npx` | Finish installing rustup or Node.js, then open a new terminal window so it picks up the new `PATH`. |
-| Docker cannot connect | Open Docker Desktop, wait for it to start, then retry the database command. |
-| Database connection failed | Run `docker compose ps postgres`; PostgreSQL should be healthy. Load `.env` and export `DATABASE_URL` in the terminal that starts LoomWatch. |
+| `./loomwatch` says something needs to be installed first | Install what it lists, open a new terminal window so it picks up the new `PATH`, then run `./loomwatch` again. |
+| `permission denied: ./loomwatch` | Run `chmod +x loomwatch` once, or start it with `bash loomwatch`. |
+| Docker did not start within two minutes | Open Docker Desktop yourself, finish any first-start steps it shows, wait until it says it is running, then run `./loomwatch` again. |
+| Another program is using port 5433 | Change `POSTGRES_PORT` in `.env` to a free port such as `5434`, then run `./loomwatch` again. |
 | Password authentication failed | Use the credentials from the database's first initialization. Editing `.env` does not change the password in an existing database volume. |
-| Archive disabled / Run unavailable | Restart the server with `DATABASE_URL` set, as in [Start it again later](#start-it-again-later). |
-| Address already in use | Stop the other LoomWatch server, or use `--listen 127.0.0.1:3001` and open port 3001 in the browser. |
-| Team file not found | Confirm the file is under `--teams-root`. The demo link uses `?path=operator-stop.yaml`, relative to that folder. |
+| Archive disabled / Run unavailable | LoomWatch was started without its database. Stop it and start it with `./loomwatch`. |
+| Another program is using port 3000 | Start LoomWatch on another port with `LOOMWATCH_PORT=3001 ./loomwatch`. |
+| Team file not found | Confirm the file is in your teams folder (`~/LoomWatch/teams` unless you set `LOOMWATCH_TEAMS_ROOT`). The demo link uses `?path=operator-stop.yaml`, relative to that folder. |
 | Agent is missing or unavailable | Run `command -v <agent-command>` in the LoomWatch terminal. Authenticate the app, then restart LoomWatch from that same terminal. Compose-only deployments scan the container unless the native companion is running. |
 | Skill or tool is missing locally | Confirm it exists below the current user's `.codex`, `.claude`, `.agents`, or `.config/opencode` tree, then choose **Scan again**. Check that LoomWatch was not started with `LOOMWATCH_CAPABILITY_HOME` pointing elsewhere. |
 | Skill is missing in Compose | Copy its definition below `LOOMWATCH_CAPABILITIES_DIR` using the conventional harness path, then choose **Scan again**. Symlinks whose targets are outside that mounted root cannot be followed. |
 | Harness working directory is missing | Native teams should use a real host path accessible to the agent app. Container-run teams must use `/workspaces/...` and mount its host parent through `LOOMWATCH_WORKSPACES_DIR`. |
 | Agent cannot perform a tool action | Review the recorded permission request and that agent app's project permissions. LoomWatch declines interactive ACP permission requests; configure the specific permissions the task needs in the agent app. |
-| Build reports an unsupported Node version | Install Node 24, reopen Terminal, and check `node --version`. |
-| UI assets are missing or look out of date | Rebuild `ui` first, rebuild the release executable, then restart LoomWatch. |
+| Build reports an unsupported Node version | Install the current Node.js from <https://nodejs.org/>, reopen Terminal, and check `node --version`. |
+| UI assets are missing or look out of date | Stop LoomWatch, then start it with `./loomwatch --rebuild`. |
 | Cannot connect from another device | This setup serves runs and history only on your own computer at `127.0.0.1`. Use the browser on that computer. |
 
 ## More guides

@@ -1,0 +1,388 @@
+#!/usr/bin/env bash
+# One command to set up, build, start, update and stop LoomWatch on this computer.
+#
+#   ./loomwatch            set up anything missing, build if the code changed, start, open the browser
+#   ./loomwatch update     download the latest version, rebuild, and start
+#   ./loomwatch stop       stop LoomWatch and its database (your teams and history are kept)
+#
+# Optional settings, read from the environment:
+#   LOOMWATCH_TEAMS_ROOT    where your teams live (default: ~/LoomWatch/teams)
+#   LOOMWATCH_PORT          browser port (default: LOOMWATCH_PORT in .env, else 3000)
+#   LOOMWATCH_DATABASE_URL  use your own PostgreSQL instead of the one this script runs in Docker
+#
+# Developers who want the daemon against ./teams with their own flags can keep using scripts/dev.sh.
+# Written for the bash 3.2 that ships with macOS: no associative arrays, no empty-array expansion.
+set -euo pipefail
+
+# Resolve symlinks so the script still finds its checkout when linked into a folder on PATH.
+script=${BASH_SOURCE[0]}
+while [ -L "$script" ]; do
+  target=$(readlink "$script")
+  case $target in
+    /*) script=$target ;;
+    *) script=$(dirname "$script")/$target ;;
+  esac
+done
+repo_root=$(cd "$(dirname "$script")" && pwd -P)
+cd "$repo_root"
+
+if [ -t 1 ]; then bold=$(printf '\033[1m'); reset=$(printf '\033[0m'); else bold=; reset=; fi
+say() { printf '%s\n' "$*"; }
+step() { printf '\n%s==> %s%s\n' "$bold" "$*" "$reset"; }
+failure_heading='LoomWatch could not start'
+fail() { printf '\n%s%s:%s %s\n' "$bold" "$failure_heading" "$reset" "$*" >&2; exit 1; }
+
+# rustup and Homebrew install outside the PATH a fresh or non-interactive shell may have. Appended,
+# so the operator's own ordering still wins.
+for dir in "$HOME/.cargo/bin" /opt/homebrew/bin /usr/local/bin; do
+  case ":$PATH:" in
+    *":$dir:"*) ;;
+    *) if [ -d "$dir" ]; then PATH="$PATH:$dir"; fi ;;
+  esac
+done
+export PATH
+
+command=start
+open_browser=1
+force_rebuild=0
+for arg in "$@"; do
+  case $arg in
+    start | update | stop) command=$arg ;;
+    help | -h | --help) command=help ;;
+    --no-open) open_browser=0 ;;
+    --rebuild) force_rebuild=1 ;;
+    *)
+      failure_heading=LoomWatch
+      fail "unknown option '$arg'. Run ./loomwatch help to see the options."
+      ;;
+  esac
+done
+
+teams_root=${LOOMWATCH_TEAMS_ROOT:-$HOME/LoomWatch/teams}
+binary=target/release/loomwatchd
+build_stamp=target/release/.loomwatch-build
+pid_file=target/loomwatchd.pid
+
+# The last KEY=value line for KEY in .env, without surrounding quotes. .env is read, never
+# sourced: sourcing would export the Compose-only host-runner settings into the native daemon.
+env_value() {
+  [ -f .env ] || return 0
+  sed -n "s/^$1=//p" .env | tail -n 1 | tr -d '\r' | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/"
+}
+
+port=${LOOMWATCH_PORT:-$(env_value LOOMWATCH_PORT)}
+port=${port:-3000}
+url="http://127.0.0.1:$port"
+
+is_macos() { [ "$(uname -s)" = Darwin ]; }
+
+port_in_use() {
+  command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+}
+
+loomwatch_is_running() {
+  [ "$(curl -fsS --max-time 2 "$url/api/health" 2>/dev/null)" = ok ]
+}
+
+open_url() {
+  [ "$open_browser" = 1 ] || return 0
+  if is_macos; then
+    open "$1"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$1" >/dev/null 2>&1 || true
+  fi
+}
+
+uses_docker_database() { [ -z "${LOOMWATCH_DATABASE_URL:-}" ]; }
+
+docker_app() {
+  for app in /Applications/Docker.app "$HOME/Applications/Docker.app" /Applications/OrbStack.app; do
+    if [ -d "$app" ]; then
+      printf '%s\n' "$app"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Every missing tool in one list, so nobody fixes one, reruns, and only then meets the next.
+check_prerequisites() {
+  local missing='' brew=0
+  if command -v brew >/dev/null 2>&1; then brew=1; fi
+
+  if uses_docker_database; then
+    local app
+    if ! command -v docker >/dev/null 2>&1 && is_macos && app=$(docker_app); then
+      # Docker Desktop installs its `docker` command the first time it is opened.
+      open -a "$app"
+      missing="$missing
+  - Docker Desktop is installed but has not been set up yet. It is opening now: finish its
+    first-start steps, wait until it says it is running, then run ./loomwatch again."
+    elif ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+      if [ "$brew" = 1 ]; then
+        missing="$missing
+  - Docker Desktop, which runs the database: brew install --cask docker-desktop
+    (or download it from https://docs.docker.com/desktop/), then open it once."
+      else
+        missing="$missing
+  - Docker Desktop, which runs the database: https://docs.docker.com/desktop/
+    Open it once after installing."
+      fi
+    fi
+  fi
+
+  if ! command -v node >/dev/null 2>&1; then
+    if [ "$brew" = 1 ]; then
+      missing="$missing
+  - Node.js 22 or newer, which builds the browser app: brew install node (or https://nodejs.org/)"
+    else
+      missing="$missing
+  - Node.js 22 or newer, which builds the browser app: https://nodejs.org/"
+    fi
+  elif ! node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)'; then
+    missing="$missing
+  - A newer Node.js: LoomWatch needs 22.12 or newer and this computer has $(node --version).
+    Install the current version from https://nodejs.org/"
+  fi
+
+  if ! command -v cargo >/dev/null 2>&1; then
+    missing="$missing
+  - Rust, which builds the LoomWatch program. Install it with:
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+  fi
+
+  if [ -n "$missing" ]; then
+    printf '\n%sLoomWatch needs a few things installed first:%s\n%s\n\n' "$bold" "$reset" "$missing" >&2
+    say "When they are installed, open a new terminal window and run ./loomwatch again." >&2
+    exit 1
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    if is_macos; then
+      say "Note: the offline demo team needs Python 3. Install it with: xcode-select --install"
+    else
+      say "Note: the offline demo team needs Python 3."
+    fi
+  fi
+}
+
+random_secret() {
+  head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'
+}
+
+ensure_env_file() {
+  [ -f .env ] && return 0
+  [ -f .env.example ] || fail ".env.example is missing from $repo_root. Download LoomWatch again."
+  # Another PostgreSQL on the usual port is common enough to step around instead of failing on.
+  local db_port=5433
+  while port_in_use "$db_port" && [ "$db_port" -lt 5460 ]; do db_port=$((db_port + 1)); done
+  sed -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(random_secret)/" \
+    -e "s/^POSTGRES_PORT=.*/POSTGRES_PORT=$db_port/" \
+    -e "s/^LOOMWATCH_HOST_RUNNER_TOKEN=.*/LOOMWATCH_HOST_RUNNER_TOKEN=$(random_secret)/" \
+    .env.example >.env
+  chmod 600 .env
+  say "Created your settings file (.env) with a random database password."
+}
+
+# Fails before the long build, not after it, when the database's port belongs to something else.
+check_database_port() {
+  uses_docker_database || return 0
+  local db_port
+  db_port=$(env_value POSTGRES_PORT)
+  port_in_use "${db_port:-5433}" || return 0
+  if docker info >/dev/null 2>&1 && [ -n "$(docker compose ps --status running --quiet postgres 2>/dev/null)" ]; then
+    return 0
+  fi
+  fail "another program is using port ${db_port:-5433}, which the LoomWatch database needs. Change POSTGRES_PORT in .env to a free port such as $((${db_port:-5433} + 1)), then run ./loomwatch again."
+}
+
+ensure_teams_root() {
+  [ -d "$teams_root" ] && return 0
+  mkdir -p "$teams_root"
+  cp examples/operator-stop.yaml examples/operator-stop-harness.py "$teams_root/"
+  say "Created your teams folder at $teams_root, with an offline demo team in it."
+}
+
+# Asks Docker Desktop to start without waiting, so it boots while LoomWatch builds.
+wake_docker() {
+  uses_docker_database || return 0
+  docker info >/dev/null 2>&1 && return 0
+  local app
+  if is_macos && app=$(docker_app); then
+    say "Starting $(basename "$app" .app). If it asks you to accept its terms, do that and LoomWatch will carry on."
+    open -a "$app"
+  fi
+}
+
+start_database() {
+  if ! uses_docker_database; then
+    DATABASE_URL=$LOOMWATCH_DATABASE_URL
+    return 0
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    if is_macos && docker_app >/dev/null; then
+      say "Waiting for Docker to finish starting…"
+      local waited=0
+      until docker info >/dev/null 2>&1; do
+        [ "$waited" -ge 120 ] && fail "Docker did not start within two minutes. Open Docker Desktop, wait until it says it is running, then run ./loomwatch again."
+        sleep 2
+        waited=$((waited + 2))
+      done
+    else
+      fail "Docker is not running. Start Docker, then run ./loomwatch again."
+    fi
+  fi
+
+  local user password db db_port
+  user=$(env_value POSTGRES_USER)
+  password=$(env_value POSTGRES_PASSWORD)
+  db=$(env_value POSTGRES_DB)
+  db_port=$(env_value POSTGRES_PORT)
+  step "Starting the database"
+  if ! docker compose up --detach --wait postgres; then
+    fail "the database did not start. If the message above says port ${db_port:-5433} is already in use, change POSTGRES_PORT in .env to a free port such as 5434, then run ./loomwatch again."
+  fi
+  DATABASE_URL="postgres://$user:$password@127.0.0.1:${db_port:-5433}/$db"
+}
+
+# What the build depends on: the commit plus any local edits. An unchanged checkout never rebuilds.
+source_fingerprint() {
+  if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+    local paths='ui crates migrations schemas Cargo.toml Cargo.lock rust-toolchain.toml'
+    # shellcheck disable=SC2086 # the path list is split on purpose
+    {
+      git rev-parse HEAD
+      git status --porcelain -- $paths
+      git diff HEAD -- $paths
+    } | cksum
+  else
+    echo unversioned
+  fi
+}
+
+build_if_needed() {
+  local fingerprint
+  fingerprint=$(source_fingerprint)
+  if [ "$force_rebuild" = 0 ] && [ -x "$binary" ] && [ "$(cat "$build_stamp" 2>/dev/null)" = "$fingerprint" ]; then
+    return 0
+  fi
+  step "Building LoomWatch (the first build takes a few minutes)"
+  # The browser app is built first: it is packed into the LoomWatch program.
+  (cd ui && npx --yes pnpm@12 install --frozen-lockfile && npx --yes pnpm@12 run build) ||
+    fail "the browser app did not build. The messages above say why."
+  cargo build --release --locked --bin loomwatchd ||
+    fail "the LoomWatch program did not build. The messages above say why."
+  printf '%s\n' "$fingerprint" >"$build_stamp"
+}
+
+start() {
+  if loomwatch_is_running; then
+    say "LoomWatch is already running at $url"
+    open_url "$url"
+    exit 0
+  fi
+  if port_in_use "$port"; then
+    fail "another program is using port $port. Start LoomWatch on a different port with: LOOMWATCH_PORT=$((port + 1)) ./loomwatch"
+  fi
+
+  check_prerequisites
+  ensure_env_file
+  ensure_teams_root
+  wake_docker
+  check_database_port
+  build_if_needed
+  start_database
+
+  export DATABASE_URL
+  # Compose-mode settings in the operator's own shell would point this native daemon at a
+  # container runner or a container-only capability folder.
+  unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN
+
+  # Open the browser once the server answers. This runs beside the daemon, which replaces this
+  # script below so Ctrl-C reaches it exactly as if it had been started by hand.
+  (
+    for _ in $(seq 1 120); do
+      if loomwatch_is_running; then
+        open_url "$url"
+        exit 0
+      fi
+      sleep 0.5
+    done
+  ) &
+
+  step "LoomWatch is starting at $url"
+  say "Your teams are in $teams_root"
+  say "Keep this window open while you use LoomWatch. Press Ctrl-C to stop it."
+  echo "$$" >"$pid_file"
+  exec "./$binary" serve --teams-root "$teams_root" --listen "127.0.0.1:$port"
+}
+
+stop() {
+  local pid pgid stopped=0
+  pid=$(cat "$pid_file" 2>/dev/null || true)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    case $(ps -p "$pid" -o comm= 2>/dev/null) in
+      *loomwatchd*)
+        # Signal the whole process group, as Ctrl-C would, so running agents stop with it.
+        pgid=$(ps -p "$pid" -o pgid= | tr -d ' ')
+        if [ "$pgid" = "$pid" ]; then kill -INT -- "-$pid"; else kill -INT "$pid"; fi
+        for _ in $(seq 1 20); do
+          kill -0 "$pid" 2>/dev/null || break
+          sleep 0.5
+        done
+        stopped=1
+        say "Stopped LoomWatch."
+        ;;
+    esac
+  fi
+  rm -f "$pid_file"
+  if [ "$stopped" = 0 ] && loomwatch_is_running; then
+    say "LoomWatch at $url was not started by ./loomwatch. Press Ctrl-C in the window running it."
+  fi
+
+  if uses_docker_database && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    docker compose stop postgres
+    say "Stopped the database. Your teams and history are kept."
+  fi
+}
+
+update() {
+  failure_heading='LoomWatch could not update'
+  command -v git >/dev/null 2>&1 || fail "updating needs Git. Install it with: xcode-select --install"
+  if loomwatch_is_running; then
+    fail "it is still running. Stop it first (press Ctrl-C in its window, or run ./loomwatch stop), then run ./loomwatch update."
+  fi
+  step "Downloading the latest LoomWatch"
+  git pull --ff-only ||
+    fail "the download did not finish. If Git says your local changes would be overwritten, ask whoever changed files in this folder before discarding them."
+  failure_heading='LoomWatch could not start'
+  start
+}
+
+usage() {
+  cat <<EOF
+Usage: ./loomwatch [command] [options]
+
+Commands:
+  start     Set up anything missing, build if needed, start LoomWatch and open it (the default)
+  update    Download the latest LoomWatch, rebuild it and start it
+  stop      Stop LoomWatch and its database. Your teams and history are kept.
+  help      Show this help
+
+Options:
+  --no-open   Do not open the browser
+  --rebuild   Build again even if nothing changed
+
+Settings (environment variables):
+  LOOMWATCH_TEAMS_ROOT     Where your teams live (now: $teams_root)
+  LOOMWATCH_PORT           Browser port (now: $port)
+  LOOMWATCH_DATABASE_URL   Use your own PostgreSQL instead of the one in Docker
+EOF
+}
+
+case $command in
+  start) start ;;
+  update) update ;;
+  stop) stop ;;
+  help) usage ;;
+esac
