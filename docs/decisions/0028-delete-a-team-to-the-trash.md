@@ -8,6 +8,9 @@
   `ui/src/lib/team-file/{client,useTeamList}.ts`.
 - **Closes:** the "A team cannot be deleted from the UI" follow-up from the 2026-10-01 normal-user QA
   pass (`docs/USER_JOURNEYS_QA.md`, "Practical limits and follow-ups").
+- **Amended 2026-10-02:** the trash also takes `<team>.files/`, the folder ADR 0035's **Add file…**
+  copies files into (`chosen_knowledge::files_folder`). Before this, a deleted team left that folder
+  in the teams folder, and a new team with the same file stem would have been handed its files.
 
 ## Context
 
@@ -19,6 +22,7 @@ by hand, and a team is more than its YAML:
 | Team file | `<team>.yaml` in the teams folder | its path |
 | Canvas layout | `<team>.layout.json` beside it (`composer::layout_path`) | its path |
 | Brief notes written in the panel | `<team>.brief/` beside it | its path |
+| Files added with **Add file…** (ADR 0035) | `<team>.files/` beside it (`chosen_knowledge::files_folder`) | its path |
 | Run records and their events | the `runs` table and the event archive | `team_path`, relative to the teams root |
 | Notebook notes | Postgres | the team's `id`, or its file stem when it has none (`memory::scope_id`) |
 | Managed workspaces | `.loomwatch/<team id>/<agent>/` beside the team | the team's id |
@@ -30,13 +34,14 @@ too.
 
 ## Decisions
 
-1. **Deleting moves the team; it erases nothing.** `DELETE /api/team?path=` moves three things into
-   a new folder `.trash/<UTC time>-<file stem>/` under the teams root: the team's own
-   `<team>.brief/` folder, its `<team>.layout.json` and the YAML. They move in that order, so the
-   YAML goes last. The folder also gets a `deleted.json` manifest (`path`, `name`, `trash`, `moved`,
-   `deletedAt`), and the response body is the same object. A rename never copies. If one move fails,
-   the moves already made are renamed back and the folder is removed, so the team is either still in
-   the list or wholly in the trash. To restore a team, move the files back (README, "Where your
+1. **Deleting moves the team; it erases nothing.** `DELETE /api/team?path=` moves up to four things
+   into a new folder `.trash/<UTC time>-<file stem>/` under the teams root: the team's own
+   `<team>.brief/` folder, its `<team>.layout.json`, its `<team>.files/` folder of added files, and
+   the YAML. They move in that order, each sidecar only if it exists, so the YAML goes last. The
+   folder also gets a `deleted.json` manifest (`path`, `name`, `trash`, `moved`, `deletedAt`), and
+   the response body is the same object. A rename never copies. If one move fails, the moves already
+   made are renamed back and the folder is removed, so the team is either still in the list or
+   wholly in the trash. To restore a team, move the files back (README, "Where your
    work is saved"). LoomWatch does not offer "Empty trash" or a Restore button. Permanent deletion
    stays the operator's own act. A Restore button can wait until someone needs it more than once.
 
@@ -56,7 +61,8 @@ too.
    - **`.trash` is not a real folder (500, nothing moves).** A `.trash` that is a link out of the
      root is never written through.
    - **A sibling shares the sidecars.** When `trip.yaml` and `trip.yml` both exist, they resolve to
-     the same `trip.layout.json` and `trip.brief/`. Deleting one leaves those for the other.
+     the same `trip.layout.json`, `trip.brief/` and `trip.files/`. Deleting one leaves those for the
+     other.
 
 3. **Delete is refused while a run of the team is unfinished (409).** The API router now holds the
    run-control router's registry, and `RunRegistry::live_run_for` counts `queued`, `starting` and
@@ -127,7 +133,8 @@ too.
   it, because history is shown for the open team. A restore brings it back.
 - `api::router_with_archive` takes the `RunRegistry`, and `main` builds the registry before the
   API router so both routers share one.
-- Gated by `api::tests::delete_*`, `two_deletions_in_one_second_get_a_folder_each`,
+- Gated by `api::tests::delete_*` (`delete_moves_the_files_added_to_the_team_into_the_trash` for
+  `<team>.files/`), `two_deletions_in_one_second_get_a_folder_each`,
   `memory::tests::a_team_in_the_trash_cannot_be_inherited`, `DeleteTeamDialog.test.tsx`,
   `HomeDeleteTeam.test.tsx` and `DocumentSwitcher.delete.test.tsx`. Each guard was removed in
   turn, and every removal turned its test red: liveness, inheritance (including the

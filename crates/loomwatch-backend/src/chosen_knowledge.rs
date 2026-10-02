@@ -43,6 +43,13 @@ const MAX_TEXT_READ_BYTES: u64 = 8 * 1024 * 1024;
 /// Files listed by the folder picker before it says how many more there are.
 const PICKER_FILE_LIMIT: usize = 40;
 
+/// `teams/trip.yaml` → `teams/trip.files`, the folder [`store_file`] copies added files into.
+/// Deleting the team moves it to the trash with the team file.
+#[must_use]
+pub fn files_folder(team_file: &Path) -> PathBuf {
+    team_file.with_extension("files")
+}
+
 /// Resolve a capability path the way the team file means it: absolute as written, `~/` against
 /// the home folder, anything else against the team file's own directory.
 #[must_use]
@@ -365,13 +372,12 @@ pub fn store_file(
         .parent()
         .ok_or("the team file has no folder")?
         .to_path_buf();
-    let stem = team_file
-        .file_stem()
+    let folder = files_folder(team_file);
+    let folder_name = folder
+        .file_name()
         .ok_or("the team file has no name")?
         .to_string_lossy()
         .into_owned();
-    let folder_name = format!("{stem}.files");
-    let folder = team_dir.join(&folder_name);
     fs::create_dir_all(&folder)
         .map_err(|error| format!("{} could not be created ({error})", folder.display()))?;
     // Re-checked after creating: a symlinked folder already on the way would put the file outside
