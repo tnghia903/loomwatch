@@ -1,5 +1,5 @@
 import type { HarnessSpawn } from '../harnesses'
-import type { CapabilityRef } from '../team-file/types'
+import type { AgentAllow, CapabilityRef } from '../team-file/types'
 
 export type LibraryGroup = 'detected' | 'endpoints' | 'presets'
 
@@ -23,4 +23,6 @@ export interface LibrarySource {
   model?: string
   /** Skills a job brings with it (ADR 0030/0031); delivered on whatever app the agent runs. */
   capabilities?: CapabilityRef[]
+  /** What the agent it places may do without asking (ADR 0037). */
+  allow?: AgentAllow
 }

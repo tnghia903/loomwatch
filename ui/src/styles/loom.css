@@ -174,6 +174,9 @@ span.story-schedule { cursor: default; }
 .receipt-checks li::before { content: "!"; position: absolute; left: 0; color: var(--color-accent); font-weight: 600; }
 .receipt-open { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; border: 0; background: transparent; color: var(--color-ink-3); cursor: pointer; }
 .receipt-open:hover, .receipt-open:focus-visible { color: var(--color-accent); background: var(--color-accent-tint); }
+/* ADR 0037: a refused line offers the switch that covers it, under its sentence. */
+.receipt-allow, .receipt-allowed { display: block; margin-top: 2px; font-size: 12px; }
+.receipt-allowed { color: var(--color-ok); }
 .receipt-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; font-family: var(--font-sans); }
 .receipt-foot .btn { display: inline-flex; align-items: center; gap: 6px; }
 .receipt-status { font-size: 12px; color: var(--color-ink-3); }

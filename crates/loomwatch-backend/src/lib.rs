@@ -19,6 +19,7 @@ pub mod notebook_api;
 pub mod notion;
 pub mod operator;
 pub mod orientation;
+pub mod permissions;
 pub mod runs;
 pub mod schedule;
 pub mod skill_routing;
@@ -349,12 +350,15 @@ async fn run_team_mode(
     let cwd = workspace
         .as_ref()
         .map_or(declared_cwd, |workspace| workspace.cwd.clone());
+    let permissions =
+        permissions::PermissionPolicy::for_agent(agent.allow, &cwd, &composed.delivery);
     let spec = ProcessSpec {
         cmd: agent.spawn.cmd.clone(),
         args: agent.spawn.args.clone(),
         env: agent.spawn.env.clone(),
         cwd,
         tools: composed.delivery.tools.clone(),
+        permissions: Some(permissions),
     };
 
     let process = AcpProcess::spawn(&spec)
@@ -1773,6 +1777,7 @@ fn node_process_spec(
     let (skills, delivery) = workspace.map_or_else(Default::default, |workspace| {
         (workspace.required_skills, workspace.delivery)
     });
+    let permissions = permissions::PermissionPolicy::for_agent(agent.allow, &cwd, &delivery);
     Ok((
         ProcessSpec {
             cmd: agent.spawn.cmd.clone(),
@@ -1780,6 +1785,7 @@ fn node_process_spec(
             env: agent.spawn.env.clone(),
             cwd,
             tools: delivery.tools.clone(),
+            permissions: Some(permissions),
         },
         skills,
         delivery,
@@ -3880,6 +3886,7 @@ mod tests {
             capabilities: Vec::new(),
             memory: None,
             allow_recruiting: true,
+            allow: crate::config::AgentAllow::default(),
         }
     }
 
@@ -3924,6 +3931,7 @@ mod tests {
             capabilities: Vec::new(),
             memory: None,
             allow_recruiting: false,
+            allow: crate::config::AgentAllow::default(),
         }
     }
 

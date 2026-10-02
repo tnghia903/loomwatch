@@ -39,6 +39,7 @@ import { EdgeRefusalPopover } from './canvas/EdgeRefusalPopover'
 import { EntrypointProblemBar } from './canvas/EntrypointProblemBar'
 import { DeleteTeamDialog } from './home/DeleteTeamDialog'
 import { Home } from './home/Home'
+import { ALLOW_SWITCHES } from '../lib/team-file/allow'
 import { Inspector } from './canvas/Inspector'
 import { CapabilityInspector, type InspectedCapability } from './canvas/CapabilityInspector'
 import { LayerLegend, type LayerSolo } from './canvas/LayerLegend'
@@ -1954,6 +1955,13 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             pipeline={(record?.mode ?? doc.mode) === 'pipeline'}
             linearPipeline={doc.edges.length === doc.nodes.length - 1 && doc.nodes.every((node) => doc.edges.filter((edge) => edge.source === node.id).length <= 1 && doc.edges.filter((edge) => edge.target === node.id).length <= 1)}
             onTrace={() => { if (runSetup) closeRun(); else setRunPresentation('trace') }}
+            onAllow={editable ? (agentId, key) => {
+              // ADR 0037: switched on and saved in one step, so the next run is not refused again.
+              doc.updateAgentAllow(agentId, key, true)
+              void doc.save()
+              const name = doc.nodes.find((node) => node.id === agentId)?.data.agent.name ?? agentId
+              setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === key)?.label.toLowerCase() ?? key} from the next run.`)
+            } : undefined}
             prompt={record?.prompt ?? projection.prompt ?? composerText} attempt={attempt} phase={phase} branch={retryOf.get(activeRunId ?? '') ? 'Retry of an earlier run' : 'Initiating branch'} elapsed={elapsed} mode={session.mode}
             agents={graph.nodes.filter((node): node is AgentNode => node.type === 'agent').sort((a, b) => runSetup ? (stepById.get(a.id)?.step ?? Infinity) - (stepById.get(b.id)?.step ?? Infinity) : 0)}
             evidenceByAgent={new Map(orderedAgentIds.map((id) => [id, projection.evidence.filter((item) => item.agentId === id)]))}
@@ -2106,7 +2114,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             modelOptions={modelOptionsForAgent(inspectedNode.data.agent, doc.nodes.map((node) => node.data.agent), harnesses, modelCatalog.models)} defaultThinkingEffort={modelCatalog.defaultThinkingEffort} modelOptionsLoading={modelCatalog.loading} modelOptionsError={modelCatalog.error} onRetryModelOptions={modelCatalog.retry}
             onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)}
             onCwdChange={(value) => doc.updateAgentCwd(inspectedNode.id, value)}
-            onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onDelete={() => requestNodeDelete([inspectedNode.id])}
+            onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onAllowChange={(key, on) => doc.updateAgentAllow(inspectedNode.id, key, on)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onDelete={() => requestNodeDelete([inspectedNode.id])}
             briefCount={memory?.entries.length ?? 0} teamDeliverAs={memory?.deliverAs}
             onMemoryBriefChange={(reads) => doc.updateAgentMemory(inspectedNode.id, 'brief', reads ? undefined : false)}
             onDeliverAsChange={(deliverAs) => doc.updateAgentMemory(inspectedNode.id, 'deliverAs', deliverAs === (memory?.deliverAs ?? 'native-file') ? undefined : deliverAs)}

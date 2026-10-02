@@ -2,6 +2,7 @@ import { ArrowRight, Check, ClipboardCopy, Network } from 'lucide-react'
 import { useState } from 'react'
 
 import { RECEIPT_MARK, receiptMarkdown, type Receipt } from '../../lib/story/receipt'
+import type { AllowSwitch } from '../../lib/team-file/types'
 import { LoomMark } from '../ui/glyphs'
 
 interface RunReceiptProps {
@@ -9,6 +10,9 @@ interface RunReceiptProps {
   onInspectEvidence: (id: string) => void
   onSelectAgent: (id: string) => void
   onTrace: () => void
+  /** Switch on what a refused line names, for this agent's next runs (ADR 0037). Absent when the
+      team cannot be changed from here. */
+  onAllow?: (agentId: string, key: AllowSwitch) => void
 }
 
 /**
@@ -16,7 +20,7 @@ interface RunReceiptProps {
  * it. A newcomer reads it top to bottom in ten seconds; an expert opens any line's evidence or
  * copies the slip into a pull request as proof of what ran.
  */
-export function RunReceipt({ receipt, onInspectEvidence, onSelectAgent, onTrace }: RunReceiptProps) {
+export function RunReceipt({ receipt, onInspectEvidence, onSelectAgent, onTrace, onAllow }: RunReceiptProps) {
   const [copied, setCopied] = useState<string | null>(null)
   const copy = async () => {
     try {
@@ -47,7 +51,12 @@ export function RunReceipt({ receipt, onInspectEvidence, onSelectAgent, onTrace 
           {receipt.lines.map((line, index) => (
             <li key={index} className={`tone-${line.tone}`}>
               <span className="receipt-mark" aria-hidden="true">{RECEIPT_MARK[line.tone]}</span>
-              <span>{line.text}</span>
+              <span>
+                {line.text}
+                {line.allow && line.agentId && (line.allowed
+                  ? <span className="receipt-allowed">Allowed from the next run</span>
+                  : onAllow && <button type="button" className="link receipt-allow" onClick={() => onAllow(line.agentId as string, line.allow as AllowSwitch)}>Allow from now on</button>)}
+              </span>
               {(line.evidenceId || line.agentId) && (
                 <button type="button" className="receipt-open" aria-label={line.evidenceId ? `Open the record: ${line.text}` : `Show this helper’s work: ${line.text}`} title={line.evidenceId ? 'Open the record' : 'Show this helper’s work'} onClick={() => open(line)}><ArrowRight size={12} aria-hidden="true" /></button>
               )}

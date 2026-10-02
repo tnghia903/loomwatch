@@ -107,12 +107,16 @@ function jobRole(id: 'researcher' | 'writer'): string {
 }
 
 function agent(id: string, name: string, role: string, harness: DetectedHarness, model: string): AgentConfig {
+  // The Researcher job's own switches (ADR 0037), so a template's researcher can search the web
+  // like one hired from the palette.
+  const allow = ROLE_PRESETS.find((preset) => preset.id === id)?.allow
   return {
     id,
     name,
     role,
     spawn: { cmd: harness.spawn.cmd, args: [...harness.spawn.args], env: {}, cwd: '.' },
     model,
+    ...(allow ? { allow: { ...allow } } : {}),
   }
 }
 

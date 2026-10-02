@@ -715,6 +715,7 @@ async fn get_harness_models(
         env: std::collections::BTreeMap::new(),
         cwd: state.teams_root.clone(),
         tools: Vec::new(),
+        permissions: None,
     };
     let discovered = discover_models(&spec).await;
     state

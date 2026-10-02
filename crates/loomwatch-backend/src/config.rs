@@ -374,6 +374,28 @@ pub const OPERATOR_NODE_NAME: &str = "You";
 /// and inventing an agent to hold them would be worse.
 pub const RESERVED_OPERATOR_ID: &str = "operator";
 
+/// What an agent may do without asking (ADR 0037). `LoomWatch` cannot ask the operator in the
+/// middle of a run, so it answers every permission request an app makes itself, and approves only
+/// what is switched on here. Everything defaults to off, and absent means all off.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct AgentAllow {
+    /// Search the web and read web pages.
+    pub web: bool,
+    /// Create and change files inside the agent's own working folder.
+    pub edits: bool,
+    /// Run commands in a terminal.
+    pub commands: bool,
+}
+
+impl AgentAllow {
+    /// Nothing is switched on.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        !self.web && !self.edits && !self.commands
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(try_from = "RawAgent")]
 pub struct AgentConfig {
@@ -391,6 +413,8 @@ pub struct AgentConfig {
     pub capabilities: Vec<CapabilityRef>,
     /// Per-agent memory overrides; the team's `memory:` block applies when absent.
     pub memory: Option<AgentMemoryConfig>,
+    /// What this agent may do without asking. All off for an operator node, which runs no app.
+    pub allow: AgentAllow,
 }
 
 /// The wire shape of one `agents[]` entry, before the per-kind rules are applied.
@@ -423,6 +447,8 @@ struct RawAgent {
     capabilities: Vec<CapabilityRef>,
     #[serde(default)]
     memory: Option<AgentMemoryConfig>,
+    #[serde(default)]
+    allow: Option<AgentAllow>,
     /// Runtime annotation. Accepted and discarded: writers must not persist it and readers must
     /// ignore it (`docs/TEAM_CONFIG.md`).
     #[serde(default, rename = "status")]
@@ -441,6 +467,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                 for (field, present) in [
                     ("spawn", raw.spawn.is_some()),
                     ("model", raw.model.is_some()),
+                    ("allow", raw.allow.is_some()),
                 ] {
                     if present {
                         return Err(format!(
@@ -473,6 +500,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     allow_recruiting: false,
                     capabilities: raw.capabilities,
                     memory: raw.memory,
+                    allow: AgentAllow::default(),
                 })
             }
             AgentKind::Harness => {
@@ -493,6 +521,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     allow_recruiting: raw.allow_recruiting,
                     capabilities: raw.capabilities,
                     memory: raw.memory,
+                    allow: raw.allow.unwrap_or_default(),
                 })
             }
         }
@@ -1343,6 +1372,36 @@ edges:
 
     const SOLO_AGENT: &str =
         "agents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n";
+
+    /// ADR 0037: `allow:` is read as written and absent means all off; an unknown switch is a
+    /// typo to report, not a permission to guess at; and a review stop, which runs no app, has
+    /// nothing to allow.
+    #[test]
+    fn allow_switches_parse_default_off_and_refuse_typos_and_review_stops() {
+        let with = |allow: &str| {
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nentrypoint: a\n{SOLO_AGENT}{allow}"
+            ))
+        };
+        let plain = with("").expect("no allow block");
+        assert!(plain.agents[0].allow.is_empty());
+        let web = with("    allow:\n      web: true\n").expect("web only");
+        assert_eq!(
+            web.agents[0].allow,
+            AgentAllow {
+                web: true,
+                edits: false,
+                commands: false,
+            }
+        );
+        assert!(with("    allow:\n      internet: true\n").is_err());
+
+        let stop = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n  - id: you\n    kind: operator\n    role: Approve?\n    allow:\n      web: true\n",
+        );
+        let error = format!("{:#}", stop.expect_err("a review stop allows nothing"));
+        assert!(error.contains("has no allow"), "{error}");
+    }
 
     fn scheduled_team(schedule_yaml: &str) -> Result<TeamConfig> {
         TeamConfig::parse(&format!(

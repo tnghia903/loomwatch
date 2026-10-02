@@ -454,6 +454,7 @@ $defs:
             - required: [spawn]
             - required: [model]
             - required: [thinkingEffort]
+            - required: [allow]
     properties:
       id:
         $ref: "#/$defs/Identifier"
@@ -509,6 +510,31 @@ $defs:
         description: >-
           Per-agent memory overrides. Absent means the team's `memory:` block applies unchanged.
         $ref: "#/$defs/AgentMemory"
+      allow:
+        description: >-
+          What this agent may do without asking (ADR 0037). LoomWatch cannot ask the operator in
+          the middle of a run, so it puts each app in its ask-first mode where it has one and
+          answers every permission request itself: it approves the Team Bus, the tools and
+          knowledge connected to this agent, and what is switched on here, and declines the rest.
+          Absent means everything here is off.
+        type: object
+        additionalProperties: false
+        properties:
+          web:
+            description: Search the web and read web pages.
+            type: boolean
+            default: false
+          edits:
+            description: >-
+              Create and change files inside the agent's own working folder, never its app's
+              settings folders. An agent whose folder holds its team file is given a folder of
+              its own first.
+            type: boolean
+            default: false
+          commands:
+            description: Run commands in a terminal. A command can do anything the operator can.
+            type: boolean
+            default: false
       status:
         description: Runtime-only status; team-file writers omit it and readers ignore it.
         type: string

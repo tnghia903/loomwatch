@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { AgentConfig } from '../team-file/types'
 import { buildAgentFromSource, DEFAULT_AGENT_ROLE } from './createAgent'
+import { ROLE_PRESETS, roleSource } from './roles'
 import type { LibrarySource } from './types'
 
 const harnessSource: LibrarySource = {
@@ -43,6 +44,16 @@ describe('buildAgentFromSource', () => {
     const result = buildAgentFromSource(presetSource, [])
     expect(result.role).toBe('Reviewer')
     expect(result.model).toBe('claude-opus-5')
+  })
+
+  // ADR 0037: the Researcher job brings its web switch; a bare app brings none.
+  it('places the Researcher job allowed to search the web, and a bare app allowed nothing', () => {
+    const researcher = ROLE_PRESETS.find((preset) => preset.id === 'researcher')
+    const harness = { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/bin/claude', acpAvailable: true, spawn: { cmd: 'npx', args: ['claude-agent-acp'] } }
+    const source = researcher && roleSource(researcher, [harness])
+    expect(source && buildAgentFromSource(source, []).allow).toEqual({ web: true })
+    expect(buildAgentFromSource(harnessSource, []).allow).toBeUndefined()
+    expect(ROLE_PRESETS.filter((preset) => preset.allow).map((preset) => preset.id)).toEqual(['researcher'])
   })
 
   it('copies spawn verbatim plus env and cwd defaults', () => {

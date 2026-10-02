@@ -46,6 +46,21 @@ export interface CapabilityRef {
   path?: string
 }
 
+/**
+ * ADR 0037: LoomWatch cannot ask the operator mid-run, so it answers every permission request an
+ * agent's app makes itself, approving only what is switched on here.
+ */
+export interface AgentAllow {
+  /** Search the web and read web pages. */
+  web?: boolean
+  /** Create and change files inside its own working folder. */
+  edits?: boolean
+  /** Run commands in a terminal. */
+  commands?: boolean
+}
+
+export type AllowSwitch = keyof AgentAllow
+
 export interface AgentConfig {
   id: string
   name: string
@@ -60,6 +75,8 @@ export interface AgentConfig {
   capabilities?: CapabilityRef[]
   /** Per-agent memory overrides; the team's `memory:` block applies when absent. */
   memory?: { brief?: boolean; deliverAs?: 'native-file' | 'packet-only' }
+  /** What it may do without asking (ADR 0037). Absent, or a switch left out, means off. */
+  allow?: AgentAllow
   // Runtime-only annotation. Team-file writers must never set this field;
   // it is exposed here only because readers must tolerate it on load.
   status?: AgentStatus
