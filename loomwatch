@@ -248,7 +248,7 @@ start_database() {
 # What the build depends on: the commit plus any local edits. An unchanged checkout never rebuilds.
 source_fingerprint() {
   if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
-    local paths='ui crates migrations schemas Cargo.toml Cargo.lock rust-toolchain.toml'
+    local paths='ui crates migrations schemas Cargo.toml Cargo.lock rust-toolchain.toml package.json pnpm-lock.yaml loomwatch'
     # shellcheck disable=SC2086 # the path list is split on purpose
     {
       git rev-parse HEAD
@@ -263,12 +263,15 @@ source_fingerprint() {
 build_if_needed() {
   local fingerprint
   fingerprint=$(source_fingerprint)
-  if [ "$force_rebuild" = 0 ] && [ -x "$binary" ] && [ "$(cat "$build_stamp" 2>/dev/null)" = "$fingerprint" ]; then
+  if [ "$force_rebuild" = 0 ] && [ -x "$binary" ] && [ -x node_modules/.bin/claude-agent-acp ] && [ -x node_modules/.bin/codex-acp ] && [ "$(cat "$build_stamp" 2>/dev/null)" = "$fingerprint" ]; then
     return 0
   fi
   step "Building LoomWatch (the first build takes a few minutes)"
   # The browser app is built first: it is packed into the LoomWatch program.
-  (cd ui && npx --yes pnpm@12 install --frozen-lockfile && npx --yes pnpm@12 run build) ||
+  command -v corepack >/dev/null 2>&1 || fail "Corepack is required to verify the pinned package manager. Install Corepack and retry."
+  corepack install || fail "the declared package manager could not be verified."
+  corepack pnpm install --frozen-lockfile --ignore-scripts || fail "the locked ACP bridges could not be installed."
+  (cd ui && corepack pnpm install --frozen-lockfile && corepack pnpm run build) ||
     fail "the browser app did not build. The messages above say why."
   cargo build --release --locked --bin loomwatchd ||
     fail "the LoomWatch program did not build. The messages above say why."

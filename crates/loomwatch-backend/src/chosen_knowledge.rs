@@ -20,7 +20,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::Stdio;
 
 use serde::Serialize;
 
@@ -197,16 +197,75 @@ fn is_pdf(file: &Path) -> bool {
 /// A PDF's text, from `pdftotext`. `None` when `pdftotext` is not installed or fails.
 #[must_use]
 pub fn pdf_text(file: &Path) -> Option<String> {
-    let output = Command::new(pdftotext()?)
+    // This synchronous entrypoint runs on blocking workers. A small independent runtime lets
+    // us bound both pipe reads and child lifetime without blocking the daemon's reactor.
+    static PARSERS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _permit = PARSERS.lock().ok()?;
+    let executable = pdftotext()?;
+    // This reader is also used during async run preparation; create and drop its runtime on a
+    // separate thread so neither operation nests a runtime on the caller's reactor thread.
+    std::thread::scope(|scope| {
+        scope
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .ok()?;
+                runtime.block_on(extract_pdf(
+                    executable,
+                    file,
+                    std::time::Duration::from_secs(15),
+                    MAX_TEXT_READ_BYTES,
+                ))
+            })
+            .join()
+            .ok()
+            .flatten()
+    })
+}
+
+async fn extract_pdf(
+    executable: PathBuf,
+    file: &Path,
+    deadline: std::time::Duration,
+    limit: u64,
+) -> Option<String> {
+    use tokio::io::AsyncReadExt;
+    let mut child = tokio::process::Command::new(executable)
         .args(["-enc", "UTF-8", "-q"])
         .arg(file)
         .arg("-")
-        .output()
+        .env_clear()
+        .envs(crate::process_env::harness_environment(
+            std::env::vars(),
+            &std::collections::BTreeMap::default(),
+        ))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
         .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    let stdout = child.stdout.take()?;
+    let work = async {
+        let mut output = Vec::new();
+        let mut bounded = stdout.take(limit + 1);
+        bounded.read_to_end(&mut output).await.ok()?;
+        if output.len() as u64 > limit {
+            return None;
+        }
+        child
+            .wait()
+            .await
+            .ok()?
+            .success()
+            .then(|| String::from_utf8_lossy(&output).into_owned())
+    };
+    let result = tokio::time::timeout(deadline, work).await.ok().flatten();
+    if result.is_none() {
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+    }
+    result
 }
 
 /// Where `pdftotext` is. A daemon started outside a login shell sees a short `PATH`, and Homebrew
@@ -666,5 +725,46 @@ mod tests {
             .bytes(),
         );
         pdf
+    }
+}
+
+#[cfg(all(test, unix))]
+mod extraction_security_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    async fn run(script: &str, deadline: std::time::Duration, limit: u64) -> Option<String> {
+        let root = std::env::temp_dir().join(format!("loomwatch-pdf-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let executable = root.join("extract");
+        fs::write(&executable, format!("#!/bin/sh\n{script}\n")).unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let result = extract_pdf(executable, Path::new("ignored.pdf"), deadline, limit).await;
+        fs::remove_dir_all(root).unwrap();
+        result
+    }
+    #[tokio::test]
+    async fn extraction_is_bounded_and_normal_text_is_preserved() {
+        assert_eq!(
+            run(
+                "printf 'normal text'",
+                std::time::Duration::from_secs(1),
+                64
+            )
+            .await
+            .as_deref(),
+            Some("normal text")
+        );
+        assert!(
+            run("printf '123456789'", std::time::Duration::from_secs(1), 8)
+                .await
+                .is_none()
+        );
+        let start = std::time::Instant::now();
+        assert!(
+            run("exec sleep 30", std::time::Duration::from_millis(50), 64)
+                .await
+                .is_none()
+        );
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
     }
 }

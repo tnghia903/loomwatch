@@ -1510,7 +1510,7 @@ mod tests {
               *'"name":"Authorization"'*'"Bearer '* ) ;;
               *) printf 'missing Team Bus auth: %s\n' "$session_new" >&2; exit 12 ;;
             esac
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"worker-acp-session","configOptions":[]}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Ask first"}]},"sessionId":"worker-acp-session","configOptions":[]}}'
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"worker-acp-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"worker reply"}}}}'
             printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
@@ -1736,7 +1736,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}}}}'
             IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"worker-acp-session","configOptions":[]}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Ask first"}]},"sessionId":"worker-acp-session","configOptions":[]}}'
             IFS= read -r _
             sleep 1
             printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
@@ -2326,7 +2326,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
             IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"helper","configOptions":[]}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Ask first"}]},"sessionId":"helper","configOptions":[]}}'
             IFS= read -r _
             exec sleep 60
         "#;
@@ -2442,7 +2442,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
             IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"live-a","configOptions":[]}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Ask first"}]},"sessionId":"live-a","configOptions":[]}}'
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"live-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"main turn done"}}}}'
             printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
@@ -2582,7 +2582,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
             IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"helper-session","configOptions":[]}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Ask first"}]},"sessionId":"helper-session","configOptions":[]}}'
             IFS= read -r prompt
             case "$prompt" in
               *'## Your assigned role'*'## What the team knows'*'## Task'*) ;;

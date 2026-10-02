@@ -96,7 +96,7 @@ export async function fetchHarnesses(): Promise<HarnessReport> {
 }
 
 export async function fetchHarnessModels(harnessId: string): Promise<HarnessModels> {
-  const response = await daemonFetch(`/api/harnesses/${encodeURIComponent(harnessId)}/models`)
+  const response = await daemonFetch(`/api/harnesses/${encodeURIComponent(harnessId)}/models`, { headers: { 'X-LoomWatch-Request': 'model-discovery' } })
   if (!response.ok) {
     let message = response.statusText
     try {

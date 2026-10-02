@@ -448,15 +448,17 @@ even when nothing changed, and `./loomwatch help` lists everything.
 <summary>What <code>./loomwatch</code> runs, if you prefer to do it by hand</summary>
 
 ```sh
-cp .env.example .env   # then replace both replace-with-… values with long random letters and numbers
+cp .env.example .env   # replace all replace-with-… values with independently generated random tokens
 docker compose up -d --wait postgres
-(cd ui && npx --yes pnpm@12 install --frozen-lockfile && npx --yes pnpm@12 run build)
+corepack install
+corepack pnpm install --frozen-lockfile --ignore-scripts
+(cd ui && corepack pnpm install --frozen-lockfile && corepack pnpm run build)
 cargo build --release --locked --bin loomwatchd
 mkdir -p "$HOME/LoomWatch/teams"
 cp -n examples/operator-stop.yaml examples/operator-stop-harness.py "$HOME/LoomWatch/teams/"
 set -a; . ./.env; set +a
 export DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
-unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN
+unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN LOOMWATCH_SERVER_TOKEN
 ./target/release/loomwatchd serve --teams-root "$HOME/LoomWatch/teams" --listen 127.0.0.1:3000
 ```
 
@@ -517,8 +519,8 @@ The Library recognizes these integrations:
 
 | Agent app | Connection used by LoomWatch |
 | --- | --- |
-| Claude | `claude-agent-acp`, with an `npx` bridge fallback |
-| Codex | `codex-acp`, with an `npx` bridge fallback |
+| Claude | `claude-agent-acp`, installed by the locked bootstrap |
+| Codex | `codex-acp`, installed by the locked bootstrap |
 | Gemini | `gemini --acp` |
 | OpenCode | `opencode acp` |
 | Hermes | `hermes-acp` |
@@ -527,7 +529,7 @@ The Library recognizes these integrations:
 LoomWatch also recognizes pi, but cannot run it: pi has no ACP connection. Use its models through
 OpenCode instead.
 
-Bridge fallbacks may download a package on first use. Availability in the Library means
+Bridge packages are installed with the frozen root lockfile during setup; discovery never downloads them. Availability in the Library means
 the required commands were found; it does not confirm that your account is signed in or
 has model access. Delegation and session-resume support vary by integration.
 
@@ -783,7 +785,7 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Your saved jobs | `.jobs` inside your teams folder, one `<job>.yaml` per job; removed jobs move to `.jobs/.removed` |
 | Files you add to an agent (**Add file…**) | `<team>.files/` beside the team file |
 | Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
-| AI apps you connected to LoomWatch | `.loomwatch/connections.json` in your teams folder. It holds each app's private key. |
+| AI apps you connected to LoomWatch | `~/.local/share/loomwatch/secrets/<teams-root-hash>/connections.json`, outside the teams folder. Existing connections migrate there on startup. |
 | Run history, recorded events, Notebook entries and Ask conversations | The local PostgreSQL Docker volume |
 | Database settings | `.env` in the source repository |
 | Provider sign-in | Managed by each host agent app; Compose-only deployments use `loomwatch-home` |
@@ -879,3 +881,26 @@ teams folder's `.jobs`.
   <br>
   <sub>Woven with Rust, React and ACP. Watch every thread.</sub>
 </p>
+
+### Security boundaries
+
+Loopback serving keeps the usual local workflow. A listener on any other interface (including
+Docker's container listener) requires `LOOMWATCH_SERVER_TOKEN`, a random token of at least 32
+characters. Generate it with `openssl rand -hex 32`; the browser's login uses username `loomwatch`
+and that token as the password. API clients may send `Authorization: Bearer <token>`. Control MCP
+continues to require its own scoped connection bearer. Host/Origin checks are additional browser
+protections, independent of authentication. Use HTTPS termination when accessing a listener over
+a network. Compose still publishes only on host loopback.
+
+The bootstrap verifies the root `packageManager` declaration through Corepack and installs the
+exact ACP bridge versions with the frozen root lockfile. Discovery uses installed adapters and
+never downloads a package. The model-discovery API requires `X-LoomWatch-Request: model-discovery` (the UI sends it automatically). Standalone adapters on the operator's PATH remain supported. The
+container image includes the same locked bridges.
+
+Harnesses receive a minimal runtime/provider environment and explicitly configured team values;
+daemon database, Control, and runner credentials are excluded. Only the internal runner bridge
+receives its runner capability. The host runner rejects environment overrides from clients,
+limits connections to 64, and limits authentication frames to 16 KiB and five seconds. Team
+permissions require successful ask-first mode negotiation before prompting. Managed workspaces
+reject unsafe identifiers and existing symlinked ancestors or descendants. PDF extraction is
+serialized with a 15-second deadline and an 8 MiB text output limit.

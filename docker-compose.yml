@@ -27,6 +27,7 @@ services:
       HOME: /home/node
       LOOMWATCH_CAPABILITY_HOME: /opt/loomwatch/capabilities
       LOOMWATCH_ALLOW_CONTAINER_LISTENER: "true"
+      LOOMWATCH_SERVER_TOKEN: ${LOOMWATCH_SERVER_TOKEN:?set a random 32-character LOOMWATCH_SERVER_TOKEN in .env}
       # The optional native companion keeps host-installed harnesses and credentials on the host.
       LOOMWATCH_HOST_RUNNER_ADDR: ${LOOMWATCH_HOST_RUNNER_ADDR:-host.docker.internal:3031}
       LOOMWATCH_HOST_RUNNER_TOKEN: ${LOOMWATCH_HOST_RUNNER_TOKEN:-${POSTGRES_PASSWORD}}

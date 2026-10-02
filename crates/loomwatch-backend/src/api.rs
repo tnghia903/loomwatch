@@ -599,6 +599,28 @@ async fn enforce_allowed_host(
         return ApiError::new(StatusCode::FORBIDDEN, "host is not allowed".to_owned())
             .into_response();
     }
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok());
+    let origin_ok = request.headers().get(header::ORIGIN).is_none_or(|origin| {
+        origin.to_str().is_ok_and(|origin| {
+            host.is_some_and(|host| {
+                origin == format!("http://{host}") || origin == format!("https://{host}")
+            })
+        })
+    });
+    let fetch_ok = request
+        .headers()
+        .get("sec-fetch-site")
+        .is_none_or(|site| site == "same-origin" || site == "none");
+    if !origin_ok || !fetch_ok {
+        return ApiError::new(
+            StatusCode::FORBIDDEN,
+            "request must come from the local origin".to_owned(),
+        )
+        .into_response();
+    }
     next.run(request).await
 }
 
@@ -685,7 +707,20 @@ async fn get_harnesses(State(state): State<ApiState>) -> Json<HarnessReport> {
 async fn get_harness_models(
     State(state): State<ApiState>,
     AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
 ) -> Result<Json<HarnessModels>, ApiError> {
+    // A non-simple header cannot be sent by images, navigations or cross-origin requests
+    // without a CORS preflight, which this API does not grant. Also covers older browsers
+    // that omit Fetch Metadata on cross-site GETs.
+    if headers
+        .get("x-loomwatch-request")
+        .is_none_or(|value| value != "model-discovery")
+    {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "model discovery requires an explicit application request".to_owned(),
+        ));
+    }
     let harness = harness_report(&state)
         .await
         .harnesses
@@ -2123,28 +2158,21 @@ fn detected(
             )),
         );
     };
-    if find_executable(search_path, bridge.command).is_some() {
-        return found(bridge.command, bridge.args, true, None);
+    if let Some(command) = find_executable(search_path, bridge.command) {
+        return found(&command.to_string_lossy(), bridge.args, true, None);
     }
-    let npx_available = find_executable(search_path, "npx").is_some();
-    match bridge.fallback_package {
-        Some(package) if npx_available => found("npx", &["-y", package], true, None),
-        Some(package) => found(
-            bridge.command,
-            bridge.args,
-            false,
-            Some(format!(
-                "neither {} nor npx (for the {package} bridge) is on the searched PATH.",
+    found(
+        bridge.command,
+        bridge.args,
+        false,
+        Some(match bridge.fallback_package {
+            Some(package) => format!(
+                "{} is not installed. Install the locked {package} bridge with ./loomwatch --rebuild.",
                 bridge.command
-            )),
-        ),
-        None => found(
-            bridge.command,
-            bridge.args,
-            false,
-            Some(format!("{} is not on the searched PATH.", bridge.command)),
-        ),
-    }
+            ),
+            None => format!("{} is not on the searched PATH.", bridge.command),
+        }),
+    )
 }
 
 /// The `PATH` entries a scan would walk, in order.
@@ -2178,6 +2206,10 @@ pub(crate) fn augment_search_path(
                 directories.push(candidate);
             }
         }
+    }
+    let bundled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../node_modules/.bin");
+    if bundled.is_dir() && !directories.contains(&bundled) {
+        directories.push(bundled);
     }
     if directories.is_empty() {
         return inherited;
@@ -2226,6 +2258,13 @@ pub(crate) fn find_executable(search_path: &std::ffi::OsStr, command: &str) -> O
     std::env::split_paths(search_path)
         .flat_map(|directory| executable_candidates(&directory, command))
         .find(|candidate| is_executable(candidate))
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                std::env::current_dir().unwrap_or_default().join(path)
+            }
+        })
 }
 
 #[cfg(not(windows))]
@@ -2648,7 +2687,7 @@ mod tests {
                         "command": "claude",
                         "executablePath": second.0.join("claude").to_string_lossy(),
                         "acpAvailable": false,
-                        "unavailableReason": "neither claude-agent-acp nor npx (for the @agentclientprotocol/claude-agent-acp bridge) is on the searched PATH.",
+                        "unavailableReason": "claude-agent-acp is not installed. Install the locked @agentclientprotocol/claude-agent-acp bridge with ./loomwatch --rebuild.",
                         "spawn": {"cmd": "claude-agent-acp", "args": []}
                     },
                     {
@@ -2657,7 +2696,7 @@ mod tests {
                         "command": "opencode",
                         "executablePath": first.0.join("opencode").to_string_lossy(),
                         "acpAvailable": true,
-                        "spawn": {"cmd": "opencode", "args": ["acp"]}
+                        "spawn": {"cmd": first.0.join("opencode").to_string_lossy(), "args": ["acp"]}
                     }
                 ],
                 "searchedPath": [
@@ -2692,12 +2731,18 @@ mod tests {
 
         let hermes = by_id("hermes");
         assert!(hermes.acp_available);
-        assert_eq!(hermes.spawn.cmd, "hermes-acp");
+        assert_eq!(
+            hermes.spawn.cmd,
+            directory.0.join("hermes-acp").to_string_lossy()
+        );
         assert_eq!(hermes.spawn.args, Vec::<String>::new());
 
         let openclaw = by_id("openclaw");
         assert!(openclaw.acp_available);
-        assert_eq!(openclaw.spawn.cmd, "openclaw");
+        assert_eq!(
+            openclaw.spawn.cmd,
+            directory.0.join("openclaw").to_string_lossy()
+        );
         assert_eq!(openclaw.spawn.args, ["acp"]);
 
         // `pi` has no ACP bridge at all, so it must be reported with that reason rather than the
@@ -2907,30 +2952,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn harness_endpoint_uses_npx_bridge_for_claude_and_codex_when_needed() {
+    async fn missing_bridges_never_trigger_registry_execution() {
         let directory = TempDirectory::new();
-        create_executable(&directory.0, "claude");
-        create_executable(&directory.0, "codex");
-        create_executable(&directory.0, "npx");
-        let search_path = std::env::join_paths([&directory.0]).expect("join search path");
-
+        for name in ["claude", "codex", "npx"] {
+            create_executable(&directory.0, name);
+        }
+        let search_path = std::env::join_paths([&directory.0]).expect("path");
         let harnesses = detect_harnesses(Some(search_path.as_os_str()));
-
         assert_eq!(harnesses.len(), 2);
-        assert_eq!(harnesses[0].id, "claude");
-        assert!(harnesses[0].acp_available);
-        assert_eq!(harnesses[0].spawn.cmd, "npx");
-        assert_eq!(
-            harnesses[0].spawn.args,
-            ["-y", "@agentclientprotocol/claude-agent-acp"]
+        assert!(
+            harnesses
+                .iter()
+                .all(|harness| !harness.acp_available && harness.spawn.cmd != "npx")
         );
-        assert_eq!(harnesses[1].id, "codex");
-        assert!(harnesses[1].acp_available);
-        assert_eq!(harnesses[1].spawn.cmd, "npx");
-        assert_eq!(
-            harnesses[1].spawn.args,
-            ["-y", "@agentclientprotocol/codex-acp"]
-        );
+        for name in ["claude-agent-acp", "codex-acp"] {
+            create_executable(&directory.0, name);
+        }
+        let harnesses = detect_harnesses(Some(search_path.as_os_str()));
+        assert!(harnesses.iter().all(|harness| harness.acp_available && Path::new(&harness.spawn.cmd).is_absolute()));
     }
 
     #[tokio::test]
@@ -2955,6 +2994,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             .oneshot(
                 Request::builder()
                     .uri("/api/harnesses/opencode/models")
+                    .header("x-loomwatch-request", "model-discovery")
                     .header(header::HOST, "localhost")
                     .body(Body::empty())
                     .expect("request"),
@@ -3004,6 +3044,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
                 Request::builder()
                     .uri(uri)
                     .header(header::HOST, "localhost")
+                    .header("x-loomwatch-request", "model-discovery")
                     .body(Body::empty())
                     .expect("request"),
             )
@@ -4182,6 +4223,46 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             fs::read_to_string(outside_path).expect("read outside file"),
             "do not replace"
         );
+    }
+
+    #[tokio::test]
+    async fn cross_site_model_discovery_is_rejected_before_spawning() {
+        let directory = TempDirectory::new();
+        create_executable(&directory.0, "opencode");
+        let path = std::env::join_paths([&directory.0]).unwrap();
+        let app = test_router_with_path(&directory.0, Some(path));
+        for (name, value) in [
+            ("origin", "https://attacker.example"),
+            ("origin", "null"),
+            ("sec-fetch-site", "cross-site"),
+            ("sec-fetch-site", "same-site"),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/harnesses/opencode/models")
+                        .header("x-loomwatch-request", "model-discovery")
+                        .header(header::HOST, "localhost")
+                        .header(name, value)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        }
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/harnesses/opencode/models")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

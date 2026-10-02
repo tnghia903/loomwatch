@@ -64,6 +64,8 @@ fn embedded_response(path: &str, immutable: bool) -> Response {
         .status(StatusCode::OK)
         .header(CONTENT_TYPE, content_type.as_ref())
         .header(CACHE_CONTROL, cache_control)
+        .header("content-security-policy", "frame-ancestors 'none'")
+        .header("x-frame-options", "DENY")
         .body(Body::from(asset.data))
         .expect("static response headers are valid")
 }
@@ -87,6 +89,11 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()[CONTENT_TYPE], "text/html");
         assert_eq!(response.headers()[CACHE_CONTROL], NO_CACHE);
+        assert_eq!(
+            response.headers()["content-security-policy"],
+            "frame-ancestors 'none'"
+        );
+        assert_eq!(response.headers()["x-frame-options"], "DENY");
         let body = response.into_body().collect().await.unwrap().to_bytes();
         assert!(
             body.windows(b"id=\"root\"".len())

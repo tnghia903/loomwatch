@@ -2,7 +2,7 @@
 //!
 //! *Connect* registers `LoomWatch` with the app's own command — never by editing its config files —
 //! after the panel has shown that exact command. Each connection gets its own token, kept in
-//! `<teams root>/.loomwatch/connections.json` so the app keeps working after a restart.
+//! private application data outside the teams folder so it survives a restart.
 //! *Disconnect* runs the app's own remove and revokes the token. Apps with no command for this get
 //! a snippet to paste instead.
 
@@ -22,7 +22,62 @@ use super::{Caller, Control, SERVER_NAME, error, lock, new_token, now};
 use crate::acp::EventLog;
 use crate::archive::EventArchive;
 
-const FILE: &str = ".loomwatch/connections.json";
+const LEGACY_FILE: &str = ".loomwatch/connections.json";
+
+pub(super) fn credentials_path(teams_root: &Path) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let key = format!(
+        "{:x}",
+        Sha256::digest(teams_root.to_string_lossy().as_bytes())
+    );
+    #[cfg(test)]
+    let private_root = std::env::temp_dir()
+        .canonicalize()
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("loomwatch-test-secrets");
+    #[cfg(not(test))]
+    let private_root = std::env::var_os("HOME")
+        .map_or_else(std::env::temp_dir, PathBuf::from)
+        .join(".local/share/loomwatch/secrets");
+    private_root.join(key).join("connections.json")
+}
+
+fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let parent = path.parent().expect("credential parent");
+    // Reject existing links before opening secrets. New directories/files are private from birth.
+    for ancestor in parent.ancestors() {
+        if std::fs::symlink_metadata(ancestor).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Err(std::io::Error::other(
+                "credential storage contains a symlink",
+            ));
+        }
+    }
+    std::fs::create_dir_all(parent)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+    }
+    let temporary = parent.join(format!(".connections-{}", uuid::Uuid::new_v4()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let result = (|| {
+        let mut file = options.open(&temporary)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 /// The environment variable the stdio bridge reads its token from.
 pub const TOKEN_VARIABLE: &str = "LOOMWATCH_CONTROL_TOKEN";
@@ -55,7 +110,27 @@ const INBOX_LIMIT: usize = 50;
 
 impl Connections {
     pub(super) fn load(teams_root: &Path) -> Self {
-        let path = teams_root.join(FILE);
+        let path = credentials_path(teams_root);
+        let legacy = teams_root.join(LEGACY_FILE);
+        if legacy.exists() {
+            // Preserve existing connections, then remove the credential from agent-readable data.
+            let migrated = (|| -> std::io::Result<()> {
+                if !path.exists() {
+                    write_private(&path, &std::fs::read_to_string(&legacy)?)?;
+                }
+                std::fs::remove_file(&legacy)
+            })();
+            if let Err(error) = migrated {
+                eprintln!("could not migrate Control credentials: {error}; connections disabled");
+                return Self {
+                    path,
+                    file: StdMutex::default(),
+                    logs: StdMutex::default(),
+                    started: uuid::Uuid::new_v4().simple().to_string(),
+                    inbox: StdMutex::default(),
+                };
+            }
+        }
         let file = std::fs::read_to_string(&path)
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
@@ -121,16 +196,8 @@ impl Connections {
     fn save(&self, update: impl FnOnce(&mut ConnectionsFile)) -> Result<(), String> {
         let mut file = lock(&self.file);
         update(&mut file);
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
         let text = serde_json::to_string_pretty(&*file).map_err(|error| error.to_string())?;
-        std::fs::write(&self.path, text).map_err(|error| error.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600));
-        }
+        write_private(&self.path, &text).map_err(|error| error.to_string())?;
         Ok(())
     }
 }
@@ -549,4 +616,47 @@ where
 
 fn bridge_error(id: &Value, message: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": message}})
+}
+
+#[cfg(test)]
+mod storage_security_tests {
+    use super::*;
+    #[test]
+    fn existing_connections_migrate_outside_agent_read_scope() {
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("loomwatch-token-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join(".loomwatch")).unwrap();
+        let token = "existing-connection-test-token";
+        std::fs::write(
+            root.join(LEGACY_FILE),
+            serde_json::json!({"apps": {"codex": {"token": token, "connectedAt": "today"}}})
+                .to_string(),
+        )
+        .unwrap();
+        // Records are serialized in camelCase, and migration preserves their exact bytes.
+        let connections = Connections::load(&root);
+        assert!(!connections.path.starts_with(&root));
+        assert!(!root.join(LEGACY_FILE).exists());
+        assert_eq!(
+            connections.tokens(),
+            [("codex".to_owned(), token.to_owned())]
+        );
+        assert_eq!(Connections::load(&root).tokens(), connections.tokens());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&connections.path)
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        std::fs::remove_dir_all(connections.path.parent().unwrap()).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

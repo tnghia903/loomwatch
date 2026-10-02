@@ -24,7 +24,7 @@ for line in sys.stdin:
     if method == "initialize":
         result = {"protocolVersion": 1}
     elif method == "session/new":
-        result = {"sessionId": agent, "configOptions": []}
+        result = {"sessionId": agent, "configOptions": [], "modes": {"currentModeId": "default", "availableModes": [{"id": "default", "name": "Ask first"}]}}
     elif method == "session/prompt":
         prompt = "\n".join(part.get("text", "") for part in request["params"]["prompt"])
         if prompt.startswith("Last step. Record where this work stands"):

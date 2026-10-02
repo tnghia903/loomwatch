@@ -1,7 +1,10 @@
 FROM node:24-bookworm-slim AS ui-builder
 
-WORKDIR /source/ui
+WORKDIR /source
 RUN corepack enable
+COPY package.json pnpm-lock.yaml ./
+RUN corepack pnpm install --frozen-lockfile --ignore-scripts
+WORKDIR /source/ui
 COPY ui/package.json ui/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY ui/ ./
@@ -31,7 +34,8 @@ RUN mkdir -p /data/teams /workspaces /opt/loomwatch/capabilities \
 USER node
 WORKDIR /workspaces
 ENV HOME=/home/node
-ENV PATH=/home/node/.local/bin:$PATH
+COPY --from=ui-builder /source/node_modules /opt/loomwatch/adapters/node_modules
+ENV PATH=/home/node/.local/bin:/opt/loomwatch/adapters/node_modules/.bin:$PATH
 
 EXPOSE 3000
 ENTRYPOINT ["loomwatchd"]

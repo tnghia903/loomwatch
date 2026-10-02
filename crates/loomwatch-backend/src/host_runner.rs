@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
 
@@ -151,7 +151,10 @@ fn proxied_report(mut report: HarnessReport) -> HarnessReport {
         harness.executable_path = format!("host:{}", harness.executable_path);
         if harness.acp_available {
             harness.spawn = HarnessSpawn {
-                cmd: PROXY_COMMAND.to_owned(),
+                cmd: std::env::current_exe().map_or_else(
+                    |_| PROXY_COMMAND.to_owned(),
+                    |path| path.to_string_lossy().into_owned(),
+                ),
                 args: vec![
                     "harness-client".to_owned(),
                     "--harness".to_owned(),
@@ -183,11 +186,16 @@ pub async fn serve(listen: SocketAddr, token: String, mappings: Vec<PathMapping>
     }
     let listener = TcpListener::bind(listen).await?;
     println!("LoomWatch host runner listening on {listen}");
+    let connections = std::sync::Arc::new(tokio::sync::Semaphore::new(64));
     loop {
         let (stream, peer) = listener.accept().await?;
+        let Ok(permit) = connections.clone().try_acquire_owned() else {
+            continue;
+        };
         let token = token.clone();
         let mappings = mappings.clone();
         tokio::spawn(async move {
+            let _permit = permit;
             if let Err(error) = serve_connection(stream, &token, &mappings).await {
                 eprintln!("host runner connection from {peer} failed: {error:#}");
             }
@@ -197,10 +205,7 @@ pub async fn serve(listen: SocketAddr, token: String, mappings: Vec<PathMapping>
 
 async fn serve_connection(stream: TcpStream, token: &str, mappings: &[PathMapping]) -> Result<()> {
     let mut reader = BufReader::new(stream);
-    let mut opening = String::new();
-    if reader.read_line(&mut opening).await? == 0 {
-        bail!("client closed before authentication");
-    }
+    let opening = read_opening(&mut reader, std::time::Duration::from_secs(5)).await?;
     let request: RunnerRequest = serde_json::from_str(opening.trim_end())?;
     let authenticated = match &request {
         RunnerRequest::List { token: supplied }
@@ -275,24 +280,19 @@ async fn serve_spawn(
     env: BTreeMap<String, String>,
     mappings: &[PathMapping],
 ) -> Result<()> {
-    let harness = crate::api::system_harness_report()
-        .harnesses
-        .into_iter()
-        .find(|candidate| candidate.id == harness_id)
-        .with_context(|| format!("host harness {harness_id:?} was not found"))?;
-    if !harness.acp_available {
-        bail!(
-            "host harness {} is unavailable: {}",
-            harness.name,
-            harness
-                .unavailable_reason
-                .unwrap_or_else(|| "no ACP adapter".to_owned())
-        );
-    }
+    anyhow::ensure!(
+        env.is_empty(),
+        "host runner does not accept client environment overrides"
+    );
+    let harness = native_harness(harness_id)?;
     let cwd = mapped_cwd(cwd, mappings)?;
     let mut child = Command::new(&harness.spawn.cmd)
         .args(&harness.spawn.args)
-        .envs(env)
+        .env_clear()
+        .envs(crate::process_env::harness_environment(
+            std::env::vars(),
+            &BTreeMap::new(),
+        ))
         .current_dir(&cwd)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -518,7 +518,10 @@ mod tests {
             proxied.harnesses[0].executable_path,
             "host:/host/bin/opencode"
         );
-        assert_eq!(proxied.harnesses[0].spawn.cmd, "loomwatchd");
+        assert_eq!(
+            PathBuf::from(&proxied.harnesses[0].spawn.cmd),
+            std::env::current_exe().unwrap()
+        );
         assert_eq!(
             proxied.harnesses[0].spawn.args,
             ["harness-client", "--harness", "opencode"]
@@ -550,5 +553,110 @@ mod tests {
             [("codex", "loomwatchd"), ("opencode", "loomwatchd")]
         );
         assert_eq!(merged.searched_path, ["host:/host/bin", "/bin"]);
+    }
+}
+
+fn native_harness(harness_id: &str) -> Result<DetectedHarness> {
+    let harness = crate::api::system_harness_report()
+        .harnesses
+        .into_iter()
+        .find(|candidate| candidate.id == harness_id)
+        .with_context(|| format!("host harness {harness_id:?} was not found"))?;
+    if !harness.acp_available {
+        bail!(
+            "host harness {} is unavailable: {}",
+            harness.name,
+            harness
+                .unavailable_reason
+                .unwrap_or_else(|| "no ACP adapter".to_owned())
+        );
+    }
+    anyhow::ensure!(
+        Path::new(&harness.spawn.cmd).is_absolute(),
+        "host catalog executable must be absolute"
+    );
+    Ok(harness)
+}
+
+async fn read_opening<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+    deadline: std::time::Duration,
+) -> Result<String> {
+    let mut opening = String::new();
+    let count = tokio::time::timeout(
+        deadline,
+        (&mut *reader).take(16 * 1024 + 1).read_line(&mut opening),
+    )
+    .await
+    .context("host runner authentication timed out")??;
+    anyhow::ensure!(
+        count <= 16 * 1024 && opening.ends_with('\n'),
+        "invalid or oversized authentication frame"
+    );
+    Ok(opening)
+}
+
+#[cfg(test)]
+mod runner_security_tests {
+    use super::*;
+    #[tokio::test]
+    async fn preauthentication_reads_reject_oversized_and_idle_streams() {
+        let data = vec![b'x'; 16 * 1024 + 1];
+        let mut reader = BufReader::new(data.as_slice());
+        assert!(
+            read_opening(&mut reader, std::time::Duration::from_secs(1))
+                .await
+                .is_err()
+        );
+        let (_writer, reader) = tokio::io::duplex(64);
+        assert!(
+            read_opening(
+                &mut BufReader::new(reader),
+                std::time::Duration::from_millis(20)
+            )
+            .await
+            .is_err()
+        );
+        let mut reader = BufReader::new(b"{\"op\":\"list\",\"token\":\"correct\"}\n".as_slice());
+        assert!(
+            read_opening(&mut reader, std::time::Duration::from_secs(1))
+                .await
+                .is_ok()
+        );
+    }
+    #[tokio::test]
+    async fn authenticated_spawn_rejects_loader_and_path_overrides() {
+        let token = "a-valid-test-runner-token";
+        for key in [
+            "PATH",
+            "NODE_OPTIONS",
+            "PYTHONPATH",
+            "LD_PRELOAD",
+            "DYLD_INSERT_LIBRARIES",
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let mut client = TcpStream::connect(listener.local_addr().unwrap())
+                .await
+                .unwrap();
+            let (server, _) = listener.accept().await.unwrap();
+            write_request(
+                &mut client,
+                &RunnerRequest::Spawn {
+                    token: token.to_owned(),
+                    harness: "opencode".to_owned(),
+                    cwd: PathBuf::from("/workspaces"),
+                    env: BTreeMap::from([(key.to_owned(), "injected".to_owned())]),
+                },
+            )
+            .await
+            .unwrap();
+            let error = serve_connection(server, token, &[]).await.unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("does not accept client environment"),
+                "{error}"
+            );
+        }
     }
 }

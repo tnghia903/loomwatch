@@ -138,7 +138,23 @@ impl PermissionPolicy {
     }
 
     fn readable(&self, path: &Path) -> bool {
-        path.starts_with(&self.folder) || self.readable.iter().any(|root| path.starts_with(root))
+        let sensitive = path.ends_with(".loomwatch/connections.json")
+            || path
+                .components()
+                .collect::<Vec<_>>()
+                .windows(4)
+                .any(|parts| {
+                    parts.iter().map(|part| part.as_os_str()).eq([
+                        ".local",
+                        "share",
+                        "loomwatch",
+                        "secrets",
+                    ]
+                    .map(std::ffi::OsStr::new))
+                });
+        !sensitive
+            && (path.starts_with(&self.folder)
+                || self.readable.iter().any(|root| path.starts_with(root)))
     }
 }
 

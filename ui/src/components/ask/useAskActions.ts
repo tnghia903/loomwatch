@@ -106,6 +106,11 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
   }, [settled])
 
   const begin = useCallback((proposal: Proposal, inPlace: boolean) => {
+    if ((inPlace && (proposal.baseRevision !== doc.currentRevision() || doc.saveState === 'dirty' || doc.saveState === 'conflict'))
+      || (!inPlace && proposal.baseRevision !== null)) {
+      say({ text: 'This proposal is based on an older team. Ask for a fresh proposal before applying it.' })
+      return
+    }
     const beforeYaml = inPlace ? doc.yamlPreview : null
     const changes = proposalChanges(inPlace ? doc.loadedYaml ?? doc.yamlPreview : null, proposal.yaml)
     const applied = inPlace ? doc.applyYaml(proposal.yaml) : doc.applyYaml(proposal.yaml, proposal.file)
@@ -166,7 +171,7 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
       present(await fetchProposal(id))
     } catch (caught) {
       if (recorded?.yaml) {
-        present({ id, source: '', file: recorded.file, name: recorded.name, isNew: recorded.isNew, yaml: recorded.yaml, baseRevision: null, summary: recorded.summary, createdAt: recorded.at })
+        present({ id, source: '', file: recorded.file, name: recorded.name, isNew: recorded.isNew, yaml: recorded.yaml, baseRevision: recorded.baseRevision ?? null, summary: recorded.summary, createdAt: recorded.at })
         return
       }
       say({ text: caught instanceof Error ? caught.message : String(caught) })
@@ -219,6 +224,10 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
 
   const applyProposal = useCallback(async () => {
     if (!preview || preview.applying) return
+    if (preview.proposal.baseRevision !== doc.currentRevision()) {
+      setPreview({ ...preview, error: 'The team changed since this proposal was prepared. Ask for a fresh proposal.' })
+      return
+    }
     setPreview({ ...preview, applying: true, error: null })
     const saved = await doc.save()
     if (!saved) {

@@ -953,6 +953,13 @@ impl TeamConfig {
         if team.schema_version != 1 {
             bail!("unsupported team schema version {}", team.schema_version);
         }
+        // Legacy documents may omit a team id; a supplied id must be a safe component.
+        if !team.id.is_empty() {
+            validate_identifier(&team.id)?;
+        }
+        for agent in &team.agents {
+            validate_identifier(&agent.id)?;
+        }
         team.entrypoint_agent()?;
         // Before `pipeline_order`, so "the entrypoint is a stop" is reported as what it is rather
         // than as the incoming-edge violation it also happens to be.
@@ -1590,5 +1597,41 @@ edges:
         assert_eq!(describe("30 * * * *", None), "hourly at :30 local time");
         assert_eq!(describe("*/5 * * * *", None), "*/5 * * * * local time");
         assert_eq!(describe("0 8 1 * *", Some("UTC")), "0 8 1 * * UTC");
+    }
+}
+
+/// The schema's identifier grammar, also enforced at filesystem boundaries.
+pub(crate) fn validate_identifier(id: &str) -> Result<()> {
+    let valid = !id.is_empty()
+        && id.len() <= 128
+        && id.as_bytes()[0].is_ascii_alphanumeric()
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
+    anyhow::ensure!(
+        valid,
+        "invalid identifier {id:?}; expected 1–128 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit"
+    );
+    Ok(())
+}
+#[cfg(test)]
+mod identifier_security_tests {
+    #[test]
+    fn identifiers_cannot_escape_the_workspace() {
+        for bad in [
+            "",
+            ".",
+            "..",
+            "../other",
+            "/tmp/other",
+            "a/b",
+            "a\\b",
+            "équipe",
+        ] {
+            assert!(super::validate_identifier(bad).is_err(), "{bad}");
+        }
+        for good in ["a", "Team-2", "agent.v1", "team_name"] {
+            assert!(super::validate_identifier(good).is_ok());
+        }
     }
 }

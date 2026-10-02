@@ -2460,7 +2460,7 @@ set -eu
 IFS= read -r _
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
 IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"harness-session","configOptions":[]}}'
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Ask first"}]},"sessionId":"harness-session","configOptions":[]}}'
 IFS= read -r _
 printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"harness-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}'
 printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
@@ -2476,7 +2476,7 @@ set -eu
 IFS= read -r _
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
 IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"sleepy","configOptions":[]}}'
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Ask first"}]},"sessionId":"sleepy","configOptions":[]}}'
 IFS= read -r _
 exec sleep 60
 "#;
@@ -2488,7 +2488,7 @@ set -eu
 IFS= read -r _
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
 IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"quiet","configOptions":[]}}'
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Ask first"}]},"sessionId":"quiet","configOptions":[]}}'
 IFS= read -r _
 printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
 IFS= read -r _
@@ -2533,7 +2533,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
                     (String::new(), 4, 5)
                 };
                 let script = format!(
-                    "#!/bin/sh\nset -eu\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"protocolVersion\":1}}}}'\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{{\"sessionId\":\"{session}\",\"configOptions\":[]}}}}'\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"{reply}\"}}}}}}}}'\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{{\"stopReason\":\"end_turn\"}}}}'\n{handover_turn}IFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"\\n## Done\\n{reply}\\n\\n## Next\\nnothing\"}}}}}}}}'\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":{checkpoint_id},\"result\":{{\"stopReason\":\"end_turn\"}}}}'\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":{close_id},\"result\":{{}}}}'\n"
+                    "#!/bin/sh\nset -eu\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"protocolVersion\":1}}}}'\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{{\"modes\":{{\"currentModeId\":\"default\",\"availableModes\":[{{\"id\":\"default\",\"name\":\"Ask first\"}}]}},\"sessionId\":\"{session}\",\"configOptions\":[]}}}}'\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"{reply}\"}}}}}}}}'\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{{\"stopReason\":\"end_turn\"}}}}'\n{handover_turn}IFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"\\n## Done\\n{reply}\\n\\n## Next\\nnothing\"}}}}}}}}'\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":{checkpoint_id},\"result\":{{\"stopReason\":\"end_turn\"}}}}'\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":{close_id},\"result\":{{}}}}'\n"
                 );
                 self.write_harness(&format!("{session}.sh"), &script)
             };
@@ -3247,7 +3247,7 @@ set -eu
 IFS= read -r _
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
 IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"dying","configOptions":[]}}'
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Ask first"}]},"sessionId":"dying","configOptions":[]}}'
 IFS= read -r _
 printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"dying","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"half of section three"}}}}'
 exit 7

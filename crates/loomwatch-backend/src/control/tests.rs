@@ -596,7 +596,7 @@ async fn connect_runs_the_apps_own_command_and_disconnect_revokes_the_token() {
         "the token never comes back for a command app"
     );
     let saved =
-        std::fs::read_to_string(fixture.root.0.join(".loomwatch/connections.json")).expect("saved");
+        std::fs::read_to_string(super::connect::credentials_path(&fixture.root.0)).expect("saved");
     assert!(saved.contains(&token));
     let (status, listed) = fixture
         .mcp(
@@ -646,7 +646,7 @@ async fn a_refused_connection_is_not_saved_and_never_echoes_the_token() {
         !message.contains("Bearer lw_") || message.contains("lw_••••••••"),
         "{message}"
     );
-    assert!(!fixture.root.0.join(".loomwatch/connections.json").exists());
+    assert!(!super::connect::credentials_path(&fixture.root.0).exists());
 }
 
 #[tokio::test]

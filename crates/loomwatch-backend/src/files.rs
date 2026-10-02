@@ -220,8 +220,8 @@ pub(crate) fn opener(resolved: &Path, reveal: bool) -> std::process::Command {
             command.arg(format!("/select,{}", resolved.display()));
             command
         } else {
-            let mut command = std::process::Command::new("cmd");
-            command.args(["/C", "start", ""]).arg(resolved);
+            let mut command = std::process::Command::new("explorer.exe");
+            command.arg(resolved);
             command
         }
     }

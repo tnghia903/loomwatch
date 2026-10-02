@@ -216,10 +216,23 @@ impl AcpProcess {
     ///
     /// Returns an error when the process cannot be spawned or its streams are unavailable.
     pub fn spawn(spec: &ProcessSpec) -> Result<Self> {
+        let mut environment = crate::process_env::harness_environment(std::env::vars(), &spec.env);
+        // Only the internal bridge receives the runner capability. The host harness does not.
+        if spec.args.first().is_some_and(|arg| arg == "harness-client")
+            && std::env::current_exe().is_ok_and(|exe| std::path::Path::new(&spec.cmd) == exe)
+            && let Some(config) = crate::host_runner::configured_client()
+        {
+            environment.insert(crate::host_runner::RUNNER_ADDR_ENV.to_owned(), config.addr);
+            environment.insert(
+                crate::host_runner::RUNNER_TOKEN_ENV.to_owned(),
+                config.token,
+            );
+        }
         let mut command = Command::new(&spec.cmd);
         command
             .args(&spec.args)
-            .envs(&spec.env)
+            .env_clear()
+            .envs(environment)
             .current_dir(&spec.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -764,8 +777,7 @@ impl AcpProcess {
     /// operator has not allowed reaches `LoomWatch`'s policy instead of the app deciding alone.
     ///
     /// Only for a session with a [`ProcessSpec::permissions`] policy. An app that offers no such
-    /// mode, or refuses it, is recorded as deciding for itself and the run goes on: that is what
-    /// every run did before, and the record lets the run say so.
+    /// mode, or refuses it, is recorded and stops before any prompt is sent.
     async fn ensure_ask_first(
         &mut self,
         session_id: &str,
@@ -797,8 +809,7 @@ impl AcpProcess {
         };
         let (payload, raw) = match target {
             None => unavailable(
-                "This app offers no ask-first mode, so it decides for itself what it does \
-                 without asking. LoomWatch still answers whatever it does ask."
+                "This app offers no ask-first mode. LoomWatch cannot enforce the run permissions."
                     .to_owned(),
             ),
             Some(target) if current.as_deref() == Some(target) => (
@@ -818,14 +829,23 @@ impl AcpProcess {
                     set.response,
                 ),
                 Err(error) => unavailable(format!(
-                    "This app refused its ask-first mode ({error:#}), so it decides for itself \
-                     what it does without asking."
+                    "This app refused its ask-first mode ({error:#}). LoomWatch cannot enforce the run permissions."
                 )),
             },
         };
+        let failure = (payload["phase"] == "permission_mode_unavailable").then(|| {
+            payload["reason"]
+                .as_str()
+                .unwrap_or("permission mode unavailable")
+                .to_owned()
+        });
         recorder
             .append(EventKind::SessionMeta, payload, Some(raw))
-            .await
+            .await?;
+        if let Some(reason) = failure {
+            anyhow::bail!("{reason}");
+        }
+        Ok(())
     }
 
     async fn start_recorder(
@@ -3117,9 +3137,9 @@ mod tests {
         assert_eq!(mode.payload["changed"], true);
     }
 
-    /// An app with no ask-first mode still runs, and the record says it decides for itself.
+    /// An app with no ask-first mode stops before prompting, and records why.
     #[sqlx::test(migrations = "../../migrations")]
-    async fn an_app_without_an_ask_first_mode_is_recorded_as_deciding_for_itself(pool: PgPool) {
+    async fn an_app_without_an_ask_first_mode_stops_before_prompting(pool: PgPool) {
         let script = r#"
             set -eu
             IFS= read -r _
@@ -3151,7 +3171,7 @@ mod tests {
         process
             .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
             .await
-            .expect("an app that cannot be held to the switches still runs");
+            .expect_err("an app that cannot enforce the switches must stop");
 
         let events = archive.load_session("never-asks").await.expect("events");
         let unavailable = events
@@ -3161,7 +3181,7 @@ mod tests {
         assert!(
             unavailable.payload["reason"]
                 .as_str()
-                .is_some_and(|reason| reason.contains("decides for itself")),
+                .is_some_and(|reason| reason.contains("cannot enforce")),
             "{}",
             unavailable.payload
         );

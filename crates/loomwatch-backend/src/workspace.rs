@@ -366,12 +366,7 @@ pub fn materialise(
         agent_id: agent.id.clone(),
         message,
     };
-    let root = team_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(".loomwatch")
-        .join(team_id)
-        .join(&agent.id);
+    let root = managed_root(team_path, team_id, &agent.id).map_err(&fail)?;
     let skills_dir = prepare_root(&root, agent, declared_cwd).map_err(&fail)?;
 
     let inventory = capabilities::detect_capabilities(home, teams_root);
@@ -733,7 +728,7 @@ mod tests {
             let path =
                 std::env::temp_dir().join(format!("loomwatch-workspace-{}", uuid::Uuid::new_v4()));
             fs::create_dir_all(&path).expect("create scratch directory");
-            Self(path)
+            Self(path.canonicalize().expect("canonical scratch directory"))
         }
 
         fn path(&self) -> &Path {
@@ -1664,4 +1659,84 @@ mod tests {
             "a capability taken off the canvas must stop being delivered",
         );
     }
+}
+
+// Check existing ancestors and managed descendants before any deletion or write.
+fn reject_workspace_symlinks(root: &Path) -> Result<(), String> {
+    fn check(path: &Path) -> Result<(), String> {
+        let meta = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+        if meta.file_type().is_symlink() {
+            return Err(format!(
+                "managed workspace contains a symlink: {}",
+                path.display()
+            ));
+        }
+        if meta.is_dir() {
+            for entry in fs::read_dir(path).map_err(|error| error.to_string())? {
+                check(&entry.map_err(|error| error.to_string())?.path())?;
+            }
+        }
+        Ok(())
+    }
+    for ancestor in root.ancestors() {
+        match fs::symlink_metadata(ancestor) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(format!(
+                    "managed workspace contains a symlink: {}",
+                    ancestor.display()
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    if root.exists() {
+        check(root)?;
+    }
+    Ok(())
+}
+#[cfg(all(test, unix))]
+mod path_security_tests {
+    use super::*;
+    #[test]
+    fn refuses_symlinked_ancestors_and_managed_subdirectories() {
+        let base = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("loomwatch-root-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&base).unwrap();
+        let outside = base.join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("keep"), "untouched").unwrap();
+        std::os::unix::fs::symlink(&outside, base.join(".loomwatch")).unwrap();
+        assert!(reject_workspace_symlinks(&base.join(".loomwatch/team/agent")).is_err());
+        fs::remove_file(base.join(".loomwatch")).unwrap();
+        let root = base.join(".loomwatch/team/agent");
+        fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join(".claude")).unwrap();
+        assert!(reject_workspace_symlinks(&root).is_err());
+        assert_eq!(
+            fs::read_to_string(outside.join("keep")).unwrap(),
+            "untouched"
+        );
+        fs::remove_dir_all(base).unwrap();
+    }
+}
+
+fn managed_root(team_path: &Path, team_id: &str, agent_id: &str) -> Result<PathBuf, String> {
+    if !team_id.is_empty() {
+        crate::config::validate_identifier(team_id).map_err(|error| error.to_string())?;
+    }
+    crate::config::validate_identifier(agent_id).map_err(|error| error.to_string())?;
+    let root = team_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .canonicalize()
+        .map_err(|error| error.to_string())?
+        .join(".loomwatch")
+        .join(team_id)
+        .join(agent_id);
+    reject_workspace_symlinks(&root)?;
+    Ok(root)
 }

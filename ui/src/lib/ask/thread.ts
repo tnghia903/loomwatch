@@ -31,6 +31,7 @@ export interface ProposalCard {
   isNew: boolean
   summary: string
   yaml: string
+  baseRevision?: string | null
   outcome: ProposalOutcome | null
   /** A later proposal for the same file replaced this one. */
   superseded: boolean
@@ -208,7 +209,7 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
         } else if (phase === 'ask_proposal') {
           const card: ProposalCard = {
             kind: 'proposal', id: text(payload.proposalId), at: event.ts, file: text(payload.file), name: text(payload.name) || text(payload.file),
-            isNew: payload.isNew === true, summary: text(payload.summary), yaml: text(payload.yaml), outcome: null, superseded: false,
+            isNew: payload.isNew === true, summary: text(payload.summary), yaml: text(payload.yaml), baseRevision: typeof payload.baseRevision === 'string' ? payload.baseRevision : null, outcome: null, superseded: false,
           }
           for (const earlier of proposals.values()) if (earlier.file === card.file) earlier.superseded = true
           proposals.set(card.id, card)

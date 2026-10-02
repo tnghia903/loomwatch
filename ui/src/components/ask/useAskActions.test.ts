@@ -38,6 +38,7 @@ function setup(initial: DocState = OPEN_TEAM, extra: Partial<{ activeRunId: stri
     const [history, setHistory] = useState<string[]>([])
     const doc = {
       ...state,
+      currentRevision: () => state.loadedYaml === null ? null : 'rev',
       applyYaml: (yaml: string, file?: string) => {
         spies.applyYaml(...(file ? [yaml, file] : [yaml]))
         if (!file) setHistory((past) => [...past, state.yamlPreview])
@@ -174,13 +175,23 @@ describe('useAskActions', () => {
 
   it('falls back to the file the conversation recorded when the daemon no longer has the proposal', async () => {
     client.fetchProposal.mockRejectedValue(new Error('This proposal is no longer available.'))
-    const recorded: ProposalCard = { kind: 'proposal', id: 'p1', at: '2026-10-02T09:00:00Z', file: 'brief.yaml', name: 'Brief', isNew: false, summary: '', yaml: CHANGED, outcome: null, superseded: false }
+    const recorded: ProposalCard = { kind: 'proposal', id: 'p1', at: '2026-10-02T09:00:00Z', file: 'brief.yaml', name: 'Brief', isNew: false, summary: '', yaml: CHANGED, baseRevision: 'rev', outcome: null, superseded: false }
     const { result, spies } = setup()
     await act(async () => { await result.current.actions.showProposal('p1', recorded) })
     expect(spies.applyYaml).toHaveBeenCalledWith(CHANGED)
     act(() => result.current.actions.discardProposal())
     await act(async () => { await result.current.actions.showProposal('p2') })
     expect(result.current.actions.notice?.text).toBe('This proposal is no longer available.')
+  })
+
+  it('rejects a stale proposal before changing the canvas or saving', async () => {
+    client.fetchProposal.mockResolvedValue(proposal({ baseRevision: 'older-revision' }))
+    const { result, spies } = setup()
+    await act(async () => { await result.current.actions.showProposal('p1') })
+    expect(spies.applyYaml).not.toHaveBeenCalled()
+    expect(spies.save).not.toHaveBeenCalled()
+    expect(result.current.actions.preview).toBeNull()
+    expect(result.current.actions.notice?.text).toMatch(/older team/)
   })
 
   it('starts a requested run only when asked, records it, and shows it', async () => {

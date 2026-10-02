@@ -20,8 +20,10 @@ pub mod notion;
 pub mod operator;
 pub mod orientation;
 pub mod permissions;
+mod process_env;
 pub mod runs;
 pub mod schedule;
+pub mod server_security;
 pub mod skill_routing;
 pub mod spa;
 mod team_bus;
@@ -2311,7 +2313,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
             IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"pipeline-node-a","configOptions":[]}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Ask first"}]},"sessionId":"pipeline-node-a","configOptions":[]}}'
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"pipeline-node-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"node a "}}}}'
             printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"pipeline-node-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}'
@@ -2338,7 +2340,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
             IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"pipeline-node-b","configOptions":[]}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Ask first"}]},"sessionId":"pipeline-node-b","configOptions":[]}}'
             IFS= read -r prompt
             case "$prompt" in
               *'node a brief'*) ;;
@@ -2470,7 +2472,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
             IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"{session_id}","configOptions":[]}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Ask first"}}]}},"sessionId":"{session_id}","configOptions":[]}}}}'
             IFS= read -r prompt
             {checks}
             printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{own_reply}"}}}}}}}}'
@@ -2608,7 +2610,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
             IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"{session_id}","configOptions":[]}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Ask first"}}]}},"sessionId":"{session_id}","configOptions":[]}}}}'
             IFS= read -r _
             printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{reply}"}}}}}}}}'
             printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
@@ -2654,7 +2656,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
             IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"{session_id}","configOptions":[]}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Ask first"}}]}},"sessionId":"{session_id}","configOptions":[]}}}}'
             IFS= read -r _
             printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{reply}"}}}}}}}}'
             printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
@@ -2876,7 +2878,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
             IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"brief-node-a","configOptions":[]}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Ask first"}}]}},"sessionId":"brief-node-a","configOptions":[]}}}}'
             IFS= read -r prompt
             {assertion}
             printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"brief-node-a","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"a done"}}}}}}}}'
@@ -2897,7 +2899,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
             IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"brief-node-b","configOptions":[]}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Ask first"}}]}},"sessionId":"brief-node-b","configOptions":[]}}}}'
             IFS= read -r prompt
             {assertion}
             printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"brief-node-b","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"b done"}}}}}}}}'
@@ -3146,7 +3148,7 @@ mod tests {
                     "IFS= read -r _\n",
                     "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"protocolVersion\":1,\"agentCapabilities\":{{\"mcpCapabilities\":{{\"http\":true}}}}}}}}'\n",
                     "IFS= read -r newsession\n",
-                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{{\"sessionId\":\"{session}\",\"configOptions\":[]}}}}'\n",
+                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{{\"modes\":{{\"currentModeId\":\"default\",\"availableModes\":[{{\"id\":\"default\",\"name\":\"Ask first\"}}]}},\"sessionId\":\"{session}\",\"configOptions\":[]}}}}'\n",
                     "IFS= read -r prompt\n",
                     "{body}\n",
                     "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"{session} done\"}}}}}}}}'\n",
@@ -3591,7 +3593,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
             IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"follow-b","configOptions":[]}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Ask first"}}]}},"sessionId":"follow-b","configOptions":[]}}}}'
             IFS= read -r prompt
             case "$prompt" in
               *'{REPLAYED}'*) ;;
@@ -3775,7 +3777,7 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
             IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"follow-failed-b","configOptions":[]}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Ask first"}}]}},"sessionId":"follow-failed-b","configOptions":[]}}}}'
             IFS= read -r prompt
             case "$prompt" in
               *'Previous output'*) printf 'a failed run has no output to supply: %s\n' "$prompt" >&2; exit 46 ;;
@@ -4045,7 +4047,10 @@ mod tests {
              {checkpoint_done}\nIFS= read -r _\n{closed}\n\
              if IFS= read -r extra; then printf 'the parked stage was prompted again: %s\\n' \"$extra\" >&2; exit 67; fi\n",
             init = initialize(true),
-            new = answers(2, "{\"sessionId\":\"warm-1\",\"configOptions\":[]}"),
+            new = answers(
+                2,
+                "{\"modes\":{\"currentModeId\":\"default\",\"availableModes\":[{\"id\":\"default\",\"name\":\"Ask first\"}]},\"sessionId\":\"warm-1\",\"configOptions\":[]}"
+            ),
             work = says("warm-1", "three harnesses auto-approve"),
             work_done = answers(3, "{\"stopReason\":\"end_turn\"}"),
             handover = says("warm-1", "## Summary\\nthe findings, handed over"),
@@ -4058,7 +4063,10 @@ mod tests {
             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{work_done}\n\
              IFS= read -r _\n{checkpoint}\n{checkpoint_done}\nIFS= read -r _\n{closed}\n",
             init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"writer\",\"configOptions\":[]}"),
+            new = answers(
+                2,
+                "{\"modes\":{\"currentModeId\":\"default\",\"availableModes\":[{\"id\":\"default\",\"name\":\"Ask first\"}]},\"sessionId\":\"writer\",\"configOptions\":[]}"
+            ),
             work = says("writer", "wrote it"),
             work_done = answers(3, "{\"stopReason\":\"end_turn\"}"),
             checkpoint = says("writer", CHECKPOINT_ANSWER),
@@ -4175,7 +4183,10 @@ mod tests {
              IFS= read -r _\n{handover}\n{done4}\nIFS= read -r _\n{checkpoint}\n{done5}\n\
              IFS= read -r _\n{closed}\n",
             init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-a\",\"configOptions\":[]}"),
+            new = answers(
+                2,
+                "{\"modes\":{\"currentModeId\":\"default\",\"availableModes\":[{\"id\":\"default\",\"name\":\"Ask first\"}]},\"sessionId\":\"warm-a\",\"configOptions\":[]}"
+            ),
             work = says("warm-a", "researched"),
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
             handover = says("warm-a", HANDOVER),
@@ -4192,7 +4203,10 @@ mod tests {
              case \"$prompt\" in\n  *'Asking the stage before you'*) printf 'a stop has no session to ask: %s\\n' \"$prompt\" >&2; exit 54 ;;\n  *) ;;\nesac\n\
              {work}\n{done3}\nIFS= read -r _\n{checkpoint}\n{done4}\nIFS= read -r _\n{closed}\n",
             init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-b\",\"configOptions\":[]}"),
+            new = answers(
+                2,
+                "{\"modes\":{\"currentModeId\":\"default\",\"availableModes\":[{\"id\":\"default\",\"name\":\"Ask first\"}]},\"sessionId\":\"warm-b\",\"configOptions\":[]}"
+            ),
             work = says("warm-b", "wrote it"),
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
             checkpoint = says("warm-b", CHECKPOINT_ANSWER),
@@ -4286,7 +4300,10 @@ mod tests {
              {second}\n{done6}\nIFS= read -r _\n{handover2}\n{done7}\nIFS= read -r _\n{checkpoint2}\n{done8}\n\
              IFS= read -r _\n{closed}\n",
             init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-a\",\"configOptions\":[]}"),
+            new = answers(
+                2,
+                "{\"modes\":{\"currentModeId\":\"default\",\"availableModes\":[{\"id\":\"default\",\"name\":\"Ask first\"}]},\"sessionId\":\"warm-a\",\"configOptions\":[]}"
+            ),
             work = says("warm-a", "first pass"),
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
             handover = says("warm-a", "HANDOVER ONE"),
@@ -4306,7 +4323,10 @@ mod tests {
              case \"$prompt\" in\n  *'HANDOVER TWO'*) ;;\n  *) printf 'the second pass never reached the writer: %s\\n' \"$prompt\" >&2; exit 62 ;;\nesac\n\
              {work}\n{done3}\nIFS= read -r _\n{checkpoint}\n{done4}\nIFS= read -r _\n{closed}\n",
             init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-b\",\"configOptions\":[]}"),
+            new = answers(
+                2,
+                "{\"modes\":{\"currentModeId\":\"default\",\"availableModes\":[{\"id\":\"default\",\"name\":\"Ask first\"}]},\"sessionId\":\"warm-b\",\"configOptions\":[]}"
+            ),
             work = says("warm-b", "wrote the second pass"),
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
             checkpoint = says("warm-b", CHECKPOINT_ANSWER),
@@ -4415,7 +4435,10 @@ mod tests {
              esac\n",
             init = initialize(true),
             marker = marker.display(),
-            new = answers(2, "{\"sessionId\":\"warm-1\",\"configOptions\":[]}"),
+            new = answers(
+                2,
+                "{\"modes\":{\"currentModeId\":\"default\",\"availableModes\":[{\"id\":\"default\",\"name\":\"Ask first\"}]},\"sessionId\":\"warm-1\",\"configOptions\":[]}"
+            ),
             work = says("warm-1", "first pass"),
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
             handover = says("warm-1", "HANDOVER ONE"),
@@ -4425,7 +4448,10 @@ mod tests {
             closed = answers(6, "{}"),
             replay1 = says("warm-1", "replayed: first pass"),
             replay2 = says("warm-1", "replayed: HANDOVER ONE"),
-            loaded = answers(2, "{}"),
+            loaded = answers(
+                2,
+                "{\"modes\":{\"currentModeId\":\"default\",\"availableModes\":[{\"id\":\"default\",\"name\":\"Ask first\"}]}}"
+            ),
             resumed = says("warm-1", "second pass, from what I already had"),
             done4b = answers(3, "{\"stopReason\":\"end_turn\"}"),
             handover_b = says("warm-1", "HANDOVER TWO"),
@@ -4439,7 +4465,10 @@ mod tests {
              case \"$prompt\" in\n  *'HANDOVER TWO'*) ;;\n  *) printf 'the reloaded pass never reached the writer: %s\\n' \"$prompt\" >&2; exit 74 ;;\nesac\n\
              {work}\n{done3}\nIFS= read -r _\n{checkpoint}\n{done4}\nIFS= read -r _\n{closed}\n",
             init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-b\",\"configOptions\":[]}"),
+            new = answers(
+                2,
+                "{\"modes\":{\"currentModeId\":\"default\",\"availableModes\":[{\"id\":\"default\",\"name\":\"Ask first\"}]},\"sessionId\":\"warm-b\",\"configOptions\":[]}"
+            ),
             work = says("warm-b", "wrote it"),
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
             checkpoint = says("warm-b", CHECKPOINT_ANSWER),
@@ -4538,7 +4567,10 @@ mod tests {
              IFS= read -r _\n{handover}\n{done4}\nIFS= read -r _\n{checkpoint}\n{done5}\n\
              IFS= read -r closing\ncase \"$closing\" in *session/close*) ;; *) exit 92 ;; esac\n{closed}\n",
             init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-a\",\"configOptions\":[]}"),
+            new = answers(
+                2,
+                "{\"modes\":{\"currentModeId\":\"default\",\"availableModes\":[{\"id\":\"default\",\"name\":\"Ask first\"}]},\"sessionId\":\"warm-a\",\"configOptions\":[]}"
+            ),
             work = says("warm-a", "researched"),
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
             handover = says("warm-a", "HANDOVER ONE"),
@@ -4551,7 +4583,10 @@ mod tests {
             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
              IFS= read -r _\n{checkpoint}\n{done4}\nIFS= read -r _\n{closed}\n",
             init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-b\",\"configOptions\":[]}"),
+            new = answers(
+                2,
+                "{\"modes\":{\"currentModeId\":\"default\",\"availableModes\":[{\"id\":\"default\",\"name\":\"Ask first\"}]},\"sessionId\":\"warm-b\",\"configOptions\":[]}"
+            ),
             work = says("warm-b", "wrote it"),
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
             checkpoint = says("warm-b", CHECKPOINT_ANSWER),
@@ -4655,7 +4690,10 @@ mod tests {
                     r#"{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}}}"#
                 )
             ),
-            new = answers(2, "{\"sessionId\":\"asker\",\"configOptions\":[]}"),
+            new = answers(
+                2,
+                "{\"modes\":{\"currentModeId\":\"default\",\"availableModes\":[{\"id\":\"default\",\"name\":\"Ask first\"}]},\"sessionId\":\"asker\",\"configOptions\":[]}"
+            ),
             work = says("asker", "asked and stopped"),
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
             checkpoint = says("asker", CHECKPOINT_ANSWER),
@@ -4688,7 +4726,10 @@ mod tests {
                             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
                              IFS= read -r _\n{checkpoint}\n{done4}\nIFS= read -r _\n{closed}\n",
                             init = initialize(false),
-                            new = answers(2, "{\"sessionId\":\"after\",\"configOptions\":[]}"),
+                            new = answers(
+                                2,
+                                "{\"modes\":{\"currentModeId\":\"default\",\"availableModes\":[{\"id\":\"default\",\"name\":\"Ask first\"}]},\"sessionId\":\"after\",\"configOptions\":[]}"
+                            ),
                             work = says("after", "done"),
                             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
                             checkpoint = says("after", CHECKPOINT_ANSWER),

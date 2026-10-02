@@ -24,6 +24,9 @@ enum Commands {
     Serve {
         #[arg(long, default_value = "127.0.0.1:3000")]
         listen: SocketAddr,
+        /// Required for non-loopback listeners. Browser login uses user `loomwatch` and this token.
+        #[arg(long, env = "LOOMWATCH_SERVER_TOKEN", hide_env_values = true)]
+        server_token: Option<String>,
         /// Enable local archive watching using this PostgreSQL database.
         #[arg(long, env = "DATABASE_URL")]
         database_url: Option<String>,
@@ -111,17 +114,24 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         Commands::Serve {
             listen,
+            server_token,
             teams_root,
             database_url,
             mut allowed_hosts,
             allow_container_listener,
         } => {
-            if !listen.ip().is_loopback() {
-                eprintln!(
-                    "warning: serving on non-loopback address {}; use --allow-host for each trusted hostname",
-                    listen.ip()
-                );
-            }
+            let access = if listen.ip().is_loopback() {
+                server_token
+                    .as_deref()
+                    .map(loomwatch_backend::server_security::Access::new)
+                    .transpose()?
+            } else {
+                Some(loomwatch_backend::server_security::Access::new(
+                    server_token.as_deref().context(
+                        "non-loopback serving requires LOOMWATCH_SERVER_TOKEN or --server-token",
+                    )?,
+                )?)
+            };
             allowed_hosts.extend([
                 "localhost".to_owned(),
                 "127.0.0.1".to_owned(),
@@ -197,6 +207,12 @@ async fn main() -> Result<()> {
                 .merge(routines);
             if listen.ip().is_loopback() || allow_container_listener {
                 app = app.merge(loomwatch_backend::notion::router()?);
+            }
+            if let Some(access) = access {
+                app = app.layer(axum::middleware::from_fn_with_state(
+                    access,
+                    loomwatch_backend::server_security::authenticate,
+                ));
             }
             axum::serve(listener, app).await?;
         }

@@ -26,7 +26,7 @@ describe('fetchHarnessModels', () => {
       currentModelId: 'openai/fast',
       currentThinkingEffort: 'high',
     })
-    expect(fetch).toHaveBeenCalledWith('/api/harnesses/codex/models')
+    expect(fetch).toHaveBeenCalledWith('/api/harnesses/codex/models', { headers: { 'X-LoomWatch-Request': 'model-discovery' } })
   })
 
   it('surfaces the harness error returned by the daemon', async () => {
