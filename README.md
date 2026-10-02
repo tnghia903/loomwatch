@@ -117,7 +117,7 @@ the evidence to check before you use it.
 | You copy one app's answer into the next app's prompt. | Agents hand work to each other, and every handover is on the timeline. |
 | You find out what an agent did by scrolling back through its terminal. | Every message, tool call and file it touched is recorded, and you can replay it. |
 | A weak first step quietly shapes everything after it. | A review step stops the team until you approve, or send the work back. |
-| Each app has its own skills, tools and folders. | Skills, MCP tools and project folders are delivered to whichever agent needs them. |
+| Each app has its own skills, tools and folders. | Skills, MCP tools and the folders and files you choose are delivered to the agents that need them. |
 | Doing the job again means retyping the prompt. | Saved teams, follow-ups, **Redo from** any step, and daily schedules. |
 
 ## How a run works
@@ -180,8 +180,8 @@ runs use the sign-in and plan you already have.
 
 ### 🗺️ Build on a canvas
 
-Drag agents in from the library, connect them in order, and read your team back as one plain
-sentence. **Organize** tidies the layout in one click.
+Hire agents by job, or from your own saved jobs, connect them in order, and read your team back as
+one plain sentence before anything runs.
 
 </td>
 <td width="33%" valign="top">
@@ -214,8 +214,8 @@ stream read it. Nothing is guessed from a title.
 
 ### 🧰 Your skills, tools and files
 
-Wire in the skills, MCP tools and project folders already on your computer. LoomWatch delivers each
-one to the agents you choose.
+Wire in the skills and MCP tools already on your computer, and give an agent any folder or file,
+PDFs included. LoomWatch delivers each one to the agents you choose.
 
 </td>
 </tr>
@@ -247,10 +247,10 @@ Run a team every morning and send the answer to Notion. A review stop still wait
 <tr>
 <td valign="top">
 
-### 💼 Saved jobs
+### 💬 Ask LoomWatch
 
-Save an agent that works as a job, with its instructions, app, model and skills, and add it to any
-team.
+Describe the team you want in a sentence. One of your own AI apps sets it up on the canvas, and
+nothing is saved until you click **Apply**.
 
 </td>
 <td valign="top">
@@ -275,7 +275,8 @@ model providers, as they always do.
 ## Teams you can build
 
 Every team below is made from the jobs in Build's library, each on the AI app it suits. Start from
-**New team**, then add, connect and rename agents to match.
+**New team**, then add, connect and rename agents to match. To run a team on a schedule, ask
+[Ask LoomWatch](#ask-loomwatch-to-set-up-a-team) to add one, or see [Routines](docs/WATCH.md#routines).
 
 | Team | The steps | Good for |
 | --- | --- | --- |
@@ -399,11 +400,13 @@ From inside the `loomwatch` folder:
 The first start takes a few minutes. It sets everything up for you:
 
 1. Creates your settings file (`.env`) with a random database password.
-2. Creates your teams folder, `~/LoomWatch/teams`, with an offline demo team in it.
-3. Opens Docker Desktop if it is not running, then starts the database. The database keeps your
-   run history, notes and checkpoints in a Docker volume, so they survive restarts.
+2. Creates your teams folder, `~/LoomWatch/teams`, with an offline demo team in it, if the folder
+   does not exist yet.
+3. Opens Docker Desktop if it is not running.
 4. Builds LoomWatch. This happens only the first time and after an update.
-5. Starts LoomWatch and opens **<http://127.0.0.1:3000>** in your browser.
+5. Starts the database, then LoomWatch, and opens **<http://127.0.0.1:3000>** in your browser. The
+   database keeps your run history, notes and checkpoints in a Docker volume, so they survive
+   restarts.
 
 Keep this terminal window open while you use LoomWatch. To stop LoomWatch, press <kbd>Ctrl</kbd>+<kbd>C</kbd> in it.
 
@@ -425,7 +428,7 @@ Your teams and history are kept in every case. `./loomwatch update` downloads th
 rebuilds it and starts it. If you installed LoomWatch with the older step-by-step instructions,
 `./loomwatch` keeps using your existing settings, teams folder and database.
 
-To stop one run, click **Stop** in the composer. Closing the browser tab does not stop LoomWatch or
+To stop one run, click **Stop** beside the request box. Closing the browser tab does not stop LoomWatch or
 its runs. Scheduled teams run only while LoomWatch and its database are running and the computer is
 awake. For scheduled runs and optional Notion delivery, see [Routines](docs/WATCH.md#routines) and
 [Notion setup](docs/NOTION.md).
@@ -465,8 +468,9 @@ settings meant for the Docker Compose mode below out of a local run.
 ## Try your first run
 
 The first time you open LoomWatch, a short guide offers to walk you through creating a team and
-running it with one of your own AI apps. Reopen it any time from the menu in a team, or press
-<kbd>⌘</kbd><kbd>K</kbd> and choose **Getting started guide**.
+running it with one of your own AI apps. Reopen it any time with **New here? Take the 3-minute
+guide** on Home, from the menu in a team, or by pressing <kbd>⌘</kbd><kbd>K</kbd> and choosing
+**Getting started guide**.
 
 To try a team without calling a model provider, pick **Review stop demo** under **Your teams**. The
 demo is a three-step workflow: **Researcher → You → Writer**. Its agents produce fixed responses so
@@ -477,12 +481,12 @@ you can learn the interface without calling a model provider.
 2. When the team pauses for you, open **What Researcher handed over** to read it.
 3. To ask for changes, type `Use the short guide and remove the detailed walkthrough.` and click
    **Send back to Researcher**. The researcher revises its work and asks again.
-4. Click **Approve** to let the team continue. You can also type a note first; it is passed on as
-   your direction.
+4. Click **Approve** to let the team continue. To pass on a note, type it first; the button then
+   says **Continue**, and your note goes on as your direction.
 5. Read the **Team response**. The demo writer echoes the direction it received, and the run
    finishes as **Finished**.
 
-Use the history button beside the request box to reopen a run. The replay slider lets you
+To reopen an earlier run, click **Run history** above the request, or press <kbd>⌘</kbd><kbd>P</kbd>. The replay slider lets you
 inspect earlier events without running the agents again. To request another pass, type
 new instructions and choose **Follow up**; **Redo from** can start again at a selected step.
 
@@ -501,10 +505,12 @@ new instructions and choose **Follow up**; **Redo from** can start again at a se
    Ready-made teams are saved straight away with your AI app's own default model, so you can
    run them immediately.
 4. Click **Run team**, describe what you want in plain words, and press <kbd>Enter</kbd>.
-5. To customise, open **Build**: click **+** next to an AI app to add an agent, select a card to
-   edit its instructions, app and model, and drag from the dot on a card's right edge to the next
-   card to make them work in order. Add **You (review step)** wherever you want to approve work
-   before the team continues.
+5. To customise, open **Build**. Add an agent by job under **Hire by job**, such as Researcher or
+   Writer: click it or drag it onto the canvas, and it is set up on the best AI app you have. For a
+   blank agent on one app, pick that app under **AI apps**. Select a card to edit its name,
+   instructions and app, or click **Model and more settings** to change its model. Drag from the
+   dot on a card's right edge to the next card to make them work in order, and add **You (review
+   step)** wherever you want to approve work before the team continues.
 
 LoomWatch connects to agent apps through ACP, a protocol for exchanging tasks and results.
 The Library recognizes these integrations:
@@ -517,6 +523,9 @@ The Library recognizes these integrations:
 | OpenCode | `opencode acp` |
 | Hermes | `hermes-acp` |
 | OpenClaw | `openclaw acp` |
+
+LoomWatch also recognizes pi, but cannot run it: pi has no ACP connection. Use its models through
+OpenCode instead.
 
 Bridge fallbacks may download a package on first use. Availability in the Library means
 the required commands were found; it does not confirm that your account is signed in or
@@ -531,10 +540,11 @@ has model access. Delegation and session-resume support vary by integration.
 <details>
 <summary><strong>Keep the pipeline easy to follow</strong></summary>
 
-Click **Organize** in the canvas controls (or press <kbd>⌥</kbd><kbd>⌘</kbd><kbd>L</kbd>) to arrange stages from left to
-right and group skills and sources below their agents. The view fits the arranged pipeline
-above the composer. **Undo organize** restores the previous arrangement. Positions are saved
-with the canvas layout; organizing does not change the workflow or start a run.
+Choose **Organize** from the ☰ menu at the top right (or press <kbd>⌥</kbd><kbd>⌘</kbd><kbd>L</kbd>,
+or choose **Organize pipeline** in <kbd>⌘</kbd><kbd>K</kbd>) to arrange stages from left to right
+and group skills and sources below their agents. The view then fits the arranged team. **Undo
+organize**, in the same menu, restores the previous arrangement. Positions are saved with the canvas
+layout; organizing does not change the workflow or start a run.
 
 </details>
 
@@ -549,7 +559,9 @@ the team, and the next run delivers it:
 
 - A **skill** is copied into the agent's working folder and its instructions are given to the agent.
 - A **folder or file** is given to the agent as reference material: a folder's listing and README,
-  or a file's text (a PDF's too, when `pdftotext` is installed). The agent can also read it.
+  or a file's text. A PDF's text is read when `pdftotext` is installed (`brew install poppler`).
+  The agent can also read the folder or file itself. An added file can be up to 25 MB; link a
+  folder for anything bigger.
 - A **tool** is your own MCP server, handed to that agent's app with the settings you already gave it
   in Claude Code, Codex or OpenCode.
 
@@ -562,14 +574,49 @@ delivered to agents yet" at the top of Build, click **Deliver on the next run**,
 <details>
 <summary><strong>Give the team context and review its work</strong></summary>
 
-Open **Memory** to add shared instructions or reference files to the **Brief**. Use the
-**Notebook** to review reusable notes and checkpoints. An agent's **What it was given**
-control shows the context supplied at the start of its session.
+Choose **Team memory** from the ☰ menu to add shared instructions or reference files to the
+**Brief**. Use the **Notebook** to review reusable notes and checkpoints.
 
-For a review checkpoint in a pipeline, add a **You** node between two agents and describe
-what you want to review in its role. **Continue** passes your answer to the next stage;
-**Send back** requests a revision while the previous session is available. An agent can
-also ask you a question during its work. Answer it in the composer when prompted.
+Select an agent in Build to see its **Context**: its place in the team (for example "Step 2 of 3 ·
+after Researcher · hands its work to Writer"), the team Brief, and every skill, folder, file and
+tool connected to it, each with an × to disconnect it. In a team of two or more, each agent is told
+its place at the start of every run. In the Run view, an agent's **What this agent received** link
+(**What it was given** on its card in Full trace) shows what it was supplied when its session
+started.
+
+For a review checkpoint in a pipeline, add a **You** step between two agents and say what to look
+at in its **What to check** box. **Approve** passes the work on (it says **Continue** once you
+type a note, and your note goes with it). **Send back to** the agent asks for a revision while its
+session is still open. An agent can also ask you a question mid-run: type your answer in the
+request box and click **Reply**.
+
+</details>
+
+## Ask LoomWatch to set up a team
+
+Click **Ask** at the top of any screen (or press <kbd>⌘</kbd><kbd>J</kbd>), or type in **Or describe
+the job** on Home. Say what you want in plain words, such as _"Every weekday at 8, brief me on AI
+news"_. One of your own AI apps sets the team up on the canvas. New and changed agents are marked,
+and nothing is saved until you click **Apply**; **Discard** drops the proposal, and **Undo** takes
+an applied one back.
+
+- **It asks before it runs.** When it wants to start a run, it waits for you to click **Start run**,
+  unless you turn off **Ask me before starting a run**.
+- **It never answers a review step.** It can put a drafted note in the review box; only you click
+  **Approve** or **Send back**.
+- **You choose the app.** The panel says which app it is using ("Using Claude on this computer").
+  Click the app's name to pick another, and a model under it. Ask can use Claude Code, Codex,
+  Gemini CLI, OpenCode or Hermes. Each conversation uses that app's own plan, like a run.
+
+<details>
+<summary><strong>Use LoomWatch from your other AI apps</strong></summary>
+
+Choose **Connections…** from the ☰ menu (or from <kbd>⌘</kbd><kbd>K</kbd>). Under **Use LoomWatch
+from your AI apps**, **Connect** registers LoomWatch with Claude Code, Codex, Gemini CLI or VS Code
+using that app's own command, which you can read under **What LoomWatch runs** first. OpenCode and
+Claude Desktop get a snippet to paste instead; it holds a private key, so don't share it. What a
+connected app proposes or starts appears in the Ask panel under **From your connected apps**.
+**Disconnect** stops it at once.
 
 </details>
 
@@ -726,7 +773,10 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Brief files | Paths configured by the team, usually beside its YAML file |
 | Deleted teams | `.trash` inside your teams folder, one folder per deleted team |
 | Your saved jobs | `.jobs` inside your teams folder, one `<job>.yaml` per job; removed jobs move to `.jobs/.removed` |
-| Run history, recorded events, and Notebook entries | The local PostgreSQL Docker volume |
+| Files you add to an agent (**Add file…**) | `<team>.files/` beside the team file |
+| Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
+| AI apps you connected to LoomWatch | `.loomwatch/connections.json` in your teams folder. It holds each app's private key. |
+| Run history, recorded events, Notebook entries and Ask conversations | The local PostgreSQL Docker volume |
 | Database settings | `.env` in the source repository |
 | Provider sign-in | Managed by each host agent app; Compose-only deployments use `loomwatch-home` |
 
@@ -781,8 +831,9 @@ teams folder's `.jobs`.
 | Another program is using port 3000 | Start LoomWatch on another port with `LOOMWATCH_PORT=3001 ./loomwatch`. |
 | Team file not found | Confirm the file is in your teams folder (`~/LoomWatch/teams` unless you set `LOOMWATCH_TEAMS_ROOT`). The demo link uses `?path=operator-stop.yaml`, relative to that folder. |
 | Agent is missing or unavailable | Run `command -v <agent-command>` in the LoomWatch terminal. Authenticate the app, then restart LoomWatch from that same terminal. Compose-only deployments scan the container unless the native companion is running. |
-| Skill or tool is missing locally | Confirm it exists below the current user's `.codex`, `.claude`, `.agents`, or `.config/opencode` tree, then choose **Scan again**. Check that LoomWatch was not started with `LOOMWATCH_CAPABILITY_HOME` pointing elsewhere. |
-| Skill is missing in Compose | Copy its definition below `LOOMWATCH_CAPABILITIES_DIR` using the conventional harness path, then choose **Scan again**. Symlinks whose targets are outside that mounted root cannot be followed. |
+| Skill or tool is missing locally | Confirm it exists below your `.claude`, `.codex`, `.agents`, `.gemini`, `.hermes`, `.openclaw` or `.config/opencode` folder, then click ↻ beside **Search** in Build to scan again. Check that LoomWatch was not started with `LOOMWATCH_CAPABILITY_HOME` pointing elsewhere. |
+| Skill is missing in Compose | Copy its definition below `LOOMWATCH_CAPABILITIES_DIR` using the conventional harness path, then click ↻ beside **Search** in Build to scan again. Symlinks whose targets are outside that mounted root cannot be followed. |
+| Ask says it needs an AI app | Install and sign in to Claude Code, Codex, Gemini CLI or OpenCode, then start LoomWatch again from that terminal. |
 | Harness working directory is missing | Native teams should use a real host path accessible to the agent app. Container-run teams must use `/workspaces/...` and mount its host parent through `LOOMWATCH_WORKSPACES_DIR`. |
 | Agent cannot perform a tool action | Review the recorded permission request and that agent app's project permissions. LoomWatch declines interactive ACP permission requests; configure the specific permissions the task needs in the agent app. |
 | Build reports an unsupported Node version | Install the current Node.js from <https://nodejs.org/>, reopen Terminal, and check `node --version`. |
@@ -798,6 +849,7 @@ teams folder's `.jobs`.
 | `loomwatchd` | One Rust program that starts each agent's app, supervises it, and serves the browser app |
 | [ACP](https://agentclientprotocol.com) | How LoomWatch talks to every agent app, over its standard input and output |
 | Team Bus | A tool server the agents call back into to hand work over, ask each other questions, or report |
+| LoomWatch Control | The tool server Ask LoomWatch and your connected apps use to read, propose and start teams. It answers only on this computer, with a key per app |
 | Event archive | PostgreSQL, holding every message, tool call and handover, so runs can be replayed |
 | Browser app | React, streamed live over a WebSocket and packed into the program |
 
