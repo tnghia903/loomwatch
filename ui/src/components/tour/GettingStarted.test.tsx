@@ -113,11 +113,41 @@ describe('GettingStarted', () => {
     showPage(HOME)
     goToStep('watch')
     renderGuide()
-    expect(screen.getByRole('heading', { name: 'Pick up where you left off' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Open a team to carry on' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Start again' }))
     tick()
     expect(screen.getByRole('heading', { name: 'Create your first team' })).toBeInTheDocument()
+  })
+
+  it('skips New team without landing on the dialog it would have opened', () => {
+    showPage(HOME)
+    goToStep('new-team')
+    renderGuide()
+    fireEvent.click(screen.getByRole('button', { name: 'Skip this step' }))
+    tick(2000)
+    expect(readTourState()?.step).toBe('team')
+    expect(screen.getByRole('heading', { name: 'Open a team to carry on' })).toBeInTheDocument()
+  })
+
+  it('skips Run team in Build past the Run-view steps it cannot show', () => {
+    showPage(workspace('<div data-tour="run-team"></div><div data-tour="needs-you"></div>'))
+    goToStep('run-team')
+    renderGuide()
+    fireEvent.click(screen.getByRole('button', { name: 'Skip this step' }))
+    tick(2000)
+    expect(readTourState()?.step).toBe('needs-you')
+    expect(screen.getByRole('heading', { name: 'When a team needs you' })).toBeInTheDocument()
+  })
+
+  it('skips one step only when the next one is on screen', () => {
+    window.history.replaceState({}, '', '/?path=a.yaml')
+    showPage(workspace('<div data-tour="composer"></div><div data-tour="stages"></div>'))
+    goToStep('ask')
+    renderGuide()
+    fireEvent.click(screen.getByRole('button', { name: 'Skip this step' }))
+    tick(2000)
+    expect(screen.getByRole('heading', { name: 'Watch it work' })).toBeInTheDocument()
   })
 
   it('counts only a run started during the ask step, not one already on screen', () => {
