@@ -1100,3 +1100,58 @@
 
 /* The plain-text stand-in shown for the moment before the Markdown renderer chunk arrives. */
 .markdown-fallback { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ADR 0038 — where an answer goes besides this window.
+   Build: the Team response panel's "Send every answer to Notion" section and the Output node's
+   one-line reminder. Run: the answer's own Sent / Send line under "Written by". */
+.output-send {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-hairline);
+}
+.output-send-eyebrow {
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+.output-send .check .txt span { font-size: 12px; }
+/* Inside the panel, `.inspector-fields p` would make this a gold flex row and split the link off. */
+.output-send .output-send-status {
+  display: block;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-2);
+}
+.output-send .output-send-status.warn { color: var(--color-alert); }
+.output-send-status strong { color: var(--color-ink); font-weight: 500; }
+.output-send-link { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.inspector-fields .output-send-title { color: var(--color-ink-2); }
+.output-send-hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-ink-3);
+  overflow-wrap: anywhere;
+}
+.output-send-hint q { color: var(--color-ink-2); }
+.output-send-hint code { font-size: 10.5px; }
+
+.build-node small.build-output-sends { color: var(--color-ok); margin-top: 2px; }
+
+.notion-send {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.notion-send-status { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.notion-send-note { color: var(--color-ink-2); }
+.notion-send-note.ok { color: var(--color-ok); }
+.notion-send-note.alert { color: var(--color-alert); }
+.notion-send .link { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; }
+.notion-send-button { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 12px; }
+.delivery-output header p.notion-send-plan { margin-top: 8px; color: var(--color-ok); }

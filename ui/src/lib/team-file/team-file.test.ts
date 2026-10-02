@@ -57,6 +57,20 @@ describe('TeamFileModel round-trip against examples/*.yaml', () => {
 })
 
 describe('TeamFileModel mutations touch only the affected lines', () => {
+  it('adds and removes the team-wide deliver block without touching any other line (ADR 0038)', () => {
+    const source = readExample('research-team.yaml')
+    const model = TeamFileModel.parse(source)
+    model.setDeliver({ notion: { title: 'Research — {{date}}' } })
+    const added = model.toYaml()
+    expect(model.snapshot().deliver).toEqual({ notion: { title: 'Research — {{date}}' } })
+    expect(added).toMatch(/^deliver:\n {2}notion:\n {4}title: Research — \{\{date\}\}$/m)
+    expect(isOrderedSubsequence(source.split('\n'), added.split('\n'))).toBe(true)
+
+    model.setDeliver(null)
+    expect(model.snapshot().deliver).toBeUndefined()
+    expect(model.toYaml()).toBe(source)
+  })
+
   it('changes exactly one line when editing a scalar agent field', () => {
     const source = readExample('research-team.yaml')
     const model = TeamFileModel.parse(source)

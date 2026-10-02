@@ -9,7 +9,7 @@ import { TeamFileModel, TeamFileParseError } from './document'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
 import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
-import type { AgentAllow, AgentConfig, AllowSwitch, BriefEntryConfig, CapabilityRef, EdgeConfig, ScheduleConfig, SpawnConfig, TeamDocument } from './types'
+import type { AgentAllow, AgentConfig, AllowSwitch, BriefEntryConfig, CapabilityRef, DeliverConfig, EdgeConfig, ScheduleConfig, SpawnConfig, TeamDocument } from './types'
 import {
   loadTeamValidator,
   displayFieldProblems,
@@ -1084,6 +1084,16 @@ export function useTeamDocument() {
     [markDirty, captureHistory],
   )
 
+  /** Where every run's answer goes (ADR 0038): the Team response's "Send to Notion". */
+  const updateTeamDeliver = useCallback(
+    (deliver: DeliverConfig | null) => {
+      captureHistory()
+      modelRef.current?.setDeliver(deliver)
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
   // The Memory panel's half of adding a Brief entry. The Markdown file is written by
   // `PUT /api/memory/file`; the `memory.brief` line goes through the document like every other
   // executable change, so the operator reviews and saves it rather than the daemon writing YAML
@@ -1424,6 +1434,8 @@ export function useTeamDocument() {
     entrypoint,
     entrypointProblem,
     teamSchedule,
+    /** The team-wide `deliver` block as the document holds it (ADR 0038). */
+    teamDeliver: documentSnapshot?.deliver ?? null,
     /**
      * The team's `memory.inherits` entries as the document holds them.
      *
@@ -1493,6 +1505,7 @@ export function useTeamDocument() {
     promoteEntrypoint,
     promoteResponder,
     updateTeamSchedule,
+    updateTeamDeliver,
     addBriefEntry,
     removeBriefEntry,
     addMemoryInherit,

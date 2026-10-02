@@ -12,6 +12,8 @@ interface CanvasGraphHookInput extends Omit<CanvasGraphInput, 'helperPlacements'
   outputPlan: { name: string; format: string } | undefined
   /** Build only: agent id → why its app cannot start on this computer. */
   appProblems?: ReadonlyMap<string, string>
+  /** Build only: where every answer also goes (ADR 0038), named on the Output node. */
+  sendsTo?: string | null
 }
 
 /**
@@ -22,7 +24,7 @@ interface CanvasGraphHookInput extends Omit<CanvasGraphInput, 'helperPlacements'
  * builder's input by `react-hooks/exhaustive-deps` rather than kept in step by hand.
  */
 export function useCanvasGraph(input: CanvasGraphHookInput) {
-  const { runView, doc, session, nodeNames, projection, record, activeRunId, attempt, retryOf, phase, elapsed, lineageLabel, orderedAgentIds, ownerLabels, evidenceByAgent, leadId, live, waiting, configuredPairs, overlayPositions, synthMeasurements, fannedAgentId, inspectedEvidenceId, packetAgentIds, givenNotes, responderAgent, responderId, responderFromDoc, responseText, provenanceOpen, composerText, visibleSchedule, scheduleInvalid, scheduleEditorOpen, onOpenSchedule, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityCards, removeCapabilityEdge, harnesses, outputPlan, appProblems } = input
+  const { runView, doc, session, nodeNames, projection, record, activeRunId, attempt, retryOf, phase, elapsed, lineageLabel, orderedAgentIds, ownerLabels, evidenceByAgent, leadId, live, waiting, configuredPairs, overlayPositions, synthMeasurements, fannedAgentId, inspectedEvidenceId, packetAgentIds, givenNotes, responderAgent, responderId, responderFromDoc, responseText, provenanceOpen, composerText, visibleSchedule, scheduleInvalid, scheduleEditorOpen, onOpenSchedule, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityCards, removeCapabilityEdge, harnesses, outputPlan, appProblems, sendsTo = null } = input
 
   // §15.2.6: helpers a run reveals that the document has no node for. They are placed by the
   // existing seeded auto-layout around the entrypoint, as view state — node positions are not
@@ -88,10 +90,10 @@ export function useCanvasGraph(input: CanvasGraphHookInput) {
     if (runView) return named
     return named
       .filter((node) => node.id !== '__prompt' || allWiringEdges.some((edge) => edge.from === '__prompt'))
-      .map((node) => node.type === 'response' ? { ...node, data: { ...node.data, outputName: outputPlan?.name, outputFormat: outputPlan?.format } }
+      .map((node) => node.type === 'response' ? { ...node, data: { ...node.data, outputName: outputPlan?.name, outputFormat: outputPlan?.format, sendsTo } }
         : node.type === 'agent' && appProblems?.has(node.id) ? { ...node, data: { ...node.data, appProblem: appProblems.get(node.id) } }
           : node)
-  }, [graph.nodes, harnesses, runView, allWiringEdges, outputPlan, appProblems])
+  }, [graph.nodes, harnesses, runView, allWiringEdges, outputPlan, appProblems, sendsTo])
 
   return { graph, canvasNodes }
 }

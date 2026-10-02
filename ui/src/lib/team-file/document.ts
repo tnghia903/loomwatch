@@ -1,6 +1,6 @@
 import { type Document, isMap, isScalar, isSeq, parseDocument, stringify } from 'yaml'
 
-import type { AgentConfig, BriefEntryConfig, EdgeConfig, ScheduleConfig, TeamDocument } from './types'
+import type { AgentConfig, BriefEntryConfig, DeliverConfig, EdgeConfig, ScheduleConfig, TeamDocument } from './types'
 
 /** The document could not be parsed as YAML, or does not shape up as a team file. */
 export class TeamFileParseError extends Error {
@@ -103,6 +103,12 @@ export class TeamFileModel {
 
   setSchedule(schedule: ScheduleConfig): void {
     this.doc.set('schedule', this.doc.createNode(schedule))
+  }
+
+  /** Set the team-wide `deliver` block, or remove it with `null` (ADR 0038). */
+  setDeliver(deliver: DeliverConfig | null): void {
+    if (deliver) this.doc.set('deliver', this.doc.createNode(deliver))
+    else this.doc.delete('deliver')
   }
 
   /**

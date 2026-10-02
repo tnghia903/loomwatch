@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, OnceLock, PoisonError, RwLock};
 use std::time::Duration;
 
 use axum::extract::rejection::JsonRejection;
@@ -30,7 +30,8 @@ use uuid::Uuid;
 
 use crate::api::{ApiError, normalized_relative_path, resolve_existing_team_path};
 use crate::archive::EventArchive;
-use crate::config::TeamConfig;
+use crate::config::{DEFAULT_RUN_NOTION_TITLE, TeamConfig};
+use crate::notion::{PublishError, Publisher};
 use crate::operator::{OperatorAnswer, OperatorDesk, OperatorError};
 use crate::watch_api::{ARCHIVE_DISABLED_MESSAGE, local_evidence};
 use crate::{EventKind, SessionOutcome};
@@ -180,10 +181,17 @@ pub struct RunRecord {
     pub reply: Option<String>,
     #[serde(default)]
     pub trigger: RunTrigger,
-    /// Set after a routine run finishes and its reply has been delivered (or not);
-    /// always `null` for manual runs.
+    /// Set after a run's reply has been delivered (or not): automatically once a run whose team
+    /// delivers succeeds (ADR 0010, ADR 0038), or when the operator sends it by hand.
     #[serde(default)]
     pub delivery: Option<Delivery>,
+    /// The Notion page title this run's reply is published under once it succeeds, fixed at
+    /// launch from the team's `deliver` (or a routine's `schedule.deliver`); absent when the run
+    /// delivers nowhere. It is what lets a client say "sending to Notion" between the run's end
+    /// and its `delivery`. Not stored: a record read back after a restart has its `delivery`
+    /// already or never will.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deliver_title: Option<String>,
     /// The run this one continues from. Its stages before [`Self::start_at`] are replayed from
     /// `context_packets` rather than re-run.
     ///
@@ -245,6 +253,7 @@ impl RunRecord {
             reply: None,
             trigger,
             delivery: None,
+            deliver_title: None,
             follows_run_id: None,
             start_at: None,
             retry_of_run_id: None,
@@ -510,6 +519,7 @@ fn decode_run(row: &sqlx::postgres::PgRow) -> Result<StoredRun, sqlx::Error> {
                 RunTrigger::Manual
             },
             delivery: delivery.and_then(|value| serde_json::from_value(value).ok()),
+            deliver_title: None,
             follows_run_id: row.try_get("follows_run_id")?,
             start_at: row.try_get("start_at")?,
             retry_of_run_id: row.try_get("retry_of_run_id")?,
@@ -532,6 +542,10 @@ fn decode_run(row: &sqlx::postgres::PgRow) -> Result<StoredRun, sqlx::Error> {
 pub struct RunRegistry {
     inner: Arc<RwLock<RegistryInner>>,
     store: Option<RunStore>,
+    /// Where a finished run's reply is published (ADR 0038). Installed once at startup by the
+    /// scheduler, shared by every clone; absent in tests and the CLI, where a delivery reports
+    /// that publishing is unavailable rather than reaching the keychain.
+    publisher: Arc<OnceLock<Arc<Publisher>>>,
 }
 
 /// Opaque: the records are the API's to report, and the REST router's state only needs to be
@@ -553,7 +567,18 @@ impl RunRegistry {
         Self {
             inner: Arc::default(),
             store: Some(store),
+            publisher: Arc::default(),
         }
+    }
+
+    /// Install the publisher every run's delivery goes through. The first call wins; the
+    /// daemon makes exactly one.
+    pub(crate) fn set_publisher(&self, publisher: Arc<Publisher>) {
+        let _first = self.publisher.set(publisher);
+    }
+
+    fn publisher(&self) -> Option<Arc<Publisher>> {
+        self.publisher.get().cloned()
     }
 
     /// Write one cached record through to Postgres. A no-op without a store.
@@ -1061,6 +1086,7 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
         .route("/api/runs/{id}/answers", post(answer_run))
         .route("/api/runs/{id}/agents/{agent}/ask", post(ask_agent))
         .route("/api/runs/{id}/cancel", post(cancel_run))
+        .route("/api/runs/{id}/deliver", post(deliver_run))
         .route_layer(middleware::from_fn(local_evidence))
         .with_state(RunsState {
             archive,
@@ -1680,8 +1706,15 @@ fn prepare_run(
         )
         .into());
     };
-    let record = RunRecord::queued(relative, prompt.to_owned(), &team, trigger)
+    let mut record = RunRecord::queued(relative, prompt.to_owned(), &team, trigger)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("{error:#}")))?;
+    // Fixed now, from the bytes this run executes: editing the team mid-run changes the next
+    // run's delivery, not this one's.
+    record.deliver_title = team.notion_delivery_title(
+        trigger == RunTrigger::Schedule,
+        &team_display_name(&team, &resolved),
+        Utc::now(),
+    );
     let order = if team.edges.is_empty() {
         Vec::new()
     } else {
@@ -1717,6 +1750,13 @@ fn prepare_run(
 }
 
 fn spawn_prepared(registry: &RunRegistry, prepared: PreparedRun, run_id: &str) {
+    if let Some(title) = prepared.record.deliver_title.clone() {
+        tokio::spawn(deliver_when_finished(
+            registry.clone(),
+            run_id.to_owned(),
+            title,
+        ));
+    }
     let mut lineage = prepared.lineage;
     // Every run started through the API can reach a person; a `loomwatchd run` from the CLI
     // cannot, and a team file with a review stop is refused there rather than hanging.
@@ -1735,6 +1775,216 @@ fn spawn_prepared(registry: &RunRegistry, prepared: PreparedRun, run_id: &str) {
 
 fn team_revision(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+// ---------------------------------------------------------------------------------------
+// Delivery (ADR 0010, ADR 0038)
+// ---------------------------------------------------------------------------------------
+
+/// How often a delivery task looks for its run to finish.
+const DELIVERY_POLL: Duration = Duration::from_millis(1000);
+/// Delivery message when the duplicate-title guard skipped publishing.
+pub(crate) const DUPLICATE_MESSAGE: &str = "A page with this title already exists.";
+/// Delivery message when this daemon has no publisher (tests, a build without one).
+const NO_PUBLISHER_MESSAGE: &str = "This LoomWatch cannot publish to Notion.";
+/// Notion refuses a title longer than one rich-text item.
+const MAX_TITLE_CHARS: usize = 2000;
+
+/// The team's name for `{{team}}`, or its file stem when the file names none.
+fn team_display_name(team: &TeamConfig, path: &Path) -> String {
+    if team.name.trim().is_empty() {
+        path.file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("team")
+            .to_owned()
+    } else {
+        team.name.clone()
+    }
+}
+
+/// Wait for a run to finish and, when it succeeded with a reply, publish that reply under
+/// `title` and record the outcome on the run. Every trigger goes through here, so a routine and
+/// a run started by hand deliver the same way.
+async fn deliver_when_finished(registry: RunRegistry, run_id: String, title: String) {
+    let record = loop {
+        match registry.get(&run_id) {
+            Some(record) if record.status.is_terminal() => break record,
+            Some(_) => tokio::time::sleep(DELIVERY_POLL).await,
+            None => return,
+        }
+    };
+    let Some(reply) = record
+        .reply
+        .as_deref()
+        .filter(|reply| !reply.trim().is_empty())
+    else {
+        return;
+    };
+    if record.status != RunStatus::Succeeded {
+        return;
+    }
+    let delivery = publish_reply(registry.publisher().as_deref(), &title, reply).await;
+    record_delivery(&registry, &run_id, delivery).await;
+}
+
+/// Store a delivery on its run, persist it, and say what happened in the daemon log.
+async fn record_delivery(registry: &RunRegistry, run_id: &str, delivery: Delivery) {
+    let _known = registry.set_delivery(run_id, delivery.clone());
+    persist_or_log(registry, run_id).await;
+    println!(
+        "delivery: run {run_id} {}: {}{}",
+        serde_json::to_value(delivery.status)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default(),
+        delivery.message,
+        delivery
+            .url
+            .as_deref()
+            .map_or_else(String::new, |url| format!(" {url}"))
+    );
+}
+
+/// Publish `markdown` as a Notion page titled `title` and describe the outcome.
+pub(crate) async fn publish_reply(
+    publisher: Option<&Publisher>,
+    title: &str,
+    markdown: &str,
+) -> Delivery {
+    let Some(publisher) = publisher else {
+        return Delivery::notion(
+            DeliveryStatus::Failed,
+            None,
+            None,
+            NO_PUBLISHER_MESSAGE.to_owned(),
+        );
+    };
+    match publisher.publish(title, markdown).await {
+        Ok(page) => Delivery::notion(
+            DeliveryStatus::Published,
+            Some(page.url),
+            Some(page.page_id),
+            format!("Published {title:?}."),
+        ),
+        Err(PublishError::Duplicate { page_id, url }) => Delivery::notion(
+            DeliveryStatus::Skipped,
+            Some(url),
+            Some(page_id),
+            DUPLICATE_MESSAGE.to_owned(),
+        ),
+        Err(PublishError::Failed(message)) => {
+            Delivery::notion(DeliveryStatus::Failed, None, None, message)
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DeliverRunRequest {
+    /// The page title, verbatim. Absent: the run's own delivery title, else the team's
+    /// `deliver` template (or [`DEFAULT_RUN_NOTION_TITLE`]) expanded now.
+    #[serde(default)]
+    title: Option<String>,
+}
+
+/// `POST /api/runs/{id}/deliver`: send a finished run's reply to Notion now, whatever the team
+/// file says — the operator's "Send to Notion". Answers the run with its new `delivery`; a
+/// refused or failed publish is still `200`, because the delivery records why.
+async fn deliver_run(
+    State(state): State<RunsState>,
+    RoutePath(run_id): RoutePath<String>,
+    body: Result<Json<DeliverRunRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let request = match body {
+        Ok(Json(request)) => request,
+        // An empty body is "use the default title"; anything else unreadable is a mistake.
+        Err(JsonRejection::MissingJsonContentType(_)) => DeliverRunRequest::default(),
+        Err(rejection) => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                format!("invalid delivery request: {}", rejection.body_text()),
+            ));
+        }
+    };
+    let Some(record) = state.registry.get(&run_id) else {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            format!("run {run_id} does not exist"),
+        ));
+    };
+    if !record.status.is_terminal() {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "The run is still going. Send its answer once it finishes.".to_owned(),
+        ));
+    }
+    if record.status == RunStatus::Succeeded
+        && record.deliver_title.is_some()
+        && record.delivery.is_none()
+    {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "This answer is already on its way to Notion.".to_owned(),
+        ));
+    }
+    let Some(reply) = record
+        .reply
+        .as_deref()
+        .filter(|reply| !reply.trim().is_empty())
+    else {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "This run has no answer to send.".to_owned(),
+        ));
+    };
+    let title = match request.title.as_deref().map(str::trim) {
+        Some("") => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "The page title must not be empty.".to_owned(),
+            ));
+        }
+        Some(title) if title.chars().count() > MAX_TITLE_CHARS => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                format!("The page title must be at most {MAX_TITLE_CHARS} characters."),
+            ));
+        }
+        Some(title) => title.to_owned(),
+        None => record
+            .deliver_title
+            .clone()
+            .unwrap_or_else(|| default_delivery_title(&state.teams_root, &record.team_path)),
+    };
+    let delivery = publish_reply(state.registry.publisher().as_deref(), &title, reply).await;
+    record_delivery(&state.registry, &run_id, delivery).await;
+    let record = state.registry.get(&run_id).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("run {run_id} vanished from the registry"),
+        )
+    })?;
+    Ok((StatusCode::OK, Json(record)).into_response())
+}
+
+/// The title a hand-sent answer gets: the team's `deliver` template when the file still loads,
+/// else [`DEFAULT_RUN_NOTION_TITLE`] named after the file.
+fn default_delivery_title(teams_root: &Path, team_path: &str) -> String {
+    let path = teams_root.join(team_path);
+    let now = Utc::now();
+    if let Ok(team) = TeamConfig::load(&path) {
+        let name = team_display_name(&team, &path);
+        return team
+            .notion_delivery_title(false, &name, now)
+            .unwrap_or_else(|| {
+                crate::config::expand_template(DEFAULT_RUN_NOTION_TITLE, &name, now, None)
+            });
+    }
+    let name = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("team");
+    crate::config::expand_template(DEFAULT_RUN_NOTION_TITLE, name, now, None)
 }
 
 /// Canonical JSON is straightforward for this fixed three-string object: keys are emitted
@@ -2861,6 +3111,113 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
 
     /// Canvas B's validation, all of it, through the endpoint that has to refuse before a harness
     /// spawns. Each of these would otherwise be a run that started and then did the wrong thing.
+    /// ADR 0038: a team with a top-level `deliver` publishes the answer of a run started by hand,
+    /// not only a routine's; a team without one publishes nothing until the operator sends it;
+    /// and the explicit send names its own refusals.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_hand_started_run_delivers_when_the_team_does_and_on_request_otherwise(
+        pool: sqlx::PgPool,
+    ) {
+        let dir = TeamsDir::new();
+        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let plain = dir.write_team("plain.yaml", &harness);
+        let delivering = fs::read_to_string(&plain).unwrap().replace(
+            "entrypoint: solo\n",
+            "entrypoint: solo\ndeliver:\n  notion: {}\n",
+        );
+        fs::write(dir.0.join("delivering.yaml"), delivering).unwrap();
+        let archive = EventArchive::from_pool(pool);
+        let registry = RunRegistry::default();
+        registry.set_publisher(Arc::new(Publisher::disconnected()));
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let start = |team: &'static str| {
+            let app = app.clone();
+            async move {
+                let response = app
+                    .oneshot(post_json(
+                        "/api/runs",
+                        &json!({"teamPath": team, "prompt": "say done"}),
+                    ))
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::ACCEPTED);
+                serde_json::from_value::<RunRecord>(json_body(response).await).unwrap()
+            }
+        };
+
+        let delivered = start("delivering.yaml").await;
+        assert_eq!(delivered.trigger, RunTrigger::Manual);
+        let title = delivered.deliver_title.clone().expect("a delivery title");
+        assert!(
+            title.starts_with("Fake harness team — ") && !title.contains("{{"),
+            "the default per-run title, expanded: {title}"
+        );
+        let done = wait_for(&registry, &delivered.run_id, |r| r.delivery.is_some()).await;
+        assert_eq!(done.status, RunStatus::Succeeded);
+        let delivery = done.delivery.expect("delivered");
+        assert_eq!(delivery.status, DeliveryStatus::Failed);
+        assert_eq!(delivery.message, crate::notion::NOT_CONNECTED_MESSAGE);
+
+        let quiet = start("plain.yaml").await;
+        assert_eq!(quiet.deliver_title, None);
+        let finished = wait_for(&registry, &quiet.run_id, |r| r.status.is_terminal()).await;
+        tokio::time::sleep(DELIVERY_POLL * 2).await;
+        assert_eq!(
+            registry.get(&quiet.run_id).unwrap().delivery,
+            None,
+            "a team that does not deliver publishes nothing by itself"
+        );
+        assert_eq!(finished.status, RunStatus::Succeeded);
+
+        let send = |id: String, body: Value| {
+            let app = app.clone();
+            async move {
+                let response = app
+                    .oneshot(post_json(&format!("/api/runs/{id}/deliver"), &body))
+                    .await
+                    .unwrap();
+                (response.status(), json_body(response).await)
+            }
+        };
+        let (status, body) = send(quiet.run_id.clone(), json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["delivery"]["status"], "failed");
+        assert_eq!(
+            body["delivery"]["message"],
+            crate::notion::NOT_CONNECTED_MESSAGE
+        );
+        assert_eq!(
+            registry.get(&quiet.run_id).unwrap().delivery,
+            serde_json::from_value(body["delivery"].clone()).unwrap(),
+            "the send is recorded on the run"
+        );
+        let (status, body) = send(quiet.run_id.clone(), json!({"title": "  "})).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        let (status, _) = send("no-such-run".to_owned(), json!({})).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, body) = send(quiet.run_id.clone(), json!({"page": "x"})).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "unknown fields: {body}");
+
+        // Counterfactual: without a publisher the send still answers, and says why nothing went.
+        let bare = RunRegistry::default();
+        let bare_app = router(Some(archive), dir.0.clone(), bare.clone());
+        let response = bare_app
+            .clone()
+            .oneshot(post_json(
+                "/api/runs",
+                &json!({"teamPath": "delivering.yaml", "prompt": "say done"}),
+            ))
+            .await
+            .unwrap();
+        let record: RunRecord = serde_json::from_value(json_body(response).await).unwrap();
+        let done = wait_for(&bare, &record.run_id, |r| r.delivery.is_some()).await;
+        assert_eq!(
+            done.delivery.unwrap().message,
+            NO_PUBLISHER_MESSAGE,
+            "no publisher is reported, not hidden"
+        );
+    }
+
     #[sqlx::test(migrations = "../../migrations")]
     async fn a_follow_up_is_refused_before_it_starts_when_it_cannot_be_honoured(
         pool: sqlx::PgPool,

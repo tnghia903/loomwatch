@@ -13,12 +13,17 @@ export interface GuardsConfig {
   maxConcurrentDispatches?: number
 }
 
+/** Where a run's answer goes once it succeeds. `$defs/Deliver`; ADR 0010 and ADR 0038. */
+export interface DeliverConfig {
+  notion?: { title?: string }
+}
+
 export interface ScheduleConfig {
   cron: string
   timezone?: string
   prompt: string
   enabled?: boolean
-  deliver?: { notion?: { title?: string } }
+  deliver?: DeliverConfig
 }
 
 export type AgentStatus =
@@ -132,6 +137,8 @@ export interface TeamDocument {
   guards?: GuardsConfig
   conversation?: { stop?: { keepAliveMinutes?: number }; [key: string]: unknown }
   schedule?: ScheduleConfig
+  /** Where every successful run's answer goes, whoever started it (ADR 0038). */
+  deliver?: DeliverConfig
   /** What the team knows before a run starts. Executable configuration, so it lives here. */
   memory?: MemoryConfig
   agents: AgentConfig[]

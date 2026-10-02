@@ -66,6 +66,8 @@ export type EvidenceNodeData = { evidence: Evidence; ownerLabel: string; live: b
 export type OutputNodeData = {
   outputName?: string
   outputFormat?: string
+  /** Build only: where every answer also goes, e.g. `Notion` (ADR 0038). */
+  sendsTo?: string | null
   text: string
   phase: RunPhase
   phaseText: string

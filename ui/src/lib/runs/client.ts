@@ -8,7 +8,7 @@ import { daemonFetch } from '../daemonFetch'
 export type RunStatus = 'queued' | 'starting' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 export type RunTrigger = 'manual' | 'schedule'
 
-/** Where a routine's reply went after the run (docs/decisions/0010). */
+/** Where a run's reply went after it finished (ADR 0010 routines, ADR 0038 every run). */
 export interface Delivery {
   target: 'notion'
   status: 'published' | 'skipped' | 'failed'
@@ -79,6 +79,12 @@ export interface RunRecord {
   reply: string | null
   trigger?: RunTrigger
   delivery?: Delivery | null
+  /**
+   * The Notion page title this run's answer is published under once it succeeds, fixed at launch
+   * from the team's `deliver`; absent when the run delivers nowhere. Between the run's end and its
+   * `delivery` it is what "Sending to Notion…" means.
+   */
+  deliverTitle?: string | null
   /**
    * The run this one continues (Canvas B, decision 8). Its stages before `startAt` were not
    * executed: their stored handovers were replayed into this run.
@@ -211,6 +217,19 @@ export async function cancelRun(runId: string): Promise<RunRecord> {
 export async function fetchRun(runId: string, signal?: AbortSignal): Promise<RunRecord> {
   const response = await daemonFetch(`/api/runs/${encodeURIComponent(runId)}`, { signal, cache: 'no-store' })
   return readRun<RunRecord>(response)
+}
+
+/**
+ * "Send to Notion" (ADR 0038): publish a finished run's answer now, whatever the team file says.
+ * Answers the run with its new `delivery` — a publish Notion refused is still a record, with the
+ * reason in `delivery.message`. Without `title` the daemon uses the run's own delivery title, else
+ * the team's template.
+ */
+export async function deliverRun(runId: string, title?: string): Promise<RunRecord> {
+  return readRun<RunRecord>(await daemonFetch(`/api/runs/${encodeURIComponent(runId)}/deliver`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(title === undefined ? {} : { title }), cache: 'no-store',
+  }))
 }
 
 export async function fetchSchedules(signal?: AbortSignal): Promise<ScheduleEntry[]> {
