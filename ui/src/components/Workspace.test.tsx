@@ -26,7 +26,7 @@ const documentState = vi.hoisted(() => ({
   canUndo: false, canRedo: false, refusal: null, mode: 'pipeline',
   pipelineSteps: [{ id: 'researcher', step: 1, joinFrom: [] }, { id: 'reviewer', step: 2, joinFrom: [] }],
   modeSwitchBanner: false, pendingEdgeRemoval: null,
-  createNewDocument: vi.fn(), reloadFromDisk: vi.fn(), keepMine: vi.fn(), useDisk: vi.fn(), saveCopy: vi.fn(), layoutNodes: vi.fn(),
+  createNewDocument: vi.fn(), applyYaml: vi.fn(() => true), closeDocument: vi.fn(), teamsRoot: null as string | null, reloadFromDisk: vi.fn(), keepMine: vi.fn(), useDisk: vi.fn(), saveCopy: vi.fn(), layoutNodes: vi.fn(),
   settleNodeCollision: vi.fn(), capturePositionHistory: vi.fn(), undo: vi.fn(), redo: vi.fn(), onNodesChange: vi.fn(), onEdgesChange: vi.fn(),
   onConnect: vi.fn(), addAgentFromDrop: vi.fn(), save: vi.fn(async () => true), touchField: vi.fn(), renameAgent: vi.fn(), updateAgentModel: vi.fn(),
   updateAgentCwd: vi.fn(), updateAgentAllowRecruiting: vi.fn(), promoteEntrypoint: vi.fn(), promoteResponder: vi.fn(),
@@ -102,6 +102,8 @@ async function openRunTrace() {
 
 beforeEach(() => {
   window.history.replaceState({}, '', '/?path=demo.yaml')
+  // Ask LoomWatch keeps its panel open across pages in a tab; each test starts with it closed.
+  window.sessionStorage.clear()
   sessionState.events = []
   composerLayoutState.nodes = []
   composerLayoutState.edges = []
@@ -128,6 +130,23 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('Workspace', () => {
+  it('opens Ask LoomWatch from the header, ⌘J and the palette, where Build’s own words are suggested', async () => {
+    renderWorkspace()
+    const ask = () => screen.queryByRole('complementary', { name: 'Ask LoomWatch' })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask LoomWatch' }))
+    expect(await screen.findByRole('complementary', { name: 'Ask LoomWatch' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Message to Ask LoomWatch' })).toHaveAttribute('placeholder', 'Ask for a change, or say “run it”')
+    expect(screen.getByRole('button', { name: 'Add a fact-checker before the last step' })).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'j', metaKey: true })
+    expect(ask()).not.toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
+    fireEvent.click(screen.getByRole('button', { name: /Ask LoomWatch…/ }))
+    expect(ask()).toBeInTheDocument()
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+  })
+
   it('previews the next run without starting a job and exposes the final responder choice', async () => {
     renderWorkspace(undefined, 'delivery')
     fireEvent.change(screen.getByLabelText('Final response owner'), {target: {value: 'researcher'}})
@@ -359,6 +378,13 @@ describe('Workspace', () => {
     expect(screen.getByText('sequence from Researcher to Reviewer')).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'k', metaKey: true })
     expect(screen.getByRole('button', { name: /Solo edge layer/ })).toBeInTheDocument()
+  })
+
+  it('puts the getting-started guide’s example in the request box without running it', () => {
+    renderWorkspace()
+    act(() => { window.dispatchEvent(new CustomEvent('loomwatch:compose', { detail: 'Give me three ideas' })) })
+    expect(screen.getByLabelText('What should the team do?')).toHaveValue('Give me three ideas')
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
   })
 
   it('starts a run from the composer and rewires the canvas into the prompt-to-output story', async () => {

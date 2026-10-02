@@ -1,4 +1,5 @@
 import type { AgentStatus } from '../team-file/types'
+import { ACTIVITY_KINDS, ReplyText } from './replyText'
 
 export const eventKinds = ['message', 'thought', 'tool_call', 'tool_update', 'plan', 'permission', 'session_meta', 'usage', 'turn_end', 'process'] as const
 export interface RunEvent {
@@ -22,23 +23,38 @@ function messagePhase(event: RunEvent): unknown {
   return event.payload.phase ?? codex.phase
 }
 
-/** Old run rows include progress in their canonical reply. Match the entire archived turn,
- * then use its explicit phases; never replace that reply with a later helper-question answer. */
+function messageId(event: RunEvent): string | null {
+  return typeof event.payload.messageId === 'string' ? event.payload.messageId : null
+}
+
+/** Old run rows include progress in their canonical reply, and ran separate messages together.
+ * Match the entire archived turn, then present it by its explicit phases and message boundaries;
+ * never replace that reply with a later helper-question answer. */
 export function recordedReplyText(events: readonly RunEvent[], agentId: string | null, savedReply: string): string {
-  let all = '', final = '', classified = false
+  const newTurn = () => ({ all: '', final: '', classified: false, reply: new ReplyText(), finalReply: new ReplyText() })
+  let turn = newTurn()
   for (const event of events) {
     if (event.agentId !== agentId) continue
-    if (event.kind === 'message' && event.payload.role === 'agent') {
+    if (event.kind === 'message' && event.payload.role === 'user') {
+      // A prompt starts the daemon's reply afresh, which also drops a reloaded session's replay.
+      turn = newTurn()
+    } else if (event.kind === 'message' && event.payload.role === 'agent') {
       const text = eventText(event)
-      all += text
+      turn.all += text
+      turn.reply.push(text, messageId(event))
       const phase = messagePhase(event)
       if (phase === 'commentary' || phase === 'final_answer') {
-        classified = true
-        if (phase === 'final_answer') final += text
+        turn.classified = true
+        if (phase === 'final_answer') { turn.final += text; turn.finalReply.push(text, messageId(event)) }
       }
+    } else if (ACTIVITY_KINDS.has(event.kind)) {
+      turn.reply.noteActivity(); turn.finalReply.noteActivity()
     } else if (event.kind === 'turn_end') {
-      if (all === savedReply && classified) return final
-      all = ''; final = ''; classified = false
+      const presented = turn.classified ? turn.finalReply.text : turn.reply.text
+      // The turn as each daemon generation saved it: every chunk run together, then only the
+      // final-answer chunks run together, then the reply with its messages kept apart.
+      if (savedReply === presented || savedReply === turn.all || (turn.classified && savedReply === turn.final)) return presented
+      turn = newTurn()
     }
   }
   return savedReply
@@ -570,7 +586,7 @@ function taskStateFor(status: AgentStatus, streaming: boolean, thinking: boolean
 }
 
 export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, context: RunContext = {}): RunProjection {
-  type AgentAtWork = Omit<ProjectedAgent, 'openCalls'> & { streaming: boolean; thinking: boolean; turnText: string; turnPhaseKnown: boolean; openCalls: Set<string>; handedOff: boolean }
+  type AgentAtWork = Omit<ProjectedAgent, 'openCalls'> & { streaming: boolean; thinking: boolean; turnText: ReplyText; allText: ReplyText; turnPhaseKnown: boolean; openCalls: Set<string>; handedOff: boolean }
   const agents = new Map<string, AgentAtWork>()
   const calls = new Map<string, Evidence & { busName: string | null }>()
   const evidence: Evidence[] = []
@@ -606,7 +622,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         toolCalls: 0, turns: 0, tokens: null, contextUsed: null, contextSize: null,
         firstSeq: event.seq, lastSeq: event.seq, firstTs: event.ts, lastTs: event.ts, exitCode: null, stopReason: null, pid: null, model: null, busUnavailable: false,
         received: null, memory: null, promptSections: null,
-        streaming: false, thinking: false, turnText: '', turnPhaseKnown: false, openCalls: new Set(), handedOff: false,
+        streaming: false, thinking: false, turnText: new ReplyText(), allText: new ReplyText(), turnPhaseKnown: false, openCalls: new Set(), handedOff: false,
       }
       agents.set(id, agent)
     }
@@ -627,6 +643,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
     if (replaying.has(event.agentId)) continue
     const agent = ensureAgent(event.agentId, event)
     const p = event.payload
+    if (ACTIVITY_KINDS.has(event.kind)) { agent.turnText.noteActivity(); agent.allText.noteActivity() }
 
     switch (event.kind) {
       case 'process': {
@@ -698,6 +715,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
       case 'message': {
         const text = eventText(event)
         if (p.role === 'user') {
+          agent.allText.endMessage()
           if (object(event.raw) && event.raw.phase === 'operator_answer') {
             agent.status = 'succeeded'; agent.task = 'Decision received'; agent.reply = text
             evidence.push({ id: event.id, kind: 'source', relation: 'directed', name: 'Your answer', detail: text, agentId: agent.id, seq: event.seq, order: 0, ts: event.ts, status: 'succeeded', capture: 'recorded', offsetMs: Date.parse(event.ts) - startMs, callId: null, toolKind: null, rawInput: null, rawOutput: text, content: text, locations: [], target: null, events: [event] })
@@ -716,15 +734,16 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         } else if (p.role === 'agent') {
           messages += 1
           if (!agent.handedOff && agent.status !== 'failed') agent.status = 'running'
-          agent.text += text
+          agent.allText.push(text, messageId(event))
+          agent.text = agent.allText.text
           const phase = messagePhase(event)
           if (!auxiliaryTurns.has(agent.id)) {
             if (phase === 'commentary' || phase === 'final_answer') {
-              if (!agent.turnPhaseKnown) agent.turnText = ''
+              if (!agent.turnPhaseKnown) agent.turnText = new ReplyText()
               agent.turnPhaseKnown = true
               agent.replyPhaseKnown = true
-              if (phase === 'final_answer') agent.turnText += text
-            } else if (!agent.turnPhaseKnown) agent.turnText += text
+              if (phase === 'final_answer') agent.turnText.push(text, messageId(event))
+            } else if (!agent.turnPhaseKnown) agent.turnText.push(text, messageId(event))
           }
           agent.streaming = !auxiliaryTurns.has(agent.id) && phase !== 'commentary'
           agent.thinking = false
@@ -866,10 +885,10 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
       case 'turn_end': {
         agent.turns += 1
         if (!auxiliaryTurns.has(agent.id)) {
-          agent.reply = agent.turnPhaseKnown ? agent.turnText : agent.turnText || agent.reply
+          agent.reply = agent.turnPhaseKnown ? agent.turnText.text : agent.turnText.text || agent.reply
           agent.replyPhaseKnown = agent.turnPhaseKnown
         }
-        agent.turnText = ''
+        agent.turnText = new ReplyText()
         agent.turnPhaseKnown = false
         agent.streaming = false
         agent.thinking = false
@@ -893,7 +912,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
   // An agent still mid-turn when the projection is cut off keeps its unfinished text as
   // the reply candidate so a streaming answer reads in the Output node.
   for (const agent of agents.values()) {
-    if (!agent.reply && agent.turnText) agent.reply = agent.turnText
+    if (!agent.reply && agent.turnText.text) agent.reply = agent.turnText.text
     agent.taskState = taskStateFor(agent.status, agent.streaming, agent.thinking)
     if (agent.status === 'waiting') agent.taskState = agent.task === 'Waiting for you' ? 'WAITING' : 'QUEUED'
   }
@@ -960,7 +979,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
   const settled: CategoryCoverage = { level: 'complete', reason: 'observed', observed: 0 }
   const empty: CategoryCoverage = { level: 'unavailable', reason: 'none_recorded', observed: 0 }
   return {
-    agents: list.map(({ streaming: _s, thinking: _t, turnText: _x, turnPhaseKnown: _p, handedOff: _h, openCalls, ...agent }) => ({ ...agent, openCalls: openCalls.size })),
+    agents: list.map(({ streaming: _s, thinking: _t, turnText: _x, allText: _a, turnPhaseKnown: _p, handedOff: _h, openCalls, ...agent }) => ({ ...agent, openCalls: openCalls.size })),
     evidence,
     delegations: [...delegations.values()],
     attention,

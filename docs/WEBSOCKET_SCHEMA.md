@@ -253,6 +253,11 @@ The envelope and event kinds are unchanged:
 - Agent `message` payloads may include `phase: commentary | final_answer`, normalized from explicit
   Codex ACP `_meta.codex.phase`. The original raw frame remains intact. These phases separate
   progress from delivered replies. Missing/unknown phases retain generic ACP behavior.
+- A delivered reply joins the chunks of one agent message verbatim and puts separate messages a
+  blank line apart. Agent `message` payloads carry the ACP `messageId` when the harness sends one,
+  and a changed `messageId` starts a new message. A harness that sends no IDs starts one after any
+  `tool_call`, `tool_update`, `plan` or `permission` event. The daemon (`ReplyText` in
+  `acp.rs`) and the UI projection (`ui/src/lib/watch/replyText.ts`) apply the same rule.
 
 See [ADR 0020](decisions/0020-delivery-lane-and-required-skill-receipts.md) for replay and legacy-row handling.
 

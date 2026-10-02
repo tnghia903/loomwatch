@@ -47,7 +47,9 @@ The fingerprint covers SKILL.md, not scripts or other files in the bundle. These
 
 Codex ACP metadata explicitly identifies commentary and final_answer chunks. The recorder keeps all chunks in the archive but delivers only final-answer text when those phases are available. Generic ACP output without phase metadata retains its existing behavior; there are no keyword-based filters.
 
-For old run rows, the UI matches the entire saved canonical reply to a completed archived turn before using that turn's phase metadata to clean its presentation. It never substitutes a later answer to a helper's question for the saved team response. Persisted historical rows are not rewritten. A follow-up from an old row therefore retains its original archived context.
+Without phases, the delivered reply keeps every message the agent wrote in that turn, including progress notes written between tool calls. Choosing only the last message would be a guess, and it would lose a report the agent wrote before calling a tool to save it. Messages are a blank line apart, and the chunks within one message are joined verbatim. A changed ACP `messageId` marks a new message. A harness that sends no IDs is read at tool, plan and permission activity instead. Joining every chunk verbatim, as the daemon first did, ran separate notes into one line ("…render it.Draft builds…").
+
+For old run rows, the UI matches the entire saved canonical reply to a completed archived turn before using that turn's phase metadata and message boundaries to clean its presentation. It never substitutes a later answer to a helper's question for the saved team response. Persisted historical rows are not rewritten. A follow-up from an old row therefore retains its original archived context.
 
 Markdown output supports headings, tables, links, lists and code, plus copy and Markdown download. Raw HTML is omitted and remote image references are displayed as text. A generated-file gallery, embedded HTML artifact preview, and persistent whole-output approval are future work; the accompanying interaction prototype explores review behavior but does not imply it is implemented in the daemon.
 

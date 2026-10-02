@@ -215,7 +215,7 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
   return (
     <>
       {children}
-      <div ref={panel} className={`panel bottom cx e1 lw-composer ${slim ? 'prototype-composer' : ''} ${focused ? 'focused' : ''} ${switchBanner ? 'mode-switch' : ''} ${answering || replyTo || canFollowUp ? 'expanded-actions' : ''}`} role="group" aria-label="Prompt composer">
+      <div ref={panel} className={`panel bottom cx e1 lw-composer ${slim ? 'prototype-composer' : ''} ${focused ? 'focused' : ''} ${switchBanner ? 'mode-switch' : ''} ${answering || replyTo || canFollowUp ? 'expanded-actions' : ''}`} role="group" aria-label="Prompt composer" data-tour="composer">
         {slim && <MessageSquare className="composer-message-icon" size={17} />}
         <button type="button" className={`mode-chip t-body-m ${mode}`} onClick={onOpenMode} aria-haspopup="dialog" aria-expanded={modeOpen} title="How this team works through a request">
           <span className="glyph" aria-hidden="true">{mode === 'pipeline' ? <Workflow size={15} /> : <Asterisk size={15} />}</span>

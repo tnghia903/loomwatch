@@ -196,6 +196,10 @@ pub struct AcpProcess {
     supports_load_session: bool,
     /// Wired MCP servers, from [`ProcessSpec::tools`].
     tools: Vec<crate::delivery::DeliveredTool>,
+    /// The one MCP server whose tool calls this session may approve when the app asks: the Ask
+    /// assistant's own `LoomWatch` Control server (ADR 0033). `None` everywhere else, so every other
+    /// permission prompt is still refused.
+    approved_tool_server: Option<String>,
 }
 
 impl AcpProcess {
@@ -247,7 +251,15 @@ impl AcpProcess {
             request_timeout: REQUEST_TIMEOUT,
             supports_load_session: false,
             tools: spec.tools.clone(),
+            approved_tool_server: None,
         })
+    }
+
+    /// Approve permission prompts for `server`'s tools in this session only (ADR 0033).
+    #[must_use]
+    pub(crate) fn approving_tools_of(mut self, server: &str) -> Self {
+        self.approved_tool_server = Some(server.to_owned());
+        self
     }
 
     #[cfg(test)]
@@ -881,6 +893,11 @@ impl AcpProcess {
         negotiated: &NegotiatedSession,
         recorder: &mut Recorder,
     ) -> Result<()> {
+        // No model means the app's own default: the Ask assistant (ADR 0033) is not a team agent
+        // and has no `model` field.
+        if model.trim().is_empty() {
+            return record_default_model(recorder).await;
+        }
         // Current ACP adapters expose model and reasoning effort as separate config options.
         // Older team files may still carry Codex's combined `model[effort]` selector, so split
         // only suffixes that are known reasoning levels (Claude's `model[1m]` remains intact).
@@ -1066,7 +1083,7 @@ impl AcpProcess {
         // is archived under its own phase and never becomes provenance (CONTRACT §8.2).
         recorder.note_self_report().await?;
 
-        Ok(std::mem::take(&mut recorder.reply))
+        Ok(recorder.reply.take())
     }
 
     /// Record why a coordinator-requested turn exists. Its text and cost remain evidence, but
@@ -1166,7 +1183,8 @@ impl AcpProcess {
             }
 
             if message.get("method").is_some() && message.get("id").is_some() {
-                let response = build_client_response(&message)?;
+                let response =
+                    build_client_response(&message, self.approved_tool_server.as_deref())?;
                 if let Some(recorder) = recorder.as_deref_mut() {
                     recorder.record_frame(&response).await?;
                 }
@@ -1685,7 +1703,7 @@ fn with_archive_failure_context(
 /// prompt turn was cancelled, which is wrong for an observer merely declining one tool call.
 /// Prefer an advertised `reject_once` option so the agent denies that call and keeps going,
 /// then `reject_always`, falling back to `cancelled` only when the harness offered neither.
-fn build_client_response(request: &Value) -> Result<Value> {
+fn build_client_response(request: &Value, approved_server: Option<&str>) -> Result<Value> {
     let id = request
         .get("id")
         .cloned()
@@ -1694,6 +1712,17 @@ fn build_client_response(request: &Value) -> Result<Value> {
         .get("method")
         .and_then(Value::as_str)
         .context("client request omitted method")?;
+    if method == "session/request_permission"
+        && let Some(option_id) = approved_server
+            .filter(|server| asks_about_server_tool(request, server))
+            .and_then(|_| allow_once_option(request))
+    {
+        return Ok(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {"outcome": {"outcome": "selected", "optionId": option_id}}
+        }));
+    }
     let response = if method == "session/request_permission" {
         let rejection = request
             .pointer("/params/options")
@@ -1728,6 +1757,59 @@ fn build_client_response(request: &Value) -> Result<Value> {
         })
     };
     Ok(response)
+}
+
+/// Record that a session kept its app's default model, so the archive still says what was chosen.
+async fn record_default_model(recorder: &mut Recorder) -> Result<()> {
+    recorder
+        .append(
+            EventKind::SessionMeta,
+            json!({
+                "phase": "set_config_option_skipped",
+                "configId": "model",
+                "value": "",
+                "reason": "no model was configured, so the app's default model is used"
+            }),
+            Some(json!({"source": "loomwatch", "phase": "set_config_option_skipped"})),
+        )
+        .await
+}
+
+/// Whether a permission prompt is about one of `server`'s MCP tools.
+///
+/// Apps title an MCP tool call in one of three shapes: Claude Code `mcp__<server>__<tool>`, Gemini
+/// `<tool> (<server> MCP Server)`, and `<server>.<tool>`. Only those exact shapes count, so a file
+/// named after the server, a shell command, or another server whose name merely starts the same
+/// never does.
+fn asks_about_server_tool(request: &Value, server: &str) -> bool {
+    let title = request
+        .pointer("/params/toolCall/title")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let server = server.to_ascii_lowercase();
+    let tool_name = |name: &str| {
+        !name.is_empty()
+            && name
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    };
+    title
+        .strip_prefix(&format!("mcp__{server}__"))
+        .or_else(|| title.strip_prefix(&format!("{server}.")))
+        .or_else(|| title.strip_suffix(&format!(" ({server} mcp server)")))
+        .is_some_and(tool_name)
+}
+
+/// The prompt's one-time allow option, when the app offered one.
+fn allow_once_option(request: &Value) -> Option<Value> {
+    request
+        .pointer("/params/options")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|option| option.get("kind").and_then(Value::as_str) == Some("allow_once"))
+        .and_then(|option| option.get("optionId").cloned())
 }
 
 /// One dense, serialized event stream shared by every ACP process in a team run.
@@ -1820,13 +1902,85 @@ impl EventLog {
     }
 }
 
+/// An agent's reply, assembled from the message chunks it streamed.
+///
+/// Chunks of one message are joined verbatim: they are tokens of the same sentence. Separate
+/// messages are a paragraph apart. An agent that narrates between tool calls ("Reading the
+/// template…", then "Draft builds…") sends each note as its own message, and joining those
+/// verbatim ran them into one line of the team's output. ACP's `messageId` says which message a
+/// chunk belongs to and is authoritative when both sides carry one; a harness that sends none is
+/// read at tool, plan and permission activity instead, the only boundary it gives.
+///
+/// `ui/src/lib/watch/replyText.ts` applies the same rule to the archive. The two must agree, or a
+/// saved reply stops matching the archived turn it came from.
+#[derive(Debug, Default)]
+pub(crate) struct ReplyText {
+    text: String,
+    message_id: Option<String>,
+    boundary: bool,
+}
+
+impl ReplyText {
+    pub(crate) fn push(&mut self, chunk: &str, message_id: Option<&str>) {
+        if chunk.is_empty() {
+            return;
+        }
+        let new_message = match (self.message_id.as_deref(), message_id) {
+            (Some(previous), Some(current)) => previous != current,
+            _ => self.boundary,
+        };
+        if new_message && !self.text.is_empty() {
+            let have = trailing_newlines(&self.text) + leading_newlines(chunk);
+            for _ in have..2 {
+                self.text.push('\n');
+            }
+        }
+        self.text.push_str(chunk);
+        self.message_id = message_id.map(str::to_owned);
+        self.boundary = false;
+    }
+
+    /// The agent did something other than talk, so whatever it says next is a new message.
+    pub(crate) fn note_activity(&mut self) {
+        self.boundary = true;
+    }
+
+    /// A turn ended: the next chunk starts a new message even if its harness reuses the ID.
+    pub(crate) fn end_message(&mut self) {
+        self.message_id = None;
+        self.boundary = true;
+    }
+
+    pub(crate) fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.text
+    }
+
+    pub(crate) fn take(&mut self) -> String {
+        let text = std::mem::take(&mut self.text);
+        self.clear();
+        text
+    }
+}
+
+fn trailing_newlines(text: &str) -> usize {
+    text.bytes().rev().take_while(|byte| *byte == b'\n').count()
+}
+
+fn leading_newlines(text: &str) -> usize {
+    text.bytes().take_while(|byte| *byte == b'\n').count()
+}
+
 pub(crate) struct Recorder {
     required_skills: Vec<crate::workspace::PreparedSkill>,
     /// What was delivered to this agent, kept for the whole session so an open can be recognised
     /// on any turn. `required_skills` is taken by the first `session/prompt` — it is the *send*
     /// receipt — so it cannot also be the table an open is matched against.
     delivered_skills: Vec<DeliveredSkill>,
-    reply: String,
+    reply: ReplyText,
     reply_phase_known: bool,
     event_log: EventLog,
     acp_session_id: String,
@@ -1868,7 +2022,7 @@ impl Recorder {
             event_log,
             acp_session_id,
             agent_id: agent_id.to_owned(),
-            reply: String::new(),
+            reply: ReplyText::default(),
             reply_phase_known: false,
             required_skills: Vec::new(),
             delivered_skills: Vec::new(),
@@ -1929,7 +2083,7 @@ impl Recorder {
         if !self.delivered_skills.iter().any(|skill| skill.translated) {
             return Ok(());
         }
-        let Some(text) = crate::skill_routing::self_report(&self.reply) else {
+        let Some(text) = crate::skill_routing::self_report(self.reply.as_str()) else {
             return Ok(());
         };
         self.append(
@@ -1967,6 +2121,7 @@ impl Recorder {
 
     async fn record_frame(&mut self, message: &Value) -> Result<()> {
         if let Some(payload) = permission_payload(message) {
+            self.reply.note_activity();
             return self
                 .append(EventKind::Permission, payload, Some(message.clone()))
                 .await;
@@ -2011,6 +2166,7 @@ impl Recorder {
                 if role == "agent"
                     && let Some(text) = content.get("text").and_then(Value::as_str)
                 {
+                    let message_id = update.get("messageId").and_then(Value::as_str);
                     let phase = update.pointer("/_meta/codex/phase").and_then(Value::as_str);
                     if matches!(phase, Some("commentary" | "final_answer")) {
                         // A harness's explicit phase is authoritative. Keep every chunk in the
@@ -2021,10 +2177,10 @@ impl Recorder {
                         }
                         payload.insert("phase".into(), json!(phase));
                         if phase == Some("final_answer") {
-                            self.reply.push_str(text);
+                            self.reply.push(text, message_id);
                         }
                     } else if !self.reply_phase_known {
-                        self.reply.push_str(text);
+                        self.reply.push(text, message_id);
                     }
                 }
                 payload.insert("content".into(), content);
@@ -2056,6 +2212,12 @@ impl Recorder {
             Some("usage_update") => (EventKind::Usage, update.clone()),
             Some(_) | None => (EventKind::SessionMeta, update.clone()),
         };
+        if matches!(
+            kind,
+            EventKind::ToolCall | EventKind::ToolUpdate | EventKind::Plan
+        ) {
+            self.reply.note_activity();
+        }
         self.append(kind, payload, Some(message.clone())).await?;
         self.note_open_if_delivered(update_type, update).await
     }
@@ -2340,7 +2502,7 @@ mod tests {
         ] {
             recorder.record_frame(&json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "phase-test", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}, "_meta": {"codex": {"phase": phase}}}}})).await.unwrap();
         }
-        assert_eq!(recorder.reply, "Final report");
+        assert_eq!(recorder.reply.as_str(), "Final report");
         assert_eq!(archive.verify_session("phase-test").await.unwrap().len(), 6);
     }
 
@@ -2446,29 +2608,81 @@ mod tests {
 
     #[test]
     fn permission_response_uses_each_supported_rejection_fallback() {
-        let response = build_client_response(&json!({
-            "jsonrpc": "2.0",
-            "id": "permission-1",
-            "method": "session/request_permission",
-            "params": {"options": [
-                {"optionId": "always", "kind": "reject_always"},
-                {"optionId": "once", "kind": "reject_once"}
-            ]}
-        }))
+        let response = build_client_response(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": "permission-1",
+                "method": "session/request_permission",
+                "params": {"options": [
+                    {"optionId": "always", "kind": "reject_always"},
+                    {"optionId": "once", "kind": "reject_once"}
+                ]}
+            }),
+            None,
+        )
         .expect("response");
         assert_eq!(response["result"]["outcome"]["optionId"], "once");
 
-        let response = build_client_response(&json!({
-            "jsonrpc": "2.0",
-            "id": "permission-2",
-            "method": "session/request_permission",
-            "params": {"options": [
-                {"optionId": "always", "kind": "reject_always"}
-            ]}
-        }))
+        let response = build_client_response(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": "permission-2",
+                "method": "session/request_permission",
+                "params": {"options": [
+                    {"optionId": "always", "kind": "reject_always"}
+                ]}
+            }),
+            None,
+        )
         .expect("response");
         assert_eq!(response["result"]["outcome"]["outcome"], "selected");
         assert_eq!(response["result"]["outcome"]["optionId"], "always");
+    }
+
+    /// ADR 0033: an Ask session approves prompts for its own tool server's calls, whichever way
+    /// the app spells the tool, and still refuses everything else — shell, edits, other servers.
+    #[test]
+    fn ask_sessions_approve_only_their_own_tool_server() {
+        let prompt = |title: &str| {
+            json!({
+                "jsonrpc": "2.0",
+                "id": "permission-ask",
+                "method": "session/request_permission",
+                "params": {
+                    "toolCall": {"toolCallId": "call-1", "title": title},
+                    "options": [
+                        {"optionId": "yes", "kind": "allow_once"},
+                        {"optionId": "always", "kind": "allow_always"},
+                        {"optionId": "no", "kind": "reject_once"}
+                    ]
+                }
+            })
+        };
+        let chosen = |title: &str, server: Option<&str>| {
+            build_client_response(&prompt(title), server).expect("response")["result"]["outcome"]
+                ["optionId"]
+                .clone()
+        };
+        for title in [
+            "mcp__loomwatch__propose_team",
+            "propose_team (loomwatch MCP Server)",
+            "loomwatch.start_run",
+        ] {
+            assert_eq!(chosen(title, Some("loomwatch")), "yes", "{title}");
+            assert_eq!(
+                chosen(title, None),
+                "no",
+                "a run's agents never get this: {title}"
+            );
+        }
+        for title in [
+            "Bash: rm -rf ~/LoomWatch",
+            "Write loomwatch.yaml",
+            "mcp__loomwatch-team-bus__dispatch",
+            "mcp__other__loomwatch_clone",
+        ] {
+            assert_eq!(chosen(title, Some("loomwatch")), "no", "{title}");
+        }
     }
 
     #[test]
@@ -2479,6 +2693,122 @@ mod tests {
         let rendered = format!("{combined:#}");
         assert!(rendered.contains("protocol exploded"));
         assert!(rendered.contains("Postgres unavailable"));
+    }
+
+    #[test]
+    fn reply_text_keeps_a_message_whole_and_separates_the_next() {
+        let mut ided = ReplyText::default();
+        ided.push("I'll build ", Some("m-1"));
+        ided.push("and render it.", Some("m-1"));
+        ided.push("Draft builds.", Some("m-2"));
+        assert_eq!(ided.as_str(), "I'll build and render it.\n\nDraft builds.");
+
+        // Without IDs, tool activity is the only boundary; plain streaming stays verbatim.
+        let mut bare = ReplyText::default();
+        bare.push("Still 8 ", None);
+        bare.push("pages.", None);
+        bare.note_activity();
+        bare.push("Done.", None);
+        assert_eq!(bare.as_str(), "Still 8 pages.\n\nDone.");
+
+        // An ID is authoritative: a stray update mid-message must not split a sentence.
+        let mut same = ReplyText::default();
+        same.push("half ", Some("m-1"));
+        same.note_activity();
+        same.push("sentence", Some("m-1"));
+        assert_eq!(same.as_str(), "half sentence");
+
+        // A break the text already has is not doubled, and empty chunks change nothing.
+        let mut padded = ReplyText::default();
+        padded.push("Intro\n", Some("m-1"));
+        padded.push("", Some("m-2"));
+        padded.push("\n## Report", Some("m-2"));
+        assert_eq!(padded.as_str(), "Intro\n\n## Report");
+        assert_eq!(padded.take(), "Intro\n\n## Report");
+        padded.push("fresh", Some("m-3"));
+        assert_eq!(padded.as_str(), "fresh", "take resets the joiner");
+    }
+
+    /// Run 820bb0e8: the writer narrated between tool calls and its reply read
+    /// "…then I'll build and render it.Draft builds and renders." Each note is its own ACP
+    /// message, so the delivered reply must keep them apart — with or without message IDs.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn messages_on_either_side_of_a_tool_call_do_not_run_together(pool: PgPool) {
+        for (session, first_id, second_id) in [
+            (
+                "with-ids",
+                r#""messageId":"msg-1","#,
+                r#""messageId":"msg-2","#,
+            ),
+            ("without-ids", "", ""),
+        ] {
+            let script = r#"
+                set -eu
+                IFS= read -r _
+                printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+                IFS= read -r _
+                printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"SESSION","configOptions":[]}}'
+                IFS= read -r _
+                printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"agent_message_chunk",FIRST_ID"content":{"type":"text","text":"Then I will build "}}}}'
+                printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"agent_message_chunk",FIRST_ID"content":{"type":"text","text":"and render it."}}}}'
+                printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"Terminal","kind":"execute","status":"pending"}}}'
+                printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed"}}}'
+                printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"agent_message_chunk",SECOND_ID"content":{"type":"text","text":"Draft builds and renders."}}}}'
+                printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+                IFS= read -r _
+                printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
+            "#
+            .replace("SESSION", session)
+            .replace("FIRST_ID", first_id)
+            .replace("SECOND_ID", second_id);
+            let spec = ProcessSpec {
+                cmd: "/bin/sh".into(),
+                args: vec!["-c".into(), script],
+                env: BTreeMap::new(),
+                cwd: std::env::current_dir().expect("cwd"),
+                tools: Vec::new(),
+            };
+            let archive = EventArchive::from_pool(pool.clone());
+            let mut process = AcpProcess::spawn(&spec).expect("spawn");
+            let outcome = process
+                .run_session(
+                    "writer",
+                    "test/model",
+                    "write it",
+                    &archive,
+                    Duration::from_secs(2),
+                )
+                .await
+                .expect("session");
+            assert_eq!(
+                outcome.reply, "Then I will build and render it.\n\nDraft builds and renders.",
+                "harness {session}"
+            );
+            // The archive still holds every chunk exactly as the harness sent it.
+            let chunks: Vec<String> = archive
+                .verify_session(&outcome.session_id)
+                .await
+                .expect("archived")
+                .iter()
+                .filter(|event| {
+                    event.kind == EventKind::Message && event.payload["role"] == "agent"
+                })
+                .map(|event| {
+                    event.payload["content"]["text"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned()
+                })
+                .collect();
+            assert_eq!(
+                chunks,
+                [
+                    "Then I will build ",
+                    "and render it.",
+                    "Draft builds and renders."
+                ]
+            );
+        }
     }
 
     #[sqlx::test(migrations = "../../migrations")]

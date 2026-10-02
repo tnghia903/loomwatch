@@ -17,7 +17,13 @@ export interface InterpretedAction extends CommandAction {
 
 // UX_REDESIGN §11: ⌘K is the menu. 560 px, e2, centred at 22% from the top, a filter field
 // and a flat ungrouped ranked list. Every primary flow is reachable without a pointer.
-export function CommandPalette({ actions, onClose, interpret }: { actions: CommandAction[]; onClose: () => void; interpret?: (query: string) => InterpretedAction | null }) {
+export function CommandPalette({ actions, onClose, interpret, fallback }: {
+  actions: CommandAction[]
+  onClose: () => void
+  interpret?: (query: string) => InterpretedAction | null
+  /** What to offer when nothing else matches the words typed — Ask LoomWatch, in the workspace. */
+  fallback?: (query: string) => CommandAction | null
+}) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   // Plain words and /commands resolve to one proposed action, shown first so Enter does exactly
@@ -25,8 +31,10 @@ export function CommandPalette({ actions, onClose, interpret }: { actions: Comma
   const understood = useMemo(() => interpret?.(query) ?? null, [interpret, query])
   const filtered = useMemo(() => {
     const listed = rankActions(actions, query.startsWith('/') ? query.slice(1) : query)
-    return understood ? [understood, ...listed] : listed
-  }, [actions, query, understood])
+    if (understood) return [understood, ...listed]
+    const offered = listed.length === 0 ? fallback?.(query) ?? null : null
+    return offered ? [offered] : listed
+  }, [actions, query, understood, fallback])
 
   function run(action: CommandAction | undefined) {
     if (!action || action.disabled) return

@@ -76,6 +76,13 @@ enum Commands {
         #[arg(long)]
         harness: String,
     },
+    /// Serve the `LoomWatch` Control tools over stdio, for an AI app connected from the
+    /// Connections page. Reads its token from `LOOMWATCH_CONTROL_TOKEN`.
+    Mcp {
+        /// The daemon's tool server, e.g. `http://127.0.0.1:3000/api/control/mcp`.
+        #[arg(long, default_value = "http://127.0.0.1:3000/api/control/mcp")]
+        url: String,
+    },
 }
 
 /// A durable registry when there is an archive to be durable in, with its cache already filled
@@ -163,11 +170,26 @@ async fn main() -> Result<()> {
             )?;
             let routines = loomwatch_backend::schedule::router(
                 scheduler,
-                registry,
+                registry.clone(),
                 archive.clone(),
-                teams_root,
+                teams_root.clone(),
+            );
+            // Ask LoomWatch (ADR 0033): the tool server and the Ask panel's endpoints. It shares the
+            // registry so a run it starts is an ordinary run, and the listener so its URL is the
+            // daemon's own.
+            let control = loomwatch_backend::control::Control::new(
+                loomwatch_backend::control::ControlOptions {
+                    archive: archive.clone(),
+                    teams_root: teams_root.clone(),
+                    registry: registry.clone(),
+                    listen: address,
+                    ask_command: std::env::var("LOOMWATCH_ASK_COMMAND")
+                        .ok()
+                        .map(|command| command.split_whitespace().map(str::to_owned).collect()),
+                },
             );
             let mut app = loomwatch_backend::spa::router()
+                .merge(control.router())
                 .merge(api)
                 .merge(loomwatch_backend::watch_api::router(archive))
                 .merge(runs)
@@ -220,6 +242,7 @@ async fn main() -> Result<()> {
             let code = loomwatch_backend::host_runner::client(harness).await?;
             std::process::exit(code);
         }
+        Commands::Mcp { url } => loomwatch_backend::control::bridge(&url).await?,
     }
     Ok(())
 }

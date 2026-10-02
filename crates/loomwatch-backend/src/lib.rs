@@ -8,6 +8,7 @@ pub mod archive;
 pub mod capabilities;
 pub mod composer;
 pub mod config;
+pub mod control;
 pub mod delivery;
 mod files;
 pub mod host_runner;

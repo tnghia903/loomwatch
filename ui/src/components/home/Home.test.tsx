@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DetectedHarness } from '../../lib/harnesses'
+import { readTourState, resetTourForTests } from '../../lib/tour/store'
 import { Home } from './Home'
 
 const claude: DetectedHarness = { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/bin/claude', acpAvailable: true, spawn: { cmd: 'npx', args: ['-y', '@agentclientprotocol/claude-agent-acp'] } }
@@ -161,5 +162,46 @@ describe('Home', () => {
     expect(within(dialog).getByRole('radio', { name: /Empty team/ })).toBeChecked()
     expect(within(dialog).getByText(/None of your AI apps can start right now/)).toBeInTheDocument()
     expect(within(dialog).getByText(geminiReason)).toBeInTheDocument()
+  })
+})
+
+describe('Home and the getting-started guide', () => {
+  beforeEach(() => resetTourForTests())
+
+  const demoTeam = { root: '/teams', files: ['operator-stop.yaml'], teams: [{ path: 'operator-stop.yaml', name: 'Review stop demo', agentCount: 3, modifiedAt: null }] }
+
+  it('offers the guide to someone who has never run a team, though the demo team is there', async () => {
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/runs' ? [] : demoTeam))
+    renderHome()
+    await screen.findByText('Review stop demo')
+    await waitFor(() => expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' }))
+  })
+
+  it('leaves someone who has run a team alone, but lets them start it', async () => {
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/runs' ? [{ runId: 'run-1', teamPath: 'operator-stop.yaml', status: 'succeeded' }] : demoTeam))
+    renderHome()
+    await screen.findByText('Review stop demo')
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/runs')).toBe(true))
+    expect(readTourState()).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Take the 3-minute guide/ }))
+    expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' })
+  })
+
+  it('takes the job in plain words for Ask LoomWatch, and says why when it cannot', async () => {
+    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
+    const onAsk = vi.fn()
+    const { unmount } = render(<Home harnesses={[claude]} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onCreateBlank={vi.fn()} onPalette={vi.fn()} ask={{ unavailable: null, onAsk }} />)
+    const box = screen.getByRole('textbox', { name: /Or describe the job/ })
+    fireEvent.change(box, { target: { value: '  Brief me on chip news every weekday  ' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(onAsk).toHaveBeenCalledWith('Brief me on chip news every weekday')
+    expect(box).toHaveValue('')
+    // New team stays the one gold button.
+    expect(screen.getByRole('button', { name: 'Ask' })).not.toHaveClass('btn-primary')
+    unmount()
+
+    render(<Home harnesses={[]} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onCreateBlank={vi.fn()} onPalette={vi.fn()} ask={{ unavailable: 'Ask needs Claude Code, Codex, Gemini CLI or OpenCode on this computer.', onAsk }} />)
+    expect(screen.getByRole('textbox', { name: /Or describe the job/ })).toBeDisabled()
+    expect(screen.getByText(/Ask needs Claude Code/)).toBeInTheDocument()
   })
 })

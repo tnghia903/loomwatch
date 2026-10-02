@@ -4,11 +4,15 @@ import Connections from './Connections'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+/** The page also lists the AI apps that can connect (ConnectAiApps); these tests are about Notion, so
+    that section is answered on its own and the Notion responses keep their order. */
+const routed = (notion: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) => vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+  String(input).startsWith('/api/ask/') ? Promise.resolve(response({ url: 'http://127.0.0.1:3000/api/control/mcp', apps: [] })) : notion(input, init))
 
 describe('Notion connections', () => {
   it('clears the submitted secret and shows actionable authentication errors', async () => {
     const fetch = vi.fn().mockResolvedValueOnce(response({ connected: false })).mockResolvedValueOnce(response({ error: 'Notion rejected this token.' }, 401))
-    vi.stubGlobal('fetch', fetch)
+    vi.stubGlobal('fetch', routed(fetch))
     render(<Connections />)
     const input = await screen.findByLabelText('Notion integration token')
     fireEvent.change(input, { target: { value: 'test-secret' } })
@@ -24,7 +28,7 @@ describe('Notion connections', () => {
       .mockResolvedValueOnce(response({ pages: [page], nextCursor: null }))
       .mockResolvedValueOnce(response({ connected: true, name: 'My workspace', destination: page }))
       .mockResolvedValueOnce(response({ connected: false }))
-    vi.stubGlobal('fetch', fetch)
+    vi.stubGlobal('fetch', routed(fetch))
     render(<Connections />)
     fireEvent.click(await screen.findByRole('button', { name: 'Search' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Daily News' }))

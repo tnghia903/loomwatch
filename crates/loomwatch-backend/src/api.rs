@@ -25,7 +25,7 @@ use crate::capabilities::{
 use crate::composer::{ComposerLayout, layout_path};
 use crate::config::TeamConfig;
 
-const TEAM_SCHEMA: &str = include_str!("../../../schemas/team.schema.yaml");
+pub(crate) const TEAM_SCHEMA: &str = include_str!("../../../schemas/team.schema.yaml");
 
 #[derive(Debug, Clone)]
 struct ApiState {
@@ -409,7 +409,7 @@ fn read_team_header(text: &str) -> Result<TeamHeader, &'static str> {
     })
 }
 
-fn summarize_team_file(teams_root: &Path, relative: &str) -> TeamSummary {
+pub(crate) fn summarize_team_file(teams_root: &Path, relative: &str) -> TeamSummary {
     let path = teams_root.join(relative);
     let header = fs::read_to_string(&path)
         .map_err(|_| "unreadable")
@@ -1011,7 +1011,7 @@ fn is_skipped_team_directory(name: &std::ffi::OsStr) -> bool {
         .is_some_and(|name| name.starts_with('.') || name == "node_modules")
 }
 
-fn discover_team_files(teams_root: &Path) -> io::Result<Vec<String>> {
+pub(crate) fn discover_team_files(teams_root: &Path) -> io::Result<Vec<String>> {
     let mut directories = vec![teams_root.to_path_buf()];
     let mut files = Vec::new();
 
@@ -1687,7 +1687,7 @@ async fn put_layout(
     Ok(Json(write.layout))
 }
 
-fn revision(bytes: &[u8]) -> String {
+pub(crate) fn revision(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
@@ -1772,7 +1772,10 @@ pub(crate) fn resolve_existing_team_path(
     ensure_under_teams_root(teams_root, requested, resolved)
 }
 
-fn resolve_writable_team_path(teams_root: &Path, requested: &Path) -> Result<PathBuf, ApiError> {
+pub(crate) fn resolve_writable_team_path(
+    teams_root: &Path,
+    requested: &Path,
+) -> Result<PathBuf, ApiError> {
     let candidate = rooted_candidate(teams_root, requested);
     match fs::symlink_metadata(&candidate) {
         Ok(_) => {
@@ -2001,7 +2004,10 @@ pub fn searched_directories(search_path: Option<&std::ffi::OsStr>) -> Vec<String
 ///
 /// See [`EXTRA_HARNESS_DIRECTORIES`] for why. Returns `None` only when there is nothing at all to
 /// search, which cannot happen while `HOME` is set.
-fn augment_search_path(inherited: Option<OsString>, home: Option<&Path>) -> Option<OsString> {
+pub(crate) fn augment_search_path(
+    inherited: Option<OsString>,
+    home: Option<&Path>,
+) -> Option<OsString> {
     let mut directories: Vec<PathBuf> = inherited
         .as_deref()
         .map(|path| std::env::split_paths(path).collect())
@@ -2057,7 +2063,7 @@ fn check_command(
     }
 }
 
-fn find_executable(search_path: &std::ffi::OsStr, command: &str) -> Option<PathBuf> {
+pub(crate) fn find_executable(search_path: &std::ffi::OsStr, command: &str) -> Option<PathBuf> {
     std::env::split_paths(search_path)
         .flat_map(|directory| executable_candidates(&directory, command))
         .find(|candidate| is_executable(candidate))

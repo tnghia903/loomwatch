@@ -79,7 +79,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onDismiss, className 
 
   const label = count > 0 ? `${count} need${count === 1 ? 's' : ''} you` : working > 0 ? `${working} working` : 'All clear'
   return (
-    <div className={`needs-you ${className}`}>
+    <div className={`needs-you ${className}`} data-tour="needs-you">
       <button
         ref={bell}
         type="button"

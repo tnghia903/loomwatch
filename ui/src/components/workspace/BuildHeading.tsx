@@ -1,4 +1,4 @@
-import { Play } from 'lucide-react'
+import { Check, Play } from 'lucide-react'
 
 import type { SaveState } from '../../lib/team-file/useTeamDocument'
 
@@ -19,10 +19,40 @@ interface BuildHeadingProps {
   onDeliver?: () => void
   onSave: () => void
   onRun: () => void
+  /** An Ask LoomWatch proposal is on the canvas: the heading becomes its Apply or Discard. */
+  proposal?: BuildProposal | null
+}
+
+export interface BuildProposal {
+  isNew: boolean
+  /** Who proposed it: Ask LoomWatch, or the connected app that called LoomWatch's tools. */
+  from: string
+  /** What the proposal changes, in plain words. */
+  lines: string[]
+  applying: boolean
+  error: string | null
+  onApply: () => void
+  onDiscard: () => void
 }
 
 /** Build's heading. It says what to do next, not what the screen is called. */
-export function BuildHeading({ agentCount, isValid, checking, saveState, documentChipState, appProblem = null, undelivered = 0, onDeliver, onSave, onRun }: BuildHeadingProps) {
+export function BuildHeading({ agentCount, isValid, checking, saveState, documentChipState, appProblem = null, undelivered = 0, onDeliver, onSave, onRun, proposal = null }: BuildHeadingProps) {
+  if (proposal) {
+    return (
+      <header className="build-workspace-heading proposal" aria-label="Proposal from Ask LoomWatch">
+        <div>
+          <h1>{proposal.isNew ? 'Check your new team' : 'Check the proposed changes'}</h1>
+          <span>From {proposal.from} · not saved yet</span>
+          {proposal.lines.length > 0 && <ul className="build-proposal-lines">{proposal.lines.map((line) => <li key={line}>{line}</li>)}</ul>}
+          {proposal.error && <p role="alert" className="build-proposal-error">{proposal.error}</p>}
+        </div>
+        <div className="build-workspace-actions">
+          <button className="btn" disabled={proposal.applying} onClick={proposal.onDiscard}>Discard</button>
+          <button className="btn btn-primary" disabled={proposal.applying} onClick={proposal.onApply}><Check size={15} />{proposal.applying ? 'Applying…' : 'Apply'}</button>
+        </div>
+      </header>
+    )
+  }
   const heading = agentCount === 0
     ? { title: 'Add your first agent', detail: 'Pick a job on the left, like Researcher or Writer. You can add more helpers and connect them later.' }
     : !isValid && !checking
@@ -45,7 +75,7 @@ export function BuildHeading({ agentCount, isValid, checking, saveState, documen
       </div>
       <div className="build-workspace-actions">
         <button className="btn" disabled={!['dirty', 'new'].includes(documentChipState) || !isValid} onClick={onSave}>Save</button>
-        <button className="btn btn-primary" onClick={onRun}><Play size={15} />Run team</button>
+        <button className="btn btn-primary" data-tour="run-team" onClick={onRun}><Play size={15} />Run team</button>
       </div>
     </header>
   )
