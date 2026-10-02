@@ -15,6 +15,12 @@
   border: 1px solid var(--color-hairline);
 }
 .build-workspace.lib-collapsed .team-story { left: 126px; }
+/* An open side panel starts level with the sentence, so the sentence makes room for the widest one
+   (inspector width + inset + 12px gap) rather than running under it. Below 768px the panel docks at the bottom. */
+@media (min-width: 768px) {
+  .build-workspace.inspecting .team-story { max-width: min(680px, calc(100% - 18px - var(--lw-inspector-w) - var(--lw-panel-inset) - 12px)); }
+  .build-workspace.lib-collapsed.inspecting .team-story { max-width: min(680px, calc(100% - 126px - var(--lw-inspector-w) - var(--lw-panel-inset) - 12px)); }
+}
 .team-story-eyebrow { font: 600 10.5px/1.3 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
 .team-story p { margin: 0; font: 400 19px/1.45 var(--font-serif); color: var(--color-ink-2); text-wrap: pretty; }
 .story-name, .story-schedule {

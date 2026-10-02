@@ -41,7 +41,9 @@
 .prototype-composer .comp-mid textarea { padding:5px 0; min-height:24px; font-size:12px; }
 .prototype-composer .comp-act { margin:0; padding:0; border:0; }
 .composer-message-icon { color:var(--quiet); }
-.build-workspace .node-inspector { top:251px; max-height:calc(100dvh - 275px); overflow:auto; backdrop-filter:blur(18px); background:color-mix(in srgb,var(--surface) 94%,transparent); }
+/* Level with the team sentence (canvas top 179 + its 14px inset), and stopping 12px above the zoom
+   column (16px inset + 83px tall), so the zoom, Fit team and Story/Team/Trace controls stay clickable. */
+.build-workspace .node-inspector { top:193px; max-height:calc(100dvh - 193px - 111px); overflow:auto; backdrop-filter:blur(18px); background:color-mix(in srgb,var(--surface) 94%,transparent); }
 .inspector-fields input,.inspector-fields select { border:1px solid var(--line); border-radius:5px; background:var(--surface-raised); color:var(--text); }
 @media(max-width:1100px) { .delivery-stages { gap:32px; } .prototype-handoff.delivery-handoff-arrow { top:-28px; left:50%; transform:translateX(-50%); } .prototype-handoff span,.prototype-handoff small { display:none; } }
 /* The prototype's vocabulary, derived from the semantic tokens so both themes come from one source

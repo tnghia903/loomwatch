@@ -130,8 +130,10 @@
    `.lw-shell .lw-inspector` max-height measures from the top inset and keeps a composer clear
    that Build hides, which put the last ~80px of a long form under the bottom of the window with
    no way to scroll to it. Bounding it top and bottom is the only version that cannot drift when
-   the heading changes height. The extra `.lw-shell` is there to outrank that shared rule. */
-.lw-shell.build-workspace .lw-inspector { top:190px; bottom:20px; max-height:none; }
+   the heading changes height. The extra `.lw-shell` is there to outrank that shared rule. Same
+   bounds as the short `.node-inspector`: level with the team sentence, and stopping 12px above
+   the zoom column so the canvas controls under it stay clickable. */
+.lw-shell.build-workspace .lw-inspector { top:193px; bottom:111px; max-height:none; }
 .build-workspace .lw-viewctl { top:auto; bottom:20px; }
 .build-workspace .node,.build-workspace .capability-node { border-radius:7px; box-shadow:var(--e1-shadow); }
 .build-graph .react-flow__handle { min-width:9px; min-height:9px; background:var(--color-accent); }
