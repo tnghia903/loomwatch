@@ -1,8 +1,12 @@
 name: Pages
 
-# Publishes the landing page in site/ to GitHub Pages. It runs when the page, the screenshots it
-# borrows from docs/assets/readme, the design-system fonts or this workflow change on main, and by
-# hand. Pages must be turned on once, with "GitHub Actions" as its source (Settings → Pages).
+# Publishes the landing page in site/ to https://loomwatch.github.io. This repository stays private;
+# the built page is pushed to the public loomwatch/loomwatch.github.io repository, and GitHub Pages
+# serves that repository's main branch. It runs when the page, the screenshots it borrows from
+# docs/assets/readme, the design-system fonts or this workflow change on main, and by hand.
+#
+# The push uses PAGES_DEPLOY_KEY, the private half of an SSH deploy key that has write access to
+# loomwatch/loomwatch.github.io and nothing else.
 on:
   push:
     branches: [main]
@@ -13,7 +17,7 @@ on:
       - .github/workflows/pages.yml
   workflow_dispatch:
 
-# One deployment at a time. A newer push waits rather than cancelling one that is mid-deploy.
+# One publish at a time. A newer push waits rather than cancelling one that is mid-push.
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -22,32 +26,45 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build
+  publish:
+    name: Publish
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    environment:
+      name: loomwatch.github.io
+      url: https://loomwatch.github.io
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - name: Assemble the site
-        run: site/build.sh _site
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          path: _site
+        run: |
+          site/build.sh _site
+          # Serve the files as they are; Pages would otherwise run Jekyll over them.
+          touch _site/.nojekyll
+      - name: Push it to loomwatch/loomwatch.github.io
+        env:
+          DEPLOY_KEY: ${{ secrets.PAGES_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/pages_key"
+          known="$RUNNER_TEMP/known_hosts"
+          printf '%s\n' "$DEPLOY_KEY" >"$key"
+          chmod 600 "$key"
+          # GitHub's SSH host keys, read over HTTPS rather than trusted on first use.
+          curl -fsSL https://api.github.com/meta | jq -r '.ssh_keys[] | "github.com " + .' >"$known"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$known -o StrictHostKeyChecking=yes"
 
-  deploy:
-    name: Deploy
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+          git clone --quiet --depth 1 git@github.com:loomwatch/loomwatch.github.io.git published
+          find published -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R _site/. published/
+          cd published
+          git add --all
+          if git diff --cached --quiet; then
+            echo "The published site already matches this commit."
+            exit 0
+          fi
+          git -c user.name="LoomWatch Pages" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit --quiet -m "Publish the landing page from ${GITHUB_SHA::7}"
+          git push --quiet origin HEAD:main
+          echo "Published to https://loomwatch.github.io"
