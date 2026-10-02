@@ -33,7 +33,7 @@ cron = "0.17"
 chrono-tz = "0.10"
 toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 # Ask LoomWatch checks a proposed team against the same schema the editor enforces before saving.
-jsonschema = { version = "0.53.0", default-features = false }
+jsonschema = { version = "0.58.2", default-features = false }
 
 [dev-dependencies]
 futures-util = "0.3"
