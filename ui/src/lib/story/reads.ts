@@ -60,12 +60,22 @@ export function skillName(item: Pick<Evidence, 'name' | 'relation'> & Partial<Pi
 
 const skillKey = (item: Item) => (skillName(item) ?? item.name).toLowerCase()
 
+/**
+ * A read of a skill's own file that the record files as any other file read. claude-agent-acp 0.85
+ * starts every Read as a bare "Read File" and names the path only in the next update, so a
+ * SKILL.md read is classified before anyone knows it was one. Its path still says so: a SKILL.md,
+ * or anything under a `.claude/skills/` or `.agents/skills/` folder, where skills are delivered.
+ */
+const SKILL_FILE = /(?:^|\/)SKILL\.md$|\/\.(?:claude|agents)\/skills\/[^/]+\//i
+const skillFileRead = (item: Item) => item.kind === 'file' && item.relation === 'read file' && pathsOf(item).some((path) => SKILL_FILE.test(path))
+const aboutSkill = (item: Item) => item.kind === 'skill' || skillFileRead(item)
+
 /** A skill the agent opened or invoked. Supplied in its prompt is delivery, not use. */
-const skillUse = (item: Item) => item.kind === 'skill' && item.status === 'succeeded' && item.relation !== 'loaded into prompt'
+const skillUse = (item: Item) => aboutSkill(item) && item.status === 'succeeded' && item.relation !== 'loaded into prompt'
 
 /** Whether something else the agent did got what this failed call was after. */
 function madeUpFor(miss: Item, items: readonly Item[]): boolean {
-  if (miss.kind === 'skill' && items.some((item) => skillUse(item) && skillKey(item) === skillKey(miss))) return true
+  if (aboutSkill(miss) && items.some((item) => skillUse(item) && skillKey(item) === skillKey(miss))) return true
   if (!isRead(miss)) return false
   const reads = items.filter((item) => item.status === 'succeeded' && isRead(item))
   if (miss.relation === 'consulted source') return reads.some((item) => item.relation === 'consulted source' && pageOf(item) === pageOf(miss))
@@ -106,7 +116,7 @@ export function readCount(items: readonly Item[]): ReadCount {
   const notes = new Set<string>()
   for (const item of items) {
     if (item.status !== 'succeeded') continue
-    if (item.relation === 'read file' && item.kind === 'file') files.add(pathsOf(item)[0] ?? item.id)
+    if (item.relation === 'read file' && item.kind === 'file' && !skillFileRead(item)) files.add(pathsOf(item)[0] ?? item.id)
     else if (item.relation === 'consulted source') pages.add(pageOf(item))
     else if (item.relation === 'retrieved') notes.add(noteOf(item))
   }
