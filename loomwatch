@@ -84,6 +84,18 @@ loomwatch_is_running() {
   [ "$(curl -fsS --max-time 2 "$url/api/health" 2>/dev/null)" = ok ]
 }
 
+# The process listening on a port, and the folder it was started from. Empty when lsof is missing.
+listener_pid() {
+  command -v lsof >/dev/null 2>&1 && lsof -nP -t -iTCP:"$1" -sTCP:LISTEN 2>/dev/null | head -n 1
+}
+process_folder() {
+  if [ -d "/proc/$1" ]; then
+    readlink "/proc/$1/cwd" 2>/dev/null
+  else
+    lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1
+  fi
+}
+
 open_url() {
   [ "$open_browser" = 1 ] || return 0
   if is_macos; then
@@ -94,6 +106,51 @@ open_url() {
 }
 
 uses_docker_database() { [ -z "${LOOMWATCH_DATABASE_URL:-}" ]; }
+
+database_is_running() {
+  docker info >/dev/null 2>&1 && [ -n "$(docker compose ps --status running --quiet postgres 2>/dev/null)" ]
+}
+
+# Whether the database still holds what LoomWatch set up when it started, not a new, empty one.
+database_has_loomwatch_tables() {
+  local found
+  found=$(printf '%s\n' "select to_regclass('public._sqlx_migrations') is not null;" |
+    docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA' 2>/dev/null) || true
+  [ "$found" = t ]
+}
+
+# A LoomWatch answering on the port is only this one when it was started from this folder, and it
+# only works while its database runs. Another copy, among them one whose folder has since been
+# deleted, holds the port without this copy's database, so stopping here would never create it.
+already_running() {
+  local pid folder where
+  pid=$(listener_pid "$port" || true)
+  folder=
+  if [ -n "$pid" ]; then folder=$(process_folder "$pid" || true); fi
+  if [ -n "$folder" ] && [ "$folder" != "$repo_root" ]; then
+    where="from $folder"
+    [ -d "$folder" ] || where="from $folder, a folder that no longer exists"
+    fail "another copy of LoomWatch is already running at $url (process $pid, started $where). Stop it with: kill $pid
+Then run ./loomwatch again. To keep it running, start this copy on another port instead: LOOMWATCH_PORT=$((port + 1)) ./loomwatch"
+  fi
+  if uses_docker_database && ! database_is_running; then
+    # This copy outlived its database: Docker Desktop quit or restarted, as its updates do, or the
+    # container was removed. The container has no restart policy, so it is started again here, and
+    # LoomWatch reconnects on its next query, as long as the database still holds its tables.
+    say "LoomWatch is running at $url, but its database had stopped. Starting the database again."
+    wake_docker
+    start_database
+    if ! database_has_loomwatch_tables; then
+      local stop_with='./loomwatch stop'
+      if [ -n "$pid" ]; then stop_with="kill $pid"; fi
+      fail "the database LoomWatch was using is gone, and LoomWatch only sets up a new one when it starts. Stop it with: $stop_with
+Then run ./loomwatch again."
+    fi
+  fi
+  say "LoomWatch is already running at $url"
+  open_url "$url"
+  exit 0
+}
 
 docker_app() {
   for app in /Applications/Docker.app "$HOME/Applications/Docker.app" /Applications/OrbStack.app; do
@@ -303,11 +360,7 @@ build_if_needed() {
 }
 
 start() {
-  if loomwatch_is_running; then
-    say "LoomWatch is already running at $url"
-    open_url "$url"
-    exit 0
-  fi
+  if loomwatch_is_running; then already_running; fi
   if port_in_use "$port"; then
     fail "another program is using port $port. Start LoomWatch on a different port with: LOOMWATCH_PORT=$((port + 1)) ./loomwatch"
   fi
@@ -347,19 +400,30 @@ start() {
   exec "./$binary" serve --teams-root "$teams_root" --listen "127.0.0.1:$port"
 }
 
+# Sends a signal to LoomWatch's whole process group, as Ctrl-C would, so running agents stop with
+# it, then waits up to ten seconds. True when it has stopped.
+signal_and_wait() {
+  local signal=$1 pid=$2 pgid=$3
+  if [ "$pgid" = "$pid" ]; then kill "-$signal" -- "-$pid" 2>/dev/null || true; else kill "-$signal" "$pid" 2>/dev/null || true; fi
+  for _ in $(seq 1 20); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.5
+  done
+  ! kill -0 "$pid" 2>/dev/null
+}
+
 stop() {
+  failure_heading='LoomWatch could not stop'
   local pid pgid stopped=0
   pid=$(cat "$pid_file" 2>/dev/null || true)
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
     case $(ps -p "$pid" -o comm= 2>/dev/null) in
       *loomwatchd*)
-        # Signal the whole process group, as Ctrl-C would, so running agents stop with it.
         pgid=$(ps -p "$pid" -o pgid= | tr -d ' ')
-        if [ "$pgid" = "$pid" ]; then kill -INT -- "-$pid"; else kill -INT "$pid"; fi
-        for _ in $(seq 1 20); do
-          kill -0 "$pid" 2>/dev/null || break
-          sleep 0.5
-        done
+        # One started in the background ignores Ctrl-C's signal, so it is then asked to end.
+        if ! signal_and_wait INT "$pid" "$pgid" && ! signal_and_wait TERM "$pid" "$pgid"; then
+          fail "LoomWatch (process $pid) is still running. Stop it with: kill -9 $pid"
+        fi
         stopped=1
         say "Stopped LoomWatch."
         ;;
@@ -367,7 +431,13 @@ stop() {
   fi
   rm -f "$pid_file"
   if [ "$stopped" = 0 ] && loomwatch_is_running; then
-    say "LoomWatch at $url was not started by ./loomwatch. Press Ctrl-C in the window running it."
+    local other
+    other=$(listener_pid "$port" || true)
+    if [ -n "$other" ]; then
+      say "LoomWatch at $url was not started by ./loomwatch in this folder. It is process $other, from $(process_folder "$other" || true). Press Ctrl-C in the window running it, or run: kill $other"
+    else
+      say "LoomWatch at $url was not started by ./loomwatch. Press Ctrl-C in the window running it."
+    fi
   fi
 
   if uses_docker_database && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
