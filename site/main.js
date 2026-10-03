@@ -1387,24 +1387,50 @@
       el('div', { class: 'colophon' }, el('span', { text: 'Collector · Editor · You · Writer' }), el('span', { text: issue.foot || 'to Notion' })))
   }
   // The pile is a deck you sort. The chosen issue is on top and every other one is behind it in
-  // order, older first and round again to the newest, with their left edges fanned out so each can
-  // be found by hovering. Taking the top paper puts it at the bottom; taking one from behind pulls
-  // it out and lays it on top.
+  // order, older first and round again to the newest, with their edges fanned out so each can be
+  // found by pointing at it: to the left on a wide screen, upward on a narrow one, where a phone has
+  // room. Taking the top paper puts it at the bottom; taking one from behind pulls it out and lays
+  // it on top.
+  const FAN = { dx: 12, dy: 2, turn: 0.6, up: 9 }
+  const narrow = () => window.matchMedia('(max-width: 900px)').matches
   const slotOf = (i) => (issueAt - i + ISSUES.length) % ISSUES.length
   function pose(slot, out = 0) {
+    if (narrow()) {
+      if (slot === 0) return out ? `translate(0, ${-out * 0.4}px)` : 'none'
+      return `translate(0, ${-slot * FAN.up - out}px) rotate(${slot % 2 ? 0.4 : -0.4}deg)`
+    }
     if (slot === 0) return out ? `translate(0, ${-out * 0.25}px)` : 'none'
-    const [dx, dy, turn] = window.matchMedia('(max-width: 900px)').matches ? [3, 1.5, 0.35] : [12, 2, 0.6]
-    return `translate(${-slot * dx - out}px, ${slot * dy - out * 0.3}px) rotate(${-slot * turn}deg) scale(${1 - slot * 0.01})`
+    return `translate(${-slot * FAN.dx - out}px, ${slot * FAN.dy - out * 0.3}px) rotate(${-slot * FAN.turn}deg) scale(${1 - slot * 0.01})`
   }
   function layPile(except = null) {
+    const lift = narrow() ? 12 : 22
     cardEls.forEach((card, i) => {
       if (card === except) return
       const slot = slotOf(i)
       card.classList.toggle('front', slot === 0)
       card.style.zIndex = String(100 - slot)
-      card.style.transform = pose(slot, card === hovered ? 22 : 0)
+      card.style.transform = pose(slot, card === hovered ? lift : 0)
       card.style.filter = slot ? `brightness(${card === hovered ? 1 : 1 - slot * 0.03})` : 'none'
     })
+  }
+  // Which paper is under a point, worked out from where the point is along the fan rather than from
+  // what is drawn there, so drawing one paper out never hides the next one from the pointer.
+  function paperAt(x, y) {
+    const front = cardEls[issueAt]
+    const box = pile.getBoundingClientRect()
+    const left = box.left + front.offsetLeft
+    const top = box.top + front.offsetTop
+    const W = front.offsetWidth
+    const H = front.offsetHeight
+    let slot
+    if (narrow()) {
+      if (x < left || x > left + W || y > top + H) return null
+      slot = y >= top ? 0 : Math.ceil((top - y) / FAN.up)
+    } else {
+      if (y < top - 24 || y > top + H + 24 || x > left + W) return null
+      slot = x >= left ? 0 : Math.ceil((left - x) / FAN.dx)
+    }
+    return slot < ISSUES.length ? cardEls[(issueAt - slot + ISSUES.length) % ISSUES.length] : null
   }
   function renderStory() {
     const issue = ISSUES[issueAt]
@@ -1421,8 +1447,9 @@
     layPile()
     renderStory()
   }
-  // Sorting. Down: the top paper lifts off to the right and is tucked under the pile while the rest
-  // move up. Up: a paper is drawn out to the left, then laid on top while the ones above it sink.
+  // Sorting. Down: the top paper lifts off and is tucked under the pile while the rest move up. Up:
+  // a paper is drawn out, then laid on top while the ones above it sink. On a narrow screen both
+  // move up and down, so nothing slides off the side of a phone.
   function sortTo(next, how) {
     if (sorting || next === issueAt) return
     sorting = true
@@ -1433,7 +1460,9 @@
     renderStory()
     layPile(mover)
     mover.style.transition = `transform ${reduced ? 1 : 230}ms var(--ease), filter .3s var(--ease)`
-    mover.style.transform = how === 'down' ? `translate(${W * 0.38}px, -26px) rotate(6deg)` : `translate(${-W * 0.42}px, -26px) rotate(-7deg)`
+    mover.style.transform = narrow()
+      ? (how === 'down' ? 'translate(0, -46px) rotate(-1.5deg)' : `translate(0, ${-(ISSUES.length * FAN.up + 24)}px) rotate(1.5deg)`)
+      : (how === 'down' ? `translate(${W * 0.38}px, -26px) rotate(6deg)` : `translate(${-W * 0.42}px, -26px) rotate(-7deg)`)
     mover.style.filter = 'none'
     if (how === 'down') mover.style.zIndex = '150' // over the new top paper until it is tucked under
     window.setTimeout(() => {
@@ -1450,31 +1479,70 @@
     $('#issue-play').textContent = 'Read the first two weeks'
   }
 
-  // Hovering a paper shows which issue it is; one behind the top is drawn out a little to show it.
+  // Pointing at a paper shows which issue it is; one behind the top is drawn out a little. A mouse
+  // does it by hovering, a finger by sliding along the papers.
   function clearHover() {
     pileTag.hidden = true
     if (!hovered) return
     hovered = null
     layPile()
   }
-  pile.addEventListener('pointermove', (event) => {
-    if (sorting || event.pointerType === 'touch') return
-    const card = event.target.closest?.('.issue')
-    if (!card) { clearHover(); return }
+  function point(card, event, touch) {
     const behind = card === cardEls[issueAt] ? null : card
     if (behind !== hovered) { hovered = behind; layPile() }
     const i = Number(card.dataset.i)
-    pileTag.replaceChildren(el('b', { text: `No. ${i + 1}` }), el('span', { text: behind ? ISSUES[i].tag || (ISSUES[i].live ? 'Today' : 'On time') : 'Click to put it at the bottom' }))
+    const note = behind ? ISSUES[i].tag || (ISSUES[i].live ? 'Today' : 'On time') : touch ? 'Tap to put it at the bottom' : 'Click to put it at the bottom'
+    pileTag.replaceChildren(el('b', { text: `No. ${i + 1}` }), el('span', { text: note }))
     const box = pile.getBoundingClientRect()
-    pileTag.style.left = `${event.clientX - box.left}px`
-    pileTag.style.top = `${event.clientY - box.top}px`
+    pileTag.style.left = `${Math.min(box.width - 80, Math.max(80, event.clientX - box.left))}px`
+    pileTag.style.top = `${event.clientY - box.top - (touch ? 26 : 0)}px`
     pileTag.hidden = false
+  }
+  let touch = null
+  let touchedAt = 0
+  pile.addEventListener('pointerdown', (event) => {
+    event.preventDefault() // pressing never selects the words
+    if (event.pointerType !== 'touch' || sorting) return
+    const card = paperAt(event.clientX, event.clientY)
+    if (!card) return
+    touch = { id: event.pointerId, x: event.clientX, y: event.clientY, front: card === cardEls[issueAt] }
+    if (!touch.front) point(card, event, true)
   })
-  pile.addEventListener('pointerleave', clearHover)
-  pile.addEventListener('pointerdown', (event) => event.preventDefault()) // a click never selects the words
+  pile.addEventListener('pointermove', (event) => {
+    if (touch && event.pointerId === touch.id) {
+      if (touch.front) return
+      const card = paperAt(event.clientX, event.clientY)
+      if (card) point(card, event, true)
+      return
+    }
+    if (sorting || event.pointerType === 'touch') return
+    const card = paperAt(event.clientX, event.clientY)
+    if (card) point(card, event, false)
+    else clearHover()
+  })
+  pile.addEventListener('pointerup', (event) => {
+    if (!touch || event.pointerId !== touch.id) return
+    const t = touch
+    touch = null
+    const dx = event.clientX - t.x
+    const dy = event.clientY - t.y
+    if (t.front) {
+      // A swipe sorts the top paper either way; a tap is left to the click below.
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) { touchedAt = performance.now(); stopPlaying(); sortTo(dx < 0 ? older() : newer(), dx < 0 ? 'down' : 'up') }
+      return
+    }
+    // Letting go on a paper behind lays it on top.
+    const pick = hovered
+    clearHover()
+    touchedAt = performance.now()
+    if (pick) { stopPlaying(); sortTo(Number(pick.dataset.i), 'up') }
+  })
+  pile.addEventListener('pointercancel', () => { touch = null; clearHover() })
+  pile.addEventListener('pointerleave', (event) => { if (event.pointerType !== 'touch') clearHover() })
   pile.addEventListener('click', (event) => {
-    const card = event.target.closest?.('.issue')
-    if (!card || sorting) return
+    if (sorting || performance.now() - touchedAt < 500) return
+    const card = paperAt(event.clientX, event.clientY) || hovered || event.target.closest?.('.issue')
+    if (!card) return
     stopPlaying()
     const i = Number(card.dataset.i)
     if (i === issueAt) sortTo(older(), 'down')
