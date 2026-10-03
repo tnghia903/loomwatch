@@ -52,8 +52,8 @@ export interface CapabilityRef {
 }
 
 /**
- * ADR 0037: LoomWatch cannot ask the operator mid-run, so it answers every permission request an
- * agent's app makes itself, approving only what is switched on here.
+ * ADR 0037: LoomWatch answers every permission request an agent's app makes, approving by itself
+ * only what is switched on here; anything else waits for the operator during the run (ADR 0040).
  */
 export interface AgentAllow {
   /** Search the web and read web pages. */

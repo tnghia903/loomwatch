@@ -67,6 +67,7 @@ import { HandoverPanel } from './run/HandoverPanel'
 import { LifecycleStrip } from './run/LifecycleStrip'
 import { ProvenancePanel } from './run/ProvenancePanel'
 import { DeliveryLane } from './run/DeliveryLane'
+import { PermissionPrompt } from './run/PermissionPrompt'
 import { EvidenceNodeCard, MoreEvidenceCard, OutputNodeCard, PromptNodeCard, RunNodeCard } from './run/StoryNodes'
 import { ChipDot } from './ui/glyphs'
 import { SegmentThumb } from './ui/SegmentThumb'
@@ -181,7 +182,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const depth = useStore((store) => depthForZoom(store.transform[2]))
   // Every run, in every team, that is waiting on the operator (lib/story/needsYou.ts).
   const needsYou = useNeedsYou()
-  const needsYouTray = <NeedsYouTray tickets={needsYou.tickets} working={needsYou.working} onAnswer={needsYou.answer} onDismiss={needsYou.dismiss} />
+  const needsYouTray = <NeedsYouTray tickets={needsYou.tickets} working={needsYou.working} onAnswer={needsYou.answer} onPermission={needsYou.answerPermission} onDismiss={needsYou.dismiss} />
   const { resolved: theme } = useTheme()
   const [windowWidth, setWindowWidth] = useState(window.innerWidth)
   const [windowHeight, setWindowHeight] = useState(window.innerHeight)
@@ -1947,6 +1948,18 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   return (
     <CanvasActionsContext.Provider value={canvasActions}>
       <div className={shellClass} data-tour="workspace" data-tour-agents={doc.nodes.length} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME) || event.dataTransfer.types.includes(EVIDENCE_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) setLibraryDragging(false) }}>
+        {/* ADR 0040: an agent paused on a request its switches do not cover, waiting for you. */}
+        {runView && record && (record.permissionRequests?.length ?? 0) > 0 && (
+          <PermissionPrompt
+            run={record}
+            onAlwaysAllow={editable && sameTeamFile(doc.path, record.teamPath) ? (agentId, key) => {
+              doc.updateAgentAllow(agentId, key, true)
+              void doc.save()
+              const name = doc.nodes.find((node) => node.id === agentId)?.data.agent.name ?? agentId
+              setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === key)?.label.toLowerCase() ?? key} from now on.`)
+            } : undefined}
+          />
+        )}
         {deliveryShown ? (
           <DeliveryLane
             key={activeRunId ?? 'new-run'}

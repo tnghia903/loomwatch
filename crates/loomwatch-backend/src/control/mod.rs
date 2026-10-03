@@ -577,6 +577,7 @@ fn assistant_spec(
         tools: vec![control_tool(&control.mcp_url(), token)],
         // The Ask assistant keeps its own rule: only its Control tools (ADR 0033).
         permissions: None,
+        asker: None,
     }
 }
 

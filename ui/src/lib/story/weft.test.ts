@@ -143,7 +143,7 @@ describe('buildReceipt', () => {
       ['News Collector asked permission for “Mystery tool”, and it was refused, and carried on without it', null, null],
     ])
     expect(receipt.lines[1].evidenceId).toBe('p1')
-    expect(receipt.checks.map((line) => line.text)).toContain('LoomWatch can’t ask you during a run, so it says no to anything an agent isn’t allowed to do. Change what each agent may do in its panel in Build.')
+    expect(receipt.checks.map((line) => line.text)).toContain('What an agent isn’t allowed to do waits for your answer during a run. Requests you denied, or that nobody answered in time, were declined. Change what each agent may do in its panel in Build.')
 
     // Switched on since: the same refusal now says so instead of offering the switch again.
     expect(lines({ web: true }).lines[1]).toMatchObject({ allow: 'web', allowed: true })

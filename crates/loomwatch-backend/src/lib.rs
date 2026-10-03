@@ -350,16 +350,12 @@ async fn run_team_mode(
     let cwd = workspace
         .as_ref()
         .map_or(declared_cwd, |workspace| workspace.cwd.clone());
-    let permissions =
-        permissions::PermissionPolicy::for_agent(agent.allow, &cwd, &composed.delivery);
-    let spec = ProcessSpec {
-        cmd: agent.spawn.cmd.clone(),
-        args: agent.spawn.args.clone(),
-        env: agent.spawn.env.clone(),
-        cwd,
-        tools: composed.delivery.tools.clone(),
-        permissions: Some(permissions),
-    };
+    let asker = permissions::PermissionAsker::for_run(
+        lineage.operator.as_ref(),
+        event_log.as_ref().map(EventLog::session_id),
+        agent,
+    );
+    let spec = agent_process_spec(agent, cwd, &composed.delivery, asker);
 
     let process = AcpProcess::spawn(&spec)
         .with_context(|| format!("failed to spawn ACP harness for agent {}", agent.id))?;
@@ -581,7 +577,13 @@ async fn run_pipeline_nodes(
         if let Some(previous) = parked.take() {
             previous.release(archive, exit_timeout).await?;
         }
-        let (spec, required_skills, delivery) = node_process_spec(team, team_path, agent, memory)?;
+        let (mut spec, required_skills, delivery) =
+            node_process_spec(team, team_path, agent, memory)?;
+        spec.asker = permissions::PermissionAsker::for_run(
+            lineage.operator.as_ref(),
+            shared_log.as_ref().map(EventLog::session_id),
+            agent,
+        );
         let mut node_prompt = stage_task(
             team,
             agent_id,
@@ -1735,6 +1737,26 @@ impl ParkedStage {
 /// Selection step 2: **only** when the run was started from one, and only in the packet of the
 /// stage it belongs to. A checkpoint supplied to a stage that did not write it would read as
 /// direction from an agent, which §9's trust boundary forbids.
+/// The process a run agent runs in: its app, its folder, what was delivered to it, its switches
+/// (ADR 0037) and who it asks about anything else (ADR 0040).
+fn agent_process_spec(
+    agent: &config::AgentConfig,
+    cwd: PathBuf,
+    delivery: &delivery::Delivery,
+    asker: Option<permissions::PermissionAsker>,
+) -> ProcessSpec {
+    let permissions = permissions::PermissionPolicy::for_agent(agent.allow, &cwd, delivery);
+    ProcessSpec {
+        cmd: agent.spawn.cmd.clone(),
+        args: agent.spawn.args.clone(),
+        env: agent.spawn.env.clone(),
+        cwd,
+        tools: delivery.tools.clone(),
+        permissions: Some(permissions),
+        asker,
+    }
+}
+
 fn supply_checkpoint(packet: &mut memory::ContextPacket, lineage: &RunLineage, agent_id: &str) {
     let Some((checkpoint, stale)) = lineage.checkpoint.as_ref() else {
         return;
@@ -1786,6 +1808,7 @@ fn node_process_spec(
             cwd,
             tools: delivery.tools.clone(),
             permissions: Some(permissions),
+            asker: None,
         },
         skills,
         delivery,

@@ -992,6 +992,12 @@ impl TeamBus {
             cwd,
             tools: delivery.tools,
             permissions: Some(permissions),
+            // A helper asks the same person its run does (ADR 0040).
+            asker: crate::permissions::PermissionAsker::for_run(
+                self.state.operator.as_ref(),
+                Some(event_log.session_id()),
+                agent,
+            ),
         };
         let mut packet = self.state.memory.packet_for(agent)?;
         // A delegated helper's lineage is the server-owned `delegation_path` on its caller's
@@ -2510,6 +2516,7 @@ mod tests {
             cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
             tools: Vec::new(),
             permissions: None,
+            asker: None,
         };
         let mut process = AcpProcess::spawn(&spec)?;
         let event_log = EventLog::new(archive.clone(), "live-ask-run".into());

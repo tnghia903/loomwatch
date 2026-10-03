@@ -716,6 +716,7 @@ async fn get_harness_models(
         cwd: state.teams_root.clone(),
         tools: Vec::new(),
         permissions: None,
+        asker: None,
     };
     let discovered = discover_models(&spec).await;
     state

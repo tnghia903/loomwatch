@@ -402,6 +402,12 @@ impl OperatorDesk {
         }
     }
 
+    /// The registry behind the desk, for the permission waiting room (ADR 0040), which needs only
+    /// the narrow `*_permission_*` methods.
+    pub(crate) fn registry(&self) -> &RunRegistry {
+        &self.registry
+    }
+
     /// The `operator_questions` table, when this daemon has one.
     #[must_use]
     pub fn questions(&self) -> Option<&OperatorQuestions> {

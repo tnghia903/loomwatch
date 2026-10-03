@@ -170,7 +170,7 @@ export function buildReceipt(input: ReceiptInput): Receipt {
   for (const alert of input.projection.attention) {
     checks.push({ tone: 'warn', text: alert.message, agentId: alert.agentId, evidenceId: alert.evidenceId })
   }
-  if (anyRefused) checks.push({ tone: 'warn', text: 'LoomWatch can’t ask you during a run, so it says no to anything an agent isn’t allowed to do. Change what each agent may do in its panel in Build.', aside: true })
+  if (anyRefused) checks.push({ tone: 'warn', text: 'What an agent isn’t allowed to do waits for your answer during a run. Requests you denied, or that nobody answered in time, were declined. Change what each agent may do in its panel in Build.', aside: true })
   if (terminal && !input.answered) checks.push({ tone: 'bad', text: 'The run ended without an answer' })
   const gaps = Object.entries(input.projection.coverage).filter(([, value]) => value.level !== 'complete' && value.reason !== 'none_recorded')
   if (gaps.length) checks.push({ tone: 'warn', text: `Not everything was recorded: ${gaps.map(([key]) => key).join(', ')}` })

@@ -17,7 +17,7 @@ describe('AgentPermissions', () => {
     expect(screen.getByRole('button', { name: /Edit files/ })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: /Run commands/ })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByText('It can search and read web pages.')).toBeInTheDocument()
-    expect(screen.getByText(/can’t ask you during a run/)).toBeInTheDocument()
+    expect(screen.getByText(/waits for your answer during a run/)).toBeInTheDocument()
   })
 
   it('flips one switch at a time, and does nothing when the team is read-only', () => {

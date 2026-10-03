@@ -8,16 +8,16 @@ export interface AgentPermissionsProps {
 }
 
 /**
- * ALLOWED WITHOUT ASKING (ADR 0037). LoomWatch cannot ask the operator in the middle of a run, so
- * it answers every permission request the agent's app makes itself: these switches are what it
- * says yes to. Everything defaults to off, and what is connected to the agent (its tools, its
- * folders, the team's own handovers) never needs a switch.
+ * ALLOWED WITHOUT ASKING (ADR 0037). LoomWatch answers every permission request the agent's app
+ * makes: these switches are what it says yes to by itself, and anything else waits for the
+ * operator's answer during the run (ADR 0040). Everything defaults to off, and what is connected to
+ * the agent (its tools, its folders, the team's own handovers) never needs a switch.
  */
 export function AgentPermissions({ agent, readOnly = false, onChange }: AgentPermissionsProps) {
   const app = actsWithoutAsking(agent)
   return (
     <div className="agent-context agent-permissions">
-      <div className="t-meta agent-context-note">LoomWatch can’t ask you during a run, so it says no to anything else this agent asks to do.</div>
+      <div className="t-meta agent-context-note">Anything else this agent asks to do waits for your answer during a run, and is declined if nobody answers within 10 minutes. Scheduled runs decline it straight away.</div>
       {ALLOW_SWITCHES.map(({ key, label, on, off }) => {
         const active = agent.allow?.[key] === true
         return (

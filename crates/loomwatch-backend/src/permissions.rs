@@ -1,13 +1,15 @@
 //! `LoomWatch` decides what a run's agents may do without asking (ADR 0037).
 //!
-//! An app asks before it acts only when its own settings say to, and `LoomWatch` cannot ask the
-//! operator in the middle of a run. So each run agent's session is put in its app's ask-first mode
-//! (`acp.rs`, `ensure_ask_first`), and every `session/request_permission` it sends is answered here
-//! by one policy, the same for every app: what the operator connected to the agent, plus the
-//! switches in its `allow:` block. Anything else is declined, as every request was before.
+//! An app asks before it acts only when its own settings say to. So each run agent's session is put
+//! in its app's ask-first mode (`acp.rs`, `ensure_ask_first`), and every `session/request_permission`
+//! it sends is answered here by one policy, the same for every app: what the operator connected to
+//! the agent, plus the switches in its `allow:` block. Anything else is put to the operator of the
+//! run while the app waits (ADR 0040, [`PermissionAsker`]), and declined when nobody can be asked
+//! or nobody answers.
 
 use std::path::{Component, Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::config::AgentAllow;
@@ -142,6 +144,281 @@ impl PermissionPolicy {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// Asking the operator (ADR 0040)
+// ---------------------------------------------------------------------------------------
+
+/// How long a request waits for the operator before it is declined. The app is blocked on the
+/// answer and the run with it, so a person who walked away costs at most this.
+pub const PERMISSION_WAIT: std::time::Duration = std::time::Duration::from_mins(10);
+/// Longest `detail` a request carries; the rest is cut with an ellipsis.
+const DETAIL_CHARS: usize = 300;
+
+/// One request an agent is waiting on the operator for, as the run record carries it
+/// (`permissionRequests`). Live only: it exists while the app is blocked on the answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionRequest {
+    pub id: String,
+    /// The agent asking.
+    pub agent: String,
+    /// Its display name.
+    pub name: String,
+    /// What the app calls the action — "Web search", "Bash: npm test".
+    pub title: String,
+    /// The app's ACP tool kind: `fetch`, `execute`, `edit`, `read`, …
+    pub kind: String,
+    /// The `allow:` switch that would let it through without asking: `web`, `commands` or `edits`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub switch: Option<String>,
+    /// The query, command, address or path, when the request names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// RFC 3339.
+    pub since: String,
+    /// RFC 3339: when it is declined if nobody answers.
+    pub expires_at: String,
+    /// What "Allow for this run" covers ([`grant_scope`]). Internal: the card shows `kind`.
+    #[serde(skip)]
+    pub scope: String,
+}
+
+/// What the operator chose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionDecision {
+    /// This request only.
+    AllowOnce,
+    /// This request and every later one of the same kind from this agent, until the run ends.
+    AllowRun,
+    Deny,
+}
+
+/// How a request the policy declined was finally answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AskOutcome {
+    /// Nobody could be asked: a routine, a finished run, or no run at all. Declined.
+    NotAsked,
+    /// The operator allowed this kind for the rest of the run earlier; allowed without asking.
+    AllowedForRun,
+    Answered(PermissionDecision),
+    /// Nobody answered within [`PERMISSION_WAIT`]. Declined.
+    TimedOut,
+}
+
+impl AskOutcome {
+    #[must_use]
+    pub fn allows(self) -> bool {
+        matches!(
+            self,
+            Self::AllowedForRun
+                | Self::Answered(PermissionDecision::AllowOnce | PermissionDecision::AllowRun)
+        )
+    }
+
+    /// The word the archive records for this outcome.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotAsked => "not_asked",
+            Self::AllowedForRun => "allowed_for_run",
+            Self::Answered(PermissionDecision::AllowOnce) => "allow_once",
+            Self::Answered(PermissionDecision::AllowRun) => "allow_run",
+            Self::Answered(PermissionDecision::Deny) => "deny",
+            Self::TimedOut => "timed_out",
+        }
+    }
+}
+
+/// The switch a tool kind falls under, as `PermissionPolicy::approves` reads it.
+#[must_use]
+pub fn switch_for(kind: &str) -> Option<&'static str> {
+    match kind {
+        "fetch" => Some("web"),
+        "execute" => Some("commands"),
+        "edit" => Some("edits"),
+        _ => None,
+    }
+}
+
+/// The MCP tool a request is about — `server.tool`, or the app's title for it — or `None` for one
+/// of the app's own tools. Apps label MCP calls with a broad kind (Codex calls every one of them
+/// `execute`, a shell command's kind), so the kind alone cannot tell them apart.
+fn mcp_tool(request: &Value) -> Option<String> {
+    let call = request.pointer("/params/toolCall")?;
+    let text = |pointer: &str| call.pointer(pointer).and_then(Value::as_str).map(str::trim);
+    if let (Some(server), Some(tool)) = (text("/rawInput/server"), text("/rawInput/tool"))
+        && !server.is_empty()
+        && !tool.is_empty()
+    {
+        return Some(format!("{server}.{tool}"));
+    }
+    let flagged = request.pointer("/params/_meta/is_mcp_tool_approval") == Some(&Value::Bool(true))
+        || call.pointer("/_meta/is_mcp_tool_call") == Some(&Value::Bool(true));
+    let title = text("/title").unwrap_or_default();
+    let titled =
+        title.starts_with("mcp__") || title.starts_with("mcp.") || title.ends_with(" MCP Server)");
+    (flagged || titled).then(|| title.to_owned())
+}
+
+/// What "Allow for this run" covers for this request: the tool kind for the app's own tools — every
+/// web search, every command — but one MCP tool exactly, so allowing a tool never allows every
+/// command that happens to share its kind.
+#[must_use]
+pub fn grant_scope(request: &Value) -> String {
+    mcp_tool(request).map_or_else(
+        || {
+            request
+                .pointer("/params/toolCall/kind")
+                .and_then(Value::as_str)
+                .unwrap_or("other")
+                .to_owned()
+        },
+        |tool| format!("mcp:{tool}"),
+    )
+}
+
+/// The parts of a `session/request_permission` a person needs to decide: title, kind and the one
+/// concrete thing it would touch.
+#[must_use]
+pub fn describe(request: &Value) -> (String, String, Option<String>) {
+    let call = request.pointer("/params/toolCall");
+    let text = |pointer: &str| {
+        call.and_then(|call| call.pointer(pointer))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+    };
+    let kind = text("/kind").unwrap_or("other").to_owned();
+    let title = text("/title").unwrap_or("An action").to_owned();
+    let detail = [
+        "/rawInput/command",
+        "/rawInput/query",
+        "/rawInput/url",
+        "/rawInput/file_path",
+        "/rawInput/path",
+        "/locations/0/path",
+    ]
+    .iter()
+    .find_map(|pointer| text(pointer))
+    .filter(|detail| !title.contains(detail))
+    .map(|detail| {
+        if detail.chars().count() > DETAIL_CHARS {
+            format!("{}…", detail.chars().take(DETAIL_CHARS).collect::<String>())
+        } else {
+            detail.to_owned()
+        }
+    });
+    (title, kind, detail)
+}
+
+/// Who an agent's declined requests are put to: the operator of the run it belongs to (ADR 0040).
+/// Part of [`crate::acp::ProcessSpec`], so a respawned stage keeps asking the same run.
+#[derive(Clone, Debug)]
+pub struct PermissionAsker {
+    desk: crate::operator::OperatorDesk,
+    run_id: String,
+    agent: String,
+    name: String,
+}
+
+impl PermissionAsker {
+    #[must_use]
+    pub fn new(desk: crate::operator::OperatorDesk, run_id: &str, agent: &str, name: &str) -> Self {
+        Self {
+            desk,
+            run_id: run_id.to_owned(),
+            agent: agent.to_owned(),
+            name: if name.trim().is_empty() { agent } else { name }.to_owned(),
+        }
+    }
+
+    /// The asker for `agent` of the run `run_id`, when the run has an operator to ask: the CLI path
+    /// has neither a desk nor a person, so it keeps declining at once.
+    #[must_use]
+    pub fn for_run(
+        desk: Option<&crate::operator::OperatorDesk>,
+        run_id: Option<&str>,
+        agent: &crate::config::AgentConfig,
+    ) -> Option<Self> {
+        Some(Self::new(desk?.clone(), run_id?, &agent.id, &agent.name))
+    }
+
+    /// Whether the operator already allowed what `request` asks ([`grant_scope`]) for this agent for
+    /// the rest of the run.
+    #[must_use]
+    pub fn allowed_for_run(&self, request: &Value) -> bool {
+        self.desk
+            .registry()
+            .allowed_for_run(&self.run_id, &self.agent, &grant_scope(request))
+    }
+
+    /// Put one declined `session/request_permission` on the run record for the operator to answer.
+    /// `None` when nobody can be asked — a routine, or a run that has ended — and the request is
+    /// declined at once, as every request was before ADR 0040.
+    #[must_use]
+    pub fn open(&self, request: &Value) -> Option<OpenRequest> {
+        let (title, kind, detail) = describe(request);
+        let now = chrono::Utc::now();
+        let wait = chrono::Duration::from_std(PERMISSION_WAIT).unwrap_or_default();
+        let stamp = |at: chrono::DateTime<chrono::Utc>| {
+            at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        };
+        let request = PermissionRequest {
+            id: uuid::Uuid::new_v4().to_string(),
+            agent: self.agent.clone(),
+            name: self.name.clone(),
+            // An MCP tool is not what any switch is for, whatever kind the app gives it.
+            switch: mcp_tool(request)
+                .is_none()
+                .then(|| switch_for(&kind))
+                .flatten()
+                .map(str::to_owned),
+            scope: grant_scope(request),
+            title,
+            kind,
+            detail,
+            since: stamp(now),
+            expires_at: stamp(now + wait),
+        };
+        let answer = self
+            .desk
+            .registry()
+            .open_permission_request(&self.run_id, request.clone())?;
+        Some(OpenRequest {
+            asker: self.clone(),
+            request,
+            answer,
+        })
+    }
+}
+
+/// A request waiting on the run record for the operator's answer.
+pub struct OpenRequest {
+    asker: PermissionAsker,
+    pub request: PermissionRequest,
+    answer: tokio::sync::oneshot::Receiver<PermissionDecision>,
+}
+
+impl OpenRequest {
+    /// Wait for the operator, at most [`PERMISSION_WAIT`], then take the request off the record.
+    /// The app is blocked on this answer, so nothing races the ACP request timeout: that only
+    /// runs while a line is being awaited.
+    pub async fn wait(self) -> AskOutcome {
+        let outcome = match tokio::time::timeout(PERMISSION_WAIT, self.answer).await {
+            Ok(Ok(decision)) => AskOutcome::Answered(decision),
+            // The waiting room dropped the request: the run ended while it was open.
+            Ok(Err(_)) => AskOutcome::NotAsked,
+            Err(_) => AskOutcome::TimedOut,
+        };
+        self.asker
+            .desk
+            .registry()
+            .close_permission_request(&self.asker.run_id, &self.request.id);
+        outcome
+    }
+}
+
 /// `path` with `.` and `..` folded away and the symlinks in its existing part resolved, so
 /// `/var/x` and `/private/var/x` compare equal, `folder/../elsewhere` is not inside `folder`, and a
 /// link inside the folder that points out of it is judged by where it points. A file about to be
@@ -236,6 +513,30 @@ mod tests {
         commands: true,
     };
 
+    /// ADR 0040: "Allow for this run" covers a kind for the app's own tools, but exactly one MCP
+    /// tool, however the app labels it. Codex calls every MCP tool `execute`, so allowing a tool for
+    /// the run must not allow every command, and no switch is offered for it.
+    #[test]
+    fn a_run_long_grant_covers_one_mcp_tool_never_every_command() {
+        let ask = |call: Value| json!({"params": {"toolCall": call}});
+        let command =
+            ask(json!({"kind": "execute", "title": "Bash", "rawInput": {"command": "ls"}}));
+        assert_eq!(grant_scope(&command), "execute");
+        assert_eq!(mcp_tool(&command), None);
+
+        let codex = ask(
+            json!({"kind": "execute", "title": "mcp.notion.search", "rawInput": {"server": "notion", "tool": "search", "arguments": {}}}),
+        );
+        assert_eq!(grant_scope(&codex), "mcp:notion.search");
+        let codex_flagged = json!({"params": {"_meta": {"is_mcp_tool_approval": true}, "toolCall": {"kind": "execute", "title": "Run search"}}});
+        assert_eq!(grant_scope(&codex_flagged), "mcp:Run search");
+        let claude = ask(json!({"kind": "other", "title": "mcp__notion__search"}));
+        assert_eq!(grant_scope(&claude), "mcp:mcp__notion__search");
+        let gemini = ask(json!({"kind": "execute", "title": "search (notion MCP Server)"}));
+        assert_eq!(grant_scope(&gemini), "mcp:search (notion MCP Server)");
+        assert_eq!(grant_scope(&ask(json!({"title": "?"}))), "other");
+        assert_ne!(grant_scope(&codex), grant_scope(&command));
+    }
     #[test]
     fn nothing_switched_on_declines_web_commands_and_edits() {
         let scratch = Scratch::new();
