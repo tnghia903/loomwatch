@@ -129,13 +129,32 @@ describe('Inspector context', () => {
     const place = { summary: 'Step 2 of 3 · after Researcher · hands its work to Writer.', final: false, canStart: false }
     const { rerender } = render(<Inspector {...renderInspectorProps({ place })} />)
     expect(screen.getByText(place.summary)).toBeInTheDocument()
-    expect(screen.getByText('The agent is told this at the start of every run.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'About Context' }))
+    expect(screen.getByText('The agent is told its place in the team at the start of every run.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Make this the starting agent' })).not.toBeInTheDocument()
 
     const props = renderInspectorProps({ place: { ...place, canStart: true } })
     rerender(<Inspector {...props} />)
     fireEvent.click(screen.getByRole('button', { name: 'Make this the starting agent' }))
     expect(props.onPromoteEntrypoint).toHaveBeenCalledOnce()
+  })
+
+  // A pipeline step is drawn as a thread; the sentence stays for screen readers.
+  it('draws a step as the thread from who hands it work to who it hands work to', () => {
+    const place = {
+      summary: 'Step 1 of 3 · receives your request first · hands its work to your review.', final: false, canStart: false,
+      flow: { step: 1, of: 3, from: [], to: [{ name: 'your review', you: true }] },
+    }
+    const { container } = render(<Inspector {...renderInspectorProps({ place })} />)
+    const knots = [...container.querySelectorAll('.place-thread .knot')].map((knot) => [knot.className.replace('knot ', ''), knot.textContent])
+    expect(knots).toEqual([['you', 'Your request'], ['self', 'Step 1 of 3'], ['you', 'Your review']])
+    expect(screen.getByText(place.summary)).toHaveClass('visually-hidden')
+  })
+
+  it('ends the last step at the team’s output', () => {
+    const place = { summary: 'Step 3 of 3 · after Writer. Its answer is the team’s output.', final: true, canStart: false, flow: { step: 3, of: 3, from: [{ name: 'Writer', you: false }], to: [] } }
+    const { container } = render(<Inspector {...renderInspectorProps({ place })} />)
+    expect(container.querySelector('.place-thread')).toHaveTextContent('WriterStep 3 of 3The team’s output')
   })
 
   // `allowRecruiting` is read only in pipeline mode (team_bus::refuse_by_mode); in team mode the
@@ -164,9 +183,11 @@ describe('Inspector context', () => {
     expect(props.onRemoveCapability).toHaveBeenCalledWith({ kind: 'knowledge', name: 'loomwatch project' })
   })
 
-  it('says how to connect something when nothing is', () => {
+  it('says how to connect something when nothing is, one click away', () => {
     renderInspector()
-    expect(screen.getByText(/Nothing connected\. Drag a skill, tool, folder or file from the add panel onto this agent/)).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Connected to this agent' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'About Context' }))
+    expect(screen.getByText(/Drag a skill, tool, folder or file from the add panel onto this agent/)).toBeInTheDocument()
   })
 
   it('never offers a disconnect in read-only mode', () => {
@@ -185,7 +206,7 @@ describe('Inspector memory toggles', () => {
     const props = renderInspector({ node: withMemory({ brief: false }), briefCount: 2 })
     const toggle = screen.getByRole('button', { name: /Team Brief/ })
     expect(toggle).toHaveAttribute('aria-pressed', 'false')
-    expect(toggle).toHaveTextContent('Not supplied — 2 entries left out')
+    expect(toggle).toHaveTextContent('not supplied, 2 entries left out')
 
     fireEvent.click(toggle)
 
@@ -207,6 +228,7 @@ describe('Inspector memory toggles', () => {
   it('offers no switch over a Brief that does not exist, and says so', () => {
     renderInspector({ briefCount: 0 })
     expect(screen.queryByRole('button', { name: /Team Brief/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'About Context' }))
     expect(screen.getByText(/No team Brief yet/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Work in this folder/ })).not.toBeInTheDocument()
   })
@@ -234,6 +256,8 @@ describe('Inspector memory toggles', () => {
     renderInspector({ briefCount: 1, node: { ...node, data: { ...node.data, agent: { ...node.data.agent, capabilities: [{ kind: 'skill', name: 'claude-design' }] } } } })
     expect(screen.queryByRole('button', { name: /Work in this folder/ })).not.toBeInTheDocument()
     expect(screen.getByText('Its own folder')).toBeInTheDocument()
+    expect(screen.getByText('Made for it, because something is connected.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'About Works in' }))
     expect(screen.getByText(/Something is connected/)).toBeInTheDocument()
   })
 
@@ -293,6 +317,8 @@ describe('Inspector works in', () => {
   it('says an editing agent beside its team file gets its own folder', () => {
     renderInspector({ node: withSpawn({}, { allow: { edits: true } }) })
     expect(screen.getByText('Its own folder')).toBeInTheDocument()
+    expect(screen.getByText('Made for it, because it can edit files.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'About Works in' }))
     expect(screen.getByText(/never changes your team files/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Choose folder…' })).toBeInTheDocument()
   })

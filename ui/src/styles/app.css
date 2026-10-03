@@ -561,12 +561,69 @@ textarea.input { padding: 6px var(--sp-3); resize: vertical; min-height: 84px; }
 .agent-context { display: flex; flex-direction: column; gap: var(--sp-3); color: var(--color-ink-2); }
 .agent-context-place { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
 .agent-context-place .t-body { color: var(--color-ink); }
-.agent-context-note, .agent-context-empty { color: var(--color-ink-3); }
+.agent-context-empty { color: var(--color-ink-3); }
+.agent-context-warning { color: var(--color-accent); }
 .agent-context-place .link { margin-top: var(--sp-1); font-size: 12px; }
-.agent-context-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.agent-context-list li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: var(--sp-2); align-items: start; }
-.agent-context-list li > svg { margin-top: 3px; color: var(--color-ink-3); }
-.agent-context-list .iconbtn { width: 22px; height: 22px; }
+/* A section heading with its explanation one click away (SectionHead): the panels show state,
+   and the sentences that say why open under the heading. */
+.section-head { display: flex; align-items: center; gap: 6px; }
+.section-head > .zone-head { flex: 1; }
+.explain-toggle { display: inline-grid; place-items: center; width: 18px; height: 18px; margin: -3px 0; padding: 0; border: 0; border-radius: var(--r-full); background: none; color: var(--color-ink-3); cursor: pointer; opacity: .75; }
+.explain-toggle:hover, .explain-toggle:focus-visible { color: var(--color-ink); opacity: 1; }
+.explain-toggle.on { color: var(--color-accent); opacity: 1; }
+.explain-text > div + div { margin-top: 6px; }
+.explain-text { display: block; padding: 8px 10px; border-left: 2px solid color-mix(in srgb, var(--color-accent) 50%, transparent); border-radius: 0 var(--r-xs) var(--r-xs) 0; background: color-mix(in srgb, var(--color-ink) 4%, transparent); color: var(--color-ink-2); font: 400 12px/1.5 var(--font-sans); letter-spacing: normal; text-transform: none; user-select: text; -webkit-user-select: text; }
+.explain-text b { color: var(--color-ink); font-weight: 500; }
+/* A pipeline step as a short thread: who hands it work, this step, who it hands work to. You wear
+   the operator's dashed gold ring, as on the canvas. */
+.place-thread { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.place-thread .knot { position: relative; display: flex; align-items: center; gap: 9px; min-height: 22px; color: var(--color-ink-3); font: 400 12px/16px var(--font-sans); }
+.place-thread .knot i { flex: none; box-sizing: border-box; width: 9px; height: 9px; margin-left: 2px; border: 1.5px solid var(--color-ink-3); border-radius: var(--r-full); }
+.place-thread .knot:not(:last-child)::after { content: ""; position: absolute; left: 6px; top: 15.5px; width: 1px; height: 13px; background: color-mix(in srgb, var(--color-ink) 22%, transparent); }
+.place-thread .knot.you i { border-style: dashed; border-color: var(--color-accent); }
+.place-thread .knot.output i { border-radius: 2px; }
+.place-thread .knot.self { color: var(--color-ink); font-weight: 550; }
+.place-thread .knot.self i { width: 11px; height: 11px; margin-left: 1px; border: 0; background: var(--color-accent-fill); box-shadow: 0 0 0 3px var(--color-accent-tint); }
+/* GIVEN: one chip per thing the agent is given, dashed like its card on the canvas. */
+.context-given { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.context-label { margin-right: 2px; color: var(--color-ink-3); }
+.given-chips { display: contents; list-style: none; }
+.given-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-height: 24px; box-sizing: border-box; padding: 0 9px; border: 1px dashed color-mix(in srgb, var(--color-ink) 28%, transparent); border-radius: var(--r-full); background: none; color: var(--color-ink-2); font: 500 12px/1 var(--font-sans); }
+.given-chip > svg { flex: none; color: var(--color-ink-3); }
+.given-name { min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.given-remove { display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; margin-right: -5px; padding: 0; border: 0; border-radius: var(--r-full); background: none; color: var(--color-ink-3); cursor: pointer; }
+.given-remove:hover, .given-remove:focus-visible { background: var(--color-accent-tint); color: var(--color-ink); }
+.given-chip.missing { border-color: color-mix(in srgb, var(--color-accent) 60%, transparent); }
+.given-chip.missing > svg { color: var(--color-accent); }
+.given-chip.toggle { border-style: solid; cursor: pointer; }
+.given-chip.toggle.on { border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); background: var(--color-accent-tint); color: var(--color-accent); }
+.given-chip.toggle.on > svg { color: var(--color-accent); }
+.given-chip.toggle:disabled { cursor: default; opacity: .7; }
+.given-count { color: var(--color-ink-3); font-weight: 400; }
+.given-chip.toggle.on .given-count { color: inherit; opacity: .75; }
+.given-chip.add { border-color: color-mix(in srgb, var(--color-accent) 35%, transparent); color: var(--color-accent); cursor: pointer; }
+.given-chip.add > svg { color: inherit; }
+.given-chip.add:hover:not(:disabled) { background: var(--color-accent-tint); }
+.given-chip.add:disabled { border-color: var(--color-hairline); color: var(--color-ink-3); cursor: default; }
+.given-none { color: var(--color-ink-3); }
+/* WORKS IN: the folder as one object, with the one consequence worth knowing under it. */
+.work-folder-card { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 2px var(--sp-2); padding: var(--sp-2) 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: color-mix(in srgb, var(--color-ink) 3%, transparent); }
+.work-folder-card > svg { margin-top: 2px; color: var(--color-accent); }
+.work-folder-card .t-mono-sm { color: var(--color-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-folder-gist { grid-column: 2; margin-top: 3px; color: var(--color-ink-3); }
+.agent-work-folder.needs .work-folder-card { border-color: var(--color-accent); }
+.agent-work-folder.error .work-folder-card { border-color: var(--color-alert); }
+/* ALLOWED WITHOUT ASKING: three tiles that each say what happens, "Asks you" or "Allowed". */
+.allow-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.allow-tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; padding: 9px 4px 7px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: none; color: var(--color-ink-3); font: inherit; text-align: center; cursor: pointer; }
+.allow-tile:hover:not(:disabled) { border-color: color-mix(in srgb, var(--color-ink) 30%, transparent); color: var(--color-ink-2); }
+.allow-tile:disabled { cursor: default; opacity: .7; }
+.allow-tile-name { color: var(--color-ink); font: 500 12px/1.2 var(--font-sans); }
+.allow-tile-state { color: var(--color-ink-3); font: 400 10.5px/1.2 var(--font-sans); }
+.allow-tile.on { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-accent); }
+.allow-tile.on .allow-tile-state { color: var(--color-accent); }
+.allow-tile-tick { position: absolute; top: 5px; right: 5px; color: var(--color-accent); }
+.allow-consequences { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); color: var(--color-ink-3); }
 .agent-context-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .agent-context-name b { color: var(--color-ink); font-weight: 500; overflow-wrap: anywhere; }
 .agent-context-name .t-meta { color: var(--color-ink-3); }
@@ -576,9 +633,6 @@ textarea.input { padding: 6px var(--sp-3); resize: vertical; min-height: 84px; }
 .agent-context-add .link:disabled { color: var(--color-ink-3); cursor: default; }
 .agent-context-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); color: var(--color-ink-2); }
 .agent-context-notes .failed { color: var(--color-alert); }
-.agent-work-folder-row { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: var(--sp-2); align-items: start; }
-.agent-work-folder-row > svg { margin-top: 3px; color: var(--color-ink-3); }
-.agent-work-folder-row .t-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder-picker-scrim { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: var(--sp-4); background: color-mix(in srgb, var(--color-ground) 55%, transparent); }
 .folder-picker.pop { position: relative; z-index: auto; width: min(560px, 100%); max-height: min(640px, calc(100dvh - 32px)); padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-3); }
 .folder-picker h2 { margin: 0; color: var(--color-ink); }

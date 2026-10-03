@@ -64,6 +64,15 @@ span.story-schedule { cursor: default; }
 .palette-hint { margin: 4px 6px 8px; font-size: 11px; line-height: 1.45; color: var(--color-ink-3); }
 .palette-hint b { font-weight: 600; color: var(--color-ink-2); }
 .palette-problem { color: var(--color-alert); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Each group says what it is behind its heading's "?" (SectionHead), and an empty one is a single
+   dashed slot shaped like the row that will fill it. */
+.node-palette .section-head { gap: 4px; padding-bottom: 8px; }
+.node-palette .section-head > h3 { padding: 0 0 0 5px; }
+.node-palette .explain-text { margin: 0 4px 8px; padding: 7px 9px; font-size: 11px; line-height: 1.45; }
+.palette-empty { display: flex; align-items: center; gap: 7px; margin: 0 2px; padding: 9px 10px; border: 1px dashed color-mix(in srgb, var(--color-ink) 18%, transparent); border-radius: 5px; color: var(--color-ink-3); font-size: 11px; line-height: 1.2; }
+.palette-empty svg { flex: none; opacity: .8; }
+.palette-foot svg { flex: none; }
+.node-palette .palette-foot { display: flex; align-items: center; gap: 5px; }
 
 /* "Save as job" in the agent panel. Its notes are plain help text, not the panel's gold callouts. */
 .save-job { display: grid; gap: 6px; }

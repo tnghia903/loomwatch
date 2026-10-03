@@ -27,7 +27,15 @@ describe('agentPlace', () => {
       summary: 'Step 2 of 4 · after Researcher · hands its work to your review.',
       final: false,
       canStart: false,
+      flow: { step: 2, of: 4, from: [{ name: 'Researcher', you: false }], to: [{ name: 'your review', you: true }] },
     })
+  })
+
+  // The panel draws the chain from `flow`, so it must say the same as the sentence.
+  it('gives the panel the same chain the sentence describes', () => {
+    expect(pipeline('research', chain).flow).toEqual({ step: 1, of: 4, from: [], to: [{ name: 'Fact-checker', you: false }] })
+    expect(pipeline('write', chain).flow).toMatchObject({ from: [{ name: 'your review', you: true }], to: [] })
+    expect(pipeline('write', [{ from: 'research', to: 'check' }]).flow).toBeUndefined()
   })
 
   it('says the first step receives the request and the responder writes the output', () => {

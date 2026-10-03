@@ -16,7 +16,13 @@ describe('AgentPermissions', () => {
     expect(screen.getByRole('button', { name: /Search the web/ })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: /Edit files/ })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: /Run commands/ })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: /Search the web/ })).toHaveTextContent('WebAllowed')
+    expect(screen.getByRole('button', { name: /Edit files/ })).toHaveTextContent('Edit filesAsks you')
+    // Only a switch that is on adds a line: off is what the tile already says.
     expect(screen.getByText('It can search and read web pages.')).toBeInTheDocument()
+    expect(screen.queryByText('It can read, but not change, files.')).not.toBeInTheDocument()
+    expect(screen.queryByText(/waits for your answer during a run/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'About Allowed without asking' }))
     expect(screen.getByText(/waits for your answer during a run/)).toBeInTheDocument()
   })
 

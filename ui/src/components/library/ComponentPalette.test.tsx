@@ -38,6 +38,7 @@ describe('ComponentPalette jobs', () => {
   it('shows the built-in jobs and, before any is saved, how to save one', async () => {
     palette()
     expect(within(section('Hire by job')).getByText('Researcher')).toBeInTheDocument()
+    fireEvent.click(within(section('Hire by job')).getByRole('button', { name: 'About Hire by job' }))
     expect(await screen.findByText(/select it and choose/)).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Your jobs' })).toBeNull()
   })
@@ -122,16 +123,29 @@ describe('ComponentPalette in Build and in a run', () => {
 
   it('says where built-in tools are switched on, since they are never listed as tools', () => {
     render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={capabilities} />)
-    expect(section('Tools')).toHaveTextContent('Web search, commands and file edits are built into each AI app. Switch them on per agent, under Allowed without asking.')
+    expect(section('Tools')).not.toHaveTextContent('built into each AI app')
+    fireEvent.click(within(section('Tools')).getByRole('button', { name: 'About Tools' }))
+    expect(section('Tools')).toHaveTextContent('Web search, commands and file edits are built into each AI app instead: switch them on per agent, under Allowed without asking.')
+  })
+
+  // An empty group is one dashed slot, not a paragraph; why it is empty is behind its "?".
+  it('shows an empty group as a single slot', () => {
+    render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={{ skills: [], tools: [], sources: [] }} />)
+    expect(section('Skills').querySelector('.palette-empty')).toHaveTextContent('None found on this Mac')
+    expect(section('Tools').querySelector('.palette-empty')).toHaveTextContent('None found on this Mac')
+    expect(section('Team memory').querySelector('.palette-empty')).toHaveTextContent('None yet')
   })
 
   /** ADR 0043: a folder or file is added from an agent's panel, so the add panel says where, and has no Add button of its own. */
   it('points Folders & files at the agent panel, with no Add folder of its own', () => {
     render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={{ ...capabilities, sources: [] }} />)
-    expect(section('Folders & files')).toHaveTextContent('Select an agent and use Add folder… or Add file… in its panel.')
+    expect(section('Folders & files').querySelector('.palette-empty')).toHaveTextContent('None yet')
+    fireEvent.click(within(section('Folders & files')).getByRole('button', { name: 'About Folders & files' }))
+    expect(section('Folders & files')).toHaveTextContent('Add one from an agent’s panel, with Folder or File under Given.')
     expect(within(section('Folders & files')).queryByRole('button', { name: 'Add folder…' })).not.toBeInTheDocument()
     expect(within(section('Folders & files')).queryByRole('button', { name: 'Add file…' })).not.toBeInTheDocument()
-    expect(section('Team memory')).toHaveTextContent('Other teams’ memory and imported packs appear here.')
+    fireEvent.click(within(section('Team memory')).getByRole('button', { name: 'About Team memory' }))
+    expect(section('Team memory')).toHaveTextContent('Other teams’ memory and imported packs.')
   })
 
   /**
@@ -150,7 +164,7 @@ describe('ComponentPalette in Build and in a run', () => {
     const files = section('Folders & files')
     const reports = within(files).getByRole('button', { name: /^reports.*Read by Researcher and Analyst.*Linked folder/ })
     expect(within(files).getByRole('button', { name: /^brief\.md.*No agent reads it yet.*Added file/ })).toBeInTheDocument()
-    expect(within(files).getByText('Drag one onto an agent to share it with that agent. Click to find its card.')).toBeInTheDocument()
+    expect(files.querySelector('.palette-empty')).toBeNull()
 
     const setData = vi.fn()
     fireEvent.dragStart(reports, { dataTransfer: { setData, effectAllowed: '' } })
@@ -270,8 +284,9 @@ describe('ComponentPalette while a run is shown', () => {
     const used = section('Used in this run')
     const headings = screen.getAllByRole('heading').map((heading) => heading.textContent)
     expect(headings[0]).toBe('Used in this run')
-    expect(within(used).getAllByRole('button').map((button) => button.querySelector('strong')?.textContent)).toEqual(['Web search', 'notion · search'])
+    expect([...used.querySelectorAll('.palette-item')].map((button) => button.querySelector('strong')?.textContent)).toEqual(['Web search', 'notion · search'])
     expect(within(used).getByRole('button', { name: /^Web search/ })).toHaveTextContent('Built into the app · ResearcherDeclined 2×: Researcher isn’t allowed to search the web×2')
+    fireEvent.click(within(used).getByRole('button', { name: 'About Used in this run' }))
     expect(used).toHaveTextContent('Switch them on per agent, under Allowed without asking.')
     // Never one row per permission answer, which the old Library listed as tools.
     expect(screen.queryByText(/^Search "/)).toBeNull()
@@ -294,7 +309,7 @@ describe('ComponentPalette while a run is shown', () => {
     render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} observedEvidence={published} agentNames={names} />)
     expect(within(section('Used in this run')).getByRole('button', { name: /^Artifact/ })).toHaveTextContent('Built into the app · ResearcherUsed without asking: publishes to your claude.ai account×1')
     // No switch lets it through, so the hint about switches would point nowhere.
-    expect(section('Used in this run')).not.toHaveTextContent('Allowed without asking')
+    expect(within(section('Used in this run')).queryByRole('button', { name: 'About Used in this run' })).not.toBeInTheDocument()
   })
 
   // ADR 0047, run 4bb918c5: the ChatGPT app's `cua_repl`, which a Codex Gatherer called without

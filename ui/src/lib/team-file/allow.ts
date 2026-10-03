@@ -2,12 +2,13 @@ import type { AgentConfig, AllowSwitch } from './types'
 
 /**
  * An agent's "Allowed without asking" switches (ADR 0037), in the order a newcomer weighs them:
- * least risk first. `on` and `off` say what the agent can do in each position.
+ * least risk first. `on` and `off` say what the agent can do in each position; `short` is the
+ * switch's name where there is room for one word, and is always part of `label`.
  */
-export const ALLOW_SWITCHES: readonly { key: AllowSwitch; label: string; on: string; off: string }[] = [
-  { key: 'web', label: 'Search the web', on: 'It can search and read web pages.', off: 'It works only from what it is given.' },
-  { key: 'edits', label: 'Edit files', on: 'It can create and change files in its own folder, never your team files or its app’s settings.', off: 'It can read, but not change, files.' },
-  { key: 'commands', label: 'Run commands', on: 'It can run commands in a terminal, and a command can do anything you can.', off: 'It cannot run commands.' },
+export const ALLOW_SWITCHES: readonly { key: AllowSwitch; label: string; short: string; on: string; off: string }[] = [
+  { key: 'web', label: 'Search the web', short: 'Web', on: 'It can search and read web pages.', off: 'It works only from what it is given.' },
+  { key: 'edits', label: 'Edit files', short: 'Edit files', on: 'It can create and change files in its own folder, never your team files or its app’s settings.', off: 'It can read, but not change, files.' },
+  { key: 'commands', label: 'Run commands', short: 'Commands', on: 'It can run commands in a terminal, and a command can do anything you can.', off: 'It cannot run commands.' },
 ]
 
 /** Apps that act without asking whatever mode they are in, so no switch can hold them back. */
