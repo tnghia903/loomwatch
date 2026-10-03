@@ -300,21 +300,30 @@ I can't see the other app's work.
   </article>
 </div>
 
-<!-- ================= Tomorrow: two weeks of one scheduled team ================= -->
+<!-- ================= Tomorrow: two weeks of one scheduled team, as a morning paper ================= -->
 <section class="band" id="tomorrow" aria-labelledby="tomorrow-h">
   <div class="wrap">
     <div class="band-head">
       <span class="ch-n"><b>08</b> Tomorrow</span>
       <h2 id="tomorrow-h">A team you trust becomes a habit.</h2>
-      <p class="ch-body">Put a team on a schedule and the answer is waiting when you start work. Its Notebook keeps what you taught it, so the work gets better every morning. Here are two weeks of one team, one thread per run. Pick a day.</p>
+      <p class="ch-body">Put a team on a schedule and its answer lands like a morning paper, waiting when you start work. Its Notebook keeps what you taught it, so every issue is a little better than the last. Here are one team's first two weeks. Flip back through the pile.</p>
     </div>
     <div class="fabric-wrap">
       <div class="fabric-top">
         <span class="sched"><span class="chip outline">Every day at 10:00</span><span class="to">→</span><span class="chip">Collector</span><span class="to">→</span><span class="chip">Editor</span><span class="to">→</span><span class="chip dashed">You</span><span class="to">→</span><span class="chip">Writer</span><span class="to">→</span><span class="chip outline">Notion</span></span>
-        <span class="legend" aria-hidden="true"><span><i class="lg-done"></i>finished</span><span><i class="lg-fail"></i>failed</span><span><i class="lg-wait"></i>waited for you</span><span><i class="lg-live"></i>working now</span></span>
       </div>
-      <div class="fabric" id="fabric" role="listbox" aria-label="Two weeks of runs. Choose a day to read what happened."></div>
-      <div class="day-story" id="day-story" aria-live="polite"></div>
+      <div class="press">
+        <div class="pile" id="pile" aria-hidden="true"></div>
+        <div class="press-side">
+          <div class="day-story" id="day-story" aria-live="polite"></div>
+          <div class="press-scrub">
+            <input type="range" id="issue-scrub" min="1" max="14" value="14" step="1" aria-label="Issue number, from the first morning to today">
+            <div class="press-ends" aria-hidden="true"><span>No. 1</span><span>No. 14 · today</span></div>
+          </div>
+          <div class="press-acts"><button class="btn" type="button" id="issue-play">Read the first two weeks</button></div>
+          <p class="press-count" id="issue-count"></p>
+        </div>
+      </div>
     </div>
   </div>
 </section>
