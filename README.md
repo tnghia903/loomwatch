@@ -293,16 +293,16 @@ Every team below is made from the jobs in Build's library, each on the AI app it
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/build-dark.png">
-  <img src="docs/assets/readme/build-light.png" alt="Build view: a daily news team on the canvas. A schedule trigger feeds News Collector, News Editor and Digest Writer, which produce the team response. Above the canvas, the team is described in one sentence.">
+  <img src="docs/assets/readme/build-light.png" alt="Build view: a market brief team on the canvas. A weekday schedule feeds Researcher, then a review stop for you, then Writer, which produces the team response. Below the agents hang the sources each one was handed: a q3-reports folder, a brand-guide.md file, and a house-style skill shared by both. Above the canvas, the team is described in one sentence.">
 </picture>
-<br><sub><strong>Build.</strong> A news team that runs every morning, with the whole pipeline summed up in one sentence.</sub>
+<br><sub><strong>Build.</strong> A team that runs every weekday, summed up in one sentence, with the folder, file and skill each agent was handed wired in beneath it.</sub>
 </td>
 </tr>
 <tr>
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/run-dark.png">
-  <img src="docs/assets/readme/run-light.png" alt="Run view of a finished run: the request, a run receipt listing each step, a replay timeline, and the team response with Retry and Follow up controls.">
+  <img src="docs/assets/readme/run-light.png" alt="Run view of a finished run: the request, a run receipt listing each step and your decision, a replay timeline, and the market brief the team wrote, marked Nothing flagged, with Retry and Follow up controls.">
 </picture>
 <br><sub><strong>Run.</strong> The receipt says who did what, the timeline replays it, and the answer sits beside it, ready for review.</sub>
 </td>

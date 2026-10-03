@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LoomWatch — Put AI agents to work as a team</title>
-  <meta name="description" content="LoomWatch turns the AI apps already on your computer, such as Claude, Codex, Gemini, OpenCode, Hermes and OpenClaw, into one team. Ask in plain words, watch every step, and decide before the next agent builds on it.">
+  <meta name="description" content="LoomWatch turns the AI apps already on your computer, such as Claude, Codex, Gemini, OpenCode, Hermes and OpenClaw, into one team. Hand each agent your folders, files and skills, ask in plain words, watch every step, and decide before the next agent builds on it.">
   <meta name="theme-color" content="#08080A">
   <meta property="og:title" content="LoomWatch — Put AI agents to work as a team">
   <meta property="og:description" content="You already have the AI. LoomWatch makes it one team: mix the apps you use, watch every thread, and stay a step in the work.">
@@ -141,7 +141,7 @@ I can't see the other app's work.
       <dl class="fine">
         <div><dt>Ask LoomWatch</dt><dd>Describe the team you want. One of your own AI apps proposes it on the canvas, and nothing changes until you press Apply.</dd></div>
         <div><dt>One agent, a pipeline, or a lead</dt><dd>Steps in order with stops where you want them, or a lead that hands out work and asks its teammates questions as it goes.</dd></div>
-        <div><dt>Skills, tools and files</dt><dd>Give an agent the skills and MCP tools already on your computer, or a folder or file to read, PDFs included.</dd></div>
+        <div><dt>One button for each thing</dt><dd>Every action has one control, in the same place on every screen. Shortcuts are there when you want speed.</dd></div>
       </dl>
     </div>
     <div class="ch-panel">
@@ -167,10 +167,38 @@ I can't see the other app's work.
     </div>
   </article>
 
-  <!-- 03 · Ask -->
-  <article class="chapter" id="ask" data-chapter="3" aria-labelledby="ask-h">
+  <!-- 03 · Give -->
+  <article class="chapter" id="give" data-chapter="3" aria-labelledby="give-h">
     <div class="ch-copy">
-      <span class="ch-n"><b>03</b> Ask</span>
+      <span class="ch-n"><b>03</b> Give</span>
+      <h2 id="give-h">Hand each agent what it needs. <em>Share it with a drag.</em></h2>
+      <p class="ch-body">Folders, files, skills and tools sit on the canvas as cards. Drag one onto an agent, and it's handed to that agent at the start of every run. Drag the same card onto a second agent and they share it: one card, two threads.</p>
+      <dl class="fine">
+        <div><dt>Your project stays yours</dt><dd>An agent works in the folder you choose, and changes files there only if you allow it. What you hand it is read only, and nothing is written into your project.</dd></div>
+        <div><dt>Exactly what arrives</dt><dd>A folder arrives as its listing and README, a file as its text, PDFs included, and a skill as its instructions. The record shows which ones were opened.</dd></div>
+        <div><dt>Three switches each</dt><dd>Search the web, edit files, run commands. Anything else an agent asks for waits for your answer, mid-run.</dd></div>
+      </dl>
+    </div>
+    <div class="ch-panel">
+      <div class="win">
+        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono">what each agent is given</span></span><span class="badge" id="give-count">3 threads</span></div>
+        <div class="win-body">
+          <div class="give dots" id="give-canvas" role="group" aria-label="Agents and the sources on the canvas">
+            <svg class="give-threads" id="give-threads" aria-hidden="true"></svg>
+            <div class="give-agents" id="give-agents"></div>
+            <div class="give-shelf" id="give-shelf"></div>
+          </div>
+          <p class="give-hint" id="give-hint">Drag a card onto an agent. On a phone, tap the card, then the agent.</p>
+          <section class="packet" id="packet" aria-live="polite" aria-label="What the selected agent is given"></section>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- 04 · Ask -->
+  <article class="chapter" id="ask" data-chapter="4" aria-labelledby="ask-h">
+    <div class="ch-copy">
+      <span class="ch-n"><b>04</b> Ask</span>
       <h2 id="ask-h">Say what you need, in plain words.</h2>
       <p class="ch-body">No prompt chains and no glue code. Type the job, press <span class="kbd">↵</span>, and the first agent starts. Each step starts when the one before it hands over.</p>
       <dl class="fine">
@@ -198,16 +226,16 @@ I can't see the other app's work.
     </div>
   </article>
 
-  <!-- 04 · Watch -->
-  <article class="chapter" id="watch" data-chapter="4" aria-labelledby="watch-h">
+  <!-- 05 · Watch -->
+  <article class="chapter" id="watch" data-chapter="5" aria-labelledby="watch-h">
     <div class="ch-copy">
-      <span class="ch-n"><b>04</b> Watch</span>
+      <span class="ch-n"><b>05</b> Watch</span>
       <h2 id="watch-h">Watch every thread as it's woven.</h2>
       <p class="ch-body">Every message, tool call and handover lands on a live timeline: <span class="say-live">blue</span> while an agent works, <span class="say-gold">gold</span> where it worked, a dashed outline while the team waits for you. When it's done, drag back to replay any moment.</p>
       <dl class="fine">
         <div><dt>Evidence, not guesses</dt><dd>A skill shows as loaded only when it was actually sent, and a file as opened only when the agent's own stream read it.</dd></div>
         <div><dt>Agents ask each other</dt><dd>Teammates hand over and ask questions through LoomWatch, so every handover is on the record, not buried in chat.</dd></div>
-        <div><dt>One place to look</dt><dd>No more scrolling back through four terminals to find out what happened.</dd></div>
+        <div><dt>It asks before it reaches</dt><dd>Turn off Researcher's web search in Give, and this run stops to ask you before it searches.</dd></div>
       </dl>
     </div>
     <div class="ch-panel">
@@ -222,6 +250,7 @@ I can't see the other app's work.
           <div class="scrub" id="scrub" hidden>
             <label><span class="micro">Replay</span><input type="range" id="scrub-input" min="0" max="100" value="100" step="0.1" aria-label="Drag to replay the run"></label>
           </div>
+          <div class="ask-perm" id="ask-perm" hidden></div>
           <ol class="events" id="events" aria-label="Events"></ol>
           <a class="needs-you" id="needs-you" href="#review" hidden>The team is waiting for you <span aria-hidden="true">↓</span></a>
         </div>
@@ -229,10 +258,10 @@ I can't see the other app's work.
     </div>
   </article>
 
-  <!-- 05 · Review -->
-  <article class="chapter" id="review" data-chapter="5" aria-labelledby="review-h">
+  <!-- 06 · Review -->
+  <article class="chapter" id="review" data-chapter="6" aria-labelledby="review-h">
     <div class="ch-copy">
-      <span class="ch-n"><b>05</b> Review</span>
+      <span class="ch-n"><b>06</b> Review</span>
       <h2 id="review-h">Nothing moves on until you decide.</h2>
       <p class="ch-body">Put yourself on the team as a step. When the run reaches you, it stops and shows what was handed over. Approve it, or say what to change and send it back, so a weak first step never quietly shapes everything after it.</p>
       <dl class="fine">
@@ -250,10 +279,10 @@ I can't see the other app's work.
     </div>
   </article>
 
-  <!-- 06 · Result -->
-  <article class="chapter" id="result" data-chapter="6" aria-labelledby="result-h">
+  <!-- 07 · Result -->
+  <article class="chapter" id="result" data-chapter="7" aria-labelledby="result-h">
     <div class="ch-copy">
-      <span class="ch-n"><b>06</b> Result</span>
+      <span class="ch-n"><b>07</b> Result</span>
       <h2 id="result-h">The answer comes with its receipt.</h2>
       <p class="ch-body">The team's answer opens in a reader, beside a run receipt: what you asked, who did what, how long it took, and anything worth a second look. Not quite right? Follow up, or redo from the step that went wrong.</p>
       <dl class="fine">
@@ -275,7 +304,7 @@ I can't see the other app's work.
 <section class="band" id="tomorrow" aria-labelledby="tomorrow-h">
   <div class="wrap">
     <div class="band-head">
-      <span class="ch-n"><b>07</b> Tomorrow</span>
+      <span class="ch-n"><b>08</b> Tomorrow</span>
       <h2 id="tomorrow-h">A team you trust becomes a habit.</h2>
       <p class="ch-body">Put a team on a schedule and the answer is waiting when you start work. Its Notebook keeps what you taught it, so the work gets better every morning. Here are two weeks of one team, one thread per run. Pick a day.</p>
     </div>
@@ -295,7 +324,7 @@ I can't see the other app's work.
   <div class="wrap">
     <div class="why-grid">
       <div class="band-head">
-        <span class="ch-n"><b>08</b> Why a loom</span>
+        <span class="ch-n"><b>09</b> Why a loom</span>
         <h2 id="why-h">Most team features come from one AI company. <em>A loom takes anyone's thread.</em></h2>
         <p class="ch-body">AI apps leapfrog each other every few months. LoomWatch doesn't belong to any of them, so each job gets the app that does it best. When a better one ships, you change one thread, not your whole setup.</p>
         <div class="seg" role="radiogroup" aria-label="Compare">
@@ -311,11 +340,11 @@ I can't see the other app's work.
 
     <ol class="pillars">
       <li><span class="p-n">i</span><h3>Any app, one team</h3><p>Claude, Codex, Gemini, OpenCode, Hermes and OpenClaw, side by side, each on the job it does best.</p></li>
-      <li><span class="p-n">ii</span><h3>On your computer</h3><p>LoomWatch serves on 127.0.0.1 and keeps run history in a database on your computer. Your teams are plain files.</p></li>
+      <li><span class="p-n">ii</span><h3>On your computer</h3><p>LoomWatch serves on 127.0.0.1 and keeps run history in a database on your computer. Your teams are plain files, and your folders stay where they are.</p></li>
       <li><span class="p-n">iii</span><h3>On the plans you have</h3><p>No API key and nothing new to sign up for. Runs use the sign-ins you already have.</p></li>
       <li><span class="p-n">iv</span><h3>With you in it</h3><p>You're a step on the team, not a spectator. It stops wherever you put yourself.</p></li>
       <li><span class="p-n">v</span><h3>Proof, not a guess</h3><p>Handovers are recorded as calls, not read out of chat, so the receipt only says what happened.</p></li>
-      <li><span class="p-n">vi</span><h3>Memory that outlives a switch</h3><p>The Brief, the Notebook and every run stay with your team, whichever app you swap in.</p></li>
+      <li><span class="p-n">vi</span><h3>Context that outlives a switch</h3><p>The Brief, the Notebook, every folder and file you handed over, and every run stay with your team, whichever app you swap in.</p></li>
     </ol>
     <p class="footnote">To be exact about privacy: LoomWatch itself sends nothing anywhere, but each agent's own app still sends prompts and files to its model provider, as it does when you use it directly.</p>
   </div>
@@ -326,7 +355,7 @@ I can't see the other app's work.
   <div class="wrap">
     <div class="start-grid">
       <div class="band-head">
-        <span class="ch-n"><b>09</b> Start</span>
+        <span class="ch-n"><b>10</b> Start</span>
         <h2 id="start-h">One command, and your first team is already waiting.</h2>
         <p class="ch-body">The first start takes a few minutes. Then LoomWatch opens in your browser with an offline demo team you can run before you connect any AI app.</p>
         <dl class="needs">
@@ -357,7 +386,7 @@ Keep this window open while you use LoomWatch. Press Ctrl-C to stop it.</span></
         </div>
       </div>
       <figure class="real-shot" id="real-shot" role="tabpanel" aria-labelledby="tab-home">
-        <img id="real-img" data-shot="home" width="2880" height="1240" alt="" loading="lazy">
+        <img id="real-img" data-shot="home" width="2880" height="1600" alt="" loading="lazy">
         <figcaption id="real-cap"></figcaption>
       </figure>
     </div>

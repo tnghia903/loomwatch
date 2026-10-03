@@ -112,10 +112,29 @@
   ]
   const preset = (id) => REQUESTS.find((r) => r.id === id) || REQUESTS[0]
 
+  // What can be handed to an agent (03 · Give): a folder linked where it is, a file copied beside
+  // the team, a skill and a tool from this computer. One card can thread to several agents.
+  const SOURCES = [
+    { id: 'reports', kind: 'folder', name: 'market-reports/', meta: 'Linked folder', arrives: 'its listing and README', path: '~/Documents/market-reports', reads: 'read · market-reports/README.md' },
+    { id: 'brand', kind: 'file', name: 'brand-guide.pdf', meta: 'Added file', arrives: 'its text, all 12 pages', path: 'research-and-write.files/brand-guide.pdf', reads: 'read · brand-guide.pdf' },
+    { id: 'style', kind: 'skill', name: 'house-style', meta: 'Skill · from Claude Code', arrives: 'its instructions, required', reads: 'skill · house-style/SKILL.md' },
+    { id: 'notes', kind: 'tool', name: 'team-notes', meta: 'Tool · your MCP server', arrives: 'its tools, for this run', reads: 'team-notes · search' },
+  ]
+  const source = (id) => SOURCES.find((x) => x.id === id)
+  const GIVEN_TO = ['researcher', 'writer']
+  const ALLOW = [
+    { key: 'web', label: 'Search the web' },
+    { key: 'edits', label: 'Edit files' },
+    { key: 'commands', label: 'Run commands' },
+  ]
+
   const state = {
     apps: ['claude', 'codex', 'opencode'],
     team: { researcher: 'claude', writer: 'codex', review: true },
     request: 'digest',
+    give: { researcher: ['reports'], writer: ['brand', 'style'] },
+    allow: { researcher: { web: true, edits: false, commands: false }, writer: { web: false, edits: true, commands: false } },
+    cwd: { researcher: '~/Documents/research', writer: '~/projects/news-site' },
   }
   const seq = (team) => (team.review ? ['researcher', 'you', 'writer'] : ['researcher', 'writer'])
   const LANE = { researcher: 'Researcher', you: 'You', writer: 'Writer' }
@@ -378,7 +397,7 @@
       parts.push('and then ', agentChip('writer'), ' writes the answer. ',
         el('button', { type: 'button', class: 'repair', text: 'Add a review step before Writer', onclick: () => setReview(true) }))
     }
-    if (run && (run.phase === 'running' || run.phase === 'review')) parts.push(el('span', { class: 'micro', style: 'display:block;margin-top:8px;letter-spacing:.05em', text: 'The team is running · changes apply to the next run' }))
+    if (busy()) parts.push(el('span', { class: 'micro', style: 'display:block;margin-top:8px;letter-spacing:.05em', text: 'The team is running · changes apply to the next run' }))
     sentence.replaceChildren(...parts)
   }
   function setReview(on) {
@@ -397,7 +416,8 @@
         el('div', { class: 'kind' }, el('span', { text: you ? 'Review step' : who === 'researcher' ? 'Researcher' : 'Writer' }), step === 1 ? el('span', { class: 'start', text: 'Start' }) : null),
         el('div', { class: 'nm', text: LANE[who] }),
         el('div', { class: 'ln', text: you ? 'Approve, or send it back' : who === 'researcher' ? 'Finds what is true, with sources' : 'Writes the answer' }),
-        you ? null : el('div', { class: 'ap', text: `on ${app(t[who]).name}` }))
+        you ? null : el('div', { class: 'ap', text: `on ${app(t[who]).name}` }),
+        you || !state.give[who].length ? null : el('a', { class: 'gv', href: '#give', text: `${state.give[who].length} handed over` }))
     }
     const order = seq(t)
     const kids = []
@@ -411,7 +431,22 @@
   let yamlBefore = null
   function teamYaml() {
     const t = state.team
-    const spawn = (id) => { const a = app(id); return `{ cmd: ${a.spawn}${a.args ? `, args: [${a.args.join(', ')}]` : ''}, cwd: . }` }
+    const spawn = (id, who) => { const a = app(id); return `{ cmd: ${a.spawn}${a.args ? `, args: [${a.args.join(', ')}]` : ''}, cwd: ${state.cwd[who]} }` }
+    const given = (who) => {
+      const lines = []
+      if (state.give[who].length) {
+        lines.push('    capabilities:')
+        for (const id of state.give[who]) {
+          const x = source(id)
+          lines.push(x.kind === 'folder' || x.kind === 'file'
+            ? `      - { kind: knowledge, name: ${x.name.replace(/\/$/, '')}, path: ${x.path} }`
+            : `      - { kind: ${x.kind}, name: ${x.name} }`)
+        }
+      }
+      const on = ALLOW.filter((a) => state.allow[who][a.key]).map((a) => `${a.key}: true`)
+      if (on.length) lines.push(`    allow: { ${on.join(', ')} }`)
+      return lines
+    }
     const lines = [
       '# research-and-write.yaml: a plain file on your computer',
       'schemaVersion: 1',
@@ -422,7 +457,8 @@
       '  - id: researcher',
       '    name: Researcher',
       '    role: Find out what is true, with a source for every claim.',
-      `    spawn: ${spawn(t.researcher)}`,
+      `    spawn: ${spawn(t.researcher, 'researcher')}`,
+      ...given('researcher'),
     ]
     if (t.review) lines.push(
       '  - id: review           # you: the team stops here',
@@ -433,7 +469,8 @@
       '  - id: writer',
       '    name: Writer',
       '    role: Write the answer from the findings.',
-      `    spawn: ${spawn(t.writer)}`,
+      `    spawn: ${spawn(t.writer, 'writer')}`,
+      ...given('writer'),
       'edges:')
     if (t.review) lines.push('  - { from: researcher, to: review, layer: configured, kind: sequence }', '  - { from: review, to: writer, layer: configured, kind: sequence }')
     else lines.push('  - { from: researcher, to: writer, layer: configured, kind: sequence }')
@@ -460,6 +497,7 @@
     renderSentence()
     renderCanvas(flash)
     renderYaml()
+    renderGive()
     if (!run) { renderStages(); drawLanes() }
   }
 
@@ -500,7 +538,201 @@
         } }))))
   })
 
-  /* ================================================================ 03 · Ask */
+  /* ================================================================ 03 · Give */
+
+  // Folders, files, skills and tools are cards. Drag one onto an agent (or tap it, then the agent)
+  // and that agent is handed it; the same card can thread to several agents. The packet below says
+  // exactly what the selected agent gets, where it works and what it may do without asking.
+  const giveBox = $('#give-canvas')
+  const giveAgents = $('#give-agents')
+  const giveShelf = $('#give-shelf')
+  const giveThreads = $('#give-threads')
+  const packetBox = $('#packet')
+  const giveHint = $('#give-hint')
+  const GIVE_HINT = giveHint.textContent
+  let giveFor = 'researcher'
+  let picked = null
+  let justDragged = false
+  let hintTimer = 0
+
+  const ICONS = {
+    folder: ['M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'],
+    file: ['M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z', 'M14 2v4a2 2 0 0 0 2 2h4', 'M16 13H8M16 17H8M10 9H8'],
+    skill: ['M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z'],
+    tool: ['M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'],
+  }
+  function icon(kind) {
+    const svg = el('svg:svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })
+    for (const d of ICONS[kind]) svg.append(el('svg:path', { d }))
+    return svg
+  }
+  const readOnly = (x) => x.kind === 'folder' || x.kind === 'file'
+  const readersOf = (id) => GIVEN_TO.filter((who) => state.give[who].includes(id))
+  function say(text) {
+    giveHint.textContent = text
+    window.clearTimeout(hintTimer)
+    hintTimer = window.setTimeout(() => { giveHint.textContent = picked ? giveHint.textContent : GIVE_HINT }, 5200)
+  }
+
+  function renderGive() {
+    giveAgents.replaceChildren(...GIVEN_TO.map((who) => {
+      const takes = picked && !state.give[who].includes(picked)
+      return el('button', {
+        type: 'button', class: `g-agent${who === giveFor ? ' on' : ''}${takes ? ' takes' : ''}`, 'data-who': who, 'aria-pressed': String(who === giveFor),
+        'aria-label': picked ? `Hand ${source(picked).name} to ${LANE[who]}` : `${LANE[who]}, on ${app(state.team[who]).name}, ${state.give[who].length} handed over. Show what it is given.`,
+        onclick: () => { if (picked) handOverSource(picked, who); else { giveFor = who; renderGive() } },
+      },
+      el('span', { class: 'kind', text: 'Agent' }),
+      el('span', { class: 'nm', text: LANE[who] }),
+      el('span', { class: 'ap', text: `on ${app(state.team[who]).name}` }),
+      el('span', { class: 'wk', title: 'Works in' }, icon('folder'), el('span', { text: state.cwd[who] })))
+    }))
+    giveShelf.replaceChildren(...SOURCES.map((x) => {
+      const readers = readersOf(x.id)
+      return el('button', {
+        type: 'button', class: `g-src kind-${x.kind}${picked === x.id ? ' picked' : ''}${readers.length ? ' given' : ''}`, 'data-src': x.id, 'aria-pressed': String(picked === x.id),
+        'aria-label': `${x.name}, ${x.meta}. ${readers.length ? `Handed to ${listText(readers.map((w) => LANE[w]))}.` : 'Not handed to anyone yet.'} ${picked === x.id ? 'Picked up: choose an agent.' : 'Drag it onto an agent, or press to pick it up.'}`,
+        onpointerdown: (event) => dragSource(event, x.id),
+        onclick: () => { if (!justDragged) pickSource(x.id) },
+      },
+      el('span', { class: 'g-ico' }, icon(x.kind)),
+      el('span', { class: 'g-txt' }, el('span', { class: 'g-nm', text: x.name }), el('span', { class: 'g-mt', text: x.meta })),
+      readers.length > 1 ? el('span', { class: 'g-shared', text: `shared · ${readers.length}` }) : null)
+    }))
+    giveBox.classList.toggle('picking', Boolean(picked))
+    const threads = GIVEN_TO.reduce((n, who) => n + state.give[who].length, 0)
+    $('#give-count').textContent = `${threads} thread${threads === 1 ? '' : 's'}`
+    drawGiveThreads()
+    renderPacket()
+  }
+
+  // One gold thread per agent and card, from the agent across to the card. The selected agent's
+  // threads are solid and carry the one way to take a card back, near the card's end.
+  function drawGiveThreads() {
+    $$('.g-cut', giveBox).forEach((cut) => cut.remove())
+    const box = giveBox.getBoundingClientRect()
+    if (!box.width) return
+    // Pixel coordinates, no viewBox: the threads are redrawn whenever the cards move.
+    giveThreads.replaceChildren()
+    const at = (p0, p1, p2, p3, t) => {
+      const u = 1 - t
+      return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3
+    }
+    for (const who of GIVEN_TO) {
+      const agent = $(`.g-agent[data-who="${who}"]`, giveBox)?.getBoundingClientRect()
+      for (const id of state.give[who]) {
+        const card = $(`.g-src[data-src="${id}"]`, giveBox)?.getBoundingClientRect()
+        if (!agent || !card) continue
+        const x1 = agent.right - box.left
+        const y1 = agent.top + agent.height / 2 - box.top
+        const x2 = card.left - box.left
+        const y2 = card.top + card.height / 2 - box.top
+        const mx = (x1 + x2) / 2
+        giveThreads.append(el('svg:path', { class: `g-thread${who === giveFor ? ' lit' : ''}`, d: `M${x1} ${y1}C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}` }))
+        // Only the selected agent's threads can be cut, so the canvas stays calm.
+        if (who !== giveFor) continue
+        giveBox.append(el('button', {
+          type: 'button', class: 'g-cut', style: `left:${at(x1, mx, mx, x2, 0.72)}px;top:${at(y1, y1, y2, y2, 0.72)}px`, text: '×',
+          'aria-label': `Take ${source(id).name} back from ${LANE[who]}`, title: `Take ${source(id).name} back from ${LANE[who]}`,
+          onclick: () => takeBack(id, who),
+        }))
+      }
+    }
+  }
+
+  function pickSource(id) {
+    picked = picked === id ? null : id
+    renderGive()
+    say(picked ? `Now choose who gets ${source(picked).name}. Press it again to put it back.` : GIVE_HINT)
+    if (picked) $('.g-agent', giveBox)?.focus()
+  }
+  function handOverSource(id, who) {
+    picked = null
+    if (state.give[who].includes(id)) say(`${LANE[who]} already has ${source(id).name}.`)
+    else {
+      state.give[who] = SOURCES.map((x) => x.id).filter((x) => x === id || state.give[who].includes(x))
+      const readers = readersOf(id)
+      say(readers.length > 1 ? `${source(id).name} is shared now: one card, ${['', '', 'two', 'three'][readers.length] || readers.length} threads.` : `${LANE[who]} is handed ${source(id).name}${readOnly(source(id)) ? ', read only' : ''}.`)
+    }
+    giveFor = who
+    renderCanvas(); renderYaml(); renderGive()
+  }
+  function takeBack(id, who) {
+    state.give[who] = state.give[who].filter((x) => x !== id)
+    say(`${LANE[who]} no longer gets ${source(id).name}.`)
+    giveFor = who
+    renderCanvas(); renderYaml(); renderGive()
+  }
+  // The cards move when the panel resizes, fonts arrive or the layout stacks; the threads follow.
+  if ('ResizeObserver' in window) {
+    const follow = new ResizeObserver(() => drawGiveThreads())
+    ;[giveBox, giveAgents, giveShelf].forEach((node) => follow.observe(node))
+  }
+  document.fonts?.ready.then(() => drawGiveThreads())
+  giveBox.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && picked) { picked = null; renderGive(); say(GIVE_HINT) }
+  })
+
+  // A mouse or pen drags the card itself; a finger taps it and then the agent, so the page still scrolls.
+  function dragSource(event, id) {
+    if (event.button !== 0 || event.pointerType === 'touch') return
+    const card = event.currentTarget
+    const start = { x: event.clientX, y: event.clientY }
+    const rect = card.getBoundingClientRect()
+    let ghost = null
+    let over = null
+    const move = (e) => {
+      if (!ghost) {
+        if (Math.hypot(e.clientX - start.x, e.clientY - start.y) < 6) return
+        ghost = card.cloneNode(true)
+        ghost.classList.add('g-ghost')
+        ghost.style.width = `${rect.width}px`
+        document.body.append(ghost)
+        giveBox.classList.add('dragging')
+      }
+      ghost.style.transform = `translate(${e.clientX - (start.x - rect.left)}px, ${e.clientY - (start.y - rect.top)}px) rotate(-2.5deg)`
+      const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('.g-agent')
+      if (target !== over) { over?.classList.remove('over'); over = target; over?.classList.add('over') }
+    }
+    const stop = (e) => {
+      card.removeEventListener('pointermove', move)
+      card.removeEventListener('pointerup', stop)
+      card.removeEventListener('pointercancel', stop)
+      if (!ghost) return
+      ghost.remove()
+      giveBox.classList.remove('dragging')
+      over?.classList.remove('over')
+      justDragged = true
+      window.setTimeout(() => { justDragged = false }, 0)
+      if (over && e.type === 'pointerup') handOverSource(id, over.dataset.who)
+    }
+    try { card.setPointerCapture(event.pointerId) } catch { /* the moves still reach the card while over it */ }
+    card.addEventListener('pointermove', move)
+    card.addEventListener('pointerup', stop)
+    card.addEventListener('pointercancel', stop)
+  }
+
+  function renderPacket() {
+    const who = giveFor
+    const items = state.give[who].map(source)
+    packetBox.replaceChildren(
+      el('div', { class: 'pk-head' },
+        el('span', { class: 'micro', text: 'What it gets, every run' }),
+        el('b', { text: `${LANE[who]}, on ${app(state.team[who]).name}` })),
+      el('dl', { class: 'pk' },
+        el('div', {}, el('dt', { text: 'Works in' }), el('dd', {}, el('code', { text: state.cwd[who] }),
+          el('span', { class: 'pk-note', text: state.allow[who].edits ? ' Its project. It may change files here.' : ' Its project. It reads here, and asks before it changes a file.' }))),
+        el('div', {}, el('dt', { text: 'Handed over' }), el('dd', {}, items.length
+          ? el('ul', { class: 'pk-list' }, items.map((x) => el('li', {}, icon(x.kind), el('span', {}, el('b', { text: x.name }), el('small', { text: `${x.arrives}${readOnly(x) ? ', read only' : ''}` })))))
+          : el('span', { class: 'pk-note', text: `Nothing yet. Drag a card onto ${LANE[who]}.` }))),
+        el('div', {}, el('dt', { text: 'May, without asking' }), el('dd', { class: 'pk-allow' }, ALLOW.map((a) => el('button', {
+          type: 'button', role: 'switch', class: 'sw', 'aria-checked': String(state.allow[who][a.key]),
+          onclick: () => { state.allow[who][a.key] = !state.allow[who][a.key]; renderYaml(); renderPacket() },
+        }, el('i', { 'aria-hidden': 'true' }), a.label))))),
+      el('p', { class: 'pk-foot', text: 'Anything else it asks for waits for your answer during the run.' }))
+  }
+
+  /* ================================================================ 04 · Ask */
 
   const requestsBox = $('#requests')
   const requestText = $('#request-text')
@@ -525,7 +757,7 @@
   })
   $('#composer').addEventListener('submit', (event) => {
     event.preventDefault()
-    if (run && (run.phase === 'running' || run.phase === 'review')) { scrollToId('watch'); return }
+    if (busy()) { scrollToId('watch'); return }
     startRun()
     scrollToId('watch')
   })
@@ -537,6 +769,8 @@
 
   let run = null
   let runCount = 0
+  // Running, waiting at the review step, or waiting for a permission answer.
+  const busy = () => Boolean(run && ['running', 'review', 'asking'].includes(run.phase))
   const CANCEL = Symbol('cancel')
   const SIM_MS = 430 // one simulated second, in real milliseconds
 
@@ -545,6 +779,9 @@
     return {
       n: ++runCount,
       team: { ...state.team },
+      give: JSON.parse(JSON.stringify(state.give)),
+      allow: JSON.parse(JSON.stringify(state.allow)),
+      permission: null,
       preset: p,
       findings: p.findings.map((f) => ({ ...f })),
       phase: 'running',
@@ -603,6 +840,7 @@
   function handOver(from, to) { run.hands.push({ from, to, t: run.clock }) }
 
   async function startRun() {
+    askPerm.hidden = true
     run = freshRun()
     const mine = run
     renderRunUI()
@@ -629,11 +867,19 @@
     segStart('researcher')
     if (r.pass === 1) {
       log('researcher', `Researcher started on ${name}`, { say: `Researcher started on ${name}, reading ${r.preset.reads}.` })
-      for (const tool of r.preset.tools) {
+      for (const id of r.give.researcher) {
+        await work(1.1)
+        r.tools.researcher += 1
+        log('researcher', 'Researcher', { tool: source(id).reads, say: `Researcher opened ${source(id).name}, which you handed it.` })
+      }
+      const web = r.preset.reads === 'the web'
+      if (web && !r.allow.researcher.web && !(await askPermission('researcher', r.preset.tools[0]))) r.deniedWeb = true
+      for (const tool of r.deniedWeb ? r.preset.tools.filter((t) => !/^(web search|fetch)/.test(t)) : r.preset.tools) {
         await work(1.7)
         r.tools.researcher += 1
         log('researcher', 'Researcher', { tool, say: `Researcher is working: ${tool.replace(' · ', ', ')}.` })
       }
+      if (r.deniedWeb) log('researcher', 'Researcher carried on without the web', { say: `Researcher carried on without the web, from ${r.give.researcher.length ? 'what you handed it' : 'what it already knew'}.` })
       await work(1.6)
       log('researcher', `Researcher wrote findings.md`, { tool: 'write · findings.md', say: `Researcher wrote down ${r.findings.length} findings, each with its source, or a gap where it had none.` })
     } else {
@@ -693,8 +939,8 @@
     let last = performance.now()
     let painted = 0
     function frame(now) {
-      if (run !== r || r.phase !== 'review') return
-      const seg = [...r.segs].reverse().find((s) => s.lane === 'you' && s.to === null)
+      if (run !== r || !['review', 'asking'].includes(r.phase)) return
+      const seg = [...r.segs].reverse().find((s) => s.kind === 'wait' && s.to === null)
       if (seg && r.clock - seg.from < 9) r.clock += Math.min(now - last, 100) / 1000 * 0.8
       last = now
       if (now - painted > 90) { painted = now; renderLive() }
@@ -709,6 +955,12 @@
     setStage('writer', 'running')
     segStart('writer')
     log('writer', `Writer started on ${name}`, { say: `Writer started on ${name}, with ${r.team.review ? 'the findings you approved' : 'whatever Researcher found'}.` })
+    for (const id of r.give.writer) {
+      await work(0.9)
+      r.tools.writer += 1
+      const x = source(id)
+      log('writer', 'Writer', { tool: x.reads, say: x.kind === 'skill' ? `Writer opened ${x.name}, which it is required to follow.` : `Writer opened ${x.name}, which you handed it.` })
+    }
     await work(1.4)
     r.tools.writer += 1
     log('writer', 'Writer', { tool: 'read · findings.md', say: 'Writer is reading the findings.' })
@@ -725,6 +977,45 @@
     renderReview(true)
     renderResult(true)
     renderSentence()
+  }
+
+  // ADR 0040 on the page: an agent wants something its switches don't allow, so the run stops and
+  // asks. Allow is this once; Always allow turns the switch on in Give; Deny lets it carry on without.
+  const askPerm = $('#ask-perm')
+  async function askPermission(who, tool) {
+    const r = run
+    const query = (tool.match(/“(.+)”/) || [])[1] || tool
+    r.phase = 'asking'
+    segEnd(who)
+    segStart(who, 'wait')
+    setStage(who, 'waiting')
+    r.waitSince = Date.now()
+    log(who, `${LANE[who]} asked to search the web`, { say: `${LANE[who]} wants to search the web, and its switch is off. The run waits for your answer.` })
+    const answerWith = (value) => () => { if (r.answerPermission) { const resolve = r.answerPermission; r.answerPermission = null; resolve(value) } }
+    askPerm.hidden = false
+    askPerm.replaceChildren(
+      el('p', { class: 'ap-q' }, el('b', { text: `${LANE[who]} wants to search the web` }), ` for “${query}”. It's paused until you answer.`),
+      el('div', { class: 'ap-acts' },
+        el('button', { type: 'button', class: 'btn', text: 'Deny', onclick: answerWith('deny') }),
+        el('button', { type: 'button', class: 'btn', text: 'Always allow', title: `Turns on Search the web for ${LANE[who]}, in Give`, onclick: answerWith('always') }),
+        el('button', { type: 'button', class: 'btn btn-primary', text: 'Allow', onclick: answerWith('once') })))
+    renderBadges(); renderSentence()
+    waitTicker(r)
+    const answer = await new Promise((resolve) => { r.answerPermission = resolve })
+    if (run !== r) throw CANCEL
+    askPerm.hidden = true
+    r.waitedMs += Date.now() - r.waitSince
+    r.permission = answer
+    segEnd(who)
+    segStart(who)
+    r.phase = 'running'
+    setStage(who, 'running')
+    if (answer === 'always') { state.allow[who].web = true; r.allow[who].web = true; renderYaml(); renderPacket() }
+    log('you', answer === 'deny' ? 'You said no to the web' : answer === 'always' ? 'You allowed the web from now on' : 'You allowed the web, once', {
+      say: answer === 'deny' ? `You said no. ${LANE[who]} carries on without the web.` : answer === 'always' ? `You allowed it, and turned on Search the web for ${LANE[who]}.` : `You allowed it, for this run only.`,
+    })
+    renderBadges(); renderSentence()
+    return answer !== 'deny'
   }
 
   // A decision from the review panel.
@@ -772,7 +1063,7 @@
 
   function badgeFor() {
     if (!run) return ['idle', 'Ready']
-    if (run.phase === 'review') return ['waiting', 'Waiting for you']
+    if (run.phase === 'review' || run.phase === 'asking') return ['waiting', 'Waiting for you']
     if (run.phase === 'done') return ['done', 'Finished']
     return ['running', 'Running']
   }
@@ -784,7 +1075,7 @@
   }
   function renderAskButton() {
     if (!run || run.phase === 'done') { runButton.disabled = false; runButton.textContent = run ? 'Run again' : 'Run team' }
-    else { runButton.disabled = false; runButton.textContent = run.phase === 'review' ? 'Waiting for you ↓' : 'Running ↓' }
+    else { runButton.disabled = false; runButton.textContent = run.phase === 'running' ? 'Running ↓' : 'Waiting for you ↓' }
   }
 
   function visibleEvents() {
@@ -878,11 +1169,11 @@
       el('p', { class: 'big', text: big }), text ? el('p', { text }) : null, ...more)
 
     if (!run) {
+      // One control per thing: the run starts from Ask, and a review step is added in the sentence.
       reviewBody.replaceChildren(state.team.review
-        ? quiet('', 'Nothing to review yet.', 'Run the team. When Researcher hands over, the run stops here and waits for you.',
-          el('button', { type: 'button', class: 'btn', text: 'Run team', onclick: () => { startRun(); scrollToId('watch') } }))
+        ? quiet('', 'Nothing to review yet.', 'Run the team from Ask, above. When Researcher hands over, the run stops here and waits for you.')
         : quiet('warn', 'This team has no review step.', "Researcher's findings would go straight to Writer, unchecked.",
-          el('button', { type: 'button', class: 'repair', text: 'Add a review step before Writer', onclick: () => setReview(true) })))
+          el('a', { class: 'link', href: '#build', style: 'display:inline-block;margin-top:16px', text: 'Add one in the team sentence ↑' })))
       return
     }
     if (!run.team.review) {
@@ -892,8 +1183,8 @@
         done ? `This team had no review step, so Writer used everything Researcher found, including claim ${flagged + 1}, which has no source.`
           : "This team has no review step, so Researcher's findings go straight to Writer, unchecked.",
         state.team.review
-          ? el('button', { type: 'button', class: 'btn', text: done ? 'Run again with the review step' : 'Review step added for the next run', disabled: !done, onclick: () => { startRun(); scrollToId('watch') } })
-          : el('button', { type: 'button', class: 'repair', text: 'Add a review step before Writer', onclick: () => setReview(true) })))
+          ? el('p', { text: 'The review step is on the team now. Run it again from Ask, and it stops here.' })
+          : el('a', { class: 'link', href: '#build', style: 'display:inline-block;margin-top:16px', text: 'Add one in the team sentence ↑' })))
       return
     }
     if (run.phase === 'review') {
@@ -949,20 +1240,27 @@
       ['Ran on', `${listText(apps)} · your own sign-ins`],
       ['Took', clockText(r.clock)],
     ]
-    if (r.team.review) rows.push(['Waited on you', waitText(r.waitedMs)])
+    const handed = GIVEN_TO.filter((w) => r.give[w].length).map((w) => `${LANE[w]}: ${r.give[w].map((id) => source(id).name).join(', ')}`)
+    rows.push(['Handed over', handed.length ? handed.join(' · ') : 'nothing'])
+    if (r.permission) rows.push(['Asked you', `Researcher wanted the web · ${r.permission === 'deny' ? 'you said no' : r.permission === 'always' ? 'allowed from now on' : 'allowed once'}`])
+    if (r.team.review || r.permission) rows.push(['Waited on you', waitText(r.waitedMs)])
     rows.push(['Your call', call])
-    rows.push(['Researcher', `${r.findings.filter((f) => !f.dropped).length} findings · ${r.tools.researcher} tool calls`])
+    rows.push(['Researcher', `${r.findings.filter((f) => !f.dropped).length} findings · ${r.tools.researcher} tool call${r.tools.researcher === 1 ? '' : 's'}`])
     rows.push(['Writer', `wrote ${r.preset.file}`])
-    return { rows, flagged }
+    const worth = [
+      ...flagged.slice(0, 1).map((f) => `claim ${f.i + 1} has no source.`),
+      ...(r.deniedWeb ? ['Researcher wasn’t allowed to search the web, so check where its claims came from.'] : []),
+    ]
+    return { rows, flagged, worth }
   }
   function receiptMarkdown(r) {
-    const { rows, flagged } = receiptRows(r)
+    const { rows, worth } = receiptRows(r)
     return [
       `**Run receipt · Run ${r.n} · Finished**`,
       '',
       ...rows.map(([k, v]) => `- **${k}:** ${v}`),
       '',
-      flagged.length ? `**Worth a look:** claim ${flagged[0].i + 1} has no source.` : '**Worth a look:** nothing flagged.',
+      worth.length ? `**Worth a look:** ${worth.join(' ')}` : '**Worth a look:** nothing flagged.',
       '',
       '_Simulated on the LoomWatch landing page. No model was called._',
     ].join('\n')
@@ -997,11 +1295,11 @@
         el('span', { class: 'ico', 'aria-hidden': 'true', text: r.preset.file.split('.').pop().toUpperCase() }),
         el('span', {}, el('div', { class: 'fn', text: r.preset.file }), el('div', { class: 'fm', text: `${r.preset.kind} · changed just now · Research and write › Writer` })),
         el('span', { class: 'acts', 'aria-hidden': 'true' }, el('span', { text: 'Open' }), el('span', { text: 'Show in folder' }))))
-    const { rows, flagged } = receiptRows(r)
+    const { rows, worth } = receiptRows(r)
     const slip = el('div', { class: 'slip-wrap' }, el('div', { class: 'slip' },
       el('div', { class: 'head' }, el('span', { text: `Run receipt · Run ${r.n}` }), el('span', { text: 'Finished' })),
       el('dl', {}, rows.map(([k, v]) => [el('dt', { text: k }), el('dd', { text: v })]).flat()),
-      el('div', { class: 'worth' }, el('b', { text: 'Worth a look: ' }), flagged.length ? el('span', { class: 'bad', text: `claim ${flagged[0].i + 1} has no source.` }) : 'nothing flagged.'),
+      el('div', { class: 'worth' }, el('b', { text: 'Worth a look: ' }), worth.length ? el('span', { class: 'bad', text: worth.join(' ') }) : 'nothing flagged.'),
       el('div', { class: 'foot', text: 'Simulated in your browser · no model was called' })))
     const copied = el('span', { class: 'copied', 'aria-live': 'polite' })
     const acts = el('div', { class: 'res-acts' },
@@ -1009,7 +1307,6 @@
         try { await navigator.clipboard.writeText(receiptMarkdown(r)); copied.textContent = 'Copied' } catch { copied.textContent = 'Copy failed' }
         window.setTimeout(() => { copied.textContent = '' }, 1800)
       } }),
-      el('button', { type: 'button', class: 'btn', text: 'Run it again', onclick: () => { startRun(); scrollToId('watch') } }),
       el('a', { class: 'link', href: '#watch', style: 'font-size:13px', text: 'Replay the timeline ↑' }),
       copied)
     resultBody.replaceChildren(el('div', { class: 'result-grid' }, reader, slip, acts))
@@ -1025,7 +1322,7 @@
     { d: 'Sep 23', w: 'Wed', runs: ['done'], tag: 'Notebook', when: '10:00 → 10:05', story: 'You added a line to the team\'s Notebook: <span class="q">“Five items, not ten.”</span> Every run since has read it before starting.' },
     { d: 'Sep 24', w: 'Thu', runs: ['done'], when: '10:00 → 10:04', story: 'Five items, not ten. It remembered without being told again.' },
     { d: 'Sep 25', w: 'Fri', runs: ['done'], tag: 'Swap a thread', when: '10:00 → 10:05', story: 'A newer app was better at editing, so you moved Editor to it. One change in the sentence. The team, its Brief and its Notebook stayed as they were.' },
-    { d: 'Sep 26', w: 'Sat', runs: ['done'], when: '10:00 → 10:04', story: 'Finished before you were up.' },
+    { d: 'Sep 26', w: 'Sat', runs: ['done'], tag: 'Share a source', when: '10:00 → 10:04', story: 'You dragged market-reports onto Editor too. One card, two threads: Collector and Editor read the same folder, and neither can change it.' },
     { d: 'Sep 27', w: 'Sun', runs: ['wait'], tag: 'A review step waits', when: '10:00 → 18:40', story: "Editor flagged a claim it couldn't confirm, and the review step held the run all Sunday. You approved at 18:40, and the digest went out then, not before." },
     { d: 'Sep 28', w: 'Mon', runs: ['done'], tag: 'Saved job', when: '10:00 → 10:05', story: 'You saved Editor as a job, with its instructions, app and skills, and added it to a second team.' },
     { d: 'Sep 29', w: 'Tue', runs: ['done'], when: '10:00 → 10:04', story: 'Most mornings now need nothing from you. That was the point.' },
@@ -1136,9 +1433,9 @@
   }
 
   const SCREENS = {
-    home: { w: 2880, h: 1240, alt: 'LoomWatch Home: the headline Put AI agents to work as a team, a New team button, three steps, and the teams as cards with their recent runs drawn as threads.', cap: 'Home: your teams, each with its recent runs drawn as threads, and the one gold button that starts a new one.' },
-    build: { w: 2880, h: 1800, alt: 'LoomWatch Build: the team as one sentence across the top, a Hire by job palette on the left, and agent cards wired left to right on a dotted canvas.', cap: 'Build: the team as one sentence across the top, Hire by job on the left, cards wired left to right.' },
-    run: { w: 2880, h: 1800, alt: "LoomWatch Run: the request, the team's steps, a run receipt and the timeline on the left, and the team's answer in a reader on the right.", cap: "Run: the request, the steps, the receipt and the timeline on the left; the team's answer on the right." },
+    home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as a team, a New team button, a box to describe the job in plain words, three steps, and the teams as cards with their recent runs drawn as threads.', cap: 'Home: your teams, each with its recent runs drawn as threads, and the one gold button that starts a new one.' },
+    build: { w: 2880, h: 1800, alt: 'LoomWatch Build: the team as one sentence across the top, a Hire by job palette on the left, and agent cards wired left to right on a dotted canvas, with a folder, a file and a shared skill wired in beneath the agents that use them.', cap: 'Build: the team as one sentence across the top, Hire by job on the left, and under each agent the folder, file and skill it was handed.' },
+    run: { w: 2880, h: 1800, alt: "LoomWatch Run: the request, a run receipt with each step and your decision, and the timeline on the left, and the team's market brief in a reader on the right, marked Nothing flagged.", cap: "Run: the request, the steps, the receipt and the timeline on the left; the team's answer on the right." },
   }
   const realImg = $('#real-img')
   function showScreen(name, focus = false) {
