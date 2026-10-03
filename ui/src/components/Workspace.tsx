@@ -40,15 +40,14 @@ import { EntrypointProblemBar } from './canvas/EntrypointProblemBar'
 import { DeleteTeamDialog } from './home/DeleteTeamDialog'
 import { Home } from './home/Home'
 import { ALLOW_SWITCHES } from '../lib/team-file/allow'
-import { Inspector } from './canvas/Inspector'
-import { CapabilityInspector, type InspectedCapability } from './canvas/CapabilityInspector'
+import type { InspectedCapability } from './canvas/CapabilityInspector'
 import { LayerLegend, type LayerSolo } from './canvas/LayerLegend'
 import { ParseFailureModal } from './canvas/ParseFailureModal'
 import { ScheduleNodeCard } from './canvas/ScheduleNodeCard'
 import { SchedulePanel } from './canvas/SchedulePanel'
 import { ViewControls } from './canvas/ViewControls'
 import { YamlSheet } from './canvas/YamlSheet'
-import { BuildProvEdgeView, ProvEdgeView, WarpEdgeView, WeftEdgeView } from './canvas/edges'
+import { ProvEdgeView, WarpEdgeView, WeftEdgeView } from './canvas/edges'
 import { BuildAgentCard, BuildCapabilityCard, BuildOutputCard } from './canvas/BuildNodeCard'
 import { BuildResourceInspector } from './canvas/BuildResourceInspector'
 import { BuildInspector } from './canvas/BuildInspector'
@@ -57,7 +56,7 @@ import { MessageSquareText, Play, Wrench } from 'lucide-react'
 import { Composer, type ComposerState } from './composer/Composer'
 import { RoutineNote } from './composer/RoutineNote'
 import { RunHistory } from './composer/RunHistory'
-import { CAPABILITY_DRAG_MIME, EVIDENCE_DRAG_MIME, Library, LIBRARY_DRAG_MIME } from './library'
+import { CAPABILITY_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './library'
 import { BriefEditStrip } from './memory/BriefEditStrip'
 import { CheckpointStrip } from './memory/CheckpointStrip'
 import { MemoryPanel } from './memory/MemoryPanel'
@@ -110,13 +109,13 @@ const AskPanel = lazy(() => import('./ask/AskPanel').then((module) => ({ default
 // its evidence and the response it produced — have a Run-only renderer, and only the response node
 // differs between the two, because before a run there is no answer to read.
 const nodeTypes = { agent: BuildAgentCard, schedule: ScheduleNodeCard, capability: BuildCapabilityCard, prompt: PromptNodeCard, run: RunNodeCard, evidence: EvidenceNodeCard, more: MoreEvidenceCard, response: OutputNodeCard }
-// Run keeps the provenance edge's own routing — the arc onto the Output node's top handle, the
-// resource lane — because those carry run facts. The Build vocabulary and label chrome are CSS,
-// scoped to `.build-graph`, which both surfaces set.
+// One set of lines and one word for each relationship on both canvases (ADR 0041); a run's own
+// routing — the arc onto the Output node's top handle, the resource lane — rides the edge data.
 const edgeTypes = { warp: WarpEdgeView, weft: WeftEdgeView, prov: ProvEdgeView }
+// Before a run there is no answer to show, so the Output card is the planned one.
 const buildNodeTypes = { ...nodeTypes, response: BuildOutputCard }
-const buildEdgeTypes = { ...edgeTypes, prov: BuildProvEdgeView }
 const EMPTY_CAPABILITY_INVENTORY: CapabilityInventory = { skills: [], tools: [], sources: [] }
+const EMPTY_EVIDENCE: readonly Evidence[] = []
 
 interface WorkspaceProps {
   harnesses: DetectedHarness[]
@@ -339,11 +338,10 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     // Solo is per-run view state too: a layer soloed in one story must not bleed into the next.
     setSolo('both')
   }, [doc.path])
-  // The library is composition chrome; once a run is on screen it yields (the prototype's run
-  // screens open with the rail). Keyed on the path too: before the document loads there is
-  // no Library mounted to hear the event.
-  // The full trace mounts its own Library, which would otherwise reopen in whatever state it was
-  // last left; reviewing a run starts with the graph, not the catalogue.
+  // The add panel is composition chrome; once a run is on screen it folds. Keyed on the path too:
+  // before the document loads there is no panel mounted to hear the event. The full trace mounts
+  // the panel again, and reviewing a run starts with the graph, not the catalogue — the folded
+  // panel names what the run used, for when the reader wants it (ADR 0041).
   useEffect(() => {
     if (activeRunId && doc.path) window.dispatchEvent(new Event('loomwatch:close-library'))
   }, [activeRunId, doc.path, runPresentation])
@@ -886,7 +884,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     if (!canvas || nodes.length === 0) return
     const rect = canvas.getBoundingClientRect()
     const shell = canvas.closest('.lw-shell')
-    const coveredLeft = !runView || windowWidth < 768 ? 0 : libraryCollapsed ? 68 : 344
+    // The add panel is docked beside the canvas on both tabs (ADR 0041), so the canvas's own
+    // rectangle is already the space that is free; only the composer can cover its bottom.
     let bottom = rect.bottom - 24
     for (const selector of ['.lw-composer', '.lw-composer-notices']) {
       const panel = shell?.querySelector(selector)?.getBoundingClientRect()
@@ -895,9 +894,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     // Build keeps the team sentence above the cards, so a fitted team starts below it.
     const top = !runView ? (storyShown ? 124 : 68) : windowWidth >= 768 && windowWidth < 1400 ? 184 : 132
     const bounds = getNodesBounds(nodes)
-    const viewport = getViewportForBounds(bounds, Math.max(200, rect.width - coveredLeft - 24), Math.max(160, bottom - rect.top - top), runView ? 0.1 : 0.35, runView ? 1 : 1.5, runView ? 0.12 : 0.2)
-    void flow.setViewport({ ...viewport, x: viewport.x + coveredLeft, y: viewport.y + top }, { duration: document.hidden ? 0 : 300 })
-  }, [flow, windowWidth, libraryCollapsed, runView, storyShown])
+    const viewport = getViewportForBounds(bounds, Math.max(200, rect.width - 24), Math.max(160, bottom - rect.top - top), runView ? 0.1 : 0.35, runView ? 1 : 1.5, runView ? 0.12 : 0.2)
+    void flow.setViewport({ ...viewport, y: viewport.y + top }, { duration: document.hidden ? 0 : 300 })
+  }, [flow, windowWidth, runView, storyShown])
   useEffect(() => {
     // React Flow can only frame nodes it has measured; a fit requested while new cards are
     // still mounting waits for `useNodesInitialized` to flip back to true.
@@ -1706,7 +1705,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     if (pendingPrompt !== null) return { kind: 'saving', filename }
     if (starting) return { kind: 'starting' }
     if (!doc.path) return { kind: 'blocked', reason: 'Open or create a team first.' }
-    if (doc.nodes.length === 0) return { kind: 'blocked', reason: 'Add an agent from the Library before running.' }
+    if (doc.nodes.length === 0) return { kind: 'blocked', reason: 'Add an agent before running.' }
     if (!doc.isValid && problems.length > 0) return { kind: 'blocked', reason: `${problems.length} thing${problems.length === 1 ? '' : 's'} to fix before this team can run.`, action: { label: 'Review', run: () => setProblemsOpen(true) } }
     // The run would fail the moment it started this agent, so it is not offered.
     if (appProblems.length > 0) return { kind: 'blocked', reason: appProblemSummary(appProblems, nodeNames) ?? '', action: { label: 'Review', run: () => setProblemsOpen(true) } }
@@ -1933,15 +1932,12 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     )
   }
 
-  const WorkspaceResourceInspector = runView ? CapabilityInspector : BuildResourceInspector
-  const WorkspaceInspector = runView ? Inspector : BuildInspector
-  const WorkspaceLibrary = runView ? Library : ComponentPalette
   const shellClass = [
     // `build-graph` is the canvas's own presentation — card and edge anatomy, handles, backdrop —
     // and both surfaces that draw the graph set it. `build-workspace` is Build's page layout alone.
     'lw-shell', !runView && !runSetup ? 'build-workspace' : '', runPresentation === 'trace' || (!runView && !runSetup) ? 'build-graph' : '', `mode-${doc.mode}`, libraryDragging ? 'dragging' : '', nodeDragging ? 'node-dragging' : '', inspecting ? 'inspecting' : '', sweeping ? 'sweeping' : '',
     soloActive === 'configured' ? 'solo-configured' : soloActive === 'observed' ? 'solo-observed' : '', runView ? 'run-shown' : '', deliveryShown ? 'delivery-shown' : '',
-    !runView || windowWidth >= 768 ? (libraryCollapsed ? 'lib-collapsed' : 'lib-open') : 'lib-hidden',
+    libraryCollapsed ? 'lib-collapsed' : 'lib-open',
     ask.open && !askDockBusy ? 'ask-docked' : '',
   ].filter(Boolean).join(' ')
 
@@ -1998,7 +1994,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             nodes={markedNodes}
             edges={runView ? visibleEdges : visibleEdges.filter(edge => edge.source !== '__prompt' || allWiringEdges.some(wire => wire.from === '__prompt'))}
             nodeTypes={runView ? nodeTypes : buildNodeTypes}
-            edgeTypes={runView ? edgeTypes : buildEdgeTypes}
+            edgeTypes={edgeTypes}
             onNodeClick={(_, node) => { if (!runView) { setOutputEditorOpen(node.id === '__output'); if (node.id === '__output') clearSelection() } }}
             onPaneClick={() => setOutputEditorOpen(false)}
             onNodesChange={onNodesChange}
@@ -2047,7 +2043,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         </div>
 
         {(!runView && !runSetup || runPresentation === 'trace') && (
-          <WorkspaceLibrary harnesses={harnesses} harnessSearchPath={harnessSearchPath} knownHarnessIds={knownHarnessIds} harnessesLoading={harnessesLoading} harnessesError={harnessesError} onRetry={onRetryHarnesses} capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={() => { onRetryCapabilities(); onRetryHarnesses() }} onInspectCapability={inspectCapability} onDragStateChange={setLibraryDragging} onCollapsedChange={setLibraryCollapsed} evidenceMode={runView} observedEvidence={runView ? projection.evidence : []} onRevealEvidence={(id) => {
+          // One add panel on both canvases (ADR 0041); a run adds what it used, at the top.
+          <ComponentPalette harnesses={harnesses} harnessSearchPath={harnessSearchPath} knownHarnessIds={knownHarnessIds} harnessesLoading={harnessesLoading} harnessesError={harnessesError} onRetry={onRetryHarnesses} capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={() => { onRetryCapabilities(); onRetryHarnesses() }} onInspectCapability={inspectCapability} onDragStateChange={setLibraryDragging} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} agentNames={nodeNames} onRevealEvidence={(id) => {
             // Folded is the default, so "reveal" means: fan the agent that owns this card, then
             // frame it. Framing the agent rather than the card is deliberate — the evidence node
             // does not exist yet on this render.
@@ -2123,7 +2120,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           />
         )}
         {inspectedNode && !inspectedCapability && !inspectedEvidence && (
-          <WorkspaceInspector
+          // The same agent panel in Build and in a run (ADR 0041).
+          <BuildInspector
             startAdvanced={forcedInspectorField?.agentId === inspectedNode.id} fixHint={forcedInspectorField?.agentId === inspectedNode.id ? forcedInspectorField.hint : undefined} onDismissFixHint={() => setForcedInspectorField(null)}
             harnesses={harnesses} harnessId={inspectedHarnessId ?? undefined} onHarnessChange={(id: string) => { const harness = harnesses.find(item => item.id === id); if (harness) doc.updateAgentSpawn(inspectedNode.id, { env: {}, cwd: '.', ...inspectedNode.data.agent.spawn, ...harness.spawn }) }}
             node={inspectedNode} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} pipeline={doc.mode === 'pipeline'}
@@ -2152,7 +2150,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           />
         )}
         {inspectedCapability && !inspectedNode && !inspectedEvidence && (
-          <WorkspaceResourceInspector
+          <BuildResourceInspector
+            key={`${inspectedCapability.kind}:${inspectedCapability.item.id}:${inspectedCapabilityNode?.id ?? ''}`}
             onRemove={inspectedCapabilityNode ? () => { removeCapabilityCards([inspectedCapabilityNode.id]); clearSelection() } : undefined}
             {...inspectedCapability}
             placed={Boolean(inspectedCapabilityNode)}
@@ -2247,7 +2246,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         {askNotice}
 
         {layersVisible && runPresentation === 'trace' && <LayerLegend configured={doc.edges.length} observed={observedCount} solo={soloActive} onSolo={setSolo} />}
-        {(!runView && !runSetup || runPresentation === 'trace') && <ViewControls prototype={!runView} onFit={fitCanvas} onOrganize={windowWidth >= 768 ? organize : undefined} organizeDisabled={!canOrganize} onUndoOrganize={canOrganize && previousArrangement?.key === arrangementKey ? undoOrganize : undefined} />}
+        {(!runView && !runSetup || runPresentation === 'trace') && <ViewControls onFit={fitCanvas} onOrganize={windowWidth >= 768 ? organize : undefined} organizeDisabled={!canOrganize} onUndoOrganize={canOrganize && previousArrangement?.key === arrangementKey ? undoOrganize : undefined} />}
 
         {(doc.refusal || planRefusal) && <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center" style={{ bottom: 'calc(var(--lw-panel-inset) + 72px)' }}><EdgeRefusalPopover refusal={doc.refusal ?? { message: planRefusal ?? '' }} onPromote={doc.promoteEntrypoint} onDismiss={() => { doc.dismissRefusal(); setPlanRefusal(null) }} /></div>}
         {composerLayout.error && <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center" style={{ bottom: 'calc(var(--lw-panel-inset) + 164px)' }}><EdgeRefusalPopover refusal={{ message: `Capability wiring: ${composerLayout.error}` }} onPromote={doc.promoteEntrypoint} onDismiss={composerLayout.dismissError} /></div>}

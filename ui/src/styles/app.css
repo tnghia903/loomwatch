@@ -84,141 +84,17 @@ code, kbd, pre { font-family: var(--font-mono); }
 .panel.cx     { left: 50%; transform: translateX(-50%); }
 
 /* ---------------------------------------------------------------------------
-   LIBRARY — UX_REDESIGN §4, TNG-123/124. 288 px, collapsible to a 48 px rail.
+   LIBRARY LEFTOVERS — the run Library is gone (ADR 0041); the add panel's styles live in
+   prototype-parity.css and one-canvas.css. These classes are still used by other panels.
    --------------------------------------------------------------------------- */
-.lw-library {
-  width: var(--lw-library-w);
-  height: calc(100% - 56px);
-  max-height: calc(100% - 56px);
-  left: 28px;
-  top: 28px;
-  padding: 0 var(--sp-3) var(--sp-4);
-  display: flex; flex-direction: column; gap: 0;
-  overflow: hidden;
-  background-color: var(--e1-fill);
-  background-image: var(--e1-sheen);
-  border-radius: 18px;
-  border-color: color-mix(in srgb, var(--color-ink-3) 28%, transparent);
-  box-shadow: var(--e1-shadow);
-  backdrop-filter: blur(28px) saturate(150%);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
-  transition: width var(--t-move) var(--ease-out), padding var(--t-move) var(--ease-out);
-}
-.lw-library.collapsed { width: var(--lw-library-rail-w); padding: var(--sp-2) 0; height: auto; top: var(--lw-panel-inset); left: var(--lw-panel-inset); }
-.lw-library.library-sheet { z-index: 60; }
-.lw-library.collapsed .lib-controls, .lw-library.collapsed .lib-scroll,
-.lw-library.collapsed .lib-foot, .lw-library.collapsed .lib-head-text { display: none; }
-.lw-library .rail-only { display: none; }
-.lw-library.collapsed .rail-only { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); }
-.lib-brand {
-  height: 76px; padding: 0 var(--sp-3); flex: none;
-  display: flex; align-items: center; gap: var(--sp-3);
-  border-bottom: 1px solid var(--color-hairline);
-}
-.lib-brand img { width: 36px; height: 36px; border-radius: var(--r-md); }
-.lib-brand > span { display: flex; flex-direction: column; min-width: 0; }
-.lib-brand strong { color: var(--color-ink); }
-.lib-brand small { color: var(--color-ink-2); white-space: nowrap; }
-.lib-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex: none; min-height: 60px; padding: var(--sp-2) var(--sp-3) 0; }
-.lib-title { display: inline-flex; align-items: center; gap: 10px; color: var(--color-ink); }
-.lib-scan { display: inline-flex; align-items: center; gap: 4px; }
-.lib-scan .link { display: inline-flex; align-items: center; gap: 6px; color: var(--color-ink); }
-.lib-scan .link:disabled { cursor: default; opacity: .55; text-decoration: none; }
-.lib-scan-status { min-height: 18px; padding: 0 50px 8px 45px; margin-top: -6px; display: flex; justify-content: flex-end; align-items: center; gap: 7px; color: var(--color-ink-3); }
-.scan-dot, .ready-dot { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--color-ok); box-shadow: 0 0 9px color-mix(in srgb, var(--color-ok) 45%, transparent); flex: none; }
-.scan-dot.error { background: var(--color-alert); box-shadow: none; }
-.lib-head-text { color: var(--color-ink-3); }
-.lib-title .lib-head-text { color: var(--color-ink); }
-.lib-controls { display: flex; flex-direction: column; gap: var(--sp-2); flex: none; padding: 0 var(--sp-2) var(--sp-4); }
-.lib-search {
-  display: flex; align-items: center; gap: var(--sp-2);
-  height: 38px; padding: 0 var(--sp-3);
-  border: 1px solid var(--color-hairline); border-radius: var(--r-sm);
-  color: var(--color-ink-3);
-}
-.lib-search:focus-within { border-color: var(--color-accent); }
-.lib-search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--color-ink); font: 400 12px/16px var(--font-sans); }
-.lib-search input::placeholder { color: var(--color-ink-3); }
-.lib-filters { display: flex; flex-wrap: wrap; gap: 3px; }
-.lfilt {
-  height: 22px; padding: 0 var(--sp-2);
-  border: 1px solid var(--color-hairline); border-radius: var(--r-full);
-  background: none; color: var(--color-ink-3);
-  font: 500 11px/1 var(--font-sans); white-space: nowrap;
-}
-.lfilt:hover { background: var(--color-accent-tint); color: var(--color-ink); }
-.lfilt.on { background: var(--color-accent-tint); color: var(--color-ink); border-color: var(--color-accent-dim); }
-
-.lib-scroll {
-  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
-  display: flex; flex-direction: column; gap: var(--sp-3);
-  padding: 0 8px 0 8px; margin-right: -4px;
-  scrollbar-width: thin; scrollbar-color: var(--color-ink-3) transparent;
-}
-.lib-scroll::-webkit-scrollbar { width: 6px; }
-.lib-scroll::-webkit-scrollbar-thumb { background: var(--color-hairline); border-radius: var(--r-full); }
-.lib-scroll:hover::-webkit-scrollbar-thumb { background: var(--color-ink-3); }
-.lib-scroll.can-scroll-up { mask-image: linear-gradient(to bottom, transparent, black 20px); }
-.lib-scroll.can-scroll-down { mask-image: linear-gradient(to top, transparent, black 20px); }
-.lib-scroll.can-scroll-up.can-scroll-down { mask-image: linear-gradient(to bottom, transparent, black 20px, black calc(100% - 20px), transparent); }
-
-.lib-group { display: flex; flex-direction: column; gap: var(--sp-2); }
-.lib-group + .lib-group { border-top: 1px solid var(--color-hairline); padding-top: var(--sp-3); }
-.lib-group-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); color: var(--color-ink-3); padding: var(--sp-2) var(--sp-1); }
-.lib-chev { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; padding: 0; color: var(--color-ink-2); letter-spacing: .07em; text-transform: uppercase; text-align: left; }
-.capability-group .lib-chev { color: var(--color-ink); letter-spacing: 0; text-transform: none; }
-.lib-chev:hover { color: var(--color-ink); }
+.ready-dot { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--color-ok); box-shadow: 0 0 9px color-mix(in srgb, var(--color-ok) 45%, transparent); flex: none; }
+.ready-dot.local { background: var(--color-halt); box-shadow: none; }
 .lib-count {
   display: inline-flex; flex: none; align-items: center; justify-content: center;
   min-width: 22px; height: 16px; padding: 0 6px;
   border-radius: var(--r-full); background: var(--color-hairline);
   color: var(--color-ink-3); font: 500 10px/16px var(--font-mono);
 }
-.lib-rows { display: flex; flex-direction: column; gap: 6px; }
-.lib-row {
-  min-height: 44px;
-  display: flex; align-items: center; gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-sm);
-  border: 1px solid var(--color-hairline);
-  background: color-mix(in srgb, var(--color-panel-solid) 38%, transparent);
-  color: inherit; text-align: left; width: 100%;
-  cursor: grab;
-  transition: background-color var(--t-instant) var(--ease-out), border-color var(--t-instant) var(--ease-out);
-}
-.lib-row:hover { background: var(--color-accent-tint); border-color: var(--color-accent-dim); }
-.lib-row:active { cursor: grabbing; }
-.lib-row .drag-dots { margin-left: auto; color: var(--color-ink-3); opacity: .75; letter-spacing: -1px; flex: none; }
-.lib-row .drag-dots.leading { margin: 0; }
-.lib-row:hover .drag-dots { opacity: 1; }
-.lib-row.unavailable { opacity: .55; cursor: not-allowed; background: transparent; }
-.lib-row.unavailable:hover { background: none; border-color: var(--color-hairline); }
-.lib-row.dragging { opacity: .35; border-style: dashed; }
-.lib-row.armed { border-color: var(--color-accent); background: var(--color-accent-tint); box-shadow: inset 3px 0 0 var(--color-accent); }
-.lib-row-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
-.lib-row-name { color: var(--color-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lib-row-sub { color: var(--color-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lib-row-meta { display: flex; align-items: center; gap: 4px; min-width: 0; color: var(--color-ink-3); }
-.lib-row-compat { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-/* A capability row is an agent row that places a resource instead of a worker: same 44 px card,
-   same grab cursor, same grip at the trailing edge. It used to be a static `listitem` with a
-   leading grip it could not honour. */
-.capability-row { min-height: 56px; padding: 7px var(--sp-3) 7px var(--sp-2); }
-.capability-row .monogram { width: 36px; height: 36px; border: 1px solid var(--color-hairline); background: color-mix(in srgb, var(--color-panel-solid) 80%, transparent); }
-.cap-status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--color-ink-2); flex: none; }
-.ready-dot.local { background: var(--color-halt); box-shadow: none; }
-.lib-more { min-height: 30px; padding: 3px 4px; border: 0; background: none; color: var(--color-ink-2); text-align: left; }
-.lib-more:hover { color: var(--color-ink); }
-.lbadge {
-  display: inline-block; padding: 1px 5px; border-radius: var(--r-full);
-  border: 1px solid var(--color-hairline); color: var(--color-ink-3);
-  font: 500 11px/1.4 var(--font-sans); letter-spacing: .04em; white-space: nowrap;
-}
-.lbadge.st-permission { color: var(--color-accent); border-color: var(--color-accent-dim); }
-.lbadge.st-disconnected { color: var(--color-halt); border-color: color-mix(in srgb, var(--color-halt) 50%, transparent); }
-.lbadge.st-unavailable { color: var(--color-ink-3); border-style: dashed; }
-.lbadge.wired { color: var(--color-ink); background: var(--color-accent-tint); border-color: var(--color-accent-dim); }
-.lib-foot { flex: none; display: flex; flex-direction: column; gap: 3px; padding: var(--sp-3) var(--sp-3) 0; border-top: 1px solid var(--color-hairline); color: var(--color-ink-3); }
 
 /* harness monogram — DESIGN_LANGUAGE §12: monochrome, never vendor art. */
 .monogram {
@@ -243,20 +119,6 @@ code, kbd, pre { font-family: var(--font-mono); }
 .inline-error { border: 1px dashed var(--color-alert); border-radius: var(--r-md); padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
 .inline-error .msg { color: var(--color-ink); }
 .inline-error .detail { color: var(--color-ink-2); overflow-wrap: anywhere; }
-
-/* §4.3 empty group */
-.lib-empty { padding: var(--sp-3); border: 1px dashed var(--color-hairline); border-radius: var(--r-md); color: var(--color-ink-3); display: flex; flex-direction: column; gap: var(--sp-2); }
-
-/* the carry ghost that follows a library drag (TNG-127) */
-.lib-carry {
-  position: fixed; top: 0; left: 0; z-index: 90; pointer-events: none;
-  max-width: 260px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-  padding: 6px var(--sp-3); border-radius: var(--r-sm);
-  border: 1px dashed var(--color-accent-dim);
-  background: var(--color-panel-solid); color: var(--color-ink);
-  box-shadow: var(--e2-shadow); opacity: .92;
-}
-.lib-carry.over-canvas { border-color: var(--color-accent); border-style: solid; background: var(--color-accent-tint); }
 
 /* ---------------------------------------------------------------------------
    DOCUMENT SWITCHER — UX_REDESIGN §9.1 / §9.1a. 44 px, two lines, top-centre.
@@ -869,7 +731,7 @@ textarea.input { padding: 6px var(--sp-3); resize: vertical; min-height: 84px; }
    NARROW — the coordinate canvas becomes a reading column (TNG-115).
    --------------------------------------------------------------------------- */
 @media (max-width: 767px) {
-  .lw-library, .lw-legend { display: none !important; }
+  .lw-legend { display: none !important; }
   .lw-inspector { width: auto; left: var(--sp-3); right: var(--sp-3); top: auto; bottom: 88px; max-height: 60vh; }
   .inspector-scroll { max-height: 60vh; }
   .lw-schedule-panel { width: auto; }

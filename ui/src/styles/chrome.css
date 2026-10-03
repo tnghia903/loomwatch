@@ -17,9 +17,6 @@
 .lw-shell { --lw-panel-top: var(--lw-below-header); }
 .lw-shell .panel.right.top { overflow-x: hidden; overflow-wrap: anywhere; }
 
-.lw-shell .lw-library { top: var(--lw-below-header); height: calc(100% - var(--lw-below-header) - 20px); max-height: calc(100% - var(--lw-below-header) - 20px); }
-.lw-shell .lw-library.collapsed { top: var(--lw-below-header); height: auto; }
-
 /* The replay strip belongs to the run, not to the header: centre it under the view tabs. */
 .lw-shell .workspace-chrome > .life-strip {
   position: absolute; top: var(--lw-below-header); left: 50%; transform: translateX(-50%);

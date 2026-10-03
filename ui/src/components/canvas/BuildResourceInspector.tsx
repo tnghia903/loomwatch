@@ -3,7 +3,9 @@ import { Trash2, X } from 'lucide-react'
 import { CapabilityInspector } from './CapabilityInspector'
 
 export function BuildResourceInspector(props: ComponentProps<typeof CapabilityInspector> & { onRemove?: () => void }) {
-  const [details, setDetails] = useState(false)
+  // A card on the canvas opens on its short summary; a skill or tool chosen in the add panel has no
+  // card yet, so its details — what it is, and which agents to connect — are the whole point.
+  const [details, setDetails] = useState(!props.placed)
   if (details) return <CapabilityInspector {...props} onClose={() => setDetails(false)} />
   // A knowledge card that is not memory was placed from the Library before ADR 0036 and is never
   // delivered: knowledge is a folder or file chosen in the agent's Context.
