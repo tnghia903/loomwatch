@@ -569,6 +569,77 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 
 /* ---------------------------------------------------------------- Responsive */
 
+/* ---------------------------------------------------------------- 03 · Give
+   Cards for what an agent is handed, a gold thread from each agent to each card it reads, and the
+   packet: where it works, what it holds, what it may do. One card can carry several threads. */
+
+.chapter h2 em { color: var(--accent); }
+.give { position: relative; border: 1px solid var(--hairline); border-radius: 10px; padding: 20px 16px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); column-gap: 52px; align-items: center; }
+.give-threads { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.g-thread { fill: none; stroke: var(--accent-dim); stroke-width: 1.6; stroke-linecap: round; stroke-dasharray: 5 4; transition: stroke .2s var(--ease); }
+.g-thread.lit { stroke: var(--accent); stroke-width: 2; stroke-dasharray: none; filter: var(--bloom-gold); }
+.give-agents { position: relative; display: grid; gap: 16px; }
+.g-agent { position: relative; display: grid; gap: 2px; min-width: 0; padding: 10px 12px 11px; text-align: left; background: var(--panel-solid); border: 1px solid var(--hairline-2); border-radius: 8px; box-shadow: 0 6px 18px rgb(0 0 0 / .25); cursor: pointer; transition: border-color .2s var(--ease), box-shadow .2s var(--ease), background .2s var(--ease); }
+:root[data-theme="light"] .g-agent { box-shadow: 0 1px 2px rgb(23 21 15 / .05), 0 6px 16px rgb(23 21 15 / .06); }
+.g-agent:hover { border-color: var(--accent-dim); }
+.g-agent.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 6px 18px rgb(0 0 0 / .25); }
+.g-agent .kind { font: 600 10px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
+.g-agent .nm { font: 600 14px/1.25 var(--sans); margin-top: 4px; }
+.g-agent .ap { font: 400 11px/1.2 var(--mono); color: var(--ink-3); }
+.g-agent .wk { display: flex; align-items: center; gap: 5px; margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--hairline); font: 400 10.5px/1.2 var(--mono); color: var(--ink-2); min-width: 0; }
+.g-agent .wk span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-agent .wk svg { width: 12px; height: 12px; flex: none; color: var(--ink-3); }
+.give.dragging .g-agent, .give.picking .g-agent.takes { border-style: dashed; border-color: var(--accent); }
+.give.picking .g-agent.takes { animation: takes 2.4s ease-in-out infinite; }
+@keyframes takes { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); } }
+.g-agent.over { background: var(--accent-tint); border-style: solid; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+.give-shelf { position: relative; display: grid; gap: 8px; }
+.g-src { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 9px; min-width: 0; padding: 9px 10px; text-align: left; background: var(--ground); border: 1px solid var(--hairline-2); border-radius: 8px; color: var(--ink); cursor: grab; user-select: none; -webkit-user-select: none; transition: border-color .2s var(--ease), transform .2s var(--ease), box-shadow .2s var(--ease); }
+.g-src:hover { border-color: var(--accent-dim); }
+.g-src:active { cursor: grabbing; }
+.g-src.given { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.g-src.picked { border-color: var(--accent); transform: translateY(-3px); box-shadow: 0 10px 24px rgb(0 0 0 / .3), 0 0 0 1px var(--accent); }
+.g-ico { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--hairline-2); background: var(--panel-solid); color: var(--ink-2); }
+.g-ico svg { width: 15px; height: 15px; }
+.g-src.given .g-ico { color: var(--accent); }
+.g-txt { display: grid; gap: 2px; min-width: 0; }
+.g-nm { font: 600 12.5px/1.2 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-mt { font: 400 10.5px/1.2 var(--sans); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-shared { position: absolute; top: -9px; right: 8px; padding: 2px 6px; border-radius: 999px; border: 1px solid var(--accent-dim); background: var(--panel-solid); font: 500 9.5px/1.2 var(--mono); color: var(--accent); }
+.g-ghost { position: fixed; left: 0; top: 0; z-index: 60; pointer-events: none; margin: 0; border-color: var(--accent); box-shadow: 0 18px 40px rgb(0 0 0 / .45), 0 0 0 1px var(--accent); }
+.g-cut { position: absolute; z-index: 2; transform: translate(-50%, -50%); display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 1px solid var(--hairline-2); background: var(--panel-solid); color: var(--ink-3); font: 400 13px/1 var(--sans); cursor: pointer; transition: color .15s var(--ease), border-color .15s var(--ease); }
+.g-cut:hover, .g-cut:focus-visible { color: var(--alert); border-color: var(--alert); }
+.give-hint { margin: 12px 2px 0; min-height: 1.5em; font-size: 12.5px; color: var(--ink-3); }
+.packet { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--hairline); }
+.pk-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pk-head b { font: 400 21px/1.2 var(--serif); }
+.pk { margin: 12px 0 0; display: grid; gap: 10px; }
+.pk > div { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.pk dt { font: 600 10.5px/1.6 var(--sans); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
+.pk dd { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--ink); min-width: 0; }
+.pk-note { color: var(--ink-3); font-size: 12.5px; }
+.pk-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pk-list li { display: grid; grid-template-columns: 13px minmax(0, 1fr); column-gap: 8px; align-items: start; }
+.pk-list svg { width: 13px; height: 13px; margin-top: 4px; color: var(--accent); }
+.pk-list b { display: block; font-weight: 600; }
+.pk-list small { display: block; color: var(--ink-2); font-size: 12.5px; }
+.pk-allow { display: flex; flex-wrap: wrap; gap: 8px; }
+.sw { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px 0 7px; border: 1px solid var(--hairline-2); border-radius: 999px; background: transparent; color: var(--ink-2); font: 500 12.5px/1 var(--sans); cursor: pointer; }
+.sw i { position: relative; width: 26px; height: 16px; border-radius: 999px; background: var(--hairline-2); flex: none; transition: background .2s var(--ease); }
+.sw i::after { content: ''; position: absolute; left: 2px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--ink-3); transition: transform .2s var(--ease), background .2s var(--ease); }
+.sw[aria-checked="true"] { color: var(--ink); border-color: var(--accent-dim); }
+.sw[aria-checked="true"] i { background: var(--accent-fill); }
+.sw[aria-checked="true"] i::after { transform: translateX(10px); background: var(--accent-on-fill); }
+.pk-foot { margin: 12px 0 0; font-size: 12px; color: var(--ink-3); }
+.card .gv { display: inline-block; margin-top: 6px; font: 500 10.5px/1 var(--mono); color: var(--accent); text-decoration: none; }
+.card .gv:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* The run stops to ask: an agent wants something its switches don't allow. */
+.ask-perm { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-tint); display: grid; gap: 10px; animation: ev-in .24s var(--ease); }
+.ap-q { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink-2); }
+.ap-q b { color: var(--accent); font-weight: 600; }
+.ap-acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
 @media (max-width: 1100px) {
   .why-grid, .start-grid { grid-template-columns: minmax(0, 1fr); }
   .swatch { max-width: 620px; }
@@ -630,6 +701,12 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
   .filecard .acts { display: none; }
   .open-cue { display: none; }
   .rv-acts .btn { flex: 1; }
+  .give { padding: 16px 10px; column-gap: 30px; }
+  .g-agent .wk { display: none; }
+  .g-nm { white-space: normal; overflow-wrap: anywhere; }
+  .pk > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .sw { min-height: 44px; }
+  .ap-acts .btn { flex: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
