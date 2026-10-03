@@ -1,4 +1,4 @@
-import { Check, Play } from 'lucide-react'
+import { Check, Clock3, Play } from 'lucide-react'
 
 import type { SaveState } from '../../lib/team-file/useTeamDocument'
 
@@ -17,6 +17,8 @@ interface BuildHeadingProps {
   undelivered?: number
   onDeliver?: () => void
   onRun: () => void
+  /** Start a schedule for a team that has none. Once it has one, its card on the canvas opens it. */
+  onSchedule?: () => void
   /** An Ask LoomWatch proposal is on the canvas: the heading becomes its Apply or Discard. */
   proposal?: BuildProposal | null
 }
@@ -34,7 +36,7 @@ export interface BuildProposal {
 }
 
 /** Build's heading. It says what to do next, not what the screen is called. */
-export function BuildHeading({ agentCount, isValid, checking, saveState, appProblem = null, undelivered = 0, onDeliver, onRun, proposal = null }: BuildHeadingProps) {
+export function BuildHeading({ agentCount, isValid, checking, saveState, appProblem = null, undelivered = 0, onDeliver, onRun, onSchedule, proposal = null }: BuildHeadingProps) {
   if (proposal) {
     return (
       <header className="build-workspace-heading proposal" aria-label="Proposal from Ask LoomWatch">
@@ -73,6 +75,7 @@ export function BuildHeading({ agentCount, isValid, checking, saveState, appProb
       </div>
       {/* Saving is the team chip's at the top, on every screen (ADR 0043). */}
       <div className="build-workspace-actions">
+        {onSchedule && agentCount > 0 && <button className="btn" title="Run this team on its own, at a time you choose" onClick={onSchedule}><Clock3 size={15} aria-hidden="true" />Schedule</button>}
         <button className="btn btn-primary" data-tour="run-team" onClick={onRun}><Play size={15} />Run team</button>
       </div>
     </header>

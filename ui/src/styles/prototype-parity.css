@@ -1,6 +1,8 @@
 /* Component anatomy copied from the selected interactive prototype. */
 .lw-shell { font-family:'Inter',sans-serif; --font-sans:'Inter',sans-serif; }
 .lw-shell .btn-primary { background:var(--gold); color:var(--color-accent-on-fill); }
+/* The gold above outranks app.css's disabled look, so a button that cannot be pressed read as one that can. */
+.lw-shell .btn-primary:disabled { background:var(--color-hairline); color:var(--color-ink-3); }
 .delivery-review-state { display:flex; gap:8px; align-items:center; color:var(--gold); font-size:12px; font-weight:400; letter-spacing:0; border-left:1px solid var(--line); padding-left:13px; }
 .delivery-heading h1 { flex-wrap:wrap; }
 /* Green is earned: only a finished run reads as success. The other phases keep delivery.css's colours. */

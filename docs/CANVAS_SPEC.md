@@ -843,6 +843,12 @@ to close. It was removed, and nothing should bring it back without a user need:
 - A team's `schedule:` routine (its timing, delivery, last problem and **Run now**) moved
   to the composer's note line. (It was also **Run routine now** in the workspace menu until ADR
   0043 kept one control per thing: the schedule's panel and the composer's note.)
+- **Adding a schedule (2026-10-03).** Build's heading carries a **Schedule** button beside
+  **Run team** while the team has no `schedule:` block. It opens the schedule panel on a draft
+  card (weekdays at 08:00 in this computer's zone, task blank) docked where the schedule will
+  live. Nothing reaches the document until **Save schedule**, and closing the panel drops the
+  draft. Once a schedule exists the button is gone and the card is the one way in (ADR 0043).
+  Its panel's **Remove schedule** deletes the block.
 
 ### 8.2 The two canvas states
 
