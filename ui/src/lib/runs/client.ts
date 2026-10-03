@@ -36,6 +36,30 @@ export interface ScheduleEntry {
   problem: string | null
 }
 
+/**
+ * A request an agent's app is blocked on until you answer (ADR 0040) — something its `allow:`
+ * switches do not cover, such as a web search with "Use the web" off. Declined by itself at
+ * `expiresAt` when nobody answers.
+ */
+export interface PermissionRequest {
+  id: string
+  /** The agent asking, and its name. */
+  agent: string
+  name: string
+  /** What the app calls the action: "Web search", "Bash". */
+  title: string
+  /** ACP tool kind: `fetch`, `execute`, `edit`, `read`, … */
+  kind: string
+  /** The switch that would allow it without asking. */
+  switch?: 'web' | 'commands' | 'edits' | null
+  /** The query, command, address or path, when there is one. */
+  detail?: string | null
+  since: string
+  expiresAt: string
+}
+
+export type PermissionDecision = 'allow_once' | 'allow_run' | 'deny'
+
 export interface WaitingOn {
   node: string
   name: string
@@ -53,6 +77,8 @@ export interface WaitingOn {
 export interface RunRecord {
   replyableAgents?: string[]
   waitingOn?: WaitingOn | null
+  /** Requests an agent is blocked on until you answer (ADR 0040); absent when there are none. */
+  permissionRequests?: PermissionRequest[]
   runId: string
   sessionId: string
   teamPath: string
@@ -200,6 +226,14 @@ export async function answerRun(runId: string, node: string, text: string, sendB
   return readRun<RunRecord>(await daemonFetch(`/api/runs/${encodeURIComponent(runId)}/answers`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ node, text, ...(sendBack ? { sendBack } : {}) }), cache: 'no-store',
+  }))
+}
+
+/** Your answer to one permission request (ADR 0040). Resolves with the run once the agent has it. */
+export async function answerPermission(runId: string, requestId: string, decision: PermissionDecision): Promise<RunRecord> {
+  return readRun<RunRecord>(await daemonFetch(`/api/runs/${encodeURIComponent(runId)}/permissions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestId, decision }), cache: 'no-store',
   }))
 }
 

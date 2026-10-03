@@ -388,6 +388,7 @@ async fn models_for(control: &Control, app: &crate::api::DetectedHarness) -> App
         cwd: control.inner.teams_root.clone(),
         tools: Vec::new(),
         permissions: None,
+        asker: None,
     };
     let models =
         match tokio::time::timeout(DISCOVERY_TIMEOUT, crate::acp::discover_models(&spec)).await {

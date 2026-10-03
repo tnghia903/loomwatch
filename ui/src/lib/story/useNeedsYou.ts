@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { answerRun, fetchRuns, type RunRecord } from '../runs/client'
+import { answerPermission, answerRun, fetchRuns, type PermissionDecision, type RunRecord } from '../runs/client'
 import { teamDisplayName } from '../team-file/client'
 import { useTeamList } from '../team-file/useTeamList'
 import { ticketsFrom, type Ticket } from './needsYou'
@@ -52,7 +52,7 @@ export function useNeedsYou() {
 
   const names = useMemo(() => new Map((teams ?? []).map((team) => [team.path, teamDisplayName(team)])), [teams])
   const tickets = useMemo(() => ticketsFrom(records, names, dismissed), [records, names, dismissed])
-  const working = useMemo(() => records.filter((record) => (record.status === 'running' || record.status === 'starting') && !record.waitingOn).length, [records])
+  const working = useMemo(() => records.filter((record) => (record.status === 'running' || record.status === 'starting') && !record.waitingOn && !record.permissionRequests?.length).length, [records])
 
   const dismiss = useCallback((runId: string) => {
     setDismissed((current) => {
@@ -69,9 +69,15 @@ export function useNeedsYou() {
     await refresh()
   }, [refresh])
 
+  const answerPermissionTicket = useCallback(async (ticket: Ticket, decision: PermissionDecision) => {
+    if (!ticket.requestId) return
+    await answerPermission(ticket.runId, ticket.requestId, decision)
+    await refresh()
+  }, [refresh])
+
   usePresence(tickets.length, working)
   const teamList = useMemo(() => [...names].map(([path, name]) => ({ path, name })), [names])
-  return { records, tickets, working, error, dismiss, answer, refresh, teams: teamList }
+  return { records, tickets, working, error, dismiss, answer, answerPermission: answerPermissionTicket, refresh, teams: teamList }
 }
 
 /** Tab title and tab icon carry the count, so a waiting team is visible from another tab. */

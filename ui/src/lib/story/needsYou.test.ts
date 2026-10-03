@@ -34,6 +34,16 @@ describe('ticketsFrom', () => {
     expect(tickets).toEqual([])
   })
 
+  it('turns each permission request into its own ticket, ahead of failures (ADR 0040)', () => {
+    const request = (id: string, since: string) => ({ id, agent: 'researcher', name: 'Researcher', title: 'Web search', kind: 'fetch', switch: 'web' as const, detail: 'model cards 2019', since, expiresAt: '2026-10-01T04:10:00Z' })
+    const tickets = ticketsFrom([
+      run('f1', { status: 'failed', finishedAt: '2026-10-01T03:30:00Z' }),
+      run('r1', { status: 'running', permissionRequests: [request('p2', '2026-10-01T03:58:00Z'), request('p1', '2026-10-01T03:55:00Z')] }),
+    ], names, new Set(), NOW)
+    expect(tickets.map((ticket) => [ticket.kind, ticket.requestId ?? null])).toEqual([['permission', 'p1'], ['permission', 'p2'], ['failed', null]])
+    expect(tickets[0]).toMatchObject({ teamName: 'Daily news', node: 'researcher', asker: 'Researcher', text: 'Researcher wants to use the web', context: 'Web search · model cards 2019' })
+  })
+
   it('offers no send-back when the daemon does not allow it', () => {
     const [ticket] = ticketsFrom([run('r1', { status: 'running', waitingOn: { ...waiting('review_stop', '2026-10-01T03:40:00Z'), sendBackAvailable: false } })], names, new Set(), NOW)
     expect(ticket.sendBackTo).toBeNull()

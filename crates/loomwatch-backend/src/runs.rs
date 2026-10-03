@@ -7,7 +7,7 @@
 //! is in-memory and lives as long as the daemon; it is not the immutable run record of
 //! `RUN_PROVENANCE_CONTRACT.md`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, PoisonError, RwLock};
@@ -210,6 +210,10 @@ pub struct RunRecord {
     /// What the run is waiting for, when it is waiting: `{node, agent, since, question}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting_on: Option<Value>,
+    /// Requests an agent's app is blocked on until the operator answers (ADR 0040). Live only:
+    /// emptied when the run ends and never stored, since a restart ends every run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permission_requests: Vec<crate::permissions::PermissionRequest>,
 }
 
 impl RunRecord {
@@ -258,6 +262,7 @@ impl RunRecord {
             start_at: None,
             retry_of_run_id: None,
             waiting_on: None,
+            permission_requests: Vec::new(),
         })
     }
 }
@@ -301,6 +306,12 @@ struct RegistryInner {
     /// Sessions this daemon is keeping answerable, keyed `run_id\0agent_id`, so the operator's own
     /// follow-up can reach one without going through the Team Bus's HTTP surface.
     live: BTreeMap<String, mpsc::Sender<crate::operator::LiveTurn>>,
+    /// The other half of each open permission request (ADR 0040), keyed by request id: the
+    /// channel `POST /api/runs/{id}/permissions` hands the operator's decision to.
+    asking: BTreeMap<String, oneshot::Sender<crate::permissions::PermissionDecision>>,
+    /// What the operator allowed for the rest of a run, keyed `run_id\0agent_id\0scope`, where the
+    /// scope is a tool kind or one MCP tool (`permissions::grant_scope`).
+    allowed_for_run: BTreeSet<String>,
 }
 
 /// One run parked on the operator.
@@ -524,6 +535,7 @@ fn decode_run(row: &sqlx::postgres::PgRow) -> Result<StoredRun, sqlx::Error> {
             start_at: row.try_get("start_at")?,
             retry_of_run_id: row.try_get("retry_of_run_id")?,
             waiting_on: row.try_get("waiting_on")?,
+            permission_requests: Vec::new(),
         },
         start_key: row.try_get("start_key")?,
         start_fingerprint: row.try_get("start_fingerprint")?,
@@ -862,6 +874,90 @@ impl RunRegistry {
         })
     }
 
+    /// Open a permission request on a live run so the operator can answer it (ADR 0040), and hand
+    /// back the end its decision arrives on. `None` when nobody can be asked: the run is unknown
+    /// or finished, or it is a routine, whose runs have no one watching — those decline at once,
+    /// as every request did before ADR 0040.
+    pub(crate) fn open_permission_request(
+        &self,
+        run_id: &str,
+        request: crate::permissions::PermissionRequest,
+    ) -> Option<oneshot::Receiver<crate::permissions::PermissionDecision>> {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        let entry = inner.runs.get_mut(run_id)?;
+        if entry.record.status.is_terminal() || entry.record.trigger == RunTrigger::Schedule {
+            return None;
+        }
+        let (sender, receiver) = oneshot::channel();
+        let id = request.id.clone();
+        entry.record.permission_requests.push(request);
+        inner.asking.insert(id, sender);
+        Some(receiver)
+    }
+
+    /// Take a request off the record once it is answered, timed out or abandoned.
+    pub(crate) fn close_permission_request(&self, run_id: &str, request_id: &str) {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        inner.asking.remove(request_id);
+        if let Some(entry) = inner.runs.get_mut(run_id) {
+            entry
+                .record
+                .permission_requests
+                .retain(|request| request.id != request_id);
+        }
+    }
+
+    /// Whether the operator already allowed `scope` for `agent` for the rest of this run.
+    pub(crate) fn allowed_for_run(&self, run_id: &str, agent: &str, scope: &str) -> bool {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        inner
+            .allowed_for_run
+            .contains(&format!("{run_id}\0{agent}\0{scope}"))
+    }
+
+    /// The operator's answer to one open permission request, handed to the agent waiting on it.
+    /// Answers the run as it is once the request is closed.
+    ///
+    /// # Errors
+    ///
+    /// Not found when the run or the request is unknown — already answered, declined after the
+    /// wait, or the run ended.
+    pub fn answer_permission(
+        &self,
+        run_id: &str,
+        request_id: &str,
+        decision: crate::permissions::PermissionDecision,
+    ) -> Result<RunRecord, OperatorError> {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        let Some(entry) = inner.runs.get_mut(run_id) else {
+            return Err(OperatorError::not_found(format!(
+                "run {run_id} does not exist"
+            )));
+        };
+        let Some(position) = entry
+            .record
+            .permission_requests
+            .iter()
+            .position(|request| request.id == request_id)
+        else {
+            return Err(OperatorError::not_found(
+                "That request is no longer waiting: it was answered, or declined when nobody \
+                 answered in time.",
+            ));
+        };
+        let request = entry.record.permission_requests.remove(position);
+        let record = entry.record.clone();
+        if decision == crate::permissions::PermissionDecision::AllowRun {
+            inner
+                .allowed_for_run
+                .insert(format!("{run_id}\0{}\0{}", request.agent, request.scope));
+        }
+        if let Some(sender) = inner.asking.remove(request_id) {
+            let _delivered = sender.send(decision);
+        }
+        Ok(record)
+    }
+
     /// Record where a run's reply went. Unlike status this is not a lifecycle transition:
     /// it is allowed on terminal records (delivery happens after the run finishes) and a
     /// later call overwrites an earlier outcome. `false` only when the run is unknown.
@@ -893,7 +989,10 @@ impl RunRegistry {
         entry.record.waiting_on = None;
         entry.record.status = RunStatus::Cancelled;
         entry.record.finished_at = Some(now());
-        CancelOutcome::Cancelled(entry.record.clone())
+        let open = std::mem::take(&mut entry.record.permission_requests);
+        let cancelled = entry.record.clone();
+        forget_permissions(&mut inner, run_id, &open);
+        CancelOutcome::Cancelled(cancelled)
     }
 
     /// Park a run on the operator: remember where the answer has to go, and stamp `waiting_on`.
@@ -1060,9 +1159,27 @@ impl RunRegistry {
         if next.is_terminal() {
             entry.record.waiting_on = None;
             entry.handle = None;
+            let open = std::mem::take(&mut entry.record.permission_requests);
+            forget_permissions(&mut inner, run_id, &open);
         }
         true
     }
+}
+
+/// Drop what a finished run's permission requests held. Dropping a sender is what tells a blocked
+/// agent's asker the run is gone; the run's "allow for this run" grants go with it.
+fn forget_permissions(
+    inner: &mut RegistryInner,
+    run_id: &str,
+    open: &[crate::permissions::PermissionRequest],
+) {
+    for request in open {
+        inner.asking.remove(&request.id);
+    }
+    let prefix = format!("{run_id}\0");
+    inner
+        .allowed_for_run
+        .retain(|key| !key.starts_with(&prefix));
 }
 
 #[derive(Clone)]
@@ -1087,6 +1204,7 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
         .route("/api/runs/{id}/agents/{agent}/ask", post(ask_agent))
         .route("/api/runs/{id}/cancel", post(cancel_run))
         .route("/api/runs/{id}/deliver", post(deliver_run))
+        .route("/api/runs/{id}/permissions", post(answer_permission))
         .route_layer(middleware::from_fn(local_evidence))
         .with_state(RunsState {
             archive,
@@ -2647,6 +2765,34 @@ async fn get_run_questions(
         .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.message))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PermissionAnswer {
+    request_id: String,
+    decision: crate::permissions::PermissionDecision,
+}
+
+/// `POST /api/runs/{id}/permissions` (ADR 0040): the operator's answer to one request an agent's
+/// app is blocked on. `200` with the run once the agent has it; 404 when that request is no longer
+/// waiting.
+async fn answer_permission(
+    State(state): State<RunsState>,
+    RoutePath(run_id): RoutePath<String>,
+    body: Result<Json<PermissionAnswer>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(answer) = body.map_err(|rejection| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("invalid permission answer: {}", rejection.body_text()),
+        )
+    })?;
+    let record = state
+        .registry
+        .answer_permission(&run_id, &answer.request_id, answer.decision)
+        .map_err(operator_status)?;
+    Ok((StatusCode::OK, Json(record)).into_response())
+}
+
 fn operator_status(error: OperatorError) -> ApiError {
     ApiError::new(
         if error.conflict {
@@ -2856,6 +3002,153 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         })
         .await
         .expect("run reached the awaited state in time")
+    }
+
+    fn permission_request(id: &str, kind: &str) -> crate::permissions::PermissionRequest {
+        crate::permissions::PermissionRequest {
+            id: id.to_owned(),
+            agent: "a".to_owned(),
+            name: "A".to_owned(),
+            title: "Web search".to_owned(),
+            kind: kind.to_owned(),
+            switch: crate::permissions::switch_for(kind).map(str::to_owned),
+            detail: None,
+            since: now(),
+            expires_at: now(),
+            scope: kind.to_owned(),
+        }
+    }
+
+    /// ADR 0040: a person-started run can be asked, a routine cannot; an answer reaches the waiting
+    /// agent once and only once; "allow for this run" is remembered per agent and kind until the
+    /// run ends; and ending a run lets go of everything it was waiting on.
+    #[tokio::test]
+    async fn permission_requests_are_asked_answered_once_and_dropped_with_the_run() {
+        use crate::permissions::PermissionDecision;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .unwrap();
+        let registry = RunRegistry::default();
+        let manual =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let routine =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Schedule).unwrap();
+        let (manual_id, routine_id) = (manual.run_id.clone(), routine.run_id.clone());
+        registry.insert(manual);
+        registry.insert(routine);
+
+        assert!(
+            registry
+                .open_permission_request(&routine_id, permission_request("r1", "fetch"))
+                .is_none(),
+            "nobody watches a routine"
+        );
+        assert!(
+            registry
+                .open_permission_request("no-such-run", permission_request("x", "fetch"))
+                .is_none()
+        );
+
+        let answer = registry
+            .open_permission_request(&manual_id, permission_request("p1", "fetch"))
+            .expect("a person-started run can ask");
+        let wire = serde_json::to_value(registry.get(&manual_id).unwrap()).unwrap();
+        assert_eq!(wire["permissionRequests"][0]["id"], "p1");
+        assert_eq!(wire["permissionRequests"][0]["switch"], "web");
+        assert!(!registry.allowed_for_run(&manual_id, "a", "fetch"));
+        let record = registry
+            .answer_permission(&manual_id, "p1", PermissionDecision::AllowRun)
+            .expect("open");
+        assert!(record.permission_requests.is_empty());
+        assert_eq!(answer.await.unwrap(), PermissionDecision::AllowRun);
+        assert!(registry.allowed_for_run(&manual_id, "a", "fetch"));
+        assert!(!registry.allowed_for_run(&manual_id, "a", "execute"));
+        // An MCP tool the app calls `execute` is granted as that tool, never as every command.
+        let mut tool = permission_request("p-tool", "execute");
+        tool.scope = "mcp:notion.search".to_owned();
+        let tool_answer = registry
+            .open_permission_request(&manual_id, tool)
+            .expect("open");
+        registry
+            .answer_permission(&manual_id, "p-tool", PermissionDecision::AllowRun)
+            .expect("open");
+        assert_eq!(tool_answer.await.unwrap(), PermissionDecision::AllowRun);
+        assert!(registry.allowed_for_run(&manual_id, "a", "mcp:notion.search"));
+        assert!(!registry.allowed_for_run(&manual_id, "a", "execute"));
+        assert!(!registry.allowed_for_run(&manual_id, "b", "fetch"));
+        let again = registry.answer_permission(&manual_id, "p1", PermissionDecision::Deny);
+        assert!(
+            again.is_err(),
+            "an answered request cannot be answered twice"
+        );
+
+        let abandoned = registry
+            .open_permission_request(&manual_id, permission_request("p2", "execute"))
+            .expect("open");
+        assert!(
+            matches!(registry.cancel(&manual_id), CancelOutcome::Cancelled(record) if record.permission_requests.is_empty())
+        );
+        assert!(
+            abandoned.await.is_err(),
+            "the waiting agent learns the run is gone"
+        );
+        assert!(
+            !registry.allowed_for_run(&manual_id, "a", "fetch"),
+            "grants end with the run"
+        );
+        assert!(
+            registry
+                .open_permission_request(&manual_id, permission_request("p3", "fetch"))
+                .is_none(),
+            "a finished run asks nothing"
+        );
+    }
+
+    /// `POST /api/runs/{id}/permissions`: the answer reaches the waiting agent and the run comes
+    /// back without the request; a stale or malformed answer says so.
+    #[tokio::test]
+    async fn the_permissions_endpoint_hands_the_answer_over() {
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .unwrap();
+        let dir = TeamsDir::new();
+        let registry = RunRegistry::default();
+        let record =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let run_id = record.run_id.clone();
+        registry.insert(record);
+        let waiting = registry
+            .open_permission_request(&run_id, permission_request("p1", "fetch"))
+            .expect("open");
+        let app = router(None, dir.0.clone(), registry.clone());
+        let answer = |body: Value| {
+            let app = app.clone();
+            let uri = format!("/api/runs/{run_id}/permissions");
+            async move {
+                let response = app.oneshot(post_json(&uri, &body)).await.unwrap();
+                (response.status(), json_body(response).await)
+            }
+        };
+
+        let (status, body) = answer(json!({"requestId": "p1", "decision": "allow_once"})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["permissionRequests"], Value::Null, "{body}");
+        assert_eq!(
+            waiting.await.unwrap(),
+            crate::permissions::PermissionDecision::AllowOnce
+        );
+        let (status, body) = answer(json!({"requestId": "p1", "decision": "deny"})).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("no longer waiting")
+        );
+        let (status, _) = answer(json!({"requestId": "p1", "decision": "maybe"})).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[test]

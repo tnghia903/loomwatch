@@ -174,6 +174,15 @@ Response (`202 Accepted`):
   succeeds, or by `POST /api/runs/{id}/deliver`, which sends any finished answer now: an optional
   `{ "title": "…" }`, `200` with the record (a refusal is recorded in `delivery`), 404 for an
   unknown run, 409 while it is live or already sending, 422 without an answer.
+- `permissionRequests` lists what an agent's app is blocked on until the operator answers
+  (ADR 0040): `{id, agent, name, title, kind, switch, detail, since, expiresAt}`. It is live only,
+  emptied when the run ends and never stored. `POST /api/runs/{id}/permissions` with
+  `{ "requestId": "…", "decision": "allow_once" | "allow_run" | "deny" }` answers one and returns
+  `200` with the record. It returns 404 when that request is no longer waiting: it was answered,
+  timed out after 10 minutes, or its run ended. The archive records `session_meta` events with
+  `phase: "awaiting_permission"` and `phase: "permission_answered"` (`outcome`: `allow_once`,
+  `allow_run`, `allowed_for_run`, `deny` or `timed_out`) between the request and the reply sent
+  to the app.
 
 ## Routines
 

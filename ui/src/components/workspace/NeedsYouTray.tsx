@@ -1,6 +1,7 @@
 import { ArrowUpRight, BellDot, Check, CornerDownLeft, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 
+import type { PermissionDecision } from '../../lib/runs/client'
 import { historyRunUrl } from '../../lib/runs/history'
 import { ago, APPROVAL_TEXT, type Ticket } from '../../lib/story/needsYou'
 
@@ -9,11 +10,15 @@ interface NeedsYouTrayProps {
   /** Runs working without needing anything, for the quiet "all clear" state. */
   working: number
   onAnswer: (ticket: Ticket, text: string, sendBack?: string) => Promise<void>
+  /** A permission ticket's answer (ADR 0040). Absent: permission tickets only open their run. */
+  onPermission?: (ticket: Ticket, decision: PermissionDecision) => Promise<void>
   onDismiss: (runId: string) => void
   className?: string
 }
 
-const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', failed: 'Stopped' }
+const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', permission: 'Permission', failed: 'Stopped' }
+
+const PERMISSION_SAID: Record<PermissionDecision, string> = { allow_once: 'Allowed once.', allow_run: 'Allowed for the rest of the run.', deny: 'Denied. The agent carries on without it.' }
 
 /**
  * Every place a team is waiting on the operator, across all teams, as one-question tickets.
@@ -21,7 +26,7 @@ const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: '
  * Newcomers get notification-style cards with the obvious answers; experts triage from the keyboard
  * (J/K move, A approve, R reply, O open the run), and every ticket opens the exact run it came from.
  */
-export function NeedsYouTray({ tickets, working, onAnswer, onDismiss, className = '' }: NeedsYouTrayProps) {
+export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onDismiss, className = '' }: NeedsYouTrayProps) {
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
   const [replying, setReplying] = useState<string | null>(null)
@@ -62,6 +67,19 @@ export function NeedsYouTray({ tickets, working, onAnswer, onDismiss, className 
       setBusy(null)
     }
   }
+  const decide = async (ticket: Ticket, decision: PermissionDecision) => {
+    if (!onPermission) return
+    setBusy(ticket.id)
+    setError(null)
+    try {
+      await onPermission(ticket, decision)
+      setSaid(`${ticket.asker}: ${PERMISSION_SAID[decision]}`)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setBusy(null)
+    }
+  }
   const openRun = (ticket: Ticket) => window.location.assign(historyRunUrl({ id: ticket.runId, teamPath: ticket.teamPath }))
   const startReply = (ticket: Ticket) => { setReplying(ticket.id); setDraft('') }
 
@@ -73,7 +91,9 @@ export function NeedsYouTray({ tickets, working, onAnswer, onDismiss, className 
     if (key === 'j' || event.key === 'ArrowDown') { event.preventDefault(); setActive((index) => Math.min(count - 1, index + 1)) }
     else if (key === 'k' || event.key === 'ArrowUp') { event.preventDefault(); setActive((index) => Math.max(0, index - 1)) }
     else if (key === 'a' && current.kind === 'review') { event.preventDefault(); void send(current, APPROVAL_TEXT) }
-    else if (key === 'r' && current.kind !== 'failed') { event.preventDefault(); startReply(current) }
+    else if (key === 'a' && current.kind === 'permission') { event.preventDefault(); void decide(current, 'allow_once') }
+    else if (key === 'd' && current.kind === 'permission') { event.preventDefault(); void decide(current, 'deny') }
+    else if (key === 'r' && current.kind !== 'failed' && current.kind !== 'permission') { event.preventDefault(); startReply(current) }
     else if (key === 'o') { event.preventDefault(); openRun(current) }
   }
 
@@ -101,7 +121,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onDismiss, className 
             <span>{count > 0 ? `${count} across your teams` : 'Nothing is waiting on you.'}</span>
             <button type="button" className="iconbtn" aria-label="Close" onClick={() => { setOpen(false); bell.current?.focus() }}><X size={15} /></button>
           </header>
-          {count === 0 && <p className="needs-you-empty">{working > 0 ? `${working} run${working === 1 ? ' is' : 's are'} working. Anything that needs your decision will show up here.` : 'When a team pauses for your review or asks a question, it shows up here — from any team.'}</p>}
+          {count === 0 && <p className="needs-you-empty">{working > 0 ? `${working} run${working === 1 ? ' is' : 's are'} working. Anything that needs your decision will show up here.` : 'When a team pauses for your review, asks a question or asks permission, it shows up here — from any team.'}</p>}
           <ul className="needs-you-list">
             {tickets.map((ticket, index) => (
               <li key={ticket.id} data-ticket={index} tabIndex={-1} className={`ticket kind-${ticket.kind} ${index === active ? 'active' : ''}`} onFocus={() => setActive(index)}>
@@ -110,7 +130,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onDismiss, className 
                   <span className="ticket-where">{ticket.teamName} · {ago(ticket.since)}</span>
                 </div>
                 <p className="ticket-text">
-                  {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “{ticket.text}”</> : ticket.kind === 'review' ? <>{ticket.text || `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
+                  {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “{ticket.text}”</> : ticket.kind === 'permission' ? <>{ticket.text}. It is paused until you answer.</> : ticket.kind === 'review' ? <>{ticket.text || `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
                 </p>
                 {ticket.context && <blockquote className="ticket-context" title={ticket.context}>{ticket.context}</blockquote>}
                 {replying === ticket.id ? (
@@ -125,6 +145,11 @@ export function NeedsYouTray({ tickets, working, onAnswer, onDismiss, className 
                     {ticket.kind === 'review' && <button type="button" className="btn btn-primary" disabled={busy === ticket.id} onClick={() => void send(ticket, APPROVAL_TEXT)}><Check size={13} aria-hidden="true" />Looks good<kbd>A</kbd></button>}
                     {ticket.kind === 'review' && <button type="button" className="btn" onClick={() => startReply(ticket)}>{ticket.sendBackTo ? 'Send back…' : 'Add a note…'}<kbd>R</kbd></button>}
                     {ticket.kind === 'question' && <button type="button" className="btn btn-primary" onClick={() => startReply(ticket)}>Answer…<kbd>R</kbd></button>}
+                    {ticket.kind === 'permission' && onPermission && <>
+                      <button type="button" className="btn btn-primary" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_once')}><Check size={13} aria-hidden="true" />Allow<kbd>A</kbd></button>
+                      <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_run')}>Allow for this run</button>
+                      <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'deny')}>Deny<kbd>D</kbd></button>
+                    </>}
                     <button type="button" className="btn ghost" onClick={() => openRun(ticket)}>Open run<ArrowUpRight size={13} aria-hidden="true" /></button>
                     {ticket.kind === 'failed' && <button type="button" className="btn ghost" onClick={() => onDismiss(ticket.runId)}>Dismiss</button>}
                   </div>

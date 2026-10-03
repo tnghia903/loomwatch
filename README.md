@@ -659,16 +659,21 @@ GLM, Qwen or Mistral.
 <details>
 <summary><strong>What happens when an agent asks for permission to do something?</strong></summary>
 
-LoomWatch decides, so every AI app follows the same rules. It can't ask you in the middle of a run, so
-it puts each app in its ask-first mode and answers every request itself. Each agent's panel in
-**Build** has three switches under **Allowed without asking**: **Search the web**, **Edit files**
-(only in the agent's own folder) and **Run commands**. They start off, except **Search the web** for
-researchers. LoomWatch always allows the team's own handovers and the tools, folders and files you
-connected to the agent, and says no to everything else.
+LoomWatch decides, so every AI app follows the same rules. It puts each app in its ask-first mode and
+answers every request itself. Each agent's panel in **Build** has three switches under **Allowed
+without asking**: **Search the web**, **Edit files** (only in the agent's own folder) and **Run
+commands**. They start off, except **Search the web** for researchers. LoomWatch always allows the
+team's own handovers and the tools, folders and files you connected to the agent.
 
-The run records every request. When something was refused, the run receipt says what the agent
-couldn't do and offers **Allow from now on**. OpenCode doesn't ask before it acts, so the switches
-can't hold it back.
+Anything else waits for you. The agent pauses, and the run shows what it wants to do, such as
+"Researcher wants to use the web". You can answer **Allow**, **Allow for this run**, **Always allow**
+(which switches it on for that agent) or **Deny**. The same question shows up in the Needs-you tray
+from any screen. If nobody answers within 10 minutes it is declined, and scheduled runs decline it
+straight away because nobody is watching.
+
+The run records every request and who answered it. When something was declined, the run receipt says
+what the agent couldn't do and offers **Allow from now on**. OpenCode doesn't ask before it acts, so
+the switches can't hold it back.
 
 </details>
 
@@ -843,7 +848,7 @@ teams folder's `.jobs`.
 | Skill is missing in Compose | Copy its definition below `LOOMWATCH_CAPABILITIES_DIR` using the conventional harness path, then click ↻ beside **Search** in Build to scan again. Symlinks whose targets are outside that mounted root cannot be followed. |
 | Ask says it needs an AI app | Install and sign in to Claude Code, Codex, Gemini CLI or OpenCode, then start LoomWatch again from that terminal. |
 | Harness working directory is missing | Native teams should use a real host path accessible to the agent app. Container-run teams must use `/workspaces/...` and mount its host parent through `LOOMWATCH_WORKSPACES_DIR`. |
-| Agent cannot perform a tool action | Read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel in Build. An edit outside the agent's own folder is never allowed. |
+| Agent cannot perform a tool action | While the run is going, answer its question in the run or the Needs-you tray before it is declined after 10 minutes. Afterwards, read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel in Build. An edit outside the agent's own folder is never allowed. |
 | Build reports an unsupported Node version | Install the current Node.js from <https://nodejs.org/>, reopen Terminal, and check `node --version`. |
 | UI assets are missing or look out of date | Stop LoomWatch, then start it with `./loomwatch --rebuild`. |
 | Cannot connect from another device | This setup serves runs and history only on your own computer at `127.0.0.1`. Use the browser on that computer. |

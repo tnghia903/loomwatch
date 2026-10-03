@@ -163,12 +163,14 @@ skill directory LoomWatch does not know, fails the run before anything spawns ra
 doing nothing. See [ADR 0012](decisions/0012-capability-delivery.md) and
 [ADR 0019](decisions/0019-cross-harness-skill-delivery.md).
 
-`agents[].allow` says what an agent may do without asking. LoomWatch cannot ask the operator in the
-middle of a run, so it puts each run agent's app in its ask-first mode (`default` on Claude Code and
-Gemini CLI, `read-only` on Codex) and answers every `session/request_permission` itself. It always
-approves the Team Bus, the agent's connected tools and reads of its connected folders and files.
-Otherwise it approves only what a switch allows, by the kind the app gives the tool call, and
-declines the rest:
+`agents[].allow` says what an agent may do without asking. LoomWatch puts each run agent's app in its
+ask-first mode (`default` on Claude Code and Gemini CLI, `read-only` on Codex) and answers every
+`session/request_permission` itself. It always approves the Team Bus, the agent's connected tools
+and reads of its connected folders and files, and it approves what a switch allows, by the kind the
+app gives the tool call. Anything else is put to the operator while the app waits (ADR 0040): the
+run shows "Researcher wants to use the web" with **Allow**, **Allow for this run**, **Always allow**
+(which turns the switch on here) and **Deny**, and so does the Needs-you tray. It is declined when
+nobody answers within 10 minutes, and at once in a scheduled run, which has nobody watching:
 
 ```yaml
 allow:

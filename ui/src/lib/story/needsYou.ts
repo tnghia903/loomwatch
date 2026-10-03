@@ -1,14 +1,16 @@
 import type { RunRecord } from '../runs/client'
 import { plainRunError } from '../runs/errors'
+import { permissionSentence, permissionWhat } from '../runs/permissionRequests'
 
 /**
  * The needs-you tray: every moment, across every team, where a team is waiting on the operator.
  *
- * An unattended team stops for three reasons — a review step, a question from an agent, or a
- * failure — and each one becomes one ticket with the shortest honest set of answers. Pure: derived
- * from the run registry, plus the failures the operator already dismissed.
+ * A team stops for four reasons — a review step, a question from an agent, an agent asking
+ * permission for something its switches do not allow (ADR 0040), or a failure — and each one becomes
+ * one ticket with the shortest honest set of answers. Pure: derived from the run registry, plus the
+ * failures the operator already dismissed.
  */
-export type TicketKind = 'review' | 'question' | 'failed'
+export type TicketKind = 'review' | 'question' | 'permission' | 'failed'
 
 export interface Ticket {
   id: string
@@ -25,6 +27,8 @@ export interface Ticket {
   /** What the step before handed over, so a review can be judged without opening the run. */
   context: string | null
   since: string
+  /** A permission ticket's request, which its answer names. */
+  requestId?: string
 }
 
 /** Failures older than this are history, not something waiting on you. */
@@ -38,6 +42,22 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
   const tickets: Ticket[] = []
   for (const record of records) {
     const teamName = teamLabel(record.teamPath, names)
+    for (const request of record.permissionRequests ?? []) {
+      tickets.push({
+        id: `${record.runId}:permission:${request.id}`,
+        kind: 'permission',
+        runId: record.runId,
+        teamPath: record.teamPath,
+        teamName,
+        node: request.agent,
+        sendBackTo: null,
+        asker: request.name,
+        text: permissionSentence(request),
+        context: permissionWhat(request),
+        since: request.since,
+        requestId: request.id,
+      })
+    }
     const waiting = record.waitingOn
     if (record.status === 'running' && waiting) {
       tickets.push({
@@ -72,8 +92,9 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
       }
     }
   }
-  // Questions and reviews block a running team, so they come before failures; oldest first within.
-  const weight: Record<TicketKind, number> = { question: 0, review: 0, failed: 1 }
+  // Permissions, questions and reviews block a running team, so they come before failures; oldest
+  // first within.
+  const weight: Record<TicketKind, number> = { permission: 0, question: 0, review: 0, failed: 1 }
   return tickets.sort((a, b) => weight[a.kind] - weight[b.kind] || Date.parse(a.since) - Date.parse(b.since))
 }
 
