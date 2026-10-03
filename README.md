@@ -426,7 +426,8 @@ reads them only on your computer; nothing is uploaded.
 | Update to the latest version (stop it first) | `./loomwatch update` |
 | See every option | `./loomwatch help` |
 
-Your teams and history are kept in every case. `./loomwatch update` downloads the latest version,
+Your teams and history are kept in every case. The database starts again by itself whenever Docker
+Desktop does, until you run `./loomwatch stop`. `./loomwatch update` downloads the latest version,
 rebuilds it and starts it. If you installed LoomWatch with the older step-by-step instructions,
 `./loomwatch` keeps using your existing settings, teams folder and database.
 
