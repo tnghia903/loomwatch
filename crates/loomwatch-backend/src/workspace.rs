@@ -388,12 +388,7 @@ pub fn materialise(
         agent_id: agent.id.clone(),
         message,
     };
-    let root = team_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(".loomwatch")
-        .join(team_id)
-        .join(&agent.id);
+    let root = workspace_root(team_path, team_id, &agent.id).map_err(&fail)?;
     let skills_dir = prepare_root(&root, agent, carried).map_err(&fail)?;
 
     let inventory = capabilities::detect_capabilities(home, teams_root);
@@ -537,6 +532,28 @@ fn deliver_knowledge_and_tools(
     }
     delivery.copies = Some(root.to_path_buf());
     Ok(delivery)
+}
+
+/// `.loomwatch/<team>/<agent>` beside the team file.
+///
+/// `TeamConfig::parse` already refuses ids that are not plain names. Checked again here because
+/// [`prepare_root`] deletes inside this folder, so it must never be anywhere but under
+/// `.loomwatch/`: an agent id of `../../../..` would otherwise make it the home folder.
+fn workspace_root(team_path: &Path, team_id: &str, agent_id: &str) -> Result<PathBuf, String> {
+    if !crate::config::is_identifier(agent_id)
+        || !(team_id.is_empty() || crate::config::is_identifier(team_id))
+    {
+        return Err(format!(
+            "team id {team_id:?} or agent id {agent_id:?} is not a plain name, so LoomWatch will \
+             not make a folder for it"
+        ));
+    }
+    Ok(team_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(".loomwatch")
+        .join(team_id)
+        .join(agent_id))
 }
 
 /// Rebuild the managed workspace directory and return the skill tree to copy into, if any.
@@ -756,6 +773,32 @@ mod tests {
     use super::*;
     use crate::config::SpawnConfig;
     use std::collections::BTreeMap;
+
+    /// `prepare_root` deletes `.claude/skills` and `.claude/settings.json` inside this folder, so
+    /// an id that climbs out of `.loomwatch/` gets no folder at all, however the agent was built.
+    #[test]
+    fn workspace_root_stays_under_loomwatch() {
+        let team_file = Path::new("/home/me/LoomWatch/teams/team.yaml");
+        assert_eq!(
+            workspace_root(team_file, "team", "writer").expect("plain ids"),
+            Path::new("/home/me/LoomWatch/teams/.loomwatch/team/writer")
+        );
+        assert_eq!(
+            workspace_root(team_file, "", "writer").expect("a team file without an id"),
+            Path::new("/home/me/LoomWatch/teams/.loomwatch/writer")
+        );
+        for (team_id, agent_id) in [
+            ("team", "../../../.."),
+            ("team", ".."),
+            ("team", "a/b"),
+            ("team", "/abs"),
+            ("../..", "writer"),
+        ] {
+            let error = workspace_root(team_file, team_id, agent_id)
+                .expect_err(&format!("{team_id:?}/{agent_id:?}"));
+            assert!(error.contains("not a plain name"), "{error}");
+        }
+    }
 
     /// The crate rolls its own scratch directory rather than taking a dev-dependency for it;
     /// `api.rs` tests do the same.

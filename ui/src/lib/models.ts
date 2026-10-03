@@ -9,6 +9,12 @@ function sameSpawn(left: AgentConfig['spawn'], right: DetectedHarness['spawn']):
     && args.every((arg, index) => arg === right.args[index])
 }
 
+// The daemon pins the bridge (`@agentclientprotocol/claude-agent-acp@0.85.1`), and a team file
+// keeps whichever version was current when it was saved, unpinned in older files.
+function npxRuns(cmd: string, args: readonly string[], name: string): boolean {
+  return cmd === 'npx' && args.some((arg) => arg === name || arg.startsWith(`${name}@`))
+}
+
 export function harnessIdForAgent(agent: AgentConfig, harnesses: readonly DetectedHarness[]): string | null {
   if (agent.kind === 'operator' || !agent.spawn) return null
   const detected = harnesses.find((harness) => sameSpawn(agent.spawn, harness.spawn))
@@ -20,8 +26,8 @@ export function harnessIdForAgent(agent: AgentConfig, harnesses: readonly Detect
     const harnessIndex = args.indexOf('--harness')
     return harnessIndex >= 0 ? args[harnessIndex + 1] ?? null : null
   }
-  if (cmd === 'claude-agent-acp' || (cmd === 'npx' && args.includes('@agentclientprotocol/claude-agent-acp'))) return 'claude'
-  if (cmd === 'codex-acp' || (cmd === 'npx' && args.includes('@agentclientprotocol/codex-acp'))) return 'codex'
+  if (cmd === 'claude-agent-acp' || npxRuns(cmd, args, '@agentclientprotocol/claude-agent-acp')) return 'claude'
+  if (cmd === 'codex-acp' || npxRuns(cmd, args, '@agentclientprotocol/codex-acp')) return 'codex'
   if (cmd === 'gemini') return 'gemini'
   if (cmd === 'opencode') return 'opencode'
   if (cmd === 'hermes-acp') return 'hermes'

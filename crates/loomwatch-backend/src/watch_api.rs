@@ -31,18 +31,7 @@ pub(crate) async fn local_evidence(request: Request, next: Next) -> Response {
     let local = host
         .and_then(|v| v.parse::<Authority>().ok())
         .is_some_and(|a| matches!(a.host(), "localhost" | "127.0.0.1" | "[::1]" | "::1"));
-    let origin_ok = request.headers().get(header::ORIGIN).is_none_or(|origin| {
-        origin.to_str().is_ok_and(|origin| {
-            host.is_some_and(|host| {
-                origin == format!("http://{host}") || origin == format!("https://{host}")
-            })
-        })
-    });
-    let fetch_site_ok = request
-        .headers()
-        .get("sec-fetch-site")
-        .is_none_or(|site| site == "same-origin" || site == "none");
-    if !local || !origin_ok || !fetch_site_ok {
+    if !local || !from_this_origin(request.headers()) {
         return error(
             StatusCode::FORBIDDEN,
             "Exact evidence is available only to the local origin.",
@@ -53,6 +42,27 @@ pub(crate) async fn local_evidence(request: Request, next: Next) -> Response {
         .headers_mut()
         .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
     response
+}
+
+/// False when a browser says the request came from another page: an `Origin` that is not this
+/// host, or `Sec-Fetch-Site` other than `same-origin` (the UI) or `none` (typed or bookmarked).
+/// A tool such as `curl` sends neither header and passes.
+///
+/// Fetch Metadata matters because a cross-site `GET` from an `<img>` or a link carries no
+/// `Origin` and needs no preflight, yet still reaches the handler.
+pub(crate) fn from_this_origin(headers: &header::HeaderMap) -> bool {
+    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok());
+    let origin_ok = headers.get(header::ORIGIN).is_none_or(|origin| {
+        origin.to_str().is_ok_and(|origin| {
+            host.is_some_and(|host| {
+                origin == format!("http://{host}") || origin == format!("https://{host}")
+            })
+        })
+    });
+    let fetch_site_ok = headers
+        .get("sec-fetch-site")
+        .is_none_or(|site| site == "same-origin" || site == "none");
+    origin_ok && fetch_site_ok
 }
 
 fn error(status: StatusCode, message: &str) -> Response {

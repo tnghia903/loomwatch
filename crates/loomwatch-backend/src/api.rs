@@ -135,7 +135,10 @@ struct AcpBridge {
     /// Command that speaks ACP on stdio. Often the vendor CLI itself with a subcommand.
     command: &'static str,
     args: &'static [&'static str],
-    /// Published ACP bridge to run through `npx` when no standalone bridge is installed.
+    /// Published ACP bridge to run through `npx` when no standalone bridge is installed, pinned
+    /// to the version `LoomWatch` was last tested with. Unpinned, every new install ran whatever
+    /// was newest on npm that day, so two people on the same `LoomWatch` could run different
+    /// bridges. Bump the version only after a real run on the new one.
     fallback_package: Option<&'static str>,
 }
 
@@ -164,7 +167,7 @@ const HARNESSES: &[HarnessSpec] = &[
         acp: Some(AcpBridge {
             command: "claude-agent-acp",
             args: &[],
-            fallback_package: Some("@agentclientprotocol/claude-agent-acp"),
+            fallback_package: Some("@agentclientprotocol/claude-agent-acp@0.85.1"),
         }),
         sign_in: Some(SignInCheck {
             args: &["auth", "status"],
@@ -179,7 +182,7 @@ const HARNESSES: &[HarnessSpec] = &[
         acp: Some(AcpBridge {
             command: "codex-acp",
             args: &[],
-            fallback_package: Some("@agentclientprotocol/codex-acp"),
+            fallback_package: Some("@agentclientprotocol/codex-acp@2.1.1"),
         }),
         sign_in: Some(SignInCheck {
             args: &["login", "status"],
@@ -678,6 +681,16 @@ async fn enforce_allowed_host(
     if !allowed {
         return ApiError::new(StatusCode::FORBIDDEN, "host is not allowed".to_owned())
             .into_response();
+    }
+    // The Host check stops DNS rebinding, not another site's page: an `<img>` pointed at
+    // `/api/harnesses/claude/models` would start an app on this computer. Only this origin's own
+    // page, or a tool that is not a browser, may call the API.
+    if !crate::watch_api::from_this_origin(request.headers()) {
+        return ApiError::new(
+            StatusCode::FORBIDDEN,
+            "LoomWatch answers only its own page, not requests from other sites".to_owned(),
+        )
+        .into_response();
     }
     next.run(request).await
 }
@@ -2847,7 +2860,7 @@ mod tests {
                         "command": "claude",
                         "executablePath": second.0.join("claude").to_string_lossy(),
                         "acpAvailable": false,
-                        "unavailableReason": "neither claude-agent-acp nor npx (for the @agentclientprotocol/claude-agent-acp bridge) is on the searched PATH.",
+                        "unavailableReason": "neither claude-agent-acp nor npx (for the @agentclientprotocol/claude-agent-acp@0.85.1 bridge) is on the searched PATH.",
                         "spawn": {"cmd": "claude-agent-acp", "args": []}
                     },
                     {
@@ -3128,14 +3141,14 @@ mod tests {
         assert_eq!(harnesses[0].spawn.cmd, "npx");
         assert_eq!(
             harnesses[0].spawn.args,
-            ["-y", "@agentclientprotocol/claude-agent-acp"]
+            ["-y", "@agentclientprotocol/claude-agent-acp@0.85.1"]
         );
         assert_eq!(harnesses[1].id, "codex");
         assert!(harnesses[1].acp_available);
         assert_eq!(harnesses[1].spawn.cmd, "npx");
         assert_eq!(
             harnesses[1].spawn.args,
-            ["-y", "@agentclientprotocol/codex-acp"]
+            ["-y", "@agentclientprotocol/codex-acp@2.1.1"]
         );
     }
 
@@ -3288,6 +3301,57 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         assert!(opencode.get("healthReason").is_none(), "{opencode}");
         assert!(opencode.get("healthDetail").is_none(), "{opencode}");
         assert_eq!(launches(), 1, "listing harnesses spawned one");
+    }
+
+    /// Model discovery starts an app, and a `GET` needs no preflight: any page the operator visits
+    /// could point an `<img>` at it. Requests a browser marks as coming from another page are
+    /// refused before anything starts; the app's own page and non-browser tools still get through.
+    #[tokio::test]
+    async fn another_sites_page_cannot_start_an_app_through_the_api() {
+        let directory = TempDirectory::new();
+        create_executable_with_contents(&directory.0, "gemini", REFUSING_GEMINI);
+        let search_path = std::env::join_paths([&directory.0]).expect("join search path");
+        let router = test_router_with_path(&directory.0, Some(search_path));
+        let launches = || {
+            fs::read_to_string(directory.0.join("gemini.launches"))
+                .map_or(0, |text| text.lines().count())
+        };
+        let get = |headers: &[(&str, &str)]| {
+            let mut request = Request::builder()
+                .uri("/api/harnesses/gemini/models")
+                .header(header::HOST, "localhost:3000");
+            for (name, value) in headers {
+                request = request.header(*name, *value);
+            }
+            router
+                .clone()
+                .oneshot(request.body(Body::empty()).expect("request"))
+        };
+
+        for headers in [
+            &[("sec-fetch-site", "cross-site")][..],
+            &[("sec-fetch-site", "same-site")],
+            &[("origin", "https://attacker.example")],
+            &[("origin", "null")],
+            &[("origin", "http://localhost:5173")],
+        ] {
+            let response = get(headers).await.expect("response");
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{headers:?}");
+        }
+        assert_eq!(launches(), 0, "a cross-site request started the app");
+
+        for headers in [
+            &[
+                ("origin", "http://localhost:3000"),
+                ("sec-fetch-site", "same-origin"),
+            ][..],
+            &[("sec-fetch-site", "none")],
+            &[],
+        ] {
+            let response = get(headers).await.expect("response");
+            assert_eq!(response.status(), StatusCode::BAD_GATEWAY, "{headers:?}");
+        }
+        assert_eq!(launches(), 3, "the app's own page reaches discovery");
     }
 
     /// A `claude-agent-acp` that, like the real one, opens a session for a signed-out account.

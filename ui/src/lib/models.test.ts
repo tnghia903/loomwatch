@@ -55,4 +55,13 @@ describe('harnessIdForAgent', () => {
     expect(harnessIdForAgent(bare('loomwatchd'), [opencode])).toBeNull()
     expect(harnessIdForAgent(bare('npx'), [opencode])).toBeNull()
   })
+
+  // The daemon pins the bridge version, and a saved team keeps the version it was saved with, so a
+  // later pin must not turn an older team's agent into "Custom command: npx".
+  it('recognises an npx bridge with or without a version, but not a lookalike package', () => {
+    expect(harnessIdForAgent(agent('m', 'npx', ['-y', '@agentclientprotocol/claude-agent-acp@0.85.1']), [])).toBe('claude')
+    expect(harnessIdForAgent(agent('m', 'npx', ['-y', '@agentclientprotocol/codex-acp@2.1.1']), [])).toBe('codex')
+    expect(harnessIdForAgent(agent('m', 'npx', ['-y', '@agentclientprotocol/codex-acp']), [])).toBe('codex')
+    expect(harnessIdForAgent(agent('m', 'npx', ['-y', '@agentclientprotocol/claude-agent-acp-fork']), [])).toBeNull()
+  })
 })
