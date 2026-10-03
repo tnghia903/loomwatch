@@ -92,6 +92,9 @@ impl DeliveredKnowledge {
 pub struct Delivery {
     pub knowledge: Vec<DeliveredKnowledge>,
     pub tools: Vec<DeliveredTool>,
+    /// `LoomWatch`'s folder for this agent, which holds the copies the prompt points at (skills,
+    /// full texts). Readable wherever the agent works (ADR 0042). `None` before `materialise`.
+    pub copies: Option<std::path::PathBuf>,
 }
 
 impl Delivery {
@@ -164,12 +167,17 @@ fn resolve_knowledge(
 /// memory source wired as knowledge, a path that is gone or unreadable, over the knowledge budget,
 /// a tool not found or with no usable definition, or two tools that would take the same server
 /// name.
+///
+/// `copies_at` is where an excerpted file's full text will be written, when the agent works
+/// somewhere else (ADR 0042): the excerpt then names the copy by its full path, not as a folder
+/// inside the agent's own.
 pub fn prepare_for(
     home: Option<&Path>,
     team_dir: &Path,
     inventory: &CapabilityInventory,
     agent: &AgentConfig,
     env: &dyn Fn(&str) -> Option<String>,
+    copies_at: Option<&Path>,
 ) -> Result<Delivery, String> {
     let mut delivery = Delivery::default();
     let mut knowledge_bytes = 0usize;
@@ -187,6 +195,15 @@ pub fn prepare_for(
                     ));
                 }
                 let mut knowledge = resolve_knowledge(team_dir, inventory, capability)?;
+                if let (Some(folder), Some(copy)) = (copies_at, &knowledge.text_copy) {
+                    for part in &mut knowledge.contents {
+                        part.content = crate::chosen_knowledge::relocate_copy_note(
+                            &part.content,
+                            &copy.file_name,
+                            folder,
+                        );
+                    }
+                }
                 let rendered = knowledge.rendered_contents();
                 knowledge_bytes += rendered.len();
                 if knowledge_bytes > KNOWLEDGE_BUDGET_BYTES {
@@ -863,6 +880,7 @@ mod tests {
                 teams.parent().expect("project"),
             ),
             &|_| None,
+            None,
         )
         .expect("deliverable");
 
@@ -909,6 +927,7 @@ mod tests {
                 &inventory,
                 &agent("claude-agent-acp", &[(kind, name)]),
                 &|_| None,
+                None,
             )
             .expect_err("refused");
             assert!(error.contains(name) && error.contains(expected), "{error}");
@@ -927,6 +946,7 @@ mod tests {
             &inventory,
             &demo_agent(&teams),
             &|_| None,
+            None,
         )
         .expect("deliverable");
         let base =
@@ -970,8 +990,8 @@ mod tests {
         let (_directory, home, teams) = machine();
         let inventory = capabilities::detect_capabilities(Some(&home), &teams);
         let wired = demo_agent(&teams);
-        let delivery =
-            prepare_for(Some(&home), &teams, &inventory, &wired, &|_| None).expect("deliverable");
+        let delivery = prepare_for(Some(&home), &teams, &inventory, &wired, &|_| None, None)
+            .expect("deliverable");
         let composed = crate::compose_prompt(
             &wired,
             &crate::memory::ContextPacket::default(),
@@ -1086,6 +1106,7 @@ mod tests {
                 &[(CapabilityKind::Tool, "Loomwatch Team Bus")],
             ),
             &|_| None,
+            None,
         )
         .expect_err("refused");
         assert!(error.contains("Team Bus"), "{error}");

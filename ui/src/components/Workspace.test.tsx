@@ -324,6 +324,60 @@ describe('Workspace', () => {
   })
 
   /**
+   * ADR 0042: everything an agent is given is on the canvas. A folder two agents read is one card
+   * with a line from each, drawn from the team file with no sidecar card, however each agent labels
+   * it; a skill named only in the team file gets its card too.
+   */
+  it('draws one card for a folder its agents share, and a card for a skill only the team file names', async () => {
+    const [researcher, reviewer] = documentState.nodes
+    Object.assign(researcher.data.agent, { capabilities: [{ kind: 'knowledge', name: 'reports', path: '/Users/me/reports' }, { kind: 'skill', name: 'claude-design' }] })
+    Object.assign(reviewer.data.agent, { capabilities: [{ kind: 'knowledge', name: 'Q3 reports', path: '/Users/me/reports/' }] })
+    const view = renderWorkspace()
+    try {
+      expect(await screen.findAllByLabelText(/^reports, linked folder at \/Users\/me\/reports, used by 2 agents$/)).toHaveLength(1)
+      expect(screen.getByText('Researcher reads reports')).toBeInTheDocument()
+      expect(screen.getByText('Reviewer reads reports')).toBeInTheDocument()
+      expect(screen.getByLabelText(/^claude-design, skill from Not found on this computer, used by 1 agent$/)).toBeInTheDocument()
+      expect(screen.getByText('Researcher uses skill claude-design')).toBeInTheDocument()
+
+      // Taking one agent's line away disconnects that agent only, by path, whatever its label.
+      act(() => flowRuntime.onEdgesChange?.([{ id: 'capability:reviewer->knowledge@/Users/me/reports', type: 'remove' }]))
+      expect(documentState.setAgentCapabilities).toHaveBeenLastCalledWith('reviewer', [])
+    } finally {
+      view.unmount()
+      Reflect.deleteProperty(researcher.data.agent, 'capabilities')
+      Reflect.deleteProperty(reviewer.data.agent, 'capabilities')
+    }
+  })
+
+  /**
+   * ADR 0042: drawing a line from an agent to a folder card connects that agent to the same path,
+   * and taking away the card's last line keeps the card where it is, saved in the sidecar.
+   */
+  it('connects another agent to a folder card by its path, and keeps the card once nobody reads it', async () => {
+    const [researcher] = documentState.nodes
+    Object.assign(researcher.data.agent, { capabilities: [{ kind: 'knowledge', name: 'reports', path: '/Users/me/reports' }] })
+    const view = renderWorkspace()
+    try {
+      await screen.findByLabelText(/^reports, linked folder at \/Users\/me\/reports, used by 1 agent$/)
+      act(() => flowRuntime.onConnect?.({ source: 'reviewer', target: 'knowledge@/Users/me/reports' }))
+      expect(documentState.setAgentCapabilities).toHaveBeenLastCalledWith('reviewer', [{ kind: 'knowledge', name: 'reports', path: '/Users/me/reports' }])
+
+      act(() => flowRuntime.onEdgesChange?.([{ id: 'capability:researcher->knowledge@/Users/me/reports', type: 'remove' }]))
+      expect(documentState.setAgentCapabilities).toHaveBeenLastCalledWith('researcher', [])
+      await waitFor(() => {
+        const writes = vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/api/team/layout') && init?.method === 'PUT')
+        expect(JSON.parse(String(writes.at(-1)?.[1]?.body)).layout.nodes).toEqual([
+          expect.objectContaining({ id: 'knowledge@/Users/me/reports', kind: 'knowledge', name: 'reports', source: 'Linked folder', path: '/Users/me/reports' }),
+        ])
+      }, { timeout: 2000 })
+    } finally {
+      view.unmount()
+      Reflect.deleteProperty(researcher.data.agent, 'capabilities')
+    }
+  })
+
+  /**
    * Wiring drawn before ADR 0029 lives only in the sidecar: drawn, never delivered. The canvas says
    * so and one click writes it to the team file — and redrawing it is not refused as a duplicate.
    * A knowledge card's edge is not offered: it could only fail the run (ADR 0036).

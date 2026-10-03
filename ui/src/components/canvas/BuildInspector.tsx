@@ -44,7 +44,7 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
           </section>
           <section className="build-context" aria-label="Works in">
             <span className="build-context-head">Works in</span>
-            <AgentWorkFolder agent={node.data.agent} readOnly={readOnly} onChange={props.onCwdChange} problem={props.fieldProblems?.cwd} />
+            <AgentWorkFolder agent={node.data.agent} readOnly={readOnly} onChange={props.onCwdChange} problem={props.fieldProblems?.cwd} teamPath={props.teamPath} />
           </section>
           <section className="build-context" aria-label="Allowed without asking">
             <span className="build-context-head">Allowed without asking</span>

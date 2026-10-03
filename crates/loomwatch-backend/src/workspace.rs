@@ -216,7 +216,11 @@ impl Harness {
 /// What `materialise` produced, so the caller can spawn into it and say what it delivered.
 #[derive(Debug, Clone)]
 pub struct Workspace {
+    /// Where the agent starts: [`Self::root`], or the folder the operator chose for it (ADR 0042).
     pub cwd: PathBuf,
+    /// `LoomWatch`'s own folder for this agent, holding the copies it reads: skills, the full texts
+    /// of added files, and its grants.
+    pub root: PathBuf,
     pub skills: Vec<String>,
     /// Exact instructions copied for this agent, before its harness starts.
     pub required_skills: Vec<PreparedSkill>,
@@ -331,6 +335,10 @@ impl PreparedSkill {
 /// managed skill trees are rebuilt on every run so a capability removed from the canvas stops
 /// being delivered, including after an agent changes harness.
 ///
+/// The agent starts in it only when the folder it declared is the team's own (ADR 0042). A folder
+/// the operator chose stays where the agent works: what was delivered is read from the workspace
+/// by its full path, which the prompt names and the permission policy allows.
+///
 /// # Errors
 ///
 /// Returns an error when a wired capability names a skill that is not installed, the target
@@ -354,11 +362,18 @@ pub fn materialise(
     // the team has no Brief for this agent, the agent opted out, `deliverAs: packet-only` keeps it
     // in its own `cwd`, or LoomWatch does not know which file this harness reads. In every one of
     // those cases the Brief still reaches the agent through the context packet.
-    let brief_file = native_memory_file(agent, memory);
-    // ADR 0037: an agent allowed to edit files edits only inside its own folder. When the folder it
-    // declared holds its team file (`cwd: .`, every template's default), that folder is the teams
-    // folder, so it is given a managed one instead and the team files stay out of its reach.
-    let edits_need_own_folder = agent.allow.edits && holds(declared_cwd, team_path);
+    //
+    // ADR 0042: the agent starts in the workspace only when the folder it declared holds its team
+    // file (`cwd: .`, every template's default), which is the teams folder. A folder the operator
+    // chose is a project, so the agent stays in it however much is connected. The Brief then
+    // reaches it through the packet alone: writing `CLAUDE.md` there would change their project.
+    let starts_here = holds(declared_cwd, team_path);
+    // The declared folder whose settings the workspace carries, when the agent starts there.
+    let carried = starts_here.then_some(declared_cwd);
+    let brief_file = native_memory_file(agent, memory).filter(|_| starts_here);
+    // ADR 0037: an agent allowed to edit files edits only inside its own folder, and the teams
+    // folder is never one, so the team files stay out of its reach.
+    let edits_need_own_folder = agent.allow.edits && starts_here;
     if agent.capabilities.is_empty() && brief_file.is_none() && !edits_need_own_folder {
         return Ok(None);
     }
@@ -372,7 +387,7 @@ pub fn materialise(
         .join(".loomwatch")
         .join(team_id)
         .join(&agent.id);
-    let skills_dir = prepare_root(&root, agent, declared_cwd).map_err(&fail)?;
+    let skills_dir = prepare_root(&root, agent, carried).map_err(&fail)?;
 
     let inventory = capabilities::detect_capabilities(home, teams_root);
     let mut delivered = Vec::new();
@@ -444,7 +459,7 @@ pub fn materialise(
         &inventory,
         agent,
         &root,
-        declared_cwd,
+        carried,
     )
     .map_err(&fail)?;
     // Written after the skills so a failed skill delivery does not leave a Brief file behind for a
@@ -461,7 +476,8 @@ pub fn materialise(
         })?;
     }
     Ok(Some(Workspace {
-        cwd: root,
+        cwd: carried.map_or_else(|| declared_cwd.to_path_buf(), |_| root.clone()),
+        root,
         skills: delivered,
         required_skills,
         brief_file: brief_file.map(str::to_owned),
@@ -471,28 +487,34 @@ pub fn materialise(
 
 /// ADR 0029: resolve the knowledge and tools an agent wires, after its skills, and on Claude Code
 /// write the grant that wiring implies into the workspace's settings.
+///
+/// `carried` is the declared folder whose settings the workspace carries over, when the agent
+/// starts in the workspace. When it starts in a folder the operator chose (ADR 0042), no settings
+/// are written: the app reads that folder's own, and asks `LoomWatch` before reading anything
+/// outside it, which the permission policy answers from the same delivery.
 fn deliver_knowledge_and_tools(
     home: Option<&Path>,
     team_dir: &Path,
     inventory: &capabilities::CapabilityInventory,
     agent: &AgentConfig,
     root: &Path,
-    declared_cwd: &Path,
+    carried: Option<&Path>,
 ) -> Result<crate::delivery::Delivery, String> {
+    let copies = root.join(crate::chosen_knowledge::TEXT_COPY_DIR);
     let mut delivery = crate::delivery::prepare_for(
         home,
         team_dir,
         inventory,
         agent,
         &crate::delivery::process_env,
+        carried.is_none().then_some(copies.as_path()),
     )?;
     // ADR 0035: an added file whose prompt section is only its opening has its full text put in
-    // the working folder, where every app can read it without a grant or a PDF reader.
+    // the workspace, where every app can read it without a grant or a PDF reader.
     for knowledge in &delivery.knowledge {
         if let Some(copy) = &knowledge.text_copy {
-            let directory = root.join(crate::chosen_knowledge::TEXT_COPY_DIR);
-            fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-            fs::write(directory.join(&copy.file_name), &copy.text).map_err(|error| {
+            fs::create_dir_all(&copies).map_err(|error| error.to_string())?;
+            fs::write(copies.join(&copy.file_name), &copy.text).map_err(|error| {
                 format!(
                     "cannot put the full text of {} in the working folder: {error}",
                     knowledge.name
@@ -500,10 +522,13 @@ fn deliver_knowledge_and_tools(
             })?;
         }
     }
-    if Harness::of(agent) == Harness::Claude {
+    if let Some(declared_cwd) = carried
+        && Harness::of(agent) == Harness::Claude
+    {
         let base = read_settings(declared_cwd);
         crate::delivery::grant_claude_access(root, base.as_deref(), &mut delivery)?;
     }
+    delivery.copies = Some(root.to_path_buf());
     Ok(delivery)
 }
 
@@ -515,7 +540,7 @@ fn deliver_knowledge_and_tools(
 fn prepare_root(
     root: &Path,
     agent: &AgentConfig,
-    declared_cwd: &Path,
+    carried: Option<&Path>,
 ) -> Result<Option<PathBuf>, String> {
     // `knowledge/` holds full texts of added files (ADR 0035), rebuilt on every run for the same
     // reason as the skill trees: a file disconnected since must not linger.
@@ -544,9 +569,10 @@ fn prepare_root(
     };
     // The harness only ever asks LoomWatch for permission, and LoomWatch refuses anything the
     // workspace does not allow. Carrying the declared cwd's settings across keeps that contract
-    // with the operator's own file rather than inventing a policy here.
+    // with the operator's own file rather than inventing a policy here. An agent that starts in a
+    // folder the operator chose reads that folder's settings itself (ADR 0042).
     let managed_settings = root.join(".claude/settings.json");
-    if let Some(settings) = read_settings(declared_cwd) {
+    if let Some(settings) = carried.and_then(read_settings) {
         fs::create_dir_all(root.join(".claude")).map_err(|error| error.to_string())?;
         fs::write(&managed_settings, settings).map_err(|error| error.to_string())?;
     } else if managed_settings.is_file() {
@@ -1286,6 +1312,177 @@ mod tests {
         assert!(delivered.join("SKILL.md").is_file());
         // The whole directory travels, so a skill that loads a reference by relative path works.
         assert!(delivered.join("references/style.md").is_file());
+    }
+
+    /// A team whose Writer works in a project folder of its own and has a skill, a long added file
+    /// and a Brief, for the ADR 0042 tests.
+    struct ChosenFolderTeam {
+        _temp: TempDirectory,
+        home: PathBuf,
+        teams: PathBuf,
+        team: PathBuf,
+        project: PathBuf,
+        writer: AgentConfig,
+    }
+
+    impl ChosenFolderTeam {
+        fn new() -> Self {
+            let temp = TempDirectory::new();
+            let home = temp.path().join("home");
+            let source = home.join(".claude/skills/report-writer");
+            fs::create_dir_all(&source).expect("skill dir");
+            fs::write(
+                source.join("SKILL.md"),
+                "---\nname: report-writer\ndescription: Writes reports\n---\nBody",
+            )
+            .expect("SKILL.md");
+            let teams = temp.path().join("teams");
+            fs::create_dir_all(teams.join("team.files")).expect("files");
+            fs::create_dir_all(teams.join("brief")).expect("brief");
+            let team = teams.join("team.yaml");
+            fs::write(&team, "").expect("team");
+            fs::write(
+                teams.join("brief/constraints.md"),
+                "# C\nNever touch main.\n",
+            )
+            .expect("brief");
+            fs::write(
+                teams.join("team.files/memo.md"),
+                "a line of the memo\n".repeat(1_000),
+            )
+            .expect("memo");
+            let project = temp.path().join("project");
+            fs::create_dir_all(project.join(".claude")).expect("project");
+            fs::write(
+                project.join(".claude/settings.json"),
+                r#"{"permissions":{}}"#,
+            )
+            .expect("project settings");
+            let project = fs::canonicalize(&project).expect("canonical");
+            let mut writer = agent(
+                "npx",
+                &["@agentclientprotocol/claude-agent-acp"],
+                vec![
+                    skill("report-writer"),
+                    CapabilityRef {
+                        kind: CapabilityKind::Knowledge,
+                        name: "memo.md".to_owned(),
+                        path: Some(PathBuf::from("team.files/memo.md")),
+                    },
+                ],
+            );
+            writer.allow.edits = true;
+            Self {
+                _temp: temp,
+                home,
+                teams,
+                team,
+                project,
+                writer,
+            }
+        }
+
+        fn materialise(&self, memory: &TeamMemory) -> Workspace {
+            materialise(
+                Some(&self.home),
+                &self.teams,
+                &self.team,
+                "team",
+                &self.writer,
+                &self.project,
+                memory,
+                BusMode::Pipeline,
+            )
+            .expect("delivered")
+            .expect("a workspace still holds the copies")
+        }
+    }
+
+    /// ADR 0042: connecting a skill, a file or a Brief to an agent that works in a folder the
+    /// operator chose used to move it into the workspace, so it silently stopped working on their
+    /// project. It stays in the chosen folder, the workspace still holds the copies, and nothing is
+    /// written into the project.
+    #[test]
+    fn an_agent_in_a_chosen_folder_stays_there_whatever_is_connected() {
+        let team = ChosenFolderTeam::new();
+        let workspace = team.materialise(&brief_memory(&team.teams, &team.team));
+        let project = &team.project;
+
+        assert_eq!(
+            &workspace.cwd, project,
+            "it starts in the folder it was given"
+        );
+        assert_eq!(workspace.root, team.teams.join(".loomwatch/team/writer"));
+        assert_eq!(
+            workspace.delivery.copies.as_deref(),
+            Some(workspace.root.as_path())
+        );
+        assert!(
+            workspace
+                .root
+                .join(".claude/skills/report-writer/SKILL.md")
+                .is_file()
+        );
+        assert!(workspace.root.join("knowledge/memo.md").is_file());
+        // The Brief reaches it through the packet; nothing is added to the project.
+        assert_eq!(workspace.brief_file, None);
+        assert!(!project.join("CLAUDE.md").exists());
+        assert!(!project.join(".claude/skills").exists());
+        assert_eq!(
+            fs::read_to_string(project.join(".claude/settings.json")).expect("untouched"),
+            r#"{"permissions":{}}"#
+        );
+        assert!(
+            !workspace.root.join(".claude/settings.json").exists(),
+            "grants in a folder the app never opens would only mislead"
+        );
+    }
+
+    /// ADR 0042: an agent working in a chosen folder is told where its copies are by their full
+    /// paths, and the permission policy lets it read them there, but not the team files.
+    #[test]
+    fn an_agent_in_a_chosen_folder_is_pointed_at_its_copies_and_may_read_them() {
+        let team = ChosenFolderTeam::new();
+        let workspace = team.materialise(&no_memory());
+        let prompt = crate::compose_for(
+            &team.writer,
+            &crate::memory::ContextPacket::default(),
+            &crate::NodeTask::goal("Summarise the memo"),
+            Some(&workspace),
+        );
+        let skill_file = workspace.root.join(".claude/skills/report-writer/SKILL.md");
+        assert!(
+            prompt
+                .text
+                .contains(&format!("read {} in full", skill_file.display())),
+            "{}",
+            prompt.text
+        );
+        let copy = workspace.root.join("knowledge/memo.md");
+        assert!(
+            prompt
+                .text
+                .contains(&format!("The full text is in {}; read it", copy.display())),
+            "{}",
+            prompt.text
+        );
+        let policy = crate::permissions::PermissionPolicy::for_agent(
+            team.writer.allow,
+            &team.project,
+            &workspace.delivery,
+        );
+        let read = |path: &Path| {
+            policy.approves(&serde_json::json!({"params": {"toolCall": {
+                "kind": "read",
+                "locations": [{"path": path.to_string_lossy()}],
+            }}}))
+        };
+        assert!(read(&skill_file));
+        assert!(read(&copy));
+        assert!(
+            !read(&team.teams.join("team.yaml")),
+            "the team files stay out of reach"
+        );
     }
 
     /// Delivery channel 2: the Brief written as the harness's own project memory file, which is

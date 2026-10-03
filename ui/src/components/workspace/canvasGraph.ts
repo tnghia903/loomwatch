@@ -409,7 +409,7 @@ function addCapabilityWiring(graph: GraphAccumulator, input: CanvasGraphInput, f
       draggable: editable,
       selectable: true,
       selected: selectedCapabilities.has(capability.id),
-      data: { kind: capability.kind, name: capability.name, source: capability.source, wiredTo, readOnly: !editable, onRemove: () => removeCapabilityCards([capability.id]) },
+      data: { kind: capability.kind, name: capability.name, source: capability.source, ...(capability.path ? { path: capability.path } : {}), wiredTo, readOnly: !editable, onRemove: () => removeCapabilityCards([capability.id]) },
     }
     addNode(node)
   }

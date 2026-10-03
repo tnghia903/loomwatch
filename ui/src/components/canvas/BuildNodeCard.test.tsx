@@ -237,14 +237,14 @@ describe('BuildAgentCard at each depth', () => {
     expect(facts().Allowed).toBe('Anything: OpenCode doesn’t ask')
   })
 
-  it('names a folder chosen for the agent, unless something connected overrides it', () => {
+  it('names a folder chosen for the agent, whatever is connected to it (ADR 0042)', () => {
     view.zoom = 1.4
     const chosen = { ...nodeData.agent, spawn: { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '/Users/me/Projects/website' } }
     renderCard({ ...nodeData, agent: chosen })
     expect(facts()['Works in']).toBe('website')
     cleanup()
     renderCard({ ...nodeData, agent: { ...chosen, capabilities: [{ kind: 'tool', name: 'search' }] } })
-    expect(facts()['Works in']).toBeUndefined()
+    expect(facts()['Works in']).toBe('website')
   })
 
   it('adds nothing at Team depth', () => {

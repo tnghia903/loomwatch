@@ -88,6 +88,11 @@ pub struct CapabilityNode {
     /// every version-1 file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemoryRef>,
+    /// Set on a knowledge card that is a folder or file the operator chose (ADR 0042): the same
+    /// `path` its agents' knowledge entries carry, so one card stands for one source however many
+    /// agents read it. Absent on every other card. Additive, so the version stays 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -179,6 +184,14 @@ impl ComposerLayout {
             }
         }
         for node in &self.nodes {
+            if node.path.is_some()
+                && (node.kind != CapabilityKind::Knowledge || node.memory.is_some())
+            {
+                return Err(LayoutError(format!(
+                    "capability {} has a path, which only a folder or file card may have",
+                    node.id
+                )));
+            }
             if let Some(memory) = &node.memory
                 && (memory.team.is_none() == memory.pack.is_none())
             {
@@ -264,6 +277,7 @@ mod tests {
             source: "Claude Code".to_owned(),
             position: Position { x: 10.0, y: 20.0 },
             memory: None,
+            path: None,
         }
     }
 
@@ -460,6 +474,33 @@ mod tests {
     }
 
     /// A saved agent position that is not a number would put a card at `NaN` and lose it.
+    /// ADR 0042: a folder or file card keeps its path through a save, so one card stands for one
+    /// source on every reload; a path on any other card is refused rather than kept as noise.
+    #[test]
+    fn a_folder_card_keeps_its_path_and_no_other_card_may_have_one() {
+        let mut folder = node("knowledge@/Users/me/reports", CapabilityKind::Knowledge);
+        folder.path = Some("/Users/me/reports".into());
+        let layout = ComposerLayout {
+            nodes: vec![folder],
+            ..Default::default()
+        };
+        layout.validate().expect("a folder card is valid");
+        let text = serde_json::to_string(&layout).expect("serialise");
+        assert!(text.contains(r#""path":"/Users/me/reports""#), "{text}");
+        let back: ComposerLayout = serde_json::from_str(&text).expect("read back");
+        assert_eq!(back, layout);
+
+        let mut skill = node("skill:notebooklm", CapabilityKind::Skill);
+        skill.path = Some("/Users/me/reports".into());
+        let error = ComposerLayout {
+            nodes: vec![skill],
+            ..Default::default()
+        }
+        .validate()
+        .expect_err("only knowledge has a path");
+        assert!(error.0.contains("only a folder or file card"), "{error:?}");
+    }
+
     #[test]
     fn refuses_a_saved_agent_position_that_is_not_a_number() {
         let mut layout = ComposerLayout {

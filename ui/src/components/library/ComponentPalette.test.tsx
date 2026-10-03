@@ -126,9 +126,13 @@ describe('ComponentPalette in Build and in a run', () => {
   })
 
   /** ADR 0036: with no team memory the group is empty, and says where a folder or file is added. */
-  it('points an empty knowledge group at Add folder and Add file', () => {
-    render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={{ ...capabilities, sources: [] }} />)
-    expect(section('Knowledge')).toHaveTextContent('Teams with memory appear here. To give an agent a folder or file, select the agent and use Add folder… or Add file… in its Context.')
+  it('offers Add folder and Add file under Knowledge, only where the team can be edited', () => {
+    const view = render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={{ ...capabilities, sources: [] }} teamPath="desk.yaml" onAddSources={vi.fn()} />)
+    expect(section('Knowledge')).toHaveTextContent('Teams with memory appear here. A folder or file becomes a card: connect it to every agent that should read it.')
+    expect(within(section('Knowledge')).getByRole('button', { name: 'Add folder…' })).toBeEnabled()
+    expect(within(section('Knowledge')).getByRole('button', { name: 'Add file…' })).toBeEnabled()
+    view.rerender(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={{ ...capabilities, sources: [] }} teamPath="desk.yaml" />)
+    expect(within(section('Knowledge')).queryByRole('button', { name: 'Add folder…' })).not.toBeInTheDocument()
   })
 
   it('shows a scan failure verbatim and scans again on request', () => {

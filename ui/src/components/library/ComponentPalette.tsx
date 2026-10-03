@@ -11,6 +11,7 @@ import type { DetectedHarness } from '../../lib/harnesses'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import type { Evidence } from '../../lib/watch/events'
 import { CAPABILITY_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
+import { AddSource, type ChosenSource } from '../canvas/AddSource'
 
 const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn }
 
@@ -43,6 +44,10 @@ export interface LibraryProps {
   onRevealEvidence?: (id: string) => void
   /** Agent ids to the names on their cards, for "Used in this run". */
   agentNames?: ReadonlyMap<string, string>
+  /** The open team file, which an added file is copied beside. */
+  teamPath?: string | null
+  /** Put folders and files the operator chose on the canvas as cards (ADR 0042). Absent when the team cannot be edited. */
+  onAddSources?: (sources: ChosenSource[]) => void
 }
 
 interface PaletteItem {
@@ -96,7 +101,7 @@ function usedRefusal(row: UsedInRun, name: (id: string) => string): string | nul
  * second "Library" that the trace drew with other groups, other rows and other words for the
  * same skills and tools.
  */
-export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarnessIds = [], harnessesLoading, harnessesError, onRetry, capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], onRevealEvidence, agentNames }: LibraryProps) {
+export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarnessIds = [], harnessesLoading, harnessesError, onRetry, capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], onRevealEvidence, agentNames, teamPath, onAddSources }: LibraryProps) {
   // On a phone the panel would take half the screen, so it starts closed and overlays the canvas
   // when opened; adding something closes it again so the new card is in view.
   const narrow = () => typeof window !== 'undefined' && window.innerWidth < 768
@@ -238,7 +243,8 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
         {group.name === YOURS && saved.problems.map(problem => <p key={problem.file} className="palette-hint palette-problem" title={problem.message}>Can’t read {problem.file}: {problem.message}</p>)}
         {group.name === APPS && !query && <AppsFooter loading={harnessesLoading} error={harnessesError} onRetry={onRetry} found={harnesses.length} notInstalled={notInstalled} notInstalledOpen={notInstalledOpen} onToggleNotInstalled={() => setNotInstalledOpen(open => !open)} searchPathOpen={searchPathOpen} onToggleSearchPath={() => setSearchPathOpen(open => !open)} knownIds={knownHarnessIds} searchPath={harnessSearchPath} />}
         {group.name === 'Tools' && !query && <p className="palette-hint">Web search, commands and file edits are built into each AI app. Switch them on per agent, under <b>Allowed without asking</b>.</p>}
-        {group.name === 'Knowledge' && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-hint">Teams with memory appear here. To give an agent a folder or file, select the agent and use <b>Add folder…</b> or <b>Add file…</b> in its Context.</p>}
+        {group.name === 'Knowledge' && !query && onAddSources && <AddSource teamPath={teamPath} onAdd={(sources) => { onAddSources(sources); if (narrow()) setCollapsed(true) }} />}
+        {group.name === 'Knowledge' && !query && <p className="palette-hint">{group.items.length === 0 && !capabilitiesLoading ? 'Teams with memory appear here. ' : ''}A folder or file becomes a card: connect it to every agent that should read it.</p>}
         {group.name !== 'Knowledge' && group.name !== APPS && group.name !== BUILT_IN && group.name !== YOURS && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-hint">Nothing found on this Mac yet.</p>}
       </>)
     })}

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchLayout, saveLayout } from './client'
 import {
   EMPTY_LAYOUT,
-  capabilityNodeId,
+  cardId,
   migrateLayout,
   type CapabilityDragPayload,
   type CapabilityEdgeConfig,
@@ -142,13 +142,13 @@ export function useComposerLayout(path: string | null, agentIds: readonly string
   }, [])
 
   const place = useCallback((payload: CapabilityDragPayload, position: { x: number; y: number }) => {
-    const id = capabilityNodeId(payload.kind, payload.name)
+    const id = cardId(payload)
     edit((current) => current.nodes.some((node) => node.id === id)
       // Dropping a row that is already on the canvas moves it rather than making a second card.
       ? { ...current, nodes: current.nodes.map((node) => node.id === id ? { ...node, position } : node) }
-      // `memory` travels from the Library's drag payload onto the card, because the card is what
-      // gets wired and it has to know which memory it stands for before anyone connects it.
-      : { ...current, nodes: [...current.nodes, { id, kind: payload.kind, name: payload.name, source: payload.source, position, ...(payload.memory ? { memory: payload.memory } : {}) }] })
+      // `memory` and `path` travel from the payload onto the card, because the card is what gets
+      // wired and it has to know which memory, folder or file it stands for before anyone connects it.
+      : { ...current, nodes: [...current.nodes, { id, kind: payload.kind, name: payload.name, source: payload.source, position, ...(payload.memory ? { memory: payload.memory } : {}), ...(payload.kind === 'knowledge' && payload.path ? { path: payload.path } : {}) }] })
     return id
   }, [edit])
 

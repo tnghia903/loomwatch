@@ -38,7 +38,8 @@ pub struct PermissionPolicy {
     allow: AgentAllow,
     /// The agent's working folder, resolved: where `allow.edits` lets it change files.
     folder: PathBuf,
-    /// Folders and files the operator connected as knowledge, resolved.
+    /// Folders and files the operator connected as knowledge, and `LoomWatch`'s folder of copies
+    /// for this agent, resolved.
     readable: Vec<PathBuf>,
     /// MCP servers `LoomWatch` handed this session: the Team Bus and every connected tool.
     servers: Vec<String>,
@@ -68,7 +69,8 @@ impl PermissionPolicy {
             .knowledge
             .iter()
             .flat_map(|knowledge| knowledge.folders.iter().chain(&knowledge.files))
-            .map(PathBuf::from);
+            .map(PathBuf::from)
+            .chain(delivery.copies.clone());
         let servers = std::iter::once(RESERVED_SERVER.to_owned())
             .chain(delivery.tools.iter().map(|tool| tool.server.clone()));
         Self::new(allow, folder, readable, servers)
