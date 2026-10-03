@@ -17,13 +17,15 @@ export interface NewTeamDialogProps {
   onClose: () => void
   /** The open team has unsaved changes that creating a new team would discard. */
   openTeamUnsaved?: boolean
+  /** Close this and open Home's "Set up an AI app" panel. Absent where that panel isn't on screen. */
+  onSetUpApps?: () => void
 }
 
 /**
  * Name, starting point, done. A template is written to disk as a complete team and opened, so the
  * first screen after this dialog is one where typing a request and pressing Enter runs it.
  */
-export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose, openTeamUnsaved = false }: NewTeamDialogProps) {
+export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose, openTeamUnsaved = false, onSetUpApps }: NewTeamDialogProps) {
   const ranked = rankHarnesses(harnesses)
   // Left out of `ranked` because the daemon last saw them fail to start; named so the operator knows
   // why an app they installed is not offered.
@@ -35,6 +37,7 @@ export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose
   const [error, setError] = useState<string | null>(null)
   const titleId = useId()
   const trimmed = name.trim()
+  const setUpLink = onSetUpApps && <> <button type="button" className="link" onClick={onSetUpApps} disabled={Boolean(busy)}>Set up an AI app</button></>
 
   async function create() {
     if (!trimmed || busy) return
@@ -112,8 +115,8 @@ export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose
               <span className="hint t-meta">You can change each agent's app and model later in team setup.</span>
             </label>
           )}
-          {ranked.length === 0 && failing.length === 0 && <p className="nt-note">No AI apps were found on this computer, so only an empty team is available. Install Claude Code, Codex or OpenCode and sign in to use the ready-made teams.</p>}
-          {ranked.length === 0 && failing.length > 0 && <p className="nt-note">None of your AI apps can start right now, so only an empty team is available.</p>}
+          {ranked.length === 0 && failing.length === 0 && <p className="nt-note">No AI apps were found on this computer, so only an empty team is available. Install Claude Code, Codex or OpenCode to use the ready-made teams.{setUpLink}</p>}
+          {ranked.length === 0 && failing.length > 0 && <p className="nt-note">None of your AI apps can start right now, so only an empty team is available.{setUpLink}</p>}
           {failing.length > 0 && (
             <ul className="nt-note nt-problems" aria-label="Apps that need attention">
               {failing.map((harness) => <li key={harness.id} title={harness.healthDetail}>{harnessProblem(harness)}</li>)}
@@ -125,7 +128,7 @@ export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose
               a laptop screen, and a Create button (or its progress and errors) scrolled out of view
               reads as a dialog that does nothing. */}
           <div className="nt-foot">
-            {error && <p role="alert" className="nt-error">{error}</p>}
+            {error && <p role="alert" className="nt-error">{error}{setUpLink}</p>}
             <div className="nt-acts">
               <span role="status" className="nt-busy">{busy}</span>
               <button type="button" className="btn" onClick={onClose} disabled={Boolean(busy)}>Cancel</button>
