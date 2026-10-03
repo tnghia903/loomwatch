@@ -1,5 +1,5 @@
 import type { Evidence, RunProjection } from '../watch/events'
-import { skillName } from './reads'
+import { failuresOf, skillName, workCount, type WorkCount } from './reads'
 
 /**
  * A run as woven cloth, for the weft timeline.
@@ -29,6 +29,9 @@ export interface WeftStitch {
   laneId: string
   kind: Evidence['kind']
   evidenceId: string
+  /** The recorded call, so the story can judge it by outcome as the receipt does (lib/story/reads.ts). */
+  evidence: Evidence
+  /** The call itself failed. It stays red even when the agent got what it was after another way. */
   bad: boolean
   /** For a newcomer: "Researcher read file README.md." */
   sentence: string
@@ -148,6 +151,7 @@ export function weave(projection: RunProjection, order: readonly WeftAgent[], no
       laneId: item.agentId,
       kind: item.kind,
       evidenceId: item.id,
+      evidence: item,
       bad: item.status === 'failed' || item.status === 'rejected',
       sentence: stitchSentence(label(item.agentId), item.target ? { ...item, target: label(item.target) } : item),
       code: `${item.kind} · ${item.relation} · #${item.seq}`,
@@ -220,19 +224,26 @@ function span(msValue: number): string {
   return `${minutes} minute${minutes === 1 ? '' : 's'}`
 }
 
-const COUNTED: [Evidence['kind'], string, string][] = [
-  ['source', 'opened one source', 'opened {n} sources'],
-  ['search', 'ran one search', 'ran {n} searches'],
-  ['file', 'worked with one file', 'worked with {n} files'],
-  ['command', 'ran one command', 'ran {n} commands'],
-  ['skill', 'used one skill', 'used {n} skills'],
-  ['tool', 'used one tool', 'used {n} tools'],
+/** The receipt's counts, plus the tools it does not list: each tool once, by name. */
+type Tally = WorkCount & { tools: number }
+
+const COUNTED: [(tally: Tally) => number, string, string][] = [
+  [(tally) => tally.skills, 'used one skill', 'used {n} skills'],
+  [(tally) => tally.read.files, 'read one file', 'read {n} files'],
+  [(tally) => tally.read.pages, 'opened one web page', 'opened {n} web pages'],
+  [(tally) => tally.read.notes, 'retrieved one notebook entry', 'retrieved {n} notebook entries'],
+  [(tally) => tally.searches, 'ran one search', 'ran {n} searches'],
+  [(tally) => tally.changed, 'changed one file', 'changed {n} files'],
+  [(tally) => tally.commands, 'ran one command', 'ran {n} commands'],
+  [(tally) => tally.tools, 'used one tool', 'used {n} tools'],
 ]
 
 /**
  * The timeline read aloud: who worked, for how long, what they did, where it went wrong and when
  * the work changed hands. Counted from the same stitches and knots the cloth draws — nothing is
- * paraphrased from what an agent said about itself.
+ * paraphrased from what an agent said about itself — and judged as the receipt judges them
+ * (lib/story/reads.ts): each thing once however many calls reached it, and a failed call told as
+ * a failure only when nothing else the agent did got what it was after. Its stitch stays red.
  */
 export function narrate(weft: Weft): StoryBeat[] {
   const beats: StoryBeat[] = []
@@ -246,18 +257,27 @@ export function narrate(weft: Weft): StoryBeat[] {
       continue
     }
     const mine = weft.stitches.filter((stitch) => stitch.laneId === lane.id)
-    const did = COUNTED.map(([kind, one, many]) => {
-      const count = mine.filter((stitch) => stitch.kind === kind && !stitch.bad).length
+    const calls = mine.map((stitch) => stitch.evidence)
+    const tools = new Set(calls.filter((item) => item.kind === 'tool' && item.status === 'succeeded').map((item) => item.name.split('\n')[0].trim())).size
+    const tally: Tally = { ...workCount(calls), tools }
+    const did = COUNTED.map(([counted, one, many]) => {
+      const count = counted(tally)
       return count === 0 ? null : count === 1 ? one : many.replace('{n}', String(count))
     }).filter(Boolean) as string[]
-    const doing = did.length === 0 ? '' : did.length === 1 ? `, and ${did[0]}` : `: it ${did.slice(0, -1).join(', ')} and ${did.at(-1)}`
-    beats.push({ at: start, text: lane.live ? `${lane.name} is working${doing ? doing.replace(/^, and /, ' and has ').replace(/^: it /, ' — so far it ') : ''}.` : `${lane.name} worked for ${span(length)}${doing}.`, bad: false })
-    const failed = mine.filter((stitch) => stitch.bad)
+    const list = did.length > 1 ? `${did.slice(0, -1).join(', ')} and ${did.at(-1)}` : did[0]
+    const doing = did.length === 0 ? '' : did.length === 1 ? `, and ${list}` : `: it ${list}`
+    beats.push({ at: start, text: lane.live ? `${lane.name} is working${list ? ` — so far it ${list}` : ''}.` : `${lane.name} worked for ${span(length)}${doing}.`, bad: false })
+    // A failed call the agent made up for, such as a folder read as a file before the files in it,
+    // is not told as a failure. A refused request still is: the receipt lists those apart.
+    const missed = new Set<Evidence>(failuresOf(calls))
+    const failed = mine.filter((stitch) => missed.has(stitch.evidence) || (stitch.bad && stitch.kind === 'permission'))
     if (failed.length === 1) beats.push({ at: failed[0].at, text: `${failed[0].sentence.replace(/\.$/, '')} — the run carried on.`, bad: true })
     else if (failed.length > 1) {
-      // "News Collector couldn't open x." → "couldn't open x", so the name is said once.
-      const first = failed[0].sentence.startsWith(`${lane.name} `) ? failed[0].sentence.slice(lane.name.length + 1) : failed[0].sentence
-      beats.push({ at: failed[0].at, text: `${failed.length} of ${lane.name}’s calls failed — first it ${first.replace(/\.$/, '')}.`, bad: true })
+      // "News Collector couldn't open x." → "it couldn't open x", and "News Collector’s search for x
+      // failed." → "its search for x failed", so the name is said once.
+      const sentence = failed[0].sentence.replace(/\.$/, '')
+      const first = sentence.startsWith(`${lane.name} `) ? `it ${sentence.slice(lane.name.length + 1)}` : sentence.startsWith(`${lane.name}’s `) ? `its ${sentence.slice(lane.name.length + 3)}` : sentence
+      beats.push({ at: failed[0].at, text: `${failed.length} of ${lane.name}’s calls failed — first ${first}.`, bad: true })
     }
     for (const knot of weft.knots.filter((candidate) => candidate.from === lane.id)) {
       const next = weft.lanes.find((candidate) => candidate.id === knot.to)

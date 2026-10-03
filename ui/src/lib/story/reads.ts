@@ -127,3 +127,23 @@ export function readPhrase(count: ReadCount): string {
 export function changedFiles(items: readonly Item[]): number {
   return new Set(items.filter((item) => item.kind === 'file' && item.relation !== 'read file' && item.status === 'succeeded').map((item) => pathsOf(item)[0] ?? item.id)).size
 }
+
+/** What one agent's work came to: the counts the receipt and the run's story both report. */
+export interface WorkCount {
+  skills: number
+  read: ReadCount
+  /** Run, whether or not they worked: one that failed is also told as a failure. */
+  searches: number
+  changed: number
+  commands: number
+}
+
+export function workCount(items: readonly Item[]): WorkCount {
+  return {
+    skills: skillsUsed(items).length,
+    read: readCount(items),
+    searches: items.filter((item) => item.kind === 'search').length,
+    changed: changedFiles(items),
+    commands: items.filter((item) => item.kind === 'command').length,
+  }
+}
