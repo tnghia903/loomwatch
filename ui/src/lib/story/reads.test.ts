@@ -17,17 +17,29 @@ const at = (seconds: number) => new Date(Date.UTC(2026, 9, 3, 4, 0, seconds)).to
 const record = (steps: Step[]): RunEvent[] =>
   steps.map(([agentId, kind, payload, raw], seq) => ({ id: `event-${seq}`, sessionId: 'run-7', agentId, seq, ts: at(seq), kind, payload, ...(raw === undefined ? {} : { raw }) }))
 
-/** Claude Code's Read as claude-agent-acp reports it: the call, a permission ask allowed once, then the result. */
+/**
+ * Claude Code's Read as claude-agent-acp 0.85 reports it, copied from a recorded run: the call
+ * starts as a bare "Read File" with no path, and the path arrives in the next update. So whatever
+ * is decided from the call itself is decided before anyone knows which file it was.
+ */
+function readCall(callId: string, path: string, title: string, outcome: Step[]): Step[] {
+  return [
+    ['researcher', 'tool_call', { name: 'Read', title: 'Read File', callId, status: 'pending', content: [], rawInput: {}, toolKind: 'read', locations: [] }],
+    ['researcher', 'tool_update', { title, callId, rawInput: { file_path: path }, locations: [{ line: 1, path }] }],
+    ...outcome,
+  ]
+}
+
+/** A read of a file in the linked folder: asked, allowed once, then the result. */
 function read(callId: string, path: string, error?: string): Step[] {
   const title = `Read ${path}`
-  return [
-    ['researcher', 'tool_call', { callId, title, toolKind: 'read', status: 'pending', rawInput: { file_path: path }, locations: [{ path, line: 1 }] }],
-    ['researcher', 'permission', { toolCall: { toolCallId: callId, title, kind: 'read' }, options: [{ optionId: 'allow_once', kind: 'allow_once', name: 'Allow' }, { optionId: 'reject_once', kind: 'reject_once', name: 'Reject' }] }],
-    ['researcher', 'permission', { outcome: { outcome: 'selected', optionId: 'allow_once' } }],
+  return readCall(callId, path, title, [
+    ['researcher', 'permission', { toolCall: { toolCallId: callId, kind: 'read', name: 'Read', title, status: 'pending', rawInput: { file_path: path }, locations: [{ line: 1, path }] }, options: [{ optionId: 'allow-once', kind: 'allow_once', name: 'Yes' }, { optionId: 'reject', kind: 'reject_once', name: 'No' }] }],
+    ['researcher', 'permission', { outcome: { outcome: 'selected', optionId: 'allow-once' } }],
     error
       ? ['researcher', 'tool_update', { callId, status: 'failed', rawOutput: error, content: [{ type: 'content', content: { type: 'text', text: error } }] }]
       : ['researcher', 'tool_update', { callId, status: 'completed', content: [{ type: 'content', content: { type: 'text', text: '1\t# Q3' } }] }],
-  ]
+  ])
 }
 
 /**
@@ -39,10 +51,13 @@ function marketBrief(reads: Step[]): RunEvent[] {
     ['researcher', 'process', { phase: 'spawned', pid: 41 }],
     ['researcher', 'session_meta', { phase: 'prompt_sections', sections: [{ kind: 'task', heading: '## Task', text: 'Write the market brief.' }], requiredSkills: [{ name: 'house-style', source: 'LoomWatch', sourcePath: '/Users/me/.claude/skills/house-style', path: SKILL, sha256: SHA, chars: 812 }] }, { source: 'loomwatch', phase: 'prompt_sections' }],
     ['researcher', 'message', { role: 'user', content: { type: 'text', text: 'Write the market brief.' } }],
-    // One skill, recorded twice: the agent's own Read of its SKILL.md, and LoomWatch noting that it opened.
-    ['researcher', 'tool_call', { callId: 'skill', title: 'Read .claude/skills/house-style/SKILL.md', toolKind: 'read', status: 'pending', rawInput: { file_path: SKILL }, locations: [{ path: SKILL, line: 1 }] }],
-    ['researcher', 'tool_update', { callId: 'skill', status: 'completed' }],
-    ['researcher', 'session_meta', { phase: 'skill_opened', skill: 'house-style', path: SKILL, sha256: SHA, toolCallId: 'skill' }, { source: 'loomwatch', phase: 'skill_opened' }],
+    // One skill, recorded three times: supplied with the prompt, the agent's own Read of its
+    // SKILL.md (a file read, by the time its path is known), and LoomWatch noting that it opened.
+    ['researcher', 'session_meta', { phase: 'required_skills_supplied', method: 'session/prompt', promptId: 5, skills: [{ name: 'house-style', source: 'LoomWatch', sourcePath: '/Users/me/.claude/skills/house-style', path: SKILL, sha256: SHA, chars: 812 }] }, { source: 'loomwatch', phase: 'required_skills_supplied' }],
+    ...readCall('skill', SKILL, 'Read .claude/skills/house-style/SKILL.md', [
+      ['researcher', 'session_meta', { phase: 'skill_opened', skill: 'house-style', path: SKILL, sha256: SHA, toolCallId: 'skill' }, { source: 'loomwatch', phase: 'skill_opened' }],
+      ['researcher', 'tool_update', { callId: 'skill', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: '1\t---' } }] }],
+    ]),
     ...reads,
     ['researcher', 'message', { role: 'agent', content: { type: 'text', text: 'Q3 revenue rose 12%; churn fell to 3.1%.' } }],
     ['researcher', 'turn_end', { stopReason: 'end_turn' }],
@@ -175,6 +190,21 @@ describe('counting things, not calls', () => {
     ]
     expect(failuresOf(items)).toEqual([])
     expect(failuresOf(items.slice(0, 1)).map((miss) => miss.id)).toEqual(['a'])
+  })
+
+  // The record files a SKILL.md read as a file read once its path arrives (claude-agent-acp 0.85).
+  it('counts a skill’s own file as the skill, not as a file read', () => {
+    const items = [
+      item('a', { locations: [{ path: SKILL }] }),
+      item('b', { locations: [{ path: '/Users/me/work/writer/.agents/skills/house-style/examples.md' }] }),
+      item('c', { kind: 'skill', relation: 'opened by the agent', name: 'house-style' }),
+      // Not skills: a file whose name mentions skills, and a project folder that happens to be called skills.
+      item('d', { locations: [{ path: `${FOLDER}/skills-gap.md` }] }),
+      item('e', { locations: [{ path: '/Users/me/project/skills/plan.md' }] }),
+    ]
+    expect(skillsUsed(items)).toEqual(['house-style'])
+    expect(readCount(items)).toEqual({ files: 2, pages: 0, notes: 0 })
+    expect(failuresOf([item('f', { status: 'failed', locations: [{ path: SKILL }] }), items[2]])).toEqual([])
   })
 
   it('reads a file read in pages as one, and leaves out what nobody read', () => {
