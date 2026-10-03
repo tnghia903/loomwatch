@@ -86,11 +86,30 @@
 .delivery-verification { font-size:11px; margin:0; padding:0 20px 14px; line-height:1.5; }
 .delivery-shown .delivery-output { border-radius:0; border:0; border-left:1px solid var(--color-hairline); box-shadow:none; padding-bottom:calc(var(--lw-composer-height,150px) + 28px); }
 .delivery-output>header { padding:26px 30px 22px; border-bottom:0; }
-.delivery-output-title { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:12px 0 8px; }
-.delivery-output-title h2 { margin:0; font-size:26px; font-weight:590; letter-spacing:-.45px; }
-.delivery-output-badge { font-size:11px; border:1px solid var(--color-hairline); border-radius:5px; padding:5px 7px; text-transform:uppercase; color:var(--color-ink-3); }
+.delivery-output-title { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:8px 14px; margin:12px 0 8px; }
+/* The title keeps at least 240 px; narrower than that, the verdict drops beneath it. */
+.delivery-output-title h2 { flex:1 1 240px; min-width:0; margin:0; font-size:26px; font-weight:590; letter-spacing:-.45px; }
+/* The verdict on the answer (lib/story/verdict.ts): a hairline pill, its word and glyph in the
+   colour of what it means — gold where the reader has something to check, never a fill. */
+.delivery-output-badge { flex:none; display:inline-flex; align-items:center; gap:6px; margin-top:3px; font:inherit; font-size:12px; font-weight:550; line-height:1; white-space:nowrap; border:1px solid var(--color-hairline); border-radius:var(--r-full); padding:7px 11px; background:transparent; color:var(--color-ink-2); }
+.delivery-output-badge.tone-ok { color:var(--color-ok); border-color:color-mix(in srgb, var(--color-ok) 40%, transparent); }
+.delivery-output-badge.tone-look { color:var(--color-accent); border-color:color-mix(in srgb, var(--color-accent) 45%, transparent); }
+.delivery-output-badge.tone-bad { color:var(--color-alert); border-color:color-mix(in srgb, var(--color-alert) 45%, transparent); }
+.delivery-output-badge.tone-live { color:var(--color-live); }
+.delivery-output-badge.tone-live::before { content:''; width:6px; height:6px; border-radius:var(--r-full); background:currentColor; }
+button.delivery-output-badge { cursor:pointer; transition:background var(--t-move, .15s) ease, border-color var(--t-move, .15s) ease; }
+button.delivery-output-badge:hover { border-color:currentColor; }
+button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tint); color:var(--color-ink); }
 .delivery-output-scroll { padding:0 30px 20px; }
 .delivery-output-quality { font-size:11px; margin-bottom:12px; }
+/* A finding is the line worth reading before the answer: a notice with a 3 px rule, not a whisper. */
+.delivery-output-quality:is(.tone-look,.tone-bad) { font-size:13px; line-height:1.55; color:var(--color-ink-2); padding:10px 14px; border:1px solid var(--color-hairline); border-radius:7px; box-shadow:inset 3px 0 0 var(--color-accent); }
+.delivery-output-quality.tone-bad { box-shadow:inset 3px 0 0 var(--color-alert); }
+.delivery-output-quality .delivery-link { font-size:inherit; white-space:nowrap; }
+.delivery-review-findings { margin:18px 0 0; padding:12px 14px; border:1px solid var(--color-hairline); border-radius:10px; }
+.delivery-review-findings ul { max-height:220px; overflow:auto; }
+.delivery-review-findings li { font-size:13px; line-height:1.5; color:var(--color-ink-2); }
+.delivery-review-findings li.tone-bad::before { content:"✗"; color:var(--color-alert); }
 .delivery-response { border:1px solid var(--color-hairline); border-radius:7px; padding:28px; background:var(--color-panel); font-size:15px; line-height:1.65; white-space:normal; }
 .delivery-response h1 { font-family:Georgia,serif; font-size:39px; line-height:1.13; letter-spacing:-1px; font-weight:500; margin-top:0; padding-bottom:23px; border-bottom:1px solid var(--color-hairline); }
 .delivery-response h2,.delivery-response h3 { font-family:Georgia,serif; font-size:24px; font-weight:500; }
