@@ -172,8 +172,8 @@ with a lead that hands out work and asks its teammates questions as it goes.
 
 ### 🧵 One team, many apps
 
-Each agent runs on its own app and model: Claude Code researches, Codex reviews, Gemini writes. Real
-runs use the sign-in and plan you already have.
+Each agent runs on its own app and model: Claude Code researches, Codex reviews, OpenCode writes on
+a free model. Real runs use the sign-in and plan you already have.
 
 </td>
 <td width="33%" valign="top">
@@ -346,6 +346,9 @@ memory and workspace folders already set up for your user account.
 
 ### What you need
 
+LoomWatch runs on macOS and is tested on Apple silicon Macs. Linux should work but is untested.
+Windows is not supported, because the `./loomwatch` launcher is a bash script.
+
 LoomWatch is built on your computer the first time you start it, so it needs a few free tools. You
 don't have to check for them yourself: `./loomwatch` lists anything missing and how to install it.
 
@@ -370,6 +373,11 @@ To run real agents, you also need at least one AI app installed and signed in, s
 Codex, Gemini CLI or OpenCode. You do **not** need one for the demo. If you have none yet, the home
 screen's **Set up an AI app** gives each app's install and sign-in commands and notices when it is
 ready. OpenCode works with free models and no account.
+
+> [!NOTE]
+> Gemini CLI no longer works with a personal Google sign-in. Google now refuses it ("This client is
+> no longer supported"), and LoomWatch shows Gemini as not working once that happens. Gemini CLI
+> signed in with a Gemini API key may still work, but LoomWatch has not been tested that way.
 
 Everything below is typed in a terminal (Terminal on macOS). Use a terminal where your AI app's
 command already works, because LoomWatch finds your apps, skills and tools through it.
@@ -435,6 +443,24 @@ To stop one run, click **Stop** beside the request box. Closing the browser tab 
 its runs. Scheduled teams run only while LoomWatch and its database are running and the computer is
 awake. For scheduled runs and optional Notion delivery, see [Routines](docs/WATCH.md#routines) and
 [Notion setup](docs/NOTION.md).
+
+### Remove LoomWatch
+
+1. If you connected LoomWatch to other AI apps, choose **Connections…** from the ☰ menu and click
+   **Disconnect** beside each one. For Claude Code, Codex and Gemini CLI this also removes LoomWatch
+   from the app's own settings. For an app you pasted a snippet into, delete its `loomwatch` entry
+   yourself.
+2. From the `loomwatch` folder, stop LoomWatch and delete its database. This erases your run
+   history, Notebook entries and Ask conversations:
+
+   ```sh
+   ./loomwatch stop
+   docker compose down -v
+   ```
+
+3. Delete the `loomwatch` folder.
+4. Your teams are kept in `~/LoomWatch` until you delete that folder too. It also holds your saved
+   jobs, deleted teams and the agents' working folders.
 
 ### Change the defaults
 
@@ -658,7 +684,7 @@ prompts and files to their model providers, as they do when you use them directl
 <summary><strong>Can different agents in one team use different apps and models?</strong></summary>
 
 Yes. Each agent card has its own app and model. A team can research with Claude Code, review with
-Codex and write with Gemini. Through OpenCode, an agent can also use models such as DeepSeek, Kimi,
+Codex and write with OpenCode. Through OpenCode, an agent can also use models such as DeepSeek, Kimi,
 GLM, Qwen or Mistral.
 
 </details>
