@@ -13,6 +13,7 @@ on:
     paths:
       - site/**
       - docs/assets/readme/**
+      - docs/assets/usecases/**
       - docs/design-system/fonts/**
       - examples/usecases/**
       - examples/skills/**

@@ -20,7 +20,8 @@ cp "$root"/site/index.html "$root"/site/styles.css "$root"/site/main.js "$out/"
 # The use cases page, the one run it tells, and the team files and skill it offers for download,
 # read from examples/ so the page always serves the files that are in the repository.
 cp "$root"/site/usecases.html "$root"/site/usecases.css "$root"/site/usecases.js "$root"/site/usecases-run.json "$out/"
-mkdir -p "$out/usecases/skills"
+mkdir -p "$out/usecases/skills" "$out/assets/usecases"
+cp "$root"/docs/assets/usecases/*.png "$out/assets/usecases/"
 cp "$root"/examples/usecases/*.yaml "$out/usecases/"
 cp -R "$root"/examples/usecases/*.brief "$out/usecases/"
 cp -R "$root"/examples/skills/explain-like-im-5 "$out/usecases/skills/"
