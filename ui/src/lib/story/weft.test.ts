@@ -118,9 +118,9 @@ describe('buildReceipt', () => {
     expect(receipt.team).toBe('2 helpers + your review')
     expect(receipt.ranOn).toBe('Claude Code')
     expect(receipt.lines.map((line) => [line.tone, line.text])).toEqual([
-      ['ok', 'News Collector finished · read 1 source'],
+      ['ok', 'News Collector finished · read 1 web page'],
       ['ok', 'You gave your decision'],
-      ['ok', 'News Editor finished · touched 1 file'],
+      ['ok', 'News Editor finished'],
       ['bad', 'News Editor couldn’t read SKILL.md, and carried on without it'],
     ])
     expect(receipt.lines[3].evidenceId).toBe('e2')
@@ -137,7 +137,7 @@ describe('buildReceipt', () => {
     const lines = (allow?: { web?: boolean; edits?: boolean; commands?: boolean }) => buildReceipt({ ...base, agents: [{ id: 'collector', name: 'News Collector', operator: false, allow }], evidenceByAgent: byAgent, projection: projection() })
     const receipt = lines()
     expect(receipt.lines.map((line) => [line.text, line.allow ?? null, line.allowed ?? null])).toEqual([
-      ['News Collector finished · read 1 source', null, null],
+      ['News Collector finished · read 1 web page', null, null],
       ['News Collector wasn’t allowed to search the web (asked 3 times), and carried on without it', 'web', false],
       ['News Collector wasn’t allowed to run commands, and carried on without it', 'commands', false],
       ['News Collector asked permission for “Mystery tool”, and it was refused, and carried on without it', null, null],
@@ -183,7 +183,7 @@ describe('buildReceipt', () => {
     })
     expect(receipt.heading).toBe('Run 16 · Stopped by you')
     expect(receipt.lines.map((line) => line.text)).toEqual([
-      'News Collector finished · read 1 source',
+      'News Collector finished · read 1 web page',
       'You stopped the run before giving your decision',
       'News Editor didn’t run',
     ])

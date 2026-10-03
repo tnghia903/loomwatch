@@ -1,4 +1,5 @@
 import type { RunPhase } from '../watch/events'
+import { readPhrase, type ReadCount } from './reads'
 import type { Receipt, ReceiptLine } from './receipt'
 
 /**
@@ -35,8 +36,8 @@ export interface VerdictInput {
   reviewed: boolean
   /** Only a finished run has one. */
   receipt: Receipt | null
-  /** Sources the team read, across every agent. */
-  sources: number
+  /** What the team read successfully, across every agent, each thing once (lib/story/reads.ts). */
+  read: ReadCount
 }
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
@@ -71,11 +72,12 @@ export function answerVerdict(input: VerdictInput): AnswerVerdict {
     }
   }
   if (findings.length) return { tone: 'look', label: `${plural(findings.length, 'thing')} to check`, detail: first, findings, reviewable: true }
+  const read = readPhrase(input.read)
   return {
     tone: 'ok',
     label: 'Nothing flagged',
-    detail: input.sources
-      ? `Every step finished, reading ${plural(input.sources, 'source')}, and nothing in the record was flagged.`
+    detail: read
+      ? `Every step finished, reading ${read}, and nothing in the record was flagged.`
       : 'Every step finished and nothing in the record was flagged.',
     findings,
     reviewable: true,

@@ -252,6 +252,25 @@ describe('Delivery Lane', () => {
     expect(screen.queryByRole('button', { name: /review this answer/ })).toBeNull()
     expect(screen.getByText('Every step finished and nothing in the record was flagged.')).toBeInTheDocument()
   })
+  // A linked folder read as a file (EISDIR), then the files in it, read as "1 thing to check"; and
+  // a clean run "read 1 source", which was your own answer at the review stop.
+  it('neither flags a folder whose files were read nor counts your answer as a source', () => {
+    const folder = '/Users/Shared/harbor-pine/q3-reports'
+    const read = (id: string, path: string, status = 'succeeded') => ({ id, agentId: 'researcher', seq: 1, offsetMs: 0, kind: 'file', relation: 'read file', name: `Read ${path}`, status, toolKind: 'read', rawInput: { file_path: path }, locations: [{ path, line: 1 }], target: null }) as unknown as Evidence
+    const answer = { id: 'a1', agentId: 'review', seq: 9, offsetMs: 0, kind: 'source', relation: 'directed', name: 'Your answer', status: 'succeeded', toolKind: null, rawInput: null, locations: [], target: null } as unknown as Evidence
+    const projection = { ...projectRun([]), agents: [{ id: 'researcher', status: 'succeeded', openCalls: 0, exitCode: null, stopReason: null, requiredSkills: [] }] } as unknown as RunProjection
+    setup({
+      projection,
+      agents: [{ id: 'researcher', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Researcher', agent: { id: 'researcher', name: 'Researcher', role: 'Find what changed' } } }],
+      evidenceByAgent: new Map([
+        ['researcher', [read('r0', folder, 'failed'), ...['README.md', 'q3-sales.md', 'q3-churn.md'].map((file, index) => read(`r${index + 1}`, `${folder}/${file}`))]],
+        ['review', [answer]],
+      ]),
+    })
+    const output = within(screen.getByRole('complementary', { name: 'Team output' }))
+    expect(output.getByText('Nothing flagged')).toBeInTheDocument()
+    expect(output.getByText('Every step finished, reading 3 files, and nothing in the record was flagged.')).toBeInTheDocument()
+  })
   it('supports filters and output expansion without changing the team', () => {
     const { container, props } = setup()
     fireEvent.click(screen.getByRole('button', { name: 'Tools' }))

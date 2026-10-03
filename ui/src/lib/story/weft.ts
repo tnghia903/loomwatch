@@ -1,4 +1,5 @@
 import type { Evidence, RunProjection } from '../watch/events'
+import { skillName } from './reads'
 
 /**
  * A run as woven cloth, for the weft timeline.
@@ -101,9 +102,9 @@ export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'r
     }
     case 'command': return failed ? `${agent}’s command ${quoted} failed.` : `${agent} ran ${quoted}.`
     case 'skill': {
-      // A skill is read as its SKILL.md; the folder above it is the skill's name.
-      const folder = /SKILL\.md$/i.test(what) ? item.name.match(/([^/\s'"]+)\/SKILL\.md/i)?.[1] : null
-      const skill = folder ? `“${folder}”` : quoted
+      // A skill read as its SKILL.md is named by its folder; Claude's Skill tool ("Load skill: x") by its input.
+      const named = skillName(item)
+      const skill = named ? `“${named}”` : quoted
       return failed ? `${agent} couldn’t use the skill ${skill}.` : `${agent} used the skill ${skill}.`
     }
     case 'permission': return `${agent} asked permission for ${quoted}${failed ? ', and it was refused' : ''}.`

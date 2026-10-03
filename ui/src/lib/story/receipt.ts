@@ -1,6 +1,7 @@
 import type { AgentRuntime } from '../runs/graph'
 import type { AgentAllow, AllowSwitch } from '../team-file/types'
 import type { Evidence, RunPhase, RunProjection } from '../watch/events'
+import { changedFiles, failuresOf, readCount, readPhrase, skillsUsed } from './reads'
 import { describeEvidence } from './weft'
 
 /**
@@ -9,7 +10,9 @@ import { describeEvidence } from './weft'
  * What was asked, who did what, what failed and what happened instead, then what is worth a second
  * look. It says the same facts the trace holds, once and in plain words, and every line carries the
  * evidence id it came from so an expert can open the record behind it. Nothing here is inferred
- * from an agent's prose: a skill counts as used only when the stream shows it opened.
+ * from an agent's prose: a skill counts as used only when the stream shows it opened. Lines report
+ * outcomes, not calls (lib/story/reads.ts): a failed read is a failure only when no read of the
+ * same thing succeeded, and every count is of things, not of the calls it took to reach them.
  */
 export type ReceiptTone = 'ok' | 'bad' | 'warn' | 'wait'
 
@@ -61,16 +64,16 @@ export interface ReceiptInput {
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
 
 function workSummary(items: readonly Evidence[]): string {
-  const sources = items.filter((item) => item.kind === 'source').length
+  const read = readPhrase(readCount(items))
   const searches = items.filter((item) => item.kind === 'search').length
-  const files = items.filter((item) => item.kind === 'file').length
+  const changed = changedFiles(items)
   const commands = items.filter((item) => item.kind === 'command').length
-  const skills = items.filter((item) => item.kind === 'skill' && item.status === 'succeeded').length
+  const skills = skillsUsed(items).length
   const parts = [
     skills && `used ${plural(skills, 'skill')}`,
-    sources && `read ${plural(sources, 'source')}`,
+    read && `read ${read}`,
     searches && `ran ${plural(searches, 'search', 'searches')}`,
-    files && `touched ${plural(files, 'file')}`,
+    changed && `changed ${plural(changed, 'file')}`,
     commands && `ran ${plural(commands, 'command')}`,
   ].filter(Boolean)
   return parts.length ? ` · ${parts.join(', ')}` : ''
@@ -150,9 +153,10 @@ export function buildReceipt(input: ReceiptInput): Receipt {
     } else if (terminal) lines.push({ tone: 'bad', text: stoppedByYou ? `${agent.name} was stopped before it finished` : `${agent.name} didn’t finish`, agentId: agent.id })
     else lines.push({ tone: 'wait', text: `${agent.name} is still working`, agentId: agent.id })
 
-    // Failures say what happened instead, so the reader knows whether the result is affected.
-    // Refused permission requests are told apart below, by what the agent was not allowed to do.
-    const failed = items.filter((item) => (item.status === 'failed' || item.status === 'rejected') && item.kind !== 'permission')
+    // Failures say what happened instead, so the reader knows whether the result is affected. A
+    // failed read that another read made up for (a folder read as a file, then the files in it) is
+    // not one. Refused permission requests are told apart below, by what the agent was not allowed to do.
+    const failed = failuresOf(items)
     for (const item of failed.slice(0, 3)) {
       const sentence = describeEvidence(agent.name, item).replace(/\.$/, '')
       lines.push({ tone: 'bad', text: `${sentence}${run.status === 'succeeded' ? ', and carried on without it' : ''}`, agentId: agent.id, evidenceId: item.id })

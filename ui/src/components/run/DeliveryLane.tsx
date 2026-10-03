@@ -30,6 +30,7 @@ import type { AllowSwitch } from '../../lib/team-file/types'
 import type { RunColumnProps } from './RunColumn'
 import { StripLine } from './StoryNodes'
 import { useCanvasActions } from '../canvas/CanvasActionsContext'
+import { readCount } from '../../lib/story/reads'
 import { buildReceipt, type ReceiptLine } from '../../lib/story/receipt'
 import { answerVerdict, type VerdictTone } from '../../lib/story/verdict'
 import { RunReceipt } from './RunReceipt'
@@ -230,8 +231,8 @@ export function DeliveryLane({
     answered: Boolean(output.text),
   })), [planned, terminal, attempt, prompt, phase, elapsed, agents, projection, evidenceByAgent, snapshots, harnessLabels, output.text])
   // Beside the answer's title: what its record holds to check before using it (lib/story/verdict.ts).
-  const sources = useMemo(() => [...evidenceByAgent.values()].reduce((sum, items) => sum + items.filter((item) => item.kind === 'source').length, 0), [evidenceByAgent])
-  const verdict = planned ? null : answerVerdict({ phase, text: output.text, streaming: output.streaming, terminal: terminal || output.terminal, settled: evidenceComplete, reviewed, receipt: runReceipt, sources })
+  const read = useMemo(() => readCount([...evidenceByAgent.values()].flat()), [evidenceByAgent])
+  const verdict = planned ? null : answerVerdict({ phase, text: output.text, streaming: output.streaming, terminal: terminal || output.terminal, settled: evidenceComplete, reviewed, receipt: runReceipt, read })
   const openReview = () => { setReviewChecked(false); setReviewOpen(true) }
   const fileMakers = useMemo(() => agents.map((node) => ({ id: node.id, name: node.data.agent.name })), [agents])
   const deliveredFiles = useMemo(() => (output.streaming ? [] : fileRefsIn(output.text)), [output.text, output.streaming])
