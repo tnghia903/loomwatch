@@ -42,6 +42,7 @@ agents:
       - Go through the sources the Brief lists, primary sources first, then the newsrooms. A pointer site may lead you to a story, but it never counts as its source.
       - For each story, collect every trusted source that covers it, with its link and when it was published. Skip anything older than 24 hours, and anything the Brief says to skip.
       - Gather 12 to 20 stories, so the Reader has a real choice.
+      - Find and read pages with web search only. Commands are off for this team, so don't run curl or any other command.
 
       Reply with one bullet per story: the claim in one sentence, then each trusted source that reports it, as a link with its time. Your handover's Findings carry the same bullets, one story each.
     spawn:
@@ -62,7 +63,7 @@ agents:
 
       How to work:
       - If the handover seems to leave stories out, ask the Gatherer for its full list with the ask tool.
-      - Open and read each source. Never keep a story on its headline alone.
+      - Open and read each source, except the sites the Brief says you can't open: confirm those through web search instead. Never keep a story on its headline alone.
       - Keep a story only under the Brief's rule: its primary source says it, or at least two independent newsrooms report it. Note where the sources disagree, and what each one actually says.
       - Follow anything the team has kept about this reader.
 
