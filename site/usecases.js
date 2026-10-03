@@ -196,7 +196,7 @@
       event.preventDefault()
     })
   })
-  // A link to a part of a panel (#run, #skill, #lesson) opens the panel it lives in.
+  // A link to a part of a panel (#run, #lesson) opens the panel it lives in.
   function caseFromHash() {
     const id = window.location.hash.slice(1)
     if (!id) return null
