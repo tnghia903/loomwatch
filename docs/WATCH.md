@@ -181,8 +181,10 @@ Response (`202 Accepted`):
   `200` with the record. It returns 404 when that request is no longer waiting: it was answered,
   timed out after 10 minutes, or its run ended. The archive records `session_meta` events with
   `phase: "awaiting_permission"` and `phase: "permission_answered"` (`outcome`: `allow_once`,
-  `allow_run`, `allowed_for_run`, `deny` or `timed_out`) between the request and the reply sent
-  to the app.
+  `allow_run`, `allowed_for_run`, `deny`, `timed_out`, or `not_asked` in a routine's run) between
+  the request and the reply sent to the app. An app that ends its turn when a request is declined,
+  as Codex does, is asked to carry on in the same session: the archive records
+  `phase: "turn_resumed"` and the request to carry on, and the turn ends once (ADR 0046).
 
 ## Routines
 

@@ -199,7 +199,10 @@ allow:
 ```
 
 Every switch defaults to `false`, and an absent block means all off. An approval selects the app's
-one-time option, never "always". An agent allowed to edit whose declared `spawn.cwd` holds its own
+one-time option, never "always". A decline selects the app's one-time rejection. When an app ends
+its turn on that rejection, as Codex does, LoomWatch asks the agent, in the same session, to carry
+on without what was declined, up to three times per turn
+([ADR 0046](decisions/0046-a-declined-request-does-not-end-the-turn.md)). An agent allowed to edit whose declared `spawn.cwd` holds its own
 team file (`cwd: .`) runs in its managed folder instead. An operator node takes no `allow:`. An app
 that offers no ask-first mode, OpenCode among them, decides for itself, and the run records that.
 See [ADR 0037](decisions/0037-loomwatch-decides-what-agents-may-do.md).

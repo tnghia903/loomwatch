@@ -338,3 +338,21 @@ Since [ADR 0036](decisions/0036-knowledge-is-chosen-not-discovered.md), every de
 entry is one the operator chose, so new records only carry `Linked folder` or `Added file`. Records
 from earlier runs may still carry a discovered source's provenance (`LoomWatch`, `OpenCode`, or
 both joined with ` + `); readers must keep accepting them.
+
+
+### Additive declined-request metadata (2026-10-03)
+
+The envelope, the event kinds and every existing payload shape are unchanged.
+
+- `permission_answered` gains `outcome: not_asked`, recorded when a routine's run, which has nobody
+  to ask, declines a request at once. Its `requestId` is `null`.
+- `turn_resumed`: the app ended a turn `cancelled` after `LoomWatch` declined one of its requests,
+  and `LoomWatch` asked it to carry on in the same session. The payload has `stopReason: cancelled`,
+  the app's `usage` when it sent one, and `declined[]` (`title`, `kind`, `detail`, `outcome`).
+  `raw` is `{source: loomwatch, phase: turn_resumed, response}`, and `response` is the app's own
+  `session/prompt` reply. The next user `message` is that request to carry on, not a new task. One
+  `turn_end` closes the whole turn, and the reply runs across the cut.
+- A `permission` reply that selects an option whose `kind` is `reject_once` or `reject_always` is a
+  decline, the same as `outcome: cancelled`.
+
+See [ADR 0046](decisions/0046-a-declined-request-does-not-end-the-turn.md).

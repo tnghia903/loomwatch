@@ -23,6 +23,9 @@
   ask the operator in the middle of a run", so a request no switch allowed was declined on the spot.
   The policy and the switches stay. What changes is what happens to a request the policy does not
   approve.
+- **Amended 2026-10-03** by [ADR 0046](0046-a-declined-request-does-not-end-the-turn.md):
+  `permission_answered` is also recorded, with `outcome: not_asked`, when a routine's run declines
+  at once. An app that ends its turn on the decline, as Codex does, is asked to carry on.
 
 ## Context
 
