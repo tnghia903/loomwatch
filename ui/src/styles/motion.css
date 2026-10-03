@@ -143,3 +143,18 @@
 }
 
 @keyframes thread-grow { from { scale: 1 0; } }
+
+/* ---- Canvas: live signals that keep zoomed text sharp ---------------------
+   In Safari a running opacity or transform animation anywhere inside the React Flow viewport
+   turns the whole canvas into one layer drawn at its base scale and then stretched, so zoomed-in
+   text goes soft (measured ~4x at 150 %) for as long as the animation runs; Chrome repaints at
+   the new scale and is unaffected. What pulses on the canvas therefore pulses in colour, which
+   repaints in place: the Output card's Live pip for the whole run, and the caret of an answer
+   still streaming. Only the keyframes change; duration and timing stay with each base rule. */
+@media (prefers-reduced-motion: no-preference) {
+  .react-flow .badge-live .pip { animation-name: canvas-pip-breathe; }
+  .react-flow .caret { animation-name: canvas-caret-blink; }
+}
+
+@keyframes canvas-pip-breathe { 50% { background-color: color-mix(in srgb, currentColor 35%, transparent); } }
+@keyframes canvas-caret-blink { 50% { background-color: transparent; } }
