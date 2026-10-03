@@ -1328,51 +1328,105 @@
 
   /* ================================================================ 07 · Tomorrow */
 
-  const DAYS = [
-    { d: 'Sep 19', w: 'Sat', runs: ['done'], tag: 'A schedule', when: '10:00 → 10:06', story: 'The first scheduled run. Collector, Editor and Writer were done by 10:06, and the digest was waiting in Notion.' },
-    { d: 'Sep 20', w: 'Sun', runs: ['done'], when: '10:00 → 10:05', story: 'An ordinary Sunday. The digest arrived, and nothing needed you.' },
-    { d: 'Sep 21', w: 'Mon', runs: ['done', 'short'], tag: 'Follow up', when: '10:00 → 10:05 · 10:31', story: 'You read it over coffee and followed up: <span class="q">“Shorter, please.”</span> Writer did one more pass on the same result. Nobody started over.' },
-    { d: 'Sep 22', w: 'Tue', runs: ['fail', 'done'], tag: 'Redo from a step', when: '10:00 → 10:02 · 10:40', story: "Collector couldn't open one of its sources, and the run stopped and said so. You chose Redo from step 1, and only that step and the ones after it ran again." },
-    { d: 'Sep 23', w: 'Wed', runs: ['done'], tag: 'Notebook', when: '10:00 → 10:05', story: 'You added a line to the team\'s Notebook: <span class="q">“Five items, not ten.”</span> Every run since has read it before starting.' },
-    { d: 'Sep 24', w: 'Thu', runs: ['done'], when: '10:00 → 10:04', story: 'Five items, not ten. It remembered without being told again.' },
-    { d: 'Sep 25', w: 'Fri', runs: ['done'], tag: 'Swap a thread', when: '10:00 → 10:05', story: 'A newer app was better at editing, so you moved Editor to it. One change in the sentence. The team, its Brief and its Notebook stayed as they were.' },
-    { d: 'Sep 26', w: 'Sat', runs: ['done'], tag: 'Share a source', when: '10:00 → 10:04', story: 'You dragged market-reports onto Editor too. One card, two threads: Collector and Editor read the same folder, and neither can change it.' },
-    { d: 'Sep 27', w: 'Sun', runs: ['wait'], tag: 'A review step waits', when: '10:00 → 18:40', story: "Editor flagged a claim it couldn't confirm, and the review step held the run all Sunday. You approved at 18:40, and the digest went out then, not before." },
-    { d: 'Sep 28', w: 'Mon', runs: ['done'], tag: 'Saved job', when: '10:00 → 10:05', story: 'You saved Editor as a job, with its instructions, app and skills, and added it to a second team.' },
-    { d: 'Sep 29', w: 'Tue', runs: ['done'], when: '10:00 → 10:04', story: 'Most mornings now need nothing from you. That was the point.' },
-    { d: 'Sep 30', w: 'Wed', runs: ['done'], tag: 'Replay any morning', when: '10:00 → 10:05', story: "Every run is kept on your computer, so you can open any morning's timeline and drag back through it." },
-    { d: 'Oct 1', w: 'Thu', runs: ['done'], when: '10:00 → 10:05', story: 'Finished at 10:05. Every morning so far is on the record, the failure included.' },
-    { d: 'Oct 2', w: 'Today', runs: ['live'], tag: 'Working now', when: '10:00 → now', story: "Today's run is working. Collector is reading, and the timeline fills in as it goes." },
+  // The team's answer as a morning paper. Issues are numbered, never dated, so the page doesn't go
+  // stale, and flipping back through the pile shows the paper getting better as the Notebook fills.
+  const HEADLINES = [
+    ['A new open-weight coding model tops a public benchmark', 'Its weights are public, and the licence allows commercial use.'],
+    ['Two browser makers ship on-device AI features', 'Most of them work without a connection.'],
+    ['A chip export rule changes next month', 'Two more product lines will need a licence.'],
+    ['An open agent protocol adds a way to resume a session', 'Apps can pick a conversation up where it stopped.'],
+    ['A lab publishes its safety evaluations', 'Outside testers had four weeks of access.'],
+    ['Regulators open a consultation on AI labels', 'Comments are open for sixty days.'],
+    ['A coding agent ships a team mode', 'Several agents can now share one repository.'],
+    ['Data centre power deals keep growing', 'Utilities report record long-term contracts.'],
+    ['A translation model adds forty languages', 'Quality is uneven for less common languages.'],
+    ['Universities update their AI coursework rules', 'Most now ask students to say when they used it.'],
   ]
-  const fabric = $('#fabric')
+  const ISSUES = [
+    { items: 10, when: '10:00 → 10:06', tag: 'A schedule', story: 'The first scheduled issue. Collector, Editor and Writer were done by 10:06, and it was waiting in Notion.' },
+    { items: 10, when: '10:00 → 10:05', story: 'An ordinary morning. The issue arrived, and nothing needed you.' },
+    { items: 7, when: '10:00 → 10:05 · 10:31', tag: 'Follow up', note: ['You, 10:24', 'Shorter, please.'], stamp: ['ok', 'Second pass 10:31'], story: 'You read it over coffee and followed up: <span class="q">“Shorter, please.”</span> Writer did one more pass on the same issue, back at 10:31. Nobody started over.' },
+    { items: 7, when: '10:00 → 10:02 · 10:40', stopped: true, tag: 'Redo from a step', stamp: ['bad', 'First run stopped 10:02', 'Redone 10:40'], story: "Collector couldn't open one of its sources, and the run stopped and said so. You chose Redo from step 1, and the reprint was ready at 10:40." },
+    { items: 5, when: '10:00 → 10:05', tag: 'Notebook', note: ['Notebook', 'Five items, not ten.'], story: 'You added a line to the team’s Notebook: <span class="q">“Five items, not ten.”</span> Every issue since has read it before starting.' },
+    { items: 5, when: '10:00 → 10:04', story: 'Five items, not ten. It remembered without being told again.' },
+    { items: 5, when: '10:00 → 10:05', tag: 'Swap a thread', foot: 'Edited on a newer app', story: 'A newer app was better at editing, so you moved Editor to it. One change in the sentence. The team, its Brief and its Notebook stayed as they were.' },
+    { items: 5, when: '10:00 → 10:04', tag: 'Share a source', foot: 'Sources + market-reports', story: 'You dragged market-reports onto Editor too. One card, two threads: Collector and Editor read the same folder, and neither can change it.' },
+    { items: 5, when: '10:00 → 18:40', tag: 'A review step waits', stamp: ['wait', 'Held for your review', 'Approved 18:40'], story: "Editor flagged a claim it couldn't confirm, and the review step held the issue until you were back. You approved at 18:40, and it went out then, not before." },
+    { items: 5, when: '10:00 → 10:05', tag: 'Saved job', foot: 'Editor also edits a second team', story: 'You saved Editor as a job, with its instructions, app and skills, and added it to a second team.' },
+    { items: 5, when: '10:00 → 10:04', story: 'Most mornings now need nothing from you. That was the point.' },
+    { items: 5, when: '10:00 → 10:05', tag: 'Replay any morning', story: 'Every issue is kept on your computer with the run that made it, so you can open any morning and drag back through its timeline.' },
+    { items: 5, when: '10:00 → 10:05', story: 'Ready at 10:05. Every issue so far is on the pile, the stopped one included.' },
+    { items: 5, when: '10:00 → now', live: true, tag: 'Writing now', stamp: ['live', 'Writing now'], story: "Today's issue is being written. Collector is reading, and it will be on the pile before you sit down." },
+  ]
+  const pile = $('#pile')
   const dayStory = $('#day-story')
-  let dayAt = DAYS.length - 1
-  function renderFabric() {
-    fabric.replaceChildren(...DAYS.map((day, i) => el('button', {
-      type: 'button', class: 'day', role: 'option', 'aria-selected': String(i === dayAt), tabindex: i === dayAt ? '0' : '-1',
-      'aria-label': `${day.w === 'Today' ? 'Today' : day.w}, ${day.d}${day.tag ? `: ${day.tag}` : ''}`,
-      onclick: () => selectDay(i),
-    },
-    el('span', { class: `mk${day.tag ? '' : ' none'}`, 'aria-hidden': 'true' }),
-    el('span', { class: 'runs', 'aria-hidden': 'true' }, day.runs.map((k) => el('i', { class: `thr ${k}` }))),
-    el('span', { class: 'dt', 'aria-hidden': 'true' }, el('b', { text: day.w }), day.d))))
-    const day = DAYS[dayAt]
-    const tag = el('span', { class: 'when' }, el('b', { text: day.tag || 'Finished' }), `${day.d} · ${day.when}`)
+  const issueScrub = $('#issue-scrub')
+  const today = ISSUES.length - 1
+  const readyAt = (issue) => issue.when.split(/→|·/).at(-1).trim()
+  // Waiting by 10:10: the first run's answer, unless that run stopped.
+  const onTime = (issue) => !issue.live && !issue.stopped && issue.when.split('·')[0].split('→')[1].trim() <= '10:10'
+  let issueAt = today
+  let playing = 0
+
+  function issueCard(issue, i) {
+    const items = issue.live
+      ? [72, 90, 64, 84, 58].map((w) => el('li', { class: 'bar', style: `width:${w}%` }))
+      : Array.from({ length: issue.items }, (_, k) => {
+        const [head, sub] = HEADLINES[(k + i * 3) % HEADLINES.length]
+        return el('li', {}, el('span', {}, head, issue.items <= 5 ? el('small', { text: sub }) : null))
+      })
+    return el('article', { class: 'issue', onclick: () => { stopPlaying(); selectIssue(i) } },
+      el('div', { class: 'mast' }, el('b', { text: 'AI and tech, today' }), el('span', { text: `No. ${i + 1}` })),
+      el('div', { class: 'sub' }, el('span', { text: `${issue.items} items` }), el('span', { text: issue.live ? 'writing…' : `ready ${readyAt(issue)}` })),
+      el('ol', { class: issue.live ? 'writing' : '' }, items),
+      issue.stamp ? el('div', { class: `stamp ${issue.stamp[0]}` }, issue.stamp.slice(1).flatMap((line, n) => (n ? [el('br'), line] : [line]))) : null,
+      issue.note ? el('div', { class: 'note' }, el('small', { text: issue.note[0] }), issue.note[1]) : null,
+      el('div', { class: 'colophon' }, el('span', { text: 'Collector · Editor · You · Writer' }), el('span', { text: issue.foot || 'to Notion' })))
+  }
+  // The pile: the chosen issue in front, older ones fanned behind it, newer ones lifted away.
+  function layPile() {
+    const narrow = window.matchMedia('(max-width: 900px)').matches
+    const [dx, dy, turn, behind] = narrow ? [9, 3, 1.1, 5] : [17, 3, 1.5, 7]
+    ;[...pile.children].forEach((card, i) => {
+      const d = issueAt - i
+      const k = Math.min(Math.abs(d), behind)
+      card.classList.toggle('front', d === 0)
+      card.style.zIndex = String(100 - Math.abs(d))
+      card.style.transform = d === 0 ? 'none' : d > 0 ? `translate(${-k * dx}px, ${k * dy}px) rotate(${-k * turn}deg) scale(${1 - k * 0.02})` : `translate(${120 + k * 50}px, ${-k * 6}px) rotate(${k * 4}deg)`
+      card.style.opacity = d === 0 ? '1' : d > 0 && d <= behind ? String(1 - k * 0.09) : '0'
+      card.style.filter = d > 0 ? `brightness(${1 - k * 0.07})` : 'none'
+    })
+  }
+  function renderPaper() {
+    if (!pile.children.length) pile.append(...ISSUES.map(issueCard))
+    layPile()
+    const issue = ISSUES[issueAt]
     const story = el('p')
-    story.innerHTML = day.story
-    dayStory.replaceChildren(tag, story)
+    story.innerHTML = issue.story
+    dayStory.replaceChildren(el('span', { class: 'when' }, el('b', { text: issue.tag || 'On time' }), `No. ${issueAt + 1} · ${issue.when}`), story)
+    issueScrub.value = String(issueAt + 1)
+    issueScrub.setAttribute('aria-valuetext', `Issue ${issueAt + 1}${issueAt === today ? ', today' : ''}${issue.tag ? `: ${issue.tag}` : ''}`)
+    const done = ISSUES.slice(0, issueAt + 1).filter((x) => !x.live)
+    const n = done.filter(onTime).length
+    $('#issue-count').textContent = done.length ? `${n} of ${done.length} ${done.length === 1 ? 'issue was' : 'issues were'} waiting by 10:10.` : ''
   }
-  function selectDay(i, focus = false) {
-    dayAt = (i + DAYS.length) % DAYS.length
-    renderFabric()
-    if (focus) $$('.day', fabric)[dayAt].focus()
+  function selectIssue(i) {
+    issueAt = Math.max(0, Math.min(today, i))
+    renderPaper()
   }
-  fabric.addEventListener('keydown', (event) => {
-    const step = { ArrowLeft: -1, ArrowRight: 1, Home: -dayAt, End: DAYS.length - 1 - dayAt }[event.key]
-    if (step === undefined) return
-    selectDay(dayAt + step, true)
-    event.preventDefault()
+  function stopPlaying() {
+    window.clearInterval(playing)
+    playing = 0
+    $('#issue-play').textContent = 'Read the first two weeks'
+  }
+  issueScrub.addEventListener('input', () => { stopPlaying(); selectIssue(Number(issueScrub.value) - 1) })
+  $('#issue-play').addEventListener('click', () => {
+    if (playing) { stopPlaying(); return }
+    selectIssue(0)
+    $('#issue-play').textContent = 'Stop'
+    playing = window.setInterval(() => { if (issueAt >= today) stopPlaying(); else selectIssue(issueAt + 1) }, reduced ? 2200 : 1400)
   })
+  window.addEventListener('resize', layPile)
 
   /* ================================================================ 08 · Why a loom */
 
@@ -1512,7 +1566,7 @@
   renderRunUI()
   renderReview(true)
   renderResult(true)
-  renderFabric()
+  renderPaper()
   renderSwatch()
   showScreen('home')
   paintProgress()
