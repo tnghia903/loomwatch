@@ -1,0 +1,39 @@
+# cargo-about settings for the Rust half of ui/public/third-party-notices.txt
+# (regenerate with `node scripts/third-party-notices.mjs`).
+
+# Licenses a crate may be used under, in order of preference: when a crate offers a choice
+# ("MIT OR Apache-2.0"), the earliest one listed here is the one quoted in the notices.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "MIT-0",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unlicense",
+    "CDLA-Permissive-2.0",
+    "OpenSSL",
+]
+
+# Only crates that end up inside loomwatchd on the platforms it ships for; build scripts and
+# test-only crates are not part of the program.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# loomwatch-backend itself is ours, not third-party.
+private = { ignore = true }
+
+# cargo-about's built-in fixes for crates whose license files it cannot read on its own. Its ring
+# fix only knows older ring releases; the script trims ring's per-file notices instead.
+workarounds = ["chrono", "clap", "rustls", "unicode-ident"]
