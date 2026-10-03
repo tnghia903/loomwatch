@@ -227,15 +227,6 @@
 .md blockquote { margin: 12px 0 0; padding: 4px 0 4px 14px; border-left: 2px solid var(--accent-dim); color: var(--ink-2); }
 .md blockquote p { margin: 0; font: 400 18px/1.4 var(--serif); color: var(--ink); }
 
-/* Run it yourself */
-.uc-get { margin-top: 44px; padding-top: 28px; border-top: 1px solid var(--hairline); }
-.uc-get h3 { margin: 0; font: 400 28px/1.2 var(--serif); }
-.get-steps { margin: 16px 0 0; padding: 0; list-style: none; counter-reset: get; display: grid; gap: 10px; max-width: 760px; }
-.get-steps li { counter-increment: get; display: grid; grid-template-columns: 28px 1fr; gap: 10px; font-size: 14.5px; line-height: 1.6; color: var(--ink-2); }
-.get-steps li::before { content: counter(get); display: grid; place-items: center; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; border: 1px solid var(--accent); font: 600 11px/1 var(--mono); color: var(--accent); }
-.get-steps b { color: var(--ink); font-weight: 600; }
-.get-steps a { color: var(--accent); }
-
 /* ---------------------------------------------------------------- Coverage */
 
 .uc-cover { padding: 14vh 0 12vh; }
