@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { BookmarkCheck, Bot, Box, ChartColumn, Code2, FileText, Folder, Globe, GripVertical, Info, LocateFixed, PanelLeftClose, PanelLeftOpen, PenLine, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, Wrench, type LucideIcon } from 'lucide-react'
+import { BookmarkCheck, Bot, Box, ChartColumn, Code2, FileText, Folder, Globe, GripVertical, Info, LocateFixed, Lock, PanelLeftClose, PanelLeftOpen, PenLine, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, Wrench, type LucideIcon } from 'lucide-react'
 import { harnessProblem, KNOWN_HARNESSES, knownHarness } from '../../lib/harnesses'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
 import { removeJob, savedJobPreset, useSavedJobs } from '../../lib/library/jobs'
@@ -14,6 +14,7 @@ import { CAPABILITY_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './c
 import { chosenIsFile } from '../../lib/knowledge/chosen'
 import { PALETTE_WIDTH } from '../../lib/library/paletteWidth'
 import { PaletteResizer } from './PaletteResizer'
+import { SectionHead } from '../ui/SectionHead'
 
 const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn }
 
@@ -144,6 +145,19 @@ function usedRefusal(row: UsedInRun, name: (id: string) => string): string | nul
 }
 
 /**
+ * What each group is, behind its heading's "?". The panel itself shows rows, or one dashed slot
+ * when a group is empty; these sentences are for whoever wonders why.
+ */
+const EXPLAIN: Record<string, ReactNode> = {
+  [BUILT_IN]: 'Each job is placed with working instructions on the best AI app you have.',
+  [APPS]: 'The same agents without a job: an AI app and an empty brief, for when you write the instructions yourself.',
+  Skills: 'Skills found on this Mac. Drag one onto an agent to supply its instructions there; skills you connect work with any AI app.',
+  Tools: <>Tools found on this Mac. Web search, commands and file edits are built into each AI app instead: switch them on per agent, under <b>Allowed without asking</b>.</>,
+  [FILES]: <>This team’s folders and files. Add one from an agent’s panel, with <b>Folder</b> or <b>File</b> under Given. Then drag it onto another agent to share it, or click it to find its card.</>,
+  [MEMORY]: 'Other teams’ memory and imported packs. Drag one onto an agent to supply it there.',
+}
+
+/**
  * The one add panel, in Build and in a run's full trace (ADR 0041): what you can add — jobs, AI
  * apps, skills, tools, knowledge — and, while a run is shown, what that run used. It replaced a
  * second "Library" that the trace drew with other groups, other rows and other words for the
@@ -261,8 +275,8 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
       <span className="palette-used-count" aria-label={`${item.calls} call${item.calls === 1 ? '' : 's'}`}>×{item.calls}</span>
     </button>
   }
-  const section = (name: string, rows: ReactNode[], total: number, extra?: ReactNode) => <section key={name} aria-label={name}>
-    <h3>{name}</h3>
+  const section = (name: string, rows: ReactNode[], total: number, extra?: ReactNode, explain?: ReactNode) => <section key={name} aria-label={name}>
+    <SectionHead as="h3" title={name} explain={explain} />
     {rows}
     {!query && total > limitFor(name) && <button className="palette-more" onClick={() => setExpanded(current => ({ ...current, [name]: !current[name] }))}>{expanded[name] ? 'Show less' : `Show ${total - limitFor(name)} more`}</button>}
     {extra}
@@ -282,8 +296,8 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
     {capabilitiesError && !capabilitiesLoading && <div className="palette-alert" role="alert"><span>Couldn’t scan this Mac’s skills and tools.</span><small>{capabilitiesError}</small>{onRetryCapabilities && <button className="btn" onClick={onRetryCapabilities}>Try again</button>}</div>}
     {removeError && <p role="alert">{removeError}</p>}
     {/* A run's own record first, while one is shown: what it used, one row per tool, not per call. */}
-    {used.length > 0 && usedShown.length > 0 && section(USED, visible(USED, usedShown).map(usedRow), usedShown.length,
-      used.some(item => item.origin === 'app' && !item.outward) && !query && <p className="palette-hint">Tools built into an app are not added from here. Switch them on per agent, under <b>Allowed without asking</b>.</p>)}
+    {used.length > 0 && usedShown.length > 0 && section(USED, visible(USED, usedShown).map(usedRow), usedShown.length, undefined,
+      used.some(item => item.origin === 'app' && !item.outward) && <>Tools built into an app are not added from here. Switch them on per agent, under <b>Allowed without asking</b>.</>)}
     {groups.map(group => {
       const items = group.items.filter(item => matches(`${item.name} ${item.detail}`))
       if (query && items.length === 0) return null
@@ -293,18 +307,18 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
         ...(loadingApps || loadingCapabilities ? [40, 56].map(width => <div key={width} className="skel-row" aria-hidden="true"><span className="skel-sq" /><span className="skel-bars"><i className="skel-bar" style={{ width: `${width}%` }} /><i className="skel-bar" style={{ width: `${100 - width}%` }} /></span></div>) : []),
         ...visible(group.name, items).map(row),
       ], items.length, <>
-        {group.name === BUILT_IN && !yours.items.length && !saved.problems.length && saved.available && !query && <p className="palette-hint">To reuse an agent that worked, select it and choose <b>Save as job</b>.</p>}
         {group.name === YOURS && saved.problems.map(problem => <p key={problem.file} className="palette-hint palette-problem" title={problem.message}>Can’t read {problem.file}: {problem.message}</p>)}
         {group.name === APPS && !query && <AppsFooter loading={harnessesLoading} error={harnessesError} onRetry={onRetry} found={harnesses.length} notInstalled={notInstalled} notInstalledOpen={notInstalledOpen} onToggleNotInstalled={() => setNotInstalledOpen(open => !open)} searchPathOpen={searchPathOpen} onToggleSearchPath={() => setSearchPathOpen(open => !open)} knownIds={knownHarnessIds} searchPath={harnessSearchPath} />}
-        {group.name === 'Tools' && !query && <p className="palette-hint">Web search, commands and file edits are built into each AI app. Switch them on per agent, under <b>Allowed without asking</b>.</p>}
-        {/* Added from an agent's panel, where it is connected at once: one Add folder… per screen (ADR 0043). */}
-        {group.name === FILES && !query && <p className="palette-hint">{group.items.length === 0 ? 'Select an agent and use Add folder… or Add file… in its panel. Each one then shows here, to drag onto other agents.' : 'Drag one onto an agent to share it with that agent. Click to find its card.'}</p>}
-        {group.name === MEMORY && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-hint">Other teams’ memory and imported packs appear here.</p>}
-        {group.name !== FILES && group.name !== MEMORY && group.name !== APPS && group.name !== BUILT_IN && group.name !== YOURS && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-hint">Nothing found on this Mac yet.</p>}
-      </>)
+        {/* An empty group is one dashed slot, the shape its first row will fill; why it is empty is behind the heading's "?". */}
+        {group.name === FILES && !query && group.items.length === 0 && <p className="palette-empty"><Folder size={13} aria-hidden="true" />None yet</p>}
+        {group.name === MEMORY && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty"><Box size={13} aria-hidden="true" />None yet</p>}
+        {(group.name === 'Skills' || group.name === 'Tools') && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty">{group.name === 'Skills' ? <Puzzle size={13} aria-hidden="true" /> : <Wrench size={13} aria-hidden="true" />}None found on this Mac</p>}
+      </>, group.name === BUILT_IN && saved.available
+        ? <><div>{EXPLAIN[BUILT_IN]}</div><div>To reuse an agent that worked, select it and choose <b>Save as job</b>.</div></>
+        : EXPLAIN[group.name])
     })}
     {query && usedShown.length === 0 && groups.every(group => !group.items.some(item => matches(`${item.name} ${item.detail}`))) && <p className="palette-hint">Nothing matches “{query}”.</p>}
-    <p className="palette-foot">Only names and compatibility are scanned; private contents stay on this Mac.</p>
+    <p className="palette-foot" title="Only names and compatibility are scanned; private contents stay on this Mac."><Lock size={10} aria-hidden="true" />Names only. Contents stay on this Mac.</p>
     </div>
     {onResize && <PaletteResizer width={width ?? PALETTE_WIDTH.default} onResize={onResize} />}
   </aside>

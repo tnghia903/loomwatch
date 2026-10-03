@@ -164,17 +164,15 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
       </div>
 
       <div className="zone">
-        <div className="zone-head t-micro">Context</div>
         <AgentContext
           agent={agent} place={place} pipeline={pipeline} briefCount={briefCount} inheritedMemory={inheritedMemory} readOnly={readOnly}
           onPromoteEntrypoint={onPromoteEntrypoint} onAllowRecruitingChange={onAllowRecruitingChange} onMemoryBriefChange={onMemoryBriefChange} onRemoveCapability={onRemoveCapability}
-          teamPath={teamPath} onAddKnowledge={onAddKnowledge}
+          teamPath={teamPath} onAddKnowledge={onAddKnowledge} headClassName="zone-head t-micro"
         />
       </div>
 
       <div className="zone">
-        <div className="zone-head t-micro">Works in</div>
-        <AgentWorkFolder agent={agent} readOnly={readOnly} onChange={onCwdChange} problem={fieldProblems?.cwd} teamPath={teamPath} />
+        <AgentWorkFolder agent={agent} readOnly={readOnly} onChange={onCwdChange} problem={fieldProblems?.cwd} teamPath={teamPath} headClassName="zone-head t-micro" />
         {/* docs/TEAM_MEMORY.md channel 2: `deliverAs` only decides anything for an agent with a
             Brief and nothing connected, left in the team's folder — a chosen folder is never
             given the memory file (ADR 0042), and otherwise the folder is already settled. */}
@@ -187,8 +185,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
       </div>
 
       <div className="zone">
-        <div className="zone-head t-micro">Allowed without asking</div>
-        <AgentPermissions agent={agent} readOnly={readOnly} onChange={onAllowChange} />
+        <AgentPermissions agent={agent} readOnly={readOnly} onChange={onAllowChange} headClassName="zone-head t-micro" />
       </div>
 
       {!readOnly && (

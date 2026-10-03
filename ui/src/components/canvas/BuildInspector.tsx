@@ -35,20 +35,17 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
         : <>
           <label>AI app<select value={harnessId ?? ''} disabled={readOnly} onChange={e => onHarnessChange?.(e.target.value)}><option value="" disabled>Choose an app</option>{harnesses.map(h => <option key={h.id} value={h.id} disabled={h.acpAvailable === false}>{h.name}</option>)}</select></label>
           <section className="build-context" aria-label="Context">
-            <span className="build-context-head">Context</span>
             <AgentContext
               agent={node.data.agent} place={props.place} briefCount={props.briefCount} inheritedMemory={props.inheritedMemory} readOnly={readOnly}
               onPromoteEntrypoint={props.onPromoteEntrypoint} onMemoryBriefChange={props.onMemoryBriefChange} onRemoveCapability={props.onRemoveCapability}
-              teamPath={props.teamPath} onAddKnowledge={props.onAddKnowledge}
+              teamPath={props.teamPath} onAddKnowledge={props.onAddKnowledge} headClassName="build-context-head"
             />
           </section>
           <section className="build-context" aria-label="Works in">
-            <span className="build-context-head">Works in</span>
-            <AgentWorkFolder agent={node.data.agent} readOnly={readOnly} onChange={props.onCwdChange} problem={props.fieldProblems?.cwd} teamPath={props.teamPath} />
+            <AgentWorkFolder agent={node.data.agent} readOnly={readOnly} onChange={props.onCwdChange} problem={props.fieldProblems?.cwd} teamPath={props.teamPath} headClassName="build-context-head" />
           </section>
           <section className="build-context" aria-label="Allowed without asking">
-            <span className="build-context-head">Allowed without asking</span>
-            <AgentPermissions agent={node.data.agent} readOnly={readOnly} onChange={props.onAllowChange} />
+            <AgentPermissions agent={node.data.agent} readOnly={readOnly} onChange={props.onAllowChange} headClassName="build-context-head" />
           </section>
           <p><Puzzle size={13} />Skills you connect work with any AI app.</p>
           <button className="btn" onClick={() => setAdvanced(true)}>Model and more settings</button>
