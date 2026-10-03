@@ -120,8 +120,8 @@
       cap: 'Build: “Every day at 9:00 AM” leads the sentence, and a schedule card starts the canvas.',
     },
     'digest-done': {
-      alt: 'LoomWatch Run view of a scheduled run: a run receipt listing Gatherer’s 11 searches and two failed commands, Reader reading 10 web pages and failing to open one site, and Writer finished, beside the digest titled Tech today, marked 3 things to check.',
-      cap: 'Its scheduled run, finished: the receipt counts the searches and pages, and flags the two commands that never ran and the one page Reader couldn’t open, beside the digest it wrote.',
+      alt: 'LoomWatch Run view of a scheduled run: a run receipt reading Took 8m 48s, Ran on Codex and Claude, with Gatherer finished after 32 searches, Reader finished after reading 11 web pages and 6 searches, and Writer finished, beside the digest titled Tech today, marked Nothing flagged.',
+      cap: 'Its scheduled run, finished: the receipt counts every search and page each agent used, beside the digest it wrote, with nothing flagged.',
     },
   }
   function paintShots() {

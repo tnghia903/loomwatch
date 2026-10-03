@@ -27,6 +27,13 @@ its source: follow them to a primary source or a newsroom above.
 A story makes the digest only if its primary source says it, or at least two independent
 newsrooms above report it. For a paywalled page, use only what is visible without paying.
 
+## Sites Claude can't open
+
+Reuters, the Associated Press, Bloomberg, the Financial Times, The Verge, Ars Technica, Wired and
+OpenAI's own site refuse to let Claude open their pages. An agent on Claude shouldn't try: confirm
+what they report through web search instead, from the text the search shows, never the headline
+alone.
+
 ## What I care about
 
 - **Most:** AI models and tools, developer tools, chips and hardware, security incidents, and
