@@ -113,6 +113,18 @@
 .file pre .k { color: var(--ink-2); }
 .file-err { padding: 12px 16px; font-size: 13px; color: var(--ink-2); }
 
+/* ---------------------------------------------------------------- Screens from LoomWatch */
+
+.uc-shots { margin: 30px 0 0; }
+.shot-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.shot-head .micro { color: var(--accent); }
+.uc-shots .tabs { gap: 18px; }
+.shot { display: block; margin-top: 14px; border-radius: 12px; outline-offset: 4px; }
+.shot img { width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--hairline-2); box-shadow: var(--shadow); background: var(--panel-solid); }
+.shot:hover img { border-color: var(--accent-dim); }
+.shot-cap { margin: 12px 0 0; font-size: 14px; line-height: 1.55; color: var(--ink-2); max-width: 760px; }
+.uc-shots + .uc-run { margin-top: 36px; }
+
 /* ---------------------------------------------------------------- The recorded run */
 
 .uc-run { margin-top: 30px; }
@@ -168,6 +180,10 @@
 .kv > div { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--hairline); background: var(--ground); }
 .kv dt { font: 600 10.5px/1.4 var(--sans); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
 .kv dd { margin: 4px 0 0; font-size: 14px; line-height: 1.55; color: var(--ink); }
+.kv dd.md p, .kv dd.md li { font-size: 14px; line-height: 1.55; }
+.kv dd.md > :first-child { margin-top: 0; }
+.kv dd.md p { margin: 6px 0 0; }
+.kv dd.md ul { margin: 4px 0 0; }
 .kv .breaks dt { color: var(--accent); }
 .check { margin-top: 12px; padding: 12px 14px; border: 1px dashed var(--accent); border-radius: 10px; }
 .check .q { margin: 0; font: 400 18px/1.35 var(--serif); }
@@ -276,5 +292,9 @@
   .file pre { font-size: 11px; }
   .uc-shared { margin-left: 0; flex-basis: 100%; }
   .step, .rung button, .file summary, .uc-lesson > summary { min-height: 44px; }
+  .shot-head { display: grid; gap: 6px; }
+  .uc-shots .tabs { gap: 16px; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .uc-shots .tabs::-webkit-scrollbar { display: none; }
+  .uc-shots .tabs button { flex: none; }
   .cover thead button { min-height: 44px; }
 }

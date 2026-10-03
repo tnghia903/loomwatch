@@ -40,10 +40,10 @@
     <a class="brand" href="./" aria-label="LoomWatch, home"><svg aria-hidden="true"><use href="#mark"/></svg>LoomWatch</a>
     <nav class="top-nav" aria-label="Sections">
       <a href="./#threads">The run</a>
-      <a href="usecases.html" aria-current="page">Use cases</a>
       <a href="./#tomorrow">Tomorrow</a>
       <a href="./#why">Why a loom</a>
       <a href="./#start">Start</a>
+      <a href="usecases.html" aria-current="page">Use cases</a>
     </nav>
     <div class="top-actions">
       <a class="btn" href="./#start">Get LoomWatch</a>
@@ -61,7 +61,7 @@
   <div class="wrap">
     <span class="micro eyebrow">Use cases</span>
     <h1 id="uc-h">Real jobs for a team of your AI apps. <em>Each one is a file you can run.</em></h1>
-    <p class="uc-lede">Two teams, two real runs. See the team that does each job, what LoomWatch does to make it work, and the team file to start from. The first is told word for word from its run; the second ran on its own schedule, and its numbers are its own.</p>
+    <p class="uc-lede">Two teams, two real runs. See the team that does each job, what LoomWatch does to make it work, and the team file to start from. The first is told word for word from its run; the second ran on its own schedule. The screenshots are of those same runs, in LoomWatch.</p>
   </div>
 </section>
 
@@ -82,6 +82,21 @@
           <p class="ch-body">Ask about anything. Mapper digs it down to what you already know, and you say where to start. Teacher builds it back up one idea at a time. Then Checker, on another company's app, makes every step true. All three read the same skill: <a class="link-inline" href="#skill">explain like I'm 5</a>.</p>
           <p class="uc-chain" aria-label="The team, in order"><span class="chip">Mapper <small>Claude</small></span><span class="to">→</span><span class="chip dashed">You</span><span class="to">→</span><span class="chip">Teacher <small>Claude</small></span><span class="to">→</span><span class="chip">Checker <small>Codex</small></span></p>
         </header>
+
+        <figure class="uc-shots" data-case="learn">
+          <div class="shot-head">
+            <span class="micro">In LoomWatch, the same run</span>
+            <div class="tabs" role="tablist" aria-label="Screens from the run">
+            <button role="tab" type="button" id="shot-tab-learn-build" aria-controls="shot-learn" aria-selected="true" data-shot="learn-build">The team</button>
+            <button role="tab" type="button" id="shot-tab-learn-stop" aria-controls="shot-learn" aria-selected="false" tabindex="-1" data-shot="learn-stop">At your stop</button>
+            <button role="tab" type="button" id="shot-tab-learn-done" aria-controls="shot-learn" aria-selected="false" tabindex="-1" data-shot="learn-done">The lesson and its receipt</button>
+            </div>
+          </div>
+          <a class="shot" id="shot-learn" role="tabpanel" aria-labelledby="shot-tab-learn-build" href="assets/usecases/learn-build-dark.png" target="_blank" rel="noopener">
+            <img data-shot="learn-build" src="assets/usecases/learn-build-dark.png" width="2880" height="1800" alt="" loading="lazy">
+          </a>
+          <figcaption class="shot-cap"></figcaption>
+        </figure>
 
         <div class="win uc-run" id="run">
           <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Learn from first principles</b><span class="mono" id="run-prompt">a recorded run</span></span><span class="badge" data-state="done" id="run-badge">Recorded</span></div>
@@ -127,6 +142,19 @@
           <p class="ch-body">Every morning at 9:00, one agent gathers the last day's stories from the sources you listed. A second reads each story at its sources and keeps only what they stand behind, and a third writes it up. Nothing waits for you: the digest is done before you open it.</p>
           <p class="uc-chain" aria-label="The team, in order"><span class="chip outline">Every day 09:00</span><span class="to">→</span><span class="chip">Gatherer <small>Codex</small></span><span class="to">→</span><span class="chip">Reader <small>Claude</small></span><span class="to">→</span><span class="chip">Writer <small>Claude</small></span><span class="uc-shared">all three read <b>sources.md</b></span></p>
         </header>
+        <figure class="uc-shots" data-case="digest">
+          <div class="shot-head">
+            <span class="micro">In LoomWatch, the same run</span>
+            <div class="tabs" role="tablist" aria-label="Screens from the run">
+            <button role="tab" type="button" id="shot-tab-digest-build" aria-controls="shot-digest" aria-selected="true" data-shot="digest-build">The team</button>
+            <button role="tab" type="button" id="shot-tab-digest-done" aria-controls="shot-digest" aria-selected="false" tabindex="-1" data-shot="digest-done">Its scheduled run</button>
+            </div>
+          </div>
+          <a class="shot" id="shot-digest" role="tabpanel" aria-labelledby="shot-tab-digest-build" href="assets/usecases/digest-build-dark.png" target="_blank" rel="noopener">
+            <img data-shot="digest-build" src="assets/usecases/digest-build-dark.png" width="2880" height="1800" alt="" loading="lazy">
+          </a>
+          <figcaption class="shot-cap"></figcaption>
+        </figure>
         <div class="uc-body">
           <dl class="fine">
             <div><dt>Your sources, in a file</dt><dd>The trusted list and the rule for keeping a story sit in the team's Brief, a Markdown file every agent reads. Edit it, and tomorrow's run follows it.</dd></div>
@@ -138,13 +166,13 @@
           <div class="uc-io">
             <div class="io-ask"><span class="micro">The request it runs</span><p>Today's tech news digest for <span class="ph">{{weekday}}</span> <span class="ph">{{date}}</span>: what happened in the last 24 hours, confirmed by the trusted sources in the Brief.</p></div>
             <div class="io-out">
-              <span class="micro">Its first real run, unattended</span>
+              <span class="micro">That run, by the numbers</span>
               <ol class="funnel" aria-label="What happened to the stories in its first real run">
-                <li><b>12</b><span>stories gathered from the list</span></li>
-                <li><b>7</b><span>kept by Reader under the rule</span></li>
-                <li class="kept"><b>6</b><span>in the digest, in 4 min 58 s</span></li>
+                <li><b>10</b><span>stories gathered from the list</span></li>
+                <li><b>5</b><span>kept by Reader under the rule</span></li>
+                <li class="kept"><b>5</b><span>in the digest, in 4 min 36 s</span></li>
               </ol>
-              <p class="io-foot io-real">Gatherer tried to run <code>curl</code> twice. LoomWatch declined both: commands are off, and nobody was there to ask. It carried on with web search.</p>
+              <p class="io-foot io-real">Gatherer tried to run <code>curl</code> twice, and neither ran: commands are off, and nobody was there to ask. The receipt says so, and the digest keeps only what Reader could confirm.</p>
               <span class="micro io-sub">What comes back <i>example</i></span>
               <div class="digest">
                 <h4>AI</h4>

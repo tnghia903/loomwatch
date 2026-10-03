@@ -80,6 +80,7 @@
     root.dataset.theme = theme
     themeButton.setAttribute('aria-label', theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme')
     $('meta[name="theme-color"]').content = theme === 'dark' ? '#08080A' : '#FAF8F3'
+    paintShots()
   }
   themeButton.addEventListener('click', () => {
     const next = root.dataset.theme === 'dark' ? 'light' : 'dark'
@@ -97,6 +98,69 @@
   }
   window.addEventListener('scroll', () => { if (!queued) { queued = true; window.requestAnimationFrame(paintProgress) } }, { passive: true })
   paintProgress()
+
+  /* ================================================================ Screens from the app */
+
+  // LoomWatch itself, captured during and after the same runs this page tells, in the page's theme.
+  const SHOTS = {
+    'learn-build': {
+      alt: 'LoomWatch Build view of Learn from first principles: the sentence "When you ask, Mapper does its part, then you approve or send it back, then Teacher does its part, and finally Checker checks the work and replies", and a canvas of Mapper, You, Teacher and Checker, with one skill card, explain-like-im-5, wired to Mapper, Teacher and Checker.',
+      cap: 'Build: the team as one sentence, and as a canvas. One skill card, explain-like-im-5, is wired to Mapper, Teacher and Checker, on two different apps.',
+    },
+    'learn-stop': {
+      alt: 'LoomWatch Run view, paused at the review stop: the timeline with Mapper done and You waiting, the stage cards each showing explain-like-im-5 opened, and the handover panel with Mapper’s ladder and the buttons Send back to Mapper, Approve and Stop.',
+      cap: 'Run, at your stop: Mapper’s handover is open, and nothing is taught until you approve, send it back, or say where to start.',
+    },
+    'learn-done': {
+      alt: 'LoomWatch Run view after the run: a run receipt reading Took 7m 9s, Ran on Claude Code and Codex, with Mapper, Teacher and Checker each having used 1 skill, beside the lesson Checker handed back, marked Nothing flagged, and the offer to keep 1 new note for the next run.',
+      cap: 'Run, finished: the receipt (7m 9s, on Claude Code and Codex, every agent used the skill) beside the lesson Checker handed back, and the Notebook’s offer to keep what you learned.',
+    },
+    'digest-build': {
+      alt: 'LoomWatch Build view of Daily tech digest: the sentence "Every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer", and a canvas starting from a Schedule trigger card, Daily at 9:00 AM, then Gatherer, Reader and Writer.',
+      cap: 'Build: “Every day at 9:00 AM” leads the sentence, and a schedule card starts the canvas.',
+    },
+    'digest-done': {
+      alt: 'LoomWatch Run view of a scheduled run: a run receipt listing Gatherer’s 11 searches and two failed commands, Reader reading 10 web pages and failing to open one site, and Writer finished, beside the digest titled Tech today, marked 3 things to check.',
+      cap: 'Its scheduled run, finished: the receipt counts the searches and pages, and flags the two commands that never ran and the one page Reader couldn’t open, beside the digest it wrote.',
+    },
+  }
+  function paintShots() {
+    const mode = root.dataset.theme === 'light' ? 'light' : 'dark'
+    $$('.uc-shots').forEach((figure) => {
+      const img = $('img', figure)
+      const src = `assets/usecases/${img.dataset.shot}-${mode}.png`
+      if (img.getAttribute('src') !== src) img.src = src
+      $('a.shot', figure).href = src
+    })
+  }
+  function showShot(figure, id, focus = false) {
+    const tabs = $$('[role="tab"]', figure)
+    tabs.forEach((tab) => {
+      const on = tab.dataset.shot === id
+      tab.setAttribute('aria-selected', String(on))
+      tab.tabIndex = on ? 0 : -1
+      if (on && focus) tab.focus()
+      if (on) $('a.shot', figure).setAttribute('aria-labelledby', tab.id)
+    })
+    const img = $('img', figure)
+    img.dataset.shot = id
+    img.alt = SHOTS[id].alt
+    $('.shot-cap', figure).textContent = SHOTS[id].cap
+    paintShots()
+  }
+  $$('.uc-shots').forEach((figure) => {
+    const tabs = $$('[role="tab"]', figure)
+    tabs.forEach((tab, i) => {
+      tab.addEventListener('click', () => showShot(figure, tab.dataset.shot))
+      tab.addEventListener('keydown', (event) => {
+        const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key]
+        if (!step) return
+        showShot(figure, tabs[(i + step + tabs.length) % tabs.length].dataset.shot, true)
+        event.preventDefault()
+      })
+    })
+    showShot(figure, tabs[0].dataset.shot)
+  })
 
   /* ================================================================ Tabs */
 
@@ -294,9 +358,9 @@
       el('h3', { text: rung.title }),
       rungBody(rung.body),
       el('dl', { class: 'kv' },
-        el('div', {}, el('dt', { text: 'Picture it' }), el('dd', { html: inline(rung.picture) })),
-        el('div', { class: 'breaks' }, el('dt', { text: 'Where the picture breaks' }), el('dd', { html: inline(rung.breaks) })),
-        el('div', {}, el('dt', { text: 'Why it has to be so' }), el('dd', { html: inline(rung.why) })),
+        el('div', {}, el('dt', { text: 'Picture it' }), el('dd', { class: 'md', html: markdown(rung.picture) })),
+        el('div', { class: 'breaks' }, el('dt', { text: 'Where the picture breaks' }), el('dd', { class: 'md', html: markdown(rung.breaks) })),
+        el('div', {}, el('dt', { text: 'Why it has to be so' }), el('dd', { class: 'md', html: markdown(rung.why) })),
       ),
       el('div', { class: 'check' }, el('p', { class: 'q', html: inline(rung.check) }), answer, reveal),
     ]
