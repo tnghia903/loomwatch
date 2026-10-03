@@ -2603,31 +2603,48 @@ fn managed_skill_path_matches(path: &str, name: &str) -> bool {
 /// Claude Code surfaces skill invocation as a tool call rather than as a file read, so a
 /// path-only detector would report "never opened" for the one harness that has first-class skill
 /// support. The name is taken from the structured input where the harness sends one, and from the
-/// `Skill(name)` title only as a fallback — a title is presentation, so it is the last resort
-/// rather than the first.
+/// title only as a fallback — a title is presentation, so it is the last resort rather than the
+/// first.
+///
+/// `claude-agent-acp` sends no `name` once the input is complete: its `tool_call_update` carries
+/// the tool name only in `_meta.claudeCode.toolName`, and titles the call `Load skill: <name>`
+/// (0.85's `SkillReporter`). Older builds titled it `Skill(<name>)`. All three shapes count.
 fn invoked_skill_name(update: &Value) -> Option<String> {
-    let is_skill_tool = ["name", "title"].iter().any(|key| {
-        update
-            .get(*key)
-            .and_then(Value::as_str)
-            .is_some_and(|value| value == "Skill" || value.starts_with("Skill("))
-    });
+    let is_skill_tool = update
+        .pointer("/_meta/claudeCode/toolName")
+        .and_then(Value::as_str)
+        == Some("Skill")
+        || ["name", "title"].iter().any(|key| {
+            update
+                .get(*key)
+                .and_then(Value::as_str)
+                .is_some_and(|value| {
+                    value == "Skill"
+                        || value.starts_with("Skill(")
+                        || value == "Load skill"
+                        || value.starts_with("Load skill:")
+                })
+        });
     if !is_skill_tool {
         return None;
     }
     if let Some(input) = update.get("rawInput").and_then(Value::as_object) {
         for key in ["skill", "name", "command", "skill_name", "skillName"] {
-            if let Some(value) = input.get(key).and_then(Value::as_str) {
+            if let Some(value) = input.get(key).and_then(Value::as_str)
+                && !value.trim().is_empty()
+            {
                 return Some(value.trim().to_owned());
             }
         }
     }
-    update
-        .get("title")
-        .and_then(Value::as_str)
-        .and_then(|title| title.strip_prefix("Skill("))
+    let title = update.get("title").and_then(Value::as_str)?;
+    title
+        .strip_prefix("Skill(")
         .and_then(|rest| rest.strip_suffix(')'))
-        .map(|name| name.trim().to_owned())
+        .or_else(|| title.strip_prefix("Load skill:"))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
 }
 
 fn unprojected_update(update: Option<&Value>, warning: &str) -> Value {
@@ -3706,6 +3723,71 @@ mod tests {
             invoked_skill_name(&json!({"title": "Read", "rawInput": {"command": "claude-design"}})),
             None,
             "an ordinary tool that happens to mention a skill is not an invocation",
+        );
+    }
+
+    /// `claude-agent-acp` 0.85 reports the Skill tool as `Load skill: <name>` with `kind: other`,
+    /// and its `tool_call_update` names the tool only in `_meta.claudeCode.toolName`. Missing it
+    /// left a skill loaded this way reading "given but never opened" on the receipt.
+    #[test]
+    fn claude_agent_acps_load_skill_shape_names_the_skill_it_invoked() {
+        // The update sent once the input is complete: no `name`, title and input both say it.
+        assert_eq!(
+            invoked_skill_name(&json!({
+                "sessionUpdate": "tool_call_update",
+                "_meta": {"claudeCode": {"toolName": "Skill"}},
+                "title": "Load skill: claude-design",
+                "kind": "other",
+                "rawInput": {"skill": "claude-design"},
+            }))
+            .as_deref(),
+            Some("claude-design"),
+        );
+        assert_eq!(
+            invoked_skill_name(&json!({
+                "title": "Load skill: claude-design",
+                "rawInput": {"skill": "design-md"},
+            }))
+            .as_deref(),
+            Some("design-md"),
+            "the structured input outranks the title",
+        );
+        assert_eq!(
+            invoked_skill_name(&json!({"title": "Load skill: claude-design", "kind": "other"}))
+                .as_deref(),
+            Some("claude-design"),
+            "without input, the name after the colon",
+        );
+        assert_eq!(
+            invoked_skill_name(&json!({
+                "_meta": {"claudeCode": {"toolName": "Skill"}},
+                "title": "Loading",
+                "rawInput": {"skill": "claude-design"},
+            }))
+            .as_deref(),
+            Some("claude-design"),
+            "the tool name in `_meta` is enough on its own",
+        );
+        // The stream-start `tool_call` and the completion update carry no skill name yet.
+        assert_eq!(
+            invoked_skill_name(&json!({"name": "Skill", "title": "Load skill", "rawInput": {}})),
+            None,
+        );
+        assert_eq!(
+            invoked_skill_name(&json!({
+                "_meta": {"claudeCode": {"toolName": "Skill"}},
+                "status": "completed",
+            })),
+            None,
+        );
+        assert_eq!(
+            invoked_skill_name(&json!({
+                "_meta": {"claudeCode": {"toolName": "Read"}},
+                "title": "Read SKILL.md",
+                "rawInput": {"skill": "claude-design"},
+            })),
+            None,
+            "another tool's input naming a skill is not an invocation",
         );
     }
 
