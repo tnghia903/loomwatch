@@ -105,6 +105,11 @@ export class TeamFileModel {
     this.doc.set('schedule', this.doc.createNode(schedule))
   }
 
+  /** Remove the `schedule` block: the team runs only when someone asks it to. */
+  clearSchedule(): void {
+    this.doc.delete('schedule')
+  }
+
   /** Set the team-wide `deliver` block, or remove it with `null` (ADR 0038). */
   setDeliver(deliver: DeliverConfig | null): void {
     if (deliver) this.doc.set('deliver', this.doc.createNode(deliver))

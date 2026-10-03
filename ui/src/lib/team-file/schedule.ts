@@ -37,6 +37,12 @@ export function normalizeSchedule(draft: ScheduleDraft, previous?: Partial<Sched
   return next
 }
 
+/** What the Schedule button opens: weekdays at 08:00 in this computer's zone. The task is left
+ * blank on purpose, since "Save schedule" stays off until the operator says what to do. */
+export function newSchedule(): ScheduleConfig {
+  return { cron: '0 8 * * 1-5', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', prompt: '' }
+}
+
 /** Keys the editor will silently drop on the next save, so it can say so before it happens. */
 export function unsupportedScheduleKeys(schedule: Partial<ScheduleConfig> | null | undefined): string[] {
   if (!schedule || typeof schedule !== 'object') return []

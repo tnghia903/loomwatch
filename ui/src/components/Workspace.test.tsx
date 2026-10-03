@@ -32,7 +32,7 @@ const documentState = vi.hoisted(() => ({
   settleNodeCollision: vi.fn(), capturePositionHistory: vi.fn(), undo: vi.fn(), redo: vi.fn(), onNodesChange: vi.fn(), onEdgesChange: vi.fn(),
   onConnect: vi.fn(), addAgentFromDrop: vi.fn(), save: vi.fn(async () => true), touchField: vi.fn(), renameAgent: vi.fn(), updateAgentModel: vi.fn(),
   updateAgentCwd: vi.fn(), updateAgentAllowRecruiting: vi.fn(), promoteEntrypoint: vi.fn(), promoteResponder: vi.fn(),
-  removeAgent: vi.fn(), updateTeamSchedule: vi.fn(), dismissRefusal: vi.fn(), keepLastEdgeRemoval: vi.fn(), undoLastEdgeRemoval: vi.fn(),
+  removeAgent: vi.fn(), updateTeamSchedule: vi.fn(), removeTeamSchedule: vi.fn(), dismissRefusal: vi.fn(), keepLastEdgeRemoval: vi.fn(), undoLastEdgeRemoval: vi.fn(),
   updateAgentMemory: vi.fn(), addBriefEntry: vi.fn(), removeBriefEntry: vi.fn(),
   // ADR 0016: `memory.inherits` is what the canvas draws memory cards from, and agent positions
   // arrive from the sidecar through `applyPositions` — neither dirties the document.
@@ -761,6 +761,52 @@ describe('Workspace', () => {
     expect(documentState.save).toHaveBeenCalled()
 
     Object.assign(documentState, { isValid: true, documentChipState: 'clean', saveState: 'clean', teamSchedule: null, documentProblems: [], yamlPreview: 'a: 1' })
+  })
+
+  it('adds a schedule from the Build heading, and only once its task is written', async () => {
+    // The regression: a team without a `schedule:` block had no way to get one short of editing
+    // the YAML by hand, because the schedule card — the only way into the editor — needs one.
+    documentState.updateTeamSchedule.mockClear()
+    renderWorkspace()
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule' }))
+
+    // The card appears where the schedule will live, and the editor opens on it.
+    expect(screen.getByLabelText(/Schedule trigger, Weekdays at/)).toBeInTheDocument()
+    expect(screen.getByRole('form', { name: 'Edit schedule' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Schedule' })).not.toBeInTheDocument()
+    // Nothing to remove yet: the schedule is not on the team until it is saved.
+    expect(screen.queryByRole('button', { name: 'Remove schedule' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save schedule' })).toBeDisabled()
+    expect(screen.getByRole('form', { name: 'Edit schedule' })).toHaveTextContent('Not added yet')
+
+    fireEvent.change(screen.getByLabelText('Scheduled task'), { target: { value: 'Prepare the morning digest.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(documentState.updateTeamSchedule).toHaveBeenCalledWith(expect.objectContaining({ cron: '0 8 * * 1-5', prompt: 'Prepare the morning digest.' }))
+  })
+
+  it('drops an unsaved schedule when its editor closes', async () => {
+    documentState.updateTeamSchedule.mockClear()
+    renderWorkspace()
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(screen.queryByLabelText(/Schedule trigger/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Schedule' })).toBeInTheDocument()
+    expect(documentState.updateTeamSchedule).not.toHaveBeenCalled()
+  })
+
+  it('removes a saved schedule from its panel, and offers no second way in while it exists', async () => {
+    Object.assign(documentState, { teamSchedule: { cron: '0 8 * * *', timezone: 'Asia/Singapore', prompt: 'Prepare the daily digest.' } })
+    renderWorkspace()
+    // The card is the schedule's one control (ADR 0043).
+    expect(screen.queryByRole('button', { name: 'Schedule' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Schedule trigger.*Daily/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove schedule' }))
+    expect(documentState.removeTeamSchedule).toHaveBeenCalled()
+    expect(screen.queryByRole('form', { name: 'Edit schedule' })).not.toBeInTheDocument()
+
+    Object.assign(documentState, { teamSchedule: null })
   })
 
   it('focuses the exact Inspector control for an agent-field problem', async () => {

@@ -71,6 +71,18 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
     expect(model.toYaml()).toBe(source)
   })
 
+  it('adds and removes a schedule without touching any other line', () => {
+    const source = readExample('research-team.yaml')
+    const model = TeamFileModel.parse(source)
+    model.setSchedule({ cron: '0 8 * * 1-5', timezone: 'Asia/Singapore', prompt: 'Prepare the digest.' })
+    expect(model.snapshot().schedule).toEqual({ cron: '0 8 * * 1-5', timezone: 'Asia/Singapore', prompt: 'Prepare the digest.' })
+    expect(isOrderedSubsequence(source.split('\n'), model.toYaml().split('\n'))).toBe(true)
+
+    model.clearSchedule()
+    expect(model.snapshot().schedule).toBeUndefined()
+    expect(model.toYaml()).toBe(source)
+  })
+
   it('changes exactly one line when editing a scalar agent field', () => {
     const source = readExample('research-team.yaml')
     const model = TeamFileModel.parse(source)

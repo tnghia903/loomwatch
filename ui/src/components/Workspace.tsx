@@ -6,7 +6,8 @@ import type { DetectedHarness } from '../lib/harnesses'
 import { briefFileNameFor, exportPack, fetchMemory, fetchNoteHistory, fetchNotes, fetchRunCheckpoints, fetchRunContext, reviseNote, writeMemoryFile, type Checkpoint, type ContextPacket, type MemoryView, type Note, type NotebookView } from '../lib/memory/client'
 import type { AgentNode } from '../lib/library/nodeFromDrop'
 import type { CapabilityInventory, DetectedCapability } from '../lib/library/client'
-import type { CapabilityRef } from '../lib/team-file/types'
+import type { CapabilityRef, ScheduleConfig } from '../lib/team-file/types'
+import { newSchedule } from '../lib/team-file/schedule'
 import type { TeamSource } from './library/ComponentPalette'
 import { PALETTE_WIDTH, clampPaletteWidth } from '../lib/library/paletteWidth'
 import { connectedServersByAgent } from '../lib/library/observed'
@@ -269,6 +270,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const [forcedInspectorField, setForcedInspectorField] = useState<{ agentId: string; field: AgentField; hint: string } | null>(null)
   const [yamlHighlightLine, setYamlHighlightLine] = useState<number | null>(null)
   const [scheduleEditorOpen, setScheduleEditorOpen] = useState(false)
+  /** The Schedule button's not-yet-saved schedule: drawn on the canvas only while its editor is open. */
+  const [draftSchedule, setDraftSchedule] = useState<ScheduleConfig | null>(null)
   const [scheduleSaveAttempt, setScheduleSaveAttempt] = useState(0)
   const [scheduleSaved, setScheduleSaved] = useState(false)
   const [handledScheduleSave, setHandledScheduleSave] = useState(0)
@@ -760,13 +763,14 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
 
   const problems = useMemo(() => reviewProblems(doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames, appProblems), [doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames, appProblems])
   const scheduleProblems = useMemo(() => problems.filter((problem) => problem.yamlPath?.[0] === 'schedule'), [problems])
-  const visibleSchedule = useMemo(() => doc.teamSchedule ?? (scheduleProblems.length > 0 ? { cron: '0 8 * * *', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, prompt: 'Run this team on schedule.', enabled: true } : null), [doc.teamSchedule, scheduleProblems.length])
+  const visibleSchedule = useMemo(() => doc.teamSchedule ?? (scheduleProblems.length > 0 ? { cron: '0 8 * * *', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, prompt: 'Run this team on schedule.', enabled: true } : null) ?? (scheduleEditorOpen ? draftSchedule : null), [doc.teamSchedule, scheduleProblems.length, scheduleEditorOpen, draftSchedule])
   // "Save schedule" means: write the four editable fields into the document model, regenerate the
   // YAML, re-run validation — and only then close. Closing unconditionally (as it used to) hid the
   // case where a schedule problem outlives the save, leaving the operator staring at a red node and
   // a blocked composer with no explanation. The check below reads the *re-validated* problems.
   const saveSchedule = useCallback((schedule: NonNullable<typeof visibleSchedule>) => {
     doc.updateTeamSchedule(schedule)
+    setDraftSchedule(null)
     setScheduleSaveAttempt((attempt) => attempt + 1)
   }, [doc])
   // Answered once per attempt, in the render that carries the document the attempt produced — the
@@ -786,6 +790,19 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     setYamlOpen(true)
   }, [doc.yamlPreview])
   const openScheduleEditor = useCallback(() => setScheduleEditorOpen(true), [])
+  // The Schedule button: the card appears where it will live and the editor opens on it, but nothing
+  // reaches the team file until "Save schedule" — closing the editor leaves the team as it was.
+  const startSchedule = useCallback(() => {
+    setDraftSchedule(newSchedule())
+    setScheduleSaved(false)
+    setScheduleEditorOpen(true)
+  }, [])
+  const removeSchedule = useCallback(() => {
+    doc.removeTeamSchedule()
+    setScheduleEditorOpen(false)
+    setScheduleSaved(false)
+    setStatusAnnouncement('Schedule removed. Save the team file to finish.')
+  }, [doc])
   const configuredPairs = useMemo(() => new Set(doc.edges.map((edge) => `${edge.source}->${edge.target}`)), [doc.edges])
 
   // A question travels back up a configured edge: the stage before this one stays alive precisely
@@ -999,7 +1016,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     // React Flow can only frame nodes it has measured; a fit requested while new cards are
     // still mounting waits for `useNodesInitialized` to flip back to true.
     if (!pendingFit.current || !nodesInitialized || nodeDragging) return
-    pendingFit.current = null
     // Frame the story in the area the Library (or its rail) leaves visible, not the whole
     // canvas: computed directly from the measured bounds so nothing races React Flow's own
     // asynchronous fitView, and applied without animation in a hidden tab.
@@ -1007,7 +1023,10 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     // background, where animation frames are paused and the fit would never happen. Cards
     // that grow after mounting (streamed text, wrapped titles) shift the bounds once more, so
     // a settle pass keeps the whole story in frame without following every keystroke.
-    const first = window.setTimeout(() => fitCanvas(), 0)
+    // The request is only spent once the fit runs: a card that mounts in this same commit (the
+    // Schedule button's draft) re-renders with `nodesInitialized` false, and that cleanup cancels
+    // these timers — clearing the request up front left nothing to retry once it was measured.
+    const first = window.setTimeout(() => { pendingFit.current = null; fitCanvas() }, 0)
     const settle = window.setTimeout(() => fitCanvas(), 450)
     return () => { window.clearTimeout(first); window.clearTimeout(settle) }
   }, [fitKey, nodesInitialized, fitCanvas, nodeDragging, windowWidth, windowHeight])
@@ -2211,7 +2230,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
-        {!runView && !runSetup && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} appProblem={appProblemDetail} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); window.setTimeout(focusComposer, 0) }} />}
+        {!runView && !runSetup && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} appProblem={appProblemDetail} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); window.setTimeout(focusComposer, 0) }} onSchedule={editable && !visibleSchedule ? startSchedule : undefined} />}
 
         <div aria-live="polite" aria-atomic="true" className="visually-hidden">{politeAnnouncement}</div>
         <div aria-live="assertive" className="visually-hidden">{assertiveAnnouncement}</div>
@@ -2367,6 +2386,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             onSaveFile={() => void doc.save()}
             onAdvanced={showScheduleYaml}
             onClose={() => setScheduleEditorOpen(false)}
+            onRemove={editable && doc.teamSchedule ? removeSchedule : undefined}
+            isNew={!doc.teamSchedule && scheduleProblems.length === 0}
             status={routine ? <RoutineNote schedule={routine} onRunNow={() => void runRoutineNow()} busy={routineBusy} /> : undefined}
           />
         )}

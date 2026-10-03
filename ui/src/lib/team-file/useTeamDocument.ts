@@ -1084,6 +1084,13 @@ export function useTeamDocument() {
     [markDirty, captureHistory],
   )
 
+  const removeTeamSchedule = useCallback(() => {
+    captureHistory()
+    modelRef.current?.clearSchedule()
+    setTeamSchedule(null)
+    markDirty()
+  }, [markDirty, captureHistory])
+
   /** Where every run's answer goes (ADR 0038): the Team response's "Send to Notion". */
   const updateTeamDeliver = useCallback(
     (deliver: DeliverConfig | null) => {
@@ -1505,6 +1512,7 @@ export function useTeamDocument() {
     promoteEntrypoint,
     promoteResponder,
     updateTeamSchedule,
+    removeTeamSchedule,
     updateTeamDeliver,
     addBriefEntry,
     removeBriefEntry,

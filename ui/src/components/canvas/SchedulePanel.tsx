@@ -21,12 +21,16 @@ export interface SchedulePanelProps {
   onSaveFile: () => void
   onAdvanced: () => void
   onClose: () => void
+  /** Take the schedule off the team. Absent for a schedule not added yet, and when read-only. */
+  onRemove?: () => void
+  /** Opened from the Schedule button: nothing is on the team until "Save schedule". */
+  isNew?: boolean
   /** How the saved routine is doing, as the daemon reports it, with a way to run it now. Absent
    * until the team file on disk has a schedule the daemon has picked up. */
   status?: ReactNode
 }
 
-export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile, savedInEditor, onSave, onSaveFile, onAdvanced, onClose, status }: SchedulePanelProps) {
+export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile, savedInEditor, onSave, onSaveFile, onAdvanced, onClose, onRemove, isNew = false, status }: SchedulePanelProps) {
   const initial = scheduleParts(schedule.cron)
   const [frequency, setFrequency] = useState<ScheduleFrequency>(initial.frequency)
   const [time, setTime] = useState(initial.time)
@@ -116,17 +120,19 @@ export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile
         <div className="schedule-stage t-meta" role="status">
           {problems.length > 0
             ? 'The schedule is not fixed yet — the team cannot run until these are resolved.'
-            : dirtyDraft
-              ? 'Unsaved changes in this editor.'
-              : dirty
-                ? `${savedInEditor ? 'Schedule set on the canvas' : 'This team has unsaved edits'}. The team file still needs saving.`
-                : savedInEditor ? 'Schedule saved to the team file.' : 'This schedule matches the team file on disk.'}
+            : isNew
+              ? 'Not added yet. Say what the team should do, then save the schedule.'
+              : dirtyDraft
+                ? 'Unsaved changes in this editor.'
+                : dirty
+                  ? `${savedInEditor ? 'Schedule set on the canvas' : 'This team has unsaved edits'}. The team file still needs saving.`
+                  : savedInEditor ? 'Schedule saved to the team file.' : 'This schedule matches the team file on disk.'}
         </div>
         {dirty && problems.length === 0 && !dirtyDraft && (
           <button type="button" className="btn schedule-save-file" onClick={onSaveFile} disabled={!canSaveFile}><Save size={15} aria-hidden="true" /> Save team file <kbd className="t-mono-sm">⌘S</kbd></button>
         )}
 
-        <footer><button type="button" className="link" onClick={onAdvanced}>Advanced YAML <ChevronRight size={14} aria-hidden="true" /></button><button type="button" className="link muted" onClick={onClose}>Close</button></footer>
+        <footer><button type="button" className="link" onClick={onAdvanced}>Advanced YAML <ChevronRight size={14} aria-hidden="true" /></button>{onRemove && <button type="button" className="link muted" onClick={onRemove}>Remove schedule</button>}<button type="button" className="link muted" onClick={onClose}>Close</button></footer>
       </form>
       </div>
     </aside>
