@@ -42,6 +42,8 @@ export interface CanvasActions {
    * does. What it actually wrote is in the evidence count beside it.
    */
   notebookEnabled?: boolean
+  /** The agent a skill, tool, folder or file is being dragged over: dropping connects it there. */
+  dropTargetId?: string | null
 }
 
 export const CanvasActionsContext = createContext<CanvasActions | null>(null)

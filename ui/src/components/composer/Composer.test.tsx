@@ -13,7 +13,7 @@ function renderComposer(state: ComposerState = { kind: 'ready' }, value = 'one\n
   return render(
     <Composer
       mode="pipeline" stepCount={2} state={state} value={value} onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()}
-      onRetry={vi.fn()} onNewRun={vi.fn()} onOpenHistory={vi.fn()} historyOpen={false}
+      onRetry={vi.fn()} onNewRun={vi.fn()}
     />,
   )
 }
@@ -31,47 +31,19 @@ it('labels the execution mode in plain words without offering a popover', () => 
   render(
     <Composer
       mode="team" stepCount={3} state={{ kind: 'ready' }} value="" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()}
-      onRetry={vi.fn()} onNewRun={vi.fn()} onOpenHistory={vi.fn()} historyOpen={false}
+      onRetry={vi.fn()} onNewRun={vi.fn()}
     />,
   )
   expect(screen.getByText('Lead agent delegates').closest('.mode-chip')).toHaveAttribute('title', 'Your lead agent gets the request and decides who else to bring in.')
   expect(screen.queryByRole('button', { name: /in order|delegates/ })).not.toBeInTheDocument()
 })
 
-// The Memory chip sits beside the mode chip because both explain what the run will be made of
-// (docs/TEAM_MEMORY.md, "The Memory panel"). Its count is what is *pinned*, so it must not appear
-// when nothing is, and must never be phrased as "eligible".
-it('offers a Memory chip whose count is the pinned Brief', () => {
-  const onOpenMemory = vi.fn()
-  const { unmount } = render(
-    <Composer
-      mode="pipeline" stepCount={2} state={{ kind: 'ready' }} value="" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()}
-      onRetry={vi.fn()} onNewRun={vi.fn()} onOpenHistory={vi.fn()} historyOpen={false}
-      memoryCount={2} onOpenMemory={onOpenMemory}
-    />,
-  )
-  const chip = screen.getByRole('button', { name: /Memory · 2 brief/ })
-  expect(chip).toHaveAttribute('aria-expanded', 'false')
-  fireEvent.click(chip)
-  expect(onOpenMemory).toHaveBeenCalledOnce()
-  unmount()
-
-  render(
-    <Composer
-      mode="pipeline" stepCount={2} state={{ kind: 'ready' }} value="" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()}
-      onRetry={vi.fn()} onNewRun={vi.fn()} onOpenHistory={vi.fn()} historyOpen={false}
-      memoryCount={0} onOpenMemory={onOpenMemory}
-    />,
-  )
-  expect(screen.getByRole('button', { name: 'Memory' })).toBeInTheDocument()
-  expect(screen.queryByText(/brief/)).not.toBeInTheDocument()
-})
-
-// A build with no memory wiring must not show the chip at all, rather than a chip that does
-// nothing when clicked.
-it('omits the Memory chip when no handler is supplied', () => {
+// ADR 0043: Memory and Run history open from the workspace menu on every screen, so the composer
+// carries neither: a second button for each made two controls do one thing.
+it('offers no Memory chip and no Run history button of its own', () => {
   renderComposer()
   expect(screen.queryByRole('button', { name: /Memory/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Run history' })).not.toBeInTheDocument()
 })
 
 // §1.2: "`Esc` — blur and collapse to one line, text preserved."
@@ -110,8 +82,8 @@ it('offers Follow up with the stages in pipeline order, and ⌘↵ sends it', ()
   render(
     <Composer
       mode="pipeline" stepCount={3} state={{ kind: 'terminal', phase: 'succeeded' }} value="Shorter." onChange={vi.fn()}
-      onSubmit={vi.fn()} onStop={vi.fn()} onRetry={vi.fn()} onNewRun={onNewRun} onOpenHistory={vi.fn()}
-      historyOpen={false}
+      onSubmit={vi.fn()} onStop={vi.fn()} onRetry={vi.fn()} onNewRun={onNewRun}
+     
       followUpStages={[
         { id: 'researcher', name: 'Protocol Researcher' },
         { id: 'reviewer', name: 'Code Reviewer' },
@@ -149,8 +121,8 @@ it('names the chosen follow-up target in the note, and offers only the whole pip
   const { unmount } = render(
     <Composer
       mode="pipeline" stepCount={3} state={{ kind: 'terminal', phase: 'succeeded' }} value="Shorter." onChange={vi.fn()}
-      onSubmit={vi.fn()} onStop={vi.fn()} onRetry={vi.fn()} onNewRun={vi.fn()} onOpenHistory={vi.fn()}
-      historyOpen={false}
+      onSubmit={vi.fn()} onStop={vi.fn()} onRetry={vi.fn()} onNewRun={vi.fn()}
+     
       followUpStages={[{ id: 'writer', name: 'Technical Writer' }]}
       followUpTarget="writer" onFollowUpTargetChange={vi.fn()} onFollowUp={vi.fn()}
     />,
@@ -163,8 +135,8 @@ it('names the chosen follow-up target in the note, and offers only the whole pip
   render(
     <Composer
       mode="team" stepCount={3} state={{ kind: 'terminal', phase: 'succeeded' }} value="Shorter." onChange={vi.fn()}
-      onSubmit={vi.fn()} onStop={vi.fn()} onRetry={vi.fn()} onNewRun={vi.fn()} onOpenHistory={vi.fn()}
-      historyOpen={false}
+      onSubmit={vi.fn()} onStop={vi.fn()} onRetry={vi.fn()} onNewRun={vi.fn()}
+     
       followUpStages={[]} followUpTarget={null} onFollowUpTargetChange={vi.fn()} onFollowUp={vi.fn()}
     />,
   )
@@ -183,7 +155,7 @@ it('keeps Retry and New run when no follow-up handler is supplied', () => {
 it.each(['review_stop', 'question'] as const)('routes the %s answer and keyboard shortcut without launching a run', (kind) => {
   const onAnswer = vi.fn(), onSubmit = vi.fn()
   const waiting = { node: 'review', name: 'Review', kind, since: '2026-09-13T00:00:00Z', question: 'Approve?', park: 'kept_alive' as const, parkNote: 'kept alive', handoverFrom: 'researcher', sendBackAvailable: kind === 'review_stop' }
-  const props = { mode: 'pipeline' as const, stepCount: 3, state: { kind: 'answering' as const, waiting, sending: false }, value: 'Proceed', onChange: vi.fn(), onSubmit, onStop: vi.fn(), onRetry: vi.fn(), onNewRun: vi.fn(), onOpenHistory: vi.fn(), historyOpen: false, onAnswer }
+  const props = { mode: 'pipeline' as const, stepCount: 3, state: { kind: 'answering' as const, waiting, sending: false }, value: 'Proceed', onChange: vi.fn(), onSubmit, onStop: vi.fn(), onRetry: vi.fn(), onNewRun: vi.fn(), onAnswer }
   const { rerender } = render(<Composer {...props} />)
   expect(screen.getByRole('button', { name: kind === 'review_stop' ? /Continue/ : /^Reply/ })).toBeEnabled()
   fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', metaKey: true })
@@ -200,14 +172,14 @@ it.each(['review_stop', 'question'] as const)('routes the %s answer and keyboard
 })
 
 it('names the save that a dirty follow-up must perform', () => {
-  render(<Composer mode="pipeline" stepCount={2} state={{ kind: 'terminal', phase: 'succeeded' }} value="Shorter" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()} onRetry={vi.fn()} onNewRun={vi.fn()} onOpenHistory={vi.fn()} historyOpen={false} onFollowUp={vi.fn()} dirty />)
+  render(<Composer mode="pipeline" stepCount={2} state={{ kind: 'terminal', phase: 'succeeded' }} value="Shorter" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()} onRetry={vi.fn()} onNewRun={vi.fn()} onFollowUp={vi.fn()} dirty />)
   expect(screen.getByRole('button', { name: /Save & follow up/ })).toBeEnabled()
 })
 
 
 it('lets the operator reply to a server-reported warm agent during a run', () => {
   const onReply = vi.fn(), onSubmit = vi.fn()
-  const props = { mode: 'pipeline' as const, stepCount: 2, state: { kind: 'busy' as const, phase: 'running' as const }, value: 'Check the source', onChange: vi.fn(), onSubmit, onStop: vi.fn(), onRetry: vi.fn(), onNewRun: vi.fn(), onOpenHistory: vi.fn(), historyOpen: false, replyAgents: [{ id: 'a', name: 'Researcher' }], onReply }
+  const props = { mode: 'pipeline' as const, stepCount: 2, state: { kind: 'busy' as const, phase: 'running' as const }, value: 'Check the source', onChange: vi.fn(), onSubmit, onStop: vi.fn(), onRetry: vi.fn(), onNewRun: vi.fn(), replyAgents: [{ id: 'a', name: 'Researcher' }], onReply }
   const { rerender } = render(<Composer {...props} />)
   expect(screen.getByRole('textbox')).toBeDisabled()
   fireEvent.change(screen.getByLabelText('Reply to agent'), { target: { value: 'a' } })
@@ -229,7 +201,7 @@ function keyProps(state: ComposerState, value: string) {
   render(
     <Composer
       mode="pipeline" stepCount={2} state={state} value={value} onChange={vi.fn()} onStop={vi.fn()}
-      onOpenHistory={vi.fn()} historyOpen={false} {...handlers}
+      {...handlers}
     />,
   )
   return handlers
@@ -281,7 +253,7 @@ it('lets a review stop be approved without a comment, and names who work goes ba
   render(
     <Composer
       mode="pipeline" stepCount={3} state={{ kind: 'answering', waiting, sending: false }} value="" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()}
-      onRetry={vi.fn()} onNewRun={vi.fn()} onOpenHistory={vi.fn()} historyOpen={false}
+      onRetry={vi.fn()} onNewRun={vi.fn()}
       onAnswer={onAnswer} agentNames={new Map([['researcher', 'Researcher']])}
     />,
   )
@@ -297,27 +269,26 @@ it('still requires words to answer an agent’s question', () => {
   render(
     <Composer
       mode="pipeline" stepCount={3} state={{ kind: 'answering', waiting, sending: false }} value="" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()}
-      onRetry={vi.fn()} onNewRun={vi.fn()} onOpenHistory={vi.fn()} historyOpen={false} onAnswer={vi.fn()}
+      onRetry={vi.fn()} onNewRun={vi.fn()} onAnswer={vi.fn()}
     />,
   )
   expect(screen.getByRole('button', { name: /^Reply/ })).toBeDisabled()
 })
 
 // The one-line composer on the run screen used to stay one line after the run ended, hiding
-// Retry, "Redo from" and Run history — every way the README tells people to go on from a result.
+// Retry and "Redo from" — the ways the README tells people to go on from a result.
 it('brings back the full set of next steps once a run is over, even in the one-line layout', () => {
   const onRetry = vi.fn()
   render(
     <Composer
       compact mode="pipeline" stepCount={3} state={{ kind: 'terminal', phase: 'succeeded' }} value="" onChange={vi.fn()}
-      onSubmit={vi.fn()} onStop={vi.fn()} onRetry={onRetry} onNewRun={vi.fn()} onOpenHistory={vi.fn()}
-      historyOpen={false} onFollowUp={vi.fn()} followUpStages={[{ id: 'writer', name: 'Writer' }]}
+      onSubmit={vi.fn()} onStop={vi.fn()} onRetry={onRetry} onNewRun={vi.fn()}
+      onFollowUp={vi.fn()} followUpStages={[{ id: 'writer', name: 'Writer' }]}
     />,
   )
   expect(screen.getByRole('group', { name: 'Prompt composer' })).not.toHaveClass('prototype-composer')
   expect(screen.getByRole('button', { name: /Follow up/ })).toBeInTheDocument()
   expect(screen.getByLabelText('Follow up target')).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Run history' })).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
   expect(onRetry).toHaveBeenCalledOnce()
 })
@@ -326,8 +297,8 @@ it('keeps the one-line layout for asking', () => {
   render(
     <Composer
       compact mode="pipeline" stepCount={3} state={{ kind: 'ready' }} value="Plan a trip" onChange={vi.fn()}
-      onSubmit={vi.fn()} onStop={vi.fn()} onRetry={vi.fn()} onNewRun={vi.fn()} onOpenHistory={vi.fn()}
-      historyOpen={false}
+      onSubmit={vi.fn()} onStop={vi.fn()} onRetry={vi.fn()} onNewRun={vi.fn()}
+     
     />,
   )
   expect(screen.getByRole('group', { name: 'Prompt composer' })).toHaveClass('prototype-composer')

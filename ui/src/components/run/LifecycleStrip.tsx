@@ -12,7 +12,6 @@ export interface LifecycleStripProps {
   lastSeq: number
   cursor: number | null
   onCursor: (seq: number | null) => void
-  onClose: () => void
   elapsed: string
 }
 
@@ -23,7 +22,7 @@ export interface LifecycleStripProps {
 // §15.2.4 makes this strip the run chip: it *is* the view switch now, because there is no second
 // view to switch to. `Clear` returns to the design alone — the configured graph without a run
 // drawn onto it — and there is no "Back to the team canvas", because the canvas never left.
-export function LifecycleStrip({ attempt, phase, waiting = false, leadTask, result, mode, lastSeq, cursor, onCursor, onClose, elapsed }: LifecycleStripProps) {
+export function LifecycleStrip({ attempt, phase, waiting = false, leadTask, result, mode, lastSeq, cursor, onCursor, elapsed }: LifecycleStripProps) {
   const position = cursor === null ? lastSeq : cursor
   const scrubbable = lastSeq > 0
   return (
@@ -42,7 +41,6 @@ export function LifecycleStrip({ attempt, phase, waiting = false, leadTask, resu
           {cursor !== null && <button type="button" className="btn" style={{ height: 22, padding: '0 8px' }} onClick={() => onCursor(null)}>Follow latest</button>}
         </span>
       )}
-      <button type="button" className="btn" style={{ height: 24, padding: '0 10px' }} onClick={onClose} aria-label="Clear this run and show the design alone" title="Clear the run (Esc)">Clear</button>
     </div>
   )
 }

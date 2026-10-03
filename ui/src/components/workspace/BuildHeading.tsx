@@ -8,7 +8,6 @@ interface BuildHeadingProps {
   /** The schema is still loading, so validity is not known yet. */
   checking: boolean
   saveState: SaveState
-  documentChipState: SaveState
   /** What stops an agent's app from starting on this computer, when something does. */
   appProblem?: string | null
   /**
@@ -17,7 +16,6 @@ interface BuildHeadingProps {
    */
   undelivered?: number
   onDeliver?: () => void
-  onSave: () => void
   onRun: () => void
   /** An Ask LoomWatch proposal is on the canvas: the heading becomes its Apply or Discard. */
   proposal?: BuildProposal | null
@@ -36,7 +34,7 @@ export interface BuildProposal {
 }
 
 /** Build's heading. It says what to do next, not what the screen is called. */
-export function BuildHeading({ agentCount, isValid, checking, saveState, documentChipState, appProblem = null, undelivered = 0, onDeliver, onSave, onRun, proposal = null }: BuildHeadingProps) {
+export function BuildHeading({ agentCount, isValid, checking, saveState, appProblem = null, undelivered = 0, onDeliver, onRun, proposal = null }: BuildHeadingProps) {
   if (proposal) {
     return (
       <header className="build-workspace-heading proposal" aria-label="Proposal from Ask LoomWatch">
@@ -73,8 +71,8 @@ export function BuildHeading({ agentCount, isValid, checking, saveState, documen
           </p>
         ) : <p>{heading.detail}</p>}
       </div>
+      {/* Saving is the team chip's at the top, on every screen (ADR 0043). */}
       <div className="build-workspace-actions">
-        <button className="btn" disabled={!['dirty', 'new'].includes(documentChipState) || !isValid} onClick={onSave}>Save</button>
         <button className="btn btn-primary" data-tour="run-team" onClick={onRun}><Play size={15} />Run team</button>
       </div>
     </header>

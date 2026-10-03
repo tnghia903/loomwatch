@@ -86,3 +86,23 @@ it('says nothing is left to finish when every app is here', () => {
   expect(screen.queryByText(/to finish/)).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Review' })).not.toBeInTheDocument()
 })
+
+// ADR 0043: Reload from disk and Discard both read the file again, so the switcher shows one of
+// them: Discard, which asks first, while there are changes; Reload otherwise.
+it('offers Discard with unsaved changes and Reload from disk without, never both', () => {
+  const onDiscard = vi.fn()
+  renderSwitcher({ saveState: 'dirty', onDiscard })
+  fireEvent.click(screen.getByRole('button', { name: /open team switcher/ }))
+  expect(screen.queryByRole('button', { name: 'Reload from disk' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Discard changes?' }))
+  expect(onDiscard).toHaveBeenCalledOnce()
+  cleanup()
+
+  const onReload = vi.fn()
+  renderSwitcher({ saveState: 'clean', onReload })
+  fireEvent.click(screen.getByRole('button', { name: /open team switcher/ }))
+  expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Reload from disk' }))
+  expect(onReload).toHaveBeenCalledOnce()
+})

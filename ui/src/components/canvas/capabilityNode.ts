@@ -16,7 +16,6 @@ export interface CapabilityNodeData extends Record<string, unknown> {
   /** How many agents reach it. Zero reads as "placed but not wired to anything yet". */
   wiredTo: number
   readOnly: boolean
-  onRemove: () => void
 }
 
 export type CapabilityNode = Node<CapabilityNodeData, 'capability'>

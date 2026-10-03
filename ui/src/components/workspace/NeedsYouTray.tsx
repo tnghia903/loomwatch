@@ -13,6 +13,8 @@ interface NeedsYouTrayProps {
   /** A permission ticket's answer (ADR 0040). Absent: permission tickets only open their run. */
   onPermission?: (ticket: Ticket, decision: PermissionDecision) => Promise<void>
   onDismiss: (runId: string) => void
+  /** The run the screen shows, whose own answer box and permission card already ask (ADR 0043). */
+  onScreenRunId?: string | null
   className?: string
 }
 
@@ -26,7 +28,7 @@ const PERMISSION_SAID: Record<PermissionDecision, string> = { allow_once: 'Allow
  * Newcomers get notification-style cards with the obvious answers; experts triage from the keyboard
  * (J/K move, A approve, R reply, O open the run), and every ticket opens the exact run it came from.
  */
-export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onDismiss, className = '' }: NeedsYouTrayProps) {
+export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onDismiss, onScreenRunId = null, className = '' }: NeedsYouTrayProps) {
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
   const [replying, setReplying] = useState<string | null>(null)
@@ -83,10 +85,15 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onDismi
   const openRun = (ticket: Ticket) => window.location.assign(historyRunUrl({ id: ticket.runId, teamPath: ticket.teamPath }))
   const startReply = (ticket: Ticket) => { setReplying(ticket.id); setDraft('') }
 
+  // The run on screen already asks with its own answer box and permission card, so its ticket
+  // here only says so: a second set of the same buttons would be two controls for one thing
+  // (ADR 0043). It still counts, because it still needs you.
+  const onScreen = (ticket: Ticket) => ticket.runId === onScreenRunId && ticket.kind !== 'failed'
   const onKeys = (event: KeyboardEvent) => {
     if (event.key === 'Escape') { event.stopPropagation(); if (replying) setReplying(null); else { setOpen(false); bell.current?.focus() } return }
     const typing = (event.target as HTMLElement).closest('input, textarea')
     if (typing || !current || event.metaKey || event.ctrlKey || event.altKey) return
+    if (onScreen(current) && event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && !['j', 'k'].includes(event.key.toLowerCase())) return
     const key = event.key.toLowerCase()
     if (key === 'j' || event.key === 'ArrowDown') { event.preventDefault(); setActive((index) => Math.min(count - 1, index + 1)) }
     else if (key === 'k' || event.key === 'ArrowUp') { event.preventDefault(); setActive((index) => Math.max(0, index - 1)) }
@@ -94,7 +101,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onDismi
     else if (key === 'a' && current.kind === 'permission') { event.preventDefault(); void decide(current, 'allow_once') }
     else if (key === 'd' && current.kind === 'permission') { event.preventDefault(); void decide(current, 'deny') }
     else if (key === 'r' && current.kind !== 'failed' && current.kind !== 'permission') { event.preventDefault(); startReply(current) }
-    else if (key === 'o') { event.preventDefault(); openRun(current) }
+    else if (key === 'o' && current.runId !== onScreenRunId) { event.preventDefault(); openRun(current) }
   }
 
   const label = count > 0 ? `${count} need${count === 1 ? 's' : ''} you` : working > 0 ? `${working} working` : 'All clear'
@@ -133,7 +140,9 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onDismi
                   {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “{ticket.text}”</> : ticket.kind === 'permission' ? <>{ticket.text}. It is paused until you answer.</> : ticket.kind === 'review' ? <>{ticket.text || `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
                 </p>
                 {ticket.context && <blockquote className="ticket-context" title={ticket.context}>{ticket.context}</blockquote>}
-                {replying === ticket.id ? (
+                {onScreen(ticket) ? (
+                  <p className="ticket-here t-meta">On this screen: answer it below.</p>
+                ) : replying === ticket.id ? (
                   <form className="ticket-reply" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) void send(ticket, draft.trim(), ticket.kind === 'review' ? ticket.sendBackTo ?? undefined : undefined) }}>
                     <label className="visually-hidden" htmlFor={`reply-${ticket.id}`}>{ticket.kind === 'question' ? 'Your answer' : 'What should change?'}</label>
                     <input id={`reply-${ticket.id}`} autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={ticket.kind === 'question' ? 'Type your answer' : ticket.sendBackTo ? 'What should change?' : 'Add a note for the team'} />
@@ -150,7 +159,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onDismi
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_run')}>Allow for this run</button>
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'deny')}>Deny<kbd>D</kbd></button>
                     </>}
-                    <button type="button" className="btn ghost" onClick={() => openRun(ticket)}>Open run<ArrowUpRight size={13} aria-hidden="true" /></button>
+                    {ticket.runId !== onScreenRunId && <button type="button" className="btn ghost" onClick={() => openRun(ticket)}>Open run<ArrowUpRight size={13} aria-hidden="true" /></button>}
                     {ticket.kind === 'failed' && <button type="button" className="btn ghost" onClick={() => onDismiss(ticket.runId)}>Dismiss</button>}
                   </div>
                 )}

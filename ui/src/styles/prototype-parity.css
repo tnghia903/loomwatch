@@ -51,8 +51,8 @@
 .lw-shell { --surface:var(--color-panel); --surface-raised:var(--color-panel-solid); --surface-hover:color-mix(in srgb, var(--color-ink) 6%, var(--color-panel-solid)); --graph-bg:var(--color-ground); --line:var(--color-hairline); --line-soft:var(--color-hairline); --line-strong:var(--color-ink-3); --text:var(--color-ink); --muted:var(--color-ink-2); --quiet:var(--color-ink-3); --gold:var(--color-accent); --gold-dim:color-mix(in srgb, var(--color-accent) 45%, transparent); --gold-tint:var(--color-accent-tint); --success:var(--color-ok); }
 .lw-shell .eyebrow { font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
 .lw-shell .icon-button { display:grid; place-items:center; background:transparent; border:0; color:var(--muted); padding:4px; cursor:pointer; }
-.build-workspace .node-palette { position:absolute; top:179px; bottom:0; left:0; width:210px; border-radius:0; }
-.build-workspace .lw-canvas { top:179px; left:210px; bottom:0; }
+.build-workspace .node-palette { position:absolute; top:179px; bottom:0; left:0; width:var(--lw-palette-w, 210px); border-radius:0; }
+.build-workspace .lw-canvas { top:179px; left:var(--lw-palette-w, 210px); bottom:0; }
 .build-workspace.lib-collapsed .lw-canvas { left:0; }
 .build-workspace .build-workspace-heading { top:64px; height:115px; min-height:115px; padding:24px 30px; background:var(--color-ground); }
 .build-workspace .build-workspace-actions .btn { height:42px; padding:0 17px; font-size:12px; border-radius:5px; }
@@ -94,7 +94,9 @@
 .lw-shell .workspace-chrome .lw-chip { width:100%; min-width:0; background:transparent; border:0; box-shadow:none; padding:0 12px; }
 .lw-shell .workspace-chrome .chip-l1 { font-size:12px; color:var(--color-ink-3); }
 @media(max-width:767px) { .build-workspace .node-palette { width:170px; } .build-workspace .lw-canvas { left:170px; } .build-workspace .build-workspace-heading { padding:16px; } .build-workspace .build-workspace-actions .btn { height:32px; padding:0 8px; } }
-.node-palette { overflow:auto; border-right:1px solid var(--line); padding:18px 12px 28px; background:var(--surface); z-index:3; }
+/* The panel holds a scrolling body and, on its right edge, the resize handle, which must not scroll away. */
+.node-palette { overflow:hidden; border-right:1px solid var(--line); background:var(--surface); z-index:3; }
+.node-palette .palette-body { height:100%; overflow:auto; padding:18px 12px 28px; }
 .palette-head { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:0 4px 13px; border-bottom:1px solid var(--line-soft); margin-bottom:16px; }
 .palette-head p { color:var(--quiet); font-size:10px; margin-top:6px; }
 .node-palette section+section { margin-top:20px; }

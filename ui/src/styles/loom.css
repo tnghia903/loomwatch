@@ -15,6 +15,11 @@
   border: 1px solid var(--color-hairline);
 }
 .build-workspace.lib-collapsed .team-story { left: 126px; }
+/* While something is dragged from the add panel the sentence steps aside, so a card under it can
+   still take the drop (ADR 0042): drops pass through it, its glass clears and its words fade. The
+   words fade rather than the box, because opacity on a glass panel drops its blur (motion.css). */
+.lw-shell.dragging .team-story { pointer-events: none; background: transparent; backdrop-filter: none; border-color: transparent; }
+.lw-shell.dragging .team-story > * { opacity: .25; transition: opacity var(--t-quick) var(--ease-out); }
 /* An open side panel starts level with the sentence, so the sentence makes room for the widest one
    (inspector width + inset + 12px gap) rather than running under it. Below 768px the panel docks at the bottom. */
 @media (min-width: 768px) {

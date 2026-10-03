@@ -1,6 +1,6 @@
 import { useStore, type NodeProps } from '@xyflow/react'
 import { createElement } from 'react'
-import { Bot, Box, Circle, FileText, Folder, Inbox, Puzzle, Wrench, X } from 'lucide-react'
+import { Bot, Box, Circle, FileText, Folder, Inbox, Puzzle, Wrench } from 'lucide-react'
 import { KIND_LABEL } from '../../lib/composer-layout/types'
 import { chosenIsFile } from '../../lib/knowledge/chosen'
 import { middleTruncate } from '../../lib/format'
@@ -10,7 +10,7 @@ import type { AgentConfig, AgentStatus, CapabilityRef } from '../../lib/team-fil
 import { monogramForSpawnCmd } from '../../lib/harnesses'
 import { splitModelSelector } from '../../lib/models'
 import { allowedSummary } from '../../lib/team-file/allow'
-import { ownFolderReason, workFolder } from '../../lib/team-file/workFolder'
+import { workFolder } from '../../lib/team-file/workFolder'
 import { StatusGlyph } from '../ui/glyphs'
 import { useCanvasActions } from './CanvasActionsContext'
 import { CardPorts } from './CardPorts'
@@ -48,7 +48,7 @@ const HARNESS_BY_MONOGRAM: Record<string, string> = { Cx: 'Codex', C: 'Claude Co
  * agent's evidence and its context packet. Nothing here is ever written back to the team file.
  */
 export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
-  const { editable = true, stepById, inspectHandover, toggleEvidenceFan } = useCanvasActions()
+  const { editable = true, stepById, inspectHandover, toggleEvidenceFan, dropTargetId } = useCanvasActions()
   const { agent, runtime } = data
   const step = stepById.get(id)
   // Semantic zoom: the extra Story and Trace content exists only at that depth, so nothing hidden
@@ -92,12 +92,12 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
   const givenNotes = runtime?.givenNotes ?? 0
   // The job the instructions describe, when they name one; a generic agent keeps the robot.
   const named = roleGlyph(`${agent.name} ${agent.role}`)
-  // A folder chosen for it, unless something connected moves it into its own (lib/team-file/workFolder.ts).
+  // A folder chosen for it, which nothing connected changes (ADR 0042, lib/team-file/workFolder.ts).
   const folder = workFolder(agent.spawn?.cwd)
-  const chosenFolder = folder.kind === 'chosen' && ownFolderReason(agent) !== 'connected' ? folder : null
+  const chosenFolder = folder.kind === 'chosen' ? folder : null
   return (
     <article
-      className={cx('build-node kind-harness', runtime && 'has-run', runtime && `st-${status}`, selected && 'selected')}
+      className={cx('build-node kind-harness', runtime && 'has-run', runtime && `st-${status}`, selected && 'selected', dropTargetId === id && 'drop-target')}
       // While a run is shown the node wrapper already carries the run's own accessible name,
       // so labelling the card too would announce the same agent twice.
       aria-label={runtime ? undefined : [agent.name, harness, agent.role, data.appProblem].filter(Boolean).join(', ')}
@@ -194,6 +194,6 @@ export function BuildCapabilityCard({ data, selected }: NodeProps<CapabilityNode
     <CardPorts output={false} connectIn={!data.readOnly} />
     <span className="build-node-icon"><Icon size={18} /></span>
     <div><span className="node-kind">{kind}</span><strong>{data.name}</strong><small title={data.path ?? data.source}>{data.path ? middleTruncate(data.path, 40) : data.source}</small></div>
-    {!data.readOnly && <button type="button" className="build-resource-remove nodrag" onClick={(event) => { event.stopPropagation(); data.onRemove?.() }} aria-label={`Remove ${data.name} from the canvas`}><X size={12} /></button>}
+    {/* Removed from its panel or with Delete, like an agent card: no second remove button here (ADR 0043). */}
   </article>
 }

@@ -1005,7 +1005,7 @@
       el('div', { class: 'foot', text: 'Simulated in your browser · no model was called' })))
     const copied = el('span', { class: 'copied', 'aria-live': 'polite' })
     const acts = el('div', { class: 'res-acts' },
-      el('button', { type: 'button', class: 'btn', text: 'Copy as Markdown', onclick: async () => {
+      el('button', { type: 'button', class: 'btn', text: 'Copy receipt', onclick: async () => {
         try { await navigator.clipboard.writeText(receiptMarkdown(r)); copied.textContent = 'Copied' } catch { copied.textContent = 'Copy failed' }
         window.setTimeout(() => { copied.textContent = '' }, 1800)
       } }),
