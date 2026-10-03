@@ -463,18 +463,14 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .sched { display: inline-flex; align-items: center; flex-wrap: wrap; row-gap: 6px; }
 .sched .chip { height: 24px; font-size: 12px; }
 .press { margin-top: 26px; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 40px; align-items: center; }
-.pile { position: relative; height: 470px; perspective: 1800px; touch-action: pan-y; outline: none; }
+/* The pile is handled, not read: dragging a page never selects its words. */
+.pile { position: relative; height: 470px; touch-action: pan-y; outline: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .pile:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; border-radius: 10px; }
-.issue { position: absolute; top: 16px; left: 58%; width: 320px; height: 430px; margin-left: -160px; overflow: hidden; padding: 20px 22px; border-radius: 4px; background: var(--slip); color: var(--slip-ink); box-shadow: 0 1px 0 rgb(255 255 255 / .5) inset, 0 14px 30px rgb(0 0 0 / .45); cursor: pointer; transition: transform .45s var(--ease), opacity .45s var(--ease), filter .45s var(--ease); }
-.issue.front { cursor: grab; }
-.pile.turning, .pile.turning .issue { cursor: grabbing; }
-/* While a page turns it darkens toward its hinge, and past halfway you see its blank back. */
-.issue::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgb(23 21 15 / .3), rgb(23 21 15 / 0) 70%); opacity: var(--turn, 0); }
-.issue.verso { background: #E2DDD1; }
-:root[data-theme="light"] .issue.verso { background: #F0ECE3; }
-.issue.verso > *, .issue.verso::before { visibility: hidden; }
-/* A folded corner on the front page says it can be turned. */
-.issue.ear::before { content: ''; position: absolute; right: 0; bottom: 0; width: 20px; height: 20px; border-top-left-radius: 3px; background: linear-gradient(315deg, var(--panel-solid) 50%, #D9D3C6 50%); box-shadow: -1px -1px 3px rgb(0 0 0 / .12); }
+.issue { position: absolute; top: 16px; left: 58%; width: 320px; height: 430px; margin-left: -160px; overflow: hidden; padding: 20px 22px; border-radius: 4px; background: var(--slip); color: var(--slip-ink); box-shadow: 0 1px 0 rgb(255 255 255 / .5) inset, 0 14px 30px rgb(0 0 0 / .45); cursor: pointer; transition: transform .43s var(--ease), filter .3s var(--ease); }
+/* The paper you point at says which issue it is. */
+.pile-tag { position: absolute; z-index: 400; pointer-events: none; display: grid; gap: 1px; padding: 6px 9px; transform: translate(-50%, calc(-100% - 14px)); border: 1px solid var(--hairline-2); border-radius: 7px; background: var(--panel-solid); box-shadow: 0 8px 22px rgb(0 0 0 / .35); white-space: nowrap; }
+.pile-tag b { font: 500 12px/1.2 var(--mono); color: var(--accent); }
+.pile-tag span { font: 400 11px/1.3 var(--sans); color: var(--ink-2); }
 .pile-hint { margin: 2px 0 0; text-align: center; font-size: 12.5px; color: var(--ink-3); }
 :root[data-theme="light"] .issue { border: 1px solid rgb(23 21 15 / .1); box-shadow: 0 1px 2px rgb(23 21 15 / .06), 0 12px 28px rgb(23 21 15 / .12); }
 .issue .mast { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding-bottom: 6px; border-bottom: 2px solid var(--slip-ink); }
@@ -492,6 +488,8 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .issue .writing li::before { content: none; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 .issue .colophon { position: absolute; left: 22px; right: 30px; bottom: 14px; display: flex; justify-content: space-between; gap: 10px; padding: 6px 0 0; border-top: 1px solid rgb(23 21 15 / .15); font: 400 9.5px var(--mono); color: var(--slip-ink-2); }
+.issue .colophon span { white-space: nowrap; }
+.issue .colophon span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .issue .stamp { position: absolute; right: 16px; bottom: 54px; transform: rotate(-9deg); padding: 4px 8px; border: 2px solid currentColor; border-radius: 6px; background: rgb(241 238 230 / .7); font: 700 10.5px/1.25 var(--mono); letter-spacing: .04em; text-transform: uppercase; text-align: center; opacity: .85; }
 .stamp.ok, .stamp.wait { color: #8A6A16; }
 .stamp.wait { border-style: dashed; }
