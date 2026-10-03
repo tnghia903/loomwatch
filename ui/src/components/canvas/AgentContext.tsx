@@ -1,6 +1,7 @@
 import { Box, BookOpen, FilePlus2, FolderPlus, Puzzle, Wrench, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 
+import { uniqueLabel } from '../../lib/composer-layout/types'
 import { chosenKnowledge } from '../../lib/knowledge/chosen'
 import { addTeamFile } from '../../lib/knowledge/client'
 import type { AgentPlace } from '../../lib/team-file/agentPlace'
@@ -32,14 +33,6 @@ const KIND: Record<CapabilityRef['kind'], { Icon: typeof Puzzle; label: string }
   skill: { Icon: Puzzle, label: 'Skill · its instructions are supplied' },
   knowledge: { Icon: Box, label: 'Knowledge · supplied as source material' },
   tool: { Icon: Wrench, label: 'Tool · available while it works' },
-}
-
-/** `report.pdf`, or `report.pdf (2)` when this agent already has knowledge by that name. */
-function uniqueLabel(name: string, taken: Set<string>): string {
-  let label = name
-  for (let counter = 2; taken.has(label); counter += 1) label = `${name} (${counter})`
-  taken.add(label)
-  return label
 }
 
 /**
@@ -112,8 +105,9 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
         : <div className="t-meta agent-context-empty">No team Brief yet. Notes you add in Memory are supplied to every agent.</div>)}
 
       {nothingConnected
-        ? <div className="t-meta agent-context-empty">Nothing connected. {canAdd ? 'Add a folder or file below, or drag' : 'Drag'} a skill, tool or team memory from the Library onto this agent.</div>
+        ? <div className="t-meta agent-context-empty">Nothing connected. {canAdd ? 'Add a folder or file below, or draw' : 'Draw'} a line from this agent to a skill, tool, folder or file card on the canvas.</div>
         : (
+          <>
           <ul className="agent-context-list" aria-label="Connected to this agent">
             {capabilities.map((capability) => {
               const { Icon, label } = chosenKnowledge(capability) ?? KIND[capability.kind]
@@ -134,6 +128,8 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
               </li>
             ))}
           </ul>
+          <div className="t-meta agent-context-note">Each is a card on the canvas. Draw a line from another agent to a card to share it.</div>
+          </>
         )}
 
       {canAdd && (

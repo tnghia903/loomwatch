@@ -39,15 +39,20 @@ const ROUTE_NOTE: Record<SkillRoute, (harness: string) => string> = {
   blocked: () => 'blocked — LoomWatch knows no project skill directory for this harness',
 }
 
-/** What connecting means for each kind, in the words the run will bear out (ADR 0012, 0029). */
-const PICKER_NOTE: Record<Exclude<CapabilityKind, 'knowledge'>, string> = {
+/**
+ * What connecting means for each kind, in the words the run will bear out (ADR 0012, 0029).
+ * `knowledge` is a folder or file the operator chose (ADR 0042); memory has no picker.
+ */
+const PICKER_NOTE: Record<CapabilityKind, string> = {
   skill: 'Connect this skill to require it in the next run. Its discovery source can differ from the agent’s harness.',
   tool: 'Connect this tool to give an agent its MCP server in the next run. Its config source can differ from the agent’s harness.',
+  knowledge: 'Connect every agent that should read this. They share the one source, and each is told it in its own instructions.',
 }
 
-const DELIVERY_NOTE: Record<Exclude<CapabilityKind, 'knowledge'>, string> = {
+const DELIVERY_NOTE: Record<CapabilityKind, string> = {
   skill: 'Save the team to keep these connections. LoomWatch delivers the bundle to every connected agent and adapts how the prompt introduces it: a harness that cannot be relied on to run the skill as written gets its text inlined with a note mapping what it assumes onto what that agent actually has.',
   tool: 'Save the team to keep these connections. LoomWatch hands this MCP server to each connected agent’s app when the run starts, using your own server settings. On Claude Code it also allows the server’s tools; other apps apply their own rules. A run fails up front if an app cannot take the server.',
+  knowledge: 'Save the team to keep these connections. Each connected agent may read it wherever that agent works, and never changes it. A run fails up front if it has gone or holds nothing readable.',
 }
 
 /** Plain-words heading for the portability classification. */
@@ -65,11 +70,12 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
   // Skills load their SKILL.md and memory loads what it holds; a tool has nothing to read, and a
   // knowledge card that is not memory names nothing the daemon can read (ADR 0036).
   const readsDetails = kind === 'skill' || (kind === 'knowledge' && Boolean(item.memory))
-  // What an agent can be connected to through the team file (ADR 0012, 0029). Memory is wired
-  // through `memory.inherits` on the canvas instead, and other knowledge is a folder or file chosen
-  // in the agent's Context, so neither has a picker here.
-  const wireable = kind !== 'knowledge'
-  const noun = kind === 'skill' ? 'skill' : kind === 'tool' ? 'tool' : 'source'
+  // What an agent can be connected to through the team file (ADR 0012, 0029, 0042). Memory is
+  // wired through `memory.inherits` on the canvas instead, and knowledge with no path names
+  // nothing, so neither has a picker here.
+  const chosen = kind === 'knowledge' && Boolean(item.path)
+  const wireable = kind !== 'knowledge' || chosen
+  const noun = kind === 'skill' ? 'skill' : kind === 'tool' ? 'tool' : chosen ? item.source.toLowerCase().replace(/^(added|linked) /, '') : 'source'
   useEffect(() => {
     if (!readsDetails) return
     let cancelled = false
@@ -110,7 +116,8 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
           <span className="node-glyph"><EntityGlyph kind={glyph} size={18} /></span>
           <span className="insp-text">
             <div className="insp-title t-title">{item.name}</div>
-            <div className="insp-id t-mono">{item.id}</div>
+            {/* A folder or file card's id is its path again, which Details already shows. */}
+            {!chosen && <div className="insp-id t-mono">{item.id}</div>}
             <div className="insp-status t-micro"><i className={item.status === 'Local only' ? 'ready-dot local' : 'ready-dot'} aria-hidden="true" /> {item.status}</div>
           </span>
           <button type="button" className="iconbtn" onClick={onClose} title="Close (Esc)" aria-label="Close capability details"><X size={15} aria-hidden="true" /></button>
@@ -120,9 +127,9 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
           <div className="zone-head t-micro">Details</div>
           <p className="capability-description t-body">{item.detail}</p>
           <dl className="proc-list t-meta capability-facts">
-            <dt>Type</dt><dd>{KIND_LABEL[kind]}</dd>
-            <dt>Source</dt><dd>{item.source}</dd>
-            <dt>Relation</dt><dd>{RELATION[kind]}</dd>
+            <dt>Type</dt><dd>{chosen ? item.source : KIND_LABEL[kind]}</dd>
+            {chosen ? <><dt>Path</dt><dd className="t-mono-sm" title={item.path}>{item.path}</dd></> : <><dt>Source</dt><dd>{item.source}</dd></>}
+            <dt>Relation</dt><dd>{RELATION[kind]}{chosen ? ' · read only' : ''}</dd>
           </dl>
         </div>
 
@@ -148,10 +155,10 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
           </div>
         )}
 
-        {kind === 'knowledge' && !item.memory && (
+        {kind === 'knowledge' && !item.memory && !chosen && (
           <div className="zone capability-knowledge-moved">
             <div className="zone-head t-micro">Not delivered</div>
-            <p className="capability-description t-meta">Knowledge is now a folder or file you choose, so this card no longer reaches an agent. Select the agent and use Add folder… or Add file… in its Context, then remove this card.</p>
+            <p className="capability-description t-meta">Knowledge is now a folder or file you choose, so this card no longer reaches an agent. Use Add folder… or Add file…, connect the new card to the agents that need it, then remove this one.</p>
           </div>
         )}
 
@@ -165,7 +172,7 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
                 <label key={agent.id} className="capability-agent-option">
                   <input type="checkbox" aria-label={`Use ${item.name} with ${agent.name} (${agent.harness})`} checked={agent.connected} disabled={readOnly || !onToggleAgent} onChange={(event) => onToggleAgent?.(agent.id, event.target.checked)} />
                   <span><strong>{agent.name}</strong><small>{agent.harness}{route ? ` · ${ROUTE_NOTE[route](agent.harness)}` : ''}</small></span>
-                  {agent.connected && <span className="capability-required">{kind === 'skill' ? 'Required' : 'Connected'}</span>}
+                  {agent.connected && <span className="capability-required">{kind === 'skill' ? 'Required' : kind === 'knowledge' ? 'Reads it' : 'Connected'}</span>}
                 </label>
               )
             }) : <p className="hint t-meta">Add an agent to your team to connect this {noun}.</p>}

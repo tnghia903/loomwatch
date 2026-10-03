@@ -52,6 +52,11 @@ export interface CapabilityNodeConfig {
   position: { x: number; y: number }
   /** Set on a knowledge card that is team memory. Absent on every other card. */
   memory?: MemoryRef
+  /**
+   * Set on a knowledge card that is a folder or file the operator chose (ADR 0042): the `path` its
+   * agents' knowledge entries carry. One card per path, however many agents read it.
+   */
+  path?: string
 }
 
 export interface CapabilityEdgeConfig {
@@ -103,6 +108,25 @@ export function capabilityNodeId(kind: CapabilityKind, name: string): string {
   return `${kind}:${name.trim().toLowerCase().replace(/\s+/g, '-')}`
 }
 
+/** A chosen path as cards compare it: trimmed, without a trailing slash. */
+export function sourcePath(path: string): string {
+  const trimmed = path.trim()
+  return trimmed.length > 1 ? trimmed.replace(/\/+$/, '') : trimmed
+}
+
+/**
+ * The card for a folder or file is keyed by its path, not its label (ADR 0042): two agents may
+ * label the same folder differently, and two folders may share a name.
+ */
+export function sourceCardId(path: string): string {
+  return `knowledge@${sourcePath(path)}`
+}
+
+/** The card id a payload or card gets: by path for a chosen folder or file, by kind and name otherwise. */
+export function cardId(card: Pick<CapabilityNodeConfig, 'kind' | 'name' | 'path'>): string {
+  return card.kind === 'knowledge' && card.path ? sourceCardId(card.path) : capabilityNodeId(card.kind, card.name)
+}
+
 /** The payload the Library puts on `dataTransfer`, and what a click-to-place sends. */
 export interface CapabilityDragPayload {
   kind: CapabilityKind
@@ -116,6 +140,8 @@ export interface CapabilityDragPayload {
    * which memory it stands for before anyone connects it to an agent.
    */
   memory?: { team?: string; pack?: string }
+  /** For a folder or file card: the path its agents' knowledge entries will carry (ADR 0042). */
+  path?: string
 }
 
 /**
@@ -140,21 +166,52 @@ export function refuseCapabilityEdge(
 }
 
 /**
- * The `agents[].capabilities` kind a card is wired as, or `null` for a knowledge card. Skills since
- * ADR 0012, tools since ADR 0029. A memory card is wired through `memory.inherits` instead (ADR
- * 0016), and any other knowledge card is one the Library placed before ADR 0036: knowledge is now a
- * folder or file chosen in the agent's Context, and a card's name alone points at nothing.
+ * The `agents[].capabilities` kind a card is wired as, or `null` when it is not wired through
+ * them. Skills since ADR 0012, tools since ADR 0029, and a folder or file since ADR 0042. A memory
+ * card is wired through `memory.inherits` instead (ADR 0016), and a knowledge card with no path is
+ * one the Library placed before ADR 0036: its name alone points at nothing.
  */
-export function teamFileKind(card: Pick<CapabilityNodeConfig, 'kind' | 'memory'>): Exclude<CapabilityKind, 'knowledge'> | null {
-  return card.kind === 'knowledge' ? null : card.kind
+export function teamFileKind(card: Pick<CapabilityNodeConfig, 'kind' | 'memory' | 'path'>): CapabilityKind | null {
+  if (card.kind !== 'knowledge') return card.kind
+  return card.path && !card.memory ? 'knowledge' : null
 }
 
-/** Whether a team-file capability entry is this card. Kind and name both: a tool and a skill may share a name. */
+/**
+ * Whether a team-file capability entry is this card. A skill or tool by kind and name both (they
+ * may share a name); a folder or file by its path, whatever each agent labels it.
+ */
 export function capabilityIsCard(
-  capability: { kind: CapabilityKind; name: string },
-  card: Pick<CapabilityNodeConfig, 'kind' | 'name' | 'memory'>,
+  capability: { kind: CapabilityKind; name: string; path?: string },
+  card: Pick<CapabilityNodeConfig, 'kind' | 'name' | 'memory' | 'path'>,
 ): boolean {
-  return teamFileKind(card) === capability.kind && capability.name === card.name
+  const kind = teamFileKind(card)
+  if (kind !== capability.kind) return false
+  if (kind === 'knowledge') return Boolean(capability.path && card.path && sourcePath(capability.path) === sourcePath(card.path))
+  return capability.name === card.name
+}
+
+/**
+ * The team-file entry that connects an agent to this card, or `null` for a card that is not wired
+ * through `agents[].capabilities`. A folder or file keeps its path and takes a label no other
+ * knowledge of that agent has, as Add folder… and Add file… do.
+ */
+export function capabilityForCard(
+  card: Pick<CapabilityNodeConfig, 'kind' | 'name' | 'memory' | 'path'>,
+  agentCapabilities: readonly { kind: CapabilityKind; name: string }[],
+): { kind: CapabilityKind; name: string; path?: string } | null {
+  const kind = teamFileKind(card)
+  if (!kind) return null
+  if (kind !== 'knowledge' || !card.path) return { kind, name: card.name }
+  const taken = new Set(agentCapabilities.filter((capability) => capability.kind === 'knowledge').map((capability) => capability.name))
+  return { kind, name: uniqueLabel(card.name, taken), path: card.path }
+}
+
+/** `report.pdf`, or `report.pdf (2)` when `taken` already has that name; the label is then taken. */
+export function uniqueLabel(name: string, taken: Set<string>): string {
+  let label = name
+  for (let counter = 2; taken.has(label); counter += 1) label = `${name} (${counter})`
+  taken.add(label)
+  return label
 }
 
 /** Rendered size of a capability card (`.capability-node`), used to keep placements apart. */

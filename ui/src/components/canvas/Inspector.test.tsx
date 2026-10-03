@@ -166,7 +166,7 @@ describe('Inspector context', () => {
 
   it('says how to connect something when nothing is', () => {
     renderInspector()
-    expect(screen.getByText(/Nothing connected\. Drag a skill, tool or team memory/)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing connected\. Draw a line from this agent to a skill, tool, folder or file card/)).toBeInTheDocument()
   })
 
   it('never offers a disconnect in read-only mode', () => {

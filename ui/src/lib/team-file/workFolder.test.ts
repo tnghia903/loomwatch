@@ -18,8 +18,13 @@ describe('workFolder', () => {
 describe('ownFolderReason', () => {
   const spawn = (cwd: string) => ({ cmd: 'claude-agent-acp', args: [], env: {}, cwd })
 
-  it('moves anything with something connected into its own folder, wherever it points', () => {
-    expect(ownFolderReason({ spawn: spawn('/Users/me/site'), capabilities: [{ kind: 'skill', name: 'design' }] })).toBe('connected')
+  // ADR 0042: connecting something used to move an agent out of the folder chosen for it, so it
+  // silently stopped working on the operator's project.
+  it('moves an agent with something connected only out of the team\u2019s folder', () => {
+    const design = [{ kind: 'skill' as const, name: 'design' }]
+    for (const cwd of ['.', '..']) expect(ownFolderReason({ spawn: spawn(cwd), capabilities: design })).toBe('connected')
+    expect(ownFolderReason({ spawn: spawn('/Users/me/site'), capabilities: design })).toBeNull()
+    expect(ownFolderReason({ spawn: spawn('/Users/me/site'), capabilities: [{ kind: 'knowledge', name: 'reports', path: '/Users/me/reports' }], allow: { edits: true } })).toBeNull()
   })
 
   it('moves an editing agent out of any folder that holds the team file', () => {

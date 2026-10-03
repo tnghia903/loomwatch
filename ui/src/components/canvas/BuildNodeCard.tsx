@@ -1,7 +1,8 @@
 import { useStore, type NodeProps } from '@xyflow/react'
 import { createElement } from 'react'
-import { Bot, Box, Circle, FileText, Inbox, Puzzle, Wrench, X } from 'lucide-react'
+import { Bot, Box, Circle, FileText, Folder, Inbox, Puzzle, Wrench, X } from 'lucide-react'
 import { KIND_LABEL } from '../../lib/composer-layout/types'
+import { chosenIsFile } from '../../lib/knowledge/chosen'
 import { middleTruncate } from '../../lib/format'
 import type { OutputNode } from '../../lib/runs/graph'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
@@ -184,11 +185,15 @@ export function BuildOutputCard({ data, selected }: NodeProps<OutputNode>) {
 }
 
 export function BuildCapabilityCard({ data, selected }: NodeProps<CapabilityNode>) {
-  const Icon = data.kind === 'skill' ? Puzzle : data.kind === 'tool' ? Wrench : Box
-  return <article className={`build-node kind-${data.kind} ${selected ? 'selected' : ''}`} aria-label={`${data.name}, ${KIND_LABEL[data.kind].toLowerCase()} from ${data.source}, ${data.wiredTo ? `used by ${data.wiredTo} agent${data.wiredTo === 1 ? "" : "s"}` : 'not connected to an agent yet'}`}>
+  // A folder or file the operator chose (ADR 0042) says which it is and where it lives.
+  const file = data.path ? chosenIsFile(data.path) : false
+  const Icon = data.path ? (file ? FileText : Folder) : data.kind === 'skill' ? Puzzle : data.kind === 'tool' ? Wrench : Box
+  const kind = data.path ? (file ? 'file' : 'folder') : data.kind
+  const what = data.path ? `${data.source.toLowerCase()} at ${data.path}` : `${KIND_LABEL[data.kind].toLowerCase()} from ${data.source}`
+  return <article className={`build-node kind-${data.kind} ${selected ? 'selected' : ''}`} aria-label={`${data.name}, ${what}, ${data.wiredTo ? `used by ${data.wiredTo} agent${data.wiredTo === 1 ? "" : "s"}` : 'not connected to an agent yet'}`}>
     <CardPorts output={false} connectIn={!data.readOnly} />
     <span className="build-node-icon"><Icon size={18} /></span>
-    <div><span className="node-kind">{data.kind}</span><strong>{data.name}</strong><small title={data.source}>{data.source}</small></div>
+    <div><span className="node-kind">{kind}</span><strong>{data.name}</strong><small title={data.path ?? data.source}>{data.path ? middleTruncate(data.path, 40) : data.source}</small></div>
     {!data.readOnly && <button type="button" className="build-resource-remove nodrag" onClick={(event) => { event.stopPropagation(); data.onRemove?.() }} aria-label={`Remove ${data.name} from the canvas`}><X size={12} /></button>}
   </article>
 }

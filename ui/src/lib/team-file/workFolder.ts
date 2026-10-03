@@ -23,19 +23,37 @@ export function workFolder(cwd: string | undefined): WorkFolder {
 }
 
 /**
+ * Whether the agent's folder holds its team file: the team's own folder (`.`, every template's
+ * default), or a relative path made only of `.` and `..`, which always does. Mirrors `holds` in
+ * `workspace::materialise`.
+ */
+export function holdsTeamFile(agent: Pick<AgentConfig, 'spawn'>): boolean {
+  const cwd = (agent.spawn?.cwd ?? '').trim()
+  return !cwd.startsWith('/') && segments(cwd).every((segment) => segment === '.' || segment === '..')
+}
+
+/**
  * Why LoomWatch moves this agent into a folder of its own, whatever `spawn.cwd` says, or null when
- * it works where `cwd` points. Mirrors `workspace::materialise` for the two cases the panel can
- * see for certain; the third, a Brief kept in the app's memory file, is the "Work in this folder"
- * switch's to explain.
+ * it works where `cwd` points. Mirrors `workspace::materialise`: only an agent whose folder holds
+ * its team file is ever moved (ADR 0042), because that folder is the teams folder. A folder the
+ * operator chose is where the agent works however much is connected to it.
  *
  * - Anything connected (ADR 0012 decision 4, ADR 0029): skills and tools are delivered into it.
- * - Editing beside the team file (ADR 0037 decision 6): a folder that holds the team file, which
- *   a relative path made only of `.` and `..` always does.
+ * - Allowed to edit (ADR 0037 decision 6): the team files stay out of its reach.
+ * - The third, a Brief kept in the app's memory file, is the "Work in this folder" switch's to
+ *   explain.
  */
 export function ownFolderReason(agent: Pick<AgentConfig, 'capabilities' | 'allow' | 'spawn'>): 'connected' | 'edits' | null {
+  if (!holdsTeamFile(agent)) return null
   if ((agent.capabilities ?? []).length > 0) return 'connected'
-  const cwd = (agent.spawn?.cwd ?? '').trim()
-  const holdsTeamFile = !cwd.startsWith('/') && segments(cwd).every((segment) => segment === '.' || segment === '..')
-  if (agent.allow?.edits === true && holdsTeamFile) return 'edits'
+  if (agent.allow?.edits === true) return 'edits'
   return null
+}
+
+/** The folder the team file is saved in, when the path names it: what "the team's folder" is. */
+export function teamFolderOf(teamPath: string | null | undefined): string | null {
+  const path = (teamPath ?? '').trim()
+  if (!path.startsWith('/')) return null
+  const folder = path.replace(/\/[^/]*$/, '')
+  return folder || '/'
 }

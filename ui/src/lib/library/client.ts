@@ -15,6 +15,11 @@ export interface DetectedCapability {
    * `"<Team name> · memory"` would put a display name into executable configuration.
    */
   memory?: MemorySourceRef
+  /**
+   * Present only on a folder or file the operator chose (ADR 0042), which the canvas shows as a
+   * card of its own. Never from the daemon's scan: knowledge is chosen, not discovered (ADR 0036).
+   */
+  path?: string
 }
 
 export interface MemorySourceRef {

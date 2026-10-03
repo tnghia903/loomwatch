@@ -6,6 +6,7 @@ import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { splitModelSelector } from '../../lib/models'
 import type { AgentPlace } from '../../lib/team-file/agentPlace'
 import type { AllowSwitch, CapabilityRef } from '../../lib/team-file/types'
+import { holdsTeamFile } from '../../lib/team-file/workFolder'
 import type { AgentField, AgentFieldProblems } from '../../lib/team-file/validation'
 import { StatusGlyph } from '../ui/glyphs'
 import { AgentContext } from './AgentContext'
@@ -173,10 +174,11 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
 
       <div className="zone">
         <div className="zone-head t-micro">Works in</div>
-        <AgentWorkFolder agent={agent} readOnly={readOnly} onChange={onCwdChange} problem={fieldProblems?.cwd} />
+        <AgentWorkFolder agent={agent} readOnly={readOnly} onChange={onCwdChange} problem={fieldProblems?.cwd} teamPath={teamPath} />
         {/* docs/TEAM_MEMORY.md channel 2: `deliverAs` only decides anything for an agent with a
-            Brief and nothing connected — with either missing, the folder is already settled. */}
-        {onDeliverAsChange && briefCount > 0 && !connected && (
+            Brief and nothing connected, left in the team's folder — a chosen folder is never
+            given the memory file (ADR 0042), and otherwise the folder is already settled. */}
+        {onDeliverAsChange && briefCount > 0 && !connected && holdsTeamFile(agent) && (
           <button type="button" className={`check ${nativeFile ? '' : 'on'}`} disabled={readOnly} onClick={() => onDeliverAsChange(nativeFile ? 'packet-only' : 'native-file')} aria-pressed={!nativeFile}>
             <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
             <span className="txt"><b className="t-body">Work in this folder</b><span className="t-meta">{nativeFile ? 'Off: it works in its own folder, where the Brief is kept in its AI app’s memory file for the whole session.' : 'On: it works in the folder above. In a long session its AI app may summarise the Brief away.'}</span></span>

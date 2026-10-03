@@ -156,8 +156,31 @@ describe('CapabilityInspector', () => {
     view.rerender(<CapabilityInspector item={card} kind="knowledge" placed connectedAgents={['Research']} agents={agents} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
     expect(screen.getByText('Not delivered')).toBeInTheDocument()
-    expect(screen.getByText(/use Add folder… or Add file… in its Context/)).toBeInTheDocument()
+    expect(screen.getByText(/Use Add folder… or Add file…, connect the new card/)).toBeInTheDocument()
     expect(screen.queryByText('Contents')).not.toBeInTheDocument()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  // ADR 0042: a folder or file the operator chose is a card like a skill, shared by every agent
+  // connected to it and connected from here.
+  it('connects a chosen folder to agents, says where it is, and reads nothing from the daemon', () => {
+    vi.mocked(fetch).mockClear()
+    const onToggleAgent = vi.fn()
+    const agents = [
+      { id: 'research', name: 'Research', harness: 'Claude Code', connected: true },
+      { id: 'writer', name: 'Writer', harness: 'Codex', connected: false },
+    ]
+    const folder = { id: 'knowledge@/Users/me/reports', name: 'reports', source: 'Linked folder', path: '/Users/me/reports', detail: 'A folder on this computer.', status: 'Local only' as const }
+    render(<CapabilityInspector item={folder} kind="knowledge" placed connectedAgents={['Research']} agents={agents} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
+
+    expect(screen.queryByText('Not delivered')).not.toBeInTheDocument()
+    expect(screen.queryByText('knowledge@/Users/me/reports')).not.toBeInTheDocument()
+    expect(screen.getByText('/Users/me/reports')).toBeInTheDocument()
+    expect(screen.getByText('reads · read only')).toBeInTheDocument()
+    expect(screen.getByText('Reads it')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Use reports with Writer (Codex)' }))
+    expect(onToggleAgent).toHaveBeenLastCalledWith('writer', true)
+    expect(screen.getByText(/Connect the folder to an agent above or on the canvas/)).toBeInTheDocument()
     expect(fetch).not.toHaveBeenCalled()
   })
 

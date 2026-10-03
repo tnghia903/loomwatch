@@ -6,6 +6,8 @@ import type { DetectedHarness } from '../lib/harnesses'
 import { briefFileNameFor, exportPack, fetchMemory, fetchNoteHistory, fetchNotes, fetchRunCheckpoints, fetchRunContext, reviseNote, writeMemoryFile, type Checkpoint, type ContextPacket, type MemoryView, type Note, type NotebookView } from '../lib/memory/client'
 import type { AgentNode } from '../lib/library/nodeFromDrop'
 import type { CapabilityInventory, DetectedCapability } from '../lib/library/client'
+import type { CapabilityRef } from '../lib/team-file/types'
+import type { ChosenSource } from './canvas/AddSource'
 import { isTerminalRun, runScheduleNow, scheduleForPath, useSchedules } from '../lib/runs/client'
 import { ownerLabelFor } from '../lib/runs/graph'
 import { appLabelForAgent, harnessIdForAgent, modelOptionsForAgent } from '../lib/models'
@@ -23,7 +25,8 @@ import { unifiedYamlDiff } from '../lib/team-file/diff'
 import { useTeamDocument } from '../lib/team-file/useTeamDocument'
 import { organizePipeline, type Positions } from '../lib/composer-layout/organize'
 import { useComposerLayout } from '../lib/composer-layout/useComposerLayout'
-import { RELATION, capabilityIsCard, capabilityNodeId, freeCapabilitySlot, refuseCapabilityEdge, teamFileKind, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
+import { RELATION, capabilityForCard, capabilityIsCard, capabilityNodeId, cardId, freeCapabilitySlot, refuseCapabilityEdge, teamFileKind, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
+import { chosenIsFile, chosenName, chosenSource } from '../lib/knowledge/chosen'
 import { setThemeMode, useTheme } from '../lib/theme'
 import { startTour } from '../lib/tour/store'
 import { openFeedback } from '../lib/feedback/report'
@@ -160,6 +163,24 @@ function linesDiffer(a: string, b: string): number {
  * Prefixed by kind: a team called `onboarding` and a pack folder called `onboarding` are different
  * sources, and a bare name would silently merge them.
  */
+/**
+ * What the panel says about a folder or file card (ADR 0042): what every agent connected to it is
+ * given, in the words the run bears out (ADR 0035).
+ */
+function chosenItem(card: CapabilityNodeConfig): DetectedCapability {
+  const path = card.path ?? ''
+  return {
+    id: card.id,
+    name: card.name,
+    source: chosenSource(path),
+    path,
+    status: 'Local only',
+    detail: chosenIsFile(path)
+      ? 'A file added to this team. Each agent connected to it is given its text with its instructions: all of it when it is short, otherwise the opening and a full copy it can open.'
+      : 'A folder on this computer, read where it is on every run. Each agent connected to it is given the folder\u2019s listing and README with its instructions, and may open any file in it. It never changes the folder.',
+  }
+}
+
 function memoryKey(memory: MemoryRef | undefined): string {
   if (memory?.team) return `team:${memory.team}`
   if (memory?.pack) return `pack:${memory.pack}`
@@ -462,25 +483,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       setRoutineBusy(false)
     }
   }, [routine, routineBusy, session, showRun, schedules, history, setStartError])
-  // A skill is executable, so its wiring lives in the team file; tools and knowledge sources have
-  // no delivery contract yet and stay planned intent in the sidecar. The canvas draws both the
-  // same way, so the edges it renders are the union.
-  const wiringEdges = useMemo(() => {
-    const executable = doc.nodes.flatMap((node) =>
-      (node.data.agent.capabilities ?? []).flatMap((capability) => {
-        const card = composerLayout.nodes.find((candidate) => capabilityIsCard(capability, candidate))
-        return card ? [{ from: node.id, to: card.id }] : []
-      }),
-    )
-    // Sidecar edges drawn before their kind was executable keep rendering: dropping them would
-    // silently erase wiring the operator can see on their canvas. `legacyWiring` below offers to
-    // write them into the team file, which is what makes them delivered (ADR 0029).
-    const planned = composerLayout.edges.filter(
-      (edge) => !executable.some((live) => live.from === edge.from && live.to === edge.to),
-    )
-    return [...planned, ...executable]
-  }, [composerLayout.nodes, composerLayout.edges, doc.nodes])
-
   // ---- agent positions live in the sidecar (ADR 0016, CANVAS_SPEC §7.3 option A) -------------
   //
   // Hydrate once per document. The sidecar answers a moment after the YAML, so the cards are
@@ -539,7 +541,66 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       }]
     })
   }, [composerLayout.nodes, doc.memoryInherits, doc.nodes])
-  const capabilityCards = useMemo(() => [...composerLayout.nodes, ...memoryCards], [composerLayout.nodes, memoryCards])
+  // ---- every source an agent uses is a card (ADR 0042) ----------------------------------------
+  //
+  // A skill, tool, folder or file named in an agent's `capabilities` shows as a card even when the
+  // sidecar has none for it, so the canvas always says what each agent is given. One card per
+  // skill or tool, one per path however each agent labels it, and a line from every agent that
+  // uses it. Like a memory card it has no saved position until it is dragged, so it sits under the
+  // first agent that uses it, placed by the slot finder click-placed cards use.
+  const teamFileCards = useMemo<CapabilityNodeConfig[]>(() => {
+    const cards: CapabilityNodeConfig[] = []
+    const taken = [...doc.nodes.map((node) => node.position), ...composerLayout.nodes.map((node) => node.position), ...memoryCards.map((node) => node.position)]
+    for (const node of doc.nodes) {
+      for (const capability of node.data.agent.capabilities ?? []) {
+        // Knowledge with no path names nothing (ADR 0036); the agent's Context says so.
+        if (capability.kind === 'knowledge' && !capability.path) continue
+        const path = capability.kind === 'knowledge' ? capability.path : undefined
+        const card = { kind: capability.kind, name: path ? chosenName(path) : capability.name, ...(path ? { path } : {}) }
+        const id = cardId(card)
+        // The id too: a sidecar card whose name differs only in case is the same card.
+        if ([...composerLayout.nodes, ...memoryCards, ...cards].some((other) => other.id === id || capabilityIsCard(capability, other))) continue
+        const inventory = capability.kind === 'skill' ? capabilityInventory.skills : capability.kind === 'tool' ? capabilityInventory.tools : []
+        const installed = inventory.find((item) => item.name.toLowerCase() === capability.name.toLowerCase())
+        const position = freeCapabilitySlot({ x: node.position.x, y: node.position.y + 220 }, taken)
+        taken.push(position)
+        cards.push({ id, ...card, source: path ? chosenSource(path) : installed?.source ?? 'Not found on this computer', position })
+      }
+    }
+    return cards
+  }, [capabilityInventory.skills, capabilityInventory.tools, composerLayout.nodes, doc.nodes, memoryCards])
+  const capabilityCards = useMemo(() => [...composerLayout.nodes, ...memoryCards, ...teamFileCards], [composerLayout.nodes, memoryCards, teamFileCards])
+  // Skills, tools, folders and files are wired in the team file, so the lines are read from it.
+  const wiringEdges = useMemo(() => {
+    const cards = [...composerLayout.nodes, ...teamFileCards]
+    const seen = new Set<string>()
+    const executable = doc.nodes.flatMap((node) =>
+      (node.data.agent.capabilities ?? []).flatMap((capability) => {
+        const card = cards.find((candidate) => capabilityIsCard(capability, candidate))
+        // One line per agent and card, even if the agent names the same folder twice.
+        if (!card || seen.has(`${node.id}->${card.id}`)) return []
+        seen.add(`${node.id}->${card.id}`)
+        return [{ from: node.id, to: card.id }]
+      }),
+    )
+    // Sidecar edges drawn before their kind was executable keep rendering: dropping them would
+    // silently erase wiring the operator can see on their canvas. `legacyWiring` below offers to
+    // write them into the team file, which is what makes them delivered (ADR 0029).
+    const planned = composerLayout.edges.filter(
+      (edge) => !executable.some((live) => live.from === edge.from && live.to === edge.to),
+    )
+    return [...planned, ...executable]
+  }, [composerLayout.nodes, composerLayout.edges, doc.nodes, teamFileCards])
+  /**
+   * A card drawn from the team file exists while some agent uses it. Taking away its last
+   * connection keeps it where it is, as a card of this canvas, so it can be connected again
+   * instead of vanishing under the pointer.
+   */
+  const keepUnusedCard = useCallback((card: CapabilityNodeConfig, leaving: string) => {
+    if (card.memory || composerLayout.nodes.some((node) => node.id === card.id)) return
+    const stillUsed = doc.nodes.some((node) => node.id !== leaving && (node.data.agent.capabilities ?? []).some((capability) => capabilityIsCard(capability, card)))
+    if (!stillUsed) composerLayout.place({ kind: card.kind, name: card.name, source: card.source, ...(card.path ? { path: card.path } : {}) }, card.position)
+  }, [composerLayout, doc.nodes])
   // Taking a capability card off the canvas must also stop the daemon delivering it, or the team
   // file would keep a skill the operator can no longer see.
   const removeCapabilityCards = useCallback((ids: readonly string[]) => {
@@ -609,10 +670,11 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     }
     for (const [agentId, cards] of byAgent) {
       const current = doc.nodes.find((node) => node.id === agentId)?.data.agent.capabilities ?? []
-      const added = cards.flatMap((card) => {
-        const kind = teamFileKind(card)
-        return kind ? [{ kind, name: card.name }] : []
-      })
+      const added: CapabilityRef[] = []
+      for (const card of cards) {
+        const entry = capabilityForCard(card, [...current, ...added])
+        if (entry) added.push(entry)
+      }
       doc.setAgentCapabilities(agentId, [...current, ...added])
     }
     setStatusAnnouncement(`${legacyWiring.length === 1 ? 'One connection is' : `${legacyWiring.length} connections are`} now in the team file. Save to deliver ${legacyWiring.length === 1 ? 'it' : 'them'} on the next run.`)
@@ -641,11 +703,14 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         else doc.removeMemoryInherit(key)
       }
     } else {
-      // Skills, knowledge and tools all live in the team file (ADR 0012, 0029).
+      // Skills, tools, folders and files all live in the team file (ADR 0012, 0029, 0042).
       const agent = doc.nodes.find((node) => node.id === source)?.data.agent
       const current = agent?.capabilities ?? []
       const kept = current.filter((entry) => !capabilityIsCard(entry, capability))
-      if (agent && kept.length !== current.length) doc.setAgentCapabilities(source, kept)
+      if (agent && kept.length !== current.length) {
+        keepUnusedCard(capability, source)
+        doc.setAgentCapabilities(source, kept)
+      }
       // Layouts from before the kind was executable may still hold the same edge in the sidecar.
       if (composerLayout.edges.some((edge) => edge.from === source && edge.to === target)) composerLayout.disconnect(source, target)
     }
@@ -659,7 +724,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     })
     const owner = source === '__prompt' ? 'The whole team' : nodeNames.get(source) ?? source
     setStatusAnnouncement(`${owner} no longer ${RELATION[capability.kind]} ${capability.name}.`)
-  }, [capabilityCards, composerLayout, doc, nodeNames])
+  }, [capabilityCards, composerLayout, doc, keepUnusedCard, nodeNames])
 
   const problems = useMemo(() => reviewProblems(doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames, appProblems), [doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames, appProblems])
   const scheduleProblems = useMemo(() => problems.filter((problem) => problem.yamlPath?.[0] === 'schedule'), [problems])
@@ -958,14 +1023,15 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         // sidecar state or the card is reconciled to its old position between pointer events.
         // The sidecar's debounce still collapses the gesture into one persisted write.
         if (change.type === 'position' && change.position) {
-          // A card the sidecar does not have yet — one drawn from a `memory.inherits` entry — is
-          // created at the position the drag settles on. Without this its position would be
-          // recomputed from the slot finder on every render and the drag would be lost.
+          // A card the sidecar does not have yet — one drawn from a `memory.inherits` entry or an
+          // agent's `capabilities` — is created at the position the drag settles on. Without this
+          // its position would be recomputed from the slot finder on every render and the drag
+          // would be lost.
           const known = composerLayout.nodes.some((node) => node.id === change.id)
           if (known) composerLayout.move(change.id, change.position)
           else {
             const card = capabilityCards.find((node) => node.id === change.id)
-            if (card) composerLayout.place({ kind: card.kind, name: card.name, source: card.source, memory: card.memory }, change.position)
+            if (card) composerLayout.place({ kind: card.kind, name: card.name, source: card.source, memory: card.memory, ...(card.path ? { path: card.path } : {}) }, change.position)
           }
         }
         if (change.type === 'remove') removeCapabilityCards([change.id])
@@ -978,7 +1044,12 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           })
           if (change.selected) {
             const capability = capabilityCards.find((node) => node.id === change.id)
-            if (capability) {
+            if (capability?.path) {
+              // A folder or file is chosen, not discovered (ADR 0036), so it has no Library row.
+              setInspectedCapability({ item: chosenItem(capability), kind: capability.kind })
+              setInspectedEvidenceId(null)
+              setProvenanceOpen(false)
+            } else if (capability) {
               const inventory = capability.kind === 'skill' ? capabilityInventory.skills : capability.kind === 'tool' ? capabilityInventory.tools : capabilityInventory.sources
               // A card records the provenance the Library showed when it was placed, and provenance
               // changes whenever another app turns out to hold the same skill. The Library lists one
@@ -991,7 +1062,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               setProvenanceOpen(false)
             }
           } else {
-            setInspectedCapability((current) => current && change.id === `${current.kind}:${current.item.name.trim().toLowerCase().replace(/\s+/g, '-')}` ? null : current)
+            setInspectedCapability((current) => current && change.id === cardId({ kind: current.kind, name: current.item.name, path: current.item.path }) ? null : current)
           }
         }
         continue
@@ -1306,13 +1377,18 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
-  // Kind and name identify a card; its recorded source can lag the Library's (see the card-select handler).
-  const inspectedCapabilityNode = inspectedCapability ? composerLayout.nodes.find((node) => node.kind === inspectedCapability.kind && node.name === inspectedCapability.item.name && node.source === inspectedCapability.item.source)
-    ?? composerLayout.nodes.find((node) => node.kind === inspectedCapability.kind && node.name.toLowerCase() === inspectedCapability.item.name.toLowerCase()) ?? null : null
+  /** The inspected capability as a card: what wiring and the canvas compare it by. */
+  const inspectedCard = inspectedCapability ? { kind: inspectedCapability.kind, name: inspectedCapability.item.name, source: inspectedCapability.item.source, memory: inspectedCapability.item.memory, ...(inspectedCapability.item.path ? { path: inspectedCapability.item.path } : {}) } : null
+  // Kind and name identify a card, and a path identifies a folder or file; a recorded source can
+  // lag the Library's (see the card-select handler). Cards drawn from the team file count: they
+  // are on the canvas whether or not the sidecar has them.
+  const inspectedCapabilityNode = inspectedCard ? (inspectedCard.path
+    ? capabilityCards.find((node) => node.id === cardId(inspectedCard))
+    : capabilityCards.find((node) => !node.path && node.kind === inspectedCard.kind && node.name === inspectedCard.name && node.source === inspectedCard.source)
+      ?? capabilityCards.find((node) => !node.path && node.kind === inspectedCard.kind && node.name.toLowerCase() === inspectedCard.name.toLowerCase())) ?? null : null
   /** The team-file kind the inspected capability is wired as; `null` for memory (ADR 0029). */
-  const inspectedTeamKind = inspectedCapability ? teamFileKind({ kind: inspectedCapability.kind, memory: inspectedCapability.item.memory }) : null
-  const wiresInspected = (capability: { kind: string; name: string }) =>
-    capability.kind === inspectedTeamKind && capability.name === inspectedCapability?.item.name
+  const inspectedTeamKind = inspectedCard ? teamFileKind(inspectedCard) : null
+  const wiresInspected = (capability: CapabilityRef) => Boolean(inspectedCard && capabilityIsCard(capability, inspectedCard))
   const inspectedCapabilityAgents = inspectedTeamKind
     ? doc.nodes.filter((node) => (node.data.agent.capabilities ?? []).some(wiresInspected)).map((node) => node.data.agent.name)
     : inspectedCapabilityNode
@@ -1379,24 +1455,24 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         : `${nodeNames.get(source) ?? source} reads ${targetCapability.name}.`)
       return
     }
-    // A knowledge card that is not memory was placed from the Library before ADR 0036. Its name
-    // points at nothing the daemon can read, so wiring it would only fail the next run.
-    if (targetCapability.kind === 'knowledge') {
-      setPlanRefusal('Knowledge is a folder or file you choose. Select the agent and use Add folder… or Add file… in its Context.')
+    // A knowledge card with no path was placed from the Library before ADR 0036. Its name points
+    // at nothing the daemon can read, so wiring it would only fail the next run.
+    if (!teamFileKind(targetCapability)) {
+      setPlanRefusal('Knowledge is a folder or file you choose. Use Add folder… or Add file…, then connect its card.')
       return
     }
-    const kind = teamFileKind(targetCapability)
     const agent = doc.nodes.find((node) => node.id === source)?.data.agent
-    if (!kind || !agent) {
-      setPlanRefusal('Connect skills and tools to the agent that should use them.')
+    const already = agent?.capabilities ?? []
+    const entry = capabilityForCard(targetCapability, already)
+    if (!entry || !agent) {
+      setPlanRefusal('Connect skills, tools, folders and files to the agent that should use them.')
       return
     }
     // Executable configuration, like a skill (ADR 0012): the daemon copies a skill into the
-    // agent's workspace and hands a tool to its harness as an MCP server (ADR 0029). Provenance
-    // and the agent's harness are independent.
-    const already = agent.capabilities ?? []
+    // agent's workspace, hands a tool to its harness as an MCP server (ADR 0029), and supplies a
+    // folder or file from its path (ADR 0035). Provenance and the agent's harness are independent.
     if (!already.some((capability) => capabilityIsCard(capability, targetCapability))) {
-      doc.setAgentCapabilities(source, [...already, { kind, name: targetCapability.name }])
+      doc.setAgentCapabilities(source, [...already, entry])
     }
     setStatusAnnouncement(`${nodeNames.get(source) ?? source} ${RELATION[targetCapability.kind]} ${targetCapability.name}.`)
   }, [capabilityCards, allWiringEdges, legacyWiring, doc, nodeNames])
@@ -1491,6 +1567,23 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     setStatusAnnouncement(`${payload.name} placed on the canvas. Connect an agent to it to say the agent ${RELATION[payload.kind]} it.`)
     return id
   }, [capabilityCards, composerLayout, doc])
+
+  /**
+   * Folders and files chosen in the add panel become cards no agent reads yet (ADR 0042). They are
+   * placed together so several files added at once do not land on one spot.
+   */
+  const placeSources = useCallback((sources: readonly ChosenSource[]) => {
+    if (sources.length === 0) return
+    const centre = flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+    const taken = [...doc.nodes.map((node) => node.position), ...capabilityCards.map((node) => node.position)]
+    for (const source of sources) {
+      const at = freeCapabilitySlot({ x: snapToGrid(centre.x), y: snapToGrid(centre.y) }, taken)
+      taken.push(at)
+      composerLayout.place({ kind: 'knowledge', name: source.name, source: source.source, path: source.path }, at)
+    }
+    const names = sources.map((source) => source.name).join(', ')
+    setStatusAnnouncement(`${names} ${sources.length === 1 ? 'is' : 'are'} on the canvas. Connect ${sources.length === 1 ? 'it' : 'them'} to every agent that should read ${sources.length === 1 ? 'it' : 'them'}.`)
+  }, [capabilityCards, composerLayout, doc.nodes, flow])
 
   /**
    * A job can bring skills (ADR 0030): the new agent's team-file entry already names them, and a
@@ -2044,7 +2137,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
 
         {(!runView && !runSetup || runPresentation === 'trace') && (
           // One add panel on both canvases (ADR 0041); a run adds what it used, at the top.
-          <ComponentPalette harnesses={harnesses} harnessSearchPath={harnessSearchPath} knownHarnessIds={knownHarnessIds} harnessesLoading={harnessesLoading} harnessesError={harnessesError} onRetry={onRetryHarnesses} capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={() => { onRetryCapabilities(); onRetryHarnesses() }} onInspectCapability={inspectCapability} onDragStateChange={setLibraryDragging} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} agentNames={nodeNames} onRevealEvidence={(id) => {
+          <ComponentPalette harnesses={harnesses} harnessSearchPath={harnessSearchPath} knownHarnessIds={knownHarnessIds} harnessesLoading={harnessesLoading} harnessesError={harnessesError} onRetry={onRetryHarnesses} capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={() => { onRetryCapabilities(); onRetryHarnesses() }} onInspectCapability={inspectCapability} onDragStateChange={setLibraryDragging} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} agentNames={nodeNames} teamPath={doc.path} onAddSources={editable ? placeSources : undefined} onRevealEvidence={(id) => {
             // Folded is the default, so "reveal" means: fan the agent that owns this card, then
             // frame it. Framing the agent rather than the card is deliberate — the evidence node
             // does not exist yet on this render.
@@ -2159,20 +2252,23 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             agents={doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => ({ id: node.id, name: node.data.agent.name, harnessId: harnessIdForAgent(node.data.agent, harnesses), harness: appLabelForAgent(node.data.agent, harnesses), connected: (node.data.agent.capabilities ?? []).some(wiresInspected) }))}
             onToggleAgent={(id, connected) => {
               const kind = inspectedTeamKind
-              if (!editable || !kind) return
+              if (!editable || !kind || !inspectedCard) return
               const agent = doc.nodes.find((node) => node.id === id)?.data.agent
               if (!agent) return
               const current = agent.capabilities ?? []
               const name = inspectedCapability.item.name
-              if (connected && !inspectedCapabilityNode) placeCapability(JSON.stringify({kind: inspectedCapability.kind, name, source: inspectedCapability.item.source}), flow.screenToFlowPosition({x: window.innerWidth / 2, y: window.innerHeight / 2}))
               const others = current.filter((capability) => !wiresInspected(capability))
-              doc.setAgentCapabilities(id, connected ? [...others, {kind, name}] : others)
-              setStatusAnnouncement(`${name} ${connected ? (kind === 'skill' ? 'is required by' : 'is connected to') : 'was disconnected from'} ${agent.name}. Save the team to keep this change.`)
+              const entry = capabilityForCard(inspectedCard, others)
+              if (!entry) return
+              if (connected && !inspectedCapabilityNode) placeCapability(JSON.stringify({ kind: inspectedCapability.kind, name, source: inspectedCapability.item.source, path: inspectedCard.path }), flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))
+              if (!connected && inspectedCapabilityNode) keepUnusedCard(inspectedCapabilityNode, id)
+              doc.setAgentCapabilities(id, connected ? [...others, entry] : others)
+              setStatusAnnouncement(`${name} ${connected ? (kind === 'skill' ? 'is required by' : kind === 'knowledge' ? 'is supplied to' : 'is connected to') : 'was disconnected from'} ${agent.name}. Save the team to keep this change.`)
             }}
             readOnly={!editable}
             onAdd={() => {
               if (!editable) return
-              const id = placeCapability(JSON.stringify({ kind: inspectedCapability.kind, name: inspectedCapability.item.name, source: inspectedCapability.item.source }), flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))
+              const id = placeCapability(JSON.stringify({ kind: inspectedCapability.kind, name: inspectedCapability.item.name, source: inspectedCapability.item.source, path: inspectedCapability.item.path }), flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))
               if (id) setSelectedCapabilities(new Set([id]))
             }}
             onReveal={() => {

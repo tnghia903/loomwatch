@@ -120,6 +120,12 @@ capabilities:
   - { kind: knowledge, name: Q3 memo.pdf, path: news-desk.files/Q3 memo.pdf }              # added
 ```
 
+On the canvas every folder or file is one card, keyed by its `path`, with a line from each agent
+whose `capabilities` name that path. Drawing a line from another agent adds the same `path` to it
+under a label of its own; taking the last line away keeps the card in `<team>.layout.json` with its
+`path`. Skills and tools named in the team file get a card the same way, whether or not the layout
+file has one.
+
 Knowledge without a `path` fails the run and says to add it again. The Library used to list the
 project the teams live in and the folders OpenCode had worked in, and an entry could name one of
 those; it no longer does ([ADR 0036](decisions/0036-knowledge-is-chosen-not-discovered.md)).
@@ -131,13 +137,16 @@ against the team file's folder (`~/` against your home folder). The agent gets t
 up to 12,000 characters, and a read grant for that one file. A PDF's text is extracted with
 `pdftotext` when it is installed (`brew install poppler`); without it, the agent is told where the
 PDF is. When a file is longer than that, the prompt carries its opening, and the full text is put
-in the agent's working folder as `knowledge/<file>`. Only `knowledge` may have a `path`.
+in the prepared folder as `knowledge/<file>`, which the prompt names. Only `knowledge` may have a
+`path`.
 
 **Knowledge** is supplied in the agent's opening prompt as the snapshot described above: a
 folder's top-level listing and README, or a file's text. It is framed as source material, never as
-instructions. A folder or file is also a read grant for it. On Claude Code, LoomWatch writes
-`permissions.additionalDirectories` and a `Read(//<folder>/**)` allow rule into the workspace's
-`.claude/settings.json`; other apps apply their own rules. One agent's knowledge is capped at
+instructions. A folder or file is also a read grant for it. For an agent that starts in the
+prepared folder on Claude Code, LoomWatch writes `permissions.additionalDirectories` and a
+`Read(//<folder>/**)` allow rule into that folder's `.claude/settings.json`. Every app also asks
+LoomWatch before reading outside its folder, and LoomWatch approves reads of connected folders and
+files. One agent's knowledge is capped at
 64 KiB, and a run over the cap fails rather than shortening it.
 
 **Tools** are MCP servers you already configured for Claude Code (`~/.claude.json`,
@@ -152,12 +161,22 @@ rule. A server that is disabled, needs a variable the daemon lacks, or uses a se
 carry (a Codex `cwd` or tool filter) fails the run with the reason. See
 [ADR 0029](decisions/0029-deliver-knowledge-and-tools.md).
 
-An agent that declares capabilities runs in `<team dir>/.loomwatch/<team>/<agent>/` instead of its
-declared `spawn.cwd`. LoomWatch copies each wired skill's whole bundle from whichever harness or
-shared location supplied it into the target harness's project-local discovery directory:
-`.claude/skills/` for Claude Code and `.agents/skills/` for Codex and the other supported Agent
-Skills harnesses. The declared cwd's `.claude/settings.json` is carried across. An agent that
-declares none keeps its `spawn.cwd` exactly as before. Naming a capability grants nothing: the
+LoomWatch prepares `<team dir>/.loomwatch/<team>/<agent>/` for an agent that declares
+capabilities. It copies each wired skill's whole bundle from whichever harness or shared location
+supplied it into the target harness's project-local discovery directory: `.claude/skills/` for
+Claude Code and `.agents/skills/` for Codex and the other supported Agent Skills harnesses. Where
+the agent *starts* depends on its `spawn.cwd` ([ADR 0042](decisions/0042-sources-on-the-canvas.md)):
+
+- **The team's own folder** (`cwd: .`, or any folder that holds the team file): it starts in the
+  prepared folder instead, so it never reads or changes your other team files. The declared
+  folder's `.claude/settings.json` is carried across. The same happens to an agent allowed to edit
+  files, or one whose Brief is kept in its app's memory file.
+- **A folder you chose**: it starts there, however much is connected. Its skills and the full texts
+  of long files are read from the prepared folder by the full paths its prompt names, and LoomWatch
+  approves those reads. Nothing is written into your folder, so the Brief reaches the agent in its
+  prompt only.
+
+An agent that declares nothing keeps its `spawn.cwd` exactly as before. Naming a capability grants nothing: the
 harness still authorises every use. A skill that is not installed, or a harness whose project
 skill directory LoomWatch does not know, fails the run before anything spawns rather than silently
 doing nothing. See [ADR 0012](decisions/0012-capability-delivery.md) and

@@ -157,6 +157,21 @@ fn file_contents(file: &Path) -> Result<(String, String, Option<TextCopy>), Stri
     })
 }
 
+/// Where an excerpt says its full text is, for an agent that starts in its workspace.
+fn copy_location(copy_name: &str) -> String {
+    format!("{TEXT_COPY_DIR}/{copy_name} in your working folder")
+}
+
+/// An excerpt's note with the full text named by its path in `folder`, for an agent that works in
+/// a folder the operator chose and reads its copies from the workspace (ADR 0042).
+#[must_use]
+pub fn relocate_copy_note(content: &str, copy_name: &str, folder: &Path) -> String {
+    content.replace(
+        &copy_location(copy_name),
+        &folder.join(copy_name).display().to_string(),
+    )
+}
+
 /// The whole text when it is short, or its opening, cut at a line, with where the rest is.
 fn excerpt(text: &str, copy_name: &str) -> (String, Option<TextCopy>) {
     let text = text.replace('\u{c}', "\n");
@@ -172,8 +187,9 @@ fn excerpt(text: &str, copy_name: &str) -> (String, Option<TextCopy>) {
         .map_or(head.as_str(), |index| &head[..index]);
     let rest = total - cut.chars().count();
     let content = format!(
-        "{}\n\n… {rest} more characters. The full text is in {TEXT_COPY_DIR}/{copy_name} in your working folder; read it when the task needs more.",
-        cut.trim_end()
+        "{}\n\n… {rest} more characters. The full text is in {}; read it when the task needs more.",
+        cut.trim_end(),
+        copy_location(copy_name)
     );
     (
         content,
