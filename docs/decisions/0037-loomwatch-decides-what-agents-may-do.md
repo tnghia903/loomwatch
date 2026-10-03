@@ -13,6 +13,15 @@
 - **Amends:** the rule ADRs 0010, 0029 and 0033 relied on, that every permission prompt is refused
   and the app's own settings grant everything else. Prompts are now answered by a policy.
   ADR 0029's Claude settings grants for connected knowledge and tools stay as they are.
+- **Amended 2026-10-03:** decision 3 now holds for Codex. In run 6ebcd025 a Codex Fact-checker was
+  refused its own team's `roster`, and Codex reported "user cancelled MCP tool call". ACP's
+  `session/request_permission` carries a tool call *update*, and Codex's names only the call:
+  `{toolCallId, kind: execute, status}`. The title and input came earlier, in the `tool_call` with the
+  same id, so no title shape matched and the prompt was judged as a command. `acp.rs` now keeps
+  each in-flight call's title, kind, input, locations and `_meta` (`OpenToolCalls`) and fills in what
+  a prompt leaves out before deciding. It also matches Codex's own shapes, `mcp.<server>.<tool>`
+  and `rawInput: {server, tool}`, but only on a call Codex marks `is_mcp_tool_call` or
+  `is_mcp_tool_approval`. The archive still records the prompt exactly as the app sent it.
 
 ## Context
 
@@ -82,8 +91,11 @@ The operator asked for the control to live in `LoomWatch`, not in each app.
 - Verified live against Claude Code on 2026-10-02 (`claude-agent-acp`, one prompt, no `LoomWatch`
   run). The session started in `auto` from the operator's settings and accepted `session/set_mode`
   `default`. It then asked before its web search, as `kind: fetch` with `allow_once`,
-  `allow_always` and `reject_once` offered. Approving once let the search complete. How Codex's and
-  Gemini's own tools map onto ACP kinds is not verified yet. Gemini's web search may arrive as
-  `search`, which counts as a read and is declined outside the agent's folder.
+  `allow_always` and `reject_once` offered. Approving once let the search complete. Codex
+  (`codex-acp` 2.1.1, in `read-only`) labels every MCP tool call `execute` and asks before each one,
+  and its web search arrived as `search` without asking (run 6ebcd025). So in Codex a tool from a
+  server `LoomWatch` did not connect falls under `commands`, not under its own switch. How Gemini's
+  own tools map onto ACP kinds is not verified yet. Gemini's web search may arrive as `search`,
+  which counts as a read and is declined outside the agent's folder.
 - Asking the operator live, a run that pauses with Allow and Deny, can now be built on this one
   decision point. It is not part of this ADR.
