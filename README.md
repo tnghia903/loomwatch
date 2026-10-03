@@ -367,7 +367,9 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 Then open a new terminal window so it finds the new tools.
 
 To run real agents, you also need at least one AI app installed and signed in, such as Claude Code,
-Codex, Gemini CLI or OpenCode. You do **not** need one for the demo.
+Codex, Gemini CLI or OpenCode. You do **not** need one for the demo. If you have none yet, the home
+screen's **Set up an AI app** gives each app's install and sign-in commands and notices when it is
+ready. OpenCode works with free models and no account.
 
 Everything below is typed in a terminal (Terminal on macOS). Use a terminal where your AI app's
 command already works, because LoomWatch finds your apps, skills and tools through it.
@@ -495,7 +497,9 @@ new instructions and choose **Follow up**; **Redo from** can start again at a se
 1. Install and sign in to the AI app you want to use (Claude Code, Codex or OpenCode, for example)
    in Terminal, and confirm it works on its own.
 2. Start LoomWatch from a terminal where that app is available. The bottom of the home screen
-   lists the AI apps it found.
+   lists the AI apps it found. If none can run, **Set up an AI app** opens on the home screen. It
+   checks each app's sign-in, not just that it is installed, and says when LoomWatch needs a
+   restart to use an app installed after it started.
 3. Click **New team**, give it a name and choose how it should start:
    - **One assistant** — a single agent that does the whole task (recommended to begin with).
    - **Researcher and writer** — one agent gathers facts, a second writes the result.
@@ -626,7 +630,9 @@ connected app proposes or starts appears in the Ask panel under **From your conn
 <summary><strong>Do I need an API key?</strong></summary>
 
 No. LoomWatch drives the AI apps you have already signed in to, such as Claude Code, Codex, Gemini
-CLI or OpenCode, with their own sign-in. The offline demo needs no AI account at all.
+CLI or OpenCode, with their own sign-in. The offline demo needs no AI account at all, and OpenCode
+runs real agents on its free models without one. Free models change often, and some let their
+maker learn from what you send, so keep private work for a model you pay for.
 
 </details>
 

@@ -30,18 +30,32 @@ export interface DetectedHarness {
   healthReason?: string
   /** The harness's own error behind `healthReason`, for anyone who needs the exact message. */
   healthDetail?: string
+  /**
+   * What is behind `health: 'error'` when the daemon knows for certain: `signed_out` when the
+   * app's own CLI said so (`claude auth status`, `codex login status`). Absent otherwise.
+   */
+  healthCause?: 'signed_out'
+  /**
+   * Installed after LoomWatch started, in a folder the PATH that runs start from lacks: listed and
+   * checkable, but no run can start it until LoomWatch restarts. Absent otherwise.
+   */
+  needsRestart?: boolean
   spawn: HarnessSpawn
 }
 
-/** True when an app can be offered for new work: it speaks ACP and did not last fail to start. */
+/**
+ * True when an app can be offered for new work: it speaks ACP, did not last fail to start, and a
+ * run can find it.
+ */
 export function isHarnessRunnable(harness: DetectedHarness): boolean {
-  return harness.acpAvailable !== false && harness.health !== 'error'
+  return harness.acpAvailable !== false && harness.health !== 'error' && !harness.needsRestart
 }
 
 /** Why an app cannot be used right now, in plain words, or `null` when nothing is known wrong. */
 export function harnessProblem(harness: DetectedHarness): string | null {
   if (harness.acpAvailable === false) return harness.unavailableReason ?? `${harness.spawn.cmd} not found on PATH`
   if (harness.health === 'error') return harness.healthReason ?? `${harness.name}: sign-in or version problem — run "${harness.command}" in Terminal to fix`
+  if (harness.needsRestart) return `${harness.name} was installed after LoomWatch started. Restart LoomWatch to use it.`
   return null
 }
 

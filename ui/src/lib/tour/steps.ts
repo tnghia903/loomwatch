@@ -86,8 +86,9 @@ export const TOUR_STEPS: readonly TourStep[] = [
         ? 'LoomWatch is looking for the AI apps on this computer. Your agents run inside them, signed in as you.'
         : readyApps.length > 0
           ? `LoomWatch found ${listNames(readyApps)}. Your agents run inside these apps, signed in as you, so there is nothing new to set up.`
-          : 'No AI app is ready yet. Install Claude Code, Codex or OpenCode and sign in to it once, then press Check again down here. You can keep going with the guide meanwhile.',
-      target: ['[data-tour="apps"]'],
+          : 'No AI app is ready yet. Set up an AI app shows how to install one and sign in. It notices on its own when the app is ready. You can keep going with the guide meanwhile.',
+      // The setup panel when it is open; the footer's app status otherwise.
+      target: ['[data-tour="app-setup"]', '[data-tour="apps"]'],
       sides: ['top'],
       advance: 'next',
       dim: true,

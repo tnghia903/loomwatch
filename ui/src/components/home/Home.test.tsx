@@ -53,11 +53,40 @@ describe('Home', () => {
     expect(await screen.findByRole('button', { name: /research-team/ })).toBeInTheDocument()
   })
 
-  it('says how to start when there are no teams, and when no AI app is installed', async () => {
-    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
+  it('says how to start when there are no teams, and opens app setup when no AI app is installed', async () => {
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/harnesses' ? { harnesses: [], searchedPath: [], knownIds: [] } : { root: '/teams', files: [], teams: [] }))
     renderHome([])
     expect(await screen.findByText(/No teams yet/)).toBeInTheDocument()
-    expect(screen.getByText(/No AI apps found/)).toBeInTheDocument()
+    expect(screen.getByText('No AI app is ready yet.')).toBeInTheDocument()
+    const setup = screen.getByRole('region', { name: 'Set up an AI app' })
+    expect(within(setup).getByRole('listitem', { name: /^Claude Code: Not installed/ })).toBeInTheDocument()
+    // Hidden, it is one footer link away.
+    fireEvent.click(within(setup).getByRole('button', { name: 'Hide' }))
+    expect(screen.queryByRole('region', { name: 'Set up an AI app' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Set up an AI app' }))
+    expect(screen.getByRole('region', { name: 'Set up an AI app' })).toBeInTheDocument()
+  })
+
+  it('keeps app setup out of the way once an app can run, one footer link away', async () => {
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/harnesses' ? { harnesses: [claude], searchedPath: [], knownIds: [] } : { root: '/teams', files: [], teams: [] }))
+    renderHome([claude])
+    await screen.findByText(/No teams yet/)
+    expect(screen.queryByRole('region', { name: 'Set up an AI app' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Set up another app' }))
+    expect(screen.getByRole('region', { name: 'Set up an AI app' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Set up another app' })).toBeNull()
+  })
+
+  it('takes someone from New team to app setup when no app can build a template', async () => {
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/harnesses' ? { harnesses: [], searchedPath: [], knownIds: [] } : { root: '/teams', files: [], teams: [] }))
+    renderHome([])
+    await screen.findByText(/No teams yet/)
+    fireEvent.click(within(screen.getByRole('region', { name: 'Set up an AI app' })).getByRole('button', { name: 'Hide' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New team' }))
+    const dialog = screen.getByRole('dialog', { name: 'Create a team' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Set up an AI app' }))
+    expect(screen.queryByRole('dialog', { name: 'Create a team' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Set up an AI app' })).toBeInTheDocument()
   })
 
   it('creates a ready-to-run team from a template and opens it', async () => {
@@ -142,14 +171,36 @@ describe('Home', () => {
   it('re-checks a failing app on request, then reloads the list', async () => {
     fetchMock.mockImplementation((url: string) => {
       if (url === '/api/harnesses/gemini/models') return respond({ error: 'still signed out' }, 502)
+      if (url === '/api/harnesses') return respond({ harnesses: [brokenGemini], searchedPath: [], knownIds: [] })
+      if (url.startsWith('/api/commands?')) return respond({ commands: [{ cmd: 'gemini', status: 'found', path: '/bin/gemini' }] })
       return respond({ root: '/teams', files: [], teams: [] })
     })
     const { onRetryHarnesses } = renderHome([brokenGemini])
     await screen.findByText(/No teams yet/)
     expect(screen.getByText('None of your AI apps can start right now.')).toBeInTheDocument()
+    // Hidden, the footer re-checks every failing app at once.
+    fireEvent.click(within(screen.getByRole('region', { name: 'Set up an AI app' })).getByRole('button', { name: 'Hide' }))
+    expect(within(screen.getByRole('list', { name: 'Apps that need attention' })).getByText(geminiReason)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
     await waitFor(() => expect(onRetryHarnesses).toHaveBeenCalledTimes(1))
     expect(fetchMock.mock.calls.some(([url]) => url === '/api/harnesses/gemini/models')).toBe(true)
+  })
+
+  it('lists a failing app inside app setup, with its own Check again', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === '/api/harnesses/gemini/models') return respond({ error: 'still signed out' }, 502)
+      if (url === '/api/harnesses') return respond({ harnesses: [brokenGemini], searchedPath: [], knownIds: [] })
+      if (url.startsWith('/api/commands?')) return respond({ commands: [{ cmd: 'gemini', status: 'found', path: '/bin/gemini' }] })
+      return respond({ root: '/teams', files: [], teams: [] })
+    })
+    renderHome([brokenGemini])
+    await screen.findByText(/No teams yet/)
+    // While setup is open it is the one place for app problems; the footer only states the outcome.
+    expect(screen.queryByRole('list', { name: 'Apps that need attention' })).toBeNull()
+    const gemini = within(screen.getByRole('region', { name: 'Set up an AI app' })).getByRole('listitem', { name: /^Gemini: Can’t start/ })
+    expect(within(gemini).getByRole('alert')).toHaveTextContent(geminiReason)
+    fireEvent.click(within(gemini).getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/harnesses/gemini/models')).toBe(true))
   })
 
   it('never builds a template on an app that failed to start', async () => {

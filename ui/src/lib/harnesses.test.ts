@@ -113,6 +113,12 @@ describe('harness readiness', () => {
     expect(harnessProblem({ ...failing, healthReason: undefined })).toBe('Gemini: sign-in or version problem — run "gemini" in Terminal to fix')
   })
 
+  it('does not offer an app a run cannot start until LoomWatch restarts, however well it checked', () => {
+    const fresh = { ...gemini, health: 'ok' as const, needsRestart: true }
+    expect(isHarnessRunnable(fresh)).toBe(false)
+    expect(harnessProblem(fresh)).toBe('Gemini was installed after LoomWatch started. Restart LoomWatch to use it.')
+  })
+
   it('reports a missing ACP bridge before any health verdict', () => {
     const pi = { ...gemini, id: 'pi', name: 'pi', acpAvailable: false, unavailableReason: 'pi has no ACP adapter.', health: 'error' as const, healthReason: 'unused' }
     expect(isHarnessRunnable(pi)).toBe(false)

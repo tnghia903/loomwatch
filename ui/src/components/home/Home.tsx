@@ -12,6 +12,7 @@ import { ChipDot, LoomMark } from '../ui/glyphs'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
 import { fabricFor } from '../../lib/story/fabric'
 import { TeamFabric } from './TeamFabric'
+import { AppSetup } from './AppSetup'
 import { DeleteTeamDialog } from './DeleteTeamDialog'
 import { NewTeamDialog } from './NewTeamDialog'
 import { TeamCardMenu } from './TeamCardMenu'
@@ -93,6 +94,18 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
   // Installed and ACP-capable, but the daemon's last attempt to start it failed. An app with no ACP
   // bridge at all (`acpAvailable: false`) is the Library's to explain, not the first-run footer's.
   const failing = harnesses.filter((harness) => harness.acpAvailable !== false && harness.health === 'error')
+  // "Set up an AI app" opens by itself when nothing can run, and stays open while the person
+  // installs and signs in, even through the moments an app is found but not yet checked.
+  // Judged on loaded lists only, so a reload (a footer "Check again") never reopens a panel the
+  // person hid; it reopens when an app that ran stops running.
+  const [setupOpen, setSetupOpen] = useState(false)
+  const [nothingRan, setNothingRan] = useState(false)
+  const nothingRuns = !harnessesError && runnable.length === 0
+  if (!harnessesLoading && nothingRuns !== nothingRan) {
+    setNothingRan(nothingRuns)
+    if (nothingRuns) setSetupOpen(true)
+  }
+  const openSetup = () => { setCreating(false); setSetupOpen(true) }
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase()
     if (!teams || !needle) return teams ?? []
@@ -125,13 +138,15 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
   }
   const recheckAction = <button type="button" className="link" onClick={() => void recheck()} disabled={rechecking}>{rechecking ? 'Checking…' : 'Check again'}</button>
 
+  // The panel has its own per-app checks, so while it is open the footer only states the outcome.
+  const setupAction = setupOpen ? undefined : <button type="button" className="link" onClick={openSetup}>{runnable.length > 0 ? 'Set up another app' : 'Set up an AI app'}</button>
   let status: { state: 'dirty' | 'saved' | 'incomplete' | 'invalid'; text: string; action?: ReactNode }
   if (harnessesLoading) status = { state: 'dirty', text: 'Looking for AI apps on this computer…' }
   else if (harnessesError) status = { state: 'invalid', text: `Couldn't check which AI apps are installed: ${harnessesError}`, action: <button type="button" className="link" onClick={onRetryHarnesses}>Try again</button> }
-  else if (runnable.length === 0 && failing.length > 0) status = { state: 'incomplete', text: 'None of your AI apps can start right now.', action: recheckAction }
-  else if (runnable.length === 0) status = { state: 'incomplete', text: 'No AI apps found. Install Claude Code, Codex or OpenCode, sign in, then try again.', action: <button type="button" className="link" onClick={onRetryHarnesses}>Check again</button> }
-  else status = { state: 'saved', text: `Ready to use: ${runnable.map((harness) => harness.name).join(', ')}`, ...(failing.length > 0 ? { action: recheckAction } : {}) }
-  const problems = harnessesLoading || harnessesError ? [] : failing
+  else if (runnable.length === 0 && failing.length > 0) status = { state: 'incomplete', text: 'None of your AI apps can start right now.', action: setupOpen ? undefined : <>{recheckAction}{setupAction}</> }
+  else if (runnable.length === 0) status = { state: 'incomplete', text: 'No AI app is ready yet.', action: setupAction }
+  else status = { state: 'saved', text: `Ready to use: ${runnable.map((harness) => harness.name).join(', ')}`, action: <>{failing.length > 0 && !setupOpen && recheckAction}{setupAction}</> }
+  const problems = harnessesLoading || harnessesError || setupOpen ? [] : failing
 
   return (
     <div className="lw-home" data-tour="home">
@@ -162,6 +177,14 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
             <li><b>3</b><span><strong>Review</strong> each step and the final result.</span></li>
           </ol>
         </section>
+
+        {setupOpen && (
+          <AppSetup
+            harnesses={harnesses}
+            onChanged={onRetryHarnesses}
+            onHide={() => setSetupOpen(false)}
+          />
+        )}
 
         <section className="home-teams" aria-labelledby="home-teams-title">
           <div className="home-teams-head">
@@ -219,6 +242,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
           existingPaths={[...(teams?.map((team) => team.path) ?? []), ...trashed]}
           onCreateBlank={onCreateBlank}
           onClose={() => setCreating(false)}
+          onSetUpApps={openSetup}
         />
       )}
       {deleting && (
