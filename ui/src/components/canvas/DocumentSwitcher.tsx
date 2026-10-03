@@ -193,8 +193,11 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
               {onDelete && <button type="button" className="link alert" onClick={() => { setSwitcherOpen(false); onDelete() }} disabled={unsaved} title={unsaved ? 'Save or discard your changes first' : undefined}>Delete team…</button>}
               <button type="button" className="link" onClick={() => void navigator.clipboard?.writeText(path)}>Copy path</button>
               <button type="button" className="link" onClick={onShowYaml}>Show YAML</button>
-              <button type="button" className="link" onClick={onReload} disabled={saveState === 'new'}>Reload from disk</button>
-              {dirty && saveState !== 'new' && <button type="button" className="link alert" onClick={() => discardConfirm ? (onDiscard(), setDiscardConfirm(false), setSwitcherOpen(false)) : setDiscardConfirm(true)}>{discardConfirm ? 'Discard changes?' : 'Discard'}</button>}
+              {/* Both read the file again (ADR 0043): with changes it is Discard, which asks first;
+                  without, it is Reload, which picks up an edit made outside LoomWatch. */}
+              {dirty && saveState !== 'new'
+                ? <button type="button" className="link alert" onClick={() => discardConfirm ? (onDiscard(), setDiscardConfirm(false), setSwitcherOpen(false)) : setDiscardConfirm(true)}>{discardConfirm ? 'Discard changes?' : 'Discard'}</button>
+                : <button type="button" className="link" onClick={onReload} disabled={saveState === 'new'}>Reload from disk</button>}
             </span>
             <span className="pop-note t-meta">Saves keep your comments and key order.</span>
           </div>

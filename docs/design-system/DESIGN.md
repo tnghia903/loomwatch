@@ -384,7 +384,7 @@ and the app.
 **Buttons.** `.btn` 28 px, transparent with a hairline border, `ink-2` → hover `accent-tint` +
 `ink`. `.btn-primary` is the gold fill (rationed by Law 2). `.btn-lg` 44 px for Home/empty
 states; `.btn-head` 42 px for workspace header actions (*Run team*, *Review output*,
-*Edit team*). `.btn-danger` turns red on hover; `.btn-danger-fill` exists only inside an inline
+*Full trace*). `.btn-danger` turns red on hover; `.btn-danger-fill` exists only inside an inline
 confirm. `.link` is gold text. `.iconbtn` 32 px; pressed = gold glyph. Touch: all become 44 px.
 
 **Switches.** The Run | Build view switch (header centre) and the Story · Team · Trace depth dial
@@ -475,7 +475,8 @@ fails, a gold halo pulses when it waits on you. The operator wears a dashed gold
 
 **Run receipt & timeline.** The receipt is a slightly rotated paper slip in mono ("RUN RECEIPT ·
 Run 21 · Finished", asked / team / took / ran on, then who did what, what failed and what happened
-instead, "Worth a look"), with *Copy as Markdown* and *See every event*. The weft timeline has
+instead, "Worth a look"), with *Copy receipt*; the full trace opens from the run's heading, its one
+way in (ADR 0043). The weft timeline has
 one lane per agent: a graphite warp line, a gold thread where it worked (blue while live, red
 where it failed, a dashed gold outline for time spent waiting on you), stitches for recorded
 calls and a gold playhead; dragging narrates each moment in a serif sentence.
@@ -511,7 +512,10 @@ state stays legible through shape and words.
 - **Easy answers are easy.** "Looks good" approves without a comment; "Send back to Researcher"
   uses the agent's name.
 - **Sentence case** for buttons and headings; `micro` uppercase only for eyebrows and status
-  words. Verbs on buttons: *New team*, *Run team*, *Review output*, *Copy as Markdown*.
+  words. Verbs on buttons: *New team*, *Run team*, *Review output*, *Copy receipt*.
+- **One control per thing.** On any one screen an action has one visible control, and it sits in
+  the same place on every screen (ADR 0043). Keyboard shortcuts and the command palette reach
+  the same actions faster; they are not second controls.
 - **Empty states invite, they don't apologise:** "No runs yet — the first one starts the cloth."
 - **Keys are for experts, never required:** every action is clickable; key hints are hidden on
   touch screens.

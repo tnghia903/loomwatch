@@ -4,7 +4,6 @@ import { preloadMarkdown } from '../ui/preloadMarkdown'
 import { SuppliedInstructions } from './SuppliedInstructions'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  ArrowDown,
   ArrowRight,
   Check,
   Copy,
@@ -50,7 +49,6 @@ export interface DeliveryLaneProps extends RunColumnProps {
   pipeline: boolean
   linearPipeline?: boolean
   onTrace: () => void
-  onHistory?: () => void
   /** ADR 0037: allow what a refused receipt line names, for that agent's next runs. */
   onAllow?: (agentId: string, key: AllowSwitch) => void
   /** Leave this finished run for a blank request, for a task that is not a follow-up of it. */
@@ -119,7 +117,6 @@ export function DeliveryLane({
   onSelectAgent,
   onTrace,
   onAllow,
-  onHistory,
   onNewRun,
   run = null,
   sendsTo = null,
@@ -147,7 +144,7 @@ export function DeliveryLane({
   useEffect(() => { if (reviewOpen) reviewDialog.current?.showModal() }, [reviewOpen])
   const receiptBack = useRef<HTMLButtonElement>(null)
   const capabilityButtons = useRef(new Map<string, HTMLButtonElement>())
-  const { inspectHandover, toggleProvenance, focusComposer, reusePrompt } =
+  const { inspectHandover, toggleProvenance, reusePrompt } =
     useCanvasActions()
   const selected =
     agents.find((node) => node.id === selectedId) ??
@@ -317,17 +314,20 @@ export function DeliveryLane({
               {prompt || (planned ? 'Describe the result you want to create.' : `${elapsed} · ${agents.length} agents`)}
             </p>
           </div>
-          <div className="delivery-heading-acts">
-            {/* A finished run otherwise only offers to continue itself; a different task needs a
-                way back to the blank request without a detour through Build. */}
-            {onNewRun && terminal && !planned && <button className="btn" onClick={onNewRun}><Plus size={15} /> New run</button>}
-            {output.text && !output.streaming && !planned ? <button className="btn btn-primary" onClick={openReview}>{reviewed ? 'View review' : 'Review output'} <ArrowRight size={15} /></button> : <button className="btn" onClick={onTrace}>
-              <Network size={15} /> {planned ? 'Edit team' : 'Full trace'}
-            </button>}
-          </div>
+          {/* One control per thing (ADR 0043): the full trace opens only here, review only here, and
+              a plan goes back to its team through the Build tab. */}
+          {!planned && (
+            <div className="delivery-heading-acts">
+              {/* A finished run otherwise only offers to continue itself; a different task needs a
+                  way back to the blank request without a detour through Build. */}
+              {onNewRun && terminal && <button className="btn" onClick={onNewRun}><Plus size={15} /> New run</button>}
+              <button className="btn" onClick={onTrace}><Network size={15} /> Full trace</button>
+              {output.text && !output.streaming && <button className="btn btn-primary" onClick={openReview}>{reviewed ? 'View review' : 'Review output'} <ArrowRight size={15} /></button>}
+            </div>
+          )}
         </header>
         <article className="delivery-request">
-          <div className="delivery-request-label"><span className="delivery-eyebrow">Request</span>{onHistory && <button className="delivery-link" onClick={onHistory}>Run history <ArrowDown size={12} /></button>}</div>
+          <div className="delivery-request-label"><span className="delivery-eyebrow">Request</span></div>
           <p ref={requestText} className="selectable">
             {prompt ||
               (planned
@@ -335,7 +335,7 @@ export function DeliveryLane({
                 : 'No original prompt was captured.')}
           </p>
         </article>
-        {runReceipt && <RunReceipt receipt={runReceipt} onInspectEvidence={onInspectEvidence} onSelectAgent={showStage} onTrace={onTrace} onAllow={onAllow} />}
+        {runReceipt && <RunReceipt receipt={runReceipt} onInspectEvidence={onInspectEvidence} onAllow={onAllow} />}
         {!planned && projection.startedAt && <WeftBar projection={projection} order={weftOrder} relay={pipeline} onInspectEvidence={onInspectEvidence} />}
         <div className="delivery-section-head">
           <h2>
@@ -365,8 +365,9 @@ export function DeliveryLane({
                 role="listitem"
                 key={node.id}
               >
+                {/* The arrow only shows the order; what an agent received opens from its own card. */}
                 {index > 0 && pipeline && linearPipeline && (
-                  <button className={`delivery-handoff-arrow prototype-handoff ${working ? 'passing' : ''}`} aria-label={`Inspect handoff to ${agent.name}`} onClick={() => inspectHandover?.(node.id)}><span>Handoff</span><ArrowRight size={24} /><small>View handoff</small></button>
+                  <span className={`delivery-handoff-arrow prototype-handoff ${working ? 'passing' : ''}`} aria-hidden="true"><span>Handoff</span><ArrowRight size={24} /></span>
                 )}
                 <article
                   id={`delivery-stage-${node.id}`}
@@ -722,12 +723,14 @@ export function DeliveryLane({
             <span>
               Loading evidence and output quality are separate checks.
             </span>
-            <button
-              className="delivery-link"
-              onClick={planned ? onTrace : toggleProvenance}
-            >
-              {planned ? 'Edit team' : 'All activity'} <ArrowRight size={13} />
-            </button>
+            {!planned && (
+              <button
+                className="delivery-link"
+                onClick={toggleProvenance}
+              >
+                What was recorded <ArrowRight size={13} />
+              </button>
+            )}
           </footer>
         </section>
       </section>
@@ -778,9 +781,7 @@ export function DeliveryLane({
               </button>
             </div>
           </div>
-          <div className="delivery-output-title"><h2>{output.text.match(/^#\s+(.+)$/m)?.[1] ?? 'Team response'}</h2>{verdict && (verdict.reviewable
-            ? <button type="button" className={`delivery-output-badge tone-${verdict.tone}`} aria-label={`${verdict.label}: ${reviewed ? 'view your review' : 'review this answer'}`} onClick={openReview}>{VERDICT_ICON[verdict.tone]}{verdict.label}</button>
-            : <span className={`delivery-output-badge tone-${verdict.tone}`}>{VERDICT_ICON[verdict.tone]}{verdict.label}</span>)}</div>
+          <div className="delivery-output-title"><h2>{output.text.match(/^#\s+(.+)$/m)?.[1] ?? 'Team response'}</h2>{/* A status: Review output in the heading is where review opens (ADR 0043). */}{verdict && <span className={`delivery-output-badge tone-${verdict.tone}`}>{VERDICT_ICON[verdict.tone]}{verdict.label}</span>}</div>
           <p>
             {output.text
               ? `Written by ${agents.find((node) => node.id === output.producer)?.data.agent.name ?? output.producerLabel}`
@@ -799,7 +800,7 @@ export function DeliveryLane({
         <div className="delivery-output-scroll">
           <p className={`delivery-output-quality tone-${verdict?.tone ?? 'plan'}`}>
             {verdict?.detail ?? 'The team’s answer will appear here.'}
-            {verdict?.reviewable && !reviewed && verdict.findings.length > 1 && <> <button type="button" className="delivery-link" onClick={openReview}>{verdict.findings.length - 1} more to check</button></>}
+            {verdict?.reviewable && !reviewed && verdict.findings.length > 1 && <> {verdict.findings.length - 1} more to check in the review.</>}
           </p>
           {output.text && (
             <div className="delivery-response selectable">
@@ -834,10 +835,6 @@ export function DeliveryLane({
           {output.strip && <StripLine strip={output.strip} />}
         </div>
         <footer>
-          <button className="delivery-link" onClick={focusComposer}>
-            {planned ? 'Write your request' : 'Request a change'}{' '}
-            <ArrowRight size={14} />
-          </button>
           <span role="status">
             {copyStatus && (
               <>
@@ -846,7 +843,6 @@ export function DeliveryLane({
               </>
             )}
           </span>
-          {!planned && output.text && !output.streaming && <button className="delivery-link" onClick={onTrace}>Full trace <Network size={14} /></button>}
         </footer>
       </aside>
       {sourceAgent && <dialog ref={sourceDialog} className="delivery-review-dialog" aria-label="Agent sources" onCancel={() => setSourceAgent(null)} onClose={() => setSourceAgent(null)}><h2>{agents.find(node => node.id === sourceAgent)?.data.agent.name}’s sources</h2><p>Sources recorded in this run.</p>{(evidenceByAgent.get(sourceAgent) ?? []).filter(item => item.kind === 'source').map(item => <button key={item.id} className="source-record" onClick={() => { setSourceAgent(null); onInspectEvidence(item.id) }}><FileText size={18} /><span>{item.name}</span><ArrowRight size={14} /></button>)}<div><button className="btn" onClick={() => setSourceAgent(null)}>Close</button></div></dialog>}

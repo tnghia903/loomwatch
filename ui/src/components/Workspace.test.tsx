@@ -11,6 +11,8 @@ const flowRuntime = vi.hoisted(() => ({
   onNodeDragStart: null as ((...args: unknown[]) => void) | null,
   onNodeDragStop: null as ((...args: unknown[]) => void) | null,
   onConnect: null as ((connection: { source: string | null; target: string | null }) => void) | null,
+  onDragOver: null as ((event: unknown) => void) | null,
+  onDrop: null as ((event: unknown) => void) | null,
 }))
 
 const documentState = vi.hoisted(() => ({
@@ -69,13 +71,15 @@ vi.mock('@xyflow/react', () => ({
   getSmoothStepPath: () => ['', 0, 0],
   useStore: (selector: (store: { transform: number[]; minZoom: number; maxZoom: number }) => unknown) => selector({ transform: [0, 0, 1], minZoom: 0.25, maxZoom: 2 }),
   useNodesInitialized: () => true,
-  useReactFlow: () => ({ fitView: vi.fn(), screenToFlowPosition: vi.fn(), setViewport: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn(), getNodes: () => [], getNode: () => undefined }),
-  ReactFlow: ({ nodes, edges, nodeTypes, onNodesChange, onEdgesChange, onNodeDragStart, onNodeDragStop, onConnect }: { nodes: Array<{ id: string; type: string; data: unknown; position: { x: number; y: number }; selected?: boolean; ariaLabel?: string; measured?: { width: number; height: number }; initialWidth?: number; initialHeight?: number }>; edges: Array<{ id: string; ariaLabel?: string }>; nodeTypes: Record<string, React.ComponentType<{ id: string; data: unknown; selected: boolean }>>; onNodesChange?: (...args: unknown[]) => void; onEdgesChange?: (...args: unknown[]) => void; onNodeDragStart?: (...args: unknown[]) => void; onNodeDragStop?: (...args: unknown[]) => void; onConnect?: (connection: { source: string | null; target: string | null }) => void }) => {
+  useReactFlow: () => ({ fitView: vi.fn(), screenToFlowPosition: vi.fn((point: { x: number; y: number }) => point), setViewport: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn(), getNodes: () => [], getNode: () => undefined }),
+  ReactFlow: ({ nodes, edges, nodeTypes, onNodesChange, onEdgesChange, onNodeDragStart, onNodeDragStop, onConnect, onDragOver, onDrop }: { nodes: Array<{ id: string; type: string; data: unknown; position: { x: number; y: number }; selected?: boolean; ariaLabel?: string; measured?: { width: number; height: number }; initialWidth?: number; initialHeight?: number }>; edges: Array<{ id: string; ariaLabel?: string }>; nodeTypes: Record<string, React.ComponentType<{ id: string; data: unknown; selected: boolean }>>; onNodesChange?: (...args: unknown[]) => void; onEdgesChange?: (...args: unknown[]) => void; onNodeDragStart?: (...args: unknown[]) => void; onNodeDragStop?: (...args: unknown[]) => void; onConnect?: (connection: { source: string | null; target: string | null }) => void; onDragOver?: (event: unknown) => void; onDrop?: (event: unknown) => void }) => {
     flowRuntime.onNodesChange = onNodesChange ?? null
     flowRuntime.onEdgesChange = onEdgesChange ?? null
     flowRuntime.onNodeDragStart = onNodeDragStart ?? null
     flowRuntime.onNodeDragStop = onNodeDragStop ?? null
     flowRuntime.onConnect = onConnect ?? null
+    flowRuntime.onDragOver = onDragOver ?? null
+    flowRuntime.onDrop = onDrop ?? null
     return <div data-testid="flow">
       {nodes.map((node) => { const Card = nodeTypes[node.type]; return <div key={node.id} data-node={node.type} data-position={`${node.position.x}x${node.position.y}`} data-measured={node.measured ? `${node.measured.width}x${node.measured.height}` : undefined} data-initial-size={node.initialWidth ? `${node.initialWidth}x${node.initialHeight}` : undefined} aria-label={node.ariaLabel}><Card id={node.id} data={node.data} selected={node.selected ?? false} /></div> })}
       {edges.map((edge) => <span key={edge.id} data-edge={edge.id}>{edge.ariaLabel}</span>)}
@@ -147,11 +151,12 @@ describe('Workspace', () => {
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
-  it('previews the next run without starting a job and exposes the final responder choice', async () => {
+  // The hidden "Preview next run" card was a second Run team (ADR 0043); the responder is chosen
+  // on the Team response node.
+  it('opens the next run from Run team without starting a job', async () => {
     renderWorkspace(undefined, 'delivery')
-    fireEvent.change(screen.getByLabelText('Final response owner'), {target: {value: 'researcher'}})
-    expect(documentState.promoteResponder).toHaveBeenCalledWith('researcher')
-    fireEvent.click(screen.getByRole('button', {name: 'Preview next run'}))
+    expect(screen.queryByRole('button', {name: 'Preview next run'})).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: 'Run team'}))
     expect(screen.getByRole('heading', {name: /New run/})).toBeInTheDocument()
     expect(screen.getByText('The team’s answer will appear here.')).toBeInTheDocument()
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
@@ -374,6 +379,42 @@ describe('Workspace', () => {
     } finally {
       view.unmount()
       Reflect.deleteProperty(researcher.data.agent, 'capabilities')
+    }
+  })
+
+  /**
+   * ADR 0042: a row from the add panel dropped onto an agent connects it to that agent, whatever
+   * it is, and the agent's card says it will take it while the row is over it. Dropped anywhere
+   * else, it is only placed.
+   */
+  it('connects a folder, skill or memory dropped onto an agent, and lights the agent it is over', async () => {
+    const view = renderWorkspace()
+    const drag = (payload: object, x: number, y: number) => ({
+      preventDefault: () => {}, clientX: x, clientY: y,
+      dataTransfer: { types: ['application/loomwatch-capability'], dropEffect: '', getData: (mime: string) => (mime === 'application/loomwatch-capability' ? JSON.stringify(payload) : '') },
+    })
+    try {
+      await waitFor(() => expect(flowRuntime.onDrop).toBeTruthy())
+      const folder = { kind: 'knowledge', name: 'reports', source: 'Linked folder', path: '/Users/me/reports' }
+      act(() => flowRuntime.onDragOver?.(drag(folder, 320, 20)))
+      expect(screen.getByText('Reviewer', { selector: '.node-name' }).closest('article')).toHaveClass('drop-target')
+      expect(screen.getByText('Researcher', { selector: '.node-name' }).closest('article')).not.toHaveClass('drop-target')
+
+      act(() => flowRuntime.onDrop?.(drag(folder, 320, 20)))
+      expect(documentState.setAgentCapabilities).toHaveBeenLastCalledWith('reviewer', [{ kind: 'knowledge', name: 'reports', path: '/Users/me/reports' }])
+      expect(screen.getByText('Reviewer', { selector: '.node-name' }).closest('article')).not.toHaveClass('drop-target')
+
+      act(() => flowRuntime.onDrop?.(drag({ kind: 'skill', name: 'claude-design', source: 'Claude Code' }, 20, 20)))
+      expect(documentState.setAgentCapabilities).toHaveBeenLastCalledWith('researcher', [{ kind: 'skill', name: 'claude-design' }])
+
+      act(() => flowRuntime.onDrop?.(drag({ kind: 'knowledge', name: 'Research team · memory', source: 'LoomWatch', memory: { team: 'research-team' } }, 320, 20)))
+      expect(documentState.addMemoryInherit).toHaveBeenLastCalledWith({ team: 'research-team', appliesTo: ['reviewer'] })
+
+      vi.mocked(documentState.setAgentCapabilities).mockClear()
+      act(() => flowRuntime.onDrop?.(drag(folder, 1200, 900)))
+      expect(documentState.setAgentCapabilities).not.toHaveBeenCalled()
+    } finally {
+      view.unmount()
     }
   })
 
@@ -901,13 +942,16 @@ describe('Workspace', () => {
       expect(screen.getByRole('application', { name: 'Run graph' })).toBeInTheDocument()
     })
 
-    it('returns to Build through the full trace run chip', async () => {
+    // The replay bar's Clear did what the Build tab does (ADR 0043).
+    it('returns to Build from the full trace through the Build tab', async () => {
       sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
       const { container } = renderWorkspace('run-1')
       await waitFor(() => expect(screen.getByRole('group', { name: 'Lifecycle summary' })).toBeInTheDocument())
       expect(container.querySelector('.lw-shell')).toHaveClass('run-shown')
 
-      fireEvent.click(screen.getByRole('button', { name: 'Clear this run and show the design alone' }))
+      expect(screen.queryByRole('button', { name: 'Clear this run and show the design alone' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Back to output' })).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Build' }))
 
       expect(screen.getByRole('application', { name: 'Team canvas' })).toBeInTheDocument()
       expect(container.querySelector('.lw-shell')).not.toHaveClass('run-shown')
@@ -1118,8 +1162,11 @@ it('organizes execution and resources without changing the team, and restores th
   composerLayoutState.nodes = [{ id: 'knowledge:source', kind: 'knowledge', name: 'source', source: 'local', position: { x: -400, y: -200 } }]
   composerLayoutState.edges = [{ from: 'researcher', to: 'knowledge:source' }]
   renderWorkspace()
+  // Organize and its undo live in the view bar only (ADR 0043).
   fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
-  const organize = await screen.findByRole('menuitem', { name: /^Organize$/ })
+  expect(screen.queryByRole('menuitem', { name: /Organize/ })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
+  const organize = await screen.findByRole('button', { name: /^Organize$/ })
   await waitFor(() => expect(organize).toBeEnabled())
   fireEvent.click(organize)
   const positions = vi.mocked(documentState.applyPositions).mock.calls.at(-1)![0]
@@ -1131,8 +1178,7 @@ it('organizes execution and resources without changing the team, and restores th
     expect(layout.nodes[0].position.x).toBe(positions.researcher.x)
     expect(layout.nodes[0].position.y).toBeGreaterThan(positions.researcher.y + 150)
   }, { timeout: 2000 })
-  fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Undo organize' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Undo organize' }))
   expect(documentState.applyPositions).toHaveBeenLastCalledWith({ researcher: { x: 0, y: 0 }, reviewer: { x: 300, y: 0 } })
   expect(documentState.save).not.toHaveBeenCalled()
   expect(documentState.onEdgesChange).not.toHaveBeenCalled()
@@ -1423,5 +1469,21 @@ describe('an agent whose app is not on this computer', () => {
     expect(screen.getByRole('button', { name: 'Run team' })).toBeEnabled()
     expect(screen.queryByRole('button', { name: /^Run ↵/ })).not.toBeInTheDocument()
     expect(screen.queryByText(/can’t start on this computer/)).not.toBeInTheDocument()
+  })
+})
+
+// ADR 0043: Home's way into Ask is "Describe the job", so its header has no Ask button too.
+describe('Home', () => {
+  it('asks through Describe the job only, with no second Ask button in the header', async () => {
+    const path = documentState.path
+    documentState.path = ''
+    try {
+      renderWorkspace()
+      expect(await screen.findByRole('heading', { name: 'Put AI agents to work as a team.' })).toBeInTheDocument()
+      expect(screen.getByLabelText('Or describe the job')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Ask LoomWatch/ })).not.toBeInTheDocument()
+    } finally {
+      documentState.path = path
+    }
   })
 })

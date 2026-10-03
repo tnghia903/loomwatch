@@ -86,7 +86,6 @@ export interface CanvasGraphInput {
   selectedCapabilities: ReadonlySet<string>
   selectedCapabilityEdgeIds: ReadonlySet<string>
   focusComposer: () => void
-  removeCapabilityCards: (ids: readonly string[]) => void
   removeCapabilityEdge: (source: string, target: string) => void
 }
 
@@ -396,7 +395,7 @@ function addObservedDelegations(graph: GraphAccumulator, input: CanvasGraphInput
 /** Capability and memory cards, and the wiring from the agents that use them. */
 function addCapabilityWiring(graph: GraphAccumulator, input: CanvasGraphInput, frame: GraphFrame) {
   const { addNode, edges } = graph
-  const { nodeNames, historicalPositions, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, removeCapabilityCards, removeCapabilityEdge } = input
+  const { nodeNames, historicalPositions, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, removeCapabilityEdge } = input
   const { docked } = frame
   for (const capability of capabilityCards) {
     const wiredTo = allWiringEdges.filter((edge) => edge.to === capability.id).length
@@ -409,7 +408,7 @@ function addCapabilityWiring(graph: GraphAccumulator, input: CanvasGraphInput, f
       draggable: editable,
       selectable: true,
       selected: selectedCapabilities.has(capability.id),
-      data: { kind: capability.kind, name: capability.name, source: capability.source, ...(capability.path ? { path: capability.path } : {}), wiredTo, readOnly: !editable, onRemove: () => removeCapabilityCards([capability.id]) },
+      data: { kind: capability.kind, name: capability.name, source: capability.source, ...(capability.path ? { path: capability.path } : {}), wiredTo, readOnly: !editable },
     }
     addNode(node)
   }

@@ -1,7 +1,7 @@
 import { ExternalLink, Send } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
-import { CONNECTIONS_HREF, useNotionConnection } from '../../lib/notion/connection'
+import { useNotionConnection } from '../../lib/notion/connection'
 import { deliverRun, fetchRun, type Delivery, type RunRecord } from '../../lib/runs/client'
 
 /** How long the answer waits for an automatic delivery before offering the button instead. */
@@ -85,7 +85,8 @@ export function NotionSend({ run, answered }: NotionSendProps) {
     // The daemon's own sentence also says "open Connections"; next to the link that is said twice.
     body = <>
       <span className="notion-send-note alert" title={delivery.message}>Not sent to Notion — {connection.state === 'disconnected' ? 'Notion isn’t connected yet.' : 'no page is chosen for answers yet.'}</span>
-      <a className="link" href={CONNECTIONS_HREF} target="_blank" rel="noreferrer">{connection.state === 'disconnected' ? 'Connect Notion' : 'Choose a page'} <ExternalLink size={12} aria-hidden="true" /></a>
+      {/* Connections opens from the menu, its one way in (ADR 0043). */}
+      <span className="notion-send-note">{connection.state === 'disconnected' ? 'Connect Notion' : 'Choose a page'} in Connections, from the menu.</span>
     </>
   } else if (delivery?.status === 'failed') {
     body = <>
@@ -93,7 +94,7 @@ export function NotionSend({ run, answered }: NotionSendProps) {
       <button type="button" className="link" onClick={() => void send()} disabled={sending}>{sending ? 'Sending…' : 'Try again'}</button>
     </>
   } else if (disconnected) {
-    body = <a className="link notion-send-connect" href={CONNECTIONS_HREF} target="_blank" rel="noreferrer">Connect Notion to send this answer <ExternalLink size={12} aria-hidden="true" /></a>
+    body = <span className="notion-send-note notion-send-connect">To send this answer, connect Notion in Connections, from the menu.</span>
   } else {
     body = <button type="button" className="btn notion-send-button" onClick={() => void send()} disabled={sending || connection.state === 'loading'}><Send size={13} aria-hidden="true" />{sending ? 'Sending…' : 'Send to Notion'}</button>
   }

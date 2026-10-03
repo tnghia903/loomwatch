@@ -841,7 +841,8 @@ to close. It was removed, and nothing should bring it back without a user need:
 - Observed delegations with no configured counterpart stay as the pill's `⚠ n` count, with
   a plain hover hint, and are drawn on the canvas in the Run view.
 - A team's `schedule:` routine (its timing, delivery, last problem and **Run now**) moved
-  to the composer's note line, and to **Run routine now** in the workspace menu.
+  to the composer's note line. (It was also **Run routine now** in the workspace menu until ADR
+  0043 kept one control per thing: the schedule's panel and the composer's note.)
 
 ### 8.2 The two canvas states
 

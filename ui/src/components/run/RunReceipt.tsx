@@ -1,4 +1,4 @@
-import { ArrowRight, Check, ClipboardCopy, Network } from 'lucide-react'
+import { ArrowRight, Check, ClipboardCopy } from 'lucide-react'
 import { useState } from 'react'
 
 import { RECEIPT_MARK, receiptMarkdown, type Receipt } from '../../lib/story/receipt'
@@ -8,8 +8,6 @@ import { LoomMark } from '../ui/glyphs'
 interface RunReceiptProps {
   receipt: Receipt
   onInspectEvidence: (id: string) => void
-  onSelectAgent: (id: string) => void
-  onTrace: () => void
   /** Switch on what a refused line names, for this agent's next runs (ADR 0037). Absent when the
       team cannot be changed from here. */
   onAllow?: (agentId: string, key: AllowSwitch) => void
@@ -20,19 +18,20 @@ interface RunReceiptProps {
  * it. A newcomer reads it top to bottom in ten seconds; an expert opens any line's evidence or
  * copies the slip into a pull request as proof of what ran.
  */
-export function RunReceipt({ receipt, onInspectEvidence, onSelectAgent, onTrace, onAllow }: RunReceiptProps) {
+export function RunReceipt({ receipt, onInspectEvidence, onAllow }: RunReceiptProps) {
   const [copied, setCopied] = useState<string | null>(null)
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(receiptMarkdown(receipt))
-      setCopied('Copied as Markdown')
+      setCopied('Receipt copied')
     } catch {
       setCopied('Copy unavailable here')
     }
   }
-  const open = (line: { evidenceId?: string; agentId?: string }) => {
+  // A line opens its record. A line about a helper alone has no link: its stage card is just
+  // below, and a second way to select it was two controls for one thing (ADR 0043).
+  const open = (line: { evidenceId?: string }) => {
     if (line.evidenceId) onInspectEvidence(line.evidenceId)
-    else if (line.agentId) onSelectAgent(line.agentId)
   }
   return (
     <section className="run-receipt" aria-label="Run receipt">
@@ -57,8 +56,8 @@ export function RunReceipt({ receipt, onInspectEvidence, onSelectAgent, onTrace,
                   ? <span className="receipt-allowed">Allowed from the next run</span>
                   : onAllow && <button type="button" className="link receipt-allow" onClick={() => onAllow(line.agentId as string, line.allow as AllowSwitch)}>Allow from now on</button>)}
               </span>
-              {(line.evidenceId || line.agentId) && (
-                <button type="button" className="receipt-open" aria-label={line.evidenceId ? `Open the record: ${line.text}` : `Show this helper’s work: ${line.text}`} title={line.evidenceId ? 'Open the record' : 'Show this helper’s work'} onClick={() => open(line)}><ArrowRight size={12} aria-hidden="true" /></button>
+              {line.evidenceId && (
+                <button type="button" className="receipt-open" aria-label={`Open the record: ${line.text}`} title="Open the record" onClick={() => open(line)}><ArrowRight size={12} aria-hidden="true" /></button>
               )}
             </li>
           ))}
@@ -72,7 +71,7 @@ export function RunReceipt({ receipt, onInspectEvidence, onSelectAgent, onTrace,
                 {receipt.checks.map((line, index) => (
                   <li key={index} className={`tone-${line.tone}`}>
                     <span>{line.text}</span>
-                    {(line.evidenceId || line.agentId) && <button type="button" className="receipt-open" aria-label={`Open: ${line.text}`} onClick={() => open(line)}><ArrowRight size={12} aria-hidden="true" /></button>}
+                    {line.evidenceId && <button type="button" className="receipt-open" aria-label={`Open: ${line.text}`} onClick={() => open(line)}><ArrowRight size={12} aria-hidden="true" /></button>}
                   </li>
                 ))}
               </ul>
@@ -80,9 +79,8 @@ export function RunReceipt({ receipt, onInspectEvidence, onSelectAgent, onTrace,
           </>
         )}
         <footer className="receipt-foot">
-          <button type="button" className="btn" onClick={() => void copy()}>{copied === 'Copied as Markdown' ? <Check size={14} aria-hidden="true" /> : <ClipboardCopy size={14} aria-hidden="true" />}Copy as Markdown</button>
-          <button type="button" className="btn" onClick={onTrace}><Network size={14} aria-hidden="true" />See every event</button>
-          <span role="status" className="receipt-status">{copied && copied !== 'Copied as Markdown' ? copied : ''}</span>
+          <button type="button" className="btn" onClick={() => void copy()}>{copied === 'Receipt copied' ? <Check size={14} aria-hidden="true" /> : <ClipboardCopy size={14} aria-hidden="true" />}Copy receipt</button>
+          <span role="status" className="receipt-status">{copied && copied !== 'Receipt copied' ? copied : ''}</span>
         </footer>
       </div>
     </section>

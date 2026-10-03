@@ -63,7 +63,6 @@ export interface MemoryPanelProps {
    * panel showed nothing at all for it.
    */
   unsavedEntries?: readonly string[]
-  onSaveTeam?: () => void
 }
 
 type Draft =
@@ -75,7 +74,7 @@ type Draft =
 export function MemoryPanel({
   teamPath, view, loading, error, editable, onWriteNote, onAddFile, onEditNote, onRemove, onRetry, onClose,
   notebook = null, notebookLoading = false, notebookError = null, onReviseNote, onNoteHistory,
-  onRetryNotebook, onExcludeInherited, onOpenOriginTeam, onExportPack, unsavedEntries = [], onSaveTeam,
+  onRetryNotebook, onExcludeInherited, onOpenOriginTeam, onExportPack, unsavedEntries = [],
 }: MemoryPanelProps) {
   const closeButton = useRef<HTMLButtonElement>(null)
   const [draft, setDraft] = useState<Draft>(null)
@@ -180,10 +179,10 @@ export function MemoryPanel({
         <div className="zone" role="status">
           <div className="zone-head t-micro"><span>Not saved yet</span><span>{unsavedEntries.length}</span></div>
           {unsavedEntries.map((path) => <span key={path} className="t-mono-sm" style={{ color: 'var(--color-ink-2)', overflowWrap: 'anywhere' }}>{path}</span>)}
+          {/* Saving is the team chip's at the top of the screen, never a second button here (ADR 0043). */}
           <p className="hint t-meta" style={{ margin: 0 }}>
-            Save the team to keep {unsavedEntries.length === 1 ? 'this entry' : 'these entries'}. Agents are given the Brief from the next run.
+            Save the team at the top of the screen to keep {unsavedEntries.length === 1 ? 'this entry' : 'these entries'}. Agents are given the Brief from the next run.
           </p>
-          {onSaveTeam && editable && <span><button type="button" className="btn btn-primary" onClick={onSaveTeam}>Save team</button></span>}
         </div>
       )}
 

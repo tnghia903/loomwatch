@@ -1,7 +1,12 @@
 # 0042 — Every source an agent uses is on the canvas, and connecting one never moves the agent
 
 - **Date:** 2026-10-03
-- **Status:** Accepted.
+- **Status:** Accepted. Decision 6 is replaced by [ADR 0043](0043-one-control-per-thing.md): a
+  folder or file is added from the agent's panel only, and the add panel lists them to drag.
+  Decisions 8–10 added the same day, after the operator found that a folder
+  added in the add panel left no row there to drag (`ComponentPalette.tsx`, `PaletteResizer.tsx`,
+  `lib/library/paletteWidth.ts`, `CanvasActionsContext.ts`, `Workspace.tsx` `connectDropped`,
+  `agentAt`, `revealSource`; `styles/one-canvas.css`, `prototype-parity.css`).
   - Daemon:
     - `crates/loomwatch-backend/src/workspace.rs`: `materialise` starts an agent in the workspace
       only when its declared folder holds the team file; `Workspace::root`.
@@ -98,6 +103,21 @@ On the canvas, the operator could not see what each agent used:
    - Connected folders and files are labelled "read only".
    - The "Work in this folder" Brief switch only shows where it decides something: an agent in the
      team's folder.
+
+8. **The add panel lists what this team was given.** Knowledge splits into two groups:
+   - **Folders & files** has one row per folder or file card, saying who reads it ("Read by
+     Researcher and Analyst", or "No agent reads it yet"). Add folder… and Add file… sit under
+     the rows. A click finds the card and opens it, and the info button opens its details. Folders
+     are still never scanned for (ADR 0036): the group holds only what this team chose.
+   - **Team memory** holds other teams' memory and imported packs, as before.
+9. **Dropping onto an agent connects.** A skill, tool, folder, file or memory row dropped onto an
+   agent's card writes the same entry a line from that agent writes. The card is outlined in the
+   accent while the row is over it. Dropped anywhere else, it is placed as before. A skill dropped
+   straight from the panel needs no card of its own first: the team-file entry draws it (decision 2).
+10. **The add panel is resized from its right edge**, between 200 and 520 px, with the arrow keys
+    too and a double click to reset. The width is the shell's `--lw-palette-w`, which every rule
+    that used to say 210 px now reads. It is kept in this browser only, because it suits whoever is
+    looking. Phones keep their fixed overlay.
 
 ## Consequences
 

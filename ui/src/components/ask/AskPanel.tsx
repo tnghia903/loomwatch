@@ -17,7 +17,8 @@ const SUGGESTIONS: Record<AskContext['view'], string[]> = {
   build: [
     'Add a fact-checker before the last step',
     'Explain what this team does, step by step',
-    'Run this team now',
+    // Not "Run this team now": Run team already does that, one control per thing (ADR 0043).
+    'Suggest a folder, file or skill each agent should have',
   ],
   run: [
     'What is this run doing right now?',

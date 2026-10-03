@@ -8,13 +8,13 @@
 
 /* The docked panel's width, for the rules that centre the composer or the layer legend beside it.
    They add the panel inset, so the width here is the panel's edge minus that inset. */
-.lw-shell.build-graph { --lw-library-w: calc(210px - var(--lw-panel-inset)); --lw-library-rail-w: 0px; }
+.lw-shell.build-graph { --lw-library-w: calc(var(--lw-palette-w, 210px) - var(--lw-panel-inset)); --lw-library-rail-w: 0px; }
 
 /* The add panel: docked to the left edge under the header, as Build docks it under its heading. */
-.lw-shell.run-shown.build-graph .node-palette { position: absolute; top: var(--lw-header-h); bottom: 0; left: 0; width: 210px; border-radius: 0; }
+.lw-shell.run-shown.build-graph .node-palette { position: absolute; top: var(--lw-header-h); bottom: 0; left: 0; width: var(--lw-palette-w, 210px); border-radius: 0; }
 .lw-shell.run-shown.build-graph .palette-reopen { top: calc(var(--lw-header-h) + 15px); }
 @media (min-width: 768px) {
-  .lw-shell.run-shown.build-graph.lib-open .lw-canvas { left: 210px; }
+  .lw-shell.run-shown.build-graph.lib-open .lw-canvas { left: var(--lw-palette-w, 210px); }
 }
 /* Phones: a run's trace is for reading — the timeline and the composer already take the screen —
    so the panel stays out of it there, as the run Library did. Build overlays it (chrome.css). */
@@ -77,3 +77,29 @@
 
 /* The short agent panel says what a shown run has this agent doing. */
 .inspector-run-status { display: flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 11px; line-height: 1.35; color: var(--muted); }
+
+/* The add panel's right edge is dragged to resize it (ADR 0042); `--lw-palette-w` is set on the
+   shell. A thin line shows on hover, focus and while dragging, in the accent colour. */
+/* Inside the edge: the panel clips what overflows it, so a handle straddling the border would be
+   half ungrabbable. */
+.node-palette .palette-resize {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 8px; z-index: 2;
+  cursor: col-resize; touch-action: none; outline: none;
+}
+.node-palette .palette-resize::after {
+  content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 2px;
+  background: transparent; transition: background-color .12s ease;
+}
+.node-palette .palette-resize:hover::after,
+.node-palette .palette-resize:focus-visible::after,
+body.palette-resizing .node-palette .palette-resize::after { background: var(--color-accent); }
+body.palette-resizing { cursor: col-resize; user-select: none; }
+body.palette-resizing .lw-canvas { pointer-events: none; }
+/* On phones the panel overlays the canvas at a fixed width; there is nothing to resize. */
+@media (max-width: 767px) { .node-palette .palette-resize { display: none; } }
+
+/* A skill, tool, folder or file dragged over an agent is connected to it on drop. */
+.build-node.drop-target { border-color: var(--color-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 45%, transparent), 0 8px 24px #0005; }
+
+/* Folders & files: Add folder… and Add file… sit under this team's own sources. */
+.node-palette .palette-sources { padding: 4px 5px 0; }

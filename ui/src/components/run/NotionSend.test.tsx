@@ -48,7 +48,9 @@ describe('the answer’s Notion line (ADR 0038)', () => {
     daemon({ connection: { connected: false } })
     render(<NotionSend run={run({ delivery: delivery('failed', { message: 'Notion is not connected. Open Connections and choose a destination page.' }) })} answered />)
     expect(await screen.findByText('Not sent to Notion — Notion isn’t connected yet.')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Connect Notion/ })).toHaveAttribute('href', '/connections')
+    // Connections opens from the menu, its one way in (ADR 0043): the line says where, not a second link.
+    expect(screen.getByText('Connect Notion in Connections, from the menu.')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Connect Notion/ })).toBeNull()
     cleanup()
 
     daemon({ deliver: () => ({ ...run(), delivery: delivery('skipped', { message: 'A page with this title already exists.' }) }) })
@@ -64,6 +66,7 @@ describe('the answer’s Notion line (ADR 0038)', () => {
     cleanup()
     daemon({ connection: { connected: true, name: 'Acme', destination: null } })
     render(<NotionSend run={run()} answered />)
-    expect(await screen.findByRole('link', { name: /Connect Notion to send this answer/ })).toHaveAttribute('href', '/connections')
+    expect(await screen.findByText('To send this answer, connect Notion in Connections, from the menu.')).toBeInTheDocument()
+    expect(screen.queryByRole('link')).toBeNull()
   })
 })

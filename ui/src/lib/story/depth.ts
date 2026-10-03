@@ -22,8 +22,13 @@ export const DEPTHS: readonly Depth[] = ['story', 'team', 'trace']
 /** The zoom each depth button jumps to. Inside the Build (0.35–1.5) and Run (0.1–2) ranges. */
 export const DEPTH_ZOOM: Record<Depth, number> = { story: 0.55, team: 1, trace: 1.4 }
 
+/** Story is every zoom below this; a fit for Story stops just short of it. */
+const TEAM_FROM_ZOOM = 0.72
+/** The furthest a Story fit zooms in, so a small team framed whole still reads as Story. */
+export const STORY_MAX_ZOOM = TEAM_FROM_ZOOM - 0.01
+
 export function depthForZoom(zoom: number): Depth {
-  if (zoom < 0.72) return 'story'
+  if (zoom < TEAM_FROM_ZOOM) return 'story'
   if (zoom >= 1.25) return 'trace'
   return 'team'
 }

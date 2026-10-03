@@ -1,13 +1,14 @@
 import { Background, getNodesBounds, getViewportForBounds, ReactFlow, useNodesInitialized, useReactFlow, useStore, type EdgeChange, type Node, type NodeChange, type OnNodeDrag } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
 import type { DetectedHarness } from '../lib/harnesses'
 import { briefFileNameFor, exportPack, fetchMemory, fetchNoteHistory, fetchNotes, fetchRunCheckpoints, fetchRunContext, reviseNote, writeMemoryFile, type Checkpoint, type ContextPacket, type MemoryView, type Note, type NotebookView } from '../lib/memory/client'
 import type { AgentNode } from '../lib/library/nodeFromDrop'
 import type { CapabilityInventory, DetectedCapability } from '../lib/library/client'
 import type { CapabilityRef } from '../lib/team-file/types'
-import type { ChosenSource } from './canvas/AddSource'
+import type { TeamSource } from './library/ComponentPalette'
+import { PALETTE_WIDTH, clampPaletteWidth } from '../lib/library/paletteWidth'
 import { isTerminalRun, runScheduleNow, scheduleForPath, useSchedules } from '../lib/runs/client'
 import { ownerLabelFor } from '../lib/runs/graph'
 import { appLabelForAgent, harnessIdForAgent, modelOptionsForAgent } from '../lib/models'
@@ -75,7 +76,6 @@ import { ChipDot } from './ui/glyphs'
 import { SegmentThumb } from './ui/SegmentThumb'
 import { AttentionAlerts } from './workspace/AttentionAlerts'
 import { BuildHeading } from './workspace/BuildHeading'
-import { BuildOutcome } from './workspace/BuildOutcome'
 import { capabilityEdgeId } from './workspace/canvasGraph'
 import { OutputEditor } from './workspace/OutputEditor'
 import { ConflictSheetFooter, InlineConfirm, NewTeamSheet, OpenTeamSheet, SaveCopySheet } from './workspace/Sheets'
@@ -88,7 +88,7 @@ import { NeedsYouTray } from './workspace/NeedsYouTray'
 import { useNeedsYou } from '../lib/story/useNeedsYou'
 import { matchTeam, parseIntent } from '../lib/story/intent'
 import { APPROVAL_TEXT } from '../lib/story/needsYou'
-import { DEPTH_LABEL, DEPTH_ZOOM } from '../lib/story/depth'
+import { DEPTH_LABEL, DEPTH_ZOOM, STORY_MAX_ZOOM } from '../lib/story/depth'
 import { harnessForRole, ROLE_PRESETS, roleSource } from '../lib/library/roles'
 import { savedJobPreset, useSavedJobs } from '../lib/library/jobs'
 import type { LibrarySource } from '../lib/library/types'
@@ -119,6 +119,8 @@ const edgeTypes = { warp: WarpEdgeView, weft: WeftEdgeView, prov: ProvEdgeView }
 const buildNodeTypes = { ...nodeTypes, response: BuildOutputCard }
 const EMPTY_CAPABILITY_INVENTORY: CapabilityInventory = { skills: [], tools: [], sources: [] }
 const EMPTY_EVIDENCE: readonly Evidence[] = []
+/** Where this browser keeps the add panel's width. */
+const PALETTE_WIDTH_KEY = 'loomwatch.paletteWidth'
 
 interface WorkspaceProps {
   harnesses: DetectedHarness[]
@@ -202,7 +204,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const depth = useStore((store) => depthForZoom(store.transform[2]))
   // Every run, in every team, that is waiting on the operator (lib/story/needsYou.ts).
   const needsYou = useNeedsYou()
-  const needsYouTray = <NeedsYouTray tickets={needsYou.tickets} working={needsYou.working} onAnswer={needsYou.answer} onPermission={needsYou.answerPermission} onDismiss={needsYou.dismiss} />
+  const needsYouTray = (onScreenRunId: string | null = null) => <NeedsYouTray tickets={needsYou.tickets} working={needsYou.working} onAnswer={needsYou.answer} onPermission={needsYou.answerPermission} onDismiss={needsYou.dismiss} onScreenRunId={onScreenRunId} />
   const { resolved: theme } = useTheme()
   const [windowWidth, setWindowWidth] = useState(window.innerWidth)
   const [windowHeight, setWindowHeight] = useState(window.innerHeight)
@@ -231,6 +233,25 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   // needs its size remembered here or it can settle at `visibility: hidden`.
   const [synthMeasurements, setSynthMeasurements] = useState<Record<string, { width: number; height: number }>>({})
   const [libraryCollapsed, setLibraryCollapsed] = useState(true)
+  // The add panel's width, dragged at its edge. A convenience for whoever is looking, so it is kept
+  // in this browser only, and a storage that throws (a private window) leaves the default.
+  const [paletteWidth, setPaletteWidth] = useState(() => {
+    try {
+      const saved = Number(window.localStorage.getItem(PALETTE_WIDTH_KEY))
+      return saved ? clampPaletteWidth(saved) : PALETTE_WIDTH.default
+    } catch {
+      return PALETTE_WIDTH.default
+    }
+  })
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PALETTE_WIDTH_KEY, String(paletteWidth))
+    } catch {
+      // Not kept; the panel still has this width until the page is closed.
+    }
+  }, [paletteWidth])
+  /** The agent a skill, tool, folder or file is being dragged over, so its card can say it takes it. */
+  const [dropAgentId, setDropAgentId] = useState<string | null>(null)
   const [solo, setSolo] = useState<LayerSolo>('both')
   const [sweeping, setSweeping] = useState(false)
   const [notificationsOn, setNotificationsOn] = useState(false)
@@ -596,6 +617,15 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
    * connection keeps it where it is, as a card of this canvas, so it can be connected again
    * instead of vanishing under the pointer.
    */
+  /** This team's folders and files for the add panel, one per card, with who reads each. */
+  const teamSources = useMemo<TeamSource[]>(() => capabilityCards.filter((card) => card.path && !card.memory).map((card) => ({
+    id: card.id,
+    name: card.name,
+    path: card.path ?? '',
+    source: card.source,
+    readers: wiringEdges.filter((edge) => edge.to === card.id).map((edge) => nodeNames.get(edge.from) ?? edge.from),
+    item: chosenItem(card),
+  })), [capabilityCards, wiringEdges, nodeNames])
   const keepUnusedCard = useCallback((card: CapabilityNodeConfig, leaving: string) => {
     if (card.memory || composerLayout.nodes.some((node) => node.id === card.id)) return
     const stillUsed = doc.nodes.some((node) => node.id !== leaving && (node.data.agent.capabilities ?? []).some((capability) => capabilityIsCard(capability, card)))
@@ -878,7 +908,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     orderedAgentIds, ownerLabels, evidenceByAgent, leadId, live, waiting, configuredPairs, overlayPositions, synthMeasurements,
     fannedAgentId, inspectedEvidenceId, packetAgentIds, givenNotes, responderAgent, responderId, responderFromDoc, responseText,
     provenanceOpen, composerText, visibleSchedule, scheduleInvalid: scheduleProblems.length > 0, scheduleEditorOpen, onOpenSchedule: openScheduleEditor,
-    capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityCards, removeCapabilityEdge,
+    capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityEdge,
     harnesses, outputPlan: composerLayout.output, appProblems: appProblemByAgent,
     sendsTo: doc.teamDeliver?.notion ? 'Notion' : null,
   })
@@ -942,7 +972,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     lastFit.current = fitKey
     pendingFit.current = fitKey
   }, [fitKey, libraryCollapsed, windowWidth, windowHeight])
-  const fitCanvas = useCallback(() => {
+  /** Frame the whole team; `maxZoom` caps how far in it may go (Story stays in its own band). */
+  const fitCanvas = useCallback((maxZoom?: number) => {
     if (nodeDraggingRef.current) return
     const canvas = canvasRef.current
     const nodes = flow.getNodes()
@@ -959,7 +990,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     // Build keeps the team sentence above the cards, so a fitted team starts below it.
     const top = !runView ? (storyShown ? 124 : 68) : windowWidth >= 768 && windowWidth < 1400 ? 184 : 132
     const bounds = getNodesBounds(nodes)
-    const viewport = getViewportForBounds(bounds, Math.max(200, rect.width - 24), Math.max(160, bottom - rect.top - top), runView ? 0.1 : 0.35, runView ? 1 : 1.5, runView ? 0.12 : 0.2)
+    const viewport = getViewportForBounds(bounds, Math.max(200, rect.width - 24), Math.max(160, bottom - rect.top - top), runView ? 0.1 : 0.35, Math.min(maxZoom ?? Infinity, runView ? 1 : 1.5), runView ? 0.12 : 0.2)
     void flow.setViewport({ ...viewport, y: viewport.y + top }, { duration: document.hidden ? 0 : 300 })
   }, [flow, windowWidth, runView, storyShown])
   useEffect(() => {
@@ -974,8 +1005,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     // background, where animation frames are paused and the fit would never happen. Cards
     // that grow after mounting (streamed text, wrapped titles) shift the bounds once more, so
     // a settle pass keeps the whole story in frame without following every keystroke.
-    const first = window.setTimeout(fitCanvas, 0)
-    const settle = window.setTimeout(fitCanvas, 450)
+    const first = window.setTimeout(() => fitCanvas(), 0)
+    const settle = window.setTimeout(() => fitCanvas(), 450)
     return () => { window.clearTimeout(first); window.clearTimeout(settle) }
   }, [fitKey, nodesInitialized, fitCanvas, nodeDragging, windowWidth, windowHeight])
 
@@ -1400,6 +1431,15 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     setProvenanceOpen(false)
     setInspectedCapability({ item, kind })
   }, [clearSelection])
+  /** A folder or file row in the add panel: frame its card and open it (ADR 0042). */
+  const revealSource = useCallback((id: string) => {
+    const card = capabilityCards.find((node) => node.id === id)
+    if (!card?.path) return
+    inspectCapability(chosenItem(card), 'knowledge')
+    setSelectedCapabilities(new Set([id]))
+    const node = flow.getNode(id)
+    if (node) void flow.fitView({ nodes: [node], padding: 0.7, maxZoom: 1, duration: 300 })
+  }, [capabilityCards, flow, inspectCapability])
 
   // §4's typed connection matrix. An agent may reach a capability (`uses skill` / `invokes` /
 
@@ -1569,23 +1609,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   }, [capabilityCards, composerLayout, doc])
 
   /**
-   * Folders and files chosen in the add panel become cards no agent reads yet (ADR 0042). They are
-   * placed together so several files added at once do not land on one spot.
-   */
-  const placeSources = useCallback((sources: readonly ChosenSource[]) => {
-    if (sources.length === 0) return
-    const centre = flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
-    const taken = [...doc.nodes.map((node) => node.position), ...capabilityCards.map((node) => node.position)]
-    for (const source of sources) {
-      const at = freeCapabilitySlot({ x: snapToGrid(centre.x), y: snapToGrid(centre.y) }, taken)
-      taken.push(at)
-      composerLayout.place({ kind: 'knowledge', name: source.name, source: source.source, path: source.path }, at)
-    }
-    const names = sources.map((source) => source.name).join(', ')
-    setStatusAnnouncement(`${names} ${sources.length === 1 ? 'is' : 'are'} on the canvas. Connect ${sources.length === 1 ? 'it' : 'them'} to every agent that should read ${sources.length === 1 ? 'it' : 'them'}.`)
-  }, [capabilityCards, composerLayout, doc.nodes, flow])
-
-  /**
    * A job can bring skills (ADR 0030): the new agent's team-file entry already names them, and a
    * card is what shows them on the canvas — `wiringEdges` draws the line once the card exists. Only
    * skills without a card get one, beside where the agent landed.
@@ -1606,6 +1629,57 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       taken.push(at)
     }
   }, [capabilityCards, capabilityInventory.skills, composerLayout, doc.nodes])
+
+  /** The agent whose card a flow-space point lands on, or null. A review stop takes nothing. */
+  const agentAt = useCallback((point: { x: number; y: number }) => doc.nodes.find((node) => {
+    if (node.data.agent.kind === 'operator') return false
+    // Before React Flow has measured it, an agent card is `.build-node`'s own size.
+    const measured = flow.getNode(node.id)?.measured
+    const width = measured?.width ?? 220
+    const height = measured?.height ?? 76
+    return point.x >= node.position.x && point.x <= node.position.x + width
+      && point.y >= node.position.y && point.y <= node.position.y + height
+  })?.id ?? null, [doc.nodes, flow])
+
+  /**
+   * A skill, tool, folder, file or memory dropped onto an agent connects it to that agent (ADR
+   * 0042): the same team-file entry drawing a line writes. The card comes from that entry, so a
+   * skill dropped straight from the panel appears under the agent already connected.
+   */
+  const connectDropped = useCallback((raw: string, agentId: string) => {
+    let payload: CapabilityDragPayload
+    try {
+      payload = JSON.parse(raw) as CapabilityDragPayload
+    } catch {
+      return
+    }
+    const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
+    if (!agent || !payload?.kind || !payload.name) return
+    const name = nodeNames.get(agentId) ?? agent.name
+    if (payload.memory) {
+      const key = payload.memory.team ? { team: payload.memory.team } : { pack: payload.memory.pack }
+      const existing = doc.memoryInherits.find((entry) =>
+        (key.team !== undefined && entry.team === key.team) || (key.pack !== undefined && entry.pack === key.pack))
+      // Already read by the whole team: naming one agent would take it away from the rest.
+      if (existing && !existing.appliesTo) { setStatusAnnouncement(`The whole team already reads ${payload.name}.`); return }
+      doc.addMemoryInherit({ ...key, appliesTo: [...new Set([...(existing?.appliesTo ?? []), agentId])] })
+      setStatusAnnouncement(`${name} reads ${payload.name}.`)
+      return
+    }
+    const card = { kind: payload.kind, name: payload.name, ...(payload.path ? { path: payload.path } : {}) }
+    const current = agent.capabilities ?? []
+    if (current.some((capability) => capabilityIsCard(capability, card))) {
+      setStatusAnnouncement(`${name} already ${RELATION[payload.kind]} ${payload.name}.`)
+      return
+    }
+    const entry = capabilityForCard(card, current)
+    if (!entry) {
+      setPlanRefusal('Knowledge is a folder or file you choose. Use Add folder… or Add file…, then drag it onto the agent.')
+      return
+    }
+    doc.setAgentCapabilities(agentId, [...current, entry])
+    setStatusAnnouncement(`${name} ${RELATION[payload.kind]} ${payload.name}. Save the team to keep this change.`)
+  }, [doc, nodeNames])
 
   /** Whether a flow-space point lands on the permanent Prompt node's card. */
   const overPromptNode = useCallback((point: { x: number; y: number }) => {
@@ -1633,9 +1707,15 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     if (!(plannedSource && editable) && !(evidenceSource && runView)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = evidenceSource ? 'move' : 'copy'
-  }, [editable, runView])
+    // A capability over an agent's card is connected there on drop, so that card says so now.
+    const over = editable && event.dataTransfer.types.includes(CAPABILITY_DRAG_MIME)
+      ? agentAt(flow.screenToFlowPosition({ x: event.clientX, y: event.clientY }))
+      : null
+    setDropAgentId((current) => (current === over ? current : over))
+  }, [agentAt, editable, flow, runView])
   const onDrop = useCallback((event: React.DragEvent) => {
     setLibraryDragging(false)
+    setDropAgentId(null)
     const evidenceId = runView ? event.dataTransfer.getData(EVIDENCE_DRAG_MIME) : ''
     if (evidenceId) {
       const item = projection.evidence.find((candidate) => candidate.id === evidenceId)
@@ -1653,7 +1733,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     if (capability) {
       event.preventDefault()
       const at = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
-      placeCapability(capability, at, overPromptNode(at))
+      const agentId = agentAt(at)
+      if (agentId) connectDropped(capability, agentId)
+      else placeCapability(capability, at, overPromptNode(at))
       return
     }
     const raw = event.dataTransfer.getData(LIBRARY_DRAG_MIME)
@@ -1662,7 +1744,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     const at = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
     doc.addAgentFromDrop(raw, at)
     placeJobSkills(raw, at)
-  }, [doc, flow, editable, runView, projection.evidence, placeCapability, overPromptNode, placeJobSkills])
+  }, [doc, flow, editable, runView, projection.evidence, placeCapability, overPromptNode, placeJobSkills, agentAt, connectDropped])
 
   const onNodeDragStart = useCallback<OnNodeDrag<AnyNode>>(() => {
     nodeDraggingRef.current = true
@@ -1688,7 +1770,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
 
   // ---- notifications + announcements -----------------------------------------------------
   const waitingAlert: Attention | null = useMemo(() => waiting ? { id: `waiting:${waiting.questionId ?? waiting.since}`, seq: session.lastSeq, agentId: waiting.node, message: waiting.question } : null, [waiting, session.lastSeq])
-  const alerts: Attention[] = [...session.latest.attention, ...(waitingAlert ? [waitingAlert] : [])].filter((alert) => !dismissedAlerts.has(alert.id))
+  // A question waiting on the operator is not an alert on screen: the answer box and the needs-you
+  // chip already ask it, and a third copy covered the stages it is about. It still notifies.
+  const alerts: Attention[] = session.latest.attention.filter((alert) => !dismissedAlerts.has(alert.id))
   /**
    * Where an alert is *repaired*, which is not where it was raised: a run is a record, so the
    * only thing an operator can change is the team that produced it. Returns the agent and the
@@ -1920,7 +2004,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     briefCount: memory?.entries.length ?? 0,
     teamDeliverAs: memory?.deliverAs,
     notebookEnabled: memory?.notebookEnabled ?? false,
-  }), [editable, doc, stepById, nodeNames, reusePrompt, focusComposer, memory])
+    dropTargetId: dropAgentId,
+  }), [editable, doc, stepById, nodeNames, reusePrompt, focusComposer, memory, dropAgentId])
 
   const validationProblemCount = problems.length
   // TNG89 §6.3: the preflight blocker is assertive, and the polite channel is a queue
@@ -2013,9 +2098,11 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         onRetryHarnesses={onRetryHarnesses}
         onCreateBlank={(name, path) => { doc.createNewDocument(name, path); onDocumentOpen() }}
         onPalette={() => setPaletteOpen(true)}
-        topActions={<><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray}</>}
+        // Home's way into Ask is "Describe the job", so the header has no Ask button here, and the
+        // box steps aside while the panel is open: one place to type to Ask (ADR 0043).
+        topActions={needsYouTray()}
         runs={needsYou.records}
-        ask={{ unavailable: ask.unavailable, onAsk: askFor }}
+        ask={ask.open ? undefined : { unavailable: ask.unavailable, onAsk: askFor }}
       >
         {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
         {openPathOpen && <OpenTeamSheet onClose={() => setOpenPathOpen(false)} />}
@@ -2036,7 +2123,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
 
   return (
     <CanvasActionsContext.Provider value={canvasActions}>
-      <div className={shellClass} data-tour="workspace" data-tour-agents={doc.nodes.length} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME) || event.dataTransfer.types.includes(EVIDENCE_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) setLibraryDragging(false) }}>
+      <div className={shellClass} style={{ '--lw-palette-w': `${paletteWidth}px` } as CSSProperties} data-tour="workspace" data-tour-agents={doc.nodes.length} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME) || event.dataTransfer.types.includes(EVIDENCE_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) { setLibraryDragging(false); setDropAgentId(null) } }}>
         {/* ADR 0040: an agent paused on a request its switches do not cover, waiting for you. */}
         {runView && record && (record.permissionRequests?.length ?? 0) > 0 && (
           <PermissionPrompt
@@ -2054,7 +2141,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             key={activeRunId ?? 'new-run'}
             planned={runSetup}
             appProblems={appProblemByAgent}
-            onHistory={() => setHistoryOpen(true)}
             onNewRun={() => { closeRun(); setRunSetup(true); window.setTimeout(focusComposer, 0) }}
             run={record && !runSetup ? record : null}
             sendsTo={runSetup && doc.teamDeliver?.notion ? 'Notion' : null}
@@ -2123,7 +2209,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
-        {!runView && !runSetup && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} documentChipState={doc.documentChipState} appProblem={appProblemDetail} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onSave={() => void doc.save()} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); window.setTimeout(focusComposer, 0) }} />}
+        {!runView && !runSetup && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} appProblem={appProblemDetail} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); window.setTimeout(focusComposer, 0) }} />}
 
         <div aria-live="polite" aria-atomic="true" className="visually-hidden">{politeAnnouncement}</div>
         <div aria-live="assertive" className="visually-hidden">{assertiveAnnouncement}</div>
@@ -2137,7 +2223,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
 
         {(!runView && !runSetup || runPresentation === 'trace') && (
           // One add panel on both canvases (ADR 0041); a run adds what it used, at the top.
-          <ComponentPalette harnesses={harnesses} harnessSearchPath={harnessSearchPath} knownHarnessIds={knownHarnessIds} harnessesLoading={harnessesLoading} harnessesError={harnessesError} onRetry={onRetryHarnesses} capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={() => { onRetryCapabilities(); onRetryHarnesses() }} onInspectCapability={inspectCapability} onDragStateChange={setLibraryDragging} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} agentNames={nodeNames} teamPath={doc.path} onAddSources={editable ? placeSources : undefined} onRevealEvidence={(id) => {
+          <ComponentPalette harnesses={harnesses} harnessSearchPath={harnessSearchPath} knownHarnessIds={knownHarnessIds} harnessesLoading={harnessesLoading} harnessesError={harnessesError} onRetry={onRetryHarnesses} capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={() => { onRetryCapabilities(); onRetryHarnesses() }} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} agentNames={nodeNames} teamSources={teamSources} onRevealSource={revealSource} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} onRevealEvidence={(id) => {
             // Folded is the default, so "reveal" means: fan the agent that owns this card, then
             // frame it. Framing the agent rather than the card is deliberate — the evidence node
             // does not exist yet on this render.
@@ -2152,17 +2238,12 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>
           {/* The brand is the way home: every team is one click from the list of all teams. */}
           <a className="delivery-brand" href="/" aria-label="LoomWatch — all teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}>LoomWatch</a>
-          <WorkspaceMenu
-            canOrganize={canOrganize} canUndoOrganize={Boolean(previousArrangement)} runView={runView}
-            onHistory={() => setHistoryOpen(true)} onMemory={() => { clearSelection(); setMemoryOpen(true) }} onRunRoutine={routine && !routineBusy ? () => void runRoutineNow() : undefined}
-            onOrganize={organize} onUndoOrganize={undoOrganize} onFullTrace={() => setRunPresentation('trace')} onShowYaml={() => setYamlOpen(true)}
-          />
-          <div className="needs-you-anchor"><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray}</div>
+          <WorkspaceMenu runView={runView} onHistory={() => setHistoryOpen(true)} onMemory={() => { clearSelection(); setMemoryOpen(true) }} />
+          <div className="needs-you-anchor"><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray(runView ? activeRunId : null)}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
             <SegmentThumb />
             <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); if (activeRunId) setRunPresentation('delivery'); else if (lastOpenedRun?.path === doc.path) showRun(lastOpenedRun.id); else { setRunSetup(true); setRunPresentation('delivery') } }}><Play size={15} />Run</button>
             <button type="button" aria-pressed={!runView && !runSetup} onClick={() => { clearSelection(); closeRun() }}><Wrench size={15} />Build</button>
-            {runView && runPresentation === 'trace' && <button type="button" className="trace-back" onClick={() => setRunPresentation('delivery')}>Back to output</button>}
           </nav>
           <DocumentSwitcher
             path={doc.path} teamName={doc.teamName} saveState={doc.documentChipState} saveError={doc.saveError} linesDiffer={differ}
@@ -2173,7 +2254,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             onSelectProblem={selectProblem} problemsOpen={problemsOpen} onProblemsOpenChange={setProblemsOpen}
           />
           {runView && runPresentation === 'trace' && (
-            <LifecycleStrip waiting={Boolean(waiting)} attempt={attempt} phase={phase} leadTask={waiting?.handoverFrom === leadId ? 'done' : leadAgent?.taskState.toLowerCase() ?? (phase === 'queued' ? 'queued' : 'ready')} result={lifecycleResult} mode={session.mode} lastSeq={session.lastSeq} cursor={session.cursor} onCursor={session.setCursor} onClose={closeRun} elapsed={elapsed} />
+            <LifecycleStrip waiting={Boolean(waiting)} attempt={attempt} phase={phase} leadTask={waiting?.handoverFrom === leadId ? 'done' : leadAgent?.taskState.toLowerCase() ?? (phase === 'queued' ? 'queued' : 'ready')} result={lifecycleResult} mode={session.mode} lastSeq={session.lastSeq} cursor={session.cursor} onCursor={session.setCursor} elapsed={elapsed} />
           )}
           {doc.diskNotice && <p className="lw-notice t-meta" style={{ margin: 0 }}>{doc.diskNotice}</p>}
           {doc.entrypointProblem && doc.entrypointProblem.candidates.length > 0 && editable && <EntrypointProblemBar problem={doc.entrypointProblem} onPromote={doc.promoteEntrypoint} />}
@@ -2186,13 +2267,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             </div>
           )}
         </div>
-
-        {!runView && !runSetup && !inspecting && doc.nodes.length > 0 && (
-          <BuildOutcome
-            responder={responderFromDoc} agents={doc.nodes} pipeline={doc.mode === 'pipeline'} canChooseResponder={editable && doc.mode === 'pipeline'}
-            onPromoteResponder={(id) => doc.promoteResponder(id)} onPreview={() => { setRunSetup(true); setRunPresentation('delivery') }}
-          />
-        )}
 
         {!runView && !runSetup && outputEditorOpen && (
           <OutputEditor
@@ -2325,7 +2399,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             onRetry={() => setMemoryGeneration((generation) => generation + 1)}
             onClose={() => setMemoryOpen(false)}
             unsavedEntries={doc.briefPaths.filter((path) => !memory?.entries.some((entry) => entry.path === path))}
-            onSaveTeam={() => void doc.save()}
           />
         )}
         {provenanceOpen && !inspectedEvidence && !inspectedNode && !inspectedCapability && runView && (
@@ -2342,7 +2415,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         {askNotice}
 
         {layersVisible && runPresentation === 'trace' && <LayerLegend configured={doc.edges.length} observed={observedCount} solo={soloActive} onSolo={setSolo} />}
-        {(!runView && !runSetup || runPresentation === 'trace') && <ViewControls onFit={fitCanvas} onOrganize={windowWidth >= 768 ? organize : undefined} organizeDisabled={!canOrganize} onUndoOrganize={canOrganize && previousArrangement?.key === arrangementKey ? undoOrganize : undefined} />}
+        {(!runView && !runSetup || runPresentation === 'trace') && <ViewControls onFit={() => fitCanvas(STORY_MAX_ZOOM)} onOrganize={windowWidth >= 768 ? organize : undefined} organizeDisabled={!canOrganize} onUndoOrganize={canOrganize && previousArrangement?.key === arrangementKey ? undoOrganize : undefined} />}
 
         {(doc.refusal || planRefusal) && <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center" style={{ bottom: 'calc(var(--lw-panel-inset) + 72px)' }}><EdgeRefusalPopover refusal={doc.refusal ?? { message: planRefusal ?? '' }} onPromote={doc.promoteEntrypoint} onDismiss={() => { doc.dismissRefusal(); setPlanRefusal(null) }} /></div>}
         {composerLayout.error && <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center" style={{ bottom: 'calc(var(--lw-panel-inset) + 164px)' }}><EdgeRefusalPopover refusal={{ message: `Capability wiring: ${composerLayout.error}` }} onPromote={doc.promoteEntrypoint} onDismiss={composerLayout.dismissError} /></div>}
@@ -2399,25 +2472,17 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           value={composerText} onChange={setComposerText} onSubmit={() => void submit()} onStop={() => void stop()} onRetry={retry} onNewRun={() => void submit()}
           followUpStages={followUpStages} followUpTarget={followUpTarget} onFollowUpTargetChange={setFollowUpTarget}
           onFollowUp={runView && activeRunId ? () => void followUp() : undefined}
-          onOpenHistory={() => setHistoryOpen((open) => !open)} historyOpen={historyOpen} switchBanner={doc.modeSwitchBanner}
-          memoryCount={memory?.entries.length ?? 0} memoryOpen={memoryPanelOpen} onOpenMemory={() => {
-            // Opening Memory clears the selection, because the right dock holds one panel and a
-            // selected node owns it (§13's mutual exclusion, enforced in `memoryPanelOpen`).
-            clearSelection()
-            setProvenanceOpen(false)
-            setHandoverAgentId(null)
-            setInspectedEvidenceId(null)
-            setMemoryOpen((open) => !open)
-          }}
-        >
-          {historyOpen && (
-            <RunHistory entries={historyEntries} currentId={activeRunId} loading={!history.loaded} error={history.error ?? history.unavailable} onOpen={(entry) => {
-              setHistoryOpen(false)
-              if (entry.teamPath && entry.teamPath !== doc.path) window.location.assign(historyRunUrl(entry))
-              else showRun(entry.id)
-            }} onClose={() => setHistoryOpen(false)} />
-          )}
-        </Composer>
+          switchBanner={doc.modeSwitchBanner}
+        />
+        {/* Opened from the menu on every screen (ADR 0043), so it is the shell's, not the
+            composer's: Build hides the composer, and the drawer with it. */}
+        {historyOpen && (
+          <RunHistory entries={historyEntries} currentId={activeRunId} loading={!history.loaded} error={history.error ?? history.unavailable} onOpen={(entry) => {
+            setHistoryOpen(false)
+            if (entry.teamPath && entry.teamPath !== doc.path) window.location.assign(historyRunUrl(entry))
+            else showRun(entry.id)
+          }} onClose={() => setHistoryOpen(false)} />
+        )}
 
         {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
         {discardConfirm && <InlineConfirm message="Discard changes and reload from disk?" confirmLabel="Discard changes" onConfirm={() => { setDiscardConfirm(false); void doc.reloadFromDisk() }} onCancel={() => setDiscardConfirm(false)} />}

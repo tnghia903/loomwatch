@@ -1,7 +1,6 @@
-import { ExternalLink } from 'lucide-react'
 import { useState } from 'react'
 
-import { CONNECTIONS_HREF, DEFAULT_RUN_NOTION_TITLE, previewNotionTitle, useNotionConnection, type NotionConnection } from '../../lib/notion/connection'
+import { DEFAULT_RUN_NOTION_TITLE, previewNotionTitle, useNotionConnection, type NotionConnection } from '../../lib/notion/connection'
 import type { DeliverConfig } from '../../lib/team-file/types'
 
 interface NotionDeliverySettingsProps {
@@ -78,11 +77,12 @@ export function NotionDeliverySettings({ deliver, onChange, readOnly, teamName, 
   )
 }
 
-/** Whether a page would actually arrive, and the one place to fix it when it would not. */
+/**
+ * Whether a page would actually arrive, and where to fix it when it would not. Connections opens
+ * from the menu, its one way in (ADR 0043), so this says where rather than linking a second time.
+ */
 function ConnectionLine({ connection, on }: { connection: NotionConnection; on: boolean }) {
-  const link = (label: string) => (
-    <a className="link output-send-link" href={CONNECTIONS_HREF} target="_blank" rel="noreferrer">{label} <ExternalLink size={12} aria-hidden="true" /></a>
-  )
+  const link = (label: string) => <span className="output-send-link">{label} in Connections, from the menu.</span>
   if (connection.state === 'loading') return <p className="output-send-status t-meta" role="status">Checking your Notion connection…</p>
   if (connection.state === 'unavailable') return <p className="output-send-status t-meta" role="status">{connection.message}</p>
   if (connection.state === 'disconnected') {

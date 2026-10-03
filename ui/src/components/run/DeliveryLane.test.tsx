@@ -196,12 +196,15 @@ describe('Delivery Lane', () => {
       screen.queryByRole('button', { name: 'Copy team output' }),
     ).toBeNull()
   })
-  it('uses the existing full trace and composer actions', () => {
-    const { props, actions } = setup()
+  // ADR 0043: the receipt's See every event and the answer's own Full trace link did what the
+  // heading's Full trace does, and Request a change only focused the box that is already there.
+  it('opens the full trace from one button, with no second way to the same place', () => {
+    const { props } = setup()
+    expect(screen.getAllByRole('button', { name: /Full trace|See every event/ })).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: 'Full trace' }))
     expect(props.onTrace).toHaveBeenCalledOnce()
-    fireEvent.click(screen.getByRole('button', { name: 'Request a change' }))
-    expect(actions.focusComposer).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'Request a change' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Inspect handoff/ })).toBeNull()
   })
   it('does not allow review acknowledgement to bypass missing skill evidence', () => {
     HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', '') }
@@ -234,7 +237,10 @@ describe('Delivery Lane', () => {
     const output = within(screen.getByRole('complementary', { name: 'Team output' }))
     expect(output.queryByText(/Response available/i)).toBeNull()
     expect(output.getByText('Designer wasn’t allowed to search the web, and carried on without it.')).toBeInTheDocument()
-    fireEvent.click(output.getByRole('button', { name: '1 thing to check: review this answer' }))
+    // The verdict is a status; Review output in the heading is the one way into the review (ADR 0043).
+    expect(output.queryByRole('button', { name: /review this answer/ })).toBeNull()
+    expect(output.getByText('1 thing to check')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Review output/ }))
     const review = within(screen.getByRole('dialog', { name: 'Review team output' }))
     fireEvent.click(within(review.getByRole('region', { name: 'Worth a look' })).getByRole('button', { name: /^Open: Designer wasn’t allowed/ }))
     expect(props.onInspectEvidence).toHaveBeenCalledWith('p1')
@@ -242,7 +248,8 @@ describe('Delivery Lane', () => {
   })
   it('says nothing was flagged when the record holds nothing to check', () => {
     setup({ agents: [] })
-    expect(screen.getByRole('button', { name: 'Nothing flagged: review this answer' })).toBeInTheDocument()
+    expect(screen.getByText('Nothing flagged')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /review this answer/ })).toBeNull()
     expect(screen.getByText('Every step finished and nothing in the record was flagged.')).toBeInTheDocument()
   })
   it('supports filters and output expansion without changing the team', () => {
@@ -342,26 +349,28 @@ describe('Delivery Lane', () => {
       { id: 'writer', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Writer', agent: { id: 'writer', name: 'Writer', role: 'Write' }, runtime: runtime(writerStatus) } },
     ] as DeliveryLaneProps['agents']
     const stage = (id: string) => document.getElementById(`delivery-stage-${id}`) as HTMLElement
+    // The arrow into a stage only shows the order; what the agent received opens from its card (ADR 0043).
+    const handoffInto = (id: string) => stage(id).closest('.delivery-stage-wrap')?.querySelector('.delivery-handoff-arrow') as HTMLElement
 
     it('is marked, with the handoff into it, while the run is watched live', () => {
       setup({ mode: 'live', phase: 'running', agents: agents('running') })
       expect(screen.getByRole('main', { name: 'Run workspace' })).toHaveClass('live')
       expect(stage('writer')).toHaveClass('working')
       expect(stage('researcher')).not.toHaveClass('working')
-      expect(screen.getByRole('button', { name: 'Inspect handoff to Writer' })).toHaveClass('passing')
+      expect(handoffInto('writer')).toHaveClass('passing')
     })
 
     it('settles once the stage finishes', () => {
       setup({ mode: 'live', phase: 'succeeded', agents: agents('succeeded') })
       expect(stage('writer')).not.toHaveClass('working')
-      expect(screen.getByRole('button', { name: 'Inspect handoff to Writer' })).not.toHaveClass('passing')
+      expect(handoffInto('writer')).not.toHaveClass('passing')
     })
 
     it('never moves in a replay, whatever the recorded status says', () => {
       setup({ mode: 'replay', agents: agents('running') })
       expect(screen.getByRole('main', { name: 'Run workspace' })).not.toHaveClass('live')
       expect(stage('writer')).not.toHaveClass('working')
-      expect(screen.getByRole('button', { name: 'Inspect handoff to Writer' })).not.toHaveClass('passing')
+      expect(handoffInto('writer')).not.toHaveClass('passing')
     })
   })
 

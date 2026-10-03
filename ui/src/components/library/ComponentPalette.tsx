@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { BookmarkCheck, Bot, Box, ChartColumn, Code2, Globe, GripVertical, Info, PanelLeftClose, PanelLeftOpen, PenLine, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, Wrench, type LucideIcon } from 'lucide-react'
+import { BookmarkCheck, Bot, Box, ChartColumn, Code2, FileText, Folder, Globe, GripVertical, Info, LocateFixed, PanelLeftClose, PanelLeftOpen, PenLine, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, Wrench, type LucideIcon } from 'lucide-react'
 import { harnessProblem, KNOWN_HARNESSES, knownHarness } from '../../lib/harnesses'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
 import { removeJob, savedJobPreset, useSavedJobs } from '../../lib/library/jobs'
@@ -11,7 +11,9 @@ import type { DetectedHarness } from '../../lib/harnesses'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import type { Evidence } from '../../lib/watch/events'
 import { CAPABILITY_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
-import { AddSource, type ChosenSource } from '../canvas/AddSource'
+import { chosenIsFile } from '../../lib/knowledge/chosen'
+import { PALETTE_WIDTH } from '../../lib/library/paletteWidth'
+import { PaletteResizer } from './PaletteResizer'
 
 const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn }
 
@@ -19,6 +21,8 @@ const USED = 'Used in this run'
 const BUILT_IN = 'Hire by job'
 const YOURS = 'Your jobs'
 const APPS = 'AI apps'
+const FILES = 'Folders & files'
+const MEMORY = 'Team memory'
 
 export interface LibraryProps {
   harnesses: DetectedHarness[]
@@ -44,10 +48,27 @@ export interface LibraryProps {
   onRevealEvidence?: (id: string) => void
   /** Agent ids to the names on their cards, for "Used in this run". */
   agentNames?: ReadonlyMap<string, string>
-  /** The open team file, which an added file is copied beside. */
-  teamPath?: string | null
-  /** Put folders and files the operator chose on the canvas as cards (ADR 0042). Absent when the team cannot be edited. */
-  onAddSources?: (sources: ChosenSource[]) => void
+  /** This team's folders and files, one per card, and who reads each. */
+  teamSources?: readonly TeamSource[]
+  /** Find a source's card on the canvas and open it. */
+  onRevealSource?: (id: string) => void
+  /** The panel's width in pixels, and how dragging its edge changes it. Absent: it cannot be resized. */
+  width?: number
+  onResize?: (width: number) => void
+}
+
+/** A folder or file of this team, as the panel lists it (ADR 0042). */
+export interface TeamSource {
+  /** Its card's id. */
+  id: string
+  name: string
+  path: string
+  /** "Linked folder" or "Added file". */
+  source: string
+  /** The names of the agents that read it. */
+  readers: readonly string[]
+  /** What its details panel shows. */
+  item: DetectedCapability
 }
 
 interface PaletteItem {
@@ -65,6 +86,10 @@ interface PaletteItem {
   jobId?: string
   /** A skill, tool or knowledge source: the row offers its details. */
   capability?: { item: DetectedCapability; kind: CapabilityKind }
+  /** What a click does instead of adding: a folder or file already has a card, so it is found. */
+  onActivate?: () => void
+  /** The icon at the end of the row, when a click does not add. */
+  Trailing?: LucideIcon
 }
 
 function jobItem(preset: RolePreset, harnesses: readonly DetectedHarness[], jobId?: string): PaletteItem {
@@ -78,6 +103,27 @@ function capabilityItem(item: DetectedCapability, kind: CapabilityKind): Palette
 }
 
 const listOf = (names: readonly string[]) => names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+
+/**
+ * A folder or file of this team (ADR 0042). Dragging it onto an agent connects it to that agent;
+ * a click finds its card, which every source already has.
+ */
+function sourceItem(source: TeamSource, reveal?: (id: string) => void): PaletteItem {
+  const payload: CapabilityDragPayload = { kind: 'knowledge', name: source.name, source: source.source, path: source.path }
+  return {
+    name: source.name,
+    detail: source.readers.length ? `Read by ${listOf(source.readers)}` : 'No agent reads it yet',
+    engine: source.source,
+    quiet: true,
+    Icon: chosenIsFile(source.path) ? FileText : Folder,
+    mime: CAPABILITY_DRAG_MIME,
+    event: 'loomwatch:add-capability',
+    disabled: false,
+    payload,
+    capability: { item: source.item, kind: 'knowledge' },
+    ...(reveal ? { onActivate: () => reveal(source.id), Trailing: LocateFixed } : {}),
+  }
+}
 
 /** "Built into the app · Researcher and Fact-checker" — what it is, and who used it. */
 function usedDetail(row: UsedInRun, name: (id: string) => string): string {
@@ -101,7 +147,7 @@ function usedRefusal(row: UsedInRun, name: (id: string) => string): string | nul
  * second "Library" that the trace drew with other groups, other rows and other words for the
  * same skills and tools.
  */
-export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarnessIds = [], harnessesLoading, harnessesError, onRetry, capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], onRevealEvidence, agentNames, teamPath, onAddSources }: LibraryProps) {
+export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarnessIds = [], harnessesLoading, harnessesError, onRetry, capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], onRevealEvidence, agentNames, teamSources = [], onRevealSource, width, onResize }: LibraryProps) {
   // On a phone the panel would take half the screen, so it starts closed and overlays the canvas
   // when opened; adding something closes it again so the new card is in view.
   const narrow = () => typeof window !== 'undefined' && window.innerWidth < 768
@@ -163,14 +209,18 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
       // placing it asks for its models again — but it says why it may not run instead of "AI agent".
       ...harnesses.map(h => ({ name: h.name, detail: harnessProblem(h) ?? 'Blank agent · you write its brief', Icon: Bot, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: h.acpAvailable === false, payload: { group: 'detected', id: h.id, label: h.name, spawn: h.spawn } as object })),
     ] },
-    ...(['skills', 'tools', 'sources'] as const).map(key => {
-      const kind: CapabilityKind = key === 'skills' ? 'skill' : key === 'tools' ? 'tool' : 'knowledge'
-      return { name: { skills: 'Skills', tools: 'Tools', sources: 'Knowledge' }[key], items: (capabilityInventory?.[key] ?? []).map(item => capabilityItem(item, kind)) }
+    ...(['skills', 'tools'] as const).map(key => {
+      const kind: CapabilityKind = key === 'skills' ? 'skill' : 'tool'
+      return { name: { skills: 'Skills', tools: 'Tools' }[key], items: (capabilityInventory?.[key] ?? []).map(item => capabilityItem(item, kind)) }
     }),
+    // Chosen, not discovered (ADR 0036): only what this team was given, each with its own card.
+    { name: FILES, items: teamSources.map(source => sourceItem(source, onRevealSource)) },
+    // Other teams' memory and imported packs: the only knowledge this Mac is scanned for.
+    { name: MEMORY, items: (capabilityInventory?.sources ?? []).map(item => capabilityItem(item, 'knowledge')) },
   ]
   // The agent lists are short and are what a new team needs, so they are shown whole; the
   // capability groups can run to hundreds of entries and fold to three.
-  const limitFor = (group: string) => (group === BUILT_IN ? 8 : group === YOURS ? 6 : group === APPS ? 4 : group === USED ? 6 : 3)
+  const limitFor = (group: string) => (group === BUILT_IN ? 8 : group === YOURS ? 6 : group === APPS ? 4 : group === USED || group === FILES ? 6 : 3)
   const matches = (text: string) => text.toLowerCase().includes(query.trim().toLowerCase())
   const remove = (item: PaletteItem) => {
     if (!item.jobId) return
@@ -180,7 +230,7 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
     removeJob(item.jobId).catch((error: unknown) => setRemoveError(error instanceof Error ? error.message : String(error)))
   }
   const row = (item: PaletteItem, i: number) => {
-    const add = <button key={`${item.name}-${i}`} className="palette-item" disabled={item.disabled} title={item.engine ? `${item.detail} · ${item.engine}` : item.detail} draggable={!item.disabled} onDragStart={e => { e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData(item.mime, JSON.stringify(item.payload)); e.dataTransfer.setData('text/plain', item.name); onDragStateChange?.(true) }} onDragEnd={() => onDragStateChange?.(false)} onClick={() => { window.dispatchEvent(new CustomEvent(item.event, { detail: JSON.stringify(item.payload) })); if (narrow()) setCollapsed(true) }}><GripVertical size={13} /><span className="palette-icon"><item.Icon size={15} /></span><span><strong>{item.name}</strong><small>{item.detail}</small>{item.engine && <em className={item.quiet ? 'palette-engine quiet' : 'palette-engine'}>{item.engine}</em>}</span><Plus size={13} /></button>
+    const add = <button key={`${item.name}-${i}`} className="palette-item" disabled={item.disabled} title={item.engine ? `${item.detail} · ${item.engine}` : item.detail} draggable={!item.disabled} onDragStart={e => { e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData(item.mime, JSON.stringify(item.payload)); e.dataTransfer.setData('text/plain', item.name); onDragStateChange?.(true) }} onDragEnd={() => onDragStateChange?.(false)} onClick={() => { if (item.onActivate) item.onActivate(); else window.dispatchEvent(new CustomEvent(item.event, { detail: JSON.stringify(item.payload) })); if (narrow()) setCollapsed(true) }}><GripVertical size={13} /><span className="palette-icon"><item.Icon size={15} /></span><span><strong>{item.name}</strong><small>{item.detail}</small>{item.engine && <em className={item.quiet ? 'palette-engine quiet' : 'palette-engine'}>{item.engine}</em>}</span>{item.Trailing ? <item.Trailing size={13} aria-hidden="true" /> : <Plus size={13} />}</button>
     if (item.capability && onInspectCapability) {
       const { item: capability, kind } = item.capability
       return <div key={`${item.name}-${i}`} className="palette-job">
@@ -222,7 +272,8 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
   const usedShown = used.filter(item => matches(`${item.name} ${usedDetail(item, agentName)}`))
   const scanned = capabilitiesScannedAt ? `Scanned this Mac at ${capabilitiesScannedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Scanning finds the skills and tools on this Mac'
   return <aside className="node-palette" aria-label="Add to your team" data-tour="palette">
-    <div className="palette-head"><div><span className="eyebrow">Add to your team</span><p>Click + or drag onto the canvas</p></div><button className="icon-button" onClick={() => setCollapsed(true)} aria-label="Collapse the library" title="Collapse (⌘\)"><PanelLeftClose size={16} /></button></div>
+    <div className="palette-body">
+    <div className="palette-head"><div><span className="eyebrow">Add to your team</span><p>Click + or drag onto the canvas, or onto an agent</p></div><button className="icon-button" onClick={() => setCollapsed(true)} aria-label="Collapse the library" title="Collapse (⌘\)"><PanelLeftClose size={16} /></button></div>
     <div className="palette-search"><Search size={12} /><input aria-label="Search agents, skills and tools" placeholder="Search" value={query} onChange={e => setQuery(e.target.value)} /><button className="icon-button" onClick={onRetryCapabilities} disabled={capabilitiesLoading} aria-label="Scan this computer again" title="Scan again"><RefreshCw size={12} /></button></div>
     <p className="palette-scan" role="status">{capabilitiesLoading ? 'Checking this Mac…' : scanned}</p>
     {capabilitiesError && !capabilitiesLoading && <div className="palette-alert" role="alert"><span>Couldn’t scan this Mac’s skills and tools.</span><small>{capabilitiesError}</small>{onRetryCapabilities && <button className="btn" onClick={onRetryCapabilities}>Try again</button>}</div>}
@@ -234,7 +285,7 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
       const items = group.items.filter(item => matches(`${item.name} ${item.detail}`))
       if (query && items.length === 0) return null
       const loadingApps = group.name === APPS && harnessesLoading
-      const loadingCapabilities = (group.name === 'Skills' || group.name === 'Tools' || group.name === 'Knowledge') && capabilitiesLoading && group.items.length === 0
+      const loadingCapabilities = (group.name === 'Skills' || group.name === 'Tools' || group.name === MEMORY) && capabilitiesLoading && group.items.length === 0
       return section(group.name, [
         ...(loadingApps || loadingCapabilities ? [40, 56].map(width => <div key={width} className="skel-row" aria-hidden="true"><span className="skel-sq" /><span className="skel-bars"><i className="skel-bar" style={{ width: `${width}%` }} /><i className="skel-bar" style={{ width: `${100 - width}%` }} /></span></div>) : []),
         ...visible(group.name, items).map(row),
@@ -243,13 +294,16 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
         {group.name === YOURS && saved.problems.map(problem => <p key={problem.file} className="palette-hint palette-problem" title={problem.message}>Can’t read {problem.file}: {problem.message}</p>)}
         {group.name === APPS && !query && <AppsFooter loading={harnessesLoading} error={harnessesError} onRetry={onRetry} found={harnesses.length} notInstalled={notInstalled} notInstalledOpen={notInstalledOpen} onToggleNotInstalled={() => setNotInstalledOpen(open => !open)} searchPathOpen={searchPathOpen} onToggleSearchPath={() => setSearchPathOpen(open => !open)} knownIds={knownHarnessIds} searchPath={harnessSearchPath} />}
         {group.name === 'Tools' && !query && <p className="palette-hint">Web search, commands and file edits are built into each AI app. Switch them on per agent, under <b>Allowed without asking</b>.</p>}
-        {group.name === 'Knowledge' && !query && onAddSources && <AddSource teamPath={teamPath} onAdd={(sources) => { onAddSources(sources); if (narrow()) setCollapsed(true) }} />}
-        {group.name === 'Knowledge' && !query && <p className="palette-hint">{group.items.length === 0 && !capabilitiesLoading ? 'Teams with memory appear here. ' : ''}A folder or file becomes a card: connect it to every agent that should read it.</p>}
-        {group.name !== 'Knowledge' && group.name !== APPS && group.name !== BUILT_IN && group.name !== YOURS && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-hint">Nothing found on this Mac yet.</p>}
+        {/* Added from an agent's panel, where it is connected at once: one Add folder… per screen (ADR 0043). */}
+        {group.name === FILES && !query && <p className="palette-hint">{group.items.length === 0 ? 'Select an agent and use Add folder… or Add file… in its panel. Each one then shows here, to drag onto other agents.' : 'Drag one onto an agent to share it with that agent. Click to find its card.'}</p>}
+        {group.name === MEMORY && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-hint">Other teams’ memory and imported packs appear here.</p>}
+        {group.name !== FILES && group.name !== MEMORY && group.name !== APPS && group.name !== BUILT_IN && group.name !== YOURS && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-hint">Nothing found on this Mac yet.</p>}
       </>)
     })}
     {query && usedShown.length === 0 && groups.every(group => !group.items.some(item => matches(`${item.name} ${item.detail}`))) && <p className="palette-hint">Nothing matches “{query}”.</p>}
     <p className="palette-foot">Only names and compatibility are scanned; private contents stay on this Mac.</p>
+    </div>
+    {onResize && <PaletteResizer width={width ?? PALETTE_WIDTH.default} onResize={onResize} />}
   </aside>
 }
 

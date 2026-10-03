@@ -87,7 +87,7 @@ describe('ComponentPalette in Build and in a run', () => {
     render(<ComponentPalette harnesses={[codex]} harnessesLoading={false} harnessesError={null} capabilityInventory={capabilities} capabilitiesScannedAt={new Date()} />)
     expect(within(section('Skills')).getByRole('button', { name: /notebooklm.*Claude Code \+ Codex.*Ready/ })).toBeInTheDocument()
     expect(within(section('Tools')).getByRole('button', { name: /Agent Memory.*Compatible/ })).toBeInTheDocument()
-    expect(within(section('Knowledge')).getByRole('button', { name: /Research team · memory/ })).toBeInTheDocument()
+    expect(within(section('Team memory')).getByRole('button', { name: /Research team · memory/ })).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent(/Scanned this Mac at/)
   })
 
@@ -125,14 +125,72 @@ describe('ComponentPalette in Build and in a run', () => {
     expect(section('Tools')).toHaveTextContent('Web search, commands and file edits are built into each AI app. Switch them on per agent, under Allowed without asking.')
   })
 
-  /** ADR 0036: with no team memory the group is empty, and says where a folder or file is added. */
-  it('offers Add folder and Add file under Knowledge, only where the team can be edited', () => {
-    const view = render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={{ ...capabilities, sources: [] }} teamPath="desk.yaml" onAddSources={vi.fn()} />)
-    expect(section('Knowledge')).toHaveTextContent('Teams with memory appear here. A folder or file becomes a card: connect it to every agent that should read it.')
-    expect(within(section('Knowledge')).getByRole('button', { name: 'Add folder…' })).toBeEnabled()
-    expect(within(section('Knowledge')).getByRole('button', { name: 'Add file…' })).toBeEnabled()
-    view.rerender(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={{ ...capabilities, sources: [] }} teamPath="desk.yaml" />)
-    expect(within(section('Knowledge')).queryByRole('button', { name: 'Add folder…' })).not.toBeInTheDocument()
+  /** ADR 0043: a folder or file is added from an agent's panel, so the add panel says where, and has no Add button of its own. */
+  it('points Folders & files at the agent panel, with no Add folder of its own', () => {
+    render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={{ ...capabilities, sources: [] }} />)
+    expect(section('Folders & files')).toHaveTextContent('Select an agent and use Add folder… or Add file… in its panel.')
+    expect(within(section('Folders & files')).queryByRole('button', { name: 'Add folder…' })).not.toBeInTheDocument()
+    expect(within(section('Folders & files')).queryByRole('button', { name: 'Add file…' })).not.toBeInTheDocument()
+    expect(section('Team memory')).toHaveTextContent('Other teams’ memory and imported packs appear here.')
+  })
+
+  /**
+   * ADR 0042: once added, a folder or file is a row of its own, like a skill: it says who reads
+   * it, drags with its path so dropping it on an agent connects it there, finds its card on a
+   * click, and opens its details with the info button.
+   */
+  it('lists this team\u2019s folders and files as rows that drag, find their card and open their details', () => {
+    const reveal = vi.fn()
+    const inspect = vi.fn()
+    const item = { id: 'knowledge@/Users/me/reports', name: 'reports', source: 'Linked folder', path: '/Users/me/reports', detail: 'A folder on this computer.', status: 'Local only' as const }
+    render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={capabilities} onInspectCapability={inspect} onRevealSource={reveal} teamSources={[
+      { id: item.id, name: 'reports', path: '/Users/me/reports', source: 'Linked folder', readers: ['Researcher', 'Analyst'], item },
+      { id: 'knowledge@desk.files/brief.md', name: 'brief.md', path: 'desk.files/brief.md', source: 'Added file', readers: [], item: { ...item, id: 'knowledge@desk.files/brief.md', name: 'brief.md', path: 'desk.files/brief.md' } },
+    ]} />)
+    const files = section('Folders & files')
+    const reports = within(files).getByRole('button', { name: /^reports.*Read by Researcher and Analyst.*Linked folder/ })
+    expect(within(files).getByRole('button', { name: /^brief\.md.*No agent reads it yet.*Added file/ })).toBeInTheDocument()
+    expect(within(files).getByText('Drag one onto an agent to share it with that agent. Click to find its card.')).toBeInTheDocument()
+
+    const setData = vi.fn()
+    fireEvent.dragStart(reports, { dataTransfer: { setData, effectAllowed: '' } })
+    expect(setData).toHaveBeenCalledWith(CAPABILITY_DRAG_MIME, JSON.stringify({ kind: 'knowledge', name: 'reports', source: 'Linked folder', path: '/Users/me/reports' }))
+
+    const placed = vi.fn()
+    window.addEventListener('loomwatch:add-capability', placed)
+    fireEvent.click(reports)
+    expect(reveal).toHaveBeenCalledWith('knowledge@/Users/me/reports')
+    expect(placed).not.toHaveBeenCalled()
+    window.removeEventListener('loomwatch:add-capability', placed)
+    fireEvent.click(within(files).getByRole('button', { name: 'Details for reports' }))
+    expect(inspect).toHaveBeenCalledWith(item, 'knowledge')
+  })
+
+  /** The panel's right edge resizes it: dragged, with the arrow keys, and back to default on a double click. */
+  it('resizes from its right edge, within its limits', () => {
+    const onResize = vi.fn()
+    render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} width={240} onResize={onResize} />)
+    const edge = screen.getByRole('separator', { name: 'Resize the panel' })
+    expect(edge).toHaveAttribute('aria-valuenow', '240')
+    fireEvent.keyDown(edge, { key: 'ArrowRight' })
+    expect(onResize).toHaveBeenLastCalledWith(256)
+    fireEvent.keyDown(edge, { key: 'Home' })
+    expect(onResize).toHaveBeenLastCalledWith(200)
+    fireEvent.pointerDown(edge, { button: 0, pointerId: 1, clientX: 240 })
+    fireEvent.pointerMove(edge, { pointerId: 1, clientX: 333 })
+    expect(onResize).toHaveBeenLastCalledWith(333)
+    fireEvent.pointerMove(edge, { pointerId: 1, clientX: 2000 })
+    expect(onResize).toHaveBeenLastCalledWith(520)
+    fireEvent.pointerUp(edge, { pointerId: 1 })
+    fireEvent.pointerMove(edge, { pointerId: 1, clientX: 300 })
+    expect(onResize).toHaveBeenLastCalledWith(520)
+    fireEvent.doubleClick(edge)
+    expect(onResize).toHaveBeenLastCalledWith(210)
+  })
+
+  it('cannot be resized where nothing handles it', () => {
+    render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} />)
+    expect(screen.queryByRole('separator', { name: 'Resize the panel' })).not.toBeInTheDocument()
   })
 
   it('shows a scan failure verbatim and scans again on request', () => {

@@ -29,3 +29,19 @@ describe('a permission ticket in the tray (ADR 0040)', () => {
     expect(onPermission).toHaveBeenLastCalledWith(ticket, 'deny')
   })
 })
+
+// ADR 0043: the run on screen asks with its own answer box and permission card, so its ticket in
+// the tray says where to answer instead of offering the same buttons again; it still counts.
+describe('a ticket for the run on screen', () => {
+  it('points at the screen and offers none of the run’s own buttons or keys', () => {
+    const onPermission = vi.fn(() => Promise.resolve())
+    const other = { ...ticket, id: 'r2:permission:p2', runId: 'r2', teamName: 'Other team' }
+    render(<NeedsYouTray tickets={[ticket, other]} working={0} onAnswer={vi.fn()} onPermission={onPermission} onDismiss={vi.fn()} onScreenRunId="r1" />)
+    fireEvent.click(screen.getByRole('button', { name: /2 need you/ }))
+    expect(screen.getByText('On this screen: answer it below.')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /^Allow\s*A$/ })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /^Open run/ })).toHaveLength(1)
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'a' })
+    expect(onPermission).not.toHaveBeenCalled()
+  })
+})

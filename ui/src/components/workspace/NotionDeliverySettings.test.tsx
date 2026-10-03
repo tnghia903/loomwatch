@@ -36,16 +36,16 @@ describe('Send every answer to Notion (ADR 0038)', () => {
     connection({ connected: false })
     renderSettings({ notion: {} })
     const status = await screen.findByText(/Notion isn’t connected yet, so nothing can be sent\./)
-    const link = screen.getByRole('link', { name: /Connect Notion/ })
-    expect(link).toHaveAttribute('href', '/connections')
-    expect(link).toHaveAttribute('target', '_blank')
+    // Connections opens from the menu, its one way in (ADR 0043): the line says where, not a second link.
+    expect(status).toHaveTextContent('Connect Notion in Connections, from the menu.')
+    expect(screen.queryByRole('link')).toBeNull()
     expect(status).toHaveClass('warn')
   })
 
   it('asks for a page when connected without one, and stays quiet when the daemon has no Notion API', async () => {
     connection({ connected: true, name: 'Acme', destination: null })
     renderSettings({ notion: {} })
-    expect(await screen.findByRole('link', { name: /Choose a page/ })).toBeInTheDocument()
+    expect(await screen.findByText(/Choose a page in Connections, from the menu\./)).toBeInTheDocument()
     cleanup()
     connection({ error: 'Not Found' }, 404)
     renderSettings(null)

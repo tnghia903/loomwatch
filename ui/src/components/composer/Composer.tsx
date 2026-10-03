@@ -1,4 +1,4 @@
-import { ArrowRight, MessageSquare, Asterisk, History, Notebook, Square, Workflow } from 'lucide-react'
+import { ArrowRight, MessageSquare, Asterisk, Square, Workflow } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { markLiftOrigin } from '../../lib/motion/lift'
@@ -39,13 +39,7 @@ export interface ComposerProps {
   onStop: () => void
   onRetry: () => void
   onNewRun: () => void
-  onOpenHistory: () => void
-  historyOpen: boolean
   switchBanner?: boolean
-  /** Pinned Brief entries this team will supply. 0 hides the chip's count, not the chip. */
-  memoryCount?: number
-  memoryOpen?: boolean
-  onOpenMemory?: () => void
   /**
    * The pipeline's stages **in order**, for the Follow up chooser. Empty in team mode, which then
    * offers only "whole pipeline".
@@ -73,7 +67,7 @@ export interface ComposerProps {
 // never needs, and the canvas already numbers the steps (CANVAS_SPEC §8.1).
 // ↵ sends and ⇧↵ inserts a newline, the convention of every chat app an operator already uses;
 // ⌘↵ also sends. There is no "run without saving".
-export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, state, value, onChange, onSubmit, onStop, onRetry, onNewRun, onOpenHistory, historyOpen, switchBanner, memoryCount = 0, memoryOpen = false, onOpenMemory, followUpStages = [], followUpTarget = null, onFollowUpTargetChange, onFollowUp, dirty = false, onAnswer, replyAgents = [], onReply, replySending = false, reviewContext, agentNames, note, children }: ComposerProps) {
+export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, state, value, onChange, onSubmit, onStop, onRetry, onNewRun, switchBanner, followUpStages = [], followUpTarget = null, onFollowUpTargetChange, onFollowUp, dirty = false, onAnswer, replyAgents = [], onReply, replySending = false, reviewContext, agentNames, note, children }: ComposerProps) {
   const textarea = useRef<HTMLTextAreaElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const [focused, setFocused] = useState(false)
@@ -225,16 +219,6 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
           <span className="label">{modeLabel}</span>
           {anomalyCount > 0 && <span className="anomaly t-micro" title={`In the last run, an agent passed work to someone it isn’t connected to (${anomalyCount} time${anomalyCount === 1 ? '' : 's'}). The Run view marks where.`}>⚠ {anomalyCount}</span>}
         </span>
-        {/* Memory sits beside the mode chip because both explain what the run will be made of.
-            The count is honest about state: these entries are pinned and *will* be supplied,
-            within the budget — not "eligible". docs/TEAM_MEMORY.md, "The Memory panel". */}
-        {onOpenMemory && (
-          <button type="button" className="mode-chip t-body-m" onClick={onOpenMemory} aria-haspopup="dialog" aria-expanded={memoryOpen}
-            title={memoryCount > 0 ? `${memoryCount} pinned Brief entr${memoryCount === 1 ? 'y' : 'ies'} supplied at every session start` : 'Give your team something to keep in mind'}>
-            <span className="glyph" aria-hidden="true"><Notebook size={15} /></span>
-            <span className="label">Memory{memoryCount > 0 ? ` · ${memoryCount} brief` : ''}</span>
-          </button>
-        )}
         {/* The follow-up target chooser, beside the chips that explain what the run is made of.
             Stages are listed in pipeline order; team mode has no order, so it gets one option. */}
         {canFollowUp && (
@@ -278,7 +262,6 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
         </div>
         <div className="comp-act">
           {slim && !busy && (state.kind === 'ready' || state.kind === 'dirty') ? <button type="button" className="iconbtn prototype-send" aria-label="Run team" disabled={!canSubmit} onClick={submit}><ArrowRight size={17} /></button> : action}
-          <button type="button" className="iconbtn" onClick={onOpenHistory} aria-haspopup="dialog" aria-expanded={historyOpen} title="Run history — reopen a previous run (replay)" aria-label="Run history"><History size={16} aria-hidden="true" /></button>
         </div>
       </div>
     </>

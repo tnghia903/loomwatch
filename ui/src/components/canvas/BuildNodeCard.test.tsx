@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { CanvasActionsContext, type CanvasActions } from './CanvasActionsContext'
-import { BuildAgentCard } from './BuildNodeCard'
+import { BuildAgentCard, BuildCapabilityCard } from './BuildNodeCard'
 
 // The canvas zoom the card reads its depth from (lib/story/depth.ts); 1 is the Team depth.
 const view = vi.hoisted(() => ({ zoom: 1 }))
@@ -252,4 +252,23 @@ describe('BuildAgentCard at each depth', () => {
     expect(document.querySelector('.depth-story-line')).toBeNull()
     expect(document.querySelector('.depth-trace-facts')).toBeNull()
   })
+})
+
+// ADR 0043: a skill, tool, folder or file card is removed from its panel or with Delete, like an
+// agent card; its own × was a second remove button for the same thing.
+describe('BuildCapabilityCard', () => {
+  it('has no remove button of its own, and says what it is and who uses it', () => {
+    render(<BuildCapabilityCard id="knowledge@/Users/me/reports" data={{ kind: 'knowledge', name: 'reports', source: 'Linked folder', path: '/Users/me/reports', wiredTo: 2, readOnly: false }} type="capability" dragging={false} zIndex={0} selectable deletable selected={false} draggable isConnectable positionAbsoluteX={0} positionAbsoluteY={0} />)
+    expect(screen.getByRole('article', { name: 'reports, linked folder at /Users/me/reports, used by 2 agents' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Remove reports/ })).not.toBeInTheDocument()
+  })
+})
+
+// ADR 0043: an agent a source is dragged over says it will take the drop.
+it('outlines the agent a skill, tool, folder or file is dragged over', () => {
+  const { container, unmount } = renderCard(nodeData, { dropTargetId: 'ada' })
+  expect(container.querySelector('article')).toHaveClass('drop-target')
+  unmount()
+  const other = renderCard(nodeData, { dropTargetId: 'someone-else' })
+  expect(other.container.querySelector('article')).not.toHaveClass('drop-target')
 })
