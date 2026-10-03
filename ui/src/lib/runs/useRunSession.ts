@@ -46,5 +46,5 @@ export function useRunSession(runId: string | null, responder: string | null) {
     setCursorState(seq === null || seq >= lastSeq ? null : Math.max(0, seq))
   }, [lastSeq])
 
-  return { record, applyRecord, missing, events, error, connected, projection, latest, cursor, setCursor, lastSeq, mode, terminal }
+  return { record, applyRecord, missing, events, error, connected, projection, latest, cursor, setCursor, lastSeq, mode, terminal, evidenceComplete }
 }

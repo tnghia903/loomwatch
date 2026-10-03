@@ -2,7 +2,7 @@ import { CapabilityGraph } from './CapabilityGraph'
 import { Markdown } from '../ui/Markdown'
 import { preloadMarkdown } from '../ui/preloadMarkdown'
 import { SuppliedInstructions } from './SuppliedInstructions'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowRight,
@@ -19,6 +19,7 @@ import {
   Wrench,
   Code2,
   CheckCircle2,
+  CircleAlert,
   CircleDot,
 } from 'lucide-react'
 import {
@@ -30,7 +31,8 @@ import type { AllowSwitch } from '../../lib/team-file/types'
 import type { RunColumnProps } from './RunColumn'
 import { StripLine } from './StoryNodes'
 import { useCanvasActions } from '../canvas/CanvasActionsContext'
-import { buildReceipt } from '../../lib/story/receipt'
+import { buildReceipt, type ReceiptLine } from '../../lib/story/receipt'
+import { answerVerdict, type VerdictTone } from '../../lib/story/verdict'
 import { RunReceipt } from './RunReceipt'
 import { NotionSend, type NotionSendRun } from './NotionSend'
 import { WeftBar } from './WeftBar'
@@ -63,6 +65,11 @@ export interface DeliveryLaneProps extends RunColumnProps {
    * the lane keeps owning which stage is open, so a later click here still wins.
    */
   focusAgentId?: string | null
+  /**
+   * Every archived event of a finished run has arrived. A replay pages its record in, so until then
+   * the receipt is missing stages that did run, and the verdict beside the answer waits for it.
+   */
+  evidenceComplete?: boolean
 }
 
 /**
@@ -81,6 +88,14 @@ const ROUTE_SENTENCE: Record<'native' | 'inline' | 'blocked', string> = {
 const PHASE_WORDS: Partial<Record<string, string>> = {
   queued: 'Queued', starting: 'Starting', running: 'Running', succeeded: 'Finished',
   partial: 'Finished with gaps', failed: 'Failed', cancelled: 'Stopped',
+}
+
+/** Each verdict differs by glyph as well as colour; `live` wears the breathing dot from CSS instead. */
+const VERDICT_ICON: Record<VerdictTone, ReactNode> = {
+  ok: <CheckCircle2 size={14} aria-hidden="true" />,
+  look: <CircleDot size={14} aria-hidden="true" />,
+  bad: <CircleAlert size={14} aria-hidden="true" />,
+  live: null,
 }
 
 /** Run is a reading surface. The saved team canvas remains the editing surface, and detailed
@@ -109,6 +124,7 @@ export function DeliveryLane({
   run = null,
   sendsTo = null,
   focusAgentId = null,
+  evidenceComplete = true,
 }: DeliveryLaneProps) {
   // The answer is what this view exists for; fetch its renderer before the first token arrives.
   useEffect(() => preloadMarkdown(), [])
@@ -196,15 +212,6 @@ export function DeliveryLane({
   const reads = requirements.filter(
     (item) => item.state === 'read' || item.state === 'loaded',
   ).length
-  const outputState = planned
-    ? 'Final team response'
-    : output.pending || output.streaming
-      ? 'In progress'
-      : !output.text
-        ? 'Not produced'
-        : output.phase === 'succeeded'
-          ? 'Response available'
-          : 'Partial response'
   const select = (id: string) => {
     setSelectedId(id)
     setScope('agent')
@@ -225,11 +232,25 @@ export function DeliveryLane({
     harnessLabels: new Map(agents.map((node) => [node.id, snapshots.get(node.id)?.[0]?.harness ?? harnessLabels.get(node.id) ?? ''])),
     answered: Boolean(output.text),
   })), [planned, terminal, attempt, prompt, phase, elapsed, agents, projection, evidenceByAgent, snapshots, harnessLabels, output.text])
+  // Beside the answer's title: what its record holds to check before using it (lib/story/verdict.ts).
+  const sources = useMemo(() => [...evidenceByAgent.values()].reduce((sum, items) => sum + items.filter((item) => item.kind === 'source').length, 0), [evidenceByAgent])
+  const verdict = planned ? null : answerVerdict({ phase, text: output.text, streaming: output.streaming, terminal: terminal || output.terminal, settled: evidenceComplete, reviewed, receipt: runReceipt, sources })
+  const openReview = () => { setReviewChecked(false); setReviewOpen(true) }
   const fileMakers = useMemo(() => agents.map((node) => ({ id: node.id, name: node.data.agent.name })), [agents])
   const deliveredFiles = useMemo(() => (output.streaming ? [] : fileRefsIn(output.text)), [output.text, output.streaming])
   const showStage = (id: string) => {
     select(id)
     document.getElementById(`delivery-stage-${id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }
+  const openFinding = (line: ReceiptLine) => {
+    setReviewOpen(false)
+    if (line.evidenceId) onInspectEvidence(line.evidenceId)
+    else if (line.agentId) {
+      // The stages sit beside the answer, so an expanded answer gives way to show one.
+      const id = line.agentId
+      setExpanded(false)
+      requestAnimationFrame(() => showStage(id))
+    }
   }
   // An Attention alert names the agent it belongs to; opening that stage is what "go to it" means
   // on this surface, where the skills and tools panel is already scoped to the selected stage.
@@ -300,7 +321,7 @@ export function DeliveryLane({
             {/* A finished run otherwise only offers to continue itself; a different task needs a
                 way back to the blank request without a detour through Build. */}
             {onNewRun && terminal && !planned && <button className="btn" onClick={onNewRun}><Plus size={15} /> New run</button>}
-            {output.text && !output.streaming && !planned ? <button className="btn btn-primary" onClick={() => { setReviewChecked(false); setReviewOpen(true) }}>{reviewed ? 'View review' : 'Review output'} <ArrowRight size={15} /></button> : <button className="btn" onClick={onTrace}>
+            {output.text && !output.streaming && !planned ? <button className="btn btn-primary" onClick={openReview}>{reviewed ? 'View review' : 'Review output'} <ArrowRight size={15} /></button> : <button className="btn" onClick={onTrace}>
               <Network size={15} /> {planned ? 'Edit team' : 'Full trace'}
             </button>}
           </div>
@@ -757,7 +778,9 @@ export function DeliveryLane({
               </button>
             </div>
           </div>
-          <div className="delivery-output-title"><h2>{output.text.match(/^#\s+(.+)$/m)?.[1] ?? 'Team response'}</h2><span className="delivery-output-badge">{reviewed ? 'Reviewed' : planned ? 'Planned' : outputState}</span></div>
+          <div className="delivery-output-title"><h2>{output.text.match(/^#\s+(.+)$/m)?.[1] ?? 'Team response'}</h2>{verdict && (verdict.reviewable
+            ? <button type="button" className={`delivery-output-badge tone-${verdict.tone}`} aria-label={`${verdict.label}: ${reviewed ? 'view your review' : 'review this answer'}`} onClick={openReview}>{VERDICT_ICON[verdict.tone]}{verdict.label}</button>
+            : <span className={`delivery-output-badge tone-${verdict.tone}`}>{VERDICT_ICON[verdict.tone]}{verdict.label}</span>)}</div>
           <p>
             {output.text
               ? `Written by ${agents.find((node) => node.id === output.producer)?.data.agent.name ?? output.producerLabel}`
@@ -774,14 +797,9 @@ export function DeliveryLane({
           )}
         </header>
         <div className="delivery-output-scroll">
-          <p className="delivery-output-quality">
-            {planned
-              ? 'The team’s answer will appear here.'
-              : output.text
-                ? 'Review this response and its evidence before using it.'
-                : output.terminal
-                  ? 'The run ended without a captured response.'
-                  : 'The team’s response will appear here.'}
+          <p className={`delivery-output-quality tone-${verdict?.tone ?? 'plan'}`}>
+            {verdict?.detail ?? 'The team’s answer will appear here.'}
+            {verdict?.reviewable && !reviewed && verdict.findings.length > 1 && <> <button type="button" className="delivery-link" onClick={openReview}>{verdict.findings.length - 1} more to check</button></>}
           </p>
           {output.text && (
             <div className="delivery-response selectable">
@@ -835,6 +853,9 @@ export function DeliveryLane({
       {reviewOpen && <dialog ref={reviewDialog} className="delivery-review-dialog" aria-label="Review team output" onCancel={() => setReviewOpen(false)} onClose={() => setReviewOpen(false)}>
         <h2>Review team output</h2>
         <p>{reads}/{requirements.length} required skills have loading evidence.</p>
+        {verdict?.findings.length
+          ? <section className="receipt-checks delivery-review-findings" aria-label="Worth a look"><b>Worth a look</b><ul>{verdict.findings.map((line, index) => <li key={index} className={`tone-${line.tone}`}><span>{line.text}</span>{(line.evidenceId || line.agentId) && <button type="button" className="receipt-open" aria-label={`Open: ${line.text}`} title={line.evidenceId ? 'Open the record' : 'Show this helper’s work'} onClick={() => openFinding(line)}><ArrowRight size={12} aria-hidden="true" /></button>}</li>)}</ul></section>
+          : <p>Nothing in this run’s record was flagged.</p>}
         <p>Read the response and its receipts before marking your review. This acknowledgement lasts while this run stays open.</p>
         {reviewed ? <p className="delivery-review-success">Reviewed by you in this session.</p> : <label><input type="checkbox" checked={reviewChecked} onChange={(event) => setReviewChecked(event.target.checked)} />I have reviewed this response and its supporting evidence.</label>}
         <div><button className="btn" onClick={() => setReviewOpen(false)}>Keep reading</button>{!reviewed && <button className="btn btn-primary" disabled={!reviewChecked || reads !== requirements.length || !output.text || output.streaming} onClick={() => { setReviewedText(output.text); setReviewOpen(false) }}>Mark reviewed</button>}</div>

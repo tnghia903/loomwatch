@@ -17,7 +17,7 @@ vi.mock('@xyflow/react', () => ({
   MarkerType: { ArrowClosed: 'arrowclosed' },
   ReactFlow: ({ nodes, nodeTypes }: { nodes: Array<{ id: string; type: string; data: unknown }>; nodeTypes: Record<string, ComponentType<{ data: unknown }>> }) => <>{nodes.map(node => createElement(nodeTypes[node.type], { key: node.id, data: node.data }))}</>,
 }))
-import { projectRun } from '../../lib/watch/events'
+import { projectRun, type Evidence, type RunProjection } from '../../lib/watch/events'
 import type { AgentRuntime } from '../../lib/runs/graph'
 import { markLiftOrigin, noteShownRequest } from '../../lib/motion/lift'
 const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
@@ -222,7 +222,28 @@ describe('Delivery Lane', () => {
     fireEvent.click(review.getByRole('checkbox'))
     fireEvent.click(review.getByRole('button', { name: 'Mark reviewed' }))
     expect(screen.getByRole('button', { name: 'View review' })).toBeInTheDocument()
-    expect(screen.getByText('Reviewed', { selector: '.delivery-output-badge' })).toBeInTheDocument()
+    expect(screen.getByText('Reviewed by you', { selector: '.delivery-output-badge' })).toBeInTheDocument()
+  })
+  // The badge beside the answer's title read "Response available" over a response already in
+  // view. It now says what the run's record holds to check, and opens the review that lists it.
+  it('says what is worth a look beside the answer, and opens the review on it', () => {
+    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', '') }
+    const refused = { id: 'p1', agentId: 'designer', seq: 1, offsetMs: 0, kind: 'permission', relation: 'asked permission for', name: 'Web search', status: 'rejected', target: null, rawInput: { toolCall: { kind: 'fetch' } } } as unknown as Evidence
+    const projection = { ...projectRun([]), agents: [{ id: 'designer', status: 'succeeded', openCalls: 0, exitCode: null, stopReason: null, requiredSkills: [] }] } as unknown as RunProjection
+    const { props } = setup({ projection, evidenceByAgent: new Map([['designer', [refused]]]) })
+    const output = within(screen.getByRole('complementary', { name: 'Team output' }))
+    expect(output.queryByText(/Response available/i)).toBeNull()
+    expect(output.getByText('Designer wasn’t allowed to search the web, and carried on without it.')).toBeInTheDocument()
+    fireEvent.click(output.getByRole('button', { name: '1 thing to check: review this answer' }))
+    const review = within(screen.getByRole('dialog', { name: 'Review team output' }))
+    fireEvent.click(within(review.getByRole('region', { name: 'Worth a look' })).getByRole('button', { name: /^Open: Designer wasn’t allowed/ }))
+    expect(props.onInspectEvidence).toHaveBeenCalledWith('p1')
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+  it('says nothing was flagged when the record holds nothing to check', () => {
+    setup({ agents: [] })
+    expect(screen.getByRole('button', { name: 'Nothing flagged: review this answer' })).toBeInTheDocument()
+    expect(screen.getByText('Every step finished and nothing in the record was flagged.')).toBeInTheDocument()
   })
   it('supports filters and output expansion without changing the team', () => {
     const { container, props } = setup()
