@@ -55,22 +55,94 @@ export const OUTWARD_APP_TOOLS: Readonly<Record<string, string>> = {
   ListAgents: 'lists your other Claude sessions',
 }
 
-/** The outward tool a call used, or `null` for any other evidence. */
-export function outwardTool(item: Evidence): string | null {
-  if (item.kind === 'permission' || !item.callId) return null
-  const name = payloadString(item, 'name')
-  return name !== null && Object.hasOwn(OUTWARD_APP_TOOLS, name) ? name : null
+/** LoomWatch's own MCP server, which every agent is handed (`RESERVED_SERVER` in `delivery.rs`). */
+export const TEAM_BUS_SERVER = 'loomwatch-team-bus'
+
+/**
+ * What the MCP servers an AI app brings by itself do past the run, for the ones seen so far
+ * (ADR 0047). The daemon starts a Codex run agent without the plugins and the `ChatGPT` apps they
+ * come from. The rule is whose server it is, not this list: a call to any server LoomWatch did not
+ * connect, made without asking, is flagged, and one not listed here is flagged in general words.
+ */
+export const OUTWARD_APP_SERVERS: Readonly<Record<string, string>> = {
+  cua_repl: 'controls the browser and apps on your computer',
+  node_repl: 'runs code that can control your browser',
+  codex_apps: 'uses the apps on your ChatGPT account',
 }
 
-/** An agent's outward calls that did not fail, by tool, in the order it first used each. */
-export function outwardCalls(items: readonly Evidence[]): Map<string, Evidence[]> {
-  const byTool = new Map<string, Evidence[]>()
+/** What a row says a server LoomWatch did not connect does, when nothing more is known. */
+export const UNCONNECTED_SERVER = 'came with the app, not from LoomWatch'
+
+/** A tool an agent reached past the run with, without asking (ADR 0044, ADR 0047). */
+export interface OutwardUse {
+  /** The app tool's name (`Artifact`), or the MCP server's (`cua_repl`). */
+  tool: string
+  /** What it does past the run, or `null` for a server nothing more is known about. */
+  does: string | null
+}
+
+/** The MCP server and tool a call or a request was about, or `null` for anything else. */
+function mcpCall(item: Evidence): { server: string; tool: string } | null {
+  // `mcp__<server>__<tool>` from Claude Code; Codex titles the same call `mcp.<server>.<tool>`.
+  const match = /^mcp__(.+?)__(.+)$/.exec(payloadString(item, 'name') ?? '') ?? /^mcp\.([\w-]+)\.(.+)$/.exec(payloadString(item, 'title') ?? item.name)
+  return match ? { server: match[1], tool: match[2] } : null
+}
+
+/** Whether a call's MCP server is one LoomWatch handed its agent: the Team Bus, or `connected`. */
+function handedOver(server: string, connected: readonly string[]): boolean {
+  return server === TEAM_BUS_SERVER || connected.includes(server)
+}
+
+/**
+ * The outward tool a call used, or `null` for any other evidence. `connected` names the servers
+ * LoomWatch connected to the call's agent; `asked` holds `agentId:callId` for every call its app
+ * asked about.
+ *
+ * One of Claude Code's withheld tools counts unless it failed. A server LoomWatch did not connect
+ * counts unless its app asked first: Codex runs a tool that calls itself read-only without asking,
+ * and a call to a code runner that failed may still have acted before it failed.
+ */
+export function outwardTool(item: Evidence, connected: readonly string[] = [], asked: ReadonlySet<string> = new Set()): OutwardUse | null {
+  if (item.kind === 'permission' || !item.callId || item.status === 'rejected') return null
+  const name = payloadString(item, 'name')
+  if (name !== null && Object.hasOwn(OUTWARD_APP_TOOLS, name)) return item.status === 'failed' ? null : { tool: name, does: OUTWARD_APP_TOOLS[name] }
+  const server = mcpCall(item)?.server ?? null
+  if (server === null || handedOver(server, connected) || asked.has(`${item.agentId}:${item.callId}`)) return null
+  return { tool: server, does: Object.hasOwn(OUTWARD_APP_SERVERS, server) ? OUTWARD_APP_SERVERS[server] : null }
+}
+
+/** `agentId:callId` for every call an app asked about, so a call that asked is not outward. */
+function askedCalls(items: readonly Evidence[]): Set<string> {
+  return new Set(items.flatMap((item) => (item.kind === 'permission' && item.callId ? [`${item.agentId}:${item.callId}`] : [])))
+}
+
+/** One outward tool's calls, and whether any of them finished. */
+export interface OutwardCalls extends OutwardUse {
+  calls: Evidence[]
+  completed: boolean
+}
+
+/**
+ * An agent's outward calls, by tool, in the order it first used each. `connected` names the
+ * servers LoomWatch connected to it, from its run record (`ProjectedAgent.connectedServers`).
+ */
+export function outwardCalls(items: readonly Evidence[], connected: readonly string[] = []): Map<string, OutwardCalls> {
+  const asked = askedCalls(items)
+  const byTool = new Map<string, OutwardCalls>()
   for (const item of items) {
-    const tool = outwardTool(item)
-    if (tool === null || item.status === 'failed' || item.status === 'rejected') continue
-    byTool.set(tool, [...(byTool.get(tool) ?? []), item])
+    const use = outwardTool(item, connected, asked)
+    if (use === null) continue
+    const entry = byTool.get(use.tool) ?? { ...use, calls: [], completed: false }
+    entry.calls.push(item)
+    entry.completed ||= item.status !== 'failed'
+    byTool.set(use.tool, entry)
   }
   return byTool
+}
+
+/** The servers LoomWatch connected to each agent, from the run's projection, for `usedInRun`. */
+export function connectedServersByAgent(agents: readonly { id: string; connectedServers?: readonly string[] }[]): Map<string, readonly string[]> {
+  return new Map(agents.map((agent) => [agent.id, agent.connectedServers ?? []]))
 }
 
 /** Claude Code's own tools, by the name its adapter records, in the words Build uses. */
@@ -118,18 +190,19 @@ function payloadString(item: Evidence, key: string): string | null {
 }
 
 /** What a tool call or a permission request was about, as a row identity. */
-function toolIdentity(item: Evidence): Pick<UsedInRun, 'key' | 'name' | 'origin' | 'allow'> {
+function toolIdentity(item: Evidence, connected: readonly string[]): Pick<UsedInRun, 'key' | 'name' | 'origin' | 'allow'> {
   const rawName = payloadString(item, 'name')
   const title = payloadString(item, 'title') ?? item.name
   // A permission request carries the ACP kind on its tool call; a call carries it as toolKind.
   const toolKind = item.toolKind ?? payloadString(item, 'kind')
   if (rawName && MEMORY_TOOLS.has(rawName)) return { key: 'team:memory', name: 'Team memory', origin: 'team', allow: null }
-  // `mcp__<server>__<tool>` from Claude Code; Codex titles the same call `mcp.<server>.<tool>`.
-  const mcp = /^mcp__(.+?)__(.+)$/.exec(rawName ?? '') ?? /^mcp\.([\w-]+)\.(.+)$/.exec(title)
+  const mcp = mcpCall(item)
   if (mcp) {
-    const [server, tool] = [mcp[1], mcp[2].replace(/_/g, ' ')]
-    const team = server === 'loomwatch-team-bus'
-    return { key: `mcp:${server}:${tool}`.toLowerCase(), name: team ? `Team Bus · ${tool}` : `${server} · ${tool}`, origin: team ? 'team' : 'connected', allow: null }
+    const [server, tool] = [mcp.server, mcp.tool.replace(/_/g, ' ')]
+    const team = server === TEAM_BUS_SERVER
+    // A server LoomWatch did not connect came with the agent's app (ADR 0047): not a connected tool.
+    const origin = team ? 'team' : handedOver(server, connected) ? 'connected' : 'app'
+    return { key: `mcp:${server}:${tool}`.toLowerCase(), name: team ? `Team Bus · ${tool}` : `${server} · ${tool}`, origin, allow: null }
   }
   const known = (rawName && APP_TOOLS[rawName]) || (rawName ? { name: rawName } : byKind(toolKind, title))
   return { key: `app:${known.name}`.toLowerCase(), name: known.name, origin: 'app', allow: known.allow ?? null }
@@ -143,17 +216,23 @@ function refusedPermission(item: Evidence): boolean {
   return item.status === 'succeeded' && !/^allow/i.test(option)
 }
 
-export function usedInRun(evidence: readonly Evidence[]): UsedInRun[] {
+/**
+ * `connected` names, per agent id, the servers LoomWatch connected to it (`connectedServersByAgent`).
+ * An agent missing from it was connected none.
+ */
+export function usedInRun(evidence: readonly Evidence[], connected: ReadonlyMap<string, readonly string[]> = new Map()): UsedInRun[] {
   const rows = new Map<string, UsedInRun>()
   const rowOfCall = new Map<string, UsedInRun>()
+  const asked = askedCalls(evidence)
+  const serversOf = (item: Evidence) => connected.get(item.agentId) ?? []
   const add = (identity: Pick<UsedInRun, 'key' | 'name' | 'origin' | 'allow'>, kind: UsedInRun['kind'], item: Evidence) => {
     let row = rows.get(identity.key)
     if (!row) {
       row = { ...identity, kind, agents: [], calls: 0, refused: 0, refusedBy: [], failed: 0, outward: null, evidenceId: item.id }
       rows.set(identity.key, row)
     }
-    const outward = outwardTool(item)
-    if (outward !== null && item.status !== 'failed' && item.status !== 'rejected') row.outward = OUTWARD_APP_TOOLS[outward]
+    const outward = outwardTool(item, serversOf(item), asked)
+    if (outward !== null) row.outward = outward.does ?? UNCONNECTED_SERVER
     row.calls += 1
     const agent = row.agents.find((entry) => entry.id === item.agentId)
     if (agent) agent.calls += 1
@@ -173,15 +252,15 @@ export function usedInRun(evidence: readonly Evidence[]): UsedInRun[] {
     // Evidence without a call is what the run was handed — the operator's own answer, today — not
     // something an agent used. A folder it read or a page it fetched is a call: Read files, Web fetch.
     if (!item.callId) continue
-    const row = add(toolIdentity(item), 'tool', item)
+    const row = add(toolIdentity(item, serversOf(item)), 'tool', item)
     rowOfCall.set(`${item.agentId}:${item.callId}`, row)
   }
   for (const item of evidence) {
     if (item.kind !== 'permission' || !refusedPermission(item)) continue
-    const row = (item.callId ? rowOfCall.get(`${item.agentId}:${item.callId}`) : undefined) ?? rows.get(toolIdentity(item).key)
+    const row = (item.callId ? rowOfCall.get(`${item.agentId}:${item.callId}`) : undefined) ?? rows.get(toolIdentity(item, serversOf(item)).key)
     if (row) { refuse(row, item.agentId); continue }
     // Asked and refused before any call was recorded: the request is the only trace of the tool.
-    const added = add(toolIdentity(item), 'tool', item)
+    const added = add(toolIdentity(item, serversOf(item)), 'tool', item)
     refuse(added, item.agentId)
   }
   return [...rows.values()]

@@ -51,6 +51,50 @@ describe('a tool that reaches past the run', () => {
   })
 })
 
+// ADR 0047, run 4bb918c5: a scheduled Gatherer on Codex opened a browser tab through the ChatGPT
+// app's `cua_repl`, a plugin LoomWatch never connected. Codex asked nobody: the tool calls itself
+// read-only. The call failed ("Browser is not available: iab") and the receipt flagged nothing.
+describe('an MCP server its app brought, used without asking', () => {
+  const gather = (seq: number, kind: RunEvent['kind'], payload: RunEvent['payload'], raw?: unknown): RunEvent =>
+    ({ id: `gather-${seq}`, sessionId: 'run-3', agentId: 'gatherer', seq, ts: at(seq), kind, payload, ...(raw ? { raw } : {}) })
+  const mcp = (seq: number, callId: string, server: string, tool: string, status: 'completed' | 'failed'): RunEvent[] => [
+    gather(seq, 'tool_call', { callId, title: `mcp.${server}.${tool}`, toolKind: 'execute', status: 'in_progress', rawInput: { tool, server, arguments: { code: 'let tab = await cua.createBrowserTab("iab", "https://github.blog/changelog/")' } } }),
+    gather(seq + 1, 'tool_update', { callId, status, rawOutput: { result: { content: [{ type: 'text', text: status === 'failed' ? 'Browser is not available: iab' : 'ok' }] } } }),
+  ]
+  const connected = (servers: string[]) =>
+    gather(1, 'session_meta', { phase: 'prompt_sections', sections: [], requiredSkills: [], tools: servers.map((server) => ({ name: server, server, provider: 'Codex', transport: 'stdio' })) }, { source: 'loomwatch', phase: 'prompt_sections' })
+  function gathererReceipt(events: RunEvent[]) {
+    const projection = projectRun([gather(0, 'process', { phase: 'spawned', pid: 7 }), ...events, gather(98, 'turn_end', { stopReason: 'end_turn' }), gather(99, 'process', { phase: 'exited', exitCode: 0 })])
+    return buildReceipt({
+      attempt: 1,
+      prompt: 'Find what happened in tech in the last 24 hours.',
+      phase: 'succeeded',
+      elapsed: '6m',
+      agents: [{ id: 'gatherer', name: 'Gatherer', operator: false, runtime: { status: 'succeeded' } }],
+      projection,
+      evidenceByAgent: new Map([['gatherer', projection.evidence]]),
+      harnessLabels: new Map([['gatherer', 'Codex']]),
+      answered: true,
+    })
+  }
+  const outward = (events: RunEvent[]) => findingsOf(gathererReceipt(events)).filter((line) => line.text.includes('without asking you'))
+
+  it('is a finding in what the server does, even when the call failed, pointing at the call', () => {
+    expect(outward(mcp(2, 'call_L7uY', 'cua_repl', 'js', 'failed'))).toEqual([
+      { tone: 'bad', text: 'Gatherer tried cua_repl, which controls the browser and apps on your computer, without asking you', agentId: 'gatherer', evidenceId: 'gatherer:call_L7uY' },
+    ])
+  })
+
+  it('names the app that brought a server nothing more is known about', () => {
+    expect(outward([...mcp(2, 'm1', 'agentmemory', 'memory_recall', 'completed'), ...mcp(4, 'm2', 'agentmemory', 'memory_save', 'failed')]).map((line) => line.text))
+      .toEqual(['Gatherer used agentmemory, which Codex brought and LoomWatch didn’t connect, without asking you (2 times)'])
+  })
+
+  it('is not a finding for a server the run record says LoomWatch connected, or for the Team Bus', () => {
+    expect(outward([connected(['agentmemory']), ...mcp(2, 'm1', 'agentmemory', 'memory_recall', 'completed'), ...mcp(4, 'r1', 'loomwatch-team-bus', 'roster', 'completed')])).toEqual([])
+  })
+})
+
 // ADR 0046, run f806a330: a scheduled Gatherer on Codex asked to `curl` a feed. Nobody could be
 // asked, so LoomWatch chose Codex's only rejection, `cancel`, and Codex ended the work turn. The
 // receipt said "Turn ended: cancelled" and nothing about what was declined.

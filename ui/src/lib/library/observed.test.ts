@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { projectRun, type RunEvent } from '../watch/events'
-import { outwardCalls, usedInRun } from './observed'
+import { connectedServersByAgent, outwardCalls, usedInRun } from './observed'
 
 const at = (seconds: number) => new Date(Date.UTC(2026, 9, 3, 0, 0, seconds)).toISOString()
 const event = (seq: number, agentId: string, kind: RunEvent['kind'], payload: RunEvent['payload']): RunEvent =>
@@ -34,6 +34,8 @@ const run: RunEvent[] = [
   event(40, 'critic', 'tool_call', { callId: 'r1', title: 'mcp.loomwatch-team-bus.roster', toolKind: 'execute', status: 'in_progress', rawInput: {} }),
   event(41, 'critic', 'permission', { options: [{ kind: 'allow_once', optionId: 'allow_once' }, { kind: 'reject_once', optionId: 'cancel' }], toolCall: { kind: 'execute', toolCallId: 'r1' } }),
   event(42, 'critic', 'permission', { outcome: { optionId: 'cancel', outcome: 'selected' } }),
+  // What LoomWatch connected to the writer, as the daemon records it before the prompt (ADR 0029).
+  { ...event(49, 'writer', 'session_meta', { phase: 'prompt_sections', sections: [], requiredSkills: [], tools: [{ name: 'Notion', server: 'notion', provider: 'Claude Code', transport: 'stdio' }] }), raw: { source: 'loomwatch', phase: 'prompt_sections' } },
   event(50, 'writer', 'tool_call', { callId: 'n1', name: 'mcp__notion__search', title: 'mcp__notion__search', toolKind: 'other', status: 'in_progress', rawInput: {} }),
   event(51, 'writer', 'tool_call', { callId: 'b1', name: 'Bash', title: '$ ls', toolKind: 'execute', status: 'in_progress', rawInput: { command: 'ls' } }),
   event(52, 'writer', 'permission', { options: [{ kind: 'allow_once', optionId: 'allow-once' }], toolCall: { kind: 'execute', name: 'Bash', title: '$ ls', toolCallId: 'b1' } }),
@@ -41,7 +43,8 @@ const run: RunEvent[] = [
 ]
 
 describe('usedInRun', () => {
-  const rows = usedInRun(projectRun(run).evidence)
+  const projection = projectRun(run)
+  const rows = usedInRun(projection.evidence, connectedServersByAgent(projection.agents))
   const row = (name: string) => rows.find((candidate) => candidate.name === name)
 
   it('lists a tool once however many times it was called, never one row per call or per permission answer', () => {
@@ -98,6 +101,50 @@ describe('an outward tool used without asking', () => {
   it('lists, per tool, only the calls that did not fail', () => {
     const calls = outwardCalls(projectRun([...published(1, 'a1', 'completed'), ...published(3, 'a2', 'failed')]).evidence)
     expect([...calls.keys()]).toEqual(['Artifact'])
-    expect(calls.get('Artifact')?.map((item) => item.callId)).toEqual(['a1'])
+    expect(calls.get('Artifact')?.calls.map((item) => item.callId)).toEqual(['a1'])
+  })
+})
+
+// ADR 0047, run 4bb918c5: a scheduled Gatherer on Codex called the ChatGPT app's `cua_repl`, a
+// plugin LoomWatch never connected, to open a browser tab. Codex asked nobody, since the tool calls
+// itself read-only. The call failed, and the record listed it as a connected tool.
+describe('an MCP server LoomWatch did not connect, used without asking', () => {
+  const gatherer = (seq: number, kind: RunEvent['kind'], payload: RunEvent['payload']) => event(seq, 'gatherer', kind, payload)
+  const mcp = (seq: number, callId: string, server: string, tool: string, status: 'completed' | 'failed'): RunEvent[] => [
+    gatherer(seq, 'tool_call', { callId, title: `mcp.${server}.${tool}`, toolKind: 'execute', status: 'in_progress', rawInput: { tool, server, arguments: {} } }),
+    gatherer(seq + 1, 'tool_update', { callId, status }),
+  ]
+  const asked = (seq: number, callId: string): RunEvent[] => [
+    gatherer(seq, 'permission', { _meta: { is_mcp_tool_approval: true }, options: [{ kind: 'allow_once', optionId: 'allow_once' }, { kind: 'reject_once', optionId: 'cancel' }], toolCall: { kind: 'execute', toolCallId: callId } }),
+    gatherer(seq + 1, 'permission', { outcome: { optionId: 'allow_once', outcome: 'selected' } }),
+  ]
+  const evidence = projectRun([
+    ...mcp(1, 'c1', 'cua_repl', 'js', 'failed'),
+    ...mcp(3, 'm1', 'agentmemory', 'memory_recall', 'completed'),
+    ...mcp(5, 'r1', 'loomwatch-team-bus', 'roster', 'completed'),
+    ...mcp(7, 's1', 'agentmemory', 'memory_save', 'completed'),
+    ...asked(9, 's1'),
+  ]).evidence
+  const rowOf = (rows: ReturnType<typeof usedInRun>, name: string) => rows.find((candidate) => candidate.name === name)
+
+  it('says what the server does past the run, even when the call failed, and that it came with the app', () => {
+    const rows = usedInRun(evidence)
+    expect(rowOf(rows, 'cua_repl · js')).toMatchObject({ origin: 'app', failed: 1, outward: 'controls the browser and apps on your computer' })
+    expect(rowOf(rows, 'agentmemory · memory recall')).toMatchObject({ origin: 'app', outward: 'came with the app, not from LoomWatch' })
+    expect(rowOf(rows, 'Team Bus · roster')).toMatchObject({ origin: 'team', outward: null })
+  })
+
+  it('says nothing for a call its app asked about first, or for a server LoomWatch connected', () => {
+    expect(rowOf(usedInRun(evidence), 'agentmemory · memory save')).toMatchObject({ origin: 'app', outward: null })
+    expect(rowOf(usedInRun(evidence, new Map([['gatherer', ['agentmemory']]])), 'agentmemory · memory recall')).toMatchObject({ origin: 'connected', outward: null })
+  })
+
+  it('lists each server once, with every call that ran, and whether any finished', () => {
+    const calls = outwardCalls(evidence)
+    expect([...calls.keys()]).toEqual(['cua_repl', 'agentmemory'])
+    expect(calls.get('cua_repl')).toMatchObject({ does: 'controls the browser and apps on your computer', completed: false })
+    expect(calls.get('agentmemory')).toMatchObject({ does: null, completed: true })
+    expect(calls.get('agentmemory')?.calls.map((item) => item.callId)).toEqual(['m1'])
+    expect(outwardCalls(evidence, ['agentmemory', 'cua_repl']).size).toBe(0)
   })
 })

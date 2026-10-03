@@ -262,9 +262,11 @@ const refusedSearch = (seq: number, callId: string): RunEvent[] => [
 describe('ComponentPalette while a run is shown', () => {
   const evidence = projectRun([...refusedSearch(1, 's1'), ...refusedSearch(5, 's2'), event(9, 'researcher', 'tool_call', { callId: 'n1', name: 'mcp__notion__search', title: 'mcp__notion__search', toolKind: 'other', status: 'completed', rawInput: {} })]).evidence
   const names = new Map([['researcher', 'Researcher']])
+  // What LoomWatch connected to the researcher, from its run record.
+  const connected = new Map([['researcher', ['notion']]])
 
   it('leads with what the run used, one row per tool, saying why a built-in one was declined', () => {
-    render(<ComponentPalette harnesses={[codex]} harnessesLoading={false} harnessesError={null} capabilityInventory={capabilities} observedEvidence={evidence} agentNames={names} />)
+    render(<ComponentPalette harnesses={[codex]} harnessesLoading={false} harnessesError={null} capabilityInventory={capabilities} observedEvidence={evidence} observedConnected={connected} agentNames={names} />)
     const used = section('Used in this run')
     const headings = screen.getAllByRole('heading').map((heading) => heading.textContent)
     expect(headings[0]).toBe('Used in this run')
@@ -277,7 +279,7 @@ describe('ComponentPalette while a run is shown', () => {
 
   it('reveals a row on the canvas, or lets it be dragged there to reposition the card', () => {
     const reveal = vi.fn()
-    render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} observedEvidence={evidence} agentNames={names} onRevealEvidence={reveal} />)
+    render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} observedEvidence={evidence} observedConnected={connected} agentNames={names} onRevealEvidence={reveal} />)
     const row = within(section('Used in this run')).getByRole('button', { name: /^notion · search/ })
     fireEvent.click(row)
     expect(reveal).toHaveBeenCalledWith('researcher:n1')
@@ -293,6 +295,17 @@ describe('ComponentPalette while a run is shown', () => {
     expect(within(section('Used in this run')).getByRole('button', { name: /^Artifact/ })).toHaveTextContent('Built into the app · ResearcherUsed without asking: publishes to your claude.ai account×1')
     // No switch lets it through, so the hint about switches would point nowhere.
     expect(section('Used in this run')).not.toHaveTextContent('Allowed without asking')
+  })
+
+  // ADR 0047, run 4bb918c5: the ChatGPT app's `cua_repl`, which a Codex Gatherer called without
+  // asking, read "Connected tool" as if the operator had connected it.
+  it('says when a server the app brought, not one LoomWatch connected, ran without asking', () => {
+    const repl = projectRun([
+      event(1, 'researcher', 'tool_call', { callId: 'c1', title: 'mcp.cua_repl.js', toolKind: 'execute', status: 'in_progress', rawInput: { tool: 'js', server: 'cua_repl', arguments: { code: 'await cua.createBrowserTab("iab", "https://github.blog/")' } } }),
+      event(2, 'researcher', 'tool_update', { callId: 'c1', status: 'failed' }),
+    ]).evidence
+    render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} observedEvidence={repl} observedConnected={connected} agentNames={names} />)
+    expect(within(section('Used in this run')).getByRole('button', { name: /^cua_repl · js/ })).toHaveTextContent('Built into the app · ResearcherUsed without asking: controls the browser and apps on your computer×1')
   })
 
   it('names the folded panel after what a run reader opens it for', () => {

@@ -687,6 +687,13 @@ asking, so LoomWatch starts every agent without those tools. Your team's answer 
 review and the delivery you set up, such as **Send every answer to Notion**. If such a tool runs anyway,
 for example on an app that ignores the rule, the run receipt flags it.
 
+Codex brings its plugins and the apps on your ChatGPT account into every session, including the
+ChatGPT app's browser and computer control, and runs any of their tools that call themselves
+read-only without asking. So LoomWatch starts every Codex agent with plugins and apps switched off.
+The MCP servers you added to Codex's own settings (`~/.codex/config.toml`) still load, because
+LoomWatch can't switch them off through Codex's adapter yet. If an agent uses any tool LoomWatch
+didn't connect to it without asking you, the run receipt flags it.
+
 </details>
 
 <details>

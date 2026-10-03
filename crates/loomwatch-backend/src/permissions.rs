@@ -55,6 +55,14 @@ pub(crate) const WITHHELD_CLAUDE_TOOLS: [&str; 13] = [
     "ListAgents",
 ];
 
+/// Codex features a run agent is started without (ADR 0047). `plugins` brings every enabled
+/// plugin's MCP servers, skills and hooks, among them the `ChatGPT` app's `cua_repl`, which drives
+/// the operator's browser and apps. `apps` is `codex_apps`, the connectors on the operator's
+/// `ChatGPT` account. Asking is not enough: Codex runs an MCP tool that calls itself read-only
+/// without asking, and those two do. The servers `LoomWatch` hands over are not plugins or apps,
+/// so they stay.
+pub(crate) const WITHHELD_CODEX_FEATURES: [&str; 2] = ["plugins", "apps"];
+
 /// How one run agent's permission requests are answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionPolicy {
@@ -105,6 +113,35 @@ impl PermissionPolicy {
     #[must_use]
     pub fn session_meta() -> Value {
         serde_json::json!({"claudeCode": {"options": {"disallowedTools": WITHHELD_CLAUDE_TOOLS}}})
+    }
+
+    /// The `CODEX_CONFIG` a Codex run agent is spawned with (ADR 0047): `current`, the one the
+    /// team file or the daemon already sets, with every [`WITHHELD_CODEX_FEATURES`] switched off.
+    /// `codex-acp` reads it once at startup and merges it into every `thread/start` and
+    /// `thread/resume` it sends Codex, so a reloaded session is started without them too. It is
+    /// the adapter's only handle on a session's config, and it carries no secret: the agent's own
+    /// commands can read it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `current` is not a JSON object, which `codex-acp` would refuse too.
+    pub fn codex_config(current: Option<&str>) -> anyhow::Result<String> {
+        let mut config = match current {
+            Some(text) => serde_json::from_str::<Value>(text)
+                .ok()
+                .filter(Value::is_object)
+                .ok_or_else(|| anyhow::anyhow!("CODEX_CONFIG is set but is not a JSON object"))?,
+            None => Value::Object(serde_json::Map::new()),
+        };
+        // An object, never dotted keys: `codex-acp` sets `features` itself, and Codex applies a
+        // session's config keys in no fixed order, so `features.plugins` could lose to it.
+        if !config["features"].is_object() {
+            config["features"] = Value::Object(serde_json::Map::new());
+        }
+        for feature in WITHHELD_CODEX_FEATURES {
+            config["features"][feature] = Value::Bool(false);
+        }
+        Ok(config.to_string())
     }
 
     /// Whether to approve one `session/request_permission`, from the tool call it describes.
@@ -612,6 +649,38 @@ mod tests {
             "TaskCreate",
         ] {
             assert!(!withheld.contains(&working), "{working} is kept");
+        }
+    }
+
+    /// ADR 0047: a Codex run agent starts with its plugins and apps off, and whatever config the
+    /// team file already gives Codex survives beside them.
+    #[test]
+    fn a_codex_run_agent_starts_without_plugins_or_apps_and_keeps_its_own_config() {
+        let fresh: Value =
+            serde_json::from_str(&PermissionPolicy::codex_config(None).expect("config"))
+                .expect("json");
+        assert_eq!(
+            fresh,
+            json!({"features": {"plugins": false, "apps": false}})
+        );
+
+        let kept: Value = serde_json::from_str(
+            &PermissionPolicy::codex_config(Some(
+                r#"{"model_provider":"gateway","features":{"js_repl":true,"plugins":true}}"#,
+            ))
+            .expect("config"),
+        )
+        .expect("json");
+        assert_eq!(
+            kept,
+            json!({"model_provider": "gateway", "features": {"js_repl": true, "plugins": false, "apps": false}})
+        );
+
+        for broken in ["", "[]", "not json", r#""features""#] {
+            assert!(
+                PermissionPolicy::codex_config(Some(broken)).is_err(),
+                "{broken:?} is refused"
+            );
         }
     }
 
