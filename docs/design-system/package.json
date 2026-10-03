@@ -2,6 +2,7 @@
   "name": "@loomwatch/design-system",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT OR Apache-2.0",
   "description": "LoomWatch's design system (Obsidian & Gilt) packaged for Claude Design: the app's standalone React glyphs plus the token and component CSS kit.",
   "type": "module",
   "types": "dist/types/index.d.ts",

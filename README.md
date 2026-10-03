@@ -893,6 +893,16 @@ teams folder's `.jobs`.
 - [Architecture](docs/ARCHITECTURE.md) — technical details for developers.
 - [Container runtime decision](docs/decisions/0018-container-native-compose.md) — execution, mount, and trust boundaries.
 
+## License
+
+LoomWatch is free and open source. You can use it under either the [MIT License](LICENSE-MIT) or the [Apache License 2.0](LICENSE-APACHE), whichever you prefer. Unless you say otherwise, anything you contribute is licensed the same way, with no extra terms.
+
+The licenses cover the code, not the LoomWatch name or logo.
+
+The fonts packed into LoomWatch (Inter, Instrument Serif and JetBrains Mono) are under the [SIL Open Font License](ui/public/fonts/OFL.txt). Notices for the other open-source software inside LoomWatch are in [third-party-notices.txt](ui/public/third-party-notices.txt). The running app serves the same file at `/third-party-notices.txt`. After changing a dependency, regenerate it with `node scripts/third-party-notices.mjs`.
+
+LoomWatch is not affiliated with, endorsed by or sponsored by Anthropic, OpenAI, Google, Notion or any other company whose apps it works with. Claude, Claude Code, Codex, Gemini and the other product names here are trademarks of their owners. They are used only to say which apps LoomWatch works with.
+
 <br>
 
 <p align="center">
