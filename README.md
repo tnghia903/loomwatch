@@ -675,6 +675,12 @@ The run records every request and who answered it. When something was declined, 
 what the agent couldn't do and offers **Allow from now on**. OpenCode doesn't ask before it acts, so
 the switches can't hold it back.
 
+Agents can't publish, post or send anything outside the run. Claude Code can publish to your
+claude.ai account, schedule work, send notifications and message your other Claude sessions without
+asking, so LoomWatch starts every agent without those tools. Your team's answer leaves through your
+review and the delivery you set up, such as **Send every answer to Notion**. If such a tool runs anyway,
+for example on an app that ignores the rule, the run receipt flags it.
+
 </details>
 
 <details>

@@ -204,6 +204,16 @@ team file (`cwd: .`) runs in its managed folder instead. An operator node takes 
 that offers no ask-first mode, OpenCode among them, decides for itself, and the run records that.
 See [ADR 0037](decisions/0037-loomwatch-decides-what-agents-may-do.md).
 
+No switch lets a run agent publish, post or send outside the run. Claude Code would publish an
+artifact to the operator's claude.ai account without asking, even in its ask-first mode. So each
+run agent's session starts without Claude Code's `Artifact`, `ArtifactComments`, `ArtifactData`,
+`ArtifactCheck`, `DesignSync`, `RemoteTrigger`, `CronCreate`, `CronDelete`, `CronList`,
+`ScheduleWakeup`, `PushNotification`, `SendMessage` and `ListAgents` tools. They are sent as
+`_meta.claudeCode.options.disallowedTools` on `session/new` and `session/load`, and other apps
+ignore that key. A team's answer leaves through its review and its delivery (`deliver:`). If one of
+these tools still runs, the receipt flags it. See
+[ADR 0044](decisions/0044-withhold-tools-that-reach-past-the-run.md).
+
 Connected skills are required: their complete copied `SKILL.md` instructions are also supplied in
 the agent's opening prompt. Preparation fails if the instructions cannot be read or exceed the
 128 KiB aggregate limit for that agent. The archive records the source, receiving harness, exact

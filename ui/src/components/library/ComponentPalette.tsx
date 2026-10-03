@@ -247,7 +247,8 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
   }
   const usedRow = (item: UsedInRun) => {
     const detail = usedDetail(item, agentName)
-    const refusal = usedRefusal(item, agentName)
+    // An outward tool ran without asking (ADR 0044): say what it did where the row says what was declined.
+    const refusal = item.outward ? `Used without asking: ${item.outward}` : usedRefusal(item, agentName)
     const Icon = item.kind === 'skill' ? Puzzle : item.allow === 'web' ? Globe : Wrench
     return <button key={item.key} className="palette-item palette-used" title={`${detail}${refusal ? `\n${refusal}` : ''}\n\nClick to show it on the canvas`} draggable
       onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData(EVIDENCE_DRAG_MIME, item.evidenceId); e.dataTransfer.setData('text/plain', item.name); onDragStateChange?.(true) }}
@@ -280,7 +281,7 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
     {removeError && <p role="alert">{removeError}</p>}
     {/* A run's own record first, while one is shown: what it used, one row per tool, not per call. */}
     {used.length > 0 && usedShown.length > 0 && section(USED, visible(USED, usedShown).map(usedRow), usedShown.length,
-      used.some(item => item.origin === 'app') && !query && <p className="palette-hint">Tools built into an app are not added from here. Switch them on per agent, under <b>Allowed without asking</b>.</p>)}
+      used.some(item => item.origin === 'app' && !item.outward) && !query && <p className="palette-hint">Tools built into an app are not added from here. Switch them on per agent, under <b>Allowed without asking</b>.</p>)}
     {groups.map(group => {
       const items = group.items.filter(item => matches(`${item.name} ${item.detail}`))
       if (query && items.length === 0) return null

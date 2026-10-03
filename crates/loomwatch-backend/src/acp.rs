@@ -521,12 +521,11 @@ impl AcpProcess {
             .await?;
         let before = recorder.event_log.events_appended().await;
         let cwd = self.cwd.to_string_lossy().into_owned();
+        let params = self.session_params(
+            json!({"sessionId": acp_session_id, "cwd": cwd, "mcpServers": mcp_servers}),
+        );
         let loaded = self
-            .request(
-                "session/load",
-                &json!({"sessionId": acp_session_id, "cwd": cwd, "mcpServers": mcp_servers}),
-                Some(&mut recorder),
-            )
+            .request("session/load", &params, Some(&mut recorder))
             .await
             .with_context(|| format!("ACP session/load failed for session {acp_session_id}"))?;
         let replayed = recorder
@@ -736,12 +735,9 @@ impl AcpProcess {
             &initialized.result,
         )?);
         let cwd = self.cwd.to_string_lossy().into_owned();
+        let params = self.session_params(json!({"cwd": cwd, "mcpServers": mcp_servers}));
         let created = self
-            .request(
-                "session/new",
-                &json!({"cwd": cwd, "mcpServers": mcp_servers}),
-                None,
-            )
+            .request("session/new", &params, None)
             .await
             .context("ACP session/new failed")?;
         let session_id = created
@@ -769,6 +765,16 @@ impl AcpProcess {
         )
         .await?;
         Ok(recorder)
+    }
+
+    /// `session/new` or `session/load` params, plus the `_meta` that starts a run agent without
+    /// the app tools that reach past the run (ADR 0044). Only for a session with a
+    /// [`ProcessSpec::permissions`] policy: the Ask assistant and model discovery keep every tool.
+    fn session_params(&self, mut params: Value) -> Value {
+        if self.permissions.is_some() {
+            params["_meta"] = crate::permissions::PermissionPolicy::session_meta();
+        }
+        params
     }
 
     /// ADR 0037: put a run agent's session in its app's ask-first mode, so every action the
@@ -3317,6 +3323,78 @@ mod tests {
         assert_eq!(mode.payload["modeId"], "default");
         assert_eq!(mode.payload["from"], "auto");
         assert_eq!(mode.payload["changed"], true);
+    }
+
+    /// ADR 0044: a run agent's app is started without the tools that reach past the run — Claude
+    /// Code publishes to claude.ai without asking — so `session/new` carries them as
+    /// `_meta.claudeCode.options.disallowedTools`. A session with no policy (Ask, model discovery)
+    /// keeps every tool. Each fake app exits 9, failing its session, unless it got exactly that.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_run_agent_starts_without_the_app_tools_that_reach_past_the_run(pool: PgPool) {
+        let withheld = serde_json::to_string(&crate::permissions::PermissionPolicy::session_meta())
+            .expect("meta");
+        let script = |session: &str, check: &str| {
+            format!(
+                r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
+            IFS= read -r request
+            case "$request" in
+              *'"method":"session/new"'*) ;;
+              *) exit 9 ;;
+            esac
+            {check}
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"{session}"}}}}'
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
+        "#
+            )
+        };
+        let cwd = std::env::current_dir().expect("cwd");
+        let archive = EventArchive::from_pool(pool);
+        let run = |args: String, permissions| ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), args],
+            env: BTreeMap::new(),
+            cwd: cwd.clone(),
+            tools: Vec::new(),
+            permissions,
+            asker: None,
+        };
+
+        let agent = run(
+            script(
+                "withheld",
+                &format!(r#"case "$request" in *'"_meta":{withheld}'*) ;; *) exit 9 ;; esac"#),
+            ),
+            Some(crate::permissions::PermissionPolicy::new(
+                crate::config::AgentAllow::default(),
+                &cwd,
+                [],
+                [],
+            )),
+        );
+        AcpProcess::spawn(&agent)
+            .expect("spawn")
+            .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
+            .await
+            .expect("the run agent's session/new withheld the outward tools");
+
+        let ask = run(
+            script(
+                "untouched",
+                r#"case "$request" in *'"_meta"'*) exit 9 ;; *) ;; esac"#,
+            ),
+            None,
+        );
+        AcpProcess::spawn(&ask)
+            .expect("spawn")
+            .run_session("ask", "", "hello", &archive, Duration::from_secs(2))
+            .await
+            .expect("a session with no policy keeps every tool");
     }
 
     /// ADR 0040: what the switches do not allow is put to the run's operator while the app waits,

@@ -28,8 +28,49 @@ export interface UsedInRun {
   refused: number
   refusedBy: string[]
   failed: number
+  /** What it does past the run, for an outward tool an agent used without asking (ADR 0044). */
+  outward: string | null
   /** The first recorded card, which a click reveals on the canvas. */
   evidenceId: string
+}
+
+/**
+ * Claude Code's own tools that reach past the run, by recorded name, and what each does (ADR 0044).
+ * The daemon starts every run agent without them (`WITHHELD_CLAUDE_TOOLS` in `permissions.rs`), so
+ * a call to one ran without asking: its app ignored that, or the run is older than the rule.
+ */
+export const OUTWARD_APP_TOOLS: Readonly<Record<string, string>> = {
+  Artifact: 'publishes to your claude.ai account',
+  ArtifactComments: 'comments on your claude.ai artifacts',
+  ArtifactData: 'writes to your claude.ai artifacts',
+  ArtifactCheck: 'checks your claude.ai artifacts',
+  DesignSync: 'syncs with your claude.ai designs',
+  RemoteTrigger: 'changes your cloud routines',
+  CronCreate: 'schedules work for later',
+  CronDelete: 'removes scheduled work',
+  CronList: 'reads your scheduled work',
+  ScheduleWakeup: 'schedules work for later',
+  PushNotification: 'sends notifications to your devices',
+  SendMessage: 'messages your other Claude sessions',
+  ListAgents: 'lists your other Claude sessions',
+}
+
+/** The outward tool a call used, or `null` for any other evidence. */
+export function outwardTool(item: Evidence): string | null {
+  if (item.kind === 'permission' || !item.callId) return null
+  const name = payloadString(item, 'name')
+  return name !== null && Object.hasOwn(OUTWARD_APP_TOOLS, name) ? name : null
+}
+
+/** An agent's outward calls that did not fail, by tool, in the order it first used each. */
+export function outwardCalls(items: readonly Evidence[]): Map<string, Evidence[]> {
+  const byTool = new Map<string, Evidence[]>()
+  for (const item of items) {
+    const tool = outwardTool(item)
+    if (tool === null || item.status === 'failed' || item.status === 'rejected') continue
+    byTool.set(tool, [...(byTool.get(tool) ?? []), item])
+  }
+  return byTool
 }
 
 /** Claude Code's own tools, by the name its adapter records, in the words Build uses. */
@@ -108,9 +149,11 @@ export function usedInRun(evidence: readonly Evidence[]): UsedInRun[] {
   const add = (identity: Pick<UsedInRun, 'key' | 'name' | 'origin' | 'allow'>, kind: UsedInRun['kind'], item: Evidence) => {
     let row = rows.get(identity.key)
     if (!row) {
-      row = { ...identity, kind, agents: [], calls: 0, refused: 0, refusedBy: [], failed: 0, evidenceId: item.id }
+      row = { ...identity, kind, agents: [], calls: 0, refused: 0, refusedBy: [], failed: 0, outward: null, evidenceId: item.id }
       rows.set(identity.key, row)
     }
+    const outward = outwardTool(item)
+    if (outward !== null && item.status !== 'failed' && item.status !== 'rejected') row.outward = OUTWARD_APP_TOOLS[outward]
     row.calls += 1
     const agent = row.agents.find((entry) => entry.id === item.agentId)
     if (agent) agent.calls += 1

@@ -286,6 +286,15 @@ describe('ComponentPalette while a run is shown', () => {
     expect(setData).toHaveBeenCalledWith(EVIDENCE_DRAG_MIME, 'researcher:n1')
   })
 
+  // ADR 0044: the row used to read "Artifact · Built into the app" like any harmless tool.
+  it('says when an app tool reached past the run without asking', () => {
+    const published = projectRun([event(1, 'researcher', 'tool_call', { callId: 'a1', name: 'Artifact', title: 'Artifact', toolKind: 'other', status: 'completed', rawInput: { action: 'publish' } })]).evidence
+    render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} observedEvidence={published} agentNames={names} />)
+    expect(within(section('Used in this run')).getByRole('button', { name: /^Artifact/ })).toHaveTextContent('Built into the app · ResearcherUsed without asking: publishes to your claude.ai account×1')
+    // No switch lets it through, so the hint about switches would point nowhere.
+    expect(section('Used in this run')).not.toHaveTextContent('Allowed without asking')
+  })
+
   it('names the folded panel after what a run reader opens it for', () => {
     render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} observedEvidence={evidence} agentNames={names} />)
     act(() => { window.dispatchEvent(new Event('loomwatch:close-library')) })

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { projectRun, type RunEvent } from '../watch/events'
-import { usedInRun } from './observed'
+import { outwardCalls, usedInRun } from './observed'
 
 const at = (seconds: number) => new Date(Date.UTC(2026, 9, 3, 0, 0, seconds)).toISOString()
 const event = (seq: number, agentId: string, kind: RunEvent['kind'], payload: RunEvent['payload']): RunEvent =>
@@ -67,5 +67,37 @@ describe('usedInRun', () => {
 
   it('reveals the first recorded card for a row', () => {
     expect(row('Web search')?.evidenceId).toBe('researcher:s1')
+  })
+})
+
+// ADR 0044: a demo Writer on Claude Code published its brief to the operator's claude.ai account
+// twice, with no permission request, and the run's record showed only a row named "Artifact".
+describe('an outward tool used without asking', () => {
+  const published = (seq: number, callId: string, status: 'completed' | 'failed'): RunEvent[] => [
+    event(seq, 'writer', 'tool_call', { callId, name: 'Artifact', title: 'Artifact', toolKind: 'other', status: 'pending', rawInput: { action: 'publish', file_path: 'brief.html' } }),
+    event(seq + 1, 'writer', 'tool_update', { callId, status, content: status === 'completed' ? 'Published brief.html at https://claude.ai/artifact/0123' : 'Rate limited' }),
+  ]
+  const rows = usedInRun(projectRun([
+    ...published(1, 'a1', 'completed'),
+    ...published(3, 'a2', 'completed'),
+    event(5, 'writer', 'tool_call', { callId: 'd1', name: 'ArtifactData', title: 'ArtifactData', toolKind: 'other', status: 'pending', rawInput: {} }),
+    event(6, 'writer', 'tool_update', { callId: 'd1', status: 'failed' }),
+    event(7, 'writer', 'tool_call', { callId: 'r1', name: 'Read', title: 'Read brief.md', toolKind: 'read', status: 'pending', rawInput: {}, locations: [{ path: 'brief.md' }] }),
+    event(8, 'writer', 'tool_update', { callId: 'r1', status: 'completed' }),
+  ]).evidence)
+
+  it('says what the tool did past the run on its row', () => {
+    expect(rows.find((row) => row.name === 'Artifact')).toMatchObject({ origin: 'app', calls: 2, outward: 'publishes to your claude.ai account' })
+  })
+
+  it('says nothing for a call that failed, or for a tool that stays on the machine', () => {
+    expect(rows.find((row) => row.name === 'ArtifactData')).toMatchObject({ failed: 1, outward: null })
+    expect(rows.find((row) => row.name === 'Read files')).toMatchObject({ outward: null })
+  })
+
+  it('lists, per tool, only the calls that did not fail', () => {
+    const calls = outwardCalls(projectRun([...published(1, 'a1', 'completed'), ...published(3, 'a2', 'failed')]).evidence)
+    expect([...calls.keys()]).toEqual(['Artifact'])
+    expect(calls.get('Artifact')?.map((item) => item.callId)).toEqual(['a1'])
   })
 })
