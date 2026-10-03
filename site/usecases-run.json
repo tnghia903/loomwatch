@@ -1,0 +1,349 @@
+{
+ "source": {
+  "runId": "054e7c65-1ddd-474e-922f-44724414f8c2",
+  "events": 5697,
+  "startedAt": "2026-10-03T10:23:12.291Z",
+  "finishedAt": "2026-10-03T10:31:13.570Z",
+  "note": "Every text below is copied verbatim from this run's archived events. Only the structure is added."
+ },
+ "prompt": "Teach me how my phone knows where I am on a map.",
+ "seconds": 481,
+ "stages": [
+  {
+   "id": "mapper",
+   "name": "Mapper",
+   "app": "Claude",
+   "model": "sonnet",
+   "seconds": 42
+  },
+  {
+   "id": "review",
+   "name": "You",
+   "app": null,
+   "model": null,
+   "seconds": 77
+  },
+  {
+   "id": "teacher",
+   "name": "Teacher",
+   "app": "Claude",
+   "model": "opus",
+   "seconds": 142
+  },
+  {
+   "id": "checker",
+   "name": "Checker",
+   "app": "Codex",
+   "model": "gpt-6.1-sol",
+   "seconds": 215
+  }
+ ],
+ "skill": {
+  "name": "explain-like-im-5",
+  "sha256": "ee75afcdadb605ffda7501b8b11c26d1ad1a31402f3a01da586cd8511389275e",
+  "agents": [
+   "checker",
+   "mapper",
+   "teacher"
+  ]
+ },
+ "mapper": {
+  "reply": "## The question\nHow does my phone know where I am on a map?\n\n## Bedrock\n- You can count steps. \"The slide is 10 steps from me\" is a fact you can check.\n- A string tied to a post lets you walk in a circle. The string stays the same length all the way round.\n- The far side of the playground takes longer to run to than the near side.\n- A letter with a postmark tells you when it was sent. If you know when it arrived, you know how long the trip took.\n- A map is a drawing of the ground where each place has its own spot, like \"next to the swings\".\n\n## Hand-waves we won't use\n- **\"It uses satellites\"** hides what a satellite does and why the phone needs more than one. Rungs 5 and 6 build this.\n- **\"It triangulates\"** (or \"trilaterates\") is a big word for a trick with distances. Rungs 1 and 2 build it.\n- **\"The signal tells it the distance\"** skips the question of how a message can carry a distance. Rungs 3 and 4 build this.\n- **\"The clock is synced\"** skips why a wrong clock matters so much. Rung 6 builds this.\n- **\"It finds your coordinates\"** skips how numbers turn into a dot on a picture. Rung 7 builds this.\n- **\"Satellites stay up because of orbits\"** is not needed for this question. We park it under *Where to go next* instead of explaining it.\n\n## The ladder\n1. **Knowing your distance from one known spot puts you somewhere on a circle around that spot.** \"I'm 10 steps from the slide\" doesn't say which way. It only says you're on the string-circle. needs: bedrock (counting, string on a post).\n2. **Distances from three known spots leave exactly one place you can be.** One circle leaves many places. Two circles cross in two places. A third circle picks one. needs: 1.\n3. **If a message travels at a steady speed, the time it took tells you how far it came.** A far friend's shout takes longer to reach you. Radio messages are very fast but not instant. (This is a fact from grown-ups, marked as such.) The flat picture is first-step. The fuller story is that we live in 3D, so circles become balls. needs: 2, bedrock (far takes longer).\n4. **To measure the trip time, the message must say when it was sent.** The phone compares that \"sent\" time with its own clock at arrival, like a postmark. needs: 3, bedrock (postmark).\n5. **Satellites are known spots that keep shouting two things: \"here is where I am\" and \"this is the exact time I'm shouting\".** They are far above, and each one keeps moving, but it always announces where it is right now. The phone only listens. It never tells them anything. needs: 2, 4.\n6. **The phone's own clock is slightly wrong, so a fourth shout is needed to fix it.** Radio crosses about 300 km in one thousandth of a second. A tiny clock error therefore becomes a huge distance error. Four shouts give the phone enough to work out both where it is and how wrong its clock is. needs: 2, 4, 5.\n7. **The phone drops its answer onto a map by looking up the spot.** A map is a drawing where every place has a pair of numbers. The phone finds that pair and draws a dot there. needs: 6, bedrock (a map has spots).\n\n*Outside the ladder (fuller story):* indoors, phones also use Wi-Fi and phone towers to guess a position. That is a different, rougher method, so we leave it out here.\n\n## Ask the learner\nTell me which rungs you already know and want to skip, or which one you want to start at.",
+  "question": "How does my phone know where I am on a map?",
+  "bedrock": [
+   "You can count steps. \"The slide is 10 steps from me\" is a fact you can check.",
+   "A string tied to a post lets you walk in a circle. The string stays the same length all the way round.",
+   "The far side of the playground takes longer to run to than the near side.",
+   "A letter with a postmark tells you when it was sent. If you know when it arrived, you know how long the trip took.",
+   "A map is a drawing of the ground where each place has its own spot, like \"next to the swings\"."
+  ],
+  "waves": [
+   {
+    "words": "It uses satellites",
+    "note": "hides what a satellite does and why the phone needs more than one. Rungs 5 and 6 build this."
+   },
+   {
+    "words": "It triangulates",
+    "note": "(or \"trilaterates\") is a big word for a trick with distances. Rungs 1 and 2 build it."
+   },
+   {
+    "words": "The signal tells it the distance",
+    "note": "skips the question of how a message can carry a distance. Rungs 3 and 4 build this."
+   },
+   {
+    "words": "The clock is synced",
+    "note": "skips why a wrong clock matters so much. Rung 6 builds this."
+   },
+   {
+    "words": "It finds your coordinates",
+    "note": "skips how numbers turn into a dot on a picture. Rung 7 builds this."
+   },
+   {
+    "words": "Satellites stay up because of orbits",
+    "note": "is not needed for this question. We park it under *Where to go next* instead of explaining it."
+   }
+  ],
+  "ladder": [
+   {
+    "n": 1,
+    "claim": "Knowing your distance from one known spot puts you somewhere on a circle around that spot.",
+    "detail": "\"I'm 10 steps from the slide\" doesn't say which way. It only says you're on the string-circle.",
+    "needs": "bedrock (counting, string on a post)"
+   },
+   {
+    "n": 2,
+    "claim": "Distances from three known spots leave exactly one place you can be.",
+    "detail": "One circle leaves many places. Two circles cross in two places. A third circle picks one.",
+    "needs": "1"
+   },
+   {
+    "n": 3,
+    "claim": "If a message travels at a steady speed, the time it took tells you how far it came.",
+    "detail": "A far friend's shout takes longer to reach you. Radio messages are very fast but not instant. (This is a fact from grown-ups, marked as such.) The flat picture is first-step. The fuller story is that we live in 3D, so circles become balls.",
+    "needs": "2, bedrock (far takes longer)"
+   },
+   {
+    "n": 4,
+    "claim": "To measure the trip time, the message must say when it was sent.",
+    "detail": "The phone compares that \"sent\" time with its own clock at arrival, like a postmark.",
+    "needs": "3, bedrock (postmark)"
+   },
+   {
+    "n": 5,
+    "claim": "Satellites are known spots that keep shouting two things: \"here is where I am\" and \"this is the exact time I'm shouting\".",
+    "detail": "They are far above, and each one keeps moving, but it always announces where it is right now. The phone only listens. It never tells them anything.",
+    "needs": "2, 4"
+   },
+   {
+    "n": 6,
+    "claim": "The phone's own clock is slightly wrong, so a fourth shout is needed to fix it.",
+    "detail": "Radio crosses about 300 km in one thousandth of a second. A tiny clock error therefore becomes a huge distance error. Four shouts give the phone enough to work out both where it is and how wrong its clock is.",
+    "needs": "2, 4, 5"
+   },
+   {
+    "n": 7,
+    "claim": "The phone drops its answer onto a map by looking up the spot.",
+    "detail": "A map is a drawing where every place has a pair of numbers. The phone finds that pair and draws a dot there.",
+    "needs": "6, bedrock (a map has spots)"
+   }
+  ],
+  "side": "*Outside the ladder (fuller story):* indoors, phones also use Wi-Fi and phone towers to guess a position. That is a different, rougher method, so we leave it out here.",
+  "ask": "Tell me which rungs you already know and want to skip, or which one you want to start at."
+ },
+ "review": {
+  "question": "Here is the ladder from what you already know up to your question. Approve it, or say which rungs you already know, where you'd like to start, or what you'd like things compared to.",
+  "answer": "I already know the circles part, so skip rungs 1 and 2 and start at rung 3. Leave Wi-Fi and phone towers for where next.",
+  "skipped": [
+   1,
+   2
+  ]
+ },
+ "teacher": {
+  "prelude": "",
+  "title": "How does my phone know where I am on a map?",
+  "markdown": "# How does my phone know where I am on a map?\n\n**The short answer:** Machines high above the Earth keep sending out invisible messages that say \"here is where I am, and here is the exact time I sent this.\" Your phone listens to several of them at once. It works out how long each message took to arrive, turns each time into a distance, and finds the one spot that fits every distance. Then it puts a dot on that spot on the map.\n\n*You already know the circles part, so this lesson starts at rung 3. Rungs 1 and 2 appear below only as things you already know.*\n\n## What you already know\n- If you know how far you are from one known spot, you are somewhere on a circle around it. (Rung 1)\n- If you know how far you are from three known spots, only one place fits all three. (Rung 2)\n- Far places take longer to get to than near ones.\n- A postmark on a letter shows when the letter was sent.\n- A map is a drawing where every real place has its own spot.\n\n## The ladder\n\n### 3. If a message moves at a steady speed, the time it takes tells you how far it came.\n\nPicture a friend who always walks at the same pace. One step for every count, never faster and never slower. That is what **steady** means. If your friend walks to you and it takes 10 counts, they started 10 steps away. If it takes 50 counts, they started 50 steps away. Count the time and you know the distance. You never have to measure the path.\n\nYour phone uses messages that travel like this. They are invisible, the same kind of message a car radio catches on a trip. Grown-ups call it **radio**. Radio moves at a steady speed, and that speed is very, very fast. In one blink of your eye, radio could go around the whole Earth about twice. (That's an estimate, because blinks come in different lengths.) Still, very fast is not the same as instant. Radio always takes *some* time to get anywhere. That tiny time is what the phone measures.\n\n*(This is a grown-up fact you can't check in the kitchen. Scientists have measured it very carefully, many times, and it always comes out the same.)*\n\n**Picture it:** Your friend walks to you across the playground, one step per count. You count 20, so they started 20 steps away.\n**Where the picture breaks:** Your friend walks in one line, straight to you. A radio message spreads out in every direction at once, like ripples when you drop a pea into a bowl of water. Also, radio is far faster than any walker, so the times are much too short for you to count. *(First-step picture. The fuller story: radio slows down a tiny bit as it passes through the air near the ground, and phones correct for that.)*\n**Why it has to be so:** If the speed changed along the way, the same travel time could mean different distances, and counting would tell you nothing. A steady speed makes \"how long\" and \"how far\" two ways of saying the same thing.\n**Check:** Your steady-walking friend takes 8 counts to reach you. How many steps away did they start? *Answer:* 8 steps.\n\n### 4. The message has to say when it was sent, so the phone can work out how long it travelled.\n\nThere's a problem with rung 3. To count how long something took, you need to know when it started. When the message reaches your phone, the phone knows the time it arrived. It doesn't know the time it left.\n\nSo every message carries its own \"sent at\" time, like a postmark. When the message arrives, the phone looks at its own clock. Then it subtracts: the time it arrived, minus the time it was sent. That gap is the travel time. Rung 3 turns the travel time into a distance.\n\n**Picture it:** A postcard from a family trip says \"Written on Monday\" on the back. It lands on your doormat on Thursday. You can work out that it spent three days on the way, even though you never saw it posted.\n**Where the picture breaks:** Postcards don't travel at a steady speed. Some days the post is slow. Radio is steady, so the gap is a real distance. There's a second break too. The postcard trick only works if the \"Monday\" on the card and the \"Thursday\" on your calendar come from the same week. Two clocks have to agree. Keep that in mind, because rung 6 is about it.\n**Why it has to be so:** A message that arrives with no start time is like a race where nobody saw the start. You can see who crossed the line, but you can't say how long anyone ran.\n**Check:** A message says \"sent at 10 o'clock\". The phone's clock says it arrived a tiny bit after 10. What is that tiny bit? *Answer:* how long the message took to travel.\n\n### 5. Machines high in the sky keep shouting \"here is where I am, and here is the time.\"\n\nNow put rungs 2 and 4 together. From rung 2 you need known spots. From rung 4 those spots need to send messages with the time on them.\n\nThose known spots are machines far above the sky. They are much higher than any plane flies, about 20,000 kilometres up (an estimate). That's about half the distance around the whole Earth. Grown-ups call them **satellites**. Each one keeps moving, but it always knows exactly where it is at each moment. Over and over, every second, each one sends out a radio message: \"I am *here* right now, and the time is *exactly this*.\" Each satellite carries a super-exact clock, so its \"sent at\" time is right. *(A grown-up fact. The clocks are very special and very costly.)*\n\nYour phone only **listens**. It never shouts back. It collects messages from several satellites, works out a distance to each one, and finds the spot where all the distances fit.\n\n**Picture it:** You stand in the playground with your eyes closed. Friends are spread out around you, and each one keeps calling, \"I'm by the slide, and it's three o'clock and ten seconds!\" You can't see them, but you know where each caller is and when each call was made.\n**Where the picture breaks:** Your friends stand still. Satellites are always moving, which is why every shout says where it is *right now*. They are also high above you, not around you on the ground. And you can't hear radio. It needs a phone or a radio set to catch it. *(Why satellites stay up there without falling is a separate story. See \"Where to go next\".)*\n**Why it has to be so:** Suppose the phone had to talk back and ask each satellite a question. Then the satellites would have to answer billions of phones one at a time, and they couldn't keep up. When the satellites only shout and the phones only listen, any number of phones can use the same shouts at once. It works like a radio station that everyone can tune in to.\n**Check:** Does your phone send anything up to the satellites to find where it is? *Answer:* No. It only listens to what they send out.\n\n### 6. The phone's clock is a tiny bit wrong, so it listens to one more satellite to fix it.\n\nRemember the second break in rung 4: two clocks have to agree. The satellites have super-exact clocks. Your phone doesn't. Its clock is small and cheap, and it can be off by a sliver of a second.\n\nThat sounds like nothing. But radio is so fast that a sliver matters a lot. Split one second into a thousand tiny pieces. In *one* of those pieces, radio goes about 300 kilometres. That's about as far as a long car trip to another city. (300 is an estimate.) So if the phone's clock is off by one of those tiny pieces, every distance it works out is off by about 300 kilometres.\n\nHere's the useful part. The phone uses the *same* wrong clock for every message. So every distance is wrong by the *same* amount. They're all too long by the same amount, or all too short by the same amount. With wrong distances, the circles don't meet at one neat spot. They make a muddle. The phone asks: \"How wrong would my clock have to be for all the circles to meet at exactly one spot?\" There is only one answer that works. When the phone finds it, it learns two things at once: where you are, and the right time.\n\nTo work out that one extra thing, the clock error, the phone needs one extra satellite. That's one more than it would need if its clock were perfect.\n\n*(First-step picture. The fuller story: your circles were flat, but the real world isn't. Distances from a point high in the sky make balls, not circles. So in real life the phone needs at least **four** satellites: three for the place, plus one for the clock. Most phones hear more than four and use all of them to double-check.)*\n\n**Picture it:** You wear a watch that runs 5 minutes fast. Every time you look at it, it's wrong by the same 5 minutes, never 3 and never 8. Once one correct clock in the kitchen shows you the gap, you can fix every reading in your head.\n**Where the picture breaks:** The phone's clock error is far smaller than 5 minutes, much too small for you to ever notice. And the phone doesn't look at another clock to find the error. It works the error out from the muddle of circles, using sums.\n**Why it has to be so:** The phone has one thing it doesn't know besides where you are: how wrong its clock is. Each extra thing you don't know needs one extra clue. Because the clock error is the same for every message, a single extra satellite is enough to find it.\n**Check:** If the phone's clock is a little wrong, are all its distances wrong by different amounts or by the same amount? *Answer:* By the same amount, because every message is timed with the same clock.\n\n### 7. The phone ends up with a pair of numbers for where you are, and the map puts a dot at that pair.\n\nAfter rung 6, the phone knows where you are. But \"where\" in sums isn't a picture. It's numbers. The phone's answer is a pair of numbers: how far up or down the Earth you are, and how far across.\n\nA map uses the same pairs. Every spot on the map has its own pair of numbers. The map app finds the spot with the phone's pair and draws a dot there.\n\n**Picture it:** A muffin tray in the kitchen. \"Row 2, cup 3\" names exactly one cup. Nobody has to point. The two numbers are enough, and anyone holding the same tray finds the same cup.\n**Where the picture breaks:** A muffin tray is flat, with a few big cups. The Earth is round like a ball, and the numbers wrap all the way around it in tiny steps. So the pairs can name any spot, not only a few cups. Grown-ups call the two numbers **latitude** (up or down) and **longitude** (across). Also, the dot is only as good as the sums. That's why phones often draw a pale circle around the dot to show \"you're somewhere in here.\"\n**Why it has to be so:** The phone and the map are two different things. They need a way of saying \"exactly here\" that both understand. A pair of numbers is the shortest way to do it, the same way \"row 2, cup 3\" is.\n**Check:** On a muffin tray, how many numbers do you need to name one cup? *Answer:* Two: the row and the cup.\n\n## Back to the question\nSatellites high in the sky keep shouting where they are and the exact time they sent each message. Your phone listens. For each message, it looks at how long the message took to arrive, and because radio moves at a steady speed, that time tells it a distance. It listens to one more satellite than it would otherwise need, so it can fix its own slightly wrong clock. Then it finds the one spot where all the distances meet. That spot is a pair of numbers, and the map puts a dot at that pair.\n\n## Words you earned\n- **Steady**: always the same speed, never faster and never slower.\n- **Radio**: an invisible message that moves at a steady, very fast speed.\n- **Satellite**: a machine high above the Earth that keeps moving, always knows where it is, and keeps shouting its place and the exact time.\n- **Latitude and longitude**: the pair of numbers that names one spot on the Earth, how far up or down and how far across, like \"row 2, cup 3\" on a muffin tray.\n\n## Where to go next\n- How does your phone find you indoors, where satellite messages are weak? (Wi-Fi and phone towers.)\n- Why don't satellites fall down, even though things fall when you let go of them?\n- How do you draw a map from pairs of numbers when the Earth is round and the paper is flat?",
+  "rungs": [
+   {
+    "n": 3,
+    "title": "If a message moves at a steady speed, the time it takes tells you how far it came.",
+    "body": [
+     "Picture a friend who always walks at the same pace. One step for every count, never faster and never slower. That is what **steady** means. If your friend walks to you and it takes 10 counts, they started 10 steps away. If it takes 50 counts, they started 50 steps away. Count the time and you know the distance. You never have to measure the path.",
+     "Your phone uses messages that travel like this. They are invisible, the same kind of message a car radio catches on a trip. Grown-ups call it **radio**. Radio moves at a steady speed, and that speed is very, very fast. In one blink of your eye, radio could go around the whole Earth about twice. (That's an estimate, because blinks come in different lengths.) Still, very fast is not the same as instant. Radio always takes *some* time to get anywhere. That tiny time is what the phone measures.",
+     "*(This is a grown-up fact you can't check in the kitchen. Scientists have measured it very carefully, many times, and it always comes out the same.)*"
+    ],
+    "picture": "Your friend walks to you across the playground, one step per count. You count 20, so they started 20 steps away.",
+    "breaks": "Your friend walks in one line, straight to you. A radio message spreads out in every direction at once, like ripples when you drop a pea into a bowl of water. Also, radio is far faster than any walker, so the times are much too short for you to count. *(First-step picture. The fuller story: radio slows down a tiny bit as it passes through the air near the ground, and phones correct for that.)*",
+    "why": "If the speed changed along the way, the same travel time could mean different distances, and counting would tell you nothing. A steady speed makes \"how long\" and \"how far\" two ways of saying the same thing.",
+    "check": "Your steady-walking friend takes 8 counts to reach you. How many steps away did they start?",
+    "answer": "8 steps."
+   },
+   {
+    "n": 4,
+    "title": "The message has to say when it was sent, so the phone can work out how long it travelled.",
+    "body": [
+     "There's a problem with rung 3. To count how long something took, you need to know when it started. When the message reaches your phone, the phone knows the time it arrived. It doesn't know the time it left.",
+     "So every message carries its own \"sent at\" time, like a postmark. When the message arrives, the phone looks at its own clock. Then it subtracts: the time it arrived, minus the time it was sent. That gap is the travel time. Rung 3 turns the travel time into a distance."
+    ],
+    "picture": "A postcard from a family trip says \"Written on Monday\" on the back. It lands on your doormat on Thursday. You can work out that it spent three days on the way, even though you never saw it posted.",
+    "breaks": "Postcards don't travel at a steady speed. Some days the post is slow. Radio is steady, so the gap is a real distance. There's a second break too. The postcard trick only works if the \"Monday\" on the card and the \"Thursday\" on your calendar come from the same week. Two clocks have to agree. Keep that in mind, because rung 6 is about it.",
+    "why": "A message that arrives with no start time is like a race where nobody saw the start. You can see who crossed the line, but you can't say how long anyone ran.",
+    "check": "A message says \"sent at 10 o'clock\". The phone's clock says it arrived a tiny bit after 10. What is that tiny bit?",
+    "answer": "how long the message took to travel."
+   },
+   {
+    "n": 5,
+    "title": "Machines high in the sky keep shouting \"here is where I am, and here is the time.\"",
+    "body": [
+     "Now put rungs 2 and 4 together. From rung 2 you need known spots. From rung 4 those spots need to send messages with the time on them.",
+     "Those known spots are machines far above the sky. They are much higher than any plane flies, about 20,000 kilometres up (an estimate). That's about half the distance around the whole Earth. Grown-ups call them **satellites**. Each one keeps moving, but it always knows exactly where it is at each moment. Over and over, every second, each one sends out a radio message: \"I am *here* right now, and the time is *exactly this*.\" Each satellite carries a super-exact clock, so its \"sent at\" time is right. *(A grown-up fact. The clocks are very special and very costly.)*",
+     "Your phone only **listens**. It never shouts back. It collects messages from several satellites, works out a distance to each one, and finds the spot where all the distances fit."
+    ],
+    "picture": "You stand in the playground with your eyes closed. Friends are spread out around you, and each one keeps calling, \"I'm by the slide, and it's three o'clock and ten seconds!\" You can't see them, but you know where each caller is and when each call was made.",
+    "breaks": "Your friends stand still. Satellites are always moving, which is why every shout says where it is *right now*. They are also high above you, not around you on the ground. And you can't hear radio. It needs a phone or a radio set to catch it. *(Why satellites stay up there without falling is a separate story. See \"Where to go next\".)*",
+    "why": "Suppose the phone had to talk back and ask each satellite a question. Then the satellites would have to answer billions of phones one at a time, and they couldn't keep up. When the satellites only shout and the phones only listen, any number of phones can use the same shouts at once. It works like a radio station that everyone can tune in to.",
+    "check": "Does your phone send anything up to the satellites to find where it is?",
+    "answer": "No. It only listens to what they send out."
+   },
+   {
+    "n": 6,
+    "title": "The phone's clock is a tiny bit wrong, so it listens to one more satellite to fix it.",
+    "body": [
+     "Remember the second break in rung 4: two clocks have to agree. The satellites have super-exact clocks. Your phone doesn't. Its clock is small and cheap, and it can be off by a sliver of a second.",
+     "That sounds like nothing. But radio is so fast that a sliver matters a lot. Split one second into a thousand tiny pieces. In *one* of those pieces, radio goes about 300 kilometres. That's about as far as a long car trip to another city. (300 is an estimate.) So if the phone's clock is off by one of those tiny pieces, every distance it works out is off by about 300 kilometres.",
+     "Here's the useful part. The phone uses the *same* wrong clock for every message. So every distance is wrong by the *same* amount. They're all too long by the same amount, or all too short by the same amount. With wrong distances, the circles don't meet at one neat spot. They make a muddle. The phone asks: \"How wrong would my clock have to be for all the circles to meet at exactly one spot?\" There is only one answer that works. When the phone finds it, it learns two things at once: where you are, and the right time.",
+     "To work out that one extra thing, the clock error, the phone needs one extra satellite. That's one more than it would need if its clock were perfect.",
+     "*(First-step picture. The fuller story: your circles were flat, but the real world isn't. Distances from a point high in the sky make balls, not circles. So in real life the phone needs at least **four** satellites: three for the place, plus one for the clock. Most phones hear more than four and use all of them to double-check.)*"
+    ],
+    "picture": "You wear a watch that runs 5 minutes fast. Every time you look at it, it's wrong by the same 5 minutes, never 3 and never 8. Once one correct clock in the kitchen shows you the gap, you can fix every reading in your head.",
+    "breaks": "The phone's clock error is far smaller than 5 minutes, much too small for you to ever notice. And the phone doesn't look at another clock to find the error. It works the error out from the muddle of circles, using sums.",
+    "why": "The phone has one thing it doesn't know besides where you are: how wrong its clock is. Each extra thing you don't know needs one extra clue. Because the clock error is the same for every message, a single extra satellite is enough to find it.",
+    "check": "If the phone's clock is a little wrong, are all its distances wrong by different amounts or by the same amount?",
+    "answer": "By the same amount, because every message is timed with the same clock."
+   },
+   {
+    "n": 7,
+    "title": "The phone ends up with a pair of numbers for where you are, and the map puts a dot at that pair.",
+    "body": [
+     "After rung 6, the phone knows where you are. But \"where\" in sums isn't a picture. It's numbers. The phone's answer is a pair of numbers: how far up or down the Earth you are, and how far across.",
+     "A map uses the same pairs. Every spot on the map has its own pair of numbers. The map app finds the spot with the phone's pair and draws a dot there."
+    ],
+    "picture": "A muffin tray in the kitchen. \"Row 2, cup 3\" names exactly one cup. Nobody has to point. The two numbers are enough, and anyone holding the same tray finds the same cup.",
+    "breaks": "A muffin tray is flat, with a few big cups. The Earth is round like a ball, and the numbers wrap all the way around it in tiny steps. So the pairs can name any spot, not only a few cups. Grown-ups call the two numbers **latitude** (up or down) and **longitude** (across). Also, the dot is only as good as the sums. That's why phones often draw a pale circle around the dot to show \"you're somewhere in here.\"",
+    "why": "The phone and the map are two different things. They need a way of saying \"exactly here\" that both understand. A pair of numbers is the shortest way to do it, the same way \"row 2, cup 3\" is.",
+    "check": "On a muffin tray, how many numbers do you need to name one cup?",
+    "answer": "Two: the row and the cup."
+   }
+  ],
+  "short": "Machines high above the Earth keep sending out invisible messages that say \"here is where I am, and here is the exact time I sent this.\" Your phone listens to several of them at once. It works out how long each message took to arrive, turns each time into a distance, and finds the one spot that fits every distance. Then it puts a dot on that spot on the map.",
+  "back": "Satellites high in the sky keep shouting where they are and the exact time they sent each message. Your phone listens. For each message, it looks at how long the message took to arrive, and because radio moves at a steady speed, that time tells it a distance. It listens to one more satellite than it would otherwise need, so it can fix its own slightly wrong clock. Then it finds the one spot where all the distances meet. That spot is a pair of numbers, and the map puts a dot at that pair."
+ },
+ "checker": {
+  "prelude": "I’m using the explain-like-im-5 skill to check the full lesson for accuracy and make sure each step follows from what came before it.\n\nThe main idea holds up. I found a few places to tighten: a postcard’s writing date is not its sending date, the clock fix needs a “first-step” mark, and the map’s pale circle shows an estimate rather than a guaranteed boundary. I’ll keep the teacher’s five rungs and pictures.",
+  "title": "How does my phone know where I am on a map?",
+  "markdown": "# How does my phone know where I am on a map?\n\n**The short answer:** Machines high above the Earth send invisible messages that help your phone work out how far away they are. Your phone combines several of these clues, allows for its slightly wrong clock, and gives the map a best guess of where to draw your dot.\n\n*You already know the circles part, so this lesson starts at rung 3. I’ve tightened two earlier ideas: the circles picture is flat, and three known spots must be arranged suitably to pick out one place.*\n\n## What you already know\n\n- On a flat playground, knowing your distance from one spot puts you somewhere on a circle around it. (Rung 1)\n- Three exact distances can pick out one place, if the three known spots are not all along one straight line. (Rung 2)\n- At the same pace, a longer path takes longer to travel.\n- A letter can carry a note saying when it was posted.\n- A map is a drawing that shows where places are.\n\n## The ladder\n\n### 3. If a message moves at a known, steady speed, its travel time tells you how far it came.\n\nPicture a friend who always walks at the same pace. One equal-sized step for every count, never faster and never slower. That is what **steady** means.\n\nIf your friend walks straight to you in 10 counts, they started 10 steps away. If it takes 50 counts, they started 50 steps away. Count the time and you know the distance.\n\nYour phone uses invisible messages, like those a car radio catches on a trip. They travel on **radio waves**.\n\nRadio waves move at a steady speed through empty space. That speed is very, very fast. Still, very fast is not the same as instant. A message takes some time to reach your phone. That tiny travel time is the clue. [NASA explains radio-wave speed.](https://science.nasa.gov/learn/basics-of-space-flight/chapter6-1/)\n\n*This is a measured fact we are borrowing. You can test the walking idea in a playground. Testing radio’s speed needs special equipment.*\n\n**Picture it:** Your friend walks straight to you, one equal-sized step per count. You count 20, so they started 20 steps away.\n\n**Where the picture breaks:** Radio is far faster than any walker. Its travel times are too short for you to count. Its messages also spread across a wide area, so many phones can catch the same message.\n\n*First-step picture: we are treating the message’s journey as straight and steady. The fuller story: Earth’s air can delay it, and buildings can bounce it along a longer path. These effects need corrections and can leave mistakes.* [GPS.gov describes these sources of error.](https://www.gps.gov/gps-accuracy)\n\n**Why it has to be so:** You need to know the pace. Ten counts could mean ten steps for one walker, or twenty for a faster one. A known, steady pace lets you turn time into distance.\n\n**Check:** Your friend takes one equal-sized step per count and reaches you after 8 counts. How many steps did they travel? *Answer:* 8 steps.\n\n### 4. The message must tell the phone when it left.\n\nThere’s a problem with rung 3. To count how long a journey took, you need its start time.\n\nThe phone can record when a message arrives. But that alone doesn’t say when the message left.\n\nSo the message carries information telling the phone its sending time. The phone compares that with its own arrival time. The gap between them gives the travel time—**if the two clocks agree**.\n\nFor example, from 10 o’clock to 11 o’clock is a gap of one hour. The phone does the same kind of counting with tiny pieces of a second.\n\nWe’ll fix the clock problem in rung 6.\n\n**Picture it:** A postcard says, “Posted on Monday.” It lands on your doormat on Thursday of the same week. You can count a gap of about three days.\n\n**Where the picture breaks:** “Written on Monday” would not tell you when it was posted. It might have sat on a kitchen table until Wednesday. Even “Posted on Monday” gives only a rough start time. The phone needs something much more precise.\n\nPostcards also travel at changing speeds. Their travel time doesn’t tell you their distance.\n\n**Why it has to be so:** Seeing the end of a journey isn’t enough to time it. You need the start too. Otherwise, you don’t know how much time passed.\n\n**Check:** Two clocks agree. A message says “sent at 10 o’clock” and arrives a tiny bit later. What is that tiny gap? *Answer:* How long the message took to travel.\n\n### 5. Machines high above Earth send the place and time clues.\n\nNow put rungs 2 and 4 together.\n\nFrom rung 2, you need known spots. From rung 4, you need messages with sending times.\n\nThe known spots are machines travelling around Earth, far above any plane. Machines travelling around Earth are called **satellites**. The ones used here send messages for finding places.\n\nOne group is called **GPS**. Its satellites are about 20,000 kilometres above Earth. That is an estimate, and a very long trip upward. [GPS.gov describes their height.](https://www.gps.gov/space-segment)\n\nEach GPS satellite carries very accurate clocks. Its messages give the phone time information and enough information to work out where the satellite was when the message left. [ESA explains what the messages carry.](https://www.esa.int/Applications/Satellite_navigation/How_satellite_navigation_works)\n\nThink of each message as saying:\n\n> “Here is how to work out where I was, and when this message left.”\n\n*First-step picture: the satellite isn’t finding its place perfectly by itself. Machines on the ground track its journey and send updated information for it to pass along. There are still small errors.* [GPS.gov explains this ground support.](https://www.gps.gov/control-segment)\n\nFor this satellite part, your phone **listens**. It doesn’t need to send a question back to the GPS satellites. Many phones can use the same messages at once. [GPS.gov describes these one-way messages.](https://www.gps.gov/gps)\n\n**Picture it:** You stand in the playground with your eyes closed. Friends call, “I’m by the slide, and I started this call at three o’clock and ten seconds.” Each call gives you a known place and a start time.\n\n**Where the picture breaks:** Your friends stand still. Satellites move, so the phone needs their places **when the messages left**, not their places later.\n\nSatellites are also high above you. And you cannot hear radio waves with your ears. Your phone needs equipment that catches them.\n\n**Why it has to be so:** A distance without a known starting place leaves you stuck. “Ten steps away” is not enough. “Ten steps from the slide” gives you a useful clue. Sending the clues for everyone to hear also avoids answering each phone separately.\n\n**Check:** Does the phone need to ask each GPS satellite where it is? *Answer:* No. It can listen to the information already being sent.\n\n### 6. The phone uses another satellite clue to work out its clock mistake.\n\nRemember rung 4: the sending clock and the receiving clock must agree.\n\nThe satellite clocks are very accurate. The phone’s clock may be a little ahead or behind them.\n\nThat sounds harmless. But radio is so fast that a tiny clock mistake matters.\n\nSplit one second into a thousand equal pieces. In one piece, radio travels about **300 kilometres** through empty space. That is about as far as a long car trip to another city. The number is rounded. [NASA gives the speed behind this estimate.](https://science.nasa.gov/learn/basics-of-space-flight/chapter6-1/)\n\nIf the phone’s clock is ahead by that tiny amount, it thinks every message travelled longer than it did. The distances it first works out are about 300 kilometres too long.\n\nHere’s the useful part: the phone uses the same clock for all those measurements.\n\n*First-step picture: consider measurements taken together. The phone’s clock mistake adds the same extra amount to each distance. Other mistakes, such as a message bouncing off a building, need not be the same.*\n\nThe phone can try different answers to two questions together:\n\n- “Where might I be?”\n- “How far ahead or behind is my clock?”\n\nIt looks for answers that make the distance clues fit together.\n\nIt needs another useful satellite clue because it has another thing to work out: its clock mistake.\n\n*The fuller picture: our playground circles were flat. In space, all the places a fixed distance from one satellite make the **skin of a ball**, not its filled inside.*\n\nThe phone must work out three parts of its place: two along Earth and one for height. It must also work out its clock mistake. For this calculation, it normally needs at least **four suitably placed satellites**. It uses their clues together; one satellite isn’t assigned only to the clock. [ESA explains why four are needed.](https://www.esa.int/Applications/Satellite_navigation/About_satellite_navigation2)\n\nReal measurements have small mistakes. So the phone usually finds the place and clock correction that fit best, rather than making every distance meet perfectly.\n\n**Picture it:** You wear a watch that is 5 minutes ahead. Every reading has the same extra 5 minutes. Learning that one mistake lets you correct all its readings.\n\n**Where the picture breaks:** The phone’s timing mistake is much smaller. It also cannot find the mistake merely by reading a satellite’s clock: that clock’s message took time to arrive. It works out the place and clock mistake together from several clues.\n\n**Why it has to be so:** A late-arriving message could mean a longer journey. Or the phone’s clock could be ahead. Several suitably placed satellites give different distance clues but share the same phone-clock mistake. That lets the phone work out both.\n\n**Check:** For measurements taken together, does the phone’s clock mistake add different amounts to the distances? *Answer:* No. That clock mistake adds the same amount to each.\n\n### 7. The map uses two numbers to place your dot.\n\nAfter rung 6, the phone has an estimate of where you are.\n\nBut an answer written as numbers isn’t yet a picture.\n\nFor the map, the phone uses two numbers. One says how far north or south you are—toward the top or bottom of an ordinary world map. The other says how far east or west you are—across that map.\n\nGrown-ups call these **latitude** and **longitude**.\n\nThe map app understands these numbers. It finds the place they name and draws your dot there.\n\nThe phone can also estimate height. A flat map usually doesn’t need that number to place the dot.\n\n**Picture it:** A muffin tray in the kitchen. “Row 2, cup 3” names one cup. Anyone holding the same tray can find it without someone pointing.\n\n**Where the picture breaks:** A muffin tray has a few separate cups. Earth is round, and the place numbers can change by tiny amounts. They can name places between your footsteps.\n\nAlso, your dot shows an estimate. In apps such as Google Maps, a pale circle shows how uncertain that estimate is. A bigger circle means less certainty. It is not a fence guaranteeing you are inside it. [Google explains the blue dot and circle.](https://support.google.com/maps/answer/2839911?hl=en)\n\n**Why it has to be so:** The phone and the map need a shared way to name a place. The two numbers do that job, much like a row and cup number on a tray.\n\n**Check:** In our muffin-tray picture, which two numbers name a cup? *Answer:* Its row number and its cup number.\n\n## Back to the question\n\nSatellites send radio messages with time and place clues. Your phone uses their travel times to work out distances, while working out its own clock mistake too. Several satellite clues let it estimate its place. The map uses that place’s latitude and longitude to draw your dot.\n\n## Words you earned\n\n- **Steady:** keeping the same speed.\n- **Radio waves:** invisible travelling waves that can carry messages.\n- **Satellite:** something travelling around Earth or another world; here, a machine sending place and time clues.\n- **GPS:** one group of satellites, with supporting machines on Earth, used to find places and time.\n- **Latitude and longitude:** two numbers naming a place on Earth: north or south, and east or west.\n- **Estimate:** the best answer you can find from clues that may have small mistakes.\n\n## Where to go next\n\n- How do Wi-Fi and phone towers help your phone find you indoors?\n- Satellites are falling too—so how do they keep missing the ground?\n- How do you draw a flat map of a round Earth?\n\n## What the checker changed\n\n- **“Three distances always give one place” → “Three exact distances can give one place when the known spots are suitably arranged.”** The original missed a condition. I also marked circles as a flat picture.\n- **“Time tells distance” → “Time tells distance when the speed is known.”** I made equal steps and a straight path explicit, removed the variable blink comparison, and replaced “counting tells you nothing” with the precise limitation.\n- **“Radio spreads in every direction; delays happen near the ground” → “Messages cover a wide area; air and reflected paths can delay them.”** The original overstated the direction and narrowed the sources of delay.\n- **“Written on Monday” → “Posted on Monday.”** Writing time does not establish sending time. The clock-agreement condition now appears before the calculation and check question.\n- **“Each satellite always knows exactly where it is” → “Its messages let the phone work out its sending place, with ground support and small errors.”** The original taught perfect knowledge.\n- **“Your phone only listens” → “For this satellite part, your phone listens.”** This keeps the correct one-way GPS explanation without implying the whole phone never sends messages.\n- **“All distances are equally wrong and meet at exactly one answer” → “The shared clock mistake contributes equally to measurements taken together; real clues give a best fit.”** Other errors differ, and perfect agreement is not guaranteed.\n- **“Distances make balls; three satellites for place, one for clock” → “Distances make ball skins; four suitably placed satellites solve place and clock together.”** This corrects the geometry and avoids assigning separate jobs to individual satellites.\n- **“The phone’s answer is a pair; the circle says you’re inside; a pair is the shortest way” → “The map uses a pair, height is separate, and the circle expresses uncertainty.”** This removes unsupported guarantees and the unsupported “shortest” claim.\n- **“Satellites don’t fall” → “They fall while missing the ground.”** The next question now starts from a true idea.",
+  "rungs": [
+   {
+    "n": 3,
+    "title": "If a message moves at a known, steady speed, its travel time tells you how far it came.",
+    "body": [
+     "Picture a friend who always walks at the same pace. One equal-sized step for every count, never faster and never slower. That is what **steady** means.",
+     "If your friend walks straight to you in 10 counts, they started 10 steps away. If it takes 50 counts, they started 50 steps away. Count the time and you know the distance.",
+     "Your phone uses invisible messages, like those a car radio catches on a trip. They travel on **radio waves**.",
+     "Radio waves move at a steady speed through empty space. That speed is very, very fast. Still, very fast is not the same as instant. A message takes some time to reach your phone. That tiny travel time is the clue. [NASA explains radio-wave speed.](https://science.nasa.gov/learn/basics-of-space-flight/chapter6-1/)",
+     "*This is a measured fact we are borrowing. You can test the walking idea in a playground. Testing radio’s speed needs special equipment.*",
+     "*First-step picture: we are treating the message’s journey as straight and steady. The fuller story: Earth’s air can delay it, and buildings can bounce it along a longer path. These effects need corrections and can leave mistakes.* [GPS.gov describes these sources of error.](https://www.gps.gov/gps-accuracy)"
+    ],
+    "picture": "Your friend walks straight to you, one equal-sized step per count. You count 20, so they started 20 steps away.",
+    "breaks": "Radio is far faster than any walker. Its travel times are too short for you to count. Its messages also spread across a wide area, so many phones can catch the same message.",
+    "why": "You need to know the pace. Ten counts could mean ten steps for one walker, or twenty for a faster one. A known, steady pace lets you turn time into distance.",
+    "check": "Your friend takes one equal-sized step per count and reaches you after 8 counts. How many steps did they travel?",
+    "answer": "8 steps."
+   },
+   {
+    "n": 4,
+    "title": "The message must tell the phone when it left.",
+    "body": [
+     "There’s a problem with rung 3. To count how long a journey took, you need its start time.",
+     "The phone can record when a message arrives. But that alone doesn’t say when the message left.",
+     "So the message carries information telling the phone its sending time. The phone compares that with its own arrival time. The gap between them gives the travel time—**if the two clocks agree**.",
+     "For example, from 10 o’clock to 11 o’clock is a gap of one hour. The phone does the same kind of counting with tiny pieces of a second.",
+     "We’ll fix the clock problem in rung 6.",
+     "Postcards also travel at changing speeds. Their travel time doesn’t tell you their distance."
+    ],
+    "picture": "A postcard says, “Posted on Monday.” It lands on your doormat on Thursday of the same week. You can count a gap of about three days.",
+    "breaks": "“Written on Monday” would not tell you when it was posted. It might have sat on a kitchen table until Wednesday. Even “Posted on Monday” gives only a rough start time. The phone needs something much more precise.",
+    "why": "Seeing the end of a journey isn’t enough to time it. You need the start too. Otherwise, you don’t know how much time passed.",
+    "check": "Two clocks agree. A message says “sent at 10 o’clock” and arrives a tiny bit later. What is that tiny gap?",
+    "answer": "How long the message took to travel."
+   },
+   {
+    "n": 5,
+    "title": "Machines high above Earth send the place and time clues.",
+    "body": [
+     "Now put rungs 2 and 4 together.",
+     "From rung 2, you need known spots. From rung 4, you need messages with sending times.",
+     "The known spots are machines travelling around Earth, far above any plane. Machines travelling around Earth are called **satellites**. The ones used here send messages for finding places.",
+     "One group is called **GPS**. Its satellites are about 20,000 kilometres above Earth. That is an estimate, and a very long trip upward. [GPS.gov describes their height.](https://www.gps.gov/space-segment)",
+     "Each GPS satellite carries very accurate clocks. Its messages give the phone time information and enough information to work out where the satellite was when the message left. [ESA explains what the messages carry.](https://www.esa.int/Applications/Satellite_navigation/How_satellite_navigation_works)",
+     "Think of each message as saying:",
+     "> “Here is how to work out where I was, and when this message left.”",
+     "*First-step picture: the satellite isn’t finding its place perfectly by itself. Machines on the ground track its journey and send updated information for it to pass along. There are still small errors.* [GPS.gov explains this ground support.](https://www.gps.gov/control-segment)",
+     "For this satellite part, your phone **listens**. It doesn’t need to send a question back to the GPS satellites. Many phones can use the same messages at once. [GPS.gov describes these one-way messages.](https://www.gps.gov/gps)",
+     "Satellites are also high above you. And you cannot hear radio waves with your ears. Your phone needs equipment that catches them."
+    ],
+    "picture": "You stand in the playground with your eyes closed. Friends call, “I’m by the slide, and I started this call at three o’clock and ten seconds.” Each call gives you a known place and a start time.",
+    "breaks": "Your friends stand still. Satellites move, so the phone needs their places **when the messages left**, not their places later.",
+    "why": "A distance without a known starting place leaves you stuck. “Ten steps away” is not enough. “Ten steps from the slide” gives you a useful clue. Sending the clues for everyone to hear also avoids answering each phone separately.",
+    "check": "Does the phone need to ask each GPS satellite where it is?",
+    "answer": "No. It can listen to the information already being sent."
+   },
+   {
+    "n": 6,
+    "title": "The phone uses another satellite clue to work out its clock mistake.",
+    "body": [
+     "Remember rung 4: the sending clock and the receiving clock must agree.",
+     "The satellite clocks are very accurate. The phone’s clock may be a little ahead or behind them.",
+     "That sounds harmless. But radio is so fast that a tiny clock mistake matters.",
+     "Split one second into a thousand equal pieces. In one piece, radio travels about **300 kilometres** through empty space. That is about as far as a long car trip to another city. The number is rounded. [NASA gives the speed behind this estimate.](https://science.nasa.gov/learn/basics-of-space-flight/chapter6-1/)",
+     "If the phone’s clock is ahead by that tiny amount, it thinks every message travelled longer than it did. The distances it first works out are about 300 kilometres too long.",
+     "Here’s the useful part: the phone uses the same clock for all those measurements.",
+     "*First-step picture: consider measurements taken together. The phone’s clock mistake adds the same extra amount to each distance. Other mistakes, such as a message bouncing off a building, need not be the same.*",
+     "The phone can try different answers to two questions together:",
+     "- “Where might I be?”",
+     "- “How far ahead or behind is my clock?”",
+     "It looks for answers that make the distance clues fit together.",
+     "It needs another useful satellite clue because it has another thing to work out: its clock mistake.",
+     "*The fuller picture: our playground circles were flat. In space, all the places a fixed distance from one satellite make the **skin of a ball**, not its filled inside.*",
+     "The phone must work out three parts of its place: two along Earth and one for height. It must also work out its clock mistake. For this calculation, it normally needs at least **four suitably placed satellites**. It uses their clues together; one satellite isn’t assigned only to the clock. [ESA explains why four are needed.](https://www.esa.int/Applications/Satellite_navigation/About_satellite_navigation2)",
+     "Real measurements have small mistakes. So the phone usually finds the place and clock correction that fit best, rather than making every distance meet perfectly."
+    ],
+    "picture": "You wear a watch that is 5 minutes ahead. Every reading has the same extra 5 minutes. Learning that one mistake lets you correct all its readings.",
+    "breaks": "The phone’s timing mistake is much smaller. It also cannot find the mistake merely by reading a satellite’s clock: that clock’s message took time to arrive. It works out the place and clock mistake together from several clues.",
+    "why": "A late-arriving message could mean a longer journey. Or the phone’s clock could be ahead. Several suitably placed satellites give different distance clues but share the same phone-clock mistake. That lets the phone work out both.",
+    "check": "For measurements taken together, does the phone’s clock mistake add different amounts to the distances?",
+    "answer": "No. That clock mistake adds the same amount to each."
+   },
+   {
+    "n": 7,
+    "title": "The map uses two numbers to place your dot.",
+    "body": [
+     "After rung 6, the phone has an estimate of where you are.",
+     "But an answer written as numbers isn’t yet a picture.",
+     "For the map, the phone uses two numbers. One says how far north or south you are—toward the top or bottom of an ordinary world map. The other says how far east or west you are—across that map.",
+     "Grown-ups call these **latitude** and **longitude**.",
+     "The map app understands these numbers. It finds the place they name and draws your dot there.",
+     "The phone can also estimate height. A flat map usually doesn’t need that number to place the dot.",
+     "Also, your dot shows an estimate. In apps such as Google Maps, a pale circle shows how uncertain that estimate is. A bigger circle means less certainty. It is not a fence guaranteeing you are inside it. [Google explains the blue dot and circle.](https://support.google.com/maps/answer/2839911?hl=en)"
+    ],
+    "picture": "A muffin tray in the kitchen. “Row 2, cup 3” names one cup. Anyone holding the same tray can find it without someone pointing.",
+    "breaks": "A muffin tray has a few separate cups. Earth is round, and the place numbers can change by tiny amounts. They can name places between your footsteps.",
+    "why": "The phone and the map need a shared way to name a place. The two numbers do that job, much like a row and cup number on a tray.",
+    "check": "In our muffin-tray picture, which two numbers name a cup?",
+    "answer": "Its row number and its cup number."
+   }
+  ],
+  "short": "Machines high above the Earth send invisible messages that help your phone work out how far away they are. Your phone combines several of these clues, allows for its slightly wrong clock, and gives the map a best guess of where to draw your dot.",
+  "back": "Satellites send radio messages with time and place clues. Your phone uses their travel times to work out distances, while working out its own clock mistake too. Several satellite clues let it estimate its place. The map uses that place’s latitude and longitude to draw your dot.",
+  "changes": [
+   "**“Three distances always give one place” → “Three exact distances can give one place when the known spots are suitably arranged.”** The original missed a condition. I also marked circles as a flat picture.",
+   "**“Time tells distance” → “Time tells distance when the speed is known.”** I made equal steps and a straight path explicit, removed the variable blink comparison, and replaced “counting tells you nothing” with the precise limitation.",
+   "**“Radio spreads in every direction; delays happen near the ground” → “Messages cover a wide area; air and reflected paths can delay them.”** The original overstated the direction and narrowed the sources of delay.",
+   "**“Written on Monday” → “Posted on Monday.”** Writing time does not establish sending time. The clock-agreement condition now appears before the calculation and check question.",
+   "**“Each satellite always knows exactly where it is” → “Its messages let the phone work out its sending place, with ground support and small errors.”** The original taught perfect knowledge.",
+   "**“Your phone only listens” → “For this satellite part, your phone listens.”** This keeps the correct one-way GPS explanation without implying the whole phone never sends messages.",
+   "**“All distances are equally wrong and meet at exactly one answer” → “The shared clock mistake contributes equally to measurements taken together; real clues give a best fit.”** Other errors differ, and perfect agreement is not guaranteed.",
+   "**“Distances make balls; three satellites for place, one for clock” → “Distances make ball skins; four suitably placed satellites solve place and clock together.”** This corrects the geometry and avoids assigning separate jobs to individual satellites.",
+   "**“The phone’s answer is a pair; the circle says you’re inside; a pair is the shortest way” → “The map uses a pair, height is separate, and the circle expresses uncertainty.”** This removes unsupported guarantees and the unsupported “shortest” claim.",
+   "**“Satellites don’t fall” → “They fall while missing the ground.”** The next question now starts from a true idea."
+  ],
+  "searches": 3,
+  "asked": {
+   "agent": "teacher",
+   "question": "Please send the complete lesson verbatim, including all sections. I must check the full lesson, not the summary."
+  },
+  "note": {
+   "title": "What the learner can now explain",
+   "body": "The question was: how does my phone know where I am on a map? The learner can now explain how timed satellite radio messages give distances, how several messages help estimate both place and clock error, and how the map turns the estimated place into a dot."
+  }
+ }
+}

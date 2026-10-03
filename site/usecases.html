@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LoomWatch — Use cases</title>
+  <meta name="description" content="Real jobs for a team of the AI apps you already have: learn anything from first principles, and a daily tech digest checked against trusted sources. Each one is a LoomWatch team file you can run, shown from a real run. Each one is a LoomWatch team file you can run.">
+  <meta name="theme-color" content="#08080A">
+  <meta property="og:title" content="LoomWatch — Use cases">
+  <meta property="og:description" content="Two real jobs for a team of your AI apps, each a team file you can run, each shown from a real run.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://loomwatch.github.io/usecases.html">
+  <meta property="og:image" content="https://loomwatch.github.io/assets/readme/home-dark.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://loomwatch.github.io/usecases.html">
+  <link rel="icon" href="favicon.ico" sizes="32x32">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="preload" href="assets/fonts/instrument-serif-2.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="assets/fonts/fonts.css">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="usecases.css">
+  <script>
+    // The theme is restored before the first paint, so nothing flashes. Same key as the main page.
+    try {
+      const t = localStorage.getItem('loomwatch-site-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
+    } catch {}
+    document.documentElement.classList.add('js')
+  </script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 102 44"><g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10 24 34 42 10 60 34 78 10 96 34" opacity=".36"/><path d="M6 34 24 10 42 34 60 10 78 34 96 10"/></g></symbol>
+</svg>
+
+<header class="top">
+  <div class="top-row">
+    <a class="brand" href="./" aria-label="LoomWatch, home"><svg aria-hidden="true"><use href="#mark"/></svg>LoomWatch</a>
+    <nav class="top-nav" aria-label="Sections">
+      <a href="./#threads">The run</a>
+      <a href="usecases.html" aria-current="page">Use cases</a>
+      <a href="./#tomorrow">Tomorrow</a>
+      <a href="./#why">Why a loom</a>
+      <a href="./#start">Start</a>
+    </nav>
+    <div class="top-actions">
+      <a class="btn" href="./#start">Get LoomWatch</a>
+      <button class="iconbtn" type="button" id="theme" aria-label="Switch to the light theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="progress" aria-hidden="true"><i></i></div>
+</header>
+
+<main id="main">
+
+<section class="uc-hero" aria-labelledby="uc-h">
+  <div class="wrap">
+    <span class="micro eyebrow">Use cases</span>
+    <h1 id="uc-h">Real jobs for a team of your AI apps. <em>Each one is a file you can run.</em></h1>
+    <p class="uc-lede">Two teams, two real runs. See the team that does each job, what LoomWatch does to make it work, and the team file to start from. The first is told word for word from its run; the second ran on its own schedule, and its numbers are its own.</p>
+  </div>
+</section>
+
+<section class="uc-cases" aria-label="Use cases">
+  <div class="wrap uc-grid">
+    <div class="uc-tabs" role="tablist" aria-label="Use cases">
+      <button role="tab" id="tab-learn" aria-controls="learn" aria-selected="true" data-case="learn"><b>01</b><span><span class="t">Learn from first principles</span><span class="m">A tutor that starts from what you know</span></span><i class="real">Real run</i></button>
+      <button role="tab" id="tab-digest" aria-controls="digest" aria-selected="false" tabindex="-1" data-case="digest"><b>02</b><span><span class="t">A daily tech digest</span><span class="m">Two trusted sources, or it's out</span></span><i class="real">Daily at 9:00</i></button>
+    </div>
+
+    <div class="uc-panels">
+
+      <!-- ============ 01 · Learn from first principles (a real run) ============ -->
+      <article class="uc-panel" id="learn" role="tabpanel" aria-labelledby="tab-learn" tabindex="0">
+        <header class="uc-head">
+          <span class="ch-n"><b>01</b> A real run</span>
+          <h2>Learn anything from first principles.</h2>
+          <p class="ch-body">Ask about anything. Mapper digs it down to what you already know, and you say where to start. Teacher builds it back up one idea at a time. Then Checker, on another company's app, makes every step true. All three read the same skill: <a class="link-inline" href="#skill">explain like I'm 5</a>.</p>
+          <p class="uc-chain" aria-label="The team, in order"><span class="chip">Mapper <small>Claude</small></span><span class="to">→</span><span class="chip dashed">You</span><span class="to">→</span><span class="chip">Teacher <small>Claude</small></span><span class="to">→</span><span class="chip">Checker <small>Codex</small></span></p>
+        </header>
+
+        <div class="win uc-run" id="run">
+          <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Learn from first principles</b><span class="mono" id="run-prompt">a recorded run</span></span><span class="badge" data-state="done" id="run-badge">Recorded</span></div>
+          <div class="win-body">
+            <div class="steps" role="radiogroup" aria-label="Show the run at" id="steps"></div>
+            <div class="run-view" id="run-view">
+              <div class="ladder-col">
+                <p class="ladder-q" id="ladder-q"></p>
+                <ol class="ladder" id="ladder" aria-label="The ladder, from what you know up to the question"></ol>
+                <div class="bedrock" id="bedrock"></div>
+              </div>
+              <div class="run-side" id="run-side" aria-live="polite"></div>
+            </div>
+            <noscript><p class="uc-note">The recorded run needs JavaScript to step through. The whole lesson is in the team's files below.</p></noscript>
+          </div>
+        </div>
+        <p class="uc-note" id="run-note"></p>
+
+        <details class="uc-lesson" id="lesson">
+          <summary><span>Read the whole lesson, as the team handed it back</span></summary>
+          <div class="md" id="lesson-body"></div>
+        </details>
+
+        <section class="uc-get" id="skill" aria-labelledby="get-h">
+          <h3 id="get-h">Run it on your own question</h3>
+          <ol class="get-steps">
+            <li><b>Add the skill.</b> Put <a href="usecases/skills/explain-like-im-5/SKILL.md" download>SKILL.md</a> in <code>~/.claude/skills/explain-like-im-5/</code>. LoomWatch lists it in the Library and hands it to any app, not only Claude.</li>
+            <li><b>Add the team.</b> Put <a href="usecases/learn-from-first-principles.yaml" download>the team file</a> and <a href="usecases/learn-from-first-principles.brief/learner.md" download>learner.md</a> (in a folder named <code>learn-from-first-principles.brief</code>) in your teams folder.</li>
+            <li><b>Say who's learning.</b> Edit <code>learner.md</code>: start from five years old, or from what you already know. Then ask it anything.</li>
+          </ol>
+          <div class="files">
+            <details class="file" data-src="usecases/skills/explain-like-im-5/SKILL.md"><summary><span class="fn">explain-like-im-5 / SKILL.md</span><span class="fm">the skill all three agents read</span></summary><div class="file-body"></div></details>
+            <details class="file" data-src="usecases/learn-from-first-principles.yaml"><summary><span class="fn">learn-from-first-principles.yaml</span><span class="fm">the team file</span></summary><div class="file-body"></div></details>
+          </div>
+        </section>
+      </article>
+
+      <!-- ============ 02 · A daily tech digest (a real scheduled run) ============ -->
+      <article class="uc-panel" id="digest" role="tabpanel" aria-labelledby="tab-digest" tabindex="0" hidden>
+        <header class="uc-head">
+          <span class="ch-n"><b>02</b> A real run, every morning</span>
+          <h2>A daily tech digest, checked against sources you trust.</h2>
+          <p class="ch-body">Every morning at 9:00, one agent gathers the last day's stories from the sources you listed. A second reads each story at its sources and keeps only what they stand behind, and a third writes it up. Nothing waits for you: the digest is done before you open it.</p>
+          <p class="uc-chain" aria-label="The team, in order"><span class="chip outline">Every day 09:00</span><span class="to">→</span><span class="chip">Gatherer <small>Codex</small></span><span class="to">→</span><span class="chip">Reader <small>Claude</small></span><span class="to">→</span><span class="chip">Writer <small>Claude</small></span><span class="uc-shared">all three read <b>sources.md</b></span></p>
+        </header>
+        <div class="uc-body">
+          <dl class="fine">
+            <div><dt>Your sources, in a file</dt><dd>The trusted list and the rule for keeping a story sit in the team's Brief, a Markdown file every agent reads. Edit it, and tomorrow's run follows it.</dd></div>
+            <div><dt>Two sources, or it's out</dt><dd>A story stays only if its own primary source says it, or two independent newsrooms report it. Reader opens every source, not just the headline.</dd></div>
+            <div><dt>It runs on its own</dt><dd>No stop for you. In a scheduled run anything not switched on is declined, so only web search is on, and only for Gatherer and Reader.</dd></div>
+            <div><dt>Two companies at one desk</dt><dd>Codex gathers, Claude reads and writes, so one model never decides alone what's true.</dd></div>
+            <div><dt>Teach it once</dt><dd>Write "fewer funding stories" in the Notebook and keep it. Every later digest reads it.</dd></div>
+          </dl>
+          <div class="uc-io">
+            <div class="io-ask"><span class="micro">The request it runs</span><p>Today's tech news digest for <span class="ph">{{weekday}}</span> <span class="ph">{{date}}</span>: what happened in the last 24 hours, confirmed by the trusted sources in the Brief.</p></div>
+            <div class="io-out">
+              <span class="micro">Its first real run, unattended</span>
+              <ol class="funnel" aria-label="What happened to the stories in its first real run">
+                <li><b>12</b><span>stories gathered from the list</span></li>
+                <li><b>7</b><span>kept by Reader under the rule</span></li>
+                <li class="kept"><b>6</b><span>in the digest, in 4 min 58 s</span></li>
+              </ol>
+              <p class="io-foot io-real">Gatherer tried to run <code>curl</code> twice. LoomWatch declined both: commands are off, and nobody was there to ask. It carried on with web search.</p>
+              <span class="micro io-sub">What comes back <i>example</i></span>
+              <div class="digest">
+                <h4>AI</h4>
+                <p><b>A lab ships a smaller model that runs on a laptop.</b> The company's release notes give the sizes; two newsrooms confirm the benchmark claims. <span class="src">release notes</span> <span class="src">newsroom</span> <span class="src">newsroom</span></p>
+                <h4>Security</h4>
+                <p><b>A widely used library patches a remote-code flaw.</b> The maintainers' advisory names the affected versions. <span class="src">advisory</span> <span class="src">newsroom</span></p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="files">
+          <details class="file" data-src="usecases/daily-tech-digest.yaml"><summary><span class="fn">daily-tech-digest.yaml</span><span class="fm">the team file</span></summary><div class="file-body"></div></details>
+          <details class="file" data-src="usecases/daily-tech-digest.brief/sources.md"><summary><span class="fn">daily-tech-digest.brief / sources.md</span><span class="fm">the trusted sources and the rule, in its Brief</span></summary><div class="file-body"></div></details>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ================= What each use case leans on ================= -->
+<section class="band uc-cover" id="coverage" aria-labelledby="cover-h">
+  <div class="wrap">
+    <div class="band-head">
+      <span class="ch-n"><b>∴</b> Coverage</span>
+      <h2 id="cover-h">What each team leans on.</h2>
+      <p class="ch-body">Each mark is a line in one of these team files, not a promise. Pick a column to open that use case.</p>
+    </div>
+    <div class="cover-wrap">
+      <table class="cover" id="cover">
+        <thead>
+          <tr><th scope="col">What LoomWatch does</th><th scope="col"><button type="button" data-case="learn">Learn</button></th><th scope="col"><button type="button" data-case="digest">Digest</button></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="close uc-close" aria-label="Get LoomWatch">
+  <div class="wrap">
+    <p class="stanza-end">Your job isn't here? <em>Describe it, and Ask LoomWatch proposes the team.</em></p>
+    <a class="btn btn-primary btn-lg" href="./#start">Get LoomWatch</a>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-row">
+    <a class="brand" href="./"><svg aria-hidden="true"><use href="#mark"/></svg>LoomWatch</a>
+    <nav aria-label="Project">
+      <a href="./">The run</a>
+      <a href="usecases.html" aria-current="page">Use cases</a>
+      <a href="https://github.com/tnghia903/loomwatch">Repository</a>
+      <a href="https://github.com/tnghia903/loomwatch/blob/main/docs/TEAM_CONFIG.md">Team files</a>
+      <a href="https://agentclientprotocol.com">Agent Client Protocol</a>
+    </nav>
+    <p class="foot-line">Woven with Rust, React and ACP. Watch every thread.</p>
+  </div>
+</footer>
+
+<script src="usecases.js" defer></script>
+</body>
+</html>
