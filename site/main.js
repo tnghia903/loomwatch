@@ -681,24 +681,38 @@
     const rect = card.getBoundingClientRect()
     let ghost = null
     let over = null
+    let frame = 0
+    let at = start
+    // At most one move and one hit test per frame, however often the pointer reports.
+    const follow = () => {
+      frame = 0
+      ghost.style.transform = `translate(${at.x - (start.x - rect.left)}px, ${at.y - (start.y - rect.top)}px) rotate(-2.5deg)`
+      const target = document.elementFromPoint(at.x, at.y)?.closest('.g-agent')
+      if (target !== over) { over?.classList.remove('over'); over = target; over?.classList.add('over') }
+    }
     const move = (e) => {
+      at = { x: e.clientX, y: e.clientY }
       if (!ghost) {
-        if (Math.hypot(e.clientX - start.x, e.clientY - start.y) < 6) return
+        if (Math.hypot(at.x - start.x, at.y - start.y) < 6) return
         ghost = card.cloneNode(true)
         ghost.classList.add('g-ghost')
         ghost.style.width = `${rect.width}px`
+        // Placed under the pointer before it is shown, so it never appears anywhere else first.
+        follow()
         document.body.append(ghost)
         giveBox.classList.add('dragging')
+        return
       }
-      ghost.style.transform = `translate(${e.clientX - (start.x - rect.left)}px, ${e.clientY - (start.y - rect.top)}px) rotate(-2.5deg)`
-      const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('.g-agent')
-      if (target !== over) { over?.classList.remove('over'); over = target; over?.classList.add('over') }
+      if (!frame) frame = window.requestAnimationFrame(follow)
     }
     const stop = (e) => {
       card.removeEventListener('pointermove', move)
       card.removeEventListener('pointerup', stop)
       card.removeEventListener('pointercancel', stop)
+      window.cancelAnimationFrame(frame)
       if (!ghost) return
+      // The drop lands where the pointer let go, even if the last move had not been drawn yet.
+      if (e.type === 'pointerup') { at = { x: e.clientX, y: e.clientY }; follow() }
       ghost.remove()
       giveBox.classList.remove('dragging')
       over?.classList.remove('over')
