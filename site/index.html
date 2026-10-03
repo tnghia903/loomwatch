@@ -313,13 +313,12 @@ I can't see the other app's work.
         <span class="sched"><span class="chip outline">Every day at 10:00</span><span class="to">→</span><span class="chip">Collector</span><span class="to">→</span><span class="chip">Editor</span><span class="to">→</span><span class="chip dashed">You</span><span class="to">→</span><span class="chip">Writer</span><span class="to">→</span><span class="chip outline">Notion</span></span>
       </div>
       <div class="press">
-        <div class="pile" id="pile" aria-hidden="true"></div>
+        <div class="pile-col">
+          <div class="pile" id="pile" tabindex="0" role="group" aria-roledescription="pile of issues" aria-label="The team's issues"></div>
+          <p class="pile-hint" aria-hidden="true">Drag the page left to turn back a day, right to come forward.</p>
+        </div>
         <div class="press-side">
           <div class="day-story" id="day-story" aria-live="polite"></div>
-          <div class="press-scrub">
-            <input type="range" id="issue-scrub" min="1" max="14" value="14" step="1" aria-label="Issue number, from the first morning to today">
-            <div class="press-ends" aria-hidden="true"><span>No. 1</span><span>No. 14 · today</span></div>
-          </div>
           <div class="press-acts"><button class="btn" type="button" id="issue-play">Read the first two weeks</button></div>
           <p class="press-count" id="issue-count"></p>
         </div>
