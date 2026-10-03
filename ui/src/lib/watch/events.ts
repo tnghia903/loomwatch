@@ -206,6 +206,10 @@ export interface ProjectedAgent {
   promptSections: PromptSection[] | null
   /** Snapshot of this run’s required skills, absent for older captures. */
   requiredSkills?: RequiredSkillReceipt[]
+  /** The MCP servers LoomWatch connected to this agent, by name, from its `prompt_sections`
+      record (ADR 0029). The Team Bus is not listed: every agent has it. Absent when the record
+      lists no tools. */
+  connectedServers?: string[]
   /**
    * What the agent said it could not follow, in its own words.
    *
@@ -244,6 +248,13 @@ export interface RequiredSkillReceipt {
 
 /** How one skill reached one agent (`backend::skill_routing::SkillRoute`). */
 export type SkillRoute = 'native' | 'inline' | 'blocked'
+
+/** The servers in a `prompt_sections` record's `tools`, which carries names and never values. */
+function connectedServers(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const servers = value.flatMap((tool) => (object(tool) && typeof tool.server === 'string' ? [tool.server] : []))
+  return servers.length ? [...new Set(servers)] : undefined
+}
 
 function skillReceipts(value: unknown, state: RequiredSkillReceipt['state'], eventId: string): RequiredSkillReceipt[] | undefined {
   if (!Array.isArray(value)) return undefined
@@ -718,6 +729,8 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         if (sections) agent.promptSections ??= sections
         if (object(event.raw) && event.raw.source === 'loomwatch') {
           if (p.phase === 'prompt_sections' && agent.requiredSkills === undefined) agent.requiredSkills = skillReceipts(p.requiredSkills, 'prepared', event.id)
+          const servers = p.phase === 'prompt_sections' && agent.connectedServers === undefined ? connectedServers(p.tools) : undefined
+          if (servers) agent.connectedServers = servers
           // The agent's own stream shows it opening the file LoomWatch delivered. This is the
           // only skill state that is evidence of use rather than of delivery (CONTRACT §12), so
           // it is read from the daemon's recorded `skill_opened` and never inferred from a title.

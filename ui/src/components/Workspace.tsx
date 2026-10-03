@@ -9,6 +9,7 @@ import type { CapabilityInventory, DetectedCapability } from '../lib/library/cli
 import type { CapabilityRef } from '../lib/team-file/types'
 import type { TeamSource } from './library/ComponentPalette'
 import { PALETTE_WIDTH, clampPaletteWidth } from '../lib/library/paletteWidth'
+import { connectedServersByAgent } from '../lib/library/observed'
 import { isTerminalRun, runScheduleNow, scheduleForPath, useSchedules } from '../lib/runs/client'
 import { ownerLabelFor } from '../lib/runs/graph'
 import { appLabelForAgent, harnessIdForAgent, modelOptionsForAgent } from '../lib/models'
@@ -323,6 +324,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const waiting = record?.status === 'running' ? record.waitingOn ?? null : null
   const projection = session.projection
   const runView = activeRunId !== null
+  const observedConnected = useMemo(() => connectedServersByAgent(projection.agents), [projection.agents])
   const routine = useMemo(() => scheduleForPath(schedules.entries, doc.path), [schedules.entries, doc.path])
   // The registry knows the canonical responder for its own runs; history falls back to the document.
   const responderId = record?.responder ?? responderFromDoc
@@ -2223,7 +2225,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
 
         {(!runView && !runSetup || runPresentation === 'trace') && (
           // One add panel on both canvases (ADR 0041); a run adds what it used, at the top.
-          <ComponentPalette harnesses={harnesses} harnessSearchPath={harnessSearchPath} knownHarnessIds={knownHarnessIds} harnessesLoading={harnessesLoading} harnessesError={harnessesError} onRetry={onRetryHarnesses} capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={() => { onRetryCapabilities(); onRetryHarnesses() }} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} agentNames={nodeNames} teamSources={teamSources} onRevealSource={revealSource} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} onRevealEvidence={(id) => {
+          <ComponentPalette harnesses={harnesses} harnessSearchPath={harnessSearchPath} knownHarnessIds={knownHarnessIds} harnessesLoading={harnessesLoading} harnessesError={harnessesError} onRetry={onRetryHarnesses} capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={() => { onRetryCapabilities(); onRetryHarnesses() }} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} observedConnected={observedConnected} agentNames={nodeNames} teamSources={teamSources} onRevealSource={revealSource} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} onRevealEvidence={(id) => {
             // Folded is the default, so "reveal" means: fan the agent that owns this card, then
             // frame it. Framing the agent rather than the card is deliberate — the evidence node
             // does not exist yet on this render.

@@ -181,6 +181,31 @@ fn wired_tool_servers(
         .collect()
 }
 
+/// The environment variable `codex-acp` reads its Codex config from, once, at startup.
+const CODEX_CONFIG: &str = "CODEX_CONFIG";
+
+/// The `CODEX_CONFIG` a run agent's Codex is started with (ADR 0047), or `None` for a session
+/// with no policy (Ask, model discovery) and for every other app. The counterpart of
+/// [`AcpProcess::session_params`]'s `_meta` for Claude Code: `codex-acp` takes no per-session
+/// config, so this goes on the process. It is merged into the config the team file sets, or else
+/// the daemon's own, which the child would otherwise inherit.
+fn withheld_app_config(spec: &ProcessSpec) -> Result<Option<String>> {
+    if spec.permissions.is_none()
+        || crate::workspace::Harness::of_spawn(&spec.cmd, &spec.args)
+            != crate::workspace::Harness::Codex
+    {
+        return Ok(None);
+    }
+    let current = spec
+        .env
+        .get(CODEX_CONFIG)
+        .cloned()
+        .or_else(|| std::env::var(CODEX_CONFIG).ok());
+    crate::permissions::PermissionPolicy::codex_config(current.as_deref())
+        .map(Some)
+        .context("cannot start Codex without its plugins and apps")
+}
+
 /// Owns one ACP child and both sides of its line-delimited JSON-RPC stream.
 pub struct AcpProcess {
     child: Child,
@@ -237,6 +262,9 @@ impl AcpProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        if let Some(config) = withheld_app_config(spec)? {
+            command.env(CODEX_CONFIG, config);
+        }
         let mut child = command.spawn()?;
         let stdin = child
             .stdin
@@ -3601,6 +3629,91 @@ mod tests {
             .run_session("ask", "", "hello", &archive, Duration::from_secs(2))
             .await
             .expect("a session with no policy keeps every tool");
+    }
+
+    /// ADR 0047: a Codex run agent is started without its plugins and apps — the `ChatGPT` app's
+    /// `cua_repl` came in as a plugin and drove the browser without asking — through the
+    /// `CODEX_CONFIG` `codex-acp` reads at startup, merged into the one the team file sets. A
+    /// session with no policy and a run agent on another app get the team file's config as it was.
+    /// Each fake app exits 9, failing its session, unless its environment holds exactly that.
+    ///
+    /// `$0` names the app the way `npx`'s arguments do. The scripts mention `CODEX_CONFIG`, so the
+    /// Claude Code one relies on `Harness::of_spawn` testing `claude` before `codex`.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_codex_run_agent_starts_without_its_plugins_and_apps(pool: PgPool) {
+        let teams = r#"{"model_provider":"gateway"}"#;
+        let withheld =
+            crate::permissions::PermissionPolicy::codex_config(Some(teams)).expect("config");
+        assert!(withheld.contains(r#""plugins":false"#) && withheld.contains(r#""apps":false"#));
+        let script = |session: &str, expected: &str| {
+            format!(
+                r#"
+            set -eu
+            [ "${{CODEX_CONFIG-}}" = '{expected}' ] || exit 9
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"{session}"}}}}'
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
+        "#
+            )
+        };
+        let cwd = std::env::current_dir().expect("cwd");
+        let archive = EventArchive::from_pool(pool);
+        let policy = || {
+            Some(crate::permissions::PermissionPolicy::new(
+                crate::config::AgentAllow::default(),
+                &cwd,
+                [],
+                [],
+            ))
+        };
+        let run = |app: &str, script: String, permissions| ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script, app.into()],
+            env: BTreeMap::from([("CODEX_CONFIG".to_owned(), teams.to_owned())]),
+            cwd: cwd.clone(),
+            tools: Vec::new(),
+            permissions,
+            asker: None,
+        };
+
+        for (label, spec) in [
+            (
+                "a Codex run agent starts without its plugins and apps",
+                run("codex-acp", script("withheld", &withheld), policy()),
+            ),
+            (
+                "a Codex session with no policy keeps its config as it was",
+                run("codex-acp", script("ask", teams), None),
+            ),
+            (
+                "a run agent on another app keeps its config as it was",
+                run("claude-agent-acp", script("claude", teams), policy()),
+            ),
+        ] {
+            AcpProcess::spawn(&spec)
+                .expect("spawn")
+                .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
+                .await
+                .expect(label);
+        }
+
+        let broken = run("codex-acp", script("broken", teams), policy());
+        let broken = ProcessSpec {
+            env: BTreeMap::from([("CODEX_CONFIG".to_owned(), "not json".to_owned())]),
+            ..broken
+        };
+        let refused = AcpProcess::spawn(&broken)
+            .err()
+            .expect("a Codex config that is not an object is refused before Codex starts");
+        assert!(
+            format!("{refused:#}").contains("CODEX_CONFIG"),
+            "{refused:#}"
+        );
     }
 
     /// ADR 0040: what the switches do not allow is put to the run's operator while the app waits,

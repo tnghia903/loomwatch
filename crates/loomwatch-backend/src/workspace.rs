@@ -65,9 +65,16 @@ pub enum Harness {
 impl Harness {
     #[must_use]
     pub fn of(agent: &AgentConfig) -> Self {
-        let haystack = std::iter::once(&agent.spawn.cmd)
-            .chain(agent.spawn.args.iter())
-            .map(|part| part.to_lowercase())
+        Self::of_spawn(&agent.spawn.cmd, &agent.spawn.args)
+    }
+
+    /// [`Self::of`] for a spawn that is already a command and its arguments, such as a
+    /// [`crate::acp::ProcessSpec`].
+    #[must_use]
+    pub fn of_spawn(cmd: &str, args: &[String]) -> Self {
+        let haystack = std::iter::once(cmd)
+            .chain(args.iter().map(String::as_str))
+            .map(str::to_lowercase)
             .collect::<Vec<_>>()
             .join(" ");
         // Order matters: the longer, more specific names are tested first so `openclaw` is never

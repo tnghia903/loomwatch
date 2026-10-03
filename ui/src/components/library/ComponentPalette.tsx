@@ -45,6 +45,8 @@ export interface LibraryProps {
   onCollapsedChange?: (collapsed: boolean) => void
   /** The run on screen's recorded evidence; empty in Build. */
   observedEvidence?: readonly Evidence[]
+  /** The servers LoomWatch connected to each agent in that run (`connectedServersByAgent`). */
+  observedConnected?: ReadonlyMap<string, readonly string[]>
   onRevealEvidence?: (id: string) => void
   /** Agent ids to the names on their cards, for "Used in this run". */
   agentNames?: ReadonlyMap<string, string>
@@ -147,7 +149,7 @@ function usedRefusal(row: UsedInRun, name: (id: string) => string): string | nul
  * second "Library" that the trace drew with other groups, other rows and other words for the
  * same skills and tools.
  */
-export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarnessIds = [], harnessesLoading, harnessesError, onRetry, capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], onRevealEvidence, agentNames, teamSources = [], onRevealSource, width, onResize }: LibraryProps) {
+export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarnessIds = [], harnessesLoading, harnessesError, onRetry, capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], observedConnected, onRevealEvidence, agentNames, teamSources = [], onRevealSource, width, onResize }: LibraryProps) {
   // On a phone the panel would take half the screen, so it starts closed and overlays the canvas
   // when opened; adding something closes it again so the new card is in view.
   const narrow = () => typeof window !== 'undefined' && window.innerWidth < 768
@@ -160,7 +162,7 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
   const saved = useSavedJobs()
-  const used = useMemo(() => usedInRun(observedEvidence), [observedEvidence])
+  const used = useMemo(() => usedInRun(observedEvidence, observedConnected), [observedEvidence, observedConnected])
   const agentName = (id: string) => agentNames?.get(id) ?? id
   useEffect(() => { onCollapsedChange?.(collapsed) }, [collapsed, onCollapsedChange])
   const expand = () => {

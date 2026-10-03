@@ -217,6 +217,16 @@ ignore that key. A team's answer leaves through its review and its delivery (`de
 these tools still runs, the receipt flags it. See
 [ADR 0044](decisions/0044-withhold-tools-that-reach-past-the-run.md).
 
+Codex runs an MCP tool that declares itself read-only without asking, even in its `read-only` mode.
+Its plugins and the operator's ChatGPT apps bring such tools, among them the ChatGPT app's
+`cua_repl`, which drives the operator's browser and apps. So a Codex run agent is spawned with
+`CODEX_CONFIG` setting `features.plugins` and `features.apps` to `false`, merged into any
+`CODEX_CONFIG` the team file's `spawn.env` sets. That must be a JSON object, or the agent does not
+start. The Team Bus and connected tools still go out on `session/new`, so they stay. MCP servers in
+the operator's own `~/.codex/config.toml` still load. The receipt flags a call, made without asking,
+to any MCP server LoomWatch did not connect to that agent, on any app. See
+[ADR 0047](decisions/0047-start-codex-without-its-plugins-and-apps.md).
+
 Connected skills are required: their complete copied `SKILL.md` instructions are also supplied in
 the agent's opening prompt. Preparation fails if the instructions cannot be read or exceed the
 128 KiB aggregate limit for that agent. The archive records the source, receiving harness, exact

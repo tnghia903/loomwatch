@@ -9,6 +9,8 @@
     `UsedInRun.outward`), `ui/src/lib/story/receipt.ts` (one check line),
     `ui/src/components/library/ComponentPalette.tsx` (the "Used in this run" row).
   - Docs: `docs/TEAM_CONFIG.md`, `README.md`.
+  - Amended by [ADR 0047](0047-start-codex-without-its-plugins-and-apps.md): Codex runs an MCP
+    tool that calls itself read-only without asking, so its plugins and apps are withheld too.
 - **Amends:** [ADR 0037](0037-loomwatch-decides-what-agents-may-do.md). Its promise, that what an agent
   does without asking is what the operator switched on, assumed every outward action reaches the
   policy as a `session/request_permission`. For these tools it does not.
