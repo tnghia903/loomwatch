@@ -213,6 +213,9 @@ pub struct AcpProcess {
     permissions: Option<crate::permissions::PermissionPolicy>,
     /// From [`ProcessSpec::asker`].
     asker: Option<crate::permissions::PermissionAsker>,
+    /// What the app said about each tool call still in flight, so a prompt that names only the
+    /// call can be judged by what it is.
+    tool_calls: OpenToolCalls,
 }
 
 impl AcpProcess {
@@ -267,6 +270,7 @@ impl AcpProcess {
             approved_tool_server: None,
             permissions: spec.permissions.clone(),
             asker: spec.asker.clone(),
+            tool_calls: OpenToolCalls::default(),
         })
     }
 
@@ -1274,7 +1278,10 @@ impl AcpProcess {
                 });
             }
 
+            self.tool_calls.observe(&message);
+
             if message.get("method").is_some() && message.get("id").is_some() {
+                let message = self.tool_calls.complete(message);
                 let mut approved = request_approved(
                     &message,
                     self.approved_tool_server.as_deref(),
@@ -1957,16 +1964,23 @@ async fn record_default_model(recorder: &mut Recorder) -> Result<()> {
 /// Whether a permission prompt is about one of `server`'s MCP tools.
 ///
 /// Apps title an MCP tool call in one of three shapes: Claude Code `mcp__<server>__<tool>`, Gemini
-/// `<tool> (<server> MCP Server)`, and `<server>.<tool>`. Only those exact shapes count, so a file
-/// named after the server, a shell command, or another server whose name merely starts the same
-/// never does.
+/// `<tool> (<server> MCP Server)`, and `<server>.<tool>`. Codex titles it `mcp.<server>.<tool>`
+/// and names both in its `rawInput` (`{server, tool, arguments}`); those count only on a call Codex
+/// marks as an MCP tool call. Only those exact shapes count, so a file named after the server, a
+/// shell command, or another server whose name merely starts the same never does.
+///
+/// Codex's prompt itself names only the call, not its title or input, so the reader loop first
+/// fills it in from the call's earlier updates ([`OpenToolCalls::complete`]).
 pub(crate) fn asks_about_server_tool(request: &Value, server: &str) -> bool {
-    let title = request
-        .pointer("/params/toolCall/title")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
+    let call = request.pointer("/params/toolCall");
+    let text = |pointer: &str| {
+        call.and_then(|call| call.pointer(pointer))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+    };
+    let title = text("/title");
     let server = server.to_ascii_lowercase();
     let tool_name = |name: &str| {
         !name.is_empty()
@@ -1974,11 +1988,96 @@ pub(crate) fn asks_about_server_tool(request: &Value, server: &str) -> bool {
                 .chars()
                 .all(|character| character.is_ascii_alphanumeric() || character == '_')
     };
+    let codex_mcp = [
+        request.pointer("/params/_meta/is_mcp_tool_approval"),
+        call.and_then(|call| call.pointer("/_meta/is_mcp_tool_call")),
+    ]
+    .into_iter()
+    .any(|flag| flag.and_then(Value::as_bool) == Some(true));
     title
         .strip_prefix(&format!("mcp__{server}__"))
         .or_else(|| title.strip_prefix(&format!("{server}.")))
         .or_else(|| title.strip_suffix(&format!(" ({server} mcp server)")))
         .is_some_and(tool_name)
+        || codex_mcp
+            && (title
+                .strip_prefix(&format!("mcp.{server}."))
+                .is_some_and(tool_name)
+                || text("/rawInput/server") == server && tool_name(&text("/rawInput/tool")))
+}
+
+/// The tool calls a session has announced and not yet finished, by `toolCallId`: what a
+/// permission prompt about one of them is judged and described by.
+///
+/// ACP's `session/request_permission` carries a tool call *update*, in which only the id is
+/// required. Codex sends little more (`{toolCallId, kind, status}`): the title and input came
+/// earlier, in the `tool_call` with the same id. Without them the policy cannot tell a Codex prompt
+/// for the Team Bus from a shell command, and the operator would be asked about "An action". A
+/// finished call is forgotten, so this holds only the calls in flight.
+#[derive(Debug, Default)]
+struct OpenToolCalls(HashMap<String, serde_json::Map<String, Value>>);
+
+impl OpenToolCalls {
+    const FIELDS: [&'static str; 5] = ["title", "kind", "rawInput", "locations", "_meta"];
+
+    /// Note what a `tool_call` or `tool_call_update` notification says about its call.
+    fn observe(&mut self, message: &Value) {
+        if message.get("method").and_then(Value::as_str) != Some("session/update") {
+            return;
+        }
+        let Some(update) = message.pointer("/params/update") else {
+            return;
+        };
+        if !matches!(
+            update.get("sessionUpdate").and_then(Value::as_str),
+            Some("tool_call" | "tool_call_update")
+        ) {
+            return;
+        }
+        let Some(id) = update.get("toolCallId").and_then(Value::as_str) else {
+            return;
+        };
+        if matches!(
+            update.get("status").and_then(Value::as_str),
+            Some("completed" | "failed")
+        ) {
+            self.0.remove(id);
+            return;
+        }
+        let known = self.0.entry(id.to_owned()).or_default();
+        for field in Self::FIELDS {
+            if let Some(value) = update.get(field).filter(|value| !value.is_null()) {
+                known.insert(field.to_owned(), value.clone());
+            }
+        }
+    }
+
+    /// `request` with what its tool call leaves out filled in from that call's earlier updates.
+    /// What the prompt does say wins: it is the newest word on the call.
+    fn complete(&self, mut request: Value) -> Value {
+        let Some(call) = request
+            .pointer_mut("/params/toolCall")
+            .and_then(Value::as_object_mut)
+        else {
+            return request;
+        };
+        let Some(known) = call
+            .get("toolCallId")
+            .and_then(Value::as_str)
+            .and_then(|id| self.0.get(id))
+        else {
+            return request;
+        };
+        for (field, value) in known {
+            let missing = call
+                .get(field)
+                .is_none_or(|said| said.is_null() || said.as_str().is_some_and(str::is_empty));
+            if missing {
+                call.insert(field.clone(), value.clone());
+            }
+        }
+        request
+    }
 }
 
 /// The prompt's one-time allow option, when the app offered one.
@@ -4116,5 +4215,145 @@ mod tests {
             message.contains(r#""method":"session/cancel""#),
             "crash marker must show the session/cancel LoomWatch sent: {message}"
         );
+    }
+
+    /// Run 6ebcd025: Fact-checker, on Codex in its read-only mode, was refused its own team's
+    /// `roster`, and Codex reported "user cancelled MCP tool call". Codex's prompt names only the
+    /// call (`{toolCallId, kind: execute, status}`); its title and input came in the `tool_call`
+    /// before it. Filled in from that, the prompt is the Team Bus and needs no switch.
+    #[test]
+    fn a_codex_prompt_is_judged_by_the_tool_call_it_names() {
+        let tool_call = |id: &str, server: &str| {
+            json!({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "s",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": id,
+                    "title": format!("mcp.{server}.roster"),
+                    "kind": "execute",
+                    "status": "in_progress",
+                    "_meta": {"is_mcp_tool_call": true},
+                    "rawInput": {"server": server, "tool": "roster", "arguments": {}}
+                }
+            }})
+        };
+        let prompt = |id: &str| {
+            json!({"jsonrpc": "2.0", "id": 0, "method": "session/request_permission", "params": {
+                "sessionId": "s",
+                "_meta": {"is_mcp_tool_approval": true},
+                "toolCall": {"toolCallId": id, "kind": "execute", "status": "pending"},
+                "options": [
+                    {"optionId": "allow_once", "kind": "allow_once"},
+                    {"optionId": "allow_always", "kind": "allow_always"},
+                    {"optionId": "cancel", "kind": "reject_once"}
+                ]
+            }})
+        };
+        let cwd = std::env::current_dir().expect("cwd");
+        let policy = crate::permissions::PermissionPolicy::for_agent(
+            crate::config::AgentAllow::default(),
+            &cwd,
+            &crate::delivery::Delivery::default(),
+        );
+        let mut calls = OpenToolCalls::default();
+
+        assert!(
+            !policy.approves(&calls.complete(prompt("bus"))),
+            "alone, the prompt reads as a command"
+        );
+        calls.observe(&tool_call("bus", "loomwatch-team-bus"));
+        let filled = calls.complete(prompt("bus"));
+        assert!(policy.approves(&filled));
+        assert_eq!(
+            build_client_response(&filled, None, Some(&policy)).expect("response")["result"]["outcome"]
+                ["optionId"],
+            "allow_once"
+        );
+        assert_eq!(
+            crate::permissions::describe(&filled).0,
+            "mcp.loomwatch-team-bus.roster",
+            "the operator would see what is asked, not \"An action\""
+        );
+        assert_eq!(
+            filled["params"]["toolCall"]["status"], "pending",
+            "what the prompt says wins"
+        );
+
+        calls.observe(&tool_call("elsewhere", "github"));
+        assert!(
+            !policy.approves(&calls.complete(prompt("elsewhere"))),
+            "another server's tool is not the Team Bus"
+        );
+
+        // Either Codex shape alone is enough, but only on a call Codex marks as an MCP tool call.
+        let bus = crate::delivery::RESERVED_SERVER;
+        let shaped = |marked: bool, call: Value| {
+            let meta = if marked {
+                json!({"is_mcp_tool_approval": true})
+            } else {
+                json!({})
+            };
+            json!({"method": "session/request_permission", "params": {"_meta": meta, "toolCall": call}})
+        };
+        let by_title = json!({"toolCallId": "t", "title": "mcp.loomwatch-team-bus.roster"});
+        let by_input = json!({"toolCallId": "i", "rawInput": {"server": "loomwatch-team-bus", "tool": "roster"}});
+        let odd_tool = json!({"toolCallId": "o", "rawInput": {"server": "loomwatch-team-bus", "tool": "roster; ls"}});
+        assert!(asks_about_server_tool(&shaped(true, by_title.clone()), bus));
+        assert!(asks_about_server_tool(&shaped(true, by_input.clone()), bus));
+        assert!(!asks_about_server_tool(&shaped(false, by_title), bus));
+        assert!(!asks_about_server_tool(&shaped(false, by_input), bus));
+        assert!(!asks_about_server_tool(&shaped(true, odd_tool), bus));
+
+        // A finished call is forgotten: a late prompt naming it is judged as sent.
+        calls.observe(&json!({"method": "session/update", "params": {"update": {
+            "sessionUpdate": "tool_call_update", "toolCallId": "bus", "status": "failed"
+        }}}));
+        assert!(!policy.approves(&calls.complete(prompt("bus"))));
+        assert!(calls.0.contains_key("elsewhere") && calls.0.len() == 1);
+    }
+
+    /// The same prompt end to end, in the frames Codex sent in run 6ebcd025. Nothing is switched on
+    /// and nobody can be asked: the fake app exits 9, failing the session, unless the Team Bus
+    /// prompt is allowed once and a bare command it never announced is still refused.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_codex_team_bus_prompt_is_allowed_without_any_switch(pool: PgPool) {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"codex-bus"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"codex-bus","update":{"kind":"execute","_meta":{"is_mcp_tool_call":true},"title":"mcp.loomwatch-team-bus.roster","status":"in_progress","rawInput":{"tool":"roster","server":"loomwatch-team-bus","arguments":{}},"toolCallId":"exec-7261c43e","sessionUpdate":"tool_call"}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":0,"method":"session/request_permission","params":{"_meta":{"is_mcp_tool_approval":true},"options":[{"kind":"allow_once","name":"Allow","optionId":"allow_once"},{"kind":"allow_always","name":"Allow for this session","optionId":"allow_session"},{"kind":"allow_always","name":"Always allow","optionId":"allow_always"},{"kind":"reject_once","name":"Cancel","optionId":"cancel"}],"toolCall":{"kind":"execute","status":"pending","toolCallId":"exec-7261c43e"},"sessionId":"codex-bus"}}'
+            IFS= read -r answer
+            case "$answer" in *'"optionId":"allow_once"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":"shell","method":"session/request_permission","params":{"options":[{"kind":"allow_once","name":"Allow","optionId":"allow_once"},{"kind":"reject_once","name":"Cancel","optionId":"cancel"}],"toolCall":{"kind":"execute","status":"pending","toolCallId":"exec-unannounced"},"sessionId":"codex-bus"}}'
+            IFS= read -r answer
+            case "$answer" in *'"optionId":"cancel"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
+        "#;
+        let cwd = std::env::current_dir().expect("cwd");
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: cwd.clone(),
+            tools: Vec::new(),
+            permissions: Some(crate::permissions::PermissionPolicy::for_agent(
+                crate::config::AgentAllow::default(),
+                &cwd,
+                &crate::delivery::Delivery::default(),
+            )),
+            asker: None,
+        };
+        let archive = EventArchive::from_pool(pool);
+        let mut process = AcpProcess::spawn(&spec).expect("spawn");
+        process
+            .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
+            .await
+            .expect("the Team Bus prompt was allowed and the bare command refused");
     }
 }
