@@ -27,5 +27,6 @@ cp -R "$root"/examples/usecases/*.brief "$out/usecases/"
 # favicon.ico and apple-touch-icon.png are rendered from favicon.svg by site/icons.mjs.
 cp "$root"/site/favicon.svg "$root"/site/favicon.ico "$root"/site/apple-touch-icon.png "$out/"
 cp "$root"/docs/assets/readme/*.png "$out/assets/readme/"
-cp "$root"/docs/design-system/fonts/fonts.css "$root"/docs/design-system/fonts/*.woff2 "$out/assets/fonts/"
+# The fonts' license (SIL OFL) has to travel with every copy of them.
+cp "$root"/docs/design-system/fonts/fonts.css "$root"/docs/design-system/fonts/*.woff2 "$root"/docs/design-system/fonts/OFL.txt "$out/assets/fonts/"
 echo "Built the landing page in $out"
