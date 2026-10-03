@@ -463,9 +463,19 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .sched { display: inline-flex; align-items: center; flex-wrap: wrap; row-gap: 6px; }
 .sched .chip { height: 24px; font-size: 12px; }
 .press { margin-top: 26px; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 40px; align-items: center; }
-.pile { position: relative; height: 470px; }
+.pile { position: relative; height: 470px; perspective: 1800px; touch-action: pan-y; outline: none; }
+.pile:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; border-radius: 10px; }
 .issue { position: absolute; top: 16px; left: 58%; width: 320px; height: 430px; margin-left: -160px; overflow: hidden; padding: 20px 22px; border-radius: 4px; background: var(--slip); color: var(--slip-ink); box-shadow: 0 1px 0 rgb(255 255 255 / .5) inset, 0 14px 30px rgb(0 0 0 / .45); cursor: pointer; transition: transform .45s var(--ease), opacity .45s var(--ease), filter .45s var(--ease); }
-.issue.front { cursor: default; }
+.issue.front { cursor: grab; }
+.pile.turning, .pile.turning .issue { cursor: grabbing; }
+/* While a page turns it darkens toward its hinge, and past halfway you see its blank back. */
+.issue::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgb(23 21 15 / .3), rgb(23 21 15 / 0) 70%); opacity: var(--turn, 0); }
+.issue.verso { background: #E2DDD1; }
+:root[data-theme="light"] .issue.verso { background: #F0ECE3; }
+.issue.verso > *, .issue.verso::before { visibility: hidden; }
+/* A folded corner on the front page says it can be turned. */
+.issue.ear::before { content: ''; position: absolute; right: 0; bottom: 0; width: 20px; height: 20px; border-top-left-radius: 3px; background: linear-gradient(315deg, var(--panel-solid) 50%, #D9D3C6 50%); box-shadow: -1px -1px 3px rgb(0 0 0 / .12); }
+.pile-hint { margin: 2px 0 0; text-align: center; font-size: 12.5px; color: var(--ink-3); }
 :root[data-theme="light"] .issue { border: 1px solid rgb(23 21 15 / .1); box-shadow: 0 1px 2px rgb(23 21 15 / .06), 0 12px 28px rgb(23 21 15 / .12); }
 .issue .mast { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding-bottom: 6px; border-bottom: 2px solid var(--slip-ink); }
 .issue .mast b { font: 400 25px/1 var(--serif); }
@@ -481,7 +491,7 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .issue .writing li { display: block; height: 30px; border-radius: 3px; background: linear-gradient(90deg, rgb(23 21 15 / .07), rgb(23 21 15 / .15), rgb(23 21 15 / .07)); background-size: 200% 100%; animation: shimmer 1.6s linear infinite; }
 .issue .writing li::before { content: none; }
 @keyframes shimmer { to { background-position: -200% 0; } }
-.issue .colophon { position: absolute; left: 22px; right: 22px; bottom: 14px; display: flex; justify-content: space-between; gap: 10px; padding: 6px 0 0; border-top: 1px solid rgb(23 21 15 / .15); font: 400 9.5px var(--mono); color: var(--slip-ink-2); }
+.issue .colophon { position: absolute; left: 22px; right: 30px; bottom: 14px; display: flex; justify-content: space-between; gap: 10px; padding: 6px 0 0; border-top: 1px solid rgb(23 21 15 / .15); font: 400 9.5px var(--mono); color: var(--slip-ink-2); }
 .issue .stamp { position: absolute; right: 16px; bottom: 54px; transform: rotate(-9deg); padding: 4px 8px; border: 2px solid currentColor; border-radius: 6px; background: rgb(241 238 230 / .7); font: 700 10.5px/1.25 var(--mono); letter-spacing: .04em; text-transform: uppercase; text-align: center; opacity: .85; }
 .stamp.ok, .stamp.wait { color: #8A6A16; }
 .stamp.wait { border-style: dashed; }
@@ -491,10 +501,7 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .issue .note small { display: block; margin-bottom: 4px; font: 600 9px var(--sans); letter-spacing: .08em; text-transform: uppercase; opacity: .7; }
 .press-side .day-story { margin-top: 0; padding-top: 0; border-top: 0; grid-template-columns: minmax(0, 1fr); min-height: 0; }
 .press-side .day-story p { font-size: 25px; line-height: 1.32; min-height: 4.2em; }
-.press-scrub { margin-top: 22px; }
-.press-scrub input { width: 100%; accent-color: var(--accent-fill); }
-.press-ends { display: flex; justify-content: space-between; margin-top: 6px; font: 400 11px var(--mono); color: var(--ink-3); }
-.press-acts { margin-top: 16px; }
+.press-acts { margin-top: 18px; }
 .press-count { margin: 12px 0 0; font-size: 12.5px; color: var(--ink-3); }
 .day-story { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--hairline); display: grid; grid-template-columns: 170px 1fr; gap: 6px 24px; align-items: baseline; min-height: 96px; }
 .day-story .when { font: 400 12px/1.5 var(--mono); color: var(--ink-3); }
@@ -710,7 +717,7 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
   .issue { width: 286px; margin-left: -143px; height: 420px; padding: 18px; }
   .issue ol { max-height: 278px; }
   .issue li { font-size: 11.5px; }
-  .issue .colophon { left: 18px; right: 18px; justify-content: flex-end; }
+  .issue .colophon { left: 18px; right: 28px; justify-content: flex-end; }
   .issue .colophon span:first-child { display: none; }
   .press-side .day-story p { font-size: 21px; min-height: 0; }
   .needs div { grid-template-columns: minmax(0, 1fr); gap: 2px; }

@@ -1360,13 +1360,14 @@
   ]
   const pile = $('#pile')
   const dayStory = $('#day-story')
-  const issueScrub = $('#issue-scrub')
   const today = ISSUES.length - 1
   const readyAt = (issue) => issue.when.split(/→|·/).at(-1).trim()
   // Waiting by 10:10: the first run's answer, unless that run stopped.
   const onTime = (issue) => !issue.live && !issue.stopped && issue.when.split('·')[0].split('→')[1].trim() <= '10:10'
   let issueAt = today
   let playing = 0
+  let turning = false
+  let justTurned = false
 
   function issueCard(issue, i) {
     const items = issue.live
@@ -1375,7 +1376,7 @@
         const [head, sub] = HEADLINES[(k + i * 3) % HEADLINES.length]
         return el('li', {}, el('span', {}, head, issue.items <= 5 ? el('small', { text: sub }) : null))
       })
-    return el('article', { class: 'issue', onclick: () => { stopPlaying(); selectIssue(i) } },
+    return el('article', { class: 'issue', 'aria-hidden': 'true', onclick: () => { if (justTurned || i === issueAt || turning) return; stopPlaying(); selectIssue(i) } },
       el('div', { class: 'mast' }, el('b', { text: 'AI and tech, today' }), el('span', { text: `No. ${i + 1}` })),
       el('div', { class: 'sub' }, el('span', { text: `${issue.items} items` }), el('span', { text: issue.live ? 'writing…' : `ready ${readyAt(issue)}` })),
       el('ol', { class: issue.live ? 'writing' : '' }, items),
@@ -1383,17 +1384,23 @@
       issue.note ? el('div', { class: 'note' }, el('small', { text: issue.note[0] }), issue.note[1]) : null,
       el('div', { class: 'colophon' }, el('span', { text: 'Collector · Editor · You · Writer' }), el('span', { text: issue.foot || 'to Notion' })))
   }
-  // The pile: the chosen issue in front, older ones fanned behind it, newer ones lifted away.
+  // The pile: the chosen issue in front, older ones fanned behind it. Newer ones have been turned
+  // over to the left, out of sight, so turning one back lays it on the pile again.
   function layPile() {
     const narrow = window.matchMedia('(max-width: 900px)').matches
-    const [dx, dy, turn, behind] = narrow ? [9, 3, 1.1, 5] : [17, 3, 1.5, 7]
+    const [dx, dy, turn, behind] = narrow ? [6, 3, 1, 4] : [17, 3, 1.5, 7]
     ;[...pile.children].forEach((card, i) => {
       const d = issueAt - i
       const k = Math.min(Math.abs(d), behind)
       card.classList.toggle('front', d === 0)
+      card.classList.toggle('ear', d === 0 && issueAt > 0)
+      card.classList.remove('verso')
+      card.style.removeProperty('--turn')
       card.style.zIndex = String(100 - Math.abs(d))
-      card.style.transform = d === 0 ? 'none' : d > 0 ? `translate(${-k * dx}px, ${k * dy}px) rotate(${-k * turn}deg) scale(${1 - k * 0.02})` : `translate(${120 + k * 50}px, ${-k * 6}px) rotate(${k * 4}deg)`
-      card.style.opacity = d === 0 ? '1' : d > 0 && d <= behind ? String(1 - k * 0.09) : '0'
+      card.style.transformOrigin = d < 0 ? 'left center' : ''
+      card.style.transform = d === 0 ? 'none' : d > 0 ? `translate(${-k * dx}px, ${k * dy}px) rotate(${-k * turn}deg) scale(${1 - k * 0.02})` : 'rotateY(-180deg)'
+      // Opaque, so a page that is turned away shows the issue under it, not the ones under that.
+      card.style.opacity = d >= 0 && d <= behind ? '1' : '0'
       card.style.filter = d > 0 ? `brightness(${1 - k * 0.07})` : 'none'
     })
   }
@@ -1404,8 +1411,7 @@
     const story = el('p')
     story.innerHTML = issue.story
     dayStory.replaceChildren(el('span', { class: 'when' }, el('b', { text: issue.tag || 'On time' }), `No. ${issueAt + 1} · ${issue.when}`), story)
-    issueScrub.value = String(issueAt + 1)
-    issueScrub.setAttribute('aria-valuetext', `Issue ${issueAt + 1}${issueAt === today ? ', today' : ''}${issue.tag ? `: ${issue.tag}` : ''}`)
+    pile.setAttribute('aria-label', `Issue ${issueAt + 1} of ${ISSUES.length}${issue.tag ? `: ${issue.tag}` : ''}. Left and right arrow keys turn the page.`)
     const done = ISSUES.slice(0, issueAt + 1).filter((x) => !x.live)
     const n = done.filter(onTime).length
     $('#issue-count').textContent = done.length ? `${n} of ${done.length} ${done.length === 1 ? 'issue was' : 'issues were'} waiting by 10:10.` : ''
@@ -1419,12 +1425,86 @@
     playing = 0
     $('#issue-play').textContent = 'Read the first two weeks'
   }
-  issueScrub.addEventListener('input', () => { stopPlaying(); selectIssue(Number(issueScrub.value) - 1) })
+
+  // Turning a page: it swings on its left edge. Past halfway its blank back faces you, and it fades
+  // as it lies down, revealing the issue beneath. Turning forward brings the newer page back over.
+  function setTurn(card, deg) {
+    card.style.transformOrigin = 'left center'
+    card.style.transform = `rotateY(${deg}deg)`
+    card.style.opacity = String(Math.min(1, Math.max(0, (deg + 165) / 65)))
+    card.style.setProperty('--turn', Math.abs(Math.sin((deg * Math.PI) / 180)).toFixed(3))
+    card.classList.toggle('verso', deg < -90)
+  }
+  function startTurn(dir) {
+    if (turning || (dir === 'back' ? issueAt === 0 : issueAt === today)) return null
+    const card = pile.children[dir === 'back' ? issueAt : issueAt + 1]
+    card.style.transition = 'none'
+    card.style.zIndex = '200'
+    card.style.filter = 'none'
+    setTurn(card, dir === 'back' ? 0 : -180)
+    return card
+  }
+  function endTurn(card, dir, complete) {
+    turning = true
+    card.getBoundingClientRect() // the pose it was let go in is painted before it moves on
+    card.style.transition = ''
+    setTurn(card, (dir === 'back') === complete ? -180 : 0)
+    window.setTimeout(() => {
+      turning = false
+      if (complete) issueAt += dir === 'back' ? -1 : 1
+      renderPaper()
+    }, reduced ? 0 : 460)
+  }
+  function turnPage(dir) {
+    const card = startTurn(dir)
+    if (card) endTurn(card, dir, true)
+  }
+  // A mouse, pen or finger drags the front page; a mostly vertical move is left to page scrolling.
+  let drag = null
+  pile.addEventListener('pointerdown', (event) => {
+    const front = pile.children[issueAt]
+    if (event.button !== 0 || turning || !front?.contains(event.target)) return
+    drag = { x: event.clientX, y: event.clientY, id: event.pointerId, w: front.offsetWidth, dir: null, card: null, p: 0 }
+    try { pile.setPointerCapture(event.pointerId) } catch { /* the moves still arrive while over the pile */ }
+  })
+  pile.addEventListener('pointermove', (event) => {
+    if (!drag || event.pointerId !== drag.id) return
+    const dx = event.clientX - drag.x
+    if (!drag.dir) {
+      if (Math.abs(dx) < 6) return
+      if (Math.abs(event.clientY - drag.y) > Math.abs(dx)) { drag = null; return }
+      drag.dir = dx < 0 ? 'back' : 'forward'
+      drag.card = startTurn(drag.dir)
+      if (drag.card) { stopPlaying(); pile.classList.add('turning') }
+    }
+    if (!drag.card) return
+    drag.p = Math.min(1, Math.max(0, (drag.dir === 'back' ? -dx : dx) / (drag.w * 0.9)))
+    setTurn(drag.card, drag.dir === 'back' ? -180 * drag.p : -180 + 180 * drag.p)
+  })
+  function releasePage(event) {
+    if (!drag || event.pointerId !== drag.id) return
+    const { card, dir, p } = drag
+    drag = null
+    pile.classList.remove('turning')
+    if (!card) return
+    justTurned = true
+    window.setTimeout(() => { justTurned = false }, 0)
+    endTurn(card, dir, event.type === 'pointerup' && p > 0.3)
+  }
+  pile.addEventListener('pointerup', releasePage)
+  pile.addEventListener('pointercancel', releasePage)
+  pile.addEventListener('keydown', (event) => {
+    const dir = { ArrowLeft: 'back', ArrowRight: 'forward' }[event.key]
+    if (!dir) return
+    event.preventDefault()
+    stopPlaying()
+    turnPage(dir)
+  })
   $('#issue-play').addEventListener('click', () => {
     if (playing) { stopPlaying(); return }
     selectIssue(0)
     $('#issue-play').textContent = 'Stop'
-    playing = window.setInterval(() => { if (issueAt >= today) stopPlaying(); else selectIssue(issueAt + 1) }, reduced ? 2200 : 1400)
+    playing = window.setInterval(() => { if (issueAt >= today) stopPlaying(); else turnPage('forward') }, reduced ? 2200 : 1500)
   })
   window.addEventListener('resize', layPile)
 
