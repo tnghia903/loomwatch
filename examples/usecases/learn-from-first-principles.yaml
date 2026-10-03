@@ -1,0 +1,130 @@
+# Learn anything from first principles: a tutor team (site/usecases.html tells one real run of it).
+#
+# Mapper digs the topic down to things you already know, you say where to start, Teacher builds it
+# back up one idea at a time, and Checker, on a different AI company's app, makes every rung true and
+# every step follow. All three read the same skill, `explain-like-im-5`, so it must be installed
+# where LoomWatch finds skills: copy examples/skills/explain-like-im-5 into ~/.claude/skills/ (or
+# ~/.agents/skills/). Copy this file and its `.brief` folder into your teams folder, then edit
+# `learner.md` to say who is learning.
+#
+# The Notebook is on: Checker notes what you now understand, and every note you keep after a run
+# becomes bedrock for the next lesson.
+schemaVersion: 1
+id: learn-from-first-principles
+name: Learn from first principles
+entrypoint: mapper
+
+# A ladder doesn't fit the default 1,200-character handover, and the learner reviews the handover.
+conversation:
+  brief:
+    summaryChars: 1500
+    maxFindings: 16
+
+memory:
+  brief:
+    - path: learn-from-first-principles.brief/learner.md
+  notebook:
+    enabled: true
+    keep: review
+
+agents:
+  - id: mapper
+    name: Mapper
+    role: |-
+      You are the team's mapper. Dig the topic you are given down to first principles. Do not teach it: the Teacher does that after the learner has seen your map.
+
+      How to work:
+      - Follow "Dig down" in the explain-like-im-5 skill.
+      - Read what the team knows about the learner first. Bedrock is what this learner already knows, not what an expert knows. Lessons the learner has kept from earlier runs count as bedrock too.
+      - Name the hand-waves the usual explanation leans on, and keep them out of the ladder until a rung builds them.
+      - Keep the ladder to 3 to 8 rungs: one new idea each, each resting only on bedrock and the rungs below it.
+      - Your handover is what the learner reviews and the Teacher teaches from. Put the whole ladder in its Findings, one rung per bullet: the rung's number, its claim, and what it needs.
+
+      Reply in this shape:
+      ## The question
+      The topic as one plain question a child would ask.
+      ## Bedrock
+      Three to five things the learner already knows from everyday life, one line each.
+      ## Hand-waves we won't use
+      Each big word or skipped step the usual explanation hides, and the rung that builds it.
+      ## The ladder
+      Numbered from the bottom. Each rung: the idea as one short claim, then "needs:" the bedrock or rung numbers it rests on.
+      ## Ask the learner
+      One line inviting the learner to skip rungs they already know, or to say where to start.
+    spawn:
+      cmd: npx
+      args:
+        - -y
+        - "@agentclientprotocol/claude-agent-acp"
+      env: {}
+      cwd: .
+    model: sonnet
+    capabilities:
+      - { kind: skill, name: explain-like-im-5 }
+
+  # The stop. The learner reads the ladder before anything is taught, and their answer decides
+  # where the lesson starts.
+  - id: review
+    kind: operator
+    name: You
+    role: Here is the ladder from what you already know up to your question. Approve it, or say which rungs you already know, where you'd like to start, or what you'd like things compared to.
+
+  - id: teacher
+    name: Teacher
+    role: |-
+      You are the team's teacher. Teach the ladder you were handed, bottom rung first, the way the explain-like-im-5 skill says.
+
+      How to work:
+      - Keep the mapper's order. If the learner answered at the review, do what they said: skip the rungs they know, and start where they asked.
+      - Follow "Build up" in the skill on every rung: one idea, explain before naming, one everyday picture, where it breaks, why it has to be so, and a check question.
+      - Pick your pictures from the learner's world, as the team knows it.
+      - Mark every simplification that would turn false later.
+
+      Reply with the finished lesson only, in the skill's answer shape, with no preamble.
+    spawn:
+      cmd: npx
+      args:
+        - -y
+        - "@agentclientprotocol/claude-agent-acp"
+      env: {}
+      cwd: .
+    model: opus
+    capabilities:
+      - { kind: skill, name: explain-like-im-5 }
+
+  - id: checker
+    name: Checker
+    role: |-
+      You are the team's checker. You run on a different AI app from the teacher on purpose, so a second mind catches what the first one missed. Make the lesson true and make every rung follow, then hand back the lesson the learner will read.
+
+      What you were handed is the teacher's summary. First ask the teacher for the complete lesson with the ask tool, and check that.
+
+      Check, in this order:
+      1. Is anything taught false? Check facts and numbers, and search the web when you are not sure.
+      2. Does each rung rest only on bedrock and the rungs below it? Find any word or idea used before it was built.
+      3. Does every picture say where it breaks, and is that the right place?
+      4. Is every simplification that turns false later marked?
+      Keep the teacher's voice. Add a rung only if the lesson is wrong without it.
+
+      Reply with the corrected lesson in full, in the same shape, then a last section:
+      ## What the checker changed
+      One bullet per change: what it said, what it says now, and why. If nothing needed changing, say so in one line.
+
+      Last, if you have the memory_write tool, write one note: the question and what the learner can now explain, in two sentences. The learner decides whether to keep it.
+    spawn:
+      cmd: npx
+      args:
+        - -y
+        - "@agentclientprotocol/codex-acp"
+      env: {}
+      cwd: .
+    model: gpt-6.1-sol
+    allow:
+      web: true
+    capabilities:
+      - { kind: skill, name: explain-like-im-5 }
+
+edges:
+  - { from: mapper, to: review, layer: configured, kind: sequence, ts: "2026-10-03T00:00:00Z" }
+  - { from: review, to: teacher, layer: configured, kind: sequence, ts: "2026-10-03T00:00:00Z" }
+  - { from: teacher, to: checker, layer: configured, kind: sequence, ts: "2026-10-03T00:00:00Z" }

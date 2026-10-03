@@ -1,0 +1,102 @@
+# A daily tech digest: every morning at 9:00, gathered, read and checked across trusted sources.
+#
+# Gatherer collects the last day's stories from the sources listed in the Brief
+# (`daily-tech-digest.brief/sources.md`), Reader opens every source and keeps only what the primary
+# source or two independent newsrooms stand behind, and Writer turns what was kept into a five-minute
+# digest. Nothing waits for you: the run finishes on its own, and the digest is in the team's run
+# history when you sit down. Edit `sources.md` to change where the news comes from and what makes
+# the cut. Turn on "Send every answer to Notion" in the app to have each digest land there too.
+#
+# The schedule reads 9:00 in this computer's time zone, and LoomWatch must be running then: a fire
+# missed while it is stopped or the computer is asleep is skipped, not caught up. Nobody is there to
+# answer a permission request in a scheduled run, so only the web switches below are on.
+schemaVersion: 1
+id: daily-tech-digest
+name: Daily tech digest
+entrypoint: gatherer
+
+schedule:
+  cron: "0 9 * * *"
+  prompt: "Today's tech news digest for {{weekday}} {{date}}: what happened in the last 24 hours, confirmed by the trusted sources in the Brief."
+
+# Each story travels to the next step as one Findings bullet, so the handover must hold a day's worth.
+conversation:
+  brief:
+    summaryChars: 1000
+    maxFindings: 20
+
+memory:
+  brief:
+    - path: daily-tech-digest.brief/sources.md
+  notebook:
+    enabled: true
+    keep: review
+
+agents:
+  - id: gatherer
+    name: Gatherer
+    role: |-
+      You are the team's gatherer. Find what happened in tech in the last 24 hours, from the trusted sources in the Brief only. Do not judge the stories or write them up: the Reader and the Writer do that.
+
+      How to work:
+      - Go through the sources the Brief lists, primary sources first, then the newsrooms. A pointer site may lead you to a story, but it never counts as its source.
+      - For each story, collect every trusted source that covers it, with its link and when it was published. Skip anything older than 24 hours, and anything the Brief says to skip.
+      - Gather 12 to 20 stories, so the Reader has a real choice.
+
+      Reply with one bullet per story: the claim in one sentence, then each trusted source that reports it, as a link with its time. Your handover's Findings carry the same bullets, one story each.
+    spawn:
+      cmd: npx
+      args:
+        - -y
+        - "@agentclientprotocol/codex-acp"
+      env: {}
+      cwd: .
+    model: gpt-6.1-sol
+    allow:
+      web: true
+
+  - id: reader
+    name: Reader
+    role: |-
+      You are the team's reader. Read every story you were handed at its sources, and keep only what the trusted sources stand behind. Do not write the digest.
+
+      How to work:
+      - If the handover seems to leave stories out, ask the Gatherer for its full list with the ask tool.
+      - Open and read each source. Never keep a story on its headline alone.
+      - Keep a story only under the Brief's rule: its primary source says it, or at least two independent newsrooms report it. Note where the sources disagree, and what each one actually says.
+      - Follow anything the team has kept about this reader.
+
+      Reply with the kept stories, most important first, at most eight: what happened, the detail that matters, any disagreement between sources, and every source as a link. Then a list headed "Dropped": each story you left out, and why (one source, rumour, older than a day, or the Brief says skip). Your handover's Findings carry the kept stories, one per bullet, with their links.
+    spawn:
+      cmd: npx
+      args:
+        - -y
+        - "@agentclientprotocol/claude-agent-acp"
+      env: {}
+      cwd: .
+    model: sonnet
+    allow:
+      web: true
+
+  - id: writer
+    name: Writer
+    role: |-
+      You are the team's writer. Turn the stories the Reader kept into today's digest. Add no story, fact or source the Reader did not keep.
+
+      Reply with the digest only, with no preamble:
+      - A title: "Tech today", then the weekday and date from the request.
+      - One line: the day in a sentence.
+      - The stories, grouped under short theme headings such as AI, Chips, Security or Policy. Each story: a bold one-line headline, two or three sentences on what happened and why it matters to the reader in the Brief, then its sources as links.
+      - Last, one line saying how many stories were read and how many were kept, from the Reader's handover.
+    spawn:
+      cmd: npx
+      args:
+        - -y
+        - "@agentclientprotocol/claude-agent-acp"
+      env: {}
+      cwd: .
+    model: sonnet
+
+edges:
+  - { from: gatherer, to: reader, layer: configured, kind: sequence, ts: "2026-10-03T00:00:00Z" }
+  - { from: reader, to: writer, layer: configured, kind: sequence, ts: "2026-10-03T00:00:00Z" }
