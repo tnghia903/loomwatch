@@ -163,6 +163,13 @@ export function buildReceipt(input: ReceiptInput): Receipt {
     const refusals = refusalLines(agent, items, run.status === 'succeeded')
     lines.push(...refusals)
     anyRefused ||= refusals.length > 0
+    // Its app ended the turn at a decline, so the reply was finished on LoomWatch's request to
+    // carry on (ADR 0046). That explains the turn; it is not a finding of its own.
+    if (run.resumedTurns) {
+      const app = input.harnessLabels.get(agent.id) ?? 'Its app'
+      const times = run.resumedTurns > 1 ? ` (${run.resumedTurns} times)` : ''
+      checks.push({ tone: 'warn', text: `${app} ends ${agent.name}’s turn when a request is declined, so LoomWatch asked ${agent.name} to carry on without it${times}`, agentId: agent.id, aside: true })
+    }
 
     for (const skill of run.requiredSkills ?? []) {
       if (skill.state !== 'opened') checks.push({ tone: 'warn', text: `${agent.name} was given the skill “${skill.name}” but the record never shows it opened`, agentId: agent.id })

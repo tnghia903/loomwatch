@@ -27,15 +27,27 @@ function messageId(event: RunEvent): string | null {
   return typeof event.payload.messageId === 'string' ? event.payload.messageId : null
 }
 
+/** LoomWatch's note that an app ended a turn on a declined request and was asked to carry on. */
+function isTurnResumed(event: RunEvent): boolean {
+  return event.kind === 'session_meta' && event.payload.phase === 'turn_resumed' && object(event.raw) && event.raw.source === 'loomwatch'
+}
+
 /** Old run rows include progress in their canonical reply, and ran separate messages together.
  * Match the entire archived turn, then present it by its explicit phases and message boundaries;
  * never replace that reply with a later helper-question answer. */
 export function recordedReplyText(events: readonly RunEvent[], agentId: string | null, savedReply: string): string {
   const newTurn = () => ({ all: '', final: '', classified: false, reply: new ReplyText(), finalReply: new ReplyText() })
   let turn = newTurn()
+  let resuming = false
   for (const event of events) {
     if (event.agentId !== agentId) continue
-    if (event.kind === 'message' && event.payload.role === 'user') {
+    if (isTurnResumed(event)) {
+      // The app ended the turn on a declined request and was asked to carry on (ADR 0046): the
+      // same turn, so the prompt that follows keeps its reply, as the daemon does.
+      resuming = true
+      turn.reply.endMessage(); turn.finalReply.endMessage()
+    } else if (event.kind === 'message' && event.payload.role === 'user') {
+      if (resuming) { resuming = false; continue }
       // A prompt starts the daemon's reply afresh, which also drops a reloaded session's replay.
       turn = newTurn()
     } else if (event.kind === 'message' && event.payload.role === 'agent') {
@@ -181,6 +193,9 @@ export interface ProjectedAgent {
   model: string | null
   /** The harness did not advertise HTTP MCP, so this agent cannot reach the Team Bus. */
   busUnavailable: boolean
+  /** How often its app ended a turn on a declined request and LoomWatch asked it to carry on
+      (ADR 0046). Absent when that never happened. */
+  resumedTurns?: number
   /** What a later pipeline stage was handed by the stages before it, verbatim. Null for the
       lead, which is handed only the operator's own prompt. */
   received: string | null
@@ -639,6 +654,8 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
 
   const replaying = new Set<string>()
   const auxiliaryTurns = new Map<string, string>()
+  /** Agents whose next prompt is LoomWatch's request to carry on, not a new task. */
+  const resuming = new Set<string>()
   for (const event of events) {
     if (event.seq > throughSeq) break
     lastSeq = event.seq
@@ -683,6 +700,14 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         if (p.phase === 'set_config_option_skipped' && typeof p.value === 'string') agent.model = p.value
         if (p.phase === 'awaiting_operator') { agent.status = 'waiting'; agent.task = 'Waiting for you' }
         if (p.phase === 'team_bus_unavailable') agent.busUnavailable = true
+        if (isTurnResumed(event)) {
+          // One turn, cut by the app and carried on: its reply keeps going, and its cost counts.
+          agent.resumedTurns = (agent.resumedTurns ?? 0) + 1
+          agent.turnText.endMessage()
+          if (object(p.usage) && typeof p.usage.totalTokens === 'number') agent.tokens = (agent.tokens ?? 0) + p.usage.totalTokens
+          agent.task = 'Carrying on without what was declined'
+          resuming.add(agent.id)
+        }
         // Memory and prompt structure ride the existing `session_meta` kind as additive
         // subtypes, and both are recorded before the prompt they describe — so by the time the
         // user message below is projected, `agent.promptSections` is already set.
@@ -727,6 +752,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
             evidence.push({ id: event.id, kind: 'source', relation: 'directed', name: 'Your answer', detail: text, agentId: agent.id, seq: event.seq, order: 0, ts: event.ts, status: 'succeeded', capture: 'recorded', offsetMs: Date.parse(event.ts) - startMs, callId: null, toolKind: null, rawInput: null, rawOutput: text, content: text, locations: [], target: null, events: [event] })
             break
           }
+          if (resuming.delete(agent.id)) break
           // The record first, the legacy split only for archives that have none.
           const recordedTask = sectionText(agent.promptSections, 'task')
           const recordedHandover = sectionText(agent.promptSections, 'stage_results')
@@ -792,12 +818,21 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           evidence.push(item)
           agent.task = `Asked permission: ${firstLine(title, 60)}`
         } else if (object(p.outcome)) {
+          const outcome = p.outcome
           const last = [...evidence].reverse().find((item) => item.kind === 'permission' && item.agentId === agent.id && item.status === 'pending')
           if (last) {
-            last.status = p.outcome.outcome === 'selected' ? 'succeeded' : 'rejected'
-            last.rawOutput = p.outcome
+            // LoomWatch declines by selecting the app's own rejection (`reject_once`), so what
+            // was decided is the chosen option's kind, not whether an option was selected.
+            const selected = outcome.outcome === 'selected'
+            const options = object(last.rawInput) && Array.isArray(last.rawInput.options) ? last.rawInput.options : []
+            const chosen: unknown = selected ? options.find((option) => object(option) && option.optionId === outcome.optionId) : undefined
+            const kind = object(chosen) && typeof chosen.kind === 'string' ? chosen.kind : ''
+            const allowed = selected && !kind.startsWith('reject_')
+            last.status = allowed ? 'succeeded' : 'rejected'
+            last.rawOutput = outcome
             last.events.push(event)
-            last.detail = p.outcome.outcome === 'selected' ? `answered ${String(p.outcome.optionId ?? '')}` : `declined (${String(p.outcome.outcome)})`
+            const name = object(chosen) && typeof chosen.name === 'string' ? chosen.name : String(outcome.optionId ?? '')
+            last.detail = allowed ? `answered ${String(outcome.optionId ?? '')}` : `declined (${selected ? name : String(outcome.outcome)})`
           }
         }
         break

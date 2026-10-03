@@ -216,6 +216,9 @@ pub struct AcpProcess {
     /// What the app said about each tool call still in flight, so a prompt that names only the
     /// call can be judged by what it is.
     tool_calls: OpenToolCalls,
+    /// The permission requests declined since the last `session/prompt` was sent: what an app that
+    /// ended its turn on a decline is told when it is asked to carry on (ADR 0046).
+    declined: Vec<Declined>,
 }
 
 impl AcpProcess {
@@ -271,6 +274,7 @@ impl AcpProcess {
             permissions: spec.permissions.clone(),
             asker: spec.asker.clone(),
             tool_calls: OpenToolCalls::default(),
+            declined: Vec::new(),
         })
     }
 
@@ -1126,11 +1130,76 @@ impl AcpProcess {
     /// single-turn run archives it. Split out of `run_session_inner` so a session can take more
     /// than one turn: a pipeline stage that stays alive answers its successor's questions here,
     /// with the context it already built, rather than being respawned cold.
+    ///
+    /// An app that ends the whole turn when `LoomWatch` declines one of its requests is asked, in
+    /// the same session, to carry on without it (ADR 0046), at most [`RESUMES_PER_TURN`] times.
+    /// The archive keeps that as one turn: the cut is a `turn_resumed` note holding the app's own
+    /// `cancelled` response, then `LoomWatch`'s request to carry on, then the one `turn_end`.
     pub(crate) async fn prompt_turn(
         &mut self,
         recorder: &mut Recorder,
         prompt: &str,
     ) -> Result<String> {
+        recorder.reply.clear();
+        recorder.reply_phase_known = false;
+        let mut prompted = self.prompt_round(recorder, prompt).await?;
+        for _ in 0..RESUMES_PER_TURN {
+            if stop_reason(&prompted.result) != "cancelled" || self.declined.is_empty() {
+                break;
+            }
+            let declined = std::mem::take(&mut self.declined);
+            let mut resumed = serde_json::Map::from_iter([
+                ("phase".to_owned(), json!("turn_resumed")),
+                ("stopReason".to_owned(), json!("cancelled")),
+                (
+                    "declined".to_owned(),
+                    declined.iter().map(Declined::archived).collect(),
+                ),
+            ]);
+            if let Some(usage) = prompted.result.get("usage") {
+                resumed.insert("usage".to_owned(), usage.clone());
+            }
+            recorder
+                .append(
+                    EventKind::SessionMeta,
+                    Value::Object(resumed),
+                    Some(json!({
+                        "source": "loomwatch",
+                        "phase": "turn_resumed",
+                        "response": prompted.response,
+                    })),
+                )
+                .await?;
+            recorder.reply.end_message();
+            prompted = self
+                .prompt_round(recorder, &carry_on_request(&declined))
+                .await?;
+        }
+        self.declined.clear();
+        let mut turn_end = serde_json::Map::from_iter([(
+            "stopReason".to_owned(),
+            Value::String(stop_reason(&prompted.result).to_owned()),
+        )]);
+        if let Some(usage) = prompted.result.get("usage") {
+            turn_end.insert("usage".to_owned(), usage.clone());
+        }
+        recorder
+            .append(
+                EventKind::TurnEnd,
+                Value::Object(turn_end),
+                Some(prompted.response),
+            )
+            .await?;
+        // Read from the reply before it is taken. A self-report is the agent's own account, so it
+        // is archived under its own phase and never becomes provenance (CONTRACT §8.2).
+        recorder.note_self_report().await?;
+
+        Ok(recorder.reply.take())
+    }
+
+    /// Send one `session/prompt`, archived as the user message it is, and read until the app
+    /// answers it. Only the first prompt of a session supplies its required skills.
+    async fn prompt_round(&mut self, recorder: &mut Recorder, prompt: &str) -> Result<RpcResult> {
         let session_id = recorder.acp_session_id.clone();
         let prompt_params = json!({
             "sessionId": session_id,
@@ -1148,8 +1217,7 @@ impl AcpProcess {
                 Some(prompt_request.clone()),
             )
             .await?;
-        recorder.reply.clear();
-        recorder.reply_phase_known = false;
+        self.declined.clear();
         self.send(&prompt_request).await?;
         if !recorder.required_skills.is_empty() {
             let skills = std::mem::take(&mut recorder.required_skills);
@@ -1158,34 +1226,9 @@ impl AcpProcess {
                 "method": "session/prompt"
             }), Some(json!({"source": "loomwatch", "phase": "required_skills_supplied"}))).await?;
         }
-        let prompted = self
-            .read_response(prompt_id, "session/prompt", Some(recorder))
+        self.read_response(prompt_id, "session/prompt", Some(recorder))
             .await
-            .context("ACP session/prompt failed")?;
-        let stop_reason = prompted
-            .result
-            .get("stopReason")
-            .and_then(Value::as_str)
-            .unwrap_or("end_turn");
-        let mut turn_end = serde_json::Map::from_iter([(
-            "stopReason".to_owned(),
-            Value::String(stop_reason.to_owned()),
-        )]);
-        if let Some(usage) = prompted.result.get("usage") {
-            turn_end.insert("usage".to_owned(), usage.clone());
-        }
-        recorder
-            .append(
-                EventKind::TurnEnd,
-                Value::Object(turn_end),
-                Some(prompted.response),
-            )
-            .await?;
-        // Read from the reply before it is taken. A self-report is the agent's own account, so it
-        // is archived under its own phase and never becomes provenance (CONTRACT §8.2).
-        recorder.note_self_report().await?;
-
-        Ok(recorder.reply.take())
+            .context("ACP session/prompt failed")
     }
 
     /// Record why a coordinator-requested turn exists. Its text and cost remain evidence, but
@@ -1293,11 +1336,17 @@ impl AcpProcess {
                     self.approved_tool_server.as_deref(),
                     self.permissions.as_ref(),
                 );
-                if !approved
-                    && is_permission_request(&message)
-                    && let Some(asker) = self.asker.clone()
-                {
-                    approved = ask_operator(&asker, &message, recorder.as_deref_mut()).await?;
+                if !approved && is_permission_request(&message) {
+                    let outcome = match self.asker.clone() {
+                        Some(asker) => {
+                            ask_operator(&asker, &message, recorder.as_deref_mut()).await?
+                        }
+                        None => crate::permissions::AskOutcome::NotAsked,
+                    };
+                    approved = outcome.allows();
+                    if !approved {
+                        self.declined.push(Declined::new(&message, outcome));
+                    }
                 }
                 let response = client_response(&message, approved)?;
                 if let Some(recorder) = recorder.as_deref_mut() {
@@ -1839,20 +1888,18 @@ fn is_permission_request(message: &Value) -> bool {
 }
 
 /// Put a request the policy declined to the run's operator and archive that it was asked and how
-/// it was answered, so the record says who decided — the person, or the clock.
+/// it was answered, so the record says who decided — the person, the clock, or nobody: a routine's
+/// run has nobody to ask and declines at once (`not_asked`).
 async fn ask_operator(
     asker: &crate::permissions::PermissionAsker,
     request: &Value,
     mut recorder: Option<&mut Recorder>,
-) -> Result<bool> {
+) -> Result<crate::permissions::AskOutcome> {
     use crate::permissions::AskOutcome;
     let (title, kind, _) = crate::permissions::describe(request);
     let (outcome, request_id) = if asker.allowed_for_run(request) {
         (AskOutcome::AllowedForRun, None)
-    } else {
-        let Some(open) = asker.open(request) else {
-            return Ok(false);
-        };
+    } else if let Some(open) = asker.open(request) {
         let request_id = open.request.id.clone();
         if let Some(recorder) = recorder.as_deref_mut() {
             recorder
@@ -1864,6 +1911,8 @@ async fn ask_operator(
                 .await?;
         }
         (open.wait().await, Some(request_id))
+    } else {
+        (AskOutcome::NotAsked, None)
     };
     if let Some(recorder) = recorder {
         recorder
@@ -1881,7 +1930,95 @@ async fn ask_operator(
             )
             .await?;
     }
-    Ok(outcome.allows())
+    Ok(outcome)
+}
+
+/// How many times one turn is resumed after its app ended it on a declined request. An agent that
+/// keeps asking for what is declined, in an app that ends its turn every time, stops here: its
+/// turn then ends `cancelled`, as the app said.
+const RESUMES_PER_TURN: usize = 3;
+
+/// One permission request `LoomWatch` declined, as the agent is told about it and the archive
+/// records it.
+#[derive(Debug, Clone)]
+struct Declined {
+    title: String,
+    kind: String,
+    detail: Option<String>,
+    outcome: crate::permissions::AskOutcome,
+}
+
+impl Declined {
+    fn new(request: &Value, outcome: crate::permissions::AskOutcome) -> Self {
+        let (title, kind, detail) = crate::permissions::describe(request);
+        Self {
+            title,
+            kind,
+            detail,
+            outcome,
+        }
+    }
+
+    fn archived(&self) -> Value {
+        json!({
+            "title": self.title,
+            "kind": self.kind,
+            "detail": self.detail,
+            "outcome": self.outcome.as_str(),
+        })
+    }
+
+    /// Why it was declined, in the words the agent is told.
+    fn why(&self) -> &'static str {
+        use crate::permissions::{AskOutcome, PermissionDecision};
+        match self.outcome {
+            AskOutcome::Answered(PermissionDecision::Deny) => {
+                "the person running this team said no"
+            }
+            AskOutcome::TimedOut => "nobody answered in time",
+            _ => "nobody can be asked to allow it during this run",
+        }
+    }
+}
+
+/// What an app that ended its turn on a declined request is sent in the same session: what was
+/// declined and why, and that nobody asked it to stop (ADR 0046).
+///
+/// For most requests Codex offers one rejection, "No, and tell Codex what to do differently"
+/// (`cancel`), and ends the turn when it is chosen, waiting for the person at the keyboard to say
+/// what instead. Nobody is at this keyboard, so this is what instead.
+fn carry_on_request(declined: &[Declined]) -> String {
+    let lines = declined
+        .iter()
+        .map(|request| {
+            let detail = request
+                .detail
+                .as_deref()
+                .map(|detail| format!(" ({detail})"))
+                .unwrap_or_default();
+            format!("- {}{detail}: {}.", request.title, request.why())
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (what, it) = if declined.len() == 1 {
+        ("Your request was declined", "it")
+    } else {
+        ("Your requests were declined", "them")
+    };
+    format!(
+        "{what}:\n{lines}\n\nDeclining {it} also ended your turn, but nobody asked you to stop. \
+         Carry on with your task from where you were, without {it}: don't ask for the same thing \
+         again, and use what you are allowed to do instead. Then finish your reply as you would \
+         have."
+    )
+}
+
+/// The `stopReason` of a `session/prompt` result; ACP's `end_turn` when the app gave none.
+fn stop_reason(result: &Value) -> &str {
+    result
+        .get("stopReason")
+        .and_then(Value::as_str)
+        .unwrap_or("end_turn")
 }
 
 /// Build `LoomWatch`'s reply to an agent-initiated client request, once it is decided whether a
@@ -1892,6 +2029,12 @@ async fn ask_operator(
 /// prompt turn was cancelled, which is wrong for an observer merely declining one tool call.
 /// Prefer an advertised `reject_once` option so the agent denies that call and keeps going,
 /// then `reject_always`, falling back to `cancelled` only when the harness offered neither.
+///
+/// Codex can offer two `reject_once` options: `decline` ("No, continue without running it") and
+/// `cancel` ("No, and tell Codex what to do differently"), which ends its turn. So a `reject_once`
+/// other than `cancel` comes first. Gemini's only rejection is also called `cancel` but keeps the
+/// turn going, and Claude Code's is `reject`; each is chosen as the only one offered. When the
+/// chosen one does end the turn, [`AcpProcess::prompt_turn`] asks the agent to carry on.
 ///
 /// An approval selects `allow_once` only, never `allow_always`, which some apps would write into
 /// their own settings and so outlive the switch that granted it — "allow for this run" is kept by
@@ -1916,19 +2059,25 @@ fn client_response(request: &Value, approved: bool) -> Result<Value> {
         }));
     }
     let response = if method == "session/request_permission" {
+        let field = |option: &Value, name: &str| {
+            option
+                .get(name)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
         let rejection = request
             .pointer("/params/options")
             .and_then(Value::as_array)
             .and_then(|options| {
                 options
                     .iter()
-                    .find(|option| {
-                        option.get("kind").and_then(Value::as_str) == Some("reject_once")
-                    })
-                    .or_else(|| {
-                        options.iter().find(|option| {
-                            option.get("kind").and_then(Value::as_str) == Some("reject_always")
-                        })
+                    .filter(|option| field(option, "kind").starts_with("reject_"))
+                    .min_by_key(|option| {
+                        (
+                            field(option, "kind") != "reject_once",
+                            field(option, "optionId") == "cancel",
+                        )
                     })
             })
             .and_then(|option| option.get("optionId").cloned());
@@ -2940,6 +3089,63 @@ mod tests {
         .expect("response");
         assert_eq!(response["result"]["outcome"]["outcome"], "selected");
         assert_eq!(response["result"]["outcome"]["optionId"], "always");
+    }
+
+    /// ADR 0046: Codex's two one-time rejections differ — `cancel` ends its turn, `decline` does
+    /// not — so `decline` is chosen whenever Codex offers it, and `cancel` only when it is all there
+    /// is. Gemini's only rejection is also called `cancel` and is chosen as such.
+    #[test]
+    fn a_rejection_that_keeps_the_turn_going_is_chosen_over_one_that_ends_it() {
+        let declined = |options: Value| {
+            build_client_response(
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 0,
+                    "method": "session/request_permission",
+                    "params": {"options": options}
+                }),
+                None,
+                None,
+            )
+            .expect("response")["result"]["outcome"]["optionId"]
+                .clone()
+        };
+        // codex-acp 2.1.1 `commandDecisionOptions` when Codex lists both, in its own order.
+        assert_eq!(
+            declined(json!([
+                {"optionId": "allow_once", "name": "Yes, proceed", "kind": "allow_once"},
+                {"optionId": "allow_for_session", "name": "Yes, and don't ask again for this command in this session", "kind": "allow_always"},
+                {"optionId": "cancel", "name": "No, and tell Codex what to do differently", "kind": "reject_once"},
+                {"optionId": "decline", "name": "No, continue without running it", "kind": "reject_once"}
+            ])),
+            "decline"
+        );
+        // Run f806a330: Codex's `curl` prompt offered no `decline`.
+        assert_eq!(
+            declined(json!([
+                {"optionId": "allow_once", "name": "Yes, proceed", "kind": "allow_once"},
+                {"optionId": "accept_execpolicy_amendment", "name": "Yes, and don't ask again for commands that start with `curl -sS`", "kind": "allow_always"},
+                {"optionId": "cancel", "name": "No, and tell Codex what to do differently", "kind": "reject_once"}
+            ])),
+            "cancel"
+        );
+        // A one-time `cancel` still beats blocking a host in Codex's settings for good.
+        assert_eq!(
+            declined(json!([
+                {"optionId": "apply_network_policy_amendment:0", "kind": "reject_always"},
+                {"optionId": "cancel", "kind": "reject_once"}
+            ])),
+            "cancel"
+        );
+        // Gemini CLI 0.54: `cancel` returns "was canceled by the user" to the model, turn intact.
+        assert_eq!(
+            declined(json!([
+                {"optionId": "proceed_always", "name": "Allow All Edits", "kind": "allow_always"},
+                {"optionId": "proceed_once", "name": "Allow", "kind": "allow_once"},
+                {"optionId": "cancel", "name": "Reject", "kind": "reject_once"}
+            ])),
+            "cancel"
+        );
     }
 
     /// ADR 0033: an Ask session approves prompts for its own tool server's calls, whichever way
@@ -4515,5 +4721,207 @@ mod tests {
             .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
             .await
             .expect("the Team Bus prompt was allowed and the bare command refused");
+    }
+
+    /// A process for one of the fake apps below: nothing switched on, so every command it asks
+    /// to run is declined.
+    fn declining_process(
+        script: &str,
+        asker: Option<crate::permissions::PermissionAsker>,
+    ) -> AcpProcess {
+        let cwd = std::env::current_dir().expect("cwd");
+        AcpProcess::spawn(&ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: cwd.clone(),
+            tools: Vec::new(),
+            permissions: Some(crate::permissions::PermissionPolicy::new(
+                crate::config::AgentAllow::default(),
+                &cwd,
+                [],
+                [],
+            )),
+            asker,
+        })
+        .expect("spawn")
+    }
+
+    /// ADR 0046, in the frames Codex sent in the scheduled run f806a330: Gatherer, with only the
+    /// web switched on, asks to `curl` a feed. A routine has nobody to ask, so `LoomWatch` picks
+    /// Codex's only rejection, `cancel`, and Codex ends the turn. `LoomWatch` then asks it, in the
+    /// same session, to carry on without it, and the turn finishes with the story list. The fake
+    /// app exits 9, failing the session, unless the second prompt says what was declined and why.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_turn_codex_ended_on_a_decline_is_carried_on_in_the_same_session(pool: PgPool) {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"codex-curl"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"codex-curl","update":{"sessionUpdate":"agent_message_chunk","messageId":"m1","content":{"type":"text","text":"Checking the GitHub changelog feed."},"_meta":{"codex":{"phase":"commentary"}}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":0,"method":"session/request_permission","params":{"options":[{"kind":"allow_once","name":"Yes, proceed","optionId":"allow_once"},{"kind":"allow_always","name":"Yes, and dont ask again for commands that start with curl -sS","optionId":"accept_execpolicy_amendment"},{"kind":"reject_once","name":"No, and tell Codex what to do differently","optionId":"cancel"}],"sessionId":"codex-curl","toolCall":{"kind":"execute","rawInput":{"command":"curl -sS https://github.blog/changelog/feed/"},"status":"pending","title":"Run command","toolCallId":"exec-b8f052d4"}}}'
+            IFS= read -r answer
+            case "$answer" in *'"optionId":"cancel"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"cancelled","usage":{"totalTokens":115060}}}'
+            IFS= read -r request
+            case "$request" in
+              *'"method":"session/prompt"'*'Run command (curl -sS https://github.blog/changelog/feed/): nobody can be asked to allow it during this run.'*'nobody asked you to stop'*) ;;
+              *) exit 9 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"codex-curl","update":{"sessionUpdate":"agent_message_chunk","messageId":"m2","content":{"type":"text","text":"- GitHub: Copilot code review is generally available"},"_meta":{"codex":{"phase":"final_answer"}}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn","usage":{"totalTokens":1200}}}'
+            IFS= read -r request
+            case "$request" in *'"method":"session/close"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
+        "#;
+        // A routine's run, as `POST /api/schedules/run` starts it: nobody is asked.
+        let team = crate::config::TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: gatherer\nagents:\n  - id: gatherer\n    name: Gatherer\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .expect("team");
+        let registry = crate::runs::RunRegistry::default();
+        let record = crate::runs::RunRecord::queued(
+            "daily-tech-digest.yaml".into(),
+            "Today's tech news".into(),
+            &team,
+            crate::runs::RunTrigger::Schedule,
+        )
+        .expect("record");
+        let run_id = record.run_id.clone();
+        registry.insert(record);
+        let archive = EventArchive::from_pool(pool);
+        let asker = crate::permissions::PermissionAsker::new(
+            registry.operator_desk(Some(&archive)),
+            &run_id,
+            "gatherer",
+            "Gatherer",
+        );
+        let outcome = declining_process(script, Some(asker))
+            .run_session(
+                "gatherer",
+                "",
+                "Gather the stories",
+                &archive,
+                Duration::from_secs(2),
+            )
+            .await
+            .expect("the turn was carried on after the decline");
+        assert_eq!(
+            outcome.reply, "- GitHub: Copilot code review is generally available",
+            "the reply is the turn's final answer, written after it was carried on"
+        );
+
+        let events = archive.load_session("codex-curl").await.expect("events");
+        // What this records; the agent's own messages carry a Codex `phase` the schema lacks.
+        assert_events_match_schema(
+            &events
+                .iter()
+                .filter(|event| event.payload["role"] != "agent")
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
+        let answered = events
+            .iter()
+            .find(|event| event.payload["phase"] == "permission_answered")
+            .expect("the record says nobody was asked");
+        assert_eq!(answered.payload["outcome"], "not_asked");
+        assert_eq!(answered.payload["allowed"], false);
+
+        let resumed: Vec<_> = events
+            .iter()
+            .filter(|event| event.payload["phase"] == "turn_resumed")
+            .collect();
+        assert_eq!(resumed.len(), 1);
+        assert_eq!(resumed[0].payload["stopReason"], "cancelled");
+        assert_eq!(resumed[0].payload["usage"]["totalTokens"], 115_060);
+        assert_eq!(
+            resumed[0].payload["declined"],
+            json!([{
+                "title": "Run command",
+                "kind": "execute",
+                "detail": "curl -sS https://github.blog/changelog/feed/",
+                "outcome": "not_asked"
+            }])
+        );
+        let raw = resumed[0].raw.as_ref().expect("raw");
+        assert_eq!(raw["source"], "loomwatch");
+        assert_eq!(
+            raw["response"]["result"]["stopReason"], "cancelled",
+            "Codex's own answer to the first prompt is kept"
+        );
+
+        let prompts = events
+            .iter()
+            .filter(|event| event.kind == EventKind::Message && event.payload["role"] == "user")
+            .count();
+        assert_eq!(prompts, 2, "the work prompt, then the request to carry on");
+        let turn_ends: Vec<_> = events
+            .iter()
+            .filter(|event| event.kind == EventKind::TurnEnd)
+            .collect();
+        assert_eq!(turn_ends.len(), 1, "one turn, resumed once");
+        assert_eq!(turn_ends[0].payload["stopReason"], "end_turn");
+    }
+
+    /// An app that ends its turn on every decline is carried on [`RESUMES_PER_TURN`] times, then
+    /// its turn ends `cancelled`, as it said. A turn an app cancels with nothing declined is not
+    /// carried on at all: `LoomWatch` did not cause it. Each fake app exits 9 if prompted again.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_turn_is_carried_on_only_after_a_decline_and_only_so_often(pool: PgPool) {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"keeps-asking"}}'
+            for id in 3 4 5 6; do
+              IFS= read -r request
+              case "$request" in *'"method":"session/prompt"'*) ;; *) exit 9 ;; esac
+              printf '%s\n' '{"jsonrpc":"2.0","id":"ask","method":"session/request_permission","params":{"sessionId":"keeps-asking","toolCall":{"toolCallId":"c","title":"Run command","kind":"execute","rawInput":{"command":"curl example.com"}},"options":[{"optionId":"allow_once","kind":"allow_once"},{"optionId":"cancel","kind":"reject_once"}]}}'
+              IFS= read -r _
+              printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"cancelled"}}\n' "$id"
+            done
+            IFS= read -r request
+            case "$request" in *'"method":"session/close"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{}}'
+        "#;
+        let archive = EventArchive::from_pool(pool);
+        declining_process(script, None)
+            .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
+            .await
+            .expect("carried on three times, then closed");
+        let events = archive.load_session("keeps-asking").await.expect("events");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.payload["phase"] == "turn_resumed")
+                .count(),
+            RESUMES_PER_TURN
+        );
+        let turn_end = events
+            .iter()
+            .find(|event| event.kind == EventKind::TurnEnd)
+            .expect("turn_end");
+        assert_eq!(turn_end.payload["stopReason"], "cancelled");
+
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"cancels-itself"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"cancelled"}}'
+            IFS= read -r request
+            case "$request" in *'"method":"session/close"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
+        "#;
+        declining_process(script, None)
+            .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
+            .await
+            .expect("a cancel LoomWatch did not cause is left alone");
     }
 }
