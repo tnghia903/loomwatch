@@ -472,6 +472,8 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .pile-tag b { font: 500 12px/1.2 var(--mono); color: var(--accent); }
 .pile-tag span { font: 400 11px/1.3 var(--sans); color: var(--ink-2); }
 .pile-hint { margin: 2px 0 0; text-align: center; font-size: 12.5px; color: var(--ink-3); }
+.pile-hint .for-touch { display: none; }
+@media (hover: none) { .pile-hint .for-pointer { display: none; } .pile-hint .for-touch { display: inline; } }
 :root[data-theme="light"] .issue { border: 1px solid rgb(23 21 15 / .1); box-shadow: 0 1px 2px rgb(23 21 15 / .06), 0 12px 28px rgb(23 21 15 / .12); }
 .issue .mast { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding-bottom: 6px; border-bottom: 2px solid var(--slip-ink); }
 .issue .mast b { font: 400 25px/1 var(--serif); }
@@ -682,8 +684,10 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
   .story-intro { padding-top: 48px; }
   .day-story { grid-template-columns: minmax(0, 1fr); }
   .press { grid-template-columns: minmax(0, 1fr); gap: 18px; }
-  .pile { height: 456px; }
-  .issue { left: 50%; }
+  /* The papers behind fan upward here: room above the top paper for all of their edges. */
+  .pile { height: 590px; }
+  .issue { left: 50%; top: 134px; }
+  .issue:not(.front) { touch-action: none; } /* sliding along them picks a paper, it doesn't scroll */
   .foot-line { margin-left: 0; }
 }
 
