@@ -202,13 +202,73 @@ describe('narrate', () => {
   it('tells the run as a short story, counted from what was recorded', () => {
     const beats = narrate(weave(projection(), order))
     expect(beats.map((beat) => beat.text)).toEqual([
-      'News Collector worked for 2 minutes, and opened one source.',
+      'News Collector worked for 2 minutes, and opened one web page.',
       'News Collector handed the work to News Editor.',
       'News Editor worked for 53 seconds.',
       'News Editor couldn’t read SKILL.md — the run carried on.',
       'The run ended after 3 minutes.',
     ])
     expect(beats[3]).toMatchObject({ bad: true, at: 140_000 })
+  })
+
+  // The story and the receipt tell one record, so they count and fail the same things
+  // (lib/story/reads.ts). Only the stitch keeps the call itself, failed or not.
+  const FOLDER = '/Users/Shared/harbor-pine/q3-reports'
+  const SKILL = '/Users/me/LoomWatch/work/researcher/.claude/skills/house-style/SKILL.md'
+  const researcher = [{ id: 'researcher', name: 'Researcher', operator: false }]
+  const record = (calls: Evidence[]) => projection({ agents: [agent('researcher', 0, 40)], evidence: calls })
+  const story = (calls: Evidence[]) => narrate(weave(record(calls), researcher))
+  const readOf = (id: string, seconds: number, path: string, status = 'succeeded') =>
+    evidence(id, 'researcher', seconds, { kind: 'file', relation: 'read file', name: `Read ${path}`, status, toolKind: 'read', rawInput: { file_path: path }, locations: [{ path, line: 1 }] } as Partial<Evidence>)
+  // One skill: supplied in the prompt, read as its SKILL.md, and recorded by LoomWatch as opened.
+  const skill = [
+    evidence('s1', 'researcher', 1, { kind: 'skill', relation: 'loaded into prompt', name: 'house-style', toolKind: 'prompt', locations: [{ path: SKILL }] }),
+    evidence('s2', 'researcher', 2, { kind: 'skill', relation: 'used skill', name: 'Read .claude/skills/house-style/SKILL.md', toolKind: 'read', rawInput: { file_path: SKILL }, locations: [{ path: SKILL, line: 1 }] }),
+    evidence('s3', 'researcher', 3, { kind: 'skill', relation: 'opened by the agent', name: 'house-style', toolKind: 'read', locations: [{ path: SKILL }] }),
+  ]
+
+  it('does not tell a folder read as a file as a failure once the files in it were read', () => {
+    const calls = [...skill, readOf('e4', 5, FOLDER, 'failed'), ...['README.md', 'q3-sales.md', 'q3-churn.md', 'q3-sales.md'].map((name, index) => readOf(`e${5 + index}`, 6 + index, `${FOLDER}/${name}`))]
+    expect(story(calls).map((beat) => [beat.text, beat.bad])).toEqual([
+      ['Researcher worked for 40 seconds: it used one skill and read 3 files.', false],
+      ['The run ended after 40 seconds.', false],
+    ])
+    expect(weave(record(calls), researcher).stitches.find((stitch) => stitch.evidenceId === 'e4')).toMatchObject({ bad: true, sentence: 'Researcher couldn’t read q3-reports.' })
+  })
+
+  it('still tells a folder as a failure when nothing in it was read', () => {
+    expect(story([...skill, readOf('e4', 5, FOLDER, 'failed')]).filter((beat) => beat.bad)).toEqual([{ at: 5_000, text: 'Researcher couldn’t read q3-reports — the run carried on.', bad: true }])
+  })
+
+  it('counts the failures nothing made up for, and refused requests', () => {
+    const refused = evidence('e8', 'researcher', 9, { kind: 'permission', relation: 'asked permission for', name: 'Web search', status: 'rejected' })
+    const calls = [readOf('e4', 5, FOLDER, 'failed'), readOf('e5', 6, `${FOLDER}/README.md`), readOf('e6', 8, `${FOLDER}/q3-sales.md`, 'failed'), refused]
+    expect(story(calls).filter((beat) => beat.bad)).toEqual([{ at: 8_000, text: '2 of Researcher’s calls failed — first it couldn’t read q3-sales.md.', bad: true }])
+  })
+
+  it('says the name once when the first failure is told as the agent’s own', () => {
+    const search = (id: string, seconds: number) => evidence(id, 'researcher', seconds, { kind: 'search', relation: 'searched', name: 'Web search: q3 churn', status: 'failed' })
+    expect(story([search('e1', 4), search('e2', 6)]).filter((beat) => beat.bad).map((beat) => beat.text)).toEqual(['2 of Researcher’s calls failed — first its search for “q3 churn” failed.'])
+  })
+
+  it('counts each thing once, and nothing nobody read', () => {
+    const page = { name: 'Fetch https://ft.com/q3', rawInput: { url: 'https://ft.com/q3' } }
+    const brief = { kind: 'file', relation: 'edited file', name: 'Edit brief.md', locations: [{ path: '/w/brief.md' }] } as Partial<Evidence>
+    const notion = { kind: 'tool', relation: 'invoked tool', name: 'mcp__notion__search' } as Partial<Evidence>
+    const calls = [
+      evidence('e1', 'researcher', 1, page), evidence('e2', 'researcher', 2, page),
+      evidence('e3', 'researcher', 3, { relation: 'retrieved', name: 'Q2 decision', rawInput: { id: 'n1' } }),
+      evidence('e4', 'researcher', 4, { relation: 'wrote to notebook · decision', name: 'Q3 decision' }),
+      evidence('e5', 'researcher', 5, brief), evidence('e6', 'researcher', 6, brief),
+      evidence('e7', 'researcher', 7, { kind: 'command', relation: 'ran command', name: 'npm test' }),
+      evidence('e8', 'researcher', 8, notion), evidence('e9', 'researcher', 9, notion),
+    ]
+    expect(story(calls)[0].text).toBe('Researcher worked for 40 seconds: it opened one web page, retrieved one notebook entry, changed one file, ran one command and used one tool.')
+  })
+
+  it('says what a working helper has done so far', () => {
+    const live = projection({ phase: 'running', agents: [agent('researcher', 0, 30, { status: 'running' } as Partial<ProjectedAgent>)], evidence: [evidence('e1', 'researcher', 4, { kind: 'search', relation: 'searched', name: 'Web search: q3 churn' })] })
+    expect(narrate(weave(live, researcher, T0 + 50_000))[0].text).toBe('Researcher is working — so far it ran one search.')
   })
 })
 

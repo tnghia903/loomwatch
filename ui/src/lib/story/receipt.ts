@@ -1,7 +1,7 @@
 import type { AgentRuntime } from '../runs/graph'
 import type { AgentAllow, AllowSwitch } from '../team-file/types'
 import type { Evidence, RunPhase, RunProjection } from '../watch/events'
-import { changedFiles, failuresOf, readCount, readPhrase, skillsUsed } from './reads'
+import { failuresOf, readPhrase, workCount } from './reads'
 import { describeEvidence } from './weft'
 
 /**
@@ -64,11 +64,8 @@ export interface ReceiptInput {
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
 
 function workSummary(items: readonly Evidence[]): string {
-  const read = readPhrase(readCount(items))
-  const searches = items.filter((item) => item.kind === 'search').length
-  const changed = changedFiles(items)
-  const commands = items.filter((item) => item.kind === 'command').length
-  const skills = skillsUsed(items).length
+  const { skills, read: count, searches, changed, commands } = workCount(items)
+  const read = readPhrase(count)
   const parts = [
     skills && `used ${plural(skills, 'skill')}`,
     read && `read ${read}`,

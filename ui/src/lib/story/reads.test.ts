@@ -4,7 +4,7 @@ import { projectRun, type Evidence, type RunEvent } from '../watch/events'
 import { failuresOf, readCount, readPhrase, skillName, skillsUsed } from './reads'
 import { buildReceipt } from './receipt'
 import { answerVerdict } from './verdict'
-import { describeEvidence, weave } from './weft'
+import { describeEvidence, narrate, weave } from './weft'
 
 const FOLDER = '/Users/Shared/harbor-pine/q3-reports'
 const SKILL = '/Users/me/LoomWatch/work/researcher/.claude/skills/house-style/SKILL.md'
@@ -101,6 +101,12 @@ describe('a linked folder read as a file, then the files in it', () => {
     expect(weave(projection, agents).stitches.find((stitch) => stitch.evidenceId === 'researcher:folder')).toMatchObject({ bad: true, sentence: 'Researcher couldn’t read q3-reports.' })
   })
 
+  it('tells the same run as a story with the receipt’s counts and no failure', () => {
+    const story = narrate(weave(judge(events).projection, agents))
+    expect(story.filter((beat) => beat.bad)).toEqual([])
+    expect(story.find((beat) => beat.text.startsWith('Researcher '))?.text).toMatch(/: it used one skill and read 3 files\.$/)
+  })
+
   it('judges the folder the same whichever came first', () => {
     const after = marketBrief([...files('README.md', 'q3-sales.md'), ...read('folder', FOLDER, EISDIR)])
     expect(judge(after).receipt.lines.filter((line) => line.tone === 'bad')).toEqual([])
@@ -118,6 +124,8 @@ describe('a source that really could not be read', () => {
     ])
     expect(receipt.lines[1].evidenceId).toBe('researcher:folder')
     expect(verdict).toMatchObject({ tone: 'look', label: '1 thing to check', detail: 'Researcher couldn’t read q3-reports, and carried on without it.' })
+    const story = narrate(weave(judge(marketBrief(read('folder', FOLDER, EISDIR))).projection, agents))
+    expect(story.filter((beat) => beat.bad).map((beat) => beat.text)).toEqual(['Researcher couldn’t read q3-reports — the run carried on.'])
   })
 
   it('stays a red line when every file in it failed too', () => {
