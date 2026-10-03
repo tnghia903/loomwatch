@@ -55,7 +55,7 @@ agents:
       cmd: npx
       args:
         - -y
-        - "@agentclientprotocol/claude-agent-acp"
+        - "@agentclientprotocol/claude-agent-acp@0.85.1"
       env: {}
       cwd: .
     model: sonnet
@@ -85,7 +85,7 @@ agents:
       cmd: npx
       args:
         - -y
-        - "@agentclientprotocol/claude-agent-acp"
+        - "@agentclientprotocol/claude-agent-acp@0.85.1"
       env: {}
       cwd: .
     model: opus
@@ -115,7 +115,7 @@ agents:
       cmd: npx
       args:
         - -y
-        - "@agentclientprotocol/codex-acp"
+        - "@agentclientprotocol/codex-acp@2.1.1"
       env: {}
       cwd: .
     model: gpt-6.1-sol

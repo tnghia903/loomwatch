@@ -2,7 +2,7 @@
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
+use axum::http::header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, X_FRAME_OPTIONS};
 use axum::http::{StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -15,6 +15,9 @@ struct UiAssets;
 const INDEX_PATH: &str = "index.html";
 const NO_CACHE: &str = "no-cache";
 const IMMUTABLE_CACHE: &str = "public, max-age=31536000, immutable";
+/// No other page may frame the app: inside a frame, a site could line a click up with Run or
+/// "Allow from now on". `X-Frame-Options` is for browsers that predate `frame-ancestors`.
+const NO_FRAMING: &str = "frame-ancestors 'none'";
 
 /// Create the UI router. More-specific API routes can be merged into it without the
 /// SPA fallback intercepting them.
@@ -64,6 +67,8 @@ fn embedded_response(path: &str, immutable: bool) -> Response {
         .status(StatusCode::OK)
         .header(CONTENT_TYPE, content_type.as_ref())
         .header(CACHE_CONTROL, cache_control)
+        .header(CONTENT_SECURITY_POLICY, NO_FRAMING)
+        .header(X_FRAME_OPTIONS, "DENY")
         .body(Body::from(asset.data))
         .expect("static response headers are valid")
 }
@@ -87,6 +92,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()[CONTENT_TYPE], "text/html");
         assert_eq!(response.headers()[CACHE_CONTROL], NO_CACHE);
+        assert_eq!(response.headers()[CONTENT_SECURITY_POLICY], NO_FRAMING);
+        assert_eq!(response.headers()[X_FRAME_OPTIONS], "DENY");
         let body = response.into_body().collect().await.unwrap().to_bytes();
         assert!(
             body.windows(b"id=\"root\"".len())

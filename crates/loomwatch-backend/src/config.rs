@@ -9,6 +9,25 @@ use chrono::{DateTime, Local, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::Deserialize;
 
+/// What [`is_identifier`] requires, worded to follow an id in an error message.
+const IDENTIFIER_RULE: &str = "must start with a letter or digit and use only letters, digits, \
+     '.', '_' and '-' (at most 128 characters)";
+
+/// The team schema's `Identifier` (`^[A-Za-z0-9][A-Za-z0-9._-]*$`, at most 128 characters).
+///
+/// Such an id is one plain folder name: it cannot be empty, `.` or `..`, or contain a separator.
+#[must_use]
+pub fn is_identifier(value: &str) -> bool {
+    let mut characters = value.chars();
+    value.len() <= 128
+        && characters
+            .next()
+            .is_some_and(|first| first.is_ascii_alphanumeric())
+        && characters.all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+        })
+}
+
 /// Runtime-relevant fields from a version-1 team configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -987,6 +1006,17 @@ impl TeamConfig {
         if team.schema_version != 1 {
             bail!("unsupported team schema version {}", team.schema_version);
         }
+        // The schema's `Identifier`, enforced here too and not only in the editor: ids name the
+        // agents' folders under `.loomwatch/`, and a team file can come from anyone. An agent id of
+        // `../../../..` would otherwise put the folder LoomWatch clears at the home folder.
+        if !team.id.is_empty() && !is_identifier(&team.id) {
+            bail!("team id {:?} {IDENTIFIER_RULE}", team.id);
+        }
+        for agent in &team.agents {
+            if !is_identifier(&agent.id) {
+                bail!("agent id {:?} {IDENTIFIER_RULE}", agent.id);
+            }
+        }
         team.entrypoint_agent()?;
         // Before `pipeline_order`, so "the entrypoint is a stop" is reported as what it is rather
         // than as the incoming-edge violation it also happens to be.
@@ -1260,6 +1290,51 @@ mod tests {
         )
         .expect_err("team-mode responder must be the entrypoint");
         assert!(mismatch.to_string().contains("must match entrypoint"));
+    }
+
+    /// Ids name folders under `.loomwatch/`, and `materialise` clears `.claude/skills` and
+    /// `.claude/settings.json` inside an agent's folder. An id that climbs out of `.loomwatch/`
+    /// must be refused when the file is read, whoever wrote it.
+    #[test]
+    fn rejects_team_and_agent_ids_that_are_not_plain_names() {
+        let team = |team_id: &str, agent_id: &str| {
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nid: '{team_id}'\nentrypoint: '{agent_id}'\nagents:\n  - id: '{agent_id}'\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n",
+            ))
+        };
+        for bad in [
+            "../../../..",
+            "..",
+            ".",
+            "a/b",
+            "a\\b",
+            "/abs",
+            "-flag",
+            " a",
+            "",
+        ] {
+            let error = team("team", bad).expect_err(bad).to_string();
+            assert!(error.contains("agent id"), "{bad:?}: {error}");
+            assert!(
+                error.contains("must start with a letter or digit"),
+                "{error}"
+            );
+        }
+        for bad in ["../..", "a/b", ".hidden"] {
+            let error = team(bad, "a").expect_err(bad).to_string();
+            assert!(error.contains("team id"), "{bad:?}: {error}");
+        }
+        assert!(team("team", &"a".repeat(129)).is_err());
+
+        let longest = "a".repeat(128);
+        for good in ["a", "Writer", "writer-2", "v1.2_b", longest.as_str()] {
+            team("my-team", good).unwrap_or_else(|error| panic!("{good:?}: {error:#}"));
+        }
+        // A file that predates the required `id` still loads.
+        TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n",
+        )
+        .expect("a team without an id still loads");
     }
 
     #[test]
