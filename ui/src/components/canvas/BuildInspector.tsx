@@ -5,19 +5,27 @@ import { AgentPermissions } from './AgentPermissions'
 import { AgentWorkFolder } from './AgentWorkFolder'
 import { Inspector, type InspectorProps } from './Inspector'
 import { SaveAsJob } from './SaveAsJob'
+import { StatusGlyph } from '../ui/glyphs'
 import type { DetectedHarness } from '../../lib/harnesses'
 
 export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHarness[]; harnessId?: string; onHarnessChange?: (id: string) => void; startAdvanced?: boolean }) {
   const [advanced, setAdvanced] = useState(Object.keys(props.fieldProblems ?? {}).length > 0 || props.startAdvanced === true)
   const { node, onRename, onClose, onDelete, readOnly, harnesses = [], harnessId, onHarnessChange } = props
-  // `startAdvanced` is read once, on mount, and that is the only moment it can arrive: leaving a
-  // run for Build swaps the run Inspector for this one, so the panel is always new when something
-  // sends the operator to a field. The short panel does not contain most fields, so opening it
-  // first would hide the thing they came for.
+  // Something sent the operator to a field — an alert's Fix, a problem in the list. The short panel
+  // does not contain most fields, so it opens the full one, including when this panel is already
+  // open for the same agent (Build and a run share it, ADR 0041). It never folds it back.
+  const forced = props.startAdvanced === true
+  const [wasForced, setWasForced] = useState(forced)
+  if (forced !== wasForced) {
+    setWasForced(forced)
+    if (forced) setAdvanced(true)
+  }
   if (advanced) return <div className="advanced-node-settings"><Inspector {...props} onClose={() => setAdvanced(false)} /></div>
   const reviewStep = node.data.agent.kind === 'operator'
+  // The same panel in Build and in a run (ADR 0041); a run adds what this agent is doing in it.
+  const runtime = node.data.runtime
   return <aside className="node-inspector" aria-label="Selected node settings" onKeyDown={e => { if (e.key === 'Escape') onClose() }}>
-    <div className="inspector-head"><div><span className="eyebrow">{reviewStep ? 'Your review step' : 'Agent'}</span><strong>{node.data.agent.name}</strong></div><button className="icon-button" onClick={onClose} aria-label="Close inspector"><X size={15} /></button><button className="icon-button" onClick={onDelete} disabled={readOnly} aria-label={`Remove ${node.data.agent.name}`}><Trash2 size={15} /></button></div>
+    <div className="inspector-head"><div><span className="eyebrow">{reviewStep ? 'Your review step' : 'Agent'}</span><strong>{node.data.agent.name}</strong>{runtime && <span className="inspector-run-status"><StatusGlyph status={runtime.status} /> {runtime.taskState.toLowerCase()} · {runtime.task}</span>}</div><button className="icon-button" onClick={onClose} aria-label="Close inspector"><X size={15} /></button><button className="icon-button" onClick={onDelete} disabled={readOnly} aria-label={`Remove ${node.data.agent.name}`}><Trash2 size={15} /></button></div>
     <div className="inspector-fields">
       <label>Name<input value={node.data.agent.name} disabled={readOnly} onChange={e => onRename('name', e.target.value)} /></label>
       {/* Instructions are prose; a one-line input hid all but the first few words of them. */}

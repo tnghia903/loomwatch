@@ -1,0 +1,79 @@
+/* ---------------------------------------------------------------------------
+   ONE CANVAS, TWO TABS (ADR 0041). Build and a run's full trace draw the same team, so they share
+   the add panel, the view-controls bar, the agent panel and the edge words. What still differs is
+   only what each tab is for: Build has its heading and team sentence above the canvas; the trace
+   has the timeline and the composer. This file places the shared parts in the trace the way Build
+   places them, and keeps Build's bar clear of its heading.
+   --------------------------------------------------------------------------- */
+
+/* The docked panel's width, for the rules that centre the composer or the layer legend beside it.
+   They add the panel inset, so the width here is the panel's edge minus that inset. */
+.lw-shell.build-graph { --lw-library-w: calc(210px - var(--lw-panel-inset)); --lw-library-rail-w: 0px; }
+
+/* The add panel: docked to the left edge under the header, as Build docks it under its heading. */
+.lw-shell.run-shown.build-graph .node-palette { position: absolute; top: var(--lw-header-h); bottom: 0; left: 0; width: 210px; border-radius: 0; }
+.lw-shell.run-shown.build-graph .palette-reopen { top: calc(var(--lw-header-h) + 15px); }
+@media (min-width: 768px) {
+  .lw-shell.run-shown.build-graph.lib-open .lw-canvas { left: 210px; }
+}
+/* Phones: a run's trace is for reading — the timeline and the composer already take the screen —
+   so the panel stays out of it there, as the run Library did. Build overlays it (chrome.css). */
+@media (max-width: 767px) {
+  .lw-shell.run-shown.build-graph .node-palette, .lw-shell.run-shown.build-graph .palette-reopen { display: none; }
+}
+
+/* The agent panel in the trace: under the header, and stopping above the bottom bar. */
+.lw-shell.run-shown.build-graph .node-inspector {
+  top: var(--lw-below-header);
+  max-height: calc(100dvh - var(--lw-below-header) - var(--lw-viewctl-clear) - 12px);
+  overflow: auto;
+}
+
+/* The bar sits at the bottom right on both tabs. A run also has its composer at the bottom, centred,
+   and below ~1720px the composer's right end would run under the bar, so the bar stands above it.
+   (It used to jump to the top below 1400px, where the run's timeline strip covered it.)
+   Short windows keep their one merged bottom band (runtime.css). */
+@media (max-width: 1719px) and (min-height: 600px) {
+  .lw-shell.run-shown.build-graph .lw-viewctl { top: auto !important; bottom: calc(var(--lw-composer-height, 56px) + var(--lw-panel-inset) + 12px); }
+  /* The right-hand panels stop above the bar (app.css), so they stop above it here too. */
+  .lw-shell.run-shown.build-graph { --lw-viewctl-clear: calc(36px + var(--lw-composer-height, 56px) + var(--lw-panel-inset) + 12px + var(--sp-3)); }
+}
+
+/* Build's bar sits at the bottom at every width: there is no composer for it to dodge, and the
+   trace's mid-width "move it to the top" rule would put it over Build's heading. */
+.lw-shell.build-workspace .lw-viewctl { top: auto; bottom: 16px; }
+@media (max-width: 767px) {
+  .lw-shell.build-workspace .lw-viewctl { top: auto !important; bottom: 16px; }
+}
+/* Phones pinch to zoom, and the whole bar does not fit in 375px: the zoom buttons and level give way
+   so the depth dial, Fit and the theme switch stay reachable. */
+@media (max-width: 767px) {
+  .lw-shell .lw-viewctl .zoomlvl, .lw-shell .lw-viewctl [aria-label="Zoom out"], .lw-shell .lw-viewctl [aria-label="Zoom in"] { display: none; }
+}
+/* Below ~1200px the canvas beside the panel is too narrow for the legend and the bar on one line. */
+@media (min-width: 768px) and (max-width: 1199px) {
+  .lw-shell.build-workspace .build-canvas-legend { bottom: 64px; }
+}
+
+/* Rules Build scoped to its own page that belong to the panel wherever it is. */
+.lw-shell .node-palette .palette-search { display: flex; align-items: center; gap: 5px; margin-bottom: 16px; color: var(--quiet); }
+
+/* The add panel's own parts that the run Library used to carry. */
+.palette-scan { margin: -8px 4px 18px; font-size: 10.5px; line-height: 1.4; color: var(--quiet); }
+.palette-alert { display: grid; gap: 4px; margin: 0 4px 14px; padding: 8px 9px; border: 1px solid color-mix(in srgb, var(--color-alert) 45%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--color-alert) 8%, transparent); font-size: 11px; line-height: 1.4; color: var(--text); }
+.palette-alert small { color: var(--muted); overflow-wrap: anywhere; }
+.palette-alert .btn { justify-self: start; margin-top: 2px; height: 26px; font-size: 11px; }
+.palette-item .palette-engine.quiet { color: var(--quiet); }
+.palette-item .palette-engine.refused { color: var(--color-alert); white-space: normal; font-family: var(--font-sans); line-height: 1.35; }
+.palette-used { grid-template-columns: 12px 27px minmax(0, 1fr) auto; }
+.palette-used-count { font: 500 10.5px/1 var(--font-mono); color: var(--muted); }
+.palette-path { display: grid; gap: 4px; margin: 4px 0 2px; font: 400 10.5px/1.45 var(--font-mono); color: var(--quiet); overflow-wrap: anywhere; }
+.palette-path p { margin: 0; }
+.palette-path ol { margin: 0; padding-left: 16px; }
+.palette-hint .palette-more { padding: 4px 0; }
+.palette-hint p { margin: 2px 0; }
+.palette-foot { margin: 22px 4px 0; padding-top: 12px; border-top: 1px solid var(--line-soft); font-size: 10px; line-height: 1.45; color: var(--quiet); }
+.node-palette .skel-row { height: 44px; padding: 0 6px; }
+
+/* The short agent panel says what a shown run has this agent doing. */
+.inspector-run-status { display: flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 11px; line-height: 1.35; color: var(--muted); }

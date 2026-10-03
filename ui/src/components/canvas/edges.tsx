@@ -48,13 +48,12 @@ export function WeftEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePos
   )
 }
 
+/** The plain word for a planned relationship, the same on the Build and Run canvases (ADR 0041). */
+const PLAIN_RELATION: Readonly<Record<string, string>> = { 'uses skill': 'requires', 'responds with': 'produces', 'uses tool': 'can use' }
+
 // Provenance / story edges: ONE neutral stroke for every relationship; only work happening
 // now may use the animated blue live stroke (§12.3). The relationship word rides the edge.
-export function BuildProvEdgeView(props: EdgeProps<ProvEdge>) {
-  return <ProvEdgeView {...props} build />
-}
-
-export function ProvEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data, selected, build = false }: EdgeProps<ProvEdge> & { build?: boolean }) {
+export function ProvEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data, selected }: EdgeProps<ProvEdge>) {
   // Every provenance line takes its shape from the sides its ports chose (lib/canvas/ports.ts).
   const { path, labelX, labelY, kind } = routeEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
   // A drop's word sits beside the line and a tree branch's left of the trunk, so lines stay unbroken.
@@ -66,7 +65,7 @@ export function ProvEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePos
       {data?.label && (
         <EdgeLabelRenderer>
           <div className={cx('prov-label t-micro', data.story && 'story-label', data.live && 'prov-live-label', selected && data.onRemove && 'with-remove', beside && 'beside', before && 'before', data.arc && 'arc-label')} style={{ left: labelX, top: labelY + (data.labelOffset ?? 0) }}>
-            <span>{build ? ({ 'uses skill': 'requires', 'responds with': 'produces', 'uses tool': 'can use' }[data.label.toLowerCase()] ?? data.label.toLowerCase()) : data.label}</span>
+            <span>{PLAIN_RELATION[data.label.toLowerCase()] ?? data.label.toLowerCase()}</span>
             {selected && data.onRemove ? (
               <button
                 type="button"

@@ -66,9 +66,6 @@
 .node-palette p { margin:0; }
 .node-palette .palette-head p { margin-top:6px; }
 .node-palette section h3 { margin:0; }
-.prototype-canvas-controls { position:absolute; bottom:16px; right:16px; display:flex; flex-direction:column; border:1px solid var(--line); border-radius:6px; overflow:hidden; z-index:35; }
-.prototype-canvas-controls button { width:28px; height:27px; display:grid; place-items:center; background:var(--surface); color:var(--muted); border:0; border-bottom:1px solid var(--line); }
-.build-workspace .fit-canvas { position:absolute; bottom:17px; right:65px; }
 .lw-shell .workspace-chrome { background:var(--color-ground); }
 .prototype-workspace-menu { position:absolute; right:30px; top:16px; display:flex; align-items:center; gap:24px; pointer-events:auto; font-size:11px; color:var(--quiet); }
 .prototype-workspace-menu>button { display:grid; place-items:center; width:30px; height:30px; border:1px solid var(--line); border-radius:50%; background:var(--surface-raised); color:var(--muted); font-size:11px; }
@@ -136,7 +133,6 @@
 .build-graph .lw-canvas .react-flow__controls { border:1px solid var(--line); border-radius:6px; overflow:hidden; box-shadow:none; margin:16px; }
 .build-graph .lw-canvas .react-flow__controls-button { background:var(--surface); border-color:var(--line); fill:var(--muted); }
 .build-graph .lw-canvas .react-flow__controls-button:hover { background:var(--surface-hover); fill:var(--text); }
-.fit-canvas { position:absolute; bottom:17px; right:65px; z-index:4; height:28px; padding:0 9px; background:var(--surface); border:1px solid var(--line); border-radius:5px; font-size:11px; color:var(--muted); }
 .canvas-legend { position:absolute; z-index:4; bottom:16px; left:18px; display:flex; align-items:center; gap:15px; color:var(--quiet); font-size:11px; pointer-events:none; }
 .canvas-legend span { display:flex; align-items:center; gap:5px; }
 .legend-line { width:17px; border-top:1px solid var(--muted); }

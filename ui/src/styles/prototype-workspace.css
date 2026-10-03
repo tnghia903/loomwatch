@@ -1,15 +1,8 @@
 /* Prototype composition on the existing live workspace and canvas. */
 .build-workspace .lw-canvas { left:238px; }
-.build-workspace .lw-library:not(.collapsed) { width:210px; }
-.build-workspace .lib-head { padding:12px; gap:6px; }
-.build-workspace .lib-head-text { font-size:14px; }
-.build-workspace .lib-title { gap:6px; }
-.build-workspace .lib-scan { white-space:nowrap; font-size:10px; }
-.build-workspace .lib-scan-status { position:static; padding:0 12px 10px; white-space:nowrap; font-size:11px; }
 .build-workspace .story-draft { width:220px; min-height:88px; border:1px solid var(--color-hairline); border-radius:7px; padding:15px; }
 .build-workspace .story-draft .rt-body { font-size:10px; }
 .build-workspace .story-draft .prompt-draft-hint { display:none; }
-.build-workspace:has(.lw-library.collapsed) .lw-canvas { left:78px; }
 .build-node { width:235px; min-height:88px; display:flex; align-items:center; gap:11px; padding:15px; background:var(--workspace-glass); border:1px solid var(--color-hairline); border-radius:7px; box-shadow:0 8px 24px #0003; position:relative; }
 .build-node:not(.kind-harness) { width:220px; min-height:76px; }
 .build-node.selected { border-color:var(--color-accent); box-shadow:0 0 0 1px var(--color-accent),0 8px 24px #0003; }
@@ -127,21 +120,6 @@ button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tin
 .build-workspace-heading .build-undelivered { display:flex; align-items:center; gap:10px; flex-wrap:wrap; color:var(--color-ink-2); }
 .build-workspace-actions { display:flex; gap:8px; }
 .build-workspace .lw-canvas { top:176px; }
-.build-workspace .lw-library,.build-workspace .lw-library.collapsed { top:190px; left:14px; max-height:calc(100% - 210px); height:calc(100% - 210px); border-radius:8px; }
-.build-workspace .lw-library.collapsed { height:auto; }
-.build-workspace .lib-brand { display:none; }
-.build-workspace .lib-head { min-height:46px; }
-.build-workspace .lib-scroll { display:flex; flex-direction:column; }
-.build-workspace .lib-group[aria-label=Agents] { order:-1; }
-.build-workspace .lib-row { min-height:48px; padding:8px; border:0; border-radius:5px; gap:8px; }
-.build-workspace .lib-row:hover { background:var(--color-panel-solid); }
-.build-workspace .lib-row .monogram { width:28px; height:28px; border-radius:5px; flex-shrink:0; }
-.build-workspace .lib-row-name { font-size:12px; }
-.build-workspace .lib-row-sub { font-size:10px; }
-.build-workspace .lib-row-meta { display:none; }
-.build-workspace .cap-status { font-size:11px; max-width:65px; }
-.build-workspace .lib-group { padding-block:12px; }
-.build-workspace .lib-foot { font-size:10px; }
 .build-workspace .story-output { border:1px solid var(--color-ok); background:var(--workspace-glass); border-radius:7px; }
 .build-workspace .story-output .rt-body { font-size:12px; font-style:normal; }
 .build-workspace .build-outcome { display:none; }
@@ -169,6 +147,5 @@ button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tin
  .build-workspace-heading h1 { font-size:24px; }
  .build-workspace .lw-canvas { top:220px; }
  .build-workspace .lw-viewctl { top:auto!important; bottom:calc(var(--lw-composer-height,150px) + 28px); }
- .build-workspace .lw-library,.build-workspace .lw-library.collapsed { top:234px; max-height:calc(100% - 320px); }
  .lw-shell.build-workspace .lw-inspector { top:234px; bottom:14px; }
 }
