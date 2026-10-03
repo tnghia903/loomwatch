@@ -1,6 +1,9 @@
 services:
   postgres:
     image: postgres:17.6-bookworm
+    # Back after Docker Desktop restarts, as its updates do, so a LoomWatch still running keeps its
+    # database. Not after `./loomwatch stop` or `docker compose stop`: a stopped database stays so.
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}

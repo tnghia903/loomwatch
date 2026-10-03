@@ -134,8 +134,8 @@ already_running() {
 Then run ./loomwatch again. To keep it running, start this copy on another port instead: LOOMWATCH_PORT=$((port + 1)) ./loomwatch"
   fi
   if uses_docker_database && ! database_is_running; then
-    # This copy outlived its database: Docker Desktop quit or restarted, as its updates do, or the
-    # container was removed. The container has no restart policy, so it is started again here, and
+    # This copy outlived its database: the container was stopped or removed, or Docker Desktop was
+    # quit. Its restart policy covers only Docker restarting, so it is started again here, and
     # LoomWatch reconnects on its next query, as long as the database still holds its tables.
     say "LoomWatch is running at $url, but its database had stopped. Starting the database again."
     wake_docker
