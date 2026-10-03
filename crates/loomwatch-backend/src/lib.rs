@@ -4417,6 +4417,8 @@ mod tests {
     ///   from inside one script;
     /// * a `session/load` for any id but `warm-1` exits **71**.
     ///
+    /// A `session/load` that hands the app back its outward tools (ADR 0044) exits **75**.
+    ///
     /// The reload also replays two frames, which is what the `session_loaded` / `session_replayed`
     /// bracket exists to let the projection ignore.
     #[sqlx::test(migrations = "../../migrations")]
@@ -4438,6 +4440,7 @@ mod tests {
                  ;;\n\
                *'session/load'*)\n\
                  case \"$second\" in\n  *'\"sessionId\":\"warm-1\"'*) ;;\n  *) printf 'reloaded the wrong session: %s\\n' \"$second\" >&2; exit 71 ;;\nesac\n\
+                 case \"$second\" in\n  *'\"disallowedTools\":[\"Artifact\"'*) ;;\n  *) printf 'the reloaded session got its outward tools back: %s\\n' \"$second\" >&2; exit 75 ;;\nesac\n\
                  {replay1}\n{replay2}\n{loaded}\n\
                  IFS= read -r note\n\
                  case \"$note\" in\n  *'you already found'*) ;;\n  *) printf 'the note did not reach the reloaded session: %s\\n' \"$note\" >&2; exit 73 ;;\nesac\n\

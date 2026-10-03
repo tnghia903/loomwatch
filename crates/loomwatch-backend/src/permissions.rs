@@ -32,6 +32,29 @@ const PROTECTED_FOLDERS: [&str; 7] = [
 /// Codex's `read-only` ("Requires approval to edit files and access the internet").
 pub(crate) const ASK_FIRST_MODES: [&str; 2] = ["default", "read-only"];
 
+/// Claude Code's own tools a run agent is started without (ADR 0044). Each reaches past the run:
+/// the operator's claude.ai account (`Artifact` and its companions, `DesignSync`), their cloud
+/// routines and schedules (`RemoteTrigger`, `Cron*`, `ScheduleWakeup`), their devices
+/// (`PushNotification`), and the other Claude sessions on the machine (`SendMessage`,
+/// `ListAgents`). Asking is not enough: Claude Code rules some of them need no consent — a first
+/// publish to a new private artifact, then every redeploy of it — so no request ever reaches the
+/// policy. A team's answer leaves through `LoomWatch` instead: the review stop and its delivery.
+pub(crate) const WITHHELD_CLAUDE_TOOLS: [&str; 13] = [
+    "Artifact",
+    "ArtifactComments",
+    "ArtifactData",
+    "ArtifactCheck",
+    "DesignSync",
+    "RemoteTrigger",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "ScheduleWakeup",
+    "PushNotification",
+    "SendMessage",
+    "ListAgents",
+];
+
 /// How one run agent's permission requests are answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionPolicy {
@@ -74,6 +97,14 @@ impl PermissionPolicy {
         let servers = std::iter::once(RESERVED_SERVER.to_owned())
             .chain(delivery.tools.iter().map(|tool| tool.server.clone()));
         Self::new(allow, folder, readable, servers)
+    }
+
+    /// The `_meta` a run agent's `session/new` and `session/load` carry (ADR 0044). Claude Code's
+    /// adapter passes `claudeCode.options` to the Agent SDK, whose `disallowedTools` takes those
+    /// tools out of the session before the model sees them. Other apps ignore the key.
+    #[must_use]
+    pub fn session_meta() -> Value {
+        serde_json::json!({"claudeCode": {"options": {"disallowedTools": WITHHELD_CLAUDE_TOOLS}}})
     }
 
     /// Whether to approve one `session/request_permission`, from the tool call it describes.
@@ -539,6 +570,51 @@ mod tests {
         assert_eq!(grant_scope(&ask(json!({"title": "?"}))), "other");
         assert_ne!(grant_scope(&codex), grant_scope(&command));
     }
+    /// ADR 0044: the tools a run agent starts without are the ones that reach past the run, and
+    /// none a team's work needs. Claude Code 2.1.286 published an artifact to the operator's
+    /// claude.ai account without asking; the rest were in the same session's tool list.
+    #[test]
+    fn a_run_agent_starts_without_outward_tools_and_keeps_its_working_ones() {
+        let meta = PermissionPolicy::session_meta();
+        let withheld: Vec<&str> = meta
+            .pointer("/claudeCode/options/disallowedTools")
+            .and_then(Value::as_array)
+            .expect("disallowedTools")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        for outward in [
+            "Artifact",
+            "ArtifactComments",
+            "ArtifactData",
+            "DesignSync",
+            "RemoteTrigger",
+            "CronCreate",
+            "ScheduleWakeup",
+            "PushNotification",
+            "SendMessage",
+        ] {
+            assert!(withheld.contains(&outward), "{outward} is withheld");
+        }
+        for working in [
+            "Read",
+            "Write",
+            "Edit",
+            "Glob",
+            "Grep",
+            "Bash",
+            "WebSearch",
+            "WebFetch",
+            "Task",
+            "Skill",
+            "ToolSearch",
+            "TodoWrite",
+            "TaskCreate",
+        ] {
+            assert!(!withheld.contains(&working), "{working} is kept");
+        }
+    }
+
     #[test]
     fn nothing_switched_on_declines_web_commands_and_edits() {
         let scratch = Scratch::new();

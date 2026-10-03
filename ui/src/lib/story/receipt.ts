@@ -1,3 +1,4 @@
+import { OUTWARD_APP_TOOLS, outwardCalls } from '../library/observed'
 import type { AgentRuntime } from '../runs/graph'
 import type { AgentAllow, AllowSwitch } from '../team-file/types'
 import type { Evidence, RunPhase, RunProjection } from '../watch/events'
@@ -167,6 +168,10 @@ export function buildReceipt(input: ReceiptInput): Receipt {
       if (skill.state !== 'opened') checks.push({ tone: 'warn', text: `${agent.name} was given the skill “${skill.name}” but the record never shows it opened`, agentId: agent.id })
     }
     if (run.openCalls > 0) checks.push({ tone: 'warn', text: `${plural(run.openCalls, 'call')} from ${agent.name} never reported back`, agentId: agent.id })
+    // A tool that reaches past the run and ran without asking (ADR 0044): the call shows what it sent.
+    for (const [tool, calls] of outwardCalls(items)) {
+      checks.push({ tone: 'bad', text: `${agent.name} used ${tool}, which ${OUTWARD_APP_TOOLS[tool]}, without asking you${calls.length > 1 ? ` (${calls.length} times)` : ''}`, agentId: agent.id, evidenceId: calls[0].id })
+    }
   }
   for (const alert of input.projection.attention) {
     checks.push({ tone: 'warn', text: alert.message, agentId: alert.agentId, evidenceId: alert.evidenceId })
