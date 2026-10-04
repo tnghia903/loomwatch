@@ -17,6 +17,18 @@ def say(text):
         "content": {"type": "text", "text": text}}}})
 
 
+def operator_note(prompt):
+    """The operator's own words from "## Direction from you", without LoomWatch's framing."""
+    if "## Direction from you" not in prompt:
+        return ""
+    section = prompt.split("## Direction from you", 1)[1]
+    section = section.split("## Results from preceding stages", 1)[0].strip()
+    # LoomWatch opens the section with one paragraph of its own ("The operator answered at the
+    # review stop ..."); what follows it is what the operator typed or chose.
+    framing, _, note = section.partition("\n\n")
+    return note.strip() if framing.startswith("The operator") else section
+
+
 for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
@@ -38,8 +50,9 @@ for line in sys.stdin:
             feedback = prompt.split("\n\n", 1)[1].split("\n\nWhen you are done", 1)[0]
             say("Revised the demo findings: " + feedback)
         elif agent == "writer":
-            direction = prompt.split("## Direction from you", 1)[-1].split("## Results from preceding stages", 1)[0].strip()
-            say("Offline demo complete. Writer received your direction:\n\n" + direction)
+            note = operator_note(prompt)
+            say("Offline demo complete. No AI model was used. " +
+                ("Writer received your direction:\n\n" + note if note else "Writer received no direction."))
         else:
             say("Offline demo findings: choose a short guide or a detailed walkthrough. No model provider was called.")
         result = {"stopReason": "end_turn"}

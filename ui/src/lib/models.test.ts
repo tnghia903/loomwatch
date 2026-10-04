@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { DetectedHarness } from './harnesses'
 import type { AgentConfig } from './team-file/types'
-import { harnessIdForAgent, modelOptionsForAgent } from './models'
+import { appLabelForAgent, harnessIdForAgent, modelOptionsForAgent } from './models'
 
 function agent(model: string, cmd = 'npx', args = ['-y', '@agentclientprotocol/claude-agent-acp']): AgentConfig {
   return { id: model || 'empty', name: 'Agent', role: 'Work', model, spawn: { cmd, args, env: {}, cwd: '.' } }
@@ -63,5 +63,17 @@ describe('harnessIdForAgent', () => {
     expect(harnessIdForAgent(agent('m', 'npx', ['-y', '@agentclientprotocol/codex-acp@2.1.1']), [])).toBe('codex')
     expect(harnessIdForAgent(agent('m', 'npx', ['-y', '@agentclientprotocol/codex-acp']), [])).toBe('codex')
     expect(harnessIdForAgent(agent('m', 'npx', ['-y', '@agentclientprotocol/claude-agent-acp-fork']), [])).toBeNull()
+  })
+})
+
+describe('appLabelForAgent', () => {
+  // Field report (2026-10-04): the demo's cards said "AI app: Custom command: python3", which read
+  // as if an AI app was involved. The bundled demo script is named for what it is.
+  it('names the bundled offline demo as one, wherever its script is', () => {
+    expect(appLabelForAgent(agent('fake/offline', 'python3', ['operator-stop-harness.py', 'writer']), [])).toBe('Offline demo (no AI)')
+    expect(appLabelForAgent(agent('fake/offline', '/usr/bin/python3', ['/teams/operator-stop-harness.py', 'researcher']), [])).toBe('Offline demo (no AI)')
+    expect(appLabelForAgent(agent('m', 'python3', ['my-agent.py']), [])).toBe('Custom command: python3')
+    expect(appLabelForAgent(agent('claude-sonnet-5'), [])).toBe('Claude (not installed)')
+    expect(appLabelForAgent({ id: 'review', name: 'You', role: 'Approve?', kind: 'operator' } as AgentConfig, [])).toBe('You (review step)')
   })
 })

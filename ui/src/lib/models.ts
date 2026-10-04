@@ -35,12 +35,21 @@ export function harnessIdForAgent(agent: AgentConfig, harnesses: readonly Detect
 }
 
 /**
- * What runs this agent, in words: "Claude", "You (review step)", "Codex (not installed)", or
- * "Custom command: python3". Replaces "Harness not recorded", which was shown for every agent that
- * did not match a detected harness — including the operator's own review step and the offline demo.
+ * The script the bundled offline demo runs instead of an AI app (`examples/operator-stop-harness.py`,
+ * copied beside the demo team by `./loomwatch`). It answers with fixed text and calls no model.
+ */
+const OFFLINE_DEMO_SCRIPT = 'operator-stop-harness.py'
+
+/**
+ * What runs this agent, in words: "Claude", "You (review step)", "Codex (not installed)",
+ * "Offline demo (no AI)", or "Custom command: python3". Replaces "Harness not recorded", which was
+ * shown for every agent that did not match a detected harness — including the operator's own review
+ * step and the offline demo.
  */
 export function appLabelForAgent(agent: AgentConfig, harnesses: readonly DetectedHarness[]): string {
   if (agent.kind === 'operator') return 'You (review step)'
+  // Named for what it is: "Custom command: python3" read as if an AI app was involved.
+  if ((agent.spawn?.args ?? []).some((arg) => arg.split('/').pop() === OFFLINE_DEMO_SCRIPT)) return 'Offline demo (no AI)'
   const id = harnessIdForAgent(agent, harnesses)
   if (id) return harnesses.find((harness) => harness.id === id)?.name ?? `${knownHarness(id).name} (not installed)`
   const cmd = agent.spawn?.cmd.split('/').pop()
