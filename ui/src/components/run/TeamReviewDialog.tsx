@@ -47,8 +47,10 @@ export function TeamReviewDialog({ review, onTrust, onClose }: TeamReviewDialogP
           {review.review.map((line, index) => (
             <li key={index} className={line.warn ? 'tr-warn' : undefined}>
               {line.warn && <span className="tr-flag" aria-hidden="true">!</span>}
-              {line.warn && <span className="visually-hidden">Look twice: </span>}
-              {withCode(line.text)}
+              <span className="tr-text">
+                {line.warn && <span className="visually-hidden">Look twice: </span>}
+                {withCode(line.text)}
+              </span>
             </li>
           ))}
         </ul>
