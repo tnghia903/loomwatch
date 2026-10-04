@@ -745,6 +745,25 @@ didn't connect to it without asking you, the run receipt flags it.
 </details>
 
 <details>
+<summary><strong>Is it safe to run a team someone shared?</strong></summary>
+
+A team file is a list of programs to start, so treat one like any script you download. LoomWatch
+helps you check it. The first time you run a team that wasn't built in LoomWatch, or that changed
+outside it, LoomWatch shows what it will do before anything starts:
+
+- which app or program each agent runs, with any program LoomWatch doesn't know quoted in full;
+- what each agent may do without asking;
+- the folders it can read;
+- whether it runs on a schedule.
+
+Choose **Trust and run** only if you trust where it came from. Until then its schedule does
+nothing. A team file also can't change what an app loads or where it connects, for example with
+`NODE_OPTIONS` or a proxy. See [SECURITY.md](SECURITY.md) for what LoomWatch does and doesn't
+protect against.
+
+</details>
+
+<details>
 <summary><strong>Can I run it on a server, or entirely in Docker?</strong></summary>
 
 Yes. See [Run everything with Docker Compose](#optional-run-everything-with-docker-compose). The
@@ -942,6 +961,8 @@ teams folder's `.jobs`.
 - [Watch and replay](docs/WATCH.md) — inspecting runs, routines, and the local API.
 - [Architecture](docs/ARCHITECTURE.md) — technical details for developers.
 - [Container runtime decision](docs/decisions/0018-container-native-compose.md) — execution, mount, and trust boundaries.
+- [Security](SECURITY.md) — how to report a problem privately, and what LoomWatch does and doesn't protect against.
+- [Contributing](CONTRIBUTING.md) — building from source and sending a change.
 
 ## License
 
