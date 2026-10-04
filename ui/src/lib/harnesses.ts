@@ -32,9 +32,11 @@ export interface DetectedHarness {
   healthDetail?: string
   /**
    * What is behind `health: 'error'` when the daemon knows for certain: `signed_out` when the
-   * app's own CLI said so (`claude auth status`, `codex login status`). Absent otherwise.
+   * app's own CLI said so (`claude auth status`, `codex login status`), `needs_api_key` when Gemini
+   * CLI is set up in a way no other app can use (a Google sign-in, or API-key sign-in with no key).
+   * Absent otherwise.
    */
-  healthCause?: 'signed_out'
+  healthCause?: 'signed_out' | 'needs_api_key'
   /**
    * Installed after LoomWatch started, in a folder the PATH that runs start from lacks: listed and
    * checkable, but no run can start it until LoomWatch restarts. Absent otherwise.
@@ -49,6 +51,23 @@ export interface DetectedHarness {
  */
 export function isHarnessRunnable(harness: DetectedHarness): boolean {
   return harness.acpAvailable !== false && harness.health !== 'error' && !harness.needsRestart
+}
+
+/**
+ * What the app itself said, from the daemon's `healthDetail`: its own message, without the
+ * JSON-RPC body and LoomWatch's wrapping around it (`ACP session/new failed during model
+ * discovery: ACP error response: {"code":-32000,"message":"…"}`). Other text is returned as is.
+ */
+export function harnessSaid(detail: string): string {
+  // A regular expression, not JSON.parse: the daemon cuts a long detail short mid-body.
+  const quoted = /"message"\s*:\s*("(?:[^"\\]|\\.)*")/.exec(detail)?.[1]
+  if (quoted) {
+    try {
+      const message = (JSON.parse(quoted) as string).trim()
+      if (message) return message
+    } catch { /* not a JSON string after all: show the detail as it is */ }
+  }
+  return detail
 }
 
 /** Why an app cannot be used right now, in plain words, or `null` when nothing is known wrong. */

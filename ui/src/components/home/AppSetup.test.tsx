@@ -7,6 +7,8 @@ import { AppSetup } from './AppSetup'
 const opencode: DetectedHarness = { id: 'opencode', name: 'OpenCode', command: 'opencode', executablePath: '/home/u/.opencode/bin/opencode', acpAvailable: true, spawn: { cmd: 'opencode', args: ['acp'] } }
 const claude: DetectedHarness = { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/home/u/.local/bin/claude', acpAvailable: true, spawn: { cmd: 'npx', args: ['-y', '@agentclientprotocol/claude-agent-acp'] } }
 const signedOutReason = 'Claude isn’t signed in. Run "claude auth login" in Terminal, then check again.'
+const needsKeyReason = 'Gemini CLI needs a Gemini API key to work with other apps: set GEMINI_API_KEY, then restart LoomWatch.'
+const gemini: DetectedHarness = { id: 'gemini', name: 'Gemini', command: 'gemini', executablePath: '/usr/bin/gemini', acpAvailable: true, spawn: { cmd: 'gemini', args: ['--acp'] } }
 
 function respond(body: unknown, status = 200) {
   return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }))
@@ -16,7 +18,7 @@ function respond(body: unknown, status = 200) {
 function fakeDaemon() {
   const daemon = {
     installed: [] as DetectedHarness[],
-    /** What a models check records for an app id: `ok`, `signed_out`, `unrecorded`, or an error. */
+    /** What a models check records for an app id: `ok`, `signed_out`, `needs_api_key`, `unrecorded`, or an error. */
     verdicts: new Map<string, string>(),
     needsRestart: new Set<string>(),
     modelCalls: [] as string[],
@@ -28,6 +30,7 @@ function fakeDaemon() {
     const verdict = daemon.verdicts.get(harness.id) ?? 'ok'
     if (verdict === 'ok') return { ...harness, health: 'ok' }
     if (verdict === 'signed_out') return { ...harness, health: 'error', healthCause: 'signed_out', healthReason: signedOutReason }
+    if (verdict === 'needs_api_key') return { ...harness, health: 'error', healthCause: 'needs_api_key', healthReason: needsKeyReason }
     return { ...harness, health: 'error', healthReason: `${harness.name}: sign-in or version problem`, healthDetail: verdict }
   })
   const fetchMock = vi.fn((url: string) => {
@@ -39,7 +42,8 @@ function fakeDaemon() {
       // A daemon that failed before recording anything, e.g. while it was restarting.
       if (verdict === 'unrecorded') return respond({ error: 'busy' }, 503)
       daemon.checked.add(models[1])
-      return verdict === 'ok' ? respond({ harnessId: models[1], models: [] }) : respond({ error: verdict === 'signed_out' ? signedOutReason : verdict }, 502)
+      const refusal = verdict === 'signed_out' ? signedOutReason : verdict === 'needs_api_key' ? needsKeyReason : verdict
+      return verdict === 'ok' ? respond({ harnessId: models[1], models: [] }) : respond({ error: refusal }, 502)
     }
     return respond({ error: 'unexpected' }, 404)
   })
@@ -193,15 +197,38 @@ describe('AppSetup', () => {
 
   it('shows other apps already on this computer, with what went wrong and a way to check again', async () => {
     const daemon = fakeDaemon()
-    const gemini: DetectedHarness = { id: 'gemini', name: 'Gemini', command: 'gemini', executablePath: '/usr/bin/gemini', acpAvailable: true, spawn: { cmd: 'gemini', args: ['--acp'] } }
     daemon.installed = [gemini]
-    daemon.verdicts.set('gemini', 'This client is no longer supported')
+    daemon.verdicts.set('gemini', 'ACP session/new failed during model discovery: ACP error response: {"code":-32000,"message":"Request had invalid authentication credentials."}')
     renderSetup([gemini])
 
     const failed = await screen.findByRole('listitem', { name: /^Gemini: Can’t start/ })
     expect(within(failed).getByRole('alert')).toHaveTextContent('Gemini: sign-in or version problem')
-    expect(within(failed).getByText('This client is no longer supported')).toBeInTheDocument()
+    // What the app said, in its own words: not the JSON-RPC body around them.
+    expect(within(failed).getByText('Request had invalid authentication credentials.')).toBeInTheDocument()
+    expect(failed).not.toHaveTextContent('{"code"')
     fireEvent.click(within(failed).getByRole('button', { name: 'Check again' }))
     await waitFor(() => expect(daemon.modelCalls).toEqual(['gemini', 'gemini']))
+  })
+
+  it('says a Gemini CLI that no other app can use needs an API key, without starting it to find out', async () => {
+    const daemon = fakeDaemon()
+    daemon.installed = [gemini]
+    // The daemon reads this from Gemini CLI's settings while listing, before any check.
+    daemon.checked.add('gemini')
+    daemon.verdicts.set('gemini', 'needs_api_key')
+    renderSetup([{ ...gemini, health: 'error', healthCause: 'needs_api_key', healthReason: needsKeyReason }])
+
+    const needsKey = card(/^Gemini: Needs an API key/)
+    expect(needsKey).toHaveTextContent(needsKeyReason)
+    expect(within(needsKey).queryByText(/sign-in or version problem|run "gemini" in Terminal to fix/)).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Set up an AI app' })).toBeInTheDocument()
+    const lists = () => vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/harnesses').length
+    fireEvent(window, new Event('focus'))
+    await waitFor(() => expect(lists()).toBeGreaterThanOrEqual(1))
+    expect(daemon.modelCalls).toEqual([])
+
+    fireEvent.click(within(needsKey).getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(daemon.modelCalls).toEqual(['gemini']))
+    expect(card(/^Gemini: Needs an API key/)).toBeInTheDocument()
   })
 })

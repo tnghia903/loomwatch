@@ -7,7 +7,7 @@
 //   OpenCode     https://opencode.ai/docs/                (install script → ~/.opencode/bin/opencode)
 // The daemon finds all three install folders without a restart (api.rs EXTRA_HARNESS_DIRECTORIES).
 // The sign-in commands match the daemon's own "isn’t signed in" sentence (api.rs SignInCheck).
-import type { DetectedHarness } from './harnesses'
+import { harnessSaid, type DetectedHarness } from './harnesses'
 
 export interface AppSetupGuide {
   /** The daemon's harness id. */
@@ -65,6 +65,8 @@ export type AppSetupState =
   | { kind: 'found' }
   | { kind: 'no_bridge'; reason: string }
   | { kind: 'signed_out'; reason: string }
+  /** Set up in a way no other app can use until it has an API key (Gemini CLI), said by the daemon. */
+  | { kind: 'needs_key'; reason: string }
   | { kind: 'failed'; reason: string; detail?: string }
   /**
    * Works, but the running LoomWatch cannot start it: it was installed after LoomWatch started,
@@ -80,7 +82,8 @@ export function appSetupState(harness: DetectedHarness | undefined, checking: bo
   if (harness.acpAvailable === false) return { kind: 'no_bridge', reason: harness.unavailableReason ?? `${harness.name} can’t be started by LoomWatch.` }
   if (harness.health === 'error') {
     if (harness.healthCause === 'signed_out') return { kind: 'signed_out', reason: harness.healthReason ?? `${harness.name} isn’t signed in.` }
-    return { kind: 'failed', reason: harness.healthReason ?? `${harness.name} couldn’t start.`, ...(harness.healthDetail ? { detail: harness.healthDetail } : {}) }
+    if (harness.healthCause === 'needs_api_key') return { kind: 'needs_key', reason: harness.healthReason ?? `${harness.name} needs an API key to work with other apps.` }
+    return { kind: 'failed', reason: harness.healthReason ?? `${harness.name} couldn’t start.`, ...(harness.healthDetail ? { detail: harnessSaid(harness.healthDetail) } : {}) }
   }
   if (harness.health !== 'ok') return { kind: 'found' }
   if (harness.needsRestart) return { kind: 'restart' }
