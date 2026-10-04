@@ -29,6 +29,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::api::{ApiError, normalized_relative_path, resolve_existing_team_path};
+use crate::approvals::{Approval, ReviewLine, TeamApprovals};
 use crate::archive::EventArchive;
 use crate::config::{DEFAULT_RUN_NOTION_TITLE, TeamConfig};
 use crate::notion::{PublishError, Publisher};
@@ -50,6 +51,8 @@ const PROTOCOL_FAILURE: &str = "protocol_failure";
 const SPAWN_FAILED: &str = "spawn_failed";
 /// Stable pre-acceptance codes from `RUN_PROVENANCE_CONTRACT` §11.
 const STALE_TEAM_REVISION: &str = "stale_team_revision";
+/// A run refused until the operator reviews what the team file starts (ADR 0048).
+const TEAM_NEEDS_REVIEW: &str = "team_needs_review";
 const IDEMPOTENCY_CONFLICT: &str = "idempotency_conflict";
 /// What a record left non-terminal by a previous process is failed with at boot. Operator-facing
 /// prose, not a code: the contract defines no code for a supervisor that went away, and the UI
@@ -558,6 +561,9 @@ pub struct RunRegistry {
     /// scheduler, shared by every clone; absent in tests and the CLI, where a delivery reports
     /// that publishing is unavailable rather than reaching the keychain.
     publisher: Arc<OnceLock<Arc<Publisher>>>,
+    /// The team revisions the operator approved to run here (ADR 0048). Installed once at startup,
+    /// before the scheduler's first tick; absent in tests and the CLI, which run what they are given.
+    approvals: Arc<OnceLock<Arc<TeamApprovals>>>,
 }
 
 /// Opaque: the records are the API's to report, and the REST router's state only needs to be
@@ -580,6 +586,7 @@ impl RunRegistry {
             inner: Arc::default(),
             store: Some(store),
             publisher: Arc::default(),
+            approvals: Arc::default(),
         }
     }
 
@@ -591,6 +598,17 @@ impl RunRegistry {
 
     fn publisher(&self) -> Option<Arc<Publisher>> {
         self.publisher.get().cloned()
+    }
+
+    /// Install the record of approved team revisions every run is checked against (ADR 0048). The
+    /// first call wins; the daemon makes exactly one, before the scheduler starts.
+    pub fn set_approvals(&self, approvals: Arc<TeamApprovals>) {
+        let _first = self.approvals.set(approvals);
+    }
+
+    /// The approvals record, when the daemon installed one.
+    pub(crate) fn approvals(&self) -> Option<Arc<TeamApprovals>> {
+        self.approvals.get().cloned()
     }
 
     /// Write one cached record through to Postgres. A no-op without a store.
@@ -1205,6 +1223,7 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
         .route("/api/runs/{id}/cancel", post(cancel_run))
         .route("/api/runs/{id}/deliver", post(deliver_run))
         .route("/api/runs/{id}/permissions", post(answer_permission))
+        .route("/api/team/approve", post(approve_team))
         .route_layer(middleware::from_fn(local_evidence))
         .with_state(RunsState {
             archive,
@@ -1260,6 +1279,18 @@ enum StartRunOutcome {
 enum LaunchError {
     Api(ApiError),
     StaleRevision { current: String },
+    NeedsReview(Box<NeedsReview>),
+}
+
+/// What the operator is shown before trusting a team file nobody approved here (ADR 0048).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NeedsReview {
+    team_path: String,
+    team_name: String,
+    /// Approving this exact revision is what `POST /api/team/approve` takes.
+    team_revision: String,
+    review: Vec<ReviewLine>,
 }
 
 impl From<ApiError> for LaunchError {
@@ -1275,6 +1306,14 @@ impl LaunchError {
             Self::StaleRevision { current } => ApiError::new(
                 StatusCode::CONFLICT,
                 format!("team revision is stale; current revision is {current}"),
+            ),
+            Self::NeedsReview(review) => ApiError::new(
+                StatusCode::CONFLICT,
+                format!(
+                    "{} was added or changed outside LoomWatch, so it doesn't run until you've \
+                     checked what it runs. Open it in LoomWatch and run it once to review it.",
+                    review.team_name
+                ),
             ),
         }
     }
@@ -1326,8 +1365,81 @@ async fn start_run(
             })),
         )
             .into_response()),
+        Err(LaunchError::NeedsReview(review)) => {
+            let mut body = serde_json::to_value(&*review).unwrap_or_else(|_| json!({}));
+            body["error"] = json!("Review what this team runs before it starts.");
+            body["code"] = json!(TEAM_NEEDS_REVIEW);
+            Ok((StatusCode::CONFLICT, Json(body)).into_response())
+        }
         Err(LaunchError::Api(error)) => Err(error),
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApproveTeamRequest {
+    team_path: String,
+    /// The revision the operator was shown in the review. A file that changed since is not
+    /// approved, so nobody approves bytes they never saw.
+    team_revision: String,
+}
+
+/// `POST /api/team/approve`: the operator read what a team file runs and chose to trust it
+/// (ADR 0048). Approves exactly the revision they were shown; a file that changed since answers
+/// 409 `stale_team_revision` with the current revision, and the UI shows the review again.
+async fn approve_team(
+    State(state): State<RunsState>,
+    body: Result<Json<ApproveTeamRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = body.map_err(|rejection| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("invalid approval: {}", rejection.body_text()),
+        )
+    })?;
+    let resolved = resolve_existing_team_path(&state.teams_root, Path::new(&request.team_path))?;
+    let relative = normalized_relative_path(&state.teams_root, &resolved).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "team path {} is not a UTF-8 path below the teams root",
+                request.team_path
+            ),
+        )
+    })?;
+    let bytes = fs::read(&resolved).map_err(|error| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("failed to read team file {}: {error}", resolved.display()),
+        )
+    })?;
+    let current = team_revision(&bytes);
+    if current != request.team_revision {
+        return Ok((
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "the team file changed after you reviewed it",
+                "code": STALE_TEAM_REVISION,
+                "currentTeamRevision": current,
+            })),
+        )
+            .into_response());
+    }
+    if let Some(approvals) = state.registry.approvals() {
+        approvals
+            .approve(&relative, &current, Approval::Reviewed)
+            .map_err(|error| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("LoomWatch could not keep your approval: {error}"),
+                )
+            })?;
+    }
+    Ok((
+        StatusCode::OK,
+        Json(json!({ "teamPath": relative, "teamRevision": current })),
+    )
+        .into_response())
 }
 
 async fn launch_manual(
@@ -1376,6 +1488,7 @@ async fn launch_manual(
         }
     }
 
+    let approvals = registry.approvals();
     let mut prepared = prepare_run(
         archive,
         teams_root,
@@ -1383,6 +1496,7 @@ async fn launch_manual(
         &request.prompt,
         RunTrigger::Manual,
         expected_revision,
+        approvals.as_deref(),
     )?;
     // Resolve and check the lineage *before* the run is registered or a harness spawns. Every
     // refusal here is a 4xx on a run that never existed, which is the only place they can be
@@ -1721,8 +1835,17 @@ pub(crate) fn launch(
     prompt: &str,
     trigger: RunTrigger,
 ) -> Result<RunRecord, ApiError> {
-    let prepared = prepare_run(archive, teams_root, team_path, prompt, trigger, None)
-        .map_err(LaunchError::into_api_error)?;
+    let approvals = registry.approvals();
+    let prepared = prepare_run(
+        archive,
+        teams_root,
+        team_path,
+        prompt,
+        trigger,
+        None,
+        approvals.as_deref(),
+    )
+    .map_err(LaunchError::into_api_error)?;
     let record = prepared.record.clone();
     let run_id = record.run_id.clone();
     registry.insert(record);
@@ -1764,6 +1887,7 @@ fn prepare_run(
     prompt: &str,
     trigger: RunTrigger,
     expected_revision: Option<&str>,
+    approvals: Option<&TeamApprovals>,
 ) -> Result<PreparedRun, LaunchError> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
@@ -1817,6 +1941,7 @@ fn prepare_run(
     })?;
     let team = TeamConfig::parse(source)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("{error:#}")))?;
+    check_approved(approvals, &relative, &current_revision, &team, &resolved)?;
     let Some(archive) = archive else {
         return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1867,6 +1992,28 @@ fn prepare_run(
     })
 }
 
+/// A team file nobody approved here starts nothing, scheduled or not (ADR 0048): it came from
+/// outside `LoomWatch`, or changed there, and the operator has not seen what it runs.
+fn check_approved(
+    approvals: Option<&TeamApprovals>,
+    relative: &str,
+    revision: &str,
+    team: &TeamConfig,
+    resolved: &Path,
+) -> Result<(), LaunchError> {
+    match approvals {
+        Some(approvals) if !approvals.is_approved(relative, revision) => {
+            Err(LaunchError::NeedsReview(Box::new(NeedsReview {
+                team_name: team_display_name(team, resolved),
+                team_path: relative.to_owned(),
+                team_revision: revision.to_owned(),
+                review: crate::approvals::review(team),
+            })))
+        }
+        _ => Ok(()),
+    }
+}
+
 fn spawn_prepared(registry: &RunRegistry, prepared: PreparedRun, run_id: &str) {
     if let Some(title) = prepared.record.deliver_title.clone() {
         tokio::spawn(deliver_when_finished(
@@ -1892,7 +2039,7 @@ fn spawn_prepared(registry: &RunRegistry, prepared: PreparedRun, run_id: &str) {
 }
 
 fn team_revision(bytes: &[u8]) -> String {
-    format!("sha256:{:x}", Sha256::digest(bytes))
+    crate::approvals::revision(bytes)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -4239,6 +4386,127 @@ exit 7
                 .to_owned();
             assert!(error.contains(expected), "{error}");
         }
+    }
+
+    /// ADR 0048: a team file that appeared after the teams folder was first opened — downloaded,
+    /// unzipped, written by an agent — starts nothing until the operator approves the revision
+    /// they were shown. The check runs before the archive's, so without a database an approved
+    /// team gets as far as "archive disabled" and an unapproved one never does.
+    #[tokio::test]
+    async fn a_team_nobody_approved_is_reviewed_before_it_runs() {
+        let dir = TeamsDir::new();
+        let approvals_home = TeamsDir::new();
+        let registry = RunRegistry::default();
+        registry.set_approvals(Arc::new(
+            TeamApprovals::open(&approvals_home.0, &dir.0).expect("open approvals"),
+        ));
+        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let team_path = dir.write_team("downloaded.yaml", &harness);
+        let revision = team_revision(&fs::read(&team_path).unwrap());
+        let app = router(None, dir.0.clone(), registry.clone());
+        let start = json!({"teamPath": "downloaded.yaml", "prompt": "hello"});
+
+        let refused = app
+            .clone()
+            .oneshot(post_json("/api/runs", &start))
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        let body = json_body(refused).await;
+        assert_eq!(body["code"], TEAM_NEEDS_REVIEW);
+        assert_eq!(body["teamPath"], "downloaded.yaml");
+        assert_eq!(body["teamRevision"], revision);
+        assert_eq!(body["teamName"], "Fake harness team");
+        let first = &body["review"][0];
+        assert_eq!(
+            first["warn"], true,
+            "a /bin/sh harness is not an app LoomWatch knows"
+        );
+        assert!(
+            first["text"]
+                .as_str()
+                .unwrap()
+                .starts_with("Solo runs `/bin/sh ")
+        );
+        assert!(registry.list().is_empty(), "a refused team starts no run");
+
+        let unseen = json!({"teamPath": "downloaded.yaml", "teamRevision": "sha256:other"});
+        let not_shown = app
+            .clone()
+            .oneshot(post_json("/api/team/approve", &unseen))
+            .await
+            .unwrap();
+        assert_eq!(not_shown.status(), StatusCode::CONFLICT);
+        assert_eq!(json_body(not_shown).await["code"], STALE_TEAM_REVISION);
+
+        let approve = json!({"teamPath": "downloaded.yaml", "teamRevision": revision});
+        let approved = app
+            .clone()
+            .oneshot(post_json("/api/team/approve", &approve))
+            .await
+            .unwrap();
+        assert_eq!(approved.status(), StatusCode::OK);
+        let started = app
+            .clone()
+            .oneshot(post_json("/api/runs", &start))
+            .await
+            .unwrap();
+        assert_eq!(
+            started.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "past the review, the run only lacks a database"
+        );
+
+        // A change made outside LoomWatch needs a new review.
+        fs::write(
+            &team_path,
+            fs::read_to_string(&team_path).unwrap() + "# edited\n",
+        )
+        .unwrap();
+        let changed = app.oneshot(post_json("/api/runs", &start)).await.unwrap();
+        assert_eq!(changed.status(), StatusCode::CONFLICT);
+        assert_eq!(json_body(changed).await["code"], TEAM_NEEDS_REVIEW);
+    }
+
+    /// Teams already in the folder when `LoomWatch` first opened it keep running unreviewed, and
+    /// the scheduler's and Control's path (`launch`) refuses an unapproved team with words.
+    #[tokio::test]
+    async fn teams_that_were_already_there_run_and_launch_refuses_new_ones() {
+        let dir = TeamsDir::new();
+        let approvals_home = TeamsDir::new();
+        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        dir.write_team("mine.yaml", &harness);
+        let registry = RunRegistry::default();
+        registry.set_approvals(Arc::new(
+            TeamApprovals::open(&approvals_home.0, &dir.0).expect("open approvals"),
+        ));
+        dir.write_team("downloaded.yaml", &harness);
+
+        let mine = launch(
+            &registry,
+            None,
+            &dir.0,
+            Path::new("mine.yaml"),
+            "hi",
+            RunTrigger::Schedule,
+        )
+        .expect_err("no archive in this test");
+        assert_eq!(mine.status, StatusCode::SERVICE_UNAVAILABLE);
+        let downloaded = launch(
+            &registry,
+            None,
+            &dir.0,
+            Path::new("downloaded.yaml"),
+            "hi",
+            RunTrigger::Schedule,
+        )
+        .expect_err("an unapproved team is refused");
+        assert_eq!(downloaded.status, StatusCode::CONFLICT);
+        assert!(
+            downloaded.message.contains("outside LoomWatch"),
+            "{}",
+            downloaded.message
+        );
     }
 
     #[tokio::test]

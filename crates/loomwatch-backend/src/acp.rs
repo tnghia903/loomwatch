@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
@@ -184,6 +184,25 @@ fn wired_tool_servers(
 /// The environment variable `codex-acp` reads its Codex config from, once, at startup.
 const CODEX_CONFIG: &str = "CODEX_CONFIG";
 
+/// Whether a variable the daemon was started with is its own business rather than the app's: the
+/// database it archives runs in (`DATABASE_URL` carries the password, and an agent allowed to run
+/// commands could read every run with it) and `LoomWatch`'s own settings (ADR 0048). Everything
+/// else — the operator's proxy, API keys, `PATH` — still reaches the app. The container runner's
+/// client keeps the two variables it connects with.
+fn daemon_only(key: &str, spec: &ProcessSpec) -> bool {
+    let runner_client = Path::new(&spec.cmd)
+        .file_name()
+        .is_some_and(|name| name == "loomwatchd")
+        && spec.args.first().is_some_and(|arg| arg == "harness-client");
+    match key {
+        "DATABASE_URL" | "PGPASSWORD" => true,
+        crate::host_runner::RUNNER_ADDR_ENV | crate::host_runner::RUNNER_TOKEN_ENV => {
+            !runner_client
+        }
+        _ => key.starts_with("POSTGRES_") || key.starts_with("LOOMWATCH_"),
+    }
+}
+
 /// The `CODEX_CONFIG` a run agent's Codex is started with (ADR 0047), or `None` for a session
 /// with no policy (Ask, model discovery) and for every other app. The counterpart of
 /// [`AcpProcess::session_params`]'s `_meta` for Claude Code: `codex-acp` takes no per-session
@@ -254,6 +273,13 @@ impl AcpProcess {
     /// Returns an error when the process cannot be spawned or its streams are unavailable.
     pub fn spawn(spec: &ProcessSpec) -> Result<Self> {
         let mut command = Command::new(&spec.cmd);
+        for (key, _) in std::env::vars_os() {
+            if let Some(key) = key.to_str()
+                && daemon_only(key, spec)
+            {
+                command.env_remove(key);
+            }
+        }
         command
             .args(&spec.args)
             .envs(&spec.env)
@@ -3629,6 +3655,86 @@ mod tests {
             .run_session("ask", "", "hello", &archive, Duration::from_secs(2))
             .await
             .expect("a session with no policy keeps every tool");
+    }
+
+    /// ADR 0048: the daemon's own variables stay with the daemon; the operator's reach the app.
+    #[test]
+    fn only_the_daemons_own_variables_are_kept_from_an_agent() {
+        let spec = |cmd: &str, args: &[&str]| ProcessSpec {
+            cmd: cmd.into(),
+            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+            env: BTreeMap::new(),
+            cwd: PathBuf::from("."),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        };
+        let agent = spec("claude-agent-acp", &[]);
+        for key in [
+            "DATABASE_URL",
+            "PGPASSWORD",
+            "POSTGRES_PASSWORD",
+            "LOOMWATCH_COMMIT",
+            "LOOMWATCH_HOST_RUNNER_TOKEN",
+        ] {
+            assert!(daemon_only(key, &agent), "{key} must not reach an agent");
+        }
+        for key in [
+            "PATH",
+            "HOME",
+            "ANTHROPIC_API_KEY",
+            "HTTPS_PROXY",
+            "CODEX_CONFIG",
+        ] {
+            assert!(!daemon_only(key, &agent), "{key} must still reach an agent");
+        }
+        let runner = spec(
+            "/usr/local/bin/loomwatchd",
+            &["harness-client", "--harness", "claude"],
+        );
+        assert!(!daemon_only("LOOMWATCH_HOST_RUNNER_TOKEN", &runner));
+        assert!(!daemon_only("LOOMWATCH_HOST_RUNNER_ADDR", &runner));
+        assert!(daemon_only("DATABASE_URL", &runner));
+    }
+
+    /// ADR 0048, end to end: `#[sqlx::test]` needs `DATABASE_URL`, so this process has it, and the
+    /// fake app exits 9, failing its session, if it reaches the app.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn an_agent_does_not_inherit_the_daemons_database_address(pool: PgPool) {
+        assert!(std::env::var_os("DATABASE_URL").is_some());
+        let script = r#"
+            set -eu
+            [ -z "${DATABASE_URL+set}" ] || exit 9
+            [ -n "${PATH-}" ] || exit 8
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"env"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
+        "#;
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into(), "claude-agent-acp".into()],
+            env: BTreeMap::new(),
+            cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        };
+        AcpProcess::spawn(&spec)
+            .expect("spawn")
+            .run_session(
+                "agent",
+                "",
+                "hello",
+                &EventArchive::from_pool(pool),
+                Duration::from_secs(2),
+            )
+            .await
+            .expect("the agent starts without the daemon's DATABASE_URL");
     }
 
     /// ADR 0047: a Codex run agent is started without its plugins and apps — the `ChatGPT` app's

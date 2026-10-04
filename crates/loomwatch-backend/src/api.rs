@@ -1439,6 +1439,9 @@ async fn put_team(
     })?;
     let resolved_path = resolve_writable_team_path(&state.teams_root, &team_file.path)?;
     let create = check_precondition(&headers, &resolved_path)?;
+    let previous = fs::read(&resolved_path)
+        .ok()
+        .map(|bytes| crate::approvals::revision(&bytes));
     atomic_write(&resolved_path, team_file.yaml.as_bytes(), create).map_err(|error| {
         ApiError::new(
             if error.kind() == io::ErrorKind::AlreadyExists {
@@ -1452,6 +1455,22 @@ async fn put_team(
             ),
         )
     })?;
+    // A team built here, or changed in the editor from a version the operator approved, is
+    // theirs to run (ADR 0048). Saving a team that came from outside does not stand in for
+    // reviewing it: it stays unapproved until its first run shows what it starts.
+    if let Some(approvals) = state.runs.approvals()
+        && let Some(relative) = normalized_relative_path(&state.teams_root, &resolved_path)
+        && previous
+            .as_deref()
+            .is_none_or(|revision| approvals.is_approved(&relative, revision))
+        && let Err(error) = approvals.approve(
+            &relative,
+            &crate::approvals::revision(team_file.yaml.as_bytes()),
+            crate::approvals::Approval::Saved,
+        )
+    {
+        eprintln!("warning: could not record that {relative} was saved in LoomWatch: {error}");
+    }
     Ok(team_response(&team_file))
 }
 
@@ -2290,6 +2309,49 @@ pub fn detect_harnesses(search_path: Option<&std::ffi::OsStr>) -> Vec<DetectedHa
                 .map(|path| detected(search_path, *spec, &path))
         })
         .collect()
+}
+
+/// The app a team file's `spawn` starts, named for a person, when it is exactly how `LoomWatch` starts
+/// a harness it knows: the bare bridge command, compared whole, with that harness's own arguments,
+/// or `npx -y` of its bridge package. A path (`./claude-agent-acp`) could be any program, and an extra argument
+/// can change what a known one does (`gemini --acp --yolo`, `npx --registry …`), so both read as
+/// a program `LoomWatch` doesn't know and the operator is shown the command itself (ADR 0048).
+#[must_use]
+pub(crate) fn known_app_name(spawn: &crate::config::SpawnConfig) -> Option<&'static str> {
+    let command = spawn.cmd.as_str();
+    let args: Vec<&str> = spawn.args.iter().map(String::as_str).collect();
+    let name = |spec: &HarnessSpec| match spec.id {
+        "claude" => "Claude Code",
+        "gemini" => "Gemini CLI",
+        _ => spec.name,
+    };
+    for spec in HARNESSES {
+        let Some(bridge) = spec.acp else {
+            continue;
+        };
+        if command == bridge.command && args == bridge.args {
+            return Some(name(spec));
+        }
+        // OpenCode as LoomWatch's own examples start it, without the project's config.
+        if spec.id == "opencode" && command == "opencode" && args == ["acp", "--pure"] {
+            return Some(name(spec));
+        }
+        let Some(package) = bridge.fallback_package else {
+            continue;
+        };
+        let package = package.rsplit_once('@').map_or(package, |(name, _)| name);
+        if command == "npx"
+            && let [flag, requested] = args.as_slice()
+            && matches!(*flag, "-y" | "--yes")
+            && (*requested == package
+                || requested
+                    .strip_prefix(package)
+                    .is_some_and(|version| version.starts_with('@')))
+        {
+            return Some(name(spec));
+        }
+    }
+    None
 }
 
 /// Every id in the catalog, so the UI need not keep a second copy of the vendor list.

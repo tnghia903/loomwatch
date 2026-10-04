@@ -130,15 +130,46 @@ export interface RunRecord {
 export const STALE_TEAM_REVISION = 'stale_team_revision'
 /** §1.6: this start key is already bound to a different request fingerprint. */
 export const IDEMPOTENCY_CONFLICT = 'idempotency_conflict'
+/**
+ * ADR 0048: the team file came from outside LoomWatch, or changed there, so no run was created
+ * until the operator has seen what it runs. The error carries that review.
+ */
+export const TEAM_NEEDS_REVIEW = 'team_needs_review'
+
+/** What a team file will start, allow and read, in the daemon's plain words (ADR 0048). */
+export interface TeamReview {
+  teamPath: string
+  teamName: string
+  /** Approving this exact revision is what `approveTeam` takes. */
+  teamRevision: string
+  review: { text: string; warn: boolean }[]
+}
 
 export class RunApiError extends Error {
   readonly status: number
-  /** The daemon's machine-readable reason, where it sends one — both 409s carry it. */
+  /** The daemon's machine-readable reason, where it sends one — every 409 carries it. */
   readonly code: string | null
-  constructor(message: string, status: number, code: string | null = null) {
+  /** What the team runs, when `code` is `team_needs_review`. */
+  readonly review: TeamReview | null
+  constructor(message: string, status: number, code: string | null = null, review: TeamReview | null = null) {
     super(message)
     this.status = status
     this.code = code
+    this.review = review
+  }
+}
+
+function teamReview(body: unknown): TeamReview | null {
+  if (!body || typeof body !== 'object') return null
+  const { teamPath, teamName, teamRevision, review } = body as Record<string, unknown>
+  if (typeof teamPath !== 'string' || typeof teamRevision !== 'string' || !Array.isArray(review)) return null
+  return {
+    teamPath,
+    teamName: typeof teamName === 'string' && teamName ? teamName : teamPath,
+    teamRevision,
+    review: review
+      .filter((line): line is { text: string; warn?: unknown } => !!line && typeof line === 'object' && typeof (line as { text?: unknown }).text === 'string')
+      .map((line) => ({ text: line.text, warn: line.warn === true })),
   }
 }
 
@@ -150,7 +181,7 @@ async function readRun<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const message = body && typeof body === 'object' && 'error' in body && body.error ? String(body.error) : `${response.status} ${response.statusText}`
     const code = body && typeof body === 'object' && 'code' in body && body.code ? String(body.code) : null
-    throw new RunApiError(message, response.status, code)
+    throw new RunApiError(message, response.status, code, code === TEAM_NEEDS_REVIEW ? teamReview(body) : null)
   }
   return body as T
 }
@@ -208,6 +239,19 @@ export async function startRun(teamPath: string, prompt: string, { startKey, exp
   })
   // 202 = started, 200 = this key already started it. Both answer with that one run record.
   return readRun<RunRecord>(response)
+}
+
+/**
+ * The operator read what a team runs and trusts it (ADR 0048). Approves exactly the revision they
+ * were shown: a file that changed since is refused with `stale_team_revision`.
+ */
+export async function approveTeam(teamPath: string, teamRevision: string): Promise<void> {
+  await readRun<unknown>(await daemonFetch('/api/team/approve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ teamPath, teamRevision }),
+    cache: 'no-store',
+  }))
 }
 
 /**

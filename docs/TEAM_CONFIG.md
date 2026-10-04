@@ -57,10 +57,16 @@ depend on the document as a whole:
   fields. RFC 3339 spells its literals case-insensitively, and `RunEvent.ts` is minted
   upstream, so the lowercase `t` and `z` separators are accepted on read. LoomWatch emits
   the uppercase form.
-- Child processes inherit the LoomWatch process environment. `spawn.env` entries are
-  applied on top as literal overrides; LoomWatch performs no shell expansion, and team
-  files must not contain credentials. An override of `PATH` changes resolution of a bare
-  `spawn.cmd`, so an untrusted team file must be treated with the same care as a script.
+- Child processes inherit the LoomWatch process environment, minus LoomWatch's own
+  variables (`DATABASE_URL`, `PGPASSWORD`, `POSTGRES_*`, `LOOMWATCH_*`). `spawn.env` entries
+  are applied on top as literal overrides; LoomWatch performs no shell expansion, and team
+  files must not contain credentials. A team file may not set a variable that changes which
+  code the app loads, where it connects or which settings it reads: `PATH`, `HOME`,
+  `NODE_OPTIONS`, `LD_*`, `DYLD_*`, proxies, `*_BASE_URL`, `*_HOME`, `XDG_*` and the like are
+  refused, naming the variable ([ADR 0048](decisions/0048-run-only-teams-you-approved.md)).
+- A team file is still a list of programs to run, so one that did not come from LoomWatch's
+  editor shows what it runs before its first run, and its schedule waits until the operator
+  trusts it (ADR 0048).
 - `Agent.model` stores the harness model id. Optional `Agent.thinkingEffort` stores the
   harness's reasoning-effort id separately; at session start LoomWatch applies both through
   ACP configuration. Older combined selectors such as `gpt-6-astra[high]` remain readable.
@@ -92,7 +98,7 @@ depend on the document as a whole:
 
 Paths in `spawn.cwd` may be absolute or relative. A relative path is resolved against the
 directory containing the team file. `spawn.cmd` must be either a bare executable name
-resolved on the effective `PATH` after applying `spawn.env`, or an absolute path. Relative
+resolved on LoomWatch's `PATH`, or an absolute path. Relative
 commands containing a path separator are rejected. The command is executed directly with
 `spawn.args`; it is never passed through a shell.
 
