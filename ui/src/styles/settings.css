@@ -94,6 +94,15 @@
 .lw-settings-quiet { color: var(--color-ink-3); }
 .lw-settings-start { align-self: flex-start; }
 
+/* A second way in, folded below the main one. The summary keeps its own display so
+   its disclosure triangle stays; the children are spaced like the section's. */
+.lw-settings-advanced > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--color-ink-2);
+}
+.lw-settings-advanced > * + * { margin-top: var(--sp-3); }
+
 @media (max-width: 767px) {
   .lw-settings { padding: var(--sp-6) var(--sp-4); }
   .lw-settings-search { flex-direction: column; align-items: stretch; }

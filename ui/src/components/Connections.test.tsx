@@ -16,7 +16,7 @@ describe('Notion connections', () => {
     render(<Connections />)
     const input = await screen.findByLabelText('Notion integration token')
     fireEvent.change(input, { target: { value: 'test-secret' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Connect with token' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Notion rejected this token.')
     expect(input).toHaveValue('')
     expect(fetch.mock.calls[1][1].headers['X-LoomWatch-Request']).toBe('1')
@@ -38,5 +38,62 @@ describe('Notion connections', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Disconnect Notion' }))
     expect(await screen.findByLabelText('Notion integration token')).toHaveValue('')
     expect(fetch.mock.calls[3][1].method).toBe('DELETE')
+  })
+})
+
+describe('Notion sign-in', () => {
+  // jsdom makes location.assign non-configurable, so stand in a whole location.
+  const real = window.location
+  function standIn(search = '') {
+    const assign = vi.fn()
+    Object.defineProperty(window, 'location', { configurable: true, value: { href: `http://127.0.0.1:3000/connections${search}`, pathname: '/connections', search, hash: '', assign } })
+    return assign
+  }
+  afterEach(() => { Object.defineProperty(window, 'location', { configurable: true, value: real }) })
+
+  it('connects with the Notion account first and keeps the token way under Advanced', async () => {
+    const assign = standIn()
+    const fetch = vi.fn().mockResolvedValueOnce(response({ connected: false }))
+      .mockResolvedValueOnce(response({ url: 'https://mcp.notion.com/authorize?client_id=c' }))
+    vi.stubGlobal('fetch', routed(fetch))
+    render(<Connections />)
+    const advanced = (await screen.findByText('Advanced: connect with an integration token')).closest('details')
+    expect(advanced).not.toHaveAttribute('open')
+    expect(advanced).toContainElement(screen.getByLabelText('Notion integration token'))
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }))
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('https://mcp.notion.com/authorize?client_id=c'))
+    expect(fetch.mock.calls[1][0]).toBe('/api/notion/sign-in')
+    expect(fetch.mock.calls[1][1].method).toBe('POST')
+    expect(fetch.mock.calls[1][1].headers['X-LoomWatch-Request']).toBe('1')
+  })
+
+  it('back from Notion, says so once and lists pages to choose from', async () => {
+    standIn('?notion=connected')
+    const replace = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {})
+    const page = { id: '550e8400-e29b-41d4-a716-446655440000', title: 'Daily News' }
+    const fetch = vi.fn().mockResolvedValueOnce(response({ connected: true, name: 'Acme', destination: null, via: 'signIn' }))
+      .mockResolvedValueOnce(response({ pages: [page], nextCursor: null }))
+    vi.stubGlobal('fetch', routed(fetch))
+    render(<Connections />)
+    expect(await screen.findByRole('status')).toHaveTextContent('Notion is connected. Choose the page your teams’ answers go under.')
+    expect(await screen.findByRole('button', { name: 'Daily News' })).toBeInTheDocument()
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ query: '' })
+    expect(screen.getByText(/Connected with your Notion account/)).toBeInTheDocument()
+    expect(replace).toHaveBeenCalledWith(null, '', '/connections')
+    replace.mockRestore()
+  })
+
+  it.each([
+    ['denied', 'Notion sign-in was canceled. Nothing changed.'],
+    ['expired', 'That sign-in took too long or was already used. Click Connect Notion to try again.'],
+    ['failed', 'Notion sign-in didn’t finish. Check your internet connection and try again.'],
+  ])('explains a sign-in that ended %s', async (outcome, message) => {
+    standIn(`?notion=${outcome}`)
+    const replace = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {})
+    vi.stubGlobal('fetch', routed(vi.fn().mockResolvedValueOnce(response({ connected: false }))))
+    render(<Connections />)
+    expect(await screen.findByRole('alert')).toHaveTextContent(message)
+    expect(await screen.findByRole('button', { name: 'Connect Notion' })).toBeEnabled()
+    replace.mockRestore()
   })
 })
