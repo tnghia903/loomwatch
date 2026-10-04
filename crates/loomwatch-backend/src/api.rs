@@ -25,6 +25,8 @@ use crate::capabilities::{
 use crate::composer::{ComposerLayout, layout_path};
 use crate::config::TeamConfig;
 
+mod gemini_auth;
+
 pub(crate) const TEAM_SCHEMA: &str = include_str!("../../../schemas/team.schema.yaml");
 
 #[derive(Debug, Clone)]
@@ -199,6 +201,8 @@ const HARNESSES: &[HarnessSpec] = &[
             args: &["--acp"],
             fallback_package: None,
         }),
+        // No status command: whether it can work with another app is read from its settings
+        // instead (`gemini_auth`).
         sign_in: None,
     },
     HarnessSpec {
@@ -325,6 +329,9 @@ pub enum HarnessHealth {
 pub enum HealthCause {
     /// The harness's own CLI said its account is signed out.
     SignedOut,
+    /// The harness is set up in a way that can't work with another app until it has an API key:
+    /// Gemini CLI with a Google sign-in, or with API-key sign-in and no key (`gemini_auth`).
+    NeedsApiKey,
 }
 
 /// `GET /api/harnesses`: what was found, and where it was looked for.
@@ -772,6 +779,12 @@ fn apply_harness_health(
                     "{}: sign-in or version problem — run \"{}\" in Terminal to fix",
                     harness.name, harness.command
                 ));
+                // Gemini CLI says which of its two known setups failed; running it fixes neither.
+                if harness.id == gemini_auth::HARNESS_ID
+                    && let Some(why) = gemini_auth::unusable_from_error(detail)
+                {
+                    mark_needs_api_key(harness, why);
+                }
                 harness.health_detail = Some(detail.clone());
             }
         }
@@ -792,6 +805,27 @@ fn mark_signed_out(harness: &mut DetectedHarness, check: SignInCheck) {
     harness.health_detail = None;
 }
 
+fn mark_needs_api_key(harness: &mut DetectedHarness, why: gemini_auth::Unusable) {
+    harness.health = Some(HarnessHealth::Error);
+    harness.health_cause = Some(HealthCause::NeedsApiKey);
+    harness.health_reason = Some(why.reason().to_owned());
+}
+
+/// What Gemini CLI's own settings say about working with another app (`gemini_auth`), read
+/// without starting it. `None` for every other harness, and for one proxied from the host runner.
+async fn gemini_unusable(
+    state: &ApiState,
+    harness: &DetectedHarness,
+) -> Option<gemini_auth::Unusable> {
+    if harness.id != gemini_auth::HARNESS_ID
+        || !harness.acp_available
+        || !Path::new(&harness.executable_path).is_absolute()
+    {
+        return None;
+    }
+    gemini_auth::check(state.home_dir.as_deref(), &state.teams_root).await
+}
+
 /// Ask the harnesses' own CLIs whether they are signed in, for every harness without a fresh
 /// handshake verdict, so the list never calls a signed-out app ready.
 ///
@@ -807,6 +841,13 @@ async fn apply_sign_in_status(state: &ApiState, harnesses: &mut [DetectedHarness
         .iter_mut()
         .filter(|harness| harness.health != Some(HarnessHealth::Ok))
     {
+        // Gemini CLI has no status command; its settings answer the same question without
+        // starting it (at most a keychain lookup by `security`, on macOS).
+        if let Some(why) = gemini_unusable(state, harness).await {
+            mark_needs_api_key(harness, why);
+            harness.health_detail = None;
+            continue;
+        }
         match sign_in_status(harness, &state.teams_root).await {
             Some((check, false)) => mark_signed_out(harness, check),
             Some((_, true)) if harness.health_cause == Some(HealthCause::SignedOut) => {
@@ -883,6 +924,15 @@ async fn get_harness_models(
         return Err(ApiError::new(
             StatusCode::CONFLICT,
             format!("{} does not have an available ACP adapter", harness.name),
+        ));
+    }
+
+    // A Gemini CLI its settings say can't work with another app is never started: the list reads
+    // the same settings, so no verdict needs recording.
+    if let Some(why) = gemini_unusable(&state, &harness).await {
+        return Err(ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            why.reason().to_owned(),
         ));
     }
 
@@ -3302,13 +3352,21 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             .unwrap_or_else(|| panic!("{id} listed"))
     }
 
+    /// A Gemini CLI whose settings can't be faulted (it has a key), so a check goes on to start it.
+    fn gemini_with_a_key(home: &Path) -> gemini_auth::tests::FakeEnvironmentGuard {
+        gemini_auth::tests::use_fake_environment(
+            gemini_auth::tests::FakeEnvironment::new(home).with_var("GEMINI_API_KEY", "test-key"),
+        )
+    }
+
     /// Field report: `gemini` was on PATH, so the list said it was available and the UI offered
     /// it as ready, while every model lookup failed. The list now carries what discovery last
     /// saw — and only that: listing must not start an app to find out. (It does ask the CLIs
-    /// that have a sign-in status command; neither of these has one.)
+    /// that have a sign-in status command, and reads Gemini CLI's settings, which here have a key.)
     #[tokio::test]
     async fn harness_list_reports_the_last_discovery_outcome_without_spawning() {
         let directory = TempDirectory::new();
+        let _gemini = gemini_with_a_key(&directory.0);
         create_executable_with_contents(&directory.0, "gemini", REFUSING_GEMINI);
         create_executable_with_contents(&directory.0, "opencode", ANSWERING_OPENCODE);
         let search_path = std::env::join_paths([&directory.0]).expect("join search path");
@@ -3348,9 +3406,11 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             "health never rewrites acpAvailable"
         );
         assert_eq!(gemini["health"], "error");
+        // Running "gemini" fixes neither of Gemini CLI's known refusals; the reason names the fix.
+        assert_eq!(gemini["healthCause"], "needs_api_key");
         assert_eq!(
             gemini["healthReason"],
-            "Gemini: sign-in or version problem — run \"gemini\" in Terminal to fix"
+            gemini_auth::Unusable::GoogleSignIn.reason()
         );
         let detail = gemini["healthDetail"].as_str().expect("health detail");
         assert!(
@@ -3371,6 +3431,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
     #[tokio::test]
     async fn another_sites_page_cannot_start_an_app_through_the_api() {
         let directory = TempDirectory::new();
+        let _gemini = gemini_with_a_key(&directory.0);
         create_executable_with_contents(&directory.0, "gemini", REFUSING_GEMINI);
         let search_path = std::env::join_paths([&directory.0]).expect("join search path");
         let router = test_router_with_path(&directory.0, Some(search_path));
@@ -3414,6 +3475,67 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             assert_eq!(response.status(), StatusCode::BAD_GATEWAY, "{headers:?}");
         }
         assert_eq!(launches(), 3, "the app's own page reaches discovery");
+    }
+
+    /// Field report (2026-10-04): Home, New team and the guide offered Gemini as ready, and only a
+    /// check that started it found "Gemini API key is missing or not configured." Its settings
+    /// say so first, so the list never calls it ready and a check never starts it.
+    #[tokio::test]
+    async fn a_gemini_without_an_api_key_is_never_called_ready_or_started() {
+        let directory = TempDirectory::new();
+        let _gemini = gemini_auth::tests::use_fake_environment(
+            gemini_auth::tests::FakeEnvironment::new(&directory.0),
+        );
+        create_executable_with_contents(&directory.0, "gemini", REFUSING_GEMINI);
+        let search_path = std::env::join_paths([&directory.0]).expect("join search path");
+        let router = test_router_with_path(&directory.0, Some(search_path));
+        let launches = directory.0.join("gemini.launches");
+        let reason = gemini_auth::Unusable::NoApiKey.reason();
+
+        let (status, report) = get_json(&router, "/api/harnesses").await;
+        assert_eq!(status, StatusCode::OK);
+        let gemini = listed(&report, "gemini");
+        assert_eq!(gemini["acpAvailable"], true);
+        assert_eq!(gemini["health"], "error");
+        assert_eq!(gemini["healthCause"], "needs_api_key");
+        assert_eq!(gemini["healthReason"], reason);
+        assert!(gemini.get("healthDetail").is_none(), "{gemini}");
+
+        let (status, refused) = get_json(&router, "/api/harnesses/gemini/models").await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(refused["error"], reason);
+        assert_eq!(line_count(&launches), 0, "Gemini was started");
+    }
+
+    /// Google refuses a personal sign-in for other apps, and a key alone doesn't switch Gemini CLI
+    /// off it, so the reason says to choose the key in Gemini CLI too.
+    #[tokio::test]
+    async fn a_gemini_signed_in_with_google_is_told_to_switch_to_a_key() {
+        let directory = TempDirectory::new();
+        fs::create_dir_all(directory.0.join(".gemini")).expect("gemini folder");
+        fs::write(
+            directory.0.join(".gemini/settings.json"),
+            r#"{"security":{"auth":{"selectedType":"oauth-personal"}}}"#,
+        )
+        .expect("gemini settings");
+        let _gemini = gemini_auth::tests::use_fake_environment(
+            gemini_auth::tests::FakeEnvironment::new(&directory.0)
+                .with_var("GEMINI_API_KEY", "test-key"),
+        );
+        create_executable_with_contents(&directory.0, "gemini", REFUSING_GEMINI);
+        let search_path = std::env::join_paths([&directory.0]).expect("join search path");
+        let router = test_router_with_path(&directory.0, Some(search_path));
+
+        let (_, report) = get_json(&router, "/api/harnesses").await;
+        let gemini = listed(&report, "gemini");
+        assert_eq!(gemini["healthCause"], "needs_api_key");
+        assert_eq!(
+            gemini["healthReason"],
+            gemini_auth::Unusable::GoogleSignIn.reason()
+        );
+        let (status, _) = get_json(&router, "/api/harnesses/gemini/models").await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(line_count(&directory.0.join("gemini.launches")), 0);
     }
 
     /// A `claude-agent-acp` that, like the real one, opens a session for a signed-out account.

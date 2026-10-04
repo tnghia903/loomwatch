@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchHarnesses, fetchHarnessModels, harnessProblem, HarnessesApiError, isHarnessRunnable, knownHarness, monogramForSpawnCmd, type DetectedHarness } from './harnesses'
+import { fetchHarnesses, fetchHarnessModels, harnessProblem, harnessSaid, HarnessesApiError, isHarnessRunnable, knownHarness, monogramForSpawnCmd, type DetectedHarness } from './harnesses'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -119,9 +119,31 @@ describe('harness readiness', () => {
     expect(harnessProblem(fresh)).toBe('Gemini was installed after LoomWatch started. Restart LoomWatch to use it.')
   })
 
+  it('never offers a Gemini CLI that needs an API key, and says how to give it one', () => {
+    const reason = 'Gemini CLI needs a Gemini API key to work with other apps: set GEMINI_API_KEY, then restart LoomWatch.'
+    const needsKey = { ...gemini, health: 'error' as const, healthCause: 'needs_api_key' as const, healthReason: reason }
+    expect(isHarnessRunnable(needsKey)).toBe(false)
+    expect(harnessProblem(needsKey)).toBe(reason)
+  })
+
   it('reports a missing ACP bridge before any health verdict', () => {
     const pi = { ...gemini, id: 'pi', name: 'pi', acpAvailable: false, unavailableReason: 'pi has no ACP adapter.', health: 'error' as const, healthReason: 'unused' }
     expect(isHarnessRunnable(pi)).toBe(false)
     expect(harnessProblem(pi)).toBe('pi has no ACP adapter.')
+  })
+})
+
+describe('what an app said', () => {
+  it('keeps the app’s own message, not the JSON-RPC body LoomWatch wrapped it in', () => {
+    expect(harnessSaid('ACP session/new failed during model discovery: ACP error response: {"code":-32000,"message":"Gemini API key is missing or not configured."}'))
+      .toBe('Gemini API key is missing or not configured.')
+    // The daemon cuts a long detail short, mid-body; the message still reads.
+    expect(harnessSaid('ACP error response: {"code":-32000,"message":"Quota \\"free\\" is used up","data":{"reason":"RESOURCE_EXHAUSTED","detai…'))
+      .toBe('Quota "free" is used up')
+  })
+
+  it('leaves text that carries no message as it is', () => {
+    expect(harnessSaid('ACP initialize failed during model discovery: the app exited')).toBe('ACP initialize failed during model discovery: the app exited')
+    expect(harnessSaid('ACP error response: {"code":-32000,"message":""}')).toBe('ACP error response: {"code":-32000,"message":""}')
   })
 })

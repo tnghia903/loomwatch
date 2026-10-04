@@ -1,7 +1,7 @@
 import { ArrowRight, Check } from 'lucide-react'
 import { useId, useState } from 'react'
 
-import { fetchHarnessModels, harnessProblem, type DetectedHarness } from '../../lib/harnesses'
+import { fetchHarnessModels, harnessProblem, harnessSaid, type DetectedHarness } from '../../lib/harnesses'
 import { saveTeamFile } from '../../lib/team-file/client'
 import { teamIdForPath } from '../../lib/team-file/useTeamDocument'
 import { rankHarnesses, TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath, type TeamTemplateId } from '../../lib/team-file/templates'
@@ -119,7 +119,7 @@ export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose
           {ranked.length === 0 && failing.length > 0 && <p className="nt-note">None of your AI apps can start right now, so only an empty team is available.{setUpLink}</p>}
           {failing.length > 0 && (
             <ul className="nt-note nt-problems" aria-label="Apps that need attention">
-              {failing.map((harness) => <li key={harness.id} title={harness.healthDetail}>{harnessProblem(harness)}</li>)}
+              {failing.map((harness) => <li key={harness.id} title={harness.healthDetail && harnessSaid(harness.healthDetail)}>{harnessProblem(harness)}</li>)}
             </ul>
           )}
           {openTeamUnsaved && <p className="nt-note warn">The open team has unsaved changes. Save it first, or they will be lost.</p>}

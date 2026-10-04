@@ -12,6 +12,17 @@
 - **Amends:** the rule, stated on `GET /api/harnesses` since the Gemini field report, that listing
   never starts anything. Listing now runs each vendor's own sign-in status command. It still never
   starts an app.
+- **Amended 2026-10-04:** Gemini CLI has no status command, so its own settings stand in for one
+  (`api/gemini_auth.rs`). Over ACP it signs in as `security.auth.selectedType` in
+  `~/.gemini/settings.json` says, with a Gemini API key when nothing is chosen. A Google sign-in
+  (refused for other apps unless a Google Cloud project is set), or API-key sign-in with no key in
+  the environment, a `.env` file Gemini CLI loads, or the keychain item its /auth dialog saves,
+  reads as `health: error` with `healthCause: needs_api_key` on the list, and the models endpoint
+  refuses it without starting Gemini (decisions 4 and 5). Anything else, including an
+  administrator's or a team folder's own Gemini settings, is left to the handshake. A handshake
+  that fails with Gemini CLI's own "Gemini API key is missing" or "This client is no longer
+  supported" gets the same reason instead of "run "gemini" in Terminal to fix", which fixes neither.
+  The setup panel shows such an app as **Needs an API key**.
 
 ## Context
 

@@ -27,6 +27,7 @@ const STATUS: Record<AppSetupState['kind'], { chip: ChipState; text: string }> =
   found: { chip: 'new', text: 'Not checked yet' },
   no_bridge: { chip: 'failed', text: 'Can’t be used' },
   signed_out: { chip: 'incomplete', text: 'Not signed in' },
+  needs_key: { chip: 'incomplete', text: 'Needs an API key' },
   failed: { chip: 'failed', text: 'Can’t start' },
   restart: { chip: 'incomplete', text: 'Restart LoomWatch' },
   ready: { chip: 'saved', text: 'Ready' },
@@ -95,6 +96,12 @@ function AppCard({ guide, state, connector, onCheck }: { guide: CardGuide; state
       {state.kind === 'signed_out' && (
         <div className="hs-fix">
           {guide.signIn ? <><span>Sign in. This opens your browser:</span><CommandLine command={guide.signIn} /></> : <span>{state.reason}</span>}
+          <span className="hs-fix-acts">{checkAgain}<span className="t-meta">LoomWatch also checks again when you come back to this window.</span></span>
+        </div>
+      )}
+      {state.kind === 'needs_key' && (
+        <div className="hs-fix">
+          <span>{state.reason}</span>
           <span className="hs-fix-acts">{checkAgain}<span className="t-meta">LoomWatch also checks again when you come back to this window.</span></span>
         </div>
       )}
@@ -256,7 +263,7 @@ export function AppSetup({ harnesses, onChanged, onHide }: AppSetupProps) {
           />
         ))}
       </ul>
-      <p className="home-setup-foot t-meta">Terminal is in Applications › Utilities. LoomWatch also works with Gemini CLI, Hermes and OpenClaw if you already use them.</p>
+      <p className="home-setup-foot t-meta">Terminal is in Applications › Utilities. LoomWatch also works with Hermes, OpenClaw, and Gemini CLI with a Gemini API key, if you already use them.</p>
     </section>
   )
 }

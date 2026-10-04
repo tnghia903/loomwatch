@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { openFeedback } from '../../lib/feedback/report'
 import { relativeTime } from '../../lib/format'
-import { fetchHarnessModels, harnessProblem, isHarnessRunnable, type DetectedHarness } from '../../lib/harnesses'
+import { fetchHarnessModels, harnessProblem, harnessSaid, isHarnessRunnable, type DetectedHarness } from '../../lib/harnesses'
 import { teamDisplayName, type DeletedTeam, type TeamSummary } from '../../lib/team-file/client'
 import { openTeam, useTeamList } from '../../lib/team-file/useTeamList'
 import { useTheme } from '../../lib/theme'
@@ -231,7 +231,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
         {status.action}
         {problems.length > 0 && (
           <ul className="home-foot-problems" aria-label="Apps that need attention">
-            {problems.map((harness) => <li key={harness.id} title={harness.healthDetail}>{harnessProblem(harness)}</li>)}
+            {problems.map((harness) => <li key={harness.id} title={harness.healthDetail && harnessSaid(harness.healthDetail)}>{harnessProblem(harness)}</li>)}
           </ul>
         )}
       </footer>
