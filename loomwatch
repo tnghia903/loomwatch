@@ -90,7 +90,10 @@ pid_file=$state_dir/loomwatchd.pid
 
 # Someone running a copy of the source is in its folder; someone running a ready-built copy may be
 # anywhere, so instructions name that copy's files and folder in full.
-case $repo_root in "$HOME"/*) folder_display="~${repo_root#"$HOME"}" ;; *) folder_display=$repo_root ;; esac
+# A path as the operator would type it, with ~ for the home folder: shorter, and a pasted log no
+# longer shows the account name.
+pretty_path() { case $1 in "$HOME"/*) printf '~%s\n' "${1#"$HOME"}" ;; *) printf '%s\n' "$1" ;; esac; }
+folder_display=$(pretty_path "$repo_root")
 where_is() { if [ "$prebuilt" = 1 ]; then printf '%s/%s\n' "$folder_display" "$1"; else printf '%s\n' "$1"; fi; }
 in_this_folder() { if [ "$prebuilt" = 1 ]; then printf 'cd %s && ' "$folder_display"; fi; }
 
@@ -296,7 +299,7 @@ ensure_teams_root() {
   [ -d "$teams_root" ] && return 0
   mkdir -p "$teams_root"
   cp examples/operator-stop.yaml examples/operator-stop-harness.py "$teams_root/"
-  say "Created your teams folder at $teams_root, with an offline demo team in it."
+  say "Created your teams folder at $(pretty_path "$teams_root"), with an offline demo team in it."
 }
 
 # Asks Docker Desktop to start without waiting, so it boots while LoomWatch builds.
@@ -439,7 +442,7 @@ start() {
   ) &
 
   step "LoomWatch is starting at $url"
-  say "Your teams are in $teams_root"
+  say "Your teams are in $(pretty_path "$teams_root")"
   say "Keep this window open while you use LoomWatch. Press Ctrl-C to stop it."
   mkdir -p "$state_dir"
   echo "$$" >"$pid_file"
@@ -534,7 +537,7 @@ Options:
   --no-open   Do not open the browser$rebuild_option
 
 Settings (environment variables):
-  LOOMWATCH_TEAMS_ROOT     Where your teams live (now: $teams_root)
+  LOOMWATCH_TEAMS_ROOT     Where your teams live (now: $(pretty_path "$teams_root"))
   LOOMWATCH_PORT           Browser port (now: $port)
   LOOMWATCH_DATABASE_URL   Use your own PostgreSQL instead of the one in Docker
 EOF
