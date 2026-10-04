@@ -1195,13 +1195,15 @@ it.each(['review_stop', 'question'] as const)('answers a %s from the live worksp
     return fallback(input, init)
   }))
   renderWorkspace('run-1')
-  const textbox = await screen.findByLabelText('Answer to Reviewer')
+  // A review stop's box is the operator's note; a question's is the answer to whoever asked.
+  const label = kind === 'review_stop' ? 'Your note to the team' : 'Answer to Reviewer'
+  const textbox = await screen.findByLabelText(label)
   expect(screen.getAllByText(/waiting for you/i).length).toBeGreaterThan(0)
   expect(screen.getAllByText('Approve the smaller budget?').length).toBeGreaterThan(0)
   fireEvent.change(textbox, { target: { value: 'Proceed with the smaller budget.' } })
   fireEvent.keyDown(textbox, { key: 'Enter', metaKey: true })
   await waitFor(() => expect(calls).toEqual([{ url: '/api/runs/run-1/answers', body: { node: 'reviewer', text: 'Proceed with the smaller budget.' } }]))
-  await waitFor(() => expect(screen.queryByLabelText('Answer to Reviewer')).not.toBeInTheDocument())
+  await waitFor(() => expect(screen.queryByLabelText(label)).not.toBeInTheDocument())
 })
 
 it('organizes execution and resources without changing the team, and restores the old arrangement', async () => {

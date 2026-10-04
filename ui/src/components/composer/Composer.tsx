@@ -2,6 +2,7 @@ import { ArrowRight, MessageSquare, Asterisk, Square, Workflow } from 'lucide-re
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { markLiftOrigin } from '../../lib/motion/lift'
+import { Markdown } from '../ui/Markdown'
 
 import type { WaitingOn } from '../../lib/runs/client'
 import type { ExecutionMode } from '../../lib/team-file/useTeamDocument'
@@ -82,6 +83,8 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
     return () => { observer.disconnect(); shell.style.removeProperty('--lw-composer-height') }
   }, [])
   const answering = state.kind === 'answering' ? state : null
+  // At a review stop the box is where the operator writes a note, so it looks and reads like a field.
+  const reviewing = answering?.waiting.kind === 'review_stop'
   const busy = state.kind === 'busy'
   const [replyTarget, setReplyTarget] = useState('')
   const replyTo = busy ? replyAgents.find((agent) => agent.id === replyTarget) : null
@@ -154,11 +157,10 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
   } else if (answering) {
     // A review stop can be approved as it stands: requiring a typed comment before "Continue" made
     // the most common answer — "looks good" — the hardest one to give. A question still needs one.
-    const review = answering.waiting.kind === 'review_stop'
     const from = answering.waiting.handoverFrom
     action = <>
       {answering.waiting.sendBackAvailable && from && <button type="button" className="btn" disabled={answering.sending || !value.trim()} title={value.trim() ? undefined : 'Type what should change first.'} onClick={() => onAnswer?.(from)}>Send back to {agentNames?.get(from) ?? from}</button>}
-      <button type="button" className="btn btn-primary" disabled={answering.sending || (!review && !value.trim())} onClick={() => onAnswer?.()}>{answering.sending ? 'Sending…' : review ? (value.trim() ? 'Continue' : 'Approve') : 'Reply'}{(!review || value.trim()) && <kbd>↵</kbd>}</button>
+      <button type="button" className="btn btn-primary" disabled={answering.sending || (!reviewing && !value.trim())} onClick={() => onAnswer?.()}>{answering.sending ? 'Sending…' : reviewing ? (value.trim() ? 'Continue' : 'Approve') : 'Reply'}{(!reviewing || value.trim()) && <kbd>↵</kbd>}</button>
       <button type="button" className="btn btn-danger" onClick={onStop}>Stop</button>
     </>
   } else if (busy) {
@@ -243,20 +245,22 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
           </select>
         </label>}
         <div className="comp-mid">
+          {/* A handover is the stage's own Markdown, read here before deciding, as answers are. */}
           {reviewContext && <details className="operator-context">
-            <summary>{reviewContext.label}</summary><pre>{reviewContext.text}</pre>
+            <summary>{reviewContext.label}</summary><div className="operator-context-text"><Markdown>{reviewContext.text}</Markdown></div>
           </details>}
           <textarea
             ref={textarea}
             rows={1}
+            className={reviewing ? 'comp-field' : undefined}
             value={value}
             onChange={(event) => onChange(event.target.value)}
             onKeyDown={onKeyDown}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             disabled={disabled}
-            aria-label={replyTo ? `Reply to ${replyTo.name}` : answering ? `Answer to ${answering.waiting.name}` : 'What should the team do?'}
-            placeholder={replyTo ? 'What would you like to ask?' : answering ? answering.waiting.question : busy ? 'A run is in flight…' : canFollowUp ? 'What should change?' : terminal ? 'Type a new goal, or Retry the last one' : 'What should the team do?'}
+            aria-label={replyTo ? `Reply to ${replyTo.name}` : reviewing ? 'Your note to the team' : answering ? `Answer to ${answering.waiting.name}` : 'What should the team do?'}
+            placeholder={replyTo ? 'What would you like to ask?' : reviewing ? 'Type what should change, or leave empty to approve as is' : answering ? answering.waiting.question : busy ? 'A run is in flight…' : canFollowUp ? 'What should change?' : terminal ? 'Type a new goal, or Retry the last one' : 'What should the team do?'}
           />
           {noteNode && <span className={`comp-note t-meta ${noteClass}`} role={noteClass === 'err' ? 'alert' : undefined}>{noteNode}</span>}
         </div>

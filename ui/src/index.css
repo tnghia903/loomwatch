@@ -20,7 +20,25 @@
 
 .operator-context { max-height: min(180px, 25vh); overflow: auto; padding-bottom: var(--sp-2); }
 .operator-context summary { cursor: pointer; color: var(--color-accent); font-size: 12px; }
-.operator-context pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; margin: var(--sp-2) 0; }
+/* The handover, as Markdown: the answer's renderer at the composer's 12px, headings kept small. */
+.operator-context-text { margin: var(--sp-2) 0; font-size: 12px; line-height: 1.45; color: var(--color-ink-2); overflow-wrap: anywhere; }
+.operator-context-text > :first-child { margin-top: 0; }
+.operator-context-text > :last-child { margin-bottom: 0; }
+.operator-context-text :is(h1, h2, h3, h4, h5, h6) { margin: 10px 0 2px; font-size: 12px; font-weight: 600; color: var(--color-ink); }
+.operator-context-text p { margin: 0 0 6px; }
+.operator-context-text :is(ul, ol) { margin: 0 0 6px; padding-left: 18px; }
+.operator-context-text ul { list-style: disc; }
+.operator-context-text ol { list-style: decimal; }
+.operator-context-text a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+.operator-context-text code { font: 400 11px/16px var(--font-mono); }
+.operator-context-text pre { margin: 0 0 6px; white-space: pre-wrap; font: 400 11px/16px var(--font-mono); }
+/* At a review stop the box is a field the operator writes a note in, not the one-line request bar:
+   it has an edge and a fill, and shows two lines before anything is typed. */
+.lw-composer textarea.comp-field {
+  min-height: 56px; padding: 8px var(--sp-3); box-sizing: border-box;
+  background: var(--color-panel-solid); border: 1px solid var(--color-hairline); border-radius: var(--r-sm);
+}
+.lw-composer textarea.comp-field:focus { border-color: var(--color-accent); }
 .lw-composer.expanded-actions { flex-wrap: wrap; padding: var(--sp-2); gap: var(--sp-2); }
 .lw-composer.expanded-actions .comp-mid { order: -1; flex: 1 0 100%; padding: var(--sp-2); box-sizing: border-box; }
 .lw-composer.expanded-actions .comp-note { display: block; line-height: 1.4; }

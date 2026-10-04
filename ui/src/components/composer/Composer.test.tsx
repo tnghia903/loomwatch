@@ -273,6 +273,44 @@ it('still requires words to answer an agent’s question', () => {
     />,
   )
   expect(screen.getByRole('button', { name: /^Reply/ })).toBeDisabled()
+  // A question is answered to whoever asked it, and the box shows the question itself.
+  expect(screen.getByRole('textbox', { name: 'Answer to Writer' })).toHaveAttribute('placeholder', 'Which tone?')
+})
+
+const demoStop = { node: 'review', name: 'You', kind: 'review_stop' as const, since: '2026-10-04T00:00:00Z', question: 'Researcher is done. Approve the findings, or say what to change.', park: 'kept_alive' as const, parkNote: 'kept alive', handoverFrom: 'researcher', sendBackAvailable: true }
+
+// Field report (2026-10-04): the note box was a borderless line whose placeholder, the stop's own
+// question, read like a heading, and a screen reader called it "Answer to You".
+it('gives a review stop a note field that looks and reads like one', () => {
+  render(
+    <Composer
+      mode="pipeline" stepCount={3} state={{ kind: 'answering', waiting: demoStop, sending: false }} value="" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()}
+      onRetry={vi.fn()} onNewRun={vi.fn()} onAnswer={vi.fn()}
+    />,
+  )
+  const note = screen.getByRole('textbox', { name: 'Your note to the team' })
+  expect(note).toHaveClass('comp-field')
+  expect(note).toHaveAttribute('placeholder', 'Type what should change, or leave empty to approve as is')
+  expect(screen.queryByRole('textbox', { name: /Answer to/ })).not.toBeInTheDocument()
+})
+
+// Field report (2026-10-04): the demo's handover showed "## Summary … ## Open questions" as raw
+// text. It is Markdown, rendered as the team's answer is, and raw HTML in it is never rendered.
+it('shows what the stage handed over as formatted Markdown, never as HTML', async () => {
+  const { container } = render(
+    <Composer
+      mode="pipeline" stepCount={3} state={{ kind: 'answering', waiting: demoStop, sending: false }} value="" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()}
+      onRetry={vi.fn()} onNewRun={vi.fn()} onAnswer={vi.fn()}
+      reviewContext={{ label: 'What Researcher handed over', text: '## Summary\nDemo options: a **short** guide.\n\n- One\n- Two\n\n<img src="https://tracker.example/pixel.gif">\n\n## Open questions\nWhich format?' }}
+    />,
+  )
+  fireEvent.click(screen.getByText('What Researcher handed over'))
+  expect(await screen.findByRole('heading', { name: 'Summary' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Open questions' })).toBeInTheDocument()
+  expect(screen.getByText('short').tagName).toBe('STRONG')
+  expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual(['One', 'Two'])
+  expect(container.querySelector('.operator-context img')).toBeNull()
+  expect(container.querySelector('.operator-context')).not.toHaveTextContent('##')
 })
 
 // The one-line composer on the run screen used to stay one line after the run ended, hiding
