@@ -44,6 +44,7 @@ import { DocumentSwitcher } from './canvas/DocumentSwitcher'
 import { EdgeRefusalPopover } from './canvas/EdgeRefusalPopover'
 import { EntrypointProblemBar } from './canvas/EntrypointProblemBar'
 import { DeleteTeamDialog } from './home/DeleteTeamDialog'
+import { TeamReviewDialog } from './run/TeamReviewDialog'
 import { Home } from './home/Home'
 import { ALLOW_SWITCHES } from '../lib/team-file/allow'
 import type { InspectedCapability } from './canvas/CapabilityInspector'
@@ -428,6 +429,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const {
     composerText, setComposerText, pendingPrompt, starting, startError, setStartError, answerSending, retryOf,
     submit, stop, sendAnswer, replyToAgent, retry, followUp, startFromCheckpoint, reusePrompt,
+    teamReview, trustAndRun, dismissReview,
   } = useRunController({
     doc, session, history, activeRunId, record, waiting, projectionPrompt: projection.prompt, showRun, followUpTarget,
     output: composerLayout.output, announce: setStatusAnnouncement,
@@ -2515,6 +2517,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         {saveCopyOpen && <SaveCopySheet error={doc.saveError} onClose={() => setSaveCopyOpen(false)} onSave={doc.saveCopy} />}
         {/* Home, not the deleted team's empty canvas, is where the operator goes next. */}
         {deleteTeamOpen && doc.path && <DeleteTeamDialog path={doc.path} name={doc.teamName ?? (doc.path.split('/').pop() ?? doc.path).replace(/\.ya?ml$/i, '')} onDeleted={() => window.location.assign('/')} onClose={() => setDeleteTeamOpen(false)} />}
+        {/* ADR 0048: a team from outside LoomWatch is checked before its first run. */}
+        {teamReview && <TeamReviewDialog review={teamReview} onTrust={trustAndRun} onClose={dismissReview} />}
         {yamlOpen && <YamlSheet title={yamlHighlightLine ? `YAML preview · line ${yamlHighlightLine}` : 'YAML preview'} yaml={doc.yamlPreview} highlightLine={yamlHighlightLine} onClose={() => { setYamlOpen(false); setYamlHighlightLine(null) }} />}
         {compareOpen && doc.externalChange && (
           <YamlSheet title="Disk ↔ in-memory YAML" yaml={unifiedYamlDiff(doc.externalChange.diskYaml, doc.yamlPreview)} onClose={() => setCompareOpen(false)} footer={<ConflictSheetFooter onKeepMine={doc.keepMine} onUseDisk={() => void doc.useDisk()} />} />

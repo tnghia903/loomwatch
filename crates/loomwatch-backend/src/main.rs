@@ -41,6 +41,11 @@ enum Commands {
             default_value_t = false
         )]
         allow_container_listener: bool,
+        /// Where `LoomWatch` keeps its own state, such as which team files you approved to run.
+        /// Defaults to `~/Library/Application Support/LoomWatch` on macOS and
+        /// `$XDG_STATE_HOME/loomwatch` (or `~/.local/state/loomwatch`) elsewhere.
+        #[arg(long, env = "LOOMWATCH_STATE_DIR")]
+        state_dir: Option<PathBuf>,
     },
     /// Run one turn through the configured entrypoint ACP harness.
     Run {
@@ -105,6 +110,22 @@ async fn recovered_registry(archive: Option<&EventArchive>) -> RunRegistry {
     registry
 }
 
+/// `~/Library/Application Support/LoomWatch` on macOS, `$XDG_STATE_HOME/loomwatch` or
+/// `~/.local/state/loomwatch` elsewhere.
+fn default_state_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|home| home.is_absolute())?;
+    if cfg!(target_os = "macos") {
+        return Some(home.join("Library/Application Support/LoomWatch"));
+    }
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|state| state.is_absolute())
+        .unwrap_or_else(|| home.join(".local/state"));
+    Some(state.join("loomwatch"))
+}
+
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
@@ -115,6 +136,7 @@ async fn main() -> Result<()> {
             database_url,
             mut allowed_hosts,
             allow_container_listener,
+            state_dir,
         } => {
             if !listen.ip().is_loopback() {
                 eprintln!(
@@ -141,10 +163,24 @@ async fn main() -> Result<()> {
             let teams_root = std::fs::canonicalize(&teams_root).with_context(|| {
                 format!("failed to resolve teams root {}", teams_root.display())
             })?;
+            // Which team files may run (ADR 0048), kept outside the teams folder. Opened before
+            // anything can start a run, and the first time, it approves the teams already there.
+            let state_dir = state_dir.or_else(default_state_dir).context(
+                "set LOOMWATCH_STATE_DIR: there is no home folder to keep LoomWatch's state in",
+            )?;
+            let approvals =
+                loomwatch_backend::approvals::TeamApprovals::open(&state_dir, &teams_root)
+                    .with_context(|| {
+                        format!(
+                            "failed to open LoomWatch's state in {}",
+                            state_dir.display()
+                        )
+                    })?;
             let listener = tokio::net::TcpListener::bind(listen).await?;
             let address = listener.local_addr()?;
             println!("loomwatchd listening on http://{address}");
             let registry = recovered_registry(archive.as_ref()).await;
+            registry.set_approvals(std::sync::Arc::new(approvals));
             // The archive is handed to the REST router for exactly one reason: the capability
             // inventory's kept-note counts are rows, not files. Everything else it serves is disk.
             // The registry is the run-control router's own, so deleting a team sees every run.

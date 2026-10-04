@@ -209,5 +209,14 @@
 .lw-deleteteam .dt-acts { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
 .lw-deleteteam .btn-danger-fill { background: var(--color-alert); color: var(--color-white); border-color: transparent; }
 .lw-deleteteam .btn-danger-fill:disabled { opacity: .45; cursor: not-allowed; }
+/* ADR 0048: what a team from outside LoomWatch runs, before its first run. */
+.lw-teamreview { width: min(560px, calc(100vw - 32px)); }
+.lw-teamreview .tr-lines { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--sp-2); font-size: 14px; line-height: 1.45; color: var(--color-ink); }
+.lw-teamreview .tr-lines li { display: flex; gap: var(--sp-2); align-items: baseline; overflow-wrap: anywhere; }
+.lw-teamreview .tr-lines li::before { content: "·"; color: var(--color-ink-3); }
+.lw-teamreview .tr-lines li.tr-warn::before { content: none; }
+.lw-teamreview .tr-flag { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--color-alert); color: var(--color-white); font: 700 11px/1 var(--font-sans); }
+.lw-teamreview .tr-warn { color: var(--color-ink); }
+.lw-teamreview code { font-size: 12.5px; overflow-wrap: anywhere; }
 /* The switcher's footer links, "Delete team…" included, read as unavailable when they are. */
 .pop-foot .link:disabled { color: var(--color-ink-3); cursor: not-allowed; text-decoration: none; }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { askRunAgent, answerRun, cancelRun, findRunByStartKey, isTerminalRun, newStartKey, RunApiError, STALE_TEAM_REVISION, startRun, type WaitingOn } from '../../lib/runs/client'
+import { approveTeam, askRunAgent, answerRun, cancelRun, findRunByStartKey, isTerminalRun, newStartKey, RunApiError, STALE_TEAM_REVISION, startRun, TEAM_NEEDS_REVIEW, type TeamReview, type WaitingOn } from '../../lib/runs/client'
 import type { useRunHistory } from '../../lib/runs/useRunHistory'
 import type { useRunSession } from '../../lib/runs/useRunSession'
 import type { useTeamDocument } from '../../lib/team-file/useTeamDocument'
@@ -8,6 +8,16 @@ import type { useTeamDocument } from '../../lib/team-file/useTeamDocument'
 type TeamDocument = ReturnType<typeof useTeamDocument>
 type RunSession = ReturnType<typeof useRunSession>
 type RunHistory = ReturnType<typeof useRunHistory>
+type Lineage = { followsRunId?: string | null; startAt?: string | null; fromCheckpointId?: string | null }
+
+/** A start the daemon held back until the operator has seen what the team runs (ADR 0048). */
+interface HeldStart {
+  review: TeamReview
+  prompt: string
+  parent: string | null | undefined
+  expectedRevision: string | null
+  lineage: Lineage | undefined
+}
 
 interface RunControllerInput {
   doc: TeamDocument
@@ -43,6 +53,7 @@ export function useRunController({ doc, session, history, activeRunId, record, w
   const answerInFlight = useRef(false)
   const [answerSending, setAnswerSending] = useState(false)
   const [starting, setStarting] = useState(false)
+  const [heldStart, setHeldStart] = useState<HeldStart | null>(null)
   // §1.6: the start key of the attempt in hand, surviving a failed POST so the re-press is the
   // same attempt. Cleared once the daemon answers with a run id.
   const startAttempt = useRef<{ identity: string; key: string } | null>(null)
@@ -52,7 +63,7 @@ export function useRunController({ doc, session, history, activeRunId, record, w
   const outputPlanRef = useRef<{ name: string; format: string } | undefined>(undefined)
   useEffect(() => { outputPlanRef.current = output }, [output])
 
-  const launch = useCallback(async (prompt: string, parent?: string | null, expectedRevision: string | null = null, lineage?: { followsRunId?: string | null; startAt?: string | null; fromCheckpointId?: string | null }) => {
+  const launch = useCallback(async (prompt: string, parent?: string | null, expectedRevision: string | null = null, lineage?: Lineage) => {
     if (!doc.path) return
     // §1.6: one start key per attempt, held for the life of the attempt. An attempt is this
     // prompt against this revision of this file, so a re-press after a lost response carries the
@@ -91,6 +102,12 @@ export function useRunController({ doc, session, history, activeRunId, record, w
         void history.refresh()
         return
       }
+      // ADR 0048: a team from outside LoomWatch starts nothing until the operator has seen what it
+      // runs. The attempt (and its start key) is held for "Trust and run"; the prompt stays put.
+      if (caught instanceof RunApiError && caught.code === TEAM_NEEDS_REVIEW && caught.review) {
+        setHeldStart({ review: caught.review, prompt, parent, expectedRevision, lineage })
+        return
+      }
       // §1.5: the file moved between the save and the start, so no run was created. Hand it to
       // the §9.3 conflict bar rather than reporting it as a failed start; the prompt stays put.
       if (caught instanceof RunApiError && caught.code === STALE_TEAM_REVISION) void doc.checkDiskRevision()
@@ -99,6 +116,23 @@ export function useRunController({ doc, session, history, activeRunId, record, w
       setStarting(false)
     }
   }, [doc, history, retryOf, session, showRun])
+
+  /** "Trust and run": approve the revision the operator was shown, then make the held start. */
+  const trustAndRun = useCallback(async () => {
+    if (!heldStart) return
+    try {
+      await approveTeam(heldStart.review.teamPath, heldStart.review.teamRevision)
+    } catch (caught) {
+      if (caught instanceof RunApiError && caught.code === STALE_TEAM_REVISION) {
+        throw new Error('The team changed after this opened. Close this and press Run again to see what it runs now.')
+      }
+      throw caught
+    }
+    setHeldStart(null)
+    await launch(heldStart.prompt, heldStart.parent, heldStart.expectedRevision, heldStart.lineage)
+  }, [heldStart, launch])
+
+  const dismissReview = useCallback(() => setHeldStart(null), [])
 
   const submit = useCallback(async (promptOverride?: string) => {
     const prompt = (promptOverride ?? composerText).trim()
@@ -212,5 +246,6 @@ export function useRunController({ doc, session, history, activeRunId, record, w
   return {
     composerText, setComposerText, pendingPrompt, starting, startError, setStartError, answerSending, retryOf,
     submit, stop, sendAnswer, replyToAgent, retry, followUp, startFromCheckpoint, reusePrompt,
+    teamReview: heldStart?.review ?? null, trustAndRun, dismissReview,
   }
 }

@@ -19,8 +19,12 @@
 
 use std::ffi::OsString;
 use std::fs;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -126,7 +130,7 @@ fn file_contents(file: &Path) -> Result<(String, String, Option<TextCopy>), Stri
             None => (
                 format!("PDF · {name}"),
                 format!(
-                    "This PDF's text could not be extracted on this computer, because pdftotext is not installed. The file is at {location}; open it directly if your app can read PDFs."
+                    "This PDF's text could not be extracted on this computer: pdftotext is not installed, or it could not read this file in time. The file is at {location}; open it directly if your app can read PDFs."
                 ),
                 None,
             ),
@@ -210,19 +214,72 @@ fn is_pdf(file: &Path) -> bool {
         })
 }
 
-/// A PDF's text, from `pdftotext`. `None` when `pdftotext` is not installed or fails.
+/// How long `pdftotext` may take over one file, and how much text is kept from it. A PDF someone
+/// shared could otherwise hold a worker or fill memory (ADR 0048); the prompt carries an excerpt
+/// of far less anyway.
+const PDF_DEADLINE: Duration = Duration::from_secs(15);
+const PDF_TEXT_MAX: usize = 8 * 1024 * 1024;
+
+/// A PDF's text, from `pdftotext`, at most [`PDF_TEXT_MAX`] bytes of it. `None` when `pdftotext`
+/// is not installed, fails, or takes longer than [`PDF_DEADLINE`].
 #[must_use]
 pub fn pdf_text(file: &Path) -> Option<String> {
-    let output = Command::new(pdftotext()?)
+    extract_text(&pdftotext()?, file, PDF_DEADLINE, PDF_TEXT_MAX)
+}
+
+/// Run `program` as `pdftotext` over `file` for at most `deadline`, keeping at most `limit` bytes
+/// of what it writes. A program that writes more is stopped once the limit is read, and what was
+/// read is kept.
+fn extract_text(program: &Path, file: &Path, deadline: Duration, limit: usize) -> Option<String> {
+    let mut child = Command::new(program)
         .args(["-enc", "UTF-8", "-q"])
         .arg(file)
         .arg("-")
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    let stdout = child.stdout.take()?;
+    let full = Arc::new(AtomicBool::new(false));
+    let reader = {
+        let full = Arc::clone(&full);
+        std::thread::spawn(move || {
+            let mut text = Vec::new();
+            let _ = stdout
+                .take(u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1))
+                .read_to_end(&mut text);
+            if text.len() > limit {
+                text.truncate(limit);
+                full.store(true, Ordering::Release);
+            }
+            text
+        })
+    };
+    let stop_by = Instant::now() + deadline;
+    let finished = loop {
+        match child.try_wait() {
+            // A program stopped by the pipe closing behind the text limit still gave enough text.
+            Ok(Some(status)) => break status.success() || full.load(Ordering::Acquire),
+            // Enough text: the rest is never read, so the program is stopped rather than left
+            // blocked on a full pipe.
+            Ok(None) if full.load(Ordering::Acquire) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break true;
+            }
+            Ok(None) if Instant::now() < stop_by => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break false;
+            }
+        }
+    };
+    let text = reader.join().ok()?;
+    finished.then(|| String::from_utf8_lossy(&text).into_owned())
 }
 
 /// Where `pdftotext` is. A daemon started outside a login shell sees a short `PATH`, and Homebrew
@@ -602,6 +659,49 @@ mod tests {
                 .contains("Quarterly revenue rose"),
             "{:?}",
             snapshot.contents
+        );
+    }
+
+    fn fake_pdftotext(dir: &Path, body: &str) -> PathBuf {
+        let path = dir.join("fake-pdftotext");
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        path
+    }
+
+    /// ADR 0048: a PDF that keeps `pdftotext` busy, or makes it write without end, costs a bounded
+    /// time and a bounded amount of memory.
+    #[test]
+    fn pdf_extraction_is_bounded_in_time_and_size() {
+        let dir = scratch();
+        let file = dir.path().join("shared.pdf");
+        fs::write(&file, b"%PDF-").unwrap();
+
+        let slow = fake_pdftotext(dir.path(), "exec sleep 30");
+        let started = Instant::now();
+        assert_eq!(
+            extract_text(&slow, &file, Duration::from_millis(300), 1024),
+            None
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+
+        let endless = fake_pdftotext(dir.path(), "exec yes loomwatch");
+        let text = extract_text(&endless, &file, Duration::from_secs(10), 1000).expect("text");
+        assert_eq!(text.len(), 1000);
+        assert!(text.starts_with("loomwatch\nloomwatch\n"));
+
+        let quick = fake_pdftotext(dir.path(), "printf 'Quarterly revenue rose'");
+        assert_eq!(
+            extract_text(&quick, &file, Duration::from_secs(10), 1000).as_deref(),
+            Some("Quarterly revenue rose")
         );
     }
 

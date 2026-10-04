@@ -210,8 +210,22 @@ impl PermissionPolicy {
     }
 
     fn readable(&self, path: &Path) -> bool {
-        path.starts_with(&self.folder) || self.readable.iter().any(|root| path.starts_with(root))
+        !secret(path)
+            && (path.starts_with(&self.folder)
+                || self.readable.iter().any(|root| path.starts_with(root)))
     }
+}
+
+/// A file no agent reads without asking, wherever its folder or knowledge reaches: the keys the AI
+/// apps connected to `LoomWatch` use (ADR 0033), which sit in the teams folder an agent working at
+/// the team's own folder can reach (ADR 0048).
+fn secret(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name == "connections.json")
+        && path
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == ".loomwatch")
 }
 
 // ---------------------------------------------------------------------------------------
@@ -793,6 +807,26 @@ mod tests {
             &[&brief.to_string_lossy()]
         )));
         assert!(!none.approves(&request(Some("read"), "Read hosts", &["/etc/hosts"])));
+    }
+
+    /// ADR 0048: an agent whose folder is the teams folder reads its files without asking, but not
+    /// the keys connected apps use, which `LoomWatch` keeps there.
+    #[test]
+    fn the_connection_keys_are_never_read_without_asking() {
+        let scratch = Scratch::new();
+        let all = policy(&scratch, ALL);
+        let keys = scratch.0.join("agent/.loomwatch/connections.json");
+        let notes = scratch.0.join("agent/notes.md");
+        assert!(!all.approves(&request(
+            Some("read"),
+            "Read connections.json",
+            &[&keys.to_string_lossy()]
+        )));
+        assert!(all.approves(&request(
+            Some("read"),
+            "Read notes.md",
+            &[&notes.to_string_lossy()]
+        )));
     }
 
     #[test]

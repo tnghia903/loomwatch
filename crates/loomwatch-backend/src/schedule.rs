@@ -242,10 +242,22 @@ enum Scanned {
     Unscheduled,
 }
 
-/// Every `*.yaml` / `*.yml` below `teams_root` (hidden directories and a team's own
-/// `<team>.brief/` and `<team>.files/` skipped, directory symlinks not followed) with what its
-/// `schedule` block says.
+/// Every team file below `teams_root` with what its `schedule` block says.
 fn scan(teams_root: &Path) -> Vec<(String, Scanned)> {
+    team_files(teams_root)
+        .into_iter()
+        .map(|(key, path)| {
+            let scanned = inspect(&path);
+            (key, scanned)
+        })
+        .collect()
+}
+
+/// Every `*.yaml` / `*.yml` below `teams_root` (hidden directories and a team's own
+/// `<team>.brief/` and `<team>.files/` skipped, directory symlinks not followed), keyed by its
+/// normalised path below the root and sorted by it. The scheduler and the approvals record
+/// (`crate::approvals`) read the same set.
+pub(crate) fn team_files(teams_root: &Path) -> Vec<(String, PathBuf)> {
     let mut directories = vec![teams_root.to_path_buf()];
     let mut found = Vec::new();
     while let Some(directory) = directories.pop() {
@@ -280,7 +292,7 @@ fn scan(teams_root: &Path) -> Vec<(String, Scanned)> {
                 continue;
             }
             if let Some(key) = normalized_relative_path(teams_root, &path) {
-                found.push((key, inspect(&path)));
+                found.push((key, path));
             }
         }
     }

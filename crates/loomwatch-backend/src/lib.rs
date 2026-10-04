@@ -4,6 +4,7 @@
 
 pub mod acp;
 pub mod api;
+pub mod approvals;
 pub mod archive;
 pub mod capabilities;
 pub mod chosen_knowledge;
