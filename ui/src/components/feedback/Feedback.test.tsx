@@ -67,10 +67,13 @@ describe('Send feedback', () => {
     expect(details()).toContain('AI apps: none found')
   })
 
-  it('copies the details for a tester without GitHub access', async () => {
+  it('copies the details for someone without a GitHub account', async () => {
     render(<Feedback harnesses={harnesses} />)
     act(() => openFeedback())
     await waitFor(() => expect(details()).toContain('b4e3373'))
+    // The repository is public: anyone with a free account can post, and nobody "invited" them.
+    expect(screen.getByText(/^Posting needs a free GitHub account\. No account\? Copy the details and share them, with what happened, where you found LoomWatch\.$/)).toBeInTheDocument()
+    expect(screen.queryByText(/access to LoomWatch|invited you/)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Copy details' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Copied' })).toBeInTheDocument())
     expect(writeText).toHaveBeenCalledWith(details())
