@@ -27,8 +27,7 @@ does about that, so you can judge it for yourself.
 - **Check a team before it first runs.** A team file you didn't build in LoomWatch shows
   what it runs before its first run. That covers a file you downloaded, unzipped or edited by hand.
   You see each program, the folders it reads and what it may do without asking, then choose
-  **Trust and run**. Its schedule waits until then. See
-  [ADR 0048](docs/decisions/0048-run-only-teams-you-approved.md).
+  **Trust and run**. Its schedule waits until then.
 - **Refuse settings that disguise an app.** A team file cannot set variables that change which
   code an app loads or where it sends your traffic, such as `NODE_OPTIONS`, `DYLD_*`, proxies or
   API base addresses.
@@ -36,9 +35,7 @@ does about that, so you can judge it for yourself.
   settings, and they can't read the keys of the apps connected to LoomWatch without asking you.
 - **Ask before agents act.** LoomWatch puts each app in its ask-first mode and answers requests
   by the switches you set for each agent. Web, edits in the agent's own folder, and commands are
-  all off by default. Anything else waits for you. See
-  [ADR 0037](docs/decisions/0037-loomwatch-decides-what-agents-may-do.md) and
-  [ADR 0040](docs/decisions/0040-ask-the-operator-for-permission-mid-run.md).
+  all off by default. Anything else waits for you.
 - **Start agents without tools that reach past the run.** For example, Claude Code's publishing
   and messaging tools, and Codex's plugins and apps. The run receipt flags any that ran anyway.
 - **Send nothing about you anywhere.** LoomWatch has no account and no telemetry. It contacts

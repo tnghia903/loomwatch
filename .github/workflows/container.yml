@@ -1,6 +1,6 @@
 name: Container image
 
-# Proves the Dockerfile still builds (docs/decisions/0018). A full release build is the most
+# Proves the Dockerfile still builds. A full release build is the most
 # expensive check in the repository, so it runs only when an input the Dockerfile depends on
 # changes, once a month against fresh base images, or by hand. It never pushes an image.
 on:

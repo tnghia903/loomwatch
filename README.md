@@ -969,7 +969,6 @@ teams folder's `.jobs`.
 - [Team memory](docs/TEAM_MEMORY.md) — Brief, Notebook, inheritance, and checkpoints.
 - [Watch and replay](docs/WATCH.md) — inspecting runs, routines, and the local API.
 - [Architecture](docs/ARCHITECTURE.md) — technical details for developers.
-- [Container runtime decision](docs/decisions/0018-container-native-compose.md) — execution, mount, and trust boundaries.
 - [Security](SECURITY.md) — how to report a problem privately, and what LoomWatch does and doesn't protect against.
 - [Contributing](CONTRIBUTING.md) — building from source and sending a change.
 

@@ -42,7 +42,7 @@ DATABASE_URL=postgres://… cargo test --workspace --locked
 - Keep user-facing text plain: short sentences, the words a person who has never used LoomWatch
   would use, and labels that match what the app shows.
 - A change to how LoomWatch decides something (permissions, what an agent is given, where data
-  goes) gets a short decision record in [docs/decisions](docs/decisions/).
+  goes) explains its reasons in the pull request description.
 
 ## License
 
