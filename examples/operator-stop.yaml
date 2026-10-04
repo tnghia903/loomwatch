@@ -43,7 +43,7 @@ agents:
 
   - id: writer
     name: Writer
-    role: Write the README section the operator asked for.
+    role: Write the answer the operator asked for.
     spawn:
       cmd: python3
       args:
