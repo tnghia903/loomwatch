@@ -43,6 +43,9 @@ describe('Home', () => {
     const cards = await screen.findAllByRole('button', { name: /desk/ })
     expect(cards.map((card) => within(card).getByText(/desk$/).textContent)).toEqual(['Research desk', 'Old desk'])
     expect(cards[0]).toHaveTextContent('3 steps')
+    // A team that never ran says so in plain words, not in the loom's.
+    expect(within(cards[0]).getByText('No runs yet.')).toBeInTheDocument()
+    expect(screen.queryByText(/cloth/)).toBeNull()
     fireEvent.click(cards[0])
     expect(assign).toHaveBeenCalledWith('/?path=new.yaml')
   })

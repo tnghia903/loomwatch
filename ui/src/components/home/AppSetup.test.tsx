@@ -51,9 +51,9 @@ function fakeDaemon() {
   return daemon
 }
 
-function renderSetup(harnesses: DetectedHarness[] = []) {
+function renderSetup(harnesses: DetectedHarness[] = [], firstTeam = false) {
   const props = { onChanged: vi.fn(), onHide: vi.fn() }
-  render(<AppSetup harnesses={harnesses} {...props} />)
+  render(<AppSetup harnesses={harnesses} firstTeam={firstTeam} {...props} />)
   return props
 }
 
@@ -72,6 +72,8 @@ describe('AppSetup', () => {
     expect(within(claudeCard).getByText('curl -fsSL https://claude.ai/install.sh | bash')).toBeInTheDocument()
     expect(within(claudeCard).getByText('claude auth login')).toBeInTheDocument()
     expect(within(claudeCard).getByText(/free Claude plan doesn’t include it/)).toBeInTheDocument()
+    // The API-key route Anthropic asks apps built on its Agent SDK to use.
+    expect(within(claudeCard).getByText(/set ANTHROPIC_API_KEY before starting LoomWatch/)).toBeInTheDocument()
     expect(within(card(/^Codex: Not installed/)).getByText('codex login')).toBeInTheDocument()
 
     // The one route with no account at all says so, and has no sign-in step.
@@ -83,7 +85,7 @@ describe('AppSetup', () => {
 
   it('notices an install on its own, checks the app once, and says it is ready', async () => {
     const daemon = fakeDaemon()
-    const { onChanged } = renderSetup()
+    const { onChanged } = renderSetup([], true)
     expect(card(/^OpenCode: Not installed/)).toBeInTheDocument()
 
     daemon.installed = [opencode]
@@ -106,6 +108,21 @@ describe('AppSetup', () => {
     await waitFor(() => expect(lists()).toBeGreaterThanOrEqual(before + 2))
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(daemon.modelCalls).toEqual(['opencode'])
+  })
+
+  // Field report (2026-10-04): "Claude Code and Codex and OpenCode and Hermes and OpenClaw can run
+  // your agents now. Press New team to make your first team." — with teams already on Home.
+  it('names every ready app in one plain list, and points at New team only before the first team', () => {
+    fakeDaemon()
+    const hermes: DetectedHarness = { id: 'hermes', name: 'Hermes', command: 'hermes', executablePath: '/home/u/.local/bin/hermes', acpAvailable: true, spawn: { cmd: 'hermes-acp', args: [] } }
+    const ready = [claude, opencode, hermes].map((harness): DetectedHarness => ({ ...harness, health: 'ok' }))
+    renderSetup(ready)
+    expect(screen.getByRole('heading', { name: 'Your AI apps are ready' })).toBeInTheDocument()
+    expect(screen.getByText('Claude Code, OpenCode and Hermes can run your agents now. You can add another app below at any time.')).toBeInTheDocument()
+    cleanup()
+
+    renderSetup(ready, true)
+    expect(screen.getByText(/^Claude Code, OpenCode and Hermes can run your agents now\. Press New team to make your first team\./)).toBeInTheDocument()
   })
 
   it('asks again as soon as the tab shows again, after the person was in Terminal', async () => {

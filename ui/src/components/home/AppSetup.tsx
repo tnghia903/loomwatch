@@ -2,6 +2,7 @@ import { Check, Copy, ExternalLink } from 'lucide-react'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 
 import { APP_SETUP_GUIDES, appSetupState, checkSignature, type AppSetupGuide, type AppSetupState } from '../../lib/appSetup'
+import { listNames } from '../../lib/format'
 import { fetchHarnesses, fetchHarnessModels, type DetectedHarness } from '../../lib/harnesses'
 import { ChipDot, type ChipState } from '../ui/glyphs'
 
@@ -19,6 +20,8 @@ export interface AppSetupProps {
   /** Something changed that the rest of LoomWatch should hear about: an app became ready, or failed. */
   onChanged: () => void
   onHide: () => void
+  /** No team exists yet, so a ready app's next step is the first one. */
+  firstTeam?: boolean
 }
 
 const STATUS: Record<AppSetupState['kind'], { chip: ChipState; text: string }> = {
@@ -140,7 +143,7 @@ function AppCard({ guide, state, connector, onCheck }: { guide: CardGuide; state
  * an app — sign-in included — as soon as it appears. That check starts the app once, so it runs
  * once per install, not on every poll.
  */
-export function AppSetup({ harnesses, onChanged, onHide }: AppSetupProps) {
+export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: AppSetupProps) {
   const [report, setReport] = useState<readonly DetectedHarness[]>(harnesses)
   const [checking, setChecking] = useState<ReadonlySet<string>>(() => new Set())
   const attempted = useRef(new Map<string, { signature: string; at: number; sawVerdict: boolean }>())
@@ -240,10 +243,10 @@ export function AppSetup({ harnesses, onChanged, onHide }: AppSetupProps) {
     <section className="home-setup" data-tour="app-setup" aria-labelledby={titleId}>
       <header className="home-setup-head">
         <div>
-          <h2 id={titleId}>{ready.length > 0 ? 'Your AI app is ready' : 'Set up an AI app'}</h2>
+          <h2 id={titleId}>{ready.length > 1 ? 'Your AI apps are ready' : ready.length > 0 ? 'Your AI app is ready' : 'Set up an AI app'}</h2>
           <p>
             {ready.length > 0
-              ? `${ready.map(({ guide }) => guide.name).join(' and ')} can run your agents now. Press New team to make your first team. You can add another app below at any time.`
+              ? `${listNames(ready.map(({ guide }) => guide.name))} can run your agents now.${firstTeam ? ' Press New team to make your first team.' : ''} You can add another app below at any time.`
               : 'Your agents run inside an AI app on this computer, signed in as you. Install one of these. You only need one, and this page notices on its own when it’s ready.'}
           </p>
         </div>

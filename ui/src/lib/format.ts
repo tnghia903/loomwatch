@@ -10,6 +10,12 @@ export function middleTruncate(value: string, max = 24): string {
   return `${value.slice(0, head)}…${value.slice(value.length - tail)}`
 }
 
+/** Names in a sentence: "Claude", "Claude and Codex", "Claude, Codex and OpenCode". */
+export function listNames(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? ''
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+}
+
 /** "just now", "5 minutes ago", "yesterday", "3 days ago", then a date — for lists people scan. */
 export function relativeTime(at: Date, now: Date = new Date()): string {
   const seconds = Math.round((now.getTime() - at.getTime()) / 1000)

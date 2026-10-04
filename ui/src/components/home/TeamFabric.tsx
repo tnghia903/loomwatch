@@ -4,7 +4,7 @@ const PITCH = 11
 
 /** A team's recent runs, woven (lib/story/fabric.ts). Decorative to pointer users, described to screen readers. */
 export function TeamFabric({ fabric }: { fabric: Fabric }) {
-  if (fabric.threads.length === 0) return <span className="team-fabric empty">No runs yet — the first one starts the cloth.</span>
+  if (fabric.threads.length === 0) return <span className="team-fabric empty">No runs yet.</span>
   const width = fabric.threads.length * PITCH + 2
   return (
     <span className="team-fabric">
