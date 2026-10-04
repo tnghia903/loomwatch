@@ -40,8 +40,8 @@ export interface FeedbackDialogProps {
 
 /**
  * Says what a report contains before anything leaves the computer, then hands over to GitHub in a
- * new tab, where the operator writes and submits it. LoomWatch posts nothing itself. A tester
- * without GitHub access can copy the same details instead.
+ * new tab, where the operator writes and submits it. LoomWatch posts nothing itself. Someone
+ * without a GitHub account can copy the same details instead.
  */
 export function FeedbackDialog({ harnesses, context, onClose }: FeedbackDialogProps) {
   const titleId = useId()
@@ -99,7 +99,7 @@ export function FeedbackDialog({ harnesses, context, onClose }: FeedbackDialogPr
           <pre className="code t-mono-sm" aria-busy={checking}>{details}</pre>
           <p>Nothing from your teams, files or runs. You can edit all of it on GitHub before you submit.</p>
         </div>
-        <p className="fb-note">You need a GitHub account with access to LoomWatch. No access? Copy the details and send them, with what happened, to the person who invited you.</p>
+        <p className="fb-note">Posting needs a free GitHub account. No account? Copy the details and share them, with what happened, where you found LoomWatch.</p>
         <div className="fb-acts">
           <button type="button" className="btn" onClick={() => void copy()}>
             {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}{copied ? 'Copied' : 'Copy details'}
