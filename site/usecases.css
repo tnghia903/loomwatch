@@ -248,6 +248,9 @@
 
 .uc-close { padding: 14vh 0 16vh; }
 .uc-close .stanza-end { margin-top: 0; }
+/* styles.css fades this line in when the main page's script marks the close as seen; nothing does
+   that here, so it simply shows. */
+.js .uc-close .stanza-end { opacity: 1; transform: none; }
 
 /* ---------------------------------------------------------------- Responsive */
 
@@ -288,4 +291,7 @@
   .uc-shots .tabs::-webkit-scrollbar { display: none; }
   .uc-shots .tabs button { flex: none; }
   .cover thead button { min-height: 44px; }
+  /* Both teams' columns stay in view on a phone; the row names wrap instead. */
+  .cover { min-width: 0; }
+  .cover th, .cover td { padding: 10px; }
 }
