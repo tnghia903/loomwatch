@@ -39,7 +39,7 @@ import { WeftBar } from './WeftBar'
 import { markState } from '../../lib/story/mark'
 import { AgentMark } from '../ui/AgentMark'
 import { FileCard } from '../ui/FileCard'
-import { fileRefsIn } from '../../lib/files/fileRefs'
+import { fileRefsIn, withFolderPaths } from '../../lib/files/fileRefs'
 import { liftInto, noteShownRequest } from '../../lib/motion/lift'
 
 export interface DeliveryLaneProps extends RunColumnProps {
@@ -236,6 +236,9 @@ export function DeliveryLane({
   const openReview = () => { setReviewChecked(false); setReviewOpen(true) }
   const fileMakers = useMemo(() => agents.map((node) => ({ id: node.id, name: node.data.agent.name })), [agents])
   const deliveredFiles = useMemo(() => (output.streaming ? [] : fileRefsIn(output.text)), [output.text, output.streaming])
+  // Names listed under a folder ("Files are in `…/outputs`: - `plan.pdf`") read as files in the
+  // sentence too, not only in the header. Copy, download and Notion keep the agent's own words.
+  const shownText = useMemo(() => withFolderPaths(output.text), [output.text])
   const showStage = (id: string) => {
     select(id)
     document.getElementById(`delivery-stage-${id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
@@ -795,7 +798,7 @@ export function DeliveryLane({
           {/* A file the reply names is the deliverable: up here, ready to open, not buried as a path. */}
           {deliveredFiles.length > 0 && (
             <div className="delivery-files" role="group" aria-label="Files in this reply">
-              {deliveredFiles.map((path) => <FileCard key={path} path={path} compact={deliveredFiles.length > 2} agents={fileMakers} />)}
+              {deliveredFiles.map((path) => <FileCard key={path} path={path} compact={deliveredFiles.length > 1} agents={fileMakers} />)}
             </div>
           )}
         </header>
@@ -806,7 +809,7 @@ export function DeliveryLane({
           </p>
           {output.text && (
             <div className="delivery-response selectable">
-              <Markdown>{output.text}</Markdown>
+              <Markdown>{shownText}</Markdown>
               {output.streaming && (
                 <span className="caret" aria-label="Streaming" />
               )}

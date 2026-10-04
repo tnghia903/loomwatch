@@ -352,6 +352,30 @@ describe('Delivery Lane', () => {
     expect(container.querySelector('.delivery-response .file-chip')).not.toBeNull()
     vi.unstubAllGlobals()
   })
+  it('puts files the reply lists by name under a folder in the output header too', async () => {
+    const folder = '/teams/.loomwatch/demo/designer/outputs'
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      const path = new URL(url, 'http://localhost').searchParams.get('path') ?? ''
+      return Promise.resolve(new Response(JSON.stringify({
+        path, name: path.split('/').at(-1), exists: true, isDir: false, sizeBytes: 2048,
+        modifiedAt: null, kind: path.endsWith('.pdf') ? 'pdf' : 'document', folder: '.loomwatch/demo/designer/outputs', openable: true,
+      })))
+    }))
+    const { container } = setup({
+      output: {
+        text: `Done.\n\nFiles are in \`${folder}\`:\n- \`plan.docx\`\n- \`plan.pdf\``,
+        phase: 'succeeded', phaseText: 'Answered', producer: 'designer', producerLabel: 'Designer', mode: 'replay',
+        streaming: false, pending: false, strip: null, compact: false, expanded: false, terminal: true,
+      },
+    })
+    const files = screen.getByRole('group', { name: 'Files in this reply' })
+    expect(within(files).getByRole('button', { name: 'Open plan.docx' })).toBeInTheDocument()
+    expect(within(files).getByRole('button', { name: 'Open plan.pdf' })).toBeInTheDocument()
+    // Two cards are rows, so the answer under them stays in view in the narrow output panel.
+    expect(files.querySelectorAll('.file-card.compact')).toHaveLength(2)
+    expect(container.querySelectorAll('.delivery-response .file-chip')).toHaveLength(2)
+    vi.unstubAllGlobals()
+  })
   it('does not execute raw HTML or load embedded remote images in a report', () => {
     const { container } = setup({
       output: {

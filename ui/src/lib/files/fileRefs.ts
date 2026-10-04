@@ -3,8 +3,9 @@
  * instead of a raw path (ADR 0026).
  *
  * Deliberately narrow: an absolute path whose last segment has an extension, written as inline
- * code, as a Markdown link, or as a `file://` URL. Bare words and API routes ("/api/runs") are not
- * files, and a false positive would put an Open button on something that is not openable.
+ * code, as a Markdown link, or as a `file://` URL — or a file name listed under such a folder
+ * ([`withFolderPaths`]). Bare words and API routes ("/api/runs") are not files, and a false
+ * positive would put an Open button on something that is not openable.
  */
 const ABSOLUTE = /^(\/|[A-Za-z]:\\)/
 const EXTENSION = /\.([A-Za-z0-9]{1,8})$/
@@ -105,13 +106,119 @@ export function folderWords(folder: string | null | undefined, path: string): st
 
 /** Every distinct file a Markdown reply names, in the order it first names them. */
 export function fileRefsIn(markdown: string): string[] {
+  const text = withFolderPaths(markdown)
   const found: string[] = []
   const add = (candidate: string) => {
     const path = filePathFrom(candidate)
     if (path && !found.includes(path)) found.push(path)
   }
-  for (const match of markdown.matchAll(/`([^`\n]+)`/g)) add(match[1])
-  for (const match of markdown.matchAll(/\]\(([^)\s]+)\)/g)) add(match[1])
-  for (const match of markdown.matchAll(/(file:\/\/\/[^\s)>\]]+)/g)) add(match[1])
+  for (const match of text.matchAll(/`([^`\n]+)`/g)) add(match[1])
+  for (const match of text.matchAll(/\]\(([^)\s]+)\)/g)) add(match[1])
+  for (const match of text.matchAll(/(file:\/\/\/[^\s)>\]]+)/g)) add(match[1])
   return found
+}
+
+/**
+ * The reply with each bare file name it lists under a folder written out as that file's absolute
+ * path, so the name is recognised as a file. Agents often say where once and then list names:
+ *
+ *     Files are in `/Users/me/teams/.loomwatch/plan/editor/outputs`:
+ *     - `plan.docx`
+ *     - `plan.pdf`
+ *
+ * Still narrow (ADR 0026): a name resolves only against an absolute folder named in the same
+ * passage — one paragraph and the list that carries on after it — and only when its extension is a
+ * kind of file this module can name. Commands, domains, versions, names in another paragraph and
+ * anything in a fenced block stay text.
+ */
+export function withFolderPaths(markdown: string): string {
+  const lines = markdown.split('\n')
+  for (const passage of passagesOf(lines)) {
+    const folders: Array<{ at: number; path: string }> = []
+    passage.forEach((index, order) => {
+      for (const match of lines[index].matchAll(MENTION)) {
+        const path = folderPathFrom(match[1] ?? match[2] ?? match[3])
+        if (path) folders.push({ at: order * LINE + (match.index ?? 0), path })
+      }
+    })
+    if (!folders.length) continue
+    // The nearest folder named before the name, else the first one named after it.
+    const folderFor = (at: number) => folders.filter((folder) => folder.at < at).at(-1)?.path ?? folders.find((folder) => folder.at > at)?.path
+    passage.forEach((index, order) => {
+      lines[index] = lines[index].replace(MENTION, (whole: string, span?: string, href?: string, _url?: string, offset = 0) => {
+        const relative = relativeFileFrom(span ?? href)
+        const folder = relative ? folderFor(order * LINE + offset) : undefined
+        if (!relative || !folder) return whole
+        const path = joinPath(folder, relative)
+        return span !== undefined ? `\`${path}\`` : `](${path})`
+      })
+    })
+  }
+  return lines.join('\n')
+}
+
+// A code span, a link target, or a bare `file://` URL — in one pass, so offsets on a line agree.
+const MENTION = /`([^`\n]+)`|\]\(([^)\s]+)\)|(file:\/\/\/[^\s)>\]`]+)/g
+const LINE = 1_000_000
+const FENCE = /^\s{0,3}(```|~~~)/
+const LIST_ITEM = /^\s*([-*+]|\d+[.)])\s/
+const HEADING = /^\s{0,3}#{1,6}\s/
+
+/**
+ * The reply's lines grouped into passages: a blank line ends one unless a list carries on after it
+ * (or the next line is indented under it), and a heading always starts one. Fenced blocks belong to
+ * none.
+ */
+function passagesOf(lines: string[]): number[][] {
+  const passages: number[][] = []
+  let current: number[] = []
+  let fenced = false
+  let blank = false
+  const close = () => {
+    if (current.length) passages.push(current)
+    current = []
+  }
+  lines.forEach((line, index) => {
+    if (FENCE.test(line)) {
+      fenced = !fenced
+      close()
+      return
+    }
+    if (fenced) return
+    if (!line.trim()) {
+      blank = true
+      return
+    }
+    if (HEADING.test(line) || (blank && !LIST_ITEM.test(line) && !/^\s{2,}\S/.test(line))) close()
+    blank = false
+    current.push(index)
+  })
+  close()
+  return passages
+}
+
+/** The folder an absolute path names: no extension on its last segment, or a trailing separator. */
+function folderPathFrom(text: string | undefined): string | null {
+  let value = text?.trim() ?? ''
+  if (value.startsWith('file://')) {
+    try { value = decodeURIComponent(new URL(value).pathname) } catch { return null }
+  }
+  if (!value || value.length > 1024 || /[\n\r]/.test(value) || !ABSOLUTE.test(value)) return null
+  const folder = value.replace(/[\\/]+$/, '')
+  if (!folder || (folder === value && EXTENSION.test(baseName(folder)))) return null
+  return folder
+}
+
+/** A file name, or a short path under a folder (`drafts/plan.pdf`), whose kind this module names. */
+function relativeFileFrom(text: string | undefined): string | null {
+  const value = text?.trim().replace(/^\.\//, '') ?? ''
+  if (!value || value.length > 255 || ABSOLUTE.test(value) || value.includes('://')) return null
+  if (/[\s`'"$|<>*?=;:()\\~]/.test(value)) return null
+  const segments = value.split('/')
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..' || segment.startsWith('.'))) return null
+  return Object.hasOwn(LABELS, extensionOf(value)) ? value : null
+}
+
+function joinPath(folder: string, relative: string): string {
+  return folder.includes('\\') && !folder.includes('/') ? `${folder}\\${relative.replaceAll('/', '\\')}` : `${folder}/${relative}`
 }

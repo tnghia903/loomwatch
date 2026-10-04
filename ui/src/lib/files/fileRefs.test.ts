@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { fileLabel, fileNoun, filePathFrom, fileRefsIn, fileTitle, folderWords, formatBytes, workspaceAgent } from './fileRefs'
+import { fileLabel, fileNoun, filePathFrom, fileRefsIn, fileTitle, folderWords, formatBytes, withFolderPaths, workspaceAgent } from './fileRefs'
 
 const REPORT = '/Users/me/loomwatch/teams/.loomwatch/launch-plan/writer/market-research-report.docx'
 
@@ -28,6 +28,37 @@ describe('fileRefsIn', () => {
       'Not files: `/api/runs`, `npm test`, [site](https://example.com)',
     ].join('\n\n')
     expect(fileRefsIn(reply)).toEqual([REPORT, '/Users/me/out/deck.pptx', '/Users/me/out/data.csv'])
+  })
+
+  it('finds the files a reply lists by name under the folder it names', () => {
+    // The shape of a real Editor reply (run 6ca4befe): the folder once, then bare names.
+    const outputs = '/Users/me/LoomWatch/teams/.loomwatch/loomwatch-marketing-plan/editor/outputs'
+    const reply = [
+      'The validator couldn’t run (missing `defusedxml`), so the DOCX hasn’t been checked.',
+      `Files are in \`${outputs}\`:\n- \`LoomWatch-marketing-plan.docx\`\n- \`LoomWatch-marketing-plan.pdf\``,
+    ].join('\n\n')
+    expect(fileRefsIn(reply)).toEqual([`${outputs}/LoomWatch-marketing-plan.docx`, `${outputs}/LoomWatch-marketing-plan.pdf`])
+  })
+
+  it('resolves a name against the folder named in its own passage, before or after it', () => {
+    expect(fileRefsIn('Saved `plan.pdf` and [the deck](deck.pptx) to `/Users/me/out/`.')).toEqual(['/Users/me/out/plan.pdf', '/Users/me/out/deck.pptx'])
+    expect(fileRefsIn('In `/a/one`: `x.pdf`. In `/a/two`: `y.pdf` and `drafts/z.md`.')).toEqual(['/a/one/x.pdf', '/a/two/y.pdf', '/a/two/drafts/z.md'])
+    // A loose list (blank lines between items) still belongs to the sentence that introduces it.
+    expect(fileRefsIn('Written to `/a/out`:\n\n- `x.pdf`\n\n- `y.csv`')).toEqual(['/a/out/x.pdf', '/a/out/y.csv'])
+    expect(fileRefsIn('Written to `C:\\Users\\me\\out`: `x.pdf`')).toEqual(['C:\\Users\\me\\out\\x.pdf'])
+  })
+
+  it('leaves names alone with no folder in their passage, or that are not files', () => {
+    expect(fileRefsIn('I read `/Users/me/project`.\n\nThen I wrote `report.pdf`.')).toEqual([])
+    expect(fileRefsIn('## Files\n\nNothing yet.\n\n## In `/a/out`\n\nSee `x.pdf`.')).toEqual([])
+    expect(fileRefsIn('In `/a/out` run `python build.py`, see `example.com`, `v0.1.0`, `window.claude`, `.env`, `../x.pdf`, `~/x.pdf`.')).toEqual([])
+    expect(fileRefsIn('In `/a/out`:\n\n```\nplan.pdf\n`inside.pdf`\n```')).toEqual([])
+    expect(fileRefsIn('The route `/api/runs` is a folder, not a file.')).toEqual([])
+  })
+
+  it('writes resolved names out as paths only where it resolved them', () => {
+    const reply = 'Files are in `/a/out`:\n- `x.pdf`\n\n```\n`y.pdf`\n```\n\nAlso `z.pdf`.'
+    expect(withFolderPaths(reply)).toBe('Files are in `/a/out`:\n- `/a/out/x.pdf`\n\n```\n`y.pdf`\n```\n\nAlso `z.pdf`.')
   })
 })
 
