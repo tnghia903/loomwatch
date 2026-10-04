@@ -1367,7 +1367,10 @@ async fn start_run(
             .into_response()),
         Err(LaunchError::NeedsReview(review)) => {
             let mut body = serde_json::to_value(&*review).unwrap_or_else(|_| json!({}));
-            body["error"] = json!("Review what this team runs before it starts.");
+            body["error"] = json!(
+                "This team came from outside LoomWatch, or changed there. Open it and press Run to \
+                 check what it runs before it starts."
+            );
             body["code"] = json!(TEAM_NEEDS_REVIEW);
             Ok((StatusCode::CONFLICT, Json(body)).into_response())
         }
