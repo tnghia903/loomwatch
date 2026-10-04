@@ -441,6 +441,8 @@ awake. For scheduled runs and optional Notion delivery, see [Routines](docs/WATC
    made that shortcut.
 4. Your teams are kept in `~/LoomWatch/teams` until you delete `~/LoomWatch` too. It also holds your
    saved jobs, deleted teams and the agents' working folders.
+5. LoomWatch remembers which teams you approved to run in `~/Library/Application Support/LoomWatch`
+   (`~/.local/state/loomwatch` on Linux). Delete that folder too to leave nothing behind.
 
 For a copy built from source, run `./loomwatch stop` and `docker compose down -v` in its folder,
 then delete the folder.
@@ -876,7 +878,8 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
 | AI apps you connected to LoomWatch | `.loomwatch/connections.json` in your teams folder. It holds each app's private key. |
 | Run history, recorded events, Notebook entries and Ask conversations | The local PostgreSQL Docker volume |
-| Database settings | `.env` in the source repository |
+| Database settings | `.env` in the LoomWatch folder (`~/LoomWatch/app`, or your copy of the source) |
+| Which team files you approved to run | `~/Library/Application Support/LoomWatch` on macOS, `~/.local/state/loomwatch` on Linux |
 | Provider sign-in | Managed by each host agent app; Compose-only deployments use `loomwatch-home` |
 
 Back up your teams folder and PostgreSQL database if you want to move or preserve your work.
