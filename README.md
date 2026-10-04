@@ -17,7 +17,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/runs%20on-your%20computer-AD8A20" alt="Runs on your computer">
-  <img src="https://img.shields.io/badge/first%20run-offline%20demo%2C%20no%20API%20key-17724A" alt="First run: offline demo, no API key">
+  <img src="https://img.shields.io/badge/platform-macOS-56524A" alt="Platform: macOS">
+  <img src="https://img.shields.io/badge/first%20run-offline%20demo%2C%20no%20AI%20account-17724A" alt="First run: offline demo, no AI account">
   <img src="https://img.shields.io/badge/agents%20over-ACP-56524A" alt="Agents over ACP">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20React-56524A" alt="Built with Rust and React">
 </p>
@@ -39,8 +40,8 @@ you, it stops and asks.
 
 <p align="center">
   <sub>WORKS WITH THE AI APPS YOU ALREADY USE</sub><br>
-  <strong>Claude Code</strong> &nbsp;·&nbsp; <strong>Codex</strong> &nbsp;·&nbsp; <strong>Gemini CLI</strong> &nbsp;·&nbsp;
-  <strong>OpenCode</strong> &nbsp;·&nbsp; <strong>Hermes</strong> &nbsp;·&nbsp; <strong>OpenClaw</strong><br>
+  <strong>Claude Code</strong> &nbsp;·&nbsp; <strong>Codex</strong> &nbsp;·&nbsp; <strong>OpenCode</strong> &nbsp;·&nbsp;
+  <strong>Hermes</strong> &nbsp;·&nbsp; <strong>OpenClaw</strong><br>
   <sub>and, through OpenCode, models such as DeepSeek, Kimi, GLM, Qwen and Mistral</sub>
 </p>
 
@@ -101,12 +102,12 @@ the evidence to check before you use it.
 
 ## LoomWatch is right for you if
 
-- ✅ You use one or more AI apps, such as Claude Code, Codex, Gemini CLI or OpenCode, and want them
-  to **work on one job together**.
+- ✅ You use one or more AI apps, such as Claude Code, Codex or OpenCode, and want them to **work on
+  one job together**.
 - ✅ You want to **see what each agent did**, not just read a final answer: every tool call, file and
   handover is recorded.
 - ✅ You want to **approve or redirect work** before the next agent builds on it.
-- ✅ You want it **on your own computer**, with the skills, MCP tools and sign-ins you already have.
+- ✅ You want it **on your own computer**, with the skills and MCP tools you already have.
 - ✅ You run the same kind of job again and again, such as a daily digest or a research brief, and
   want it **repeatable, or scheduled**.
 
@@ -173,7 +174,7 @@ with a lead that hands out work and asks its teammates questions as it goes.
 ### 🧵 One team, many apps
 
 Each agent runs on its own app and model: Claude Code researches, Codex reviews, OpenCode writes on
-a free model. Real runs use the sign-in and plan you already have.
+a free model. Each agent uses its own app's sign-in or API key, under that provider's terms.
 
 </td>
 <td width="33%" valign="top">
@@ -215,7 +216,8 @@ stream read it. Nothing is guessed from a title.
 ### 🧰 Your skills, tools and files
 
 Wire in the skills and MCP tools already on your computer, and give an agent any folder or file,
-PDFs included. LoomWatch delivers each one to the agents you choose.
+PDFs included once `pdftotext` is installed (`brew install poppler`). LoomWatch delivers each one
+to the agents you choose.
 
 </td>
 </tr>
@@ -322,7 +324,7 @@ Every team below is made from the jobs in Build's library, each on the AI app it
 
 - **Not a chatbot.** It runs teams of the AI apps you already have, one app per agent.
 - **Not a cloud service.** It runs on your computer and keeps your run history there.
-- **Not a model provider.** Your agents use your own AI apps, sign-ins and plans.
+- **Not a model provider.** Your agents use your own AI apps and accounts.
 - **Not autopilot.** You choose where the team stops for your review, and it waits for you.
 
 ## Quickstart
@@ -558,7 +560,7 @@ The Library recognizes these integrations:
 | --- | --- |
 | Claude | `claude-agent-acp`, with an `npx` bridge fallback |
 | Codex | `codex-acp`, with an `npx` bridge fallback |
-| Gemini | `gemini --acp` |
+| Gemini | `gemini --acp` (API key sign-in only; untested) |
 | OpenCode | `opencode acp` |
 | Hermes | `hermes-acp` |
 | OpenClaw | `openclaw acp` |
@@ -572,7 +574,8 @@ has model access. Delegation and session-resume support vary by integration.
 
 > [!IMPORTANT]
 > Provider authentication stays with your agent app. Real runs use your existing provider account
-> and its usage limits or billing. The offline demo does not consume that usage. Agent apps may send
+> and its usage limits or billing. Check each provider's terms for using its app through other
+> tools. The offline demo does not consume that usage. Agent apps may send
 > prompts and files to their configured model providers; running LoomWatch locally does not make
 > cloud models offline.
 
@@ -645,7 +648,7 @@ an applied one back.
   **Approve** or **Send back**.
 - **You choose the app.** The panel says which app it is using ("Using Claude on this computer").
   Click the app's name to pick another, and a model under it. Ask can use Claude Code, Codex,
-  Gemini CLI, OpenCode or Hermes. Each conversation uses that app's own plan, like a run.
+  OpenCode or Hermes. Each conversation counts toward that app's account, like a run.
 
 <details>
 <summary><strong>Use LoomWatch from your other AI apps</strong></summary>
@@ -662,20 +665,28 @@ connected app proposes or starts appears in the Ask panel under **From your conn
 ## FAQ
 
 <details>
-<summary><strong>Do I need an API key?</strong></summary>
+<summary><strong>Do I need an account or an API key?</strong></summary>
 
-No. LoomWatch drives the AI apps you have already signed in to, such as Claude Code, Codex, Gemini
-CLI or OpenCode, with their own sign-in. The offline demo needs no AI account at all, and OpenCode
-runs real agents on its free models without one. Free models change often, and some let their
-maker learn from what you send, so keep private work for a model you pay for.
+Not for LoomWatch itself: it is free, has no account and never sees your sign-ins. Each agent runs
+one of your AI apps, signed in the way you set that app up, and its usage counts toward your own
+account with that provider. Providers set their own rules for using their apps through other
+programs: Anthropic, for example, asks products built on its Agent SDK, which LoomWatch uses to
+run Claude Code, to use an API key (see
+[Authentication and credential use](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)).
+To run Claude agents on an API key, start LoomWatch from a terminal where `ANTHROPIC_API_KEY` is
+set.
+
+The offline demo needs no AI account at all, and OpenCode runs real agents on its free models
+without one. Free models change often, and some let their maker learn from what you send, so keep
+private work for a model you pay for.
 
 </details>
 
 <details>
 <summary><strong>What does a run cost?</strong></summary>
 
-Real runs use your AI apps' own accounts, so they count against those plans' usage limits or
-billing, as if you had used the apps yourself. The offline demo uses none.
+Real runs use your AI apps' own accounts, so they count toward those accounts' usage limits or API
+billing, under each provider's terms. The offline demo uses none.
 
 </details>
 
@@ -716,7 +727,9 @@ The run records every request and who answered it. When something was declined, 
 what the agent couldn't do and offers **Allow from now on**. OpenCode doesn't ask before it acts, so
 the switches can't hold it back.
 
-Agents can't publish, post or send anything outside the run. Claude Code can publish to your
+LoomWatch starts agents without the tools that publish, post or message outside the run. An agent
+you allow to run commands or use the web, an OpenCode agent, or an MCP server in Codex's own
+settings can still reach the internet. Claude Code can publish to your
 claude.ai account, schedule work, send notifications and message your other Claude sessions without
 asking, so LoomWatch starts every agent without those tools. Your team's answer leaves through your
 review and the delivery you set up, such as **Send every answer to Notion**. If such a tool runs anyway,
@@ -902,7 +915,7 @@ teams folder's `.jobs`.
 | Agent is missing or unavailable | Run `command -v <agent-command>` in the LoomWatch terminal. Authenticate the app, then restart LoomWatch from that same terminal. Compose-only deployments scan the container unless the native companion is running. |
 | Skill or tool is missing locally | Confirm it exists below your `.claude`, `.codex`, `.agents`, `.gemini`, `.hermes`, `.openclaw` or `.config/opencode` folder, then click ↻ beside **Search** in Build to scan again. Check that LoomWatch was not started with `LOOMWATCH_CAPABILITY_HOME` pointing elsewhere. |
 | Skill is missing in Compose | Copy its definition below `LOOMWATCH_CAPABILITIES_DIR` using the conventional harness path, then click ↻ beside **Search** in Build to scan again. Symlinks whose targets are outside that mounted root cannot be followed. |
-| Ask says it needs an AI app | Install and sign in to Claude Code, Codex, Gemini CLI or OpenCode, then start LoomWatch again from that terminal. |
+| Ask says it needs an AI app | Install and sign in to Claude Code, Codex or OpenCode, then start LoomWatch again from that terminal. |
 | Harness working directory is missing | Native teams should use a real host path accessible to the agent app. Container-run teams must use `/workspaces/...` and mount its host parent through `LOOMWATCH_WORKSPACES_DIR`. |
 | Agent cannot perform a tool action | While the run is going, answer its question in the run or the Needs-you tray before it is declined after 10 minutes. Afterwards, read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel in Build. An edit outside the agent's own folder is never allowed. |
 | Build reports an unsupported Node version | Install the current Node.js from <https://nodejs.org/>, reopen Terminal, and check `node --version`. |
