@@ -198,6 +198,22 @@ describe('Delivery Lane', () => {
   })
   // ADR 0043: the receipt's See every event and the answer's own Full trace link did what the
   // heading's Full trace does, and Request a change only focused the box that is already there.
+  // Field report (2026-10-04): a team with no required skill showed "0/0 required loaded" and
+  // "Loading evidence and output quality are separate checks.", which told a newcomer nothing.
+  it('counts required skills only when the team has some', () => {
+    const designer = setup().props.agents[0]
+    cleanup()
+    setup({ agents: [{ ...designer, data: { ...designer.data, agent: { ...designer.data.agent, capabilities: [] } } }] })
+    expect(screen.queryByText(/required loaded/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/separate checks/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /What was recorded/ })).toBeInTheDocument()
+    cleanup()
+
+    setup()
+    expect(screen.getByText('0/1 required loaded')).toBeInTheDocument()
+    expect(screen.getByText(/separate checks/)).toBeInTheDocument()
+  })
+
   it('opens the full trace from one button, with no second way to the same place', () => {
     const { props } = setup()
     expect(screen.getAllByRole('button', { name: /Full trace|See every event/ })).toHaveLength(1)

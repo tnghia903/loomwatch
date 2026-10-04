@@ -216,11 +216,12 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
       {children}
       <div ref={panel} className={`panel bottom cx e1 lw-composer ${slim ? 'prototype-composer' : ''} ${focused ? 'focused' : ''} ${switchBanner ? 'mode-switch' : ''} ${answering || replyTo || canFollowUp ? 'expanded-actions' : ''}`} role="group" aria-label="Prompt composer" data-tour="composer">
         {slim && <MessageSquare className="composer-message-icon" size={17} />}
-        <span className={`mode-chip mode-summary t-body-m ${mode}`} title={modeHint}>
+        {/* One agent has nothing to order and no one to delegate to, so the chip would say nothing true. */}
+        {stepCount > 1 && <span className={`mode-chip mode-summary t-body-m ${mode}`} title={modeHint}>
           <span className="glyph" aria-hidden="true">{mode === 'pipeline' ? <Workflow size={15} /> : <Asterisk size={15} />}</span>
           <span className="label">{modeLabel}</span>
           {anomalyCount > 0 && <span className="anomaly t-micro" title={`In the last run, an agent passed work to someone it isn’t connected to (${anomalyCount} time${anomalyCount === 1 ? '' : 's'}). The Run view marks where.`}>⚠ {anomalyCount}</span>}
-        </span>
+        </span>}
         {/* The follow-up target chooser, beside the chips that explain what the run is made of.
             Stages are listed in pipeline order; team mode has no order, so it gets one option. */}
         {canFollowUp && (
