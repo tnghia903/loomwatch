@@ -356,6 +356,10 @@ function applySemanticRules(
  */
 export function compileTeamValidator(schema: object, Ajv: typeof Ajv2020): TeamValidator {
   const ajv = new Ajv({ allErrors: true, strict: false })
+  // The schema's timestamps say `format: date-time`, which ajv only knows with ajv-formats; without
+  // it every page load logged "unknown format "date-time" ignored". RFC 3339, as the schema's own
+  // `pattern` beside each one already requires.
+  ajv.addFormat('date-time', /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/)
   const validate = ajv.compile(schema)
 
   return (doc: TeamDocument): ValidationResult => {

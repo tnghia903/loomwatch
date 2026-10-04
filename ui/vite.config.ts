@@ -10,6 +10,9 @@ export default defineConfig({
   // minifier emit the prefix instead of dropping the standard property (e1 panels blur).
   build: {
     cssTarget: ['chrome120', 'safari16', 'firefox120'],
+    // The app's own chunk is ~615 kB (189 kB gzipped), so Vite's 500 kB default warned on every
+    // install; just above it, the warning means the bundle really grew.
+    chunkSizeWarningLimit: 650,
     rolldownOptions: {
       output: {
         // Libraries change far less often than the app: give the big ones their own long-lived,

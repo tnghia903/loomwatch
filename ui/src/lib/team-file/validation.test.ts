@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { parse } from 'yaml'
 
 import type { TeamDocument } from './types'
@@ -133,6 +133,26 @@ describe('displayFieldProblems', () => {
 
     expect(displayFieldProblems(result.fieldProblemsByAgent, new Set(), false).get('researcher')?.role?.weight).toBe('incomplete')
     expect(displayFieldProblems(result.fieldProblemsByAgent, new Set(), true).get('researcher')?.role?.weight).toBe('error')
+  })
+})
+
+// Every page load logged ajv's "unknown format "date-time" ignored" twice: the schema the daemon
+// serves stamps edges and events with `format: date-time`, which bare ajv does not know.
+describe('the schema the daemon serves', () => {
+  const schema = parse(readFileSync(resolve(process.cwd(), '../schemas/team.schema.yaml'), 'utf8')) as object
+
+  it('compiles without a warning, and still checks a timestamp', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const validate = compileWith(schema, Ajv2020)
+      expect(warn).not.toHaveBeenCalled()
+      const edge = { from: 'researcher', to: 'writer', layer: 'configured', kind: 'sequence' }
+      const team = (ts: string) => ({ ...document({ agents: [document().agents[0], { ...document().agents[0], id: 'writer', name: 'Writer' }] }), edges: [{ ...edge, ts }] })
+      expect(validate(team('2026-10-04T08:00:00Z') as TeamDocument).valid).toBe(true)
+      expect(validate(team('yesterday') as TeamDocument).valid).toBe(false)
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 
