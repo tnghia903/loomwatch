@@ -183,6 +183,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
             harnesses={harnesses}
             onChanged={onRetryHarnesses}
             onHide={() => setSetupOpen(false)}
+            firstTeam={teams?.length === 0}
           />
         )}
 

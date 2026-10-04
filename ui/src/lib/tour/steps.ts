@@ -1,3 +1,5 @@
+import { listNames } from '../format'
+
 /**
  * The getting-started guide, one card per step.
  *
@@ -58,11 +60,6 @@ function present(selector: string): boolean {
 /** How many agents the open team has, as the workspace says, not as many as are drawn yet. */
 function agentCount(): number {
   return Number(document.querySelector('[data-tour="workspace"]')?.getAttribute('data-tour-agents') ?? 0)
-}
-
-function listNames(names: readonly string[]): string {
-  if (names.length <= 1) return names[0] ?? ''
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 }
 
 export const EXAMPLE_REQUEST = 'Give me three ideas for a weekend project, one sentence each.'

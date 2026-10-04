@@ -22,7 +22,10 @@
   administrator's or a team folder's own Gemini settings, is left to the handshake. A handshake
   that fails with Gemini CLI's own "Gemini API key is missing" or "This client is no longer
   supported" gets the same reason instead of "run "gemini" in Terminal to fix", which fixes neither.
-  The setup panel shows such an app as **Needs an API key**.
+  The setup panel shows such an app as **Needs an API key**. In the same pass, the panel says
+  "Press New team to make your first team" only while Home has no team (decision 7), and Claude
+  Code's card also names the API-key route (`ANTHROPIC_API_KEY`), which Anthropic asks apps built on
+  its Agent SDK to use.
 
 ## Context
 

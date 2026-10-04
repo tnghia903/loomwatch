@@ -32,7 +32,8 @@ export const APP_SETUP_GUIDES: readonly AppSetupGuide[] = [
   {
     id: 'claude',
     name: 'Claude Code',
-    account: 'Needs a Claude Pro, Max, Team or Enterprise plan, or an Anthropic Console account. The free Claude plan doesn’t include it.',
+    // Anthropic asks apps built on its Agent SDK, as Claude Code's ACP bridge is, to use API keys.
+    account: 'Needs a Claude Pro, Max, Team or Enterprise plan; the free Claude plan doesn’t include it. Or use an Anthropic API key: set ANTHROPIC_API_KEY before starting LoomWatch.',
     install: 'curl -fsSL https://claude.ai/install.sh | bash',
     signIn: 'claude auth login',
     docs: 'https://code.claude.com/docs/en/setup',
