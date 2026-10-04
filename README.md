@@ -327,98 +327,76 @@ Every team below is made from the jobs in Build's library, each on the AI app it
 
 ## Quickstart
 
+On a Mac, paste this into Terminal:
+
 ```sh
-git clone git@github.com:tnghia903/loomwatch.git
-cd loomwatch
-./loomwatch
+curl -fsSL https://loomwatch.github.io/install.sh | bash
 ```
 
-The first start takes a few minutes, then opens **<http://127.0.0.1:3000>** with an offline demo team
-ready to run. Then follow [Try your first run](#try-your-first-run).
+It downloads LoomWatch (about 21 MB, one program for Apple silicon and Intel Macs), checks it
+against the release's checksum, puts it in `~/LoomWatch/app`, and opens
+**<http://127.0.0.1:3000>** with an offline demo team ready to run. Nothing is compiled and no
+administrator password is needed. Then follow [Try your first run](#try-your-first-run).
 
 > [!TIP]
 > No AI account yet? The offline demo needs no API key and no model usage, so you can learn the whole
-> app first. Installing does need internet access.
+> app first.
 
-This recommended setup runs LoomWatch itself on your computer and keeps only its database
-(PostgreSQL) in Docker. That way LoomWatch can use the agent apps, skills, MCP tools, sign-ins,
-memory and workspace folders already set up for your user account.
+<details>
+<summary>Rather read the installer before running it?</summary>
+
+```sh
+curl -fsSLO https://loomwatch.github.io/install.sh
+less install.sh
+bash install.sh
+```
+
+It is [scripts/install.sh](scripts/install.sh) in this repository. It downloads
+`loomwatch-macos-universal.tar.gz` and its `.sha256` from the
+[newest release](https://github.com/tnghia903/loomwatch/releases/latest), and changes nothing
+outside `~/LoomWatch` apart from a `loomwatch` shortcut in `~/.local/bin` when that folder is
+already on your `PATH`.
+
+</details>
+
+LoomWatch itself runs on your computer and keeps only its database (PostgreSQL) in Docker. That way
+it can use the AI apps, skills, MCP tools, sign-ins and folders already set up for your user account.
 
 ### What you need
 
-LoomWatch runs on macOS and is tested on Apple silicon Macs. Linux should work but is untested.
-Windows is not supported, because the `./loomwatch` launcher is a bash script.
+- **A Mac** with macOS 11 or newer. Linux downloads exist for x86_64 and arm64 but are untested.
+  Windows is not supported yet.
+- **[Docker Desktop](https://docs.docker.com/desktop/)** (or [OrbStack](https://orbstack.dev/)),
+  which runs the database that keeps your run history. With [Homebrew](https://brew.sh/):
+  `brew install --cask docker-desktop`, then open it once. If it is missing, LoomWatch says so.
+- **For real runs, one AI app** installed and signed in: Claude Code, Codex or OpenCode, for
+  example. OpenCode has free models and needs no account. You don't need any for the demo, and the
+  home screen's **Set up an AI app** gives each app's install and sign-in commands.
 
-LoomWatch is built on your computer the first time you start it, so it needs a few free tools. You
-don't have to check for them yourself: `./loomwatch` lists anything missing and how to install it.
-
-| Tool | Why |
-| --- | --- |
-| [Docker Desktop](https://docs.docker.com/desktop/) (or OrbStack, or Docker Engine with Compose) | Runs the database that keeps your run history |
-| [Node.js](https://nodejs.org/) 22.12 or newer | Builds the browser app |
-| [Rust](https://rustup.rs/) | Builds the LoomWatch program. The exact version it needs downloads on its own during the first build |
-| [Git](https://git-scm.com/downloads), plus access to this private repository | Downloads LoomWatch |
-| Python 3 | Runs the offline demo. Usually already installed on macOS |
-
-On a Mac with [Homebrew](https://brew.sh/), these two commands install everything:
-
-```sh
-brew install --cask docker-desktop && brew install node
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-```
-
-Then open a new terminal window so it finds the new tools.
-
-To run real agents, you also need at least one AI app installed and signed in, such as Claude Code,
-Codex, Gemini CLI or OpenCode. You do **not** need one for the demo. If you have none yet, the home
-screen's **Set up an AI app** gives each app's install and sign-in commands and notices when it is
-ready. OpenCode works with free models and no account.
+The offline demo runs on Python 3. On a Mac without Apple's Command Line Tools, macOS offers to
+install them the first time the demo runs; say yes, or install them first with
+`xcode-select --install`.
 
 > [!NOTE]
 > Gemini CLI no longer works with a personal Google sign-in. Google now refuses it ("This client is
 > no longer supported"), and LoomWatch shows Gemini as not working once that happens. Gemini CLI
 > signed in with a Gemini API key may still work, but LoomWatch has not been tested that way.
 
-Everything below is typed in a terminal (Terminal on macOS). Use a terminal where your AI app's
-command already works, because LoomWatch finds your apps, skills and tools through it.
+Start LoomWatch from a terminal where your AI app's command already works, because LoomWatch finds
+your apps, skills and tools through it.
 
-### 1. Download LoomWatch
+### What the first start does
 
-The repository is private, so use a method that is signed in to GitHub. With an SSH key set up for
-GitHub:
-
-```sh
-git clone git@github.com:tnghia903/loomwatch.git
-cd loomwatch
-```
-
-Or, with the [GitHub CLI](https://cli.github.com/) after `gh auth login`:
-
-```sh
-gh repo clone tnghia903/loomwatch
-cd loomwatch
-```
-
-### 2. Start LoomWatch
-
-From inside the `loomwatch` folder:
-
-```sh
-./loomwatch
-```
-
-The first start takes a few minutes. It sets everything up for you:
-
-1. Creates your settings file (`.env`) with a random database password.
+1. Creates its settings file (`~/LoomWatch/app/.env`) with a random database password.
 2. Creates your teams folder, `~/LoomWatch/teams`, with an offline demo team in it, if the folder
    does not exist yet.
 3. Opens Docker Desktop if it is not running.
-4. Builds LoomWatch. This happens only the first time and after an update.
-5. Starts the database, then LoomWatch, and opens **<http://127.0.0.1:3000>** in your browser. The
+4. Starts the database, then LoomWatch, and opens **<http://127.0.0.1:3000>** in your browser. The
    database keeps your run history, notes and checkpoints in a Docker volume, so they survive
    restarts.
 
-Keep this terminal window open while you use LoomWatch. To stop LoomWatch, press <kbd>Ctrl</kbd>+<kbd>C</kbd> in it.
+Keep the Terminal window open while you use LoomWatch. To stop LoomWatch, press
+<kbd>Ctrl</kbd>+<kbd>C</kbd> in it.
 
 LoomWatch looks for your skills and tools in the usual places in your home folder (`.claude`,
 `.codex`, `.agents`, `.config/opencode` and similar) and for AI apps on the terminal's `PATH`. It
@@ -426,18 +404,17 @@ reads them only on your computer; nothing is uploaded.
 
 ### Every day
 
-| To | Run, from the `loomwatch` folder |
+| To | Run |
 | --- | --- |
-| Start LoomWatch, or open it if it is already running | `./loomwatch` |
+| Start LoomWatch, or open it if it is already running | `~/LoomWatch/app/loomwatch` |
 | Stop LoomWatch | Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in its window |
-| Also stop the database, for example before quitting Docker Desktop | `./loomwatch stop` |
-| Update to the latest version (stop it first) | `./loomwatch update` |
-| See every option | `./loomwatch help` |
+| Also stop the database, for example before quitting Docker Desktop | `~/LoomWatch/app/loomwatch stop` |
+| Update to the newest release (stop it first) | `~/LoomWatch/app/loomwatch update` |
+| See every option | `~/LoomWatch/app/loomwatch help` |
 
-Your teams and history are kept in every case. The database starts again by itself whenever Docker
-Desktop does, until you run `./loomwatch stop`. `./loomwatch update` downloads the latest version,
-rebuilds it and starts it. If you installed LoomWatch with the older step-by-step instructions,
-`./loomwatch` keeps using your existing settings, teams folder and database.
+When the installer added the `loomwatch` shortcut, plain `loomwatch` works too. Your teams and
+history are kept in every case. The database starts again by itself whenever Docker Desktop does,
+until you run `loomwatch stop`. Running the install command again also updates LoomWatch.
 
 To stop one run, click **Stop** beside the request box. Closing the browser tab does not stop LoomWatch or
 its runs. Scheduled teams run only while LoomWatch and its database are running and the computer is
@@ -450,28 +427,59 @@ awake. For scheduled runs and optional Notion delivery, see [Routines](docs/WATC
    **Disconnect** beside each one. For Claude Code, Codex and Gemini CLI this also removes LoomWatch
    from the app's own settings. For an app you pasted a snippet into, delete its `loomwatch` entry
    yourself.
-2. From the `loomwatch` folder, stop LoomWatch and delete its database. This erases your run
-   history, Notebook entries and Ask conversations:
+2. Stop LoomWatch and delete its database. This erases your run history, Notebook entries and Ask
+   conversations:
 
    ```sh
-   ./loomwatch stop
-   docker compose down -v
+   ~/LoomWatch/app/loomwatch stop
+   cd ~/LoomWatch/app && docker compose down -v && cd ~
    ```
 
-3. Delete the `loomwatch` folder.
-4. Your teams are kept in `~/LoomWatch` until you delete that folder too. It also holds your saved
-   jobs, deleted teams and the agents' working folders.
+3. Delete the program: `rm -rf ~/LoomWatch/app`, and `rm ~/.local/bin/loomwatch` if the installer
+   made that shortcut.
+4. Your teams are kept in `~/LoomWatch/teams` until you delete `~/LoomWatch` too. It also holds your
+   saved jobs, deleted teams and the agents' working folders.
+
+For a copy built from source, run `./loomwatch stop` and `docker compose down -v` in its folder,
+then delete the folder.
 
 ### Change the defaults
 
 | Setting | Default | For example |
 | --- | --- | --- |
-| Browser port | `3000` (or `LOOMWATCH_PORT` in `.env`) | `LOOMWATCH_PORT=3001 ./loomwatch` |
-| Teams folder | `~/LoomWatch/teams` | `LOOMWATCH_TEAMS_ROOT=~/Work/teams ./loomwatch` |
-| Database | PostgreSQL in Docker | `LOOMWATCH_DATABASE_URL=postgres://… ./loomwatch` uses your own PostgreSQL, and Docker is not needed |
+| Browser port | `3000` (or `LOOMWATCH_PORT` in `.env`) | `LOOMWATCH_PORT=3001 ~/LoomWatch/app/loomwatch` |
+| Teams folder | `~/LoomWatch/teams` | `LOOMWATCH_TEAMS_ROOT=~/Work/teams ~/LoomWatch/app/loomwatch` |
+| Database | PostgreSQL in Docker | `LOOMWATCH_DATABASE_URL=postgres://… ~/LoomWatch/app/loomwatch` uses your own PostgreSQL, and Docker is not needed |
+| Install folder | `~/LoomWatch/app` | `curl -fsSL https://loomwatch.github.io/install.sh \| LOOMWATCH_APP_DIR=~/Apps/LoomWatch bash` |
+| Version | The newest release | `curl -fsSL https://loomwatch.github.io/install.sh \| LOOMWATCH_VERSION=v0.1.0 bash` |
 
-`./loomwatch --no-open` starts without opening the browser, `./loomwatch --rebuild` builds again
-even when nothing changed, and `./loomwatch help` lists everything.
+`loomwatch --no-open` starts without opening the browser, and `loomwatch help` lists everything.
+
+### Build from source
+
+To change LoomWatch, or to run the newest code on `main`, build it yourself. That needs Git,
+[Node.js](https://nodejs.org/) 22.12 or newer and [Rust](https://rustup.rs/) besides Docker; the
+exact Rust version downloads on its own during the first build. With Homebrew:
+
+```sh
+brew install --cask docker-desktop && brew install node
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+```
+
+Open a new terminal window so it finds the new tools, then:
+
+```sh
+git clone https://github.com/tnghia903/loomwatch.git
+cd loomwatch
+./loomwatch
+```
+
+The first start builds the browser app and the program, which takes a few minutes, then does what
+the installed copy does. Use `./loomwatch` from that folder wherever this guide says
+`~/LoomWatch/app/loomwatch`. In a copy of the source, `./loomwatch update` pulls the newest `main`
+and rebuilds, and `./loomwatch --rebuild` builds again even when nothing changed. `main` moves
+faster than the releases, so expect rough edges. If you installed LoomWatch from source before,
+`./loomwatch` keeps using your existing settings, teams folder and database.
 
 <details>
 <summary>What <code>./loomwatch</code> runs, if you prefer to do it by hand</summary>
@@ -515,7 +523,7 @@ you can learn the interface without calling a model provider.
 5. Read the **Team response**. The demo writer echoes the direction it received, and the run
    finishes as **Finished**.
 
-To reopen an earlier run, click **Run history** above the request, or press <kbd>⌘</kbd><kbd>P</kbd>. The replay slider lets you
+To reopen an earlier run, choose **Run history** from the ☰ menu, or press <kbd>⌘</kbd><kbd>P</kbd>. The replay slider lets you
 inspect earlier events without running the agents again. To request another pass, type
 new instructions and choose **Follow up**; **Redo from** can start again at a selected step.
 
@@ -880,15 +888,16 @@ teams folder's `.jobs`.
 
 | What you see | What to check |
 | --- | --- |
-| `git clone` asks for a username, or says the repository is not found | The repository is private. Clone with SSH or `gh repo clone` as in step 1, using a GitHub account that has access. |
-| `./loomwatch` says something needs to be installed first | Install what it lists, open a new terminal window so it picks up the new `PATH`, then run `./loomwatch` again. |
-| `permission denied: ./loomwatch` | Run `chmod +x loomwatch` once, or start it with `bash loomwatch`. |
-| Docker did not start within two minutes | Open Docker Desktop yourself, finish any first-start steps it shows, wait until it says it is running, then run `./loomwatch` again. |
-| Another program is using port 5433 | Change `POSTGRES_PORT` in `.env` to a free port such as `5434`, then run `./loomwatch` again. |
-| `password authentication failed for user "loomwatch"` | The database of an earlier LoomWatch copy on this computer kept its first password. `./loomwatch` now fixes this on its own: run `./loomwatch update`, then `./loomwatch`. If you set up the database by hand, editing `.env` does not change an existing database's password. |
-| Archive disabled / Run unavailable | LoomWatch was started without its database. Stop it and start it with `./loomwatch`. If Docker Desktop quit or restarted while LoomWatch kept running, just run `./loomwatch` again: it starts the database. |
-| Another program is using port 3000 | Start LoomWatch on another port with `LOOMWATCH_PORT=3001 ./loomwatch`. |
-| `./loomwatch` says another copy of LoomWatch is already running, or the page says "Couldn't list your teams" and none of your AI apps can start | An earlier copy is still running, often one whose folder you deleted before downloading LoomWatch again. Stop it with the `kill` command the message gives, then run `./loomwatch` again. |
+| `curl: (22) The requested URL returned error: 404` while installing | The download is briefly unavailable while a new release is published. Wait a minute and run the install command again. |
+| LoomWatch says something needs to be installed first | Install what it lists, open a new terminal window so it picks up the new `PATH`, then run `loomwatch` again. |
+| `zsh: no such file or directory: …/loomwatch` or `command not found: loomwatch` | The installer puts LoomWatch in `~/LoomWatch/app`, so start it with `~/LoomWatch/app/loomwatch`. In a copy of the source, run `./loomwatch` from its folder. |
+| `permission denied: ./loomwatch` (a copy of the source) | Run `chmod +x loomwatch` once, or start it with `bash loomwatch`. |
+| Docker did not start within two minutes | Open Docker Desktop yourself, finish any first-start steps it shows, wait until it says it is running, then run `loomwatch` again. |
+| Another program is using port 5433 | Change `POSTGRES_PORT` in `.env` (`~/LoomWatch/app/.env` for the installed copy) to a free port such as `5434`, then run `loomwatch` again. |
+| `password authentication failed for user "loomwatch"` | The database of an earlier LoomWatch copy on this computer kept its first password. `loomwatch` fixes this on its own when it starts; update it if it is older than that. If you set up the database by hand, editing `.env` does not change an existing database's password. |
+| Archive disabled / Run unavailable | LoomWatch was started without its database. Stop it and start it with `loomwatch`. If Docker Desktop quit or restarted while LoomWatch kept running, just run `loomwatch` again: it starts the database. |
+| Another program is using port 3000 | Start LoomWatch on another port: `LOOMWATCH_PORT=3001 ~/LoomWatch/app/loomwatch`. |
+| LoomWatch says another copy of LoomWatch is already running, or the page says "Couldn't list your teams" and none of your AI apps can start | An earlier copy is still running, often one whose folder you deleted before downloading LoomWatch again. Stop it with the `kill` command the message gives, then run `loomwatch` again. |
 | Team file not found | Confirm the file is in your teams folder (`~/LoomWatch/teams` unless you set `LOOMWATCH_TEAMS_ROOT`). The demo link uses `?path=operator-stop.yaml`, relative to that folder. |
 | Agent is missing or unavailable | Run `command -v <agent-command>` in the LoomWatch terminal. Authenticate the app, then restart LoomWatch from that same terminal. Compose-only deployments scan the container unless the native companion is running. |
 | Skill or tool is missing locally | Confirm it exists below your `.claude`, `.codex`, `.agents`, `.gemini`, `.hermes`, `.openclaw` or `.config/opencode` folder, then click ↻ beside **Search** in Build to scan again. Check that LoomWatch was not started with `LOOMWATCH_CAPABILITY_HOME` pointing elsewhere. |
@@ -897,7 +906,7 @@ teams folder's `.jobs`.
 | Harness working directory is missing | Native teams should use a real host path accessible to the agent app. Container-run teams must use `/workspaces/...` and mount its host parent through `LOOMWATCH_WORKSPACES_DIR`. |
 | Agent cannot perform a tool action | While the run is going, answer its question in the run or the Needs-you tray before it is declined after 10 minutes. Afterwards, read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel in Build. An edit outside the agent's own folder is never allowed. |
 | Build reports an unsupported Node version | Install the current Node.js from <https://nodejs.org/>, reopen Terminal, and check `node --version`. |
-| UI assets are missing or look out of date | Stop LoomWatch, then start it with `./loomwatch --rebuild`. |
+| UI assets are missing or look out of date | Installed copy: run `~/LoomWatch/app/loomwatch update`. Copy of the source: stop LoomWatch, then start it with `./loomwatch --rebuild`. |
 | Cannot connect from another device | This setup serves runs and history only on your own computer at `127.0.0.1`. Use the browser on that computer. |
 
 </details>

@@ -1,8 +1,9 @@
 # Continuous integration
 
-Every check runs on GitHub-hosted Ubuntu runners. Nothing is deployed or published: LoomWatch is
-built from source (see the README), so CI's job is to prove that `main` builds, passes its tests and
-still produces a container image.
+Every check runs on GitHub-hosted runners. CI's job is to prove that `main` builds, passes its tests
+and still produces a container image. Two workflows publish: **Pages** puts the landing page and the
+installer on https://loomwatch.github.io, and **Release** builds the ready-to-run program for a
+version tag.
 
 ## Workflows
 
@@ -11,6 +12,8 @@ still produces a container image.
 | `ci.yml` — **Frontend**, then **Rust** | push to `main`, every pull request, by hand | UI lint (warnings fail), typecheck, build and tests; then `cargo fmt`, Clippy (`-D warnings`) and the full test suite against PostgreSQL 17.6, building on the exact `ui/dist` the Frontend job produced | 2 + 5–8 min |
 | `container.yml` — **Build image** | a change to the Dockerfile or a lockfile/toolchain/manifest it builds from, monthly, by hand | `docker build` still succeeds; the image is never pushed | ~10–15 min (estimate) |
 | `actionlint.yml` | a change under `.github/workflows/` | the workflow files themselves are valid | < 1 min |
+| `pages.yml` — **Publish** | a change to `site/`, `scripts/install.sh`, the README screenshots or fonts it borrows, by hand | builds the landing page with `site/build.sh` and pushes it to the `loomwatch/loomwatch.github.io` repository, which GitHub Pages serves | < 1 min |
+| `release.yml` | a `v*` tag, by hand | builds the browser app once, then `loomwatchd` for macOS (one universal program, on macOS) and Linux x86_64/arm64 (on Ubuntu 22.04), packs each with `scripts/package-release.sh`, and, for a tag, attaches them to a **draft** release. Run by hand, it only builds the files | ~15 min |
 
 ```
 pull request / push to main
@@ -42,6 +45,29 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 DATABASE_URL=postgres://… cargo test --workspace --locked
 ```
+
+## Making a release
+
+The installer (`curl -fsSL https://loomwatch.github.io/install.sh | bash`) always downloads the
+newest **published** release, so a release is drafted first and published only after its files
+have been tried.
+
+1. Set `version` in `crates/loomwatch-backend/Cargo.toml` (the app reports it in Send feedback),
+   build once so `Cargo.lock` follows, and push that commit to `main`.
+2. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`. The Release workflow
+   checks the tag matches the version and drafts the release with `loomwatch-macos-universal.tar.gz`,
+   `loomwatch-linux-x86_64.tar.gz`, `loomwatch-linux-arm64.tar.gz` and a `.sha256` for each.
+3. Try the draft with the real installer, in a folder of its own:
+
+   ```sh
+   gh release download v0.2.0 -D /tmp/lw-release
+   python3 -m http.server -d /tmp/lw-release 8765 &
+   LOOMWATCH_DOWNLOAD_BASE=http://127.0.0.1:8765 LOOMWATCH_APP_DIR=/tmp/lw-try/app \
+     LOOMWATCH_TEAMS_ROOT=/tmp/lw-try/teams LOOMWATCH_PORT=3320 bash scripts/install.sh
+   ```
+
+   Stop it with Ctrl-C, then remove its database with `cd /tmp/lw-try/app && docker compose down -v`.
+4. Edit the notes, then publish: `gh release edit v0.2.0 --draft=false`.
 
 ## Repository settings (not in code)
 
