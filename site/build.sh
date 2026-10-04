@@ -24,8 +24,12 @@ mkdir -p "$out/usecases" "$out/assets/usecases"
 cp "$root"/docs/assets/usecases/*.png "$out/assets/usecases/"
 cp "$root"/examples/usecases/*.yaml "$out/usecases/"
 cp -R "$root"/examples/usecases/*.brief "$out/usecases/"
+# The installer the page tells people to run: curl -fsSL https://loomwatch.github.io/install.sh | bash
+cp "$root"/scripts/install.sh "$out/install.sh"
 # favicon.ico and apple-touch-icon.png are rendered from favicon.svg by site/icons.mjs.
 cp "$root"/site/favicon.svg "$root"/site/favicon.ico "$root"/site/apple-touch-icon.png "$out/"
+# The link preview picture (og:image); site/social-card.html says how it is made.
+cp "$root"/site/social-card.jpg "$out/"
 cp "$root"/docs/assets/readme/*.png "$out/assets/readme/"
 # The fonts' license (SIL OFL) has to travel with every copy of them.
 cp "$root"/docs/design-system/fonts/fonts.css "$root"/docs/design-system/fonts/*.woff2 "$root"/docs/design-system/fonts/OFL.txt "$out/assets/fonts/"
