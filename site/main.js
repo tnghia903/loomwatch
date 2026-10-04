@@ -38,10 +38,10 @@
 
   /* ================================================================ Catalog and state */
 
+  // Gemini CLI is left out: Google refuses it with a personal sign-in (see the README's note).
   const APPS = [
-    { id: 'claude', name: 'Claude', mono: 'C', spawn: 'claude-agent-acp' },
+    { id: 'claude', name: 'Claude Code', mono: 'C', spawn: 'claude-agent-acp' },
     { id: 'codex', name: 'Codex', mono: 'Cx', spawn: 'codex-acp' },
-    { id: 'gemini', name: 'Gemini', mono: 'G', spawn: 'gemini', args: ['--acp'] },
     { id: 'opencode', name: 'OpenCode', mono: 'Oc', spawn: 'opencode', args: ['acp'] },
     { id: 'hermes', name: 'Hermes', mono: 'H', spawn: 'hermes-acp' },
     { id: 'openclaw', name: 'OpenClaw', mono: 'Ow', spawn: 'openclaw', args: ['acp'] },
@@ -196,7 +196,7 @@
   const pasteSvg = $('.open-paste')
   const pasteLabel = $('.paste-label')
   // Where each window sits on the messy desk, as a fraction of the free space, and its tilt.
-  const DESK = { claude: [0.04, 0.05, -3], codex: [0.96, 0, 2.4], gemini: [0, 0.9, 1.8], opencode: [0.92, 1, -2.2] }
+  const DESK = { claude: [0.04, 0.05, -3], codex: [0.96, 0, 2.4], hermes: [0, 0.9, 1.8], opencode: [0.92, 1, -2.2] }
   const tags = terms.map((term) => { const tag = el('span', { class: 'term-tag', text: term.dataset.app }); field.append(tag); return tag })
   let openReady = false
   let openP = reduced ? 1 : 0
@@ -509,8 +509,8 @@
     const mine = ++proposing
     const pool = state.apps
     const pick = (avoid, prefer) => prefer.find((id) => pool.includes(id) && id !== avoid) || pool.find((id) => id !== avoid) || pool[0]
-    const researcher = pick(state.team.researcher, ['opencode', 'gemini', 'claude', 'codex', 'hermes', 'openclaw'])
-    const writer = pick(researcher, ['claude', 'codex', 'opencode', 'gemini', 'hermes', 'openclaw'])
+    const researcher = pick(state.team.researcher, ['opencode', 'claude', 'codex', 'hermes', 'openclaw'])
+    const writer = pick(researcher, ['claude', 'codex', 'opencode', 'hermes', 'openclaw'])
     const words = `A researcher on ${app(researcher).name}, then me to check its work, then a writer on ${app(writer).name}.`
     const said = el('div', { class: 'said' })
     proposeBox.hidden = false
@@ -729,13 +729,15 @@
   function renderPacket() {
     const who = giveFor
     const items = state.give[who].map(source)
+    // OpenCode doesn't ask before it acts, so for it the switches below promise nothing.
+    const asksFirst = state.team[who] !== 'opencode'
     packetBox.replaceChildren(
       el('div', { class: 'pk-head' },
         el('span', { class: 'micro', text: 'What it gets, every run' }),
         el('b', { text: `${LANE[who]}, on ${app(state.team[who]).name}` })),
       el('dl', { class: 'pk' },
         el('div', {}, el('dt', { text: 'Works in' }), el('dd', {}, el('code', { text: state.cwd[who] }),
-          el('span', { class: 'pk-note', text: state.allow[who].edits ? ' Its project. It may change files here.' : ' Its project. It reads here, and asks before it changes a file.' }))),
+          el('span', { class: 'pk-note', text: state.allow[who].edits ? ' Its project. It may change files here.' : asksFirst ? ' Its project. It reads here, and asks before it changes a file.' : ' Its project. OpenCode can change files here without asking.' }))),
         el('div', {}, el('dt', { text: 'Handed over' }), el('dd', {}, items.length
           ? el('ul', { class: 'pk-list' }, items.map((x) => el('li', {}, icon(x.kind), el('span', {}, el('b', { text: x.name }), el('small', { text: `${x.arrives}${readOnly(x) ? ', read only' : ''}` })))))
           : el('span', { class: 'pk-note', text: `Nothing yet. Drag a card onto ${LANE[who]}.` }))),
@@ -743,7 +745,7 @@
           type: 'button', role: 'switch', class: 'sw', 'aria-checked': String(state.allow[who][a.key]),
           onclick: () => { state.allow[who][a.key] = !state.allow[who][a.key]; renderYaml(); renderPacket() },
         }, el('i', { 'aria-hidden': 'true' }), a.label))))),
-      el('p', { class: 'pk-foot', text: 'Anything else it asks for waits for your answer during the run.' }))
+      el('p', { class: 'pk-foot', text: asksFirst ? 'Anything else it asks for waits for your answer during the run.' : "OpenCode doesn't ask before it acts, so these switches can't hold it back." }))
   }
 
   /* ================================================================ 04 · Ask */
@@ -887,7 +889,9 @@
         log('researcher', 'Researcher', { tool: source(id).reads, say: `Researcher opened ${source(id).name}, which you handed it.` })
       }
       const web = r.preset.reads === 'the web'
-      if (web && !r.allow.researcher.web && !(await askPermission('researcher', r.preset.tools[0]))) r.deniedWeb = true
+      // OpenCode doesn't ask before it acts, so its switch being off doesn't stop it.
+      if (web && !r.allow.researcher.web && r.team.researcher === 'opencode') log('researcher', 'Researcher searched the web without asking', { say: "Researcher's web switch is off, but OpenCode doesn't ask before it acts, so it searched anyway." })
+      else if (web && !r.allow.researcher.web && !(await askPermission('researcher', r.preset.tools[0]))) r.deniedWeb = true
       for (const tool of r.deniedWeb ? r.preset.tools.filter((t) => !/^(web search|fetch)/.test(t)) : r.preset.tools) {
         await work(1.7)
         r.tools.researcher += 1
@@ -967,6 +971,7 @@
     const r = run
     const name = app(r.team.writer).name
     setStage('writer', 'running')
+    renderResult()
     segStart('writer')
     log('writer', `Writer started on ${name}`, { say: `Writer started on ${name}, with ${r.team.review ? 'the findings you approved' : 'whatever Researcher found'}.` })
     for (const id of r.give.writer) {
@@ -1037,6 +1042,7 @@
     if (!run || run.phase !== 'review' || !run.decide) return
     const note = $('#rv-note')
     const text = note ? note.value.trim() : ''
+    if (kind === 'send' && !text) return // the button stays off until there is a note
     const resolve = run.decide
     run.decide = null
     resolve({ kind, text })
@@ -1212,16 +1218,25 @@
       const flag = flaggedIndex >= 0
         ? el('p', { class: 'rv-flag' }, el('b', { text: `Claim ${flaggedIndex + 1} has no source.` }), ' Approve it as it is, or send it back with a note.')
         : el('p', { class: 'rv-flag good' }, el('b', { text: fixedOne?.dropped ? `Claim ${run.findings.indexOf(fixedOne) + 1} is gone.` : 'Every claim has a source now.' }), fixedOne?.dropped ? ` Researcher dropped it: ${fixedOne.why}.` : ' Approve to hand the findings to Writer.')
-      const note = el('textarea', { id: 'rv-note', rows: '2', placeholder: 'Optional. Sent with either choice.' })
-      note.value = pass === 1 ? run.preset.note : ''
+      // As in LoomWatch: Approve needs no note and reads Continue once one is typed, because the note
+      // then goes on with the work; sending it back needs a note that says what to change.
+      const note = el('textarea', { id: 'rv-note', rows: '2', placeholder: flaggedIndex >= 0 ? `To send it back, say what to change. For example: ${run.preset.note}` : 'Optional. A note here goes on with the work.' })
+      const sendBack = el('button', { type: 'button', class: 'btn', text: 'Send back to Researcher', onclick: () => decide('send') })
+      const go = el('button', { type: 'button', class: 'btn btn-primary', onclick: () => decide('approve') })
+      const labelButtons = () => {
+        const typed = Boolean(note.value.trim())
+        go.textContent = typed ? 'Continue' : 'Approve'
+        sendBack.disabled = !typed
+        if (typed) sendBack.removeAttribute('title'); else sendBack.title = 'Type what should change first.'
+      }
+      note.addEventListener('input', labelButtons)
+      labelButtons()
       reviewBody.replaceChildren(
         el('p', { class: 'rv-q', text: pass === 1 ? 'Researcher is done. Approve the findings, or say what to change.' : 'Researcher made your change. Approve the findings, or send them back again.' }),
         el('div', { class: 'rv-box' }, el('span', { class: 'micro', text: 'What Researcher handed over' }), list),
         flag,
         el('div', { class: 'rv-note' }, el('label', { class: 'micro', for: 'rv-note', text: 'Your note' }), note),
-        el('div', { class: 'rv-acts' },
-          el('button', { type: 'button', class: 'btn', text: 'Send back to Researcher', onclick: () => decide('send') }),
-          el('button', { type: 'button', class: 'btn btn-primary', text: 'Approve', onclick: () => decide('approve') })))
+        el('div', { class: 'rv-acts' }, sendBack, go))
       return
     }
     if (!run.approved) {
@@ -1251,7 +1266,7 @@
     const rows = [
       ['Asked', `“${r.preset.short}”`],
       ['Team', seq(r.team).map((w) => LANE[w]).join(' → ')],
-      ['Ran on', `${listText(apps)} · your own sign-ins`],
+      ['Ran on', `${listText(apps)} · your own accounts`],
       ['Took', clockText(r.clock)],
     ]
     const handed = GIVEN_TO.filter((w) => r.give[w].length).map((w) => `${LANE[w]}: ${r.give[w].map((id) => source(id).name).join(', ')}`)
@@ -1280,7 +1295,8 @@
     ].join('\n')
   }
   function renderResult(force = false) {
-    const key = run ? `${run.n}:${run.phase}:${run.approved}:${run.sendBacks}` : 'none'
+    // Writer's stage is in the key: the panel says who is working, and that changes when Writer starts.
+    const key = run ? `${run.n}:${run.phase}:${run.approved}:${run.sendBacks}:${run.stages.writer}` : 'none'
     if (!force && key === resultKey) return
     resultKey = key
     $('#result-file').textContent = run ? run.preset.file : preset(state.request).file

@@ -154,6 +154,7 @@ em { font-style: italic; }
 .top-nav a { color: var(--ink-2); text-decoration: none; font: 500 13px/1 var(--sans); }
 .top-nav a:hover { color: var(--ink); }
 .top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.top-get .short { display: none; }
 .progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; pointer-events: none; }
 .progress i { display: block; height: 100%; width: 100%; transform-origin: 0 50%; transform: scaleX(var(--read, 0)); background: var(--accent); filter: var(--bloom-gold); }
 
@@ -163,7 +164,7 @@ em { font-style: italic; }
 .open-stage { position: sticky; top: 0; height: 100vh; height: 100svh; overflow: hidden; display: grid; grid-template-columns: minmax(0, 520px) minmax(0, 1fr); gap: 40px; align-items: center; max-width: 1240px; margin: 0 auto; padding: 72px var(--gutter) 40px; }
 .open-copy { display: grid; position: relative; z-index: 2; }
 .open-before, .open-after { grid-area: 1 / 1; align-self: center; }
-.open-copy .micro { display: block; margin-bottom: 18px; }
+.open-copy .micro { display: block; margin-bottom: 18px; text-wrap: balance; }
 .open-line, .open h1 { font: 400 clamp(40px, 5.4vw, 72px)/1.02 var(--serif); letter-spacing: -.015em; margin: 0; text-wrap: balance; }
 .open-line em, .open h1 em { color: var(--accent); }
 .open-sub { margin: 22px 0 0; max-width: 470px; color: var(--ink-2); font-size: 17px; line-height: 1.6; text-wrap: pretty; }
@@ -544,12 +545,16 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .termbox { border: 1px solid var(--hairline-2); border-radius: 14px; background: var(--panel-solid); box-shadow: var(--shadow); overflow: hidden; margin-top: 30px; }
 .termbox-bar { display: flex; align-items: center; justify-content: space-between; height: 46px; padding: 0 10px 0 18px; border-bottom: 1px solid var(--hairline); }
 .termbox-bar .btn { height: 28px; }
-.termbox pre { margin: 0; padding: 20px 20px 22px; font: 400 13.5px/1.9 var(--mono); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; min-height: 168px; }
+/* The command never breaks: it scrolls sideways when it is wider than the box. What it prints wraps. */
+.termbox pre { margin: 0; padding: 20px 20px 22px; font: 400 13.5px/1.9 var(--mono); font-variant-ligatures: none; color: var(--ink); white-space: pre; overflow-x: auto; min-height: 168px; }
 .termbox .p { color: var(--accent); }
-.termbox .c { color: var(--ink-3); }
+.termbox .c { color: var(--ink-3); white-space: pre-wrap; }
 .termbox .c b { color: var(--ink-2); font-weight: 400; }
 .termbox .typing::after { content: ''; display: inline-block; width: 8px; height: 15px; margin-left: 1px; background: var(--ink); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
 .termbox-foot { margin: 0; padding: 14px 20px 18px; border-top: 1px solid var(--hairline); font-size: 13px; line-height: 1.6; color: var(--ink-2); }
+.start-alt { margin: 18px 0 0; font-size: 13.5px; color: var(--ink-3); }
+.start-alt a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.start-alt a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .real { margin-top: 96px; }
 .real-head { display: flex; align-items: end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
 .real-line { margin: 0; font: 400 clamp(28px, 3vw, 40px)/1.15 var(--serif); }
@@ -583,6 +588,7 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .foot nav a { color: var(--ink-2); text-decoration: none; font-size: 13px; }
 .foot nav a:hover { color: var(--accent); }
 .foot-line { margin: 0 0 0 auto; font: 400 15px/1.3 var(--serif); font-style: italic; color: var(--ink-3); }
+.foot-legal { flex-basis: 100%; margin: 0; max-width: 760px; font-size: 12.5px; line-height: 1.55; color: var(--ink-3); }
 
 /* ---------------------------------------------------------------- Responsive */
 
@@ -687,14 +693,18 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
   /* The papers behind fan upward here: room above the top paper for all of their edges. */
   .pile { height: 590px; }
   .issue { left: 50%; top: 134px; }
-  .issue:not(.front) { touch-action: none; } /* sliding along them picks a paper, it doesn't scroll */
+  /* The papers keep the pile's pan-y: a swipe up or down over them scrolls the page, and a tap
+     on one behind brings it to the top. */
   .foot-line { margin-left: 0; }
 }
 
 @media (max-width: 640px) {
   :root { --gutter: 16px; }
   .top-row { gap: 12px; }
-  .top-actions .btn { display: none; }
+  /* The nav is gone, so the way to the install command stays, short. */
+  .top-get { padding: 0 12px; }
+  .top-get .long { display: none; }
+  .top-get .short { display: inline; }
   .open-stage { padding-top: 76px; }
   .open-line, .open h1 { font-size: clamp(32px, 9.4vw, 44px); }
   .open-copy .micro { margin-bottom: 12px; }
@@ -723,6 +733,7 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
   .issue .colophon span:first-child { display: none; }
   .press-side .day-story p { font-size: 21px; min-height: 0; }
   .needs div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .termbox pre { padding: 16px; font-size: 12px; line-height: 1.75; }
   .pillars { grid-template-columns: minmax(0, 1fr); }
   .pillars li, .pillars li:nth-child(even) { padding-left: 0; border-left: 0; }
   .filecard .acts { display: none; }
