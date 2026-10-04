@@ -29,7 +29,12 @@
   <sub>The bundled offline demo: build a team, ask in plain words, approve at the review step, read the result.</sub>
 </p>
 
-<br>
+**Install on a Mac** (macOS 11 or newer, with [Docker Desktop](https://docs.docker.com/desktop/)
+or [OrbStack](https://orbstack.dev/)), then follow [Try your first run](#try-your-first-run):
+
+```sh
+curl -fsSL https://loomwatch.github.io/install.sh | bash
+```
 
 ## Your AI apps are the threads. LoomWatch is the loom.
 
