@@ -38,6 +38,22 @@ it('labels the execution mode in plain words without offering a popover', () => 
   expect(screen.queryByRole('button', { name: /in order|delegates/ })).not.toBeInTheDocument()
 })
 
+// Field report (2026-10-04): a one-agent team's follow-up box said "Lead agent delegates", with no
+// one to delegate to.
+it('says nothing about order or delegation for a one-agent team', () => {
+  render(
+    <Composer
+      mode="team" stepCount={1} state={{ kind: 'terminal', phase: 'succeeded' }} value="" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()}
+      onRetry={vi.fn()} onNewRun={vi.fn()} onFollowUp={vi.fn()} followUpStages={[]}
+    />,
+  )
+  expect(screen.queryByText('Lead agent delegates')).not.toBeInTheDocument()
+  expect(document.querySelector('.mode-summary')).toBeNull()
+  // The follow-up itself is all still there.
+  expect(screen.getByRole('button', { name: /Follow up/ })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+})
+
 // ADR 0043: Memory and Run history open from the workspace menu on every screen, so the composer
 // carries neither: a second button for each made two controls do one thing.
 it('offers no Memory chip and no Run history button of its own', () => {

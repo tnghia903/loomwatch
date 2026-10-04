@@ -466,7 +466,8 @@ export function DeliveryLane({
               </button>
             )}
           </div>
-          <details className="delivery-verification"><summary>{planned ? `${requirements.length} required skills` : `${reads}/${requirements.length} required loaded`}</summary>
+          {/* With no required skill there is nothing to count: "0/0 required loaded" only puzzled. */}
+          {requirements.length > 0 && <details className="delivery-verification"><summary>{planned ? `${requirements.length} required skills` : `${reads}/${requirements.length} required loaded`}</summary>
             <ShieldCheck size={15} />
             <span>
               {planned
@@ -485,7 +486,7 @@ export function DeliveryLane({
                   ? 'Requirements and instruction fingerprints were recorded for this run.'
                   : 'Some requirements are from the open team file; older runs did not archive skill versions.'}
             </span>
-          </details>
+          </details>}
           <div className="delivery-filters">
             <div role="group" aria-label="Capability type">
               {(['all', 'skill', 'tool'] as const).map((value) => (
@@ -720,10 +721,10 @@ export function DeliveryLane({
                 : planned ? `No required skills connected to ${scope === 'team' ? 'this team' : 'this agent'}.` : `No required skills or tool activity recorded for ${scope === 'team' ? 'this team' : 'this agent'} yet.`}
             </p>
           )}
-          <footer className="delivery-cap-footer">
-            <span>
+          {(requirements.length > 0 || !planned) && <footer className="delivery-cap-footer">
+            {requirements.length > 0 && <span>
               Loading evidence and output quality are separate checks.
-            </span>
+            </span>}
             {!planned && (
               <button
                 className="delivery-link"
@@ -732,7 +733,7 @@ export function DeliveryLane({
                 What was recorded <ArrowRight size={13} />
               </button>
             )}
-          </footer>
+          </footer>}
         </section>
       </section>
       <aside className="delivery-output" aria-label="Team output" data-tour="output">
