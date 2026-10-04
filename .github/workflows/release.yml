@@ -1,0 +1,164 @@
+name: Release
+
+# Builds the ready-to-run LoomWatch that https://loomwatch.github.io/install.sh downloads: one macOS
+# program for Apple silicon and Intel Macs, and Linux programs for x86_64 and arm64, each packed by
+# scripts/package-release.sh with a checksum. A version tag such as v0.1.0 puts them on a DRAFT
+# GitHub release; publish it by hand once its files have been tried, because the installer always
+# fetches the newest published release. Run it by hand to build the files without a release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ui:
+    name: Browser app
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A tag that disagrees with the version the program reports would mislabel every bug report.
+      - name: Check the tag matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/loomwatch-backend/Cargo.toml | head -n 1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME does not match version $version in crates/loomwatch-backend/Cargo.toml."
+            exit 1
+          fi
+      - uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
+        with:
+          node-version-file: .node-version
+          cache: true
+          cache-dependency-path: ui/pnpm-lock.yaml
+          install: false
+      - name: Build
+        working-directory: ui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+      # The program embeds ui/dist when it is compiled, so every platform builds on this output.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ui-dist
+          path: ui/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  macos:
+    name: macOS
+    needs: ui
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      # The oldest macOS the program starts on.
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ui-dist
+          path: ui/dist
+      # The toolchain comes from rust-toolchain.toml; Intel Macs need its x86_64 target as well.
+      - name: Install Rust
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Build for Apple silicon
+        run: cargo build --release --locked --bin loomwatchd --target aarch64-apple-darwin
+      - name: Build for Intel
+        run: cargo build --release --locked --bin loomwatchd --target x86_64-apple-darwin
+      - name: Join them into one program
+        run: |
+          mkdir -p build
+          lipo -create -output build/loomwatchd \
+            target/aarch64-apple-darwin/release/loomwatchd \
+            target/x86_64-apple-darwin/release/loomwatchd
+          lipo -info build/loomwatchd
+          build/loomwatchd --help >/dev/null
+      - name: Pack
+        run: scripts/package-release.sh macos-universal build/loomwatchd dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-macos-universal
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: Linux (${{ matrix.platform }})
+    needs: ui
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Built on the older Ubuntu LTS so the program also runs on distributions with an older
+          # glibc, Ubuntu 22.04 and Debian 12 among them.
+          - platform: linux-x86_64
+            runner: ubuntu-22.04
+          - platform: linux-arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      PLATFORM: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ui-dist
+          path: ui/dist
+      - name: Build
+        run: cargo build --release --locked --bin loomwatchd
+      - name: Pack
+        run: |
+          target/release/loomwatchd --help >/dev/null
+          scripts/package-release.sh "$PLATFORM" target/release/loomwatchd dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  draft:
+    name: Draft the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Create a draft release with the files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --verify-tag \
+            --title "LoomWatch $GITHUB_REF_NAME" \
+            --generate-notes

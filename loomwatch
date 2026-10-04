@@ -5,6 +5,10 @@
 #   ./loomwatch update     download the latest version, rebuild, and start
 #   ./loomwatch stop       stop LoomWatch and its database (your teams and history are kept)
 #
+# The same script runs a copy of the source code, which it builds, and a ready-built copy put in
+# ~/LoomWatch/app by scripts/install.sh, which carries its program in bin/ and updates from the
+# newest release instead of from Git.
+#
 # Optional settings, read from the environment:
 #   LOOMWATCH_TEAMS_ROOT    where your teams live (default: ~/LoomWatch/teams)
 #   LOOMWATCH_PORT          browser port (default: LOOMWATCH_PORT in .env, else 3000)
@@ -25,6 +29,18 @@ while [ -L "$script" ]; do
 done
 repo_root=$(cd "$(dirname "$script")" && pwd -P)
 cd "$repo_root"
+
+# This script as the operator would type it again, for the instructions it prints: ./loomwatch in
+# a copy of the source, ~/LoomWatch/app/loomwatch or loomwatch for a ready-built copy.
+case $0 in
+  */*)
+    self=$0
+    # Started through a folder on PATH, so typed as just its name.
+    if [ "$(command -v "$(basename "$0")" 2>/dev/null)" = "$0" ]; then self=$(basename "$0"); fi
+    ;;
+  *) if [ -n "$(command -v "$0" 2>/dev/null)" ]; then self=$0; else self=./$0; fi ;;
+esac
+case $self in "$HOME"/*) self="~${self#"$HOME"}" ;; esac
 
 if [ -t 1 ]; then bold=$(printf '\033[1m'); reset=$(printf '\033[0m'); else bold=; reset=; fi
 say() { printf '%s\n' "$*"; }
@@ -53,15 +69,30 @@ for arg in "$@"; do
     --rebuild) force_rebuild=1 ;;
     *)
       failure_heading=LoomWatch
-      fail "unknown option '$arg'. Run ./loomwatch help to see the options."
+      fail "unknown option '$arg'. Run $self help to see the options."
       ;;
   esac
 done
 
 teams_root=${LOOMWATCH_TEAMS_ROOT:-$HOME/LoomWatch/teams}
-binary=target/release/loomwatchd
+# A ready-built copy has its program in bin/ and no source code to build it from.
+if [ -x bin/loomwatchd ] && [ ! -f Cargo.toml ]; then
+  prebuilt=1
+  binary=bin/loomwatchd
+  state_dir=run
+else
+  prebuilt=0
+  binary=target/release/loomwatchd
+  state_dir=target
+fi
 build_stamp=target/release/.loomwatch-build
-pid_file=target/loomwatchd.pid
+pid_file=$state_dir/loomwatchd.pid
+
+# Someone running a copy of the source is in its folder; someone running a ready-built copy may be
+# anywhere, so instructions name that copy's files and folder in full.
+case $repo_root in "$HOME"/*) folder_display="~${repo_root#"$HOME"}" ;; *) folder_display=$repo_root ;; esac
+where_is() { if [ "$prebuilt" = 1 ]; then printf '%s/%s\n' "$folder_display" "$1"; else printf '%s\n' "$1"; fi; }
+in_this_folder() { if [ "$prebuilt" = 1 ]; then printf 'cd %s && ' "$folder_display"; fi; }
 
 # The last KEY=value line for KEY in .env, without surrounding quotes. .env is read, never
 # sourced: sourcing would export the Compose-only host-runner settings into the native daemon.
@@ -131,7 +162,7 @@ already_running() {
     where="from $folder"
     [ -d "$folder" ] || where="from $folder, a folder that no longer exists"
     fail "another copy of LoomWatch is already running at $url (process $pid, started $where). Stop it with: kill $pid
-Then run ./loomwatch again. To keep it running, start this copy on another port instead: LOOMWATCH_PORT=$((port + 1)) ./loomwatch"
+Then run $self again. To keep it running, start this copy on another port instead: LOOMWATCH_PORT=$((port + 1)) $self"
   fi
   if uses_docker_database && ! database_is_running; then
     # This copy outlived its database: the container was stopped or removed, or Docker Desktop was
@@ -141,10 +172,10 @@ Then run ./loomwatch again. To keep it running, start this copy on another port 
     wake_docker
     start_database
     if ! database_has_loomwatch_tables; then
-      local stop_with='./loomwatch stop'
+      local stop_with="$self stop"
       if [ -n "$pid" ]; then stop_with="kill $pid"; fi
       fail "the database LoomWatch was using is gone, and LoomWatch only sets up a new one when it starts. Stop it with: $stop_with
-Then run ./loomwatch again."
+Then run $self again."
     fi
   fi
   say "LoomWatch is already running at $url"
@@ -174,7 +205,7 @@ check_prerequisites() {
       open -a "$app"
       missing="$missing
   - Docker Desktop is installed but has not been set up yet. It is opening now: finish its
-    first-start steps, wait until it says it is running, then run ./loomwatch again."
+    first-start steps, wait until it says it is running, then run $self again."
     elif ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
       if [ "$brew" = 1 ]; then
         missing="$missing
@@ -188,29 +219,32 @@ check_prerequisites() {
     fi
   fi
 
-  if ! command -v node >/dev/null 2>&1; then
-    if [ "$brew" = 1 ]; then
-      missing="$missing
+  # Only a copy of the source code is built here; a ready-built copy needs neither Node.js nor Rust.
+  if [ "$prebuilt" = 0 ]; then
+    if ! command -v node >/dev/null 2>&1; then
+      if [ "$brew" = 1 ]; then
+        missing="$missing
   - Node.js 22 or newer, which builds the browser app: brew install node (or https://nodejs.org/)"
-    else
-      missing="$missing
+      else
+        missing="$missing
   - Node.js 22 or newer, which builds the browser app: https://nodejs.org/"
-    fi
-  elif ! node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)'; then
-    missing="$missing
+      fi
+    elif ! node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)'; then
+      missing="$missing
   - A newer Node.js: LoomWatch needs 22.12 or newer and this computer has $(node --version).
     Install the current version from https://nodejs.org/"
-  fi
+    fi
 
-  if ! command -v cargo >/dev/null 2>&1; then
-    missing="$missing
+    if ! command -v cargo >/dev/null 2>&1; then
+      missing="$missing
   - Rust, which builds the LoomWatch program. Install it with:
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+    fi
   fi
 
   if [ -n "$missing" ]; then
     printf '\n%sLoomWatch needs a few things installed first:%s\n%s\n\n' "$bold" "$reset" "$missing" >&2
-    say "When they are installed, open a new terminal window and run ./loomwatch again." >&2
+    say "When they are installed, open a new terminal window and run $self again." >&2
     exit 1
   fi
 
@@ -237,6 +271,11 @@ ensure_env_file() {
     -e "s/^POSTGRES_PORT=.*/POSTGRES_PORT=$db_port/" \
     -e "s/^LOOMWATCH_HOST_RUNNER_TOKEN=.*/LOOMWATCH_HOST_RUNNER_TOKEN=$(random_secret)/" \
     .env.example >.env
+  if [ "$prebuilt" = 1 ]; then
+    # Compose names a project after its folder, and this one is called just `app`, like many other
+    # projects whose database this would otherwise take over. Compose reads the name from .env.
+    printf '\n# The Docker Compose project that holds the database.\nCOMPOSE_PROJECT_NAME=loomwatch-app\n' >>.env
+  fi
   chmod 600 .env
   say "Created your settings file (.env) with a random database password."
 }
@@ -250,7 +289,7 @@ check_database_port() {
   if docker info >/dev/null 2>&1 && [ -n "$(docker compose ps --status running --quiet postgres 2>/dev/null)" ]; then
     return 0
   fi
-  fail "another program is using port ${db_port:-5433}, which the LoomWatch database needs. Change POSTGRES_PORT in .env to a free port such as $((${db_port:-5433} + 1)), then run ./loomwatch again."
+  fail "another program is using port ${db_port:-5433}, which the LoomWatch database needs. Change POSTGRES_PORT in $(where_is .env) to a free port such as $((${db_port:-5433} + 1)), then run $self again."
 }
 
 ensure_teams_root() {
@@ -281,12 +320,12 @@ start_database() {
       say "Waiting for Docker to finish starting…"
       local waited=0
       until docker info >/dev/null 2>&1; do
-        [ "$waited" -ge 120 ] && fail "Docker did not start within two minutes. Open Docker Desktop, wait until it says it is running, then run ./loomwatch again."
+        [ "$waited" -ge 120 ] && fail "Docker did not start within two minutes. Open Docker Desktop, wait until it says it is running, then run $self again."
         sleep 2
         waited=$((waited + 2))
       done
     else
-      fail "Docker is not running. Start Docker, then run ./loomwatch again."
+      fail "Docker is not running. Start Docker, then run $self again."
     fi
   fi
 
@@ -297,7 +336,7 @@ start_database() {
   db_port=$(env_value POSTGRES_PORT)
   step "Starting the database"
   if ! docker compose up --detach --wait postgres; then
-    fail "the database did not start. If the message above says port ${db_port:-5433} is already in use, change POSTGRES_PORT in .env to a free port such as 5434, then run ./loomwatch again."
+    fail "the database did not start. If the message above says port ${db_port:-5433} is already in use, change POSTGRES_PORT in $(where_is .env) to a free port such as $((${db_port:-5433} + 1)), then run $self again."
   fi
   match_database_password
   DATABASE_URL="postgres://$user:$password@127.0.0.1:${db_port:-5433}/$db"
@@ -326,7 +365,7 @@ SQL
     say "Found the database of an earlier LoomWatch copy on this computer. It now uses the password in this folder's .env, so its run history is kept."
     return 0
   fi
-  fail "the database Docker kept from an earlier LoomWatch copy refuses the password in .env, and LoomWatch could not change it. To start over with an empty run history, run: docker compose down --volumes (this deletes the earlier history; your teams are kept), then ./loomwatch again."
+  fail "the database Docker kept from an earlier LoomWatch copy refuses the password in $(where_is .env), and LoomWatch could not change it. To start over with an empty run history, run: $(in_this_folder)docker compose down --volumes (this deletes the earlier history; your teams are kept), then $self again."
 }
 
 # What the build depends on: the commit plus any local edits. An unchanged checkout never rebuilds.
@@ -345,6 +384,7 @@ source_fingerprint() {
 }
 
 build_if_needed() {
+  [ "$prebuilt" = 0 ] || return 0
   local fingerprint
   fingerprint=$(source_fingerprint)
   if [ "$force_rebuild" = 0 ] && [ -x "$binary" ] && [ "$(cat "$build_stamp" 2>/dev/null)" = "$fingerprint" ]; then
@@ -362,7 +402,7 @@ build_if_needed() {
 start() {
   if loomwatch_is_running; then already_running; fi
   if port_in_use "$port"; then
-    fail "another program is using port $port. Start LoomWatch on a different port with: LOOMWATCH_PORT=$((port + 1)) ./loomwatch"
+    fail "another program is using port $port. Start LoomWatch on a different port with: LOOMWATCH_PORT=$((port + 1)) $self"
   fi
 
   check_prerequisites
@@ -377,8 +417,13 @@ start() {
   # Compose-mode settings in the operator's own shell would point this native daemon at a
   # container runner or a container-only capability folder.
   unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN
-  # Which checkout is running, for the "Send feedback" report. `-dirty` marks local edits.
-  LOOMWATCH_COMMIT=$(git describe --always --dirty --abbrev=7 2>/dev/null || true)
+  # Which checkout is running, for the "Send feedback" report. `-dirty` marks local edits. A
+  # ready-built copy names the commit its release was built from, in VERSION.
+  if [ "$prebuilt" = 1 ]; then
+    LOOMWATCH_COMMIT=$(cut -d ' ' -f 2 VERSION 2>/dev/null || true)
+  else
+    LOOMWATCH_COMMIT=$(git describe --always --dirty --abbrev=7 2>/dev/null || true)
+  fi
   export LOOMWATCH_COMMIT
 
   # Open the browser once the server answers. This runs beside the daemon, which replaces this
@@ -396,6 +441,7 @@ start() {
   step "LoomWatch is starting at $url"
   say "Your teams are in $teams_root"
   say "Keep this window open while you use LoomWatch. Press Ctrl-C to stop it."
+  mkdir -p "$state_dir"
   echo "$$" >"$pid_file"
   exec "./$binary" serve --teams-root "$teams_root" --listen "127.0.0.1:$port"
 }
@@ -434,9 +480,9 @@ stop() {
     local other
     other=$(listener_pid "$port" || true)
     if [ -n "$other" ]; then
-      say "LoomWatch at $url was not started by ./loomwatch in this folder. It is process $other, from $(process_folder "$other" || true). Press Ctrl-C in the window running it, or run: kill $other"
+      say "LoomWatch at $url was not started by $self in this folder. It is process $other, from $(process_folder "$other" || true). Press Ctrl-C in the window running it, or run: kill $other"
     else
-      say "LoomWatch at $url was not started by ./loomwatch. Press Ctrl-C in the window running it."
+      say "LoomWatch at $url was not started by $self. Press Ctrl-C in the window running it."
     fi
   fi
 
@@ -448,10 +494,17 @@ stop() {
 
 update() {
   failure_heading='LoomWatch could not update'
-  command -v git >/dev/null 2>&1 || fail "updating needs Git. Install it with: xcode-select --install"
   if loomwatch_is_running; then
-    fail "it is still running. Stop it first (press Ctrl-C in its window, or run ./loomwatch stop), then run ./loomwatch update."
+    fail "it is still running. Stop it first (press Ctrl-C in its window, or run $self stop), then run $self update."
   fi
+  if [ "$prebuilt" = 1 ]; then
+    # The installer that put this copy here fetches the newest release and replaces it in place;
+    # this script keeps running from the copy it started as, then hands over to the new one.
+    bash ./install.sh --update --dir "$repo_root" || fail "the download did not finish. The messages above say why."
+    if [ "$open_browser" = 0 ]; then exec "$repo_root/loomwatch" start --no-open; fi
+    exec "$repo_root/loomwatch" start
+  fi
+  command -v git >/dev/null 2>&1 || fail "updating needs Git. Install it with: xcode-select --install"
   step "Downloading the latest LoomWatch"
   git pull --ff-only ||
     fail "the download did not finish. If Git says your local changes would be overwritten, ask whoever changed files in this folder before discarding them."
@@ -460,18 +513,25 @@ update() {
 }
 
 usage() {
+  local start_does='Set up anything missing, build if needed, start LoomWatch and open it (the default)'
+  local update_does='Download the latest LoomWatch, rebuild it and start it' rebuild_option='
+  --rebuild   Build again even if nothing changed'
+  if [ "$prebuilt" = 1 ]; then
+    start_does='Set up anything missing, start LoomWatch and open it (the default)'
+    update_does='Download and install the newest release, then start it'
+    rebuild_option=
+  fi
   cat <<EOF
-Usage: ./loomwatch [command] [options]
+Usage: $self [command] [options]
 
 Commands:
-  start     Set up anything missing, build if needed, start LoomWatch and open it (the default)
-  update    Download the latest LoomWatch, rebuild it and start it
+  start     $start_does
+  update    $update_does
   stop      Stop LoomWatch and its database. Your teams and history are kept.
   help      Show this help
 
 Options:
-  --no-open   Do not open the browser
-  --rebuild   Build again even if nothing changed
+  --no-open   Do not open the browser$rebuild_option
 
 Settings (environment variables):
   LOOMWATCH_TEAMS_ROOT     Where your teams live (now: $teams_root)

@@ -1,9 +1,10 @@
 name: Pages
 
-# Publishes the landing page in site/ to https://loomwatch.github.io. This repository stays private;
-# the built page is pushed to the public loomwatch/loomwatch.github.io repository, and GitHub Pages
-# serves that repository's main branch. It runs when the page, the screenshots it borrows from
-# docs/assets/readme, the design-system fonts or this workflow change on main, and by hand.
+# Publishes the landing page in site/ to https://loomwatch.github.io, together with the installer
+# (scripts/install.sh, served as /install.sh). The built page is pushed to the
+# loomwatch/loomwatch.github.io repository, and GitHub Pages serves that repository's main branch.
+# It runs when the page, the installer, the screenshots it borrows from docs/assets/readme, the
+# design-system fonts or this workflow change on main, and by hand.
 #
 # The push uses PAGES_DEPLOY_KEY, the private half of an SSH deploy key that has write access to
 # loomwatch/loomwatch.github.io and nothing else.
@@ -12,6 +13,7 @@ on:
     branches: [main]
     paths:
       - site/**
+      - scripts/install.sh
       - docs/assets/readme/**
       - docs/assets/usecases/**
       - docs/design-system/fonts/**
