@@ -94,6 +94,23 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
   useEffect(() => { frameRef.current = frame; docRef.current = doc })
 
   const say = useCallback((next: AskNotice | null) => setNotice(next), [])
+  // The steps this hook times on the person's behalf, cleared when it goes away: one that fired
+  // after the page left would act on a document that is no longer there.
+  const timers = useRef(new Set<number>())
+  useEffect(() => {
+    const pending = timers.current
+    return () => {
+      for (const timer of pending) window.clearTimeout(timer)
+      pending.clear()
+    }
+  }, [])
+  const later = useCallback((run: () => void, ms: number) => {
+    const timer = window.setTimeout(() => {
+      timers.current.delete(timer)
+      run()
+    }, ms)
+    timers.current.add(timer)
+  }, [])
   useEffect(() => {
     if (!notice) return
     const timer = window.setTimeout(() => setNotice(null), notice.undo ? 10_000 : 5000)
@@ -118,11 +135,11 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
     // Reviewing is not adding: the library folds away so the proposal has the canvas. After this
     // render, because from Home the canvas and its library are not on screen yet.
     const focus = changes.added.length + changes.changed.length > 0 ? [...changes.added, ...changes.changed] : []
-    window.setTimeout(() => {
+    later(() => {
       window.dispatchEvent(new Event('loomwatch:collapse-palette'))
-      window.setTimeout(() => frameRef.current(focus), 160)
+      later(() => frameRef.current(focus), 160)
     }, 100)
-  }, [doc, onDocumentOpen, say])
+  }, [doc, onDocumentOpen, say, later])
 
   const presentRef = useRef<(proposal: Proposal) => void>(() => {})
 
@@ -139,7 +156,7 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
       if (wasNew) doc.closeDocument()
       else doc.undo()
       // Shown once the canvas is back to the person's own version, by the render that put it back.
-      window.setTimeout(() => presentRef.current(proposal), 30)
+      later(() => presentRef.current(proposal), 30)
       return
     }
     if (sameTeamFile(doc.path, proposal.file)) {
@@ -155,7 +172,7 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
       try { window.sessionStorage.setItem(CARRIED_PROPOSAL_KEY, JSON.stringify(proposal)) } catch { /* the daemon's copy is enough */ }
       window.location.assign(proposal.isNew ? `/?${new URLSearchParams({ proposal: id })}` : teamUrl(proposal.file, { proposal: id }))
     }
-  }, [preview, doc, toBuild, begin, say])
+  }, [preview, doc, toBuild, begin, say, later])
 
   /**
    * The daemon keeps proposals in memory, so after a restart it no longer has one; the conversation
@@ -235,7 +252,7 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
       undo: isNew ? undefined : () => {
         docRef.current.undo()
         // The file is put back too: Undo here means "as it was before I applied".
-        window.setTimeout(() => {
+        later(() => {
           void docRef.current.save().then((ok) => {
             if (ok) void reportProposalOutcome(preview.proposal.id, 'undone').catch(() => {})
             say({ text: ok ? `Put “${name}” back the way it was.` : 'Undone on the canvas. Press Save to keep it.' })
@@ -243,7 +260,7 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
         }, 50)
       },
     })
-  }, [preview, doc, say])
+  }, [preview, doc, say, later])
 
   const discardProposal = useCallback(() => {
     if (!preview) return

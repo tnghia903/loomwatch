@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -71,7 +71,11 @@ beforeEach(() => {
   client.decideRunRequest.mockClear()
   runs.startRun.mockReset()
 })
-afterEach(() => vi.useRealTimers())
+// Unmounting each hook clears the timers it started, so none fires after this file's window is gone.
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 describe('useAskActions', () => {
   it('shows a proposal for the open team in place, and Apply saves it and records that', async () => {
@@ -89,6 +93,33 @@ describe('useAskActions', () => {
     expect(result.current.actions.preview).toBeNull()
     expect(result.current.actions.notice?.text).toBe('Applied the changes to “Brief”.')
     expect(result.current.actions.marks.get('a')).toBe('settled')
+  })
+
+  // A step timed after showing a proposal once fired after the hook was gone (CI: "window is not
+  // defined" from the palette fold), so leaving clears every step it timed.
+  it('folds the library and frames the change while open, and does neither once it has gone', async () => {
+    vi.useFakeTimers()
+    const collapse = vi.fn()
+    window.addEventListener('loomwatch:collapse-palette', collapse)
+    try {
+      client.fetchProposal.mockResolvedValue(proposal())
+      const open = setup()
+      await act(async () => { await open.result.current.actions.showProposal('p1') })
+      act(() => { vi.advanceTimersByTime(1000) })
+      expect(collapse).toHaveBeenCalledTimes(1)
+      expect(open.options.frame).toHaveBeenCalledWith(['a'])
+      open.unmount()
+
+      collapse.mockClear()
+      const gone = setup()
+      await act(async () => { await gone.result.current.actions.showProposal('p1') })
+      gone.unmount()
+      vi.advanceTimersByTime(1000)
+      expect(collapse).not.toHaveBeenCalled()
+      expect(gone.options.frame).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('loomwatch:collapse-palette', collapse)
+    }
   })
 
   it('undoes an applied change on the canvas and in the file', async () => {
