@@ -23,6 +23,8 @@
   --alert: #F2635C;
   --ok: #4FC98D;
   --halt: #8C8C98;
+  --m-researcher: #7FC8B6;
+  --m-writer: #B9A3F5;
   --hairline: rgb(255 255 255 / 0.09);
   --hairline-2: rgb(255 255 255 / 0.14);
   --slip: #F1EEE6;
@@ -61,6 +63,8 @@
   --alert: #C0342E;
   --ok: #17724A;
   --halt: #605F6B;
+  --m-researcher: #1D7563;
+  --m-writer: #6B4FC4;
   --hairline: rgb(23 21 15 / 0.10);
   --hairline-2: rgb(23 21 15 / 0.16);
   --slip: #FFFFFF;
@@ -380,13 +384,59 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .scrub { margin-top: 10px; }
 .scrub label { display: flex; align-items: center; gap: 12px; }
 .scrub input { flex: 1; accent-color: var(--accent-fill); height: 24px; }
-.events { list-style: none; margin: 12px 0 0; padding: 12px 0 0; border-top: 1px solid var(--hairline); display: grid; gap: 6px; min-height: 120px; }
-.events li { display: grid; grid-template-columns: 38px 1fr; gap: 10px; font-size: 13px; line-height: 1.45; color: var(--ink-2); animation: ev-in .24s var(--ease); }
-.events li time { font: 400 11.5px/1.6 var(--mono); color: var(--ink-3); }
-.events li b { font-weight: 600; color: var(--ink); }
-.events li .tool { font: 400 11.5px var(--mono); color: var(--ink-2); }
-.events li.you b { color: var(--accent); }
-.events li.empty { display: block; color: var(--ink-3); font-style: italic; font-family: var(--serif); font-size: 16px; }
+.tchat { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); }
+.tchat-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.tchat-faces { display: flex; flex: none; gap: 3px; }
+.tchat-faces .tc-av { width: 26px; height: 26px; font-size: 9.5px; }
+.tchat-title { display: grid; min-width: 0; line-height: 1.3; }
+.tchat-title b { font: 600 13px/1.3 var(--sans); color: var(--ink); }
+.tchat-title span { font-size: 12px; color: var(--ink-3); }
+.tchat-log { list-style: none; margin: 0; padding: 2px 2px 4px; display: grid; align-content: start; gap: 9px; min-height: 120px; max-height: 420px; overflow-y: auto; overscroll-behavior: contain; }
+/* Scrolled down: earlier messages fade out at the top, so there is plainly more above. */
+.tchat-log.clipped { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 36px); mask-image: linear-gradient(to bottom, transparent, #000 36px); }
+.tchat-none { color: var(--ink-3); font: italic 400 16px/1.4 var(--serif); }
+/* Each member keeps one colour: neither gold, which is you, nor blue, which is working now. */
+.m-researcher { --m: var(--m-researcher); }
+.m-writer { --m: var(--m-writer); }
+.m-you { --m: var(--accent); }
+.tc-av { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--m) 45%, transparent); background: color-mix(in srgb, var(--m) 16%, var(--panel-solid)); color: var(--m); font: 600 10px/1 var(--sans); letter-spacing: .02em; }
+.tc-msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 8px; align-items: start; }
+.tc-msg.continued { margin-top: -5px; }
+.tc-main { display: grid; justify-items: start; gap: 3px; min-width: 0; }
+.tc-meta { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.tc-meta b { font-weight: 600; color: var(--m); }
+.tc-meta time, .tc-notice time { font: 400 11px/1 var(--mono); color: var(--ink-3); }
+.tc-bubble { max-width: min(100%, 440px); padding: 8px 11px; border-radius: 4px 14px 14px 14px; border: 1px solid color-mix(in srgb, var(--m) 24%, transparent); background: color-mix(in srgb, var(--m) 8%, var(--panel-solid)); font-size: 13.5px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.tc-msg.continued .tc-bubble { border-radius: 14px; }
+.tc-bubble p { margin: 0; }
+.tc-at { font-weight: 600; color: var(--m); }
+.tc-quote { display: grid; margin: 0 0 6px; padding: 2px 0 2px 8px; border-left: 2px solid var(--m); font-size: 12px; line-height: 1.4; color: var(--ink-2); text-align: left; }
+.tc-quote b { font-weight: 600; color: var(--m); }
+.tc-quote span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-file { display: grid; gap: 6px; }
+.tc-file-to { font-size: 12px; color: var(--ink-2); }
+.tc-doc { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--hairline-2); background: var(--panel); }
+.tc-doc svg { flex: none; width: 18px; height: 18px; fill: none; stroke: var(--ink-2); stroke-width: 1.3; stroke-linejoin: round; }
+.tc-doc > span { display: grid; min-width: 0; }
+.tc-doc b { font: 500 12.5px/1.35 var(--mono); color: var(--ink); }
+.tc-doc span span { font-size: 12px; color: var(--ink-3); }
+.tc-under { font-size: 11.5px; color: var(--ink-3); }
+/* Yours sit on the right, in gold. */
+.tc-msg.mine { grid-template-columns: minmax(0, 1fr); }
+.tc-msg.mine .tc-gutter { display: none; }
+.tc-msg.mine .tc-main { justify-items: end; }
+.tc-msg.mine .tc-bubble { border-radius: 14px 4px 14px 14px; border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-tint); }
+.tc-msg.mine.continued .tc-bubble { border-radius: 14px; }
+/* An answer still owed: blue while an agent writes it, a dashed gold outline while it waits for you. */
+.tc-bubble.typing { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--live); }
+.tc-msg.mine .tc-bubble.typing { border-style: dashed; border-color: var(--accent); color: var(--accent); }
+.tc-dots { display: inline-flex; gap: 3px; }
+.tc-dots i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .35; animation: tc-dot 1.2s ease-in-out infinite; }
+.tc-dots i:nth-child(2) { animation-delay: .15s; }
+.tc-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes tc-dot { 30% { opacity: 1; transform: translateY(-2px); } }
+.tc-notice { justify-self: center; display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 4px 8px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--hairline-2); font-size: 12px; color: var(--ink-2); text-align: center; }
+.tchat-log .fresh { animation: ev-in .24s var(--ease); }
 @keyframes ev-in { from { opacity: 0; transform: translateY(4px); } }
 .needs-you { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 14px; height: 40px; border-radius: 9px; border: 1px dashed var(--accent); color: var(--accent); background: var(--accent-tint); text-decoration: none; font: 500 14px/1 var(--sans); }
 .needs-you:hover { border-style: solid; }
@@ -723,6 +773,8 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
   .stage { padding: 8px; }
   .stage .top-line .word { display: none; }
   .narration { font-size: 18px; }
+  .tchat-log { max-height: 340px; }
+  .tc-notice { border-radius: 12px; }
   .btn, .dial button, .seg button, .tabs button { min-height: 44px; }
   .chip select { height: 30px; }
   .fabric-wrap { padding: 16px; }

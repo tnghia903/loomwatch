@@ -64,6 +64,7 @@
       ],
       note: 'Link claim 3, or drop it.',
       fix: { tool: 'fetch · official notice for claim 3', src: 'official notice' },
+      ask: { q: 'Which release notes back claim 2?', a: "Both browser makers' notes from this week. The links are under claim 2 in findings.md." },
       title2: 'AI and tech, today',
       intro: (n, sourced) => `${n === 4 ? 'Four' : 'Three'} stories worth your morning${sourced ? ', each with its source' : ''}.`,
       file: 'digest.md',
@@ -84,6 +85,7 @@
       ],
       note: 'Drop claim 4 unless a source backs it.',
       fix: { tool: 'web search · “cloud backup restore time”', drop: 'nothing backed it, and restore speed depends on your connection' },
+      ask: { q: 'Which page says hourly, for claim 1?', a: "Apple's Time Machine guide. The link is under claim 1 in findings.md." },
       title2: 'Backing up your Mac',
       intro: () => 'The pick: Time Machine at your desk, plus one copy somewhere else.',
       file: 'mac-backup.md',
@@ -104,6 +106,7 @@
       ],
       note: 'Drop claim 4: nothing in the project says that.',
       fix: { tool: 'search · “windows”', drop: 'nothing in the folder supports it' },
+      ask: { q: 'Claim 2: which command runs too early?', a: 'The install command on line 18. It runs before the cd into the project folder.' },
       title2: 'Getting started, rewritten',
       intro: (n, sourced, reviewed) => `A new section for the README, written from ${reviewed ? 'the findings you approved' : 'what Researcher found'}.`,
       file: 'README.md',
@@ -498,7 +501,7 @@
     renderCanvas(flash)
     renderYaml()
     renderGive()
-    if (!run) { renderStages(); drawLanes() }
+    if (!run) { renderStages(); drawLanes(); renderChat() }
   }
 
   // Ask LoomWatch: one of your own apps proposes the team, and nothing changes until Apply.
@@ -803,6 +806,7 @@
       phase: 'running',
       clock: 0,
       events: [],
+      chat: [],
       segs: [],
       stitches: [],
       hands: [],
@@ -840,7 +844,7 @@
   function log(who, text, extra = {}) {
     run.events.push({ t: run.clock, who, text, ...extra })
     if (extra.tool) run.stitches.push({ lane: who, t: run.clock })
-    renderEvents()
+    renderChat()
     renderNarration()
   }
   function segStart(lane, kind = 'work') { run.segs.push({ lane, kind, from: run.clock, to: null }) }
@@ -868,7 +872,11 @@
       await work(0.8)
       await researcherPass()
       if (mine.team.review) await reviewLoop()
-      else { handOver('researcher', 'writer'); log('researcher', 'Researcher handed over to Writer', { say: 'Researcher handed its findings straight to Writer. Nobody checked them.' }) }
+      else {
+        handOver('researcher', 'writer')
+        post({ kind: 'handover', from: 'researcher', to: 'writer', file: 'findings.md', meta: findingsMeta(mine) })
+        log('researcher', 'Researcher handed over to Writer', { say: 'Researcher handed its findings straight to Writer. Nobody checked them.' })
+      }
       await writerPass()
     } catch (error) {
       if (error !== CANCEL) throw error
@@ -921,7 +929,9 @@
     const r = run
     for (;;) {
       handOver('researcher', 'you')
+      const handed = post({ kind: 'handover', from: 'researcher', to: 'you', file: 'findings.md', meta: findingsMeta(r) })
       log('researcher', 'Researcher handed over to you', { say: 'Researcher handed over. The team has stopped, and it is waiting for you.' })
+      const owed = owe('you', 'researcher', 'Waiting for your review')
       setStage('you', 'waiting')
       segStart('you', 'wait')
       r.phase = 'review'
@@ -932,11 +942,15 @@
       if (run !== r) throw CANCEL
       r.waitedMs += Date.now() - r.waitSince
       segEnd('you')
+      paid(owed)
+      const quote = { from: 'researcher', text: `Handover: ${handed.file}, ${handed.meta}` }
       r.phase = 'running'
       if (decision.text) r.notes.push({ t: r.clock, text: decision.text, kind: decision.kind })
       if (decision.kind === 'approve') {
         r.approved = true
         setStage('you', 'done')
+        if (decision.text) post({ kind: 'note', from: 'you', to: 'writer', text: decision.text, quote, under: 'approved · passed on to Writer' })
+        else post({ kind: 'notice', from: 'you', text: 'You approved Researcher’s handover · passed on to Writer' })
         log('you', decision.text ? `You approved: “${decision.text}”` : 'You approved', { say: decision.text ? `You approved, with a note for Writer: “${decision.text}”` : 'You approved the findings as they were.' })
         handOver('you', 'writer')
         renderNeedsYou(); renderReview(); renderResult()
@@ -944,6 +958,7 @@
       }
       r.sendBacks += 1
       setStage('you', 'idle')
+      post({ kind: 'sentback', from: 'you', to: 'researcher', text: decision.text || 'Try again.', quote, under: 'sent back' })
       log('you', `You sent it back: “${decision.text || 'Try again.'}”`, { say: `You sent it back to Researcher: “${decision.text || 'Try again.'}”` })
       handOver('you', 'researcher')
       renderNeedsYou(); renderReview(); renderResult()
@@ -983,6 +998,21 @@
     await work(1.4)
     r.tools.writer += 1
     log('writer', 'Writer', { tool: 'read · findings.md', say: 'Writer is reading the findings.' })
+    // A question back to an earlier step goes through the Team Bus, which OpenClaw can't reach.
+    if (r.team.writer !== 'openclaw') {
+      await work(1.2)
+      const asked = post({ kind: 'question', from: 'writer', to: 'researcher', text: r.preset.ask.q })
+      handOver('writer', 'researcher')
+      log('writer', 'Writer asked Researcher', { say: `Writer asked Researcher: “${r.preset.ask.q}”` })
+      const owed = owe('researcher', 'writer', 'Researcher is writing an answer')
+      segStart('researcher')
+      await work(1.8)
+      segEnd('researcher')
+      paid(owed)
+      post({ kind: 'answer', from: 'researcher', to: 'writer', text: r.preset.ask.a, quote: { from: 'writer', text: asked.text } })
+      handOver('researcher', 'writer')
+      log('researcher', 'Researcher answered Writer', { say: 'Researcher answered, and Writer carried on with the answer in hand.' })
+    }
     await work(2.6)
     r.tools.writer += 1
     log('writer', `Writer wrote ${r.preset.file}`, { tool: `write · ${r.preset.file}`, say: `Writer wrote ${r.preset.file}.` })
@@ -1051,7 +1081,6 @@
   /* ---------------- Run rendering */
 
   const stagesBox = $('#stages')
-  const eventsBox = $('#events')
   const narration = $('#narration')
   const lanes = $('#lanes')
   const scrub = $('#scrub')
@@ -1060,7 +1089,7 @@
   const STAGE_WORD = { idle: 'Idle', running: 'Working', waiting: 'Waiting for you', done: 'Done' }
 
   function renderRunUI() {
-    renderStages(); renderBadges(); renderEvents(); renderNarration(); drawLanes(); renderNeedsYou(); renderScrub(); renderAskButton()
+    renderStages(); renderBadges(); renderChat(); renderNarration(); drawLanes(); renderNeedsYou(); renderScrub(); renderAskButton()
     $('#watch-clock').textContent = clockText(run ? (run.scrub ?? run.clock) : 0)
   }
   function renderLive() {
@@ -1103,19 +1132,91 @@
     const at = run.scrub ?? Infinity
     return run.events.filter((e) => e.t <= at + 1e-6)
   }
-  function renderEvents() {
-    const list = visibleEvents()
-    if (!list.length) { eventsBox.replaceChildren(el('li', { class: 'empty', text: 'Every step lands here as it happens.' })); return }
-    eventsBox.replaceChildren(...list.slice(-5).map((e) => el('li', { class: e.who === 'you' ? 'you' : '' },
-      el('time', { text: clockText(e.t) }),
-      el('span', {}, e.tool ? [el('b', { text: e.text }), ' ', el('span', { class: 'tool', text: e.tool })] : el('b', { text: e.text }))))
-    )
-  }
   function renderNarration() {
     const list = visibleEvents()
     narration.textContent = list.length ? (list.at(-1).say || list.at(-1).text) : 'The team starts when you ask.'
   }
   function renderNeedsYou() { needsYou.hidden = !(run && run.phase === 'review') }
+
+  /* ---------------- 05 · Watch: Team chat */
+
+  // What the agents said to each other, as the app's Run view shows it: only messages (a
+  // handover, a question and its answer, your review), each at the moment it was sent, so a
+  // replay shows the chat as it stood then. Tool calls stay on the timeline above it.
+  const chatLog = $('#tchat-log')
+  const chatFaces = $('#tchat-faces')
+  const chatSub = $('#tchat-sub')
+  const INITIALS = { researcher: 'Re', writer: 'Wr', you: 'You' }
+  const chatSeen = { n: 0, ids: new Set(), key: '' }
+
+  function post(item) {
+    const message = { id: run.chat.length, t: run.clock, ...item }
+    run.chat.push(message)
+    renderChat()
+    return message
+  }
+  // An answer someone owes shows as being written until it is given.
+  function owe(from, to, word) { return post({ kind: 'waiting', from, to, word, until: null }) }
+  function paid(owed) { owed.until = run.clock; renderChat() }
+  function findingsMeta(r) {
+    const kept = r.findings.filter((f) => !f.dropped)
+    const sourced = kept.filter((f) => f.src).length
+    return `${kept.length} findings, ${sourced === kept.length ? 'each with a source' : `${sourced} with a source`}`
+  }
+
+  function visibleChat() {
+    if (!run) return []
+    const at = (run.scrub ?? Infinity) + 1e-6
+    return run.chat.filter((c) => c.t <= at && !(c.kind === 'waiting' && c.until !== null && c.until <= at))
+  }
+  const avatar = (who) => el('span', { class: `tc-av m-${who}`, text: INITIALS[who] })
+  const mention = (who) => el('span', { class: `tc-at m-${who}`, text: `@${who === 'you' ? 'You' : LANE[who]}` })
+
+  function renderChat() {
+    const team = run ? run.team : state.team
+    const members = team.review ? ['researcher', 'writer', 'you'] : ['researcher', 'writer']
+    const list = visibleChat()
+    const key = `${run ? run.n : 0}:${members.join(',')}:${list.map((c) => c.id).join(',')}`
+    if (key === chatSeen.key) return
+    chatSeen.key = key
+    if (!run || run.n !== chatSeen.n) { chatSeen.n = run ? run.n : 0; chatSeen.ids.clear() }
+    chatFaces.replaceChildren(...members.map(avatar))
+    const count = list.filter((c) => c.kind !== 'waiting').length
+    chatSub.textContent = count
+      ? `${listText(members.map((w) => (w === 'you' ? 'you' : LANE[w])))} · ${count} message${count === 1 ? '' : 's'}`
+      : 'What the agents say to each other'
+    if (!list.length) { chatLog.replaceChildren(el('li', { class: 'tchat-none', text: 'Nothing has passed between the agents yet.' })); markClipped(); return }
+    const live = run.scrub === null
+    chatLog.replaceChildren(...list.map((c, i) => {
+      const fresh = live && !chatSeen.ids.has(c.id) ? ' fresh' : ''
+      chatSeen.ids.add(c.id)
+      if (c.kind === 'notice') return el('li', { class: `tc-notice${fresh}` }, el('span', { text: c.text }), el('time', { text: clockText(c.t) }))
+      const prev = list[i - 1]
+      const continued = prev && prev.kind !== 'notice' && prev.from === c.from
+      const mine = c.from === 'you'
+      const bubble = c.kind === 'waiting'
+        ? el('div', { class: 'tc-bubble typing' }, el('span', { class: 'tc-dots', 'aria-hidden': 'true' }, el('i'), el('i'), el('i')), el('span', { text: c.word }))
+        : el('div', { class: 'tc-bubble' },
+          c.quote ? el('blockquote', { class: `tc-quote m-${c.quote.from}` }, el('b', { text: LANE[c.quote.from] }), el('span', { text: c.quote.text })) : null,
+          c.kind === 'handover'
+            ? el('div', { class: 'tc-file' },
+              el('span', { class: 'tc-file-to' }, 'Handover to ', mention(c.to)),
+              el('span', { class: 'tc-doc' },
+                el('svg:svg', { viewBox: '0 0 16 16', 'aria-hidden': 'true' }, el('svg:path', { d: 'M4 1.5h5.2L12.5 4.8V14.5H4z M9 1.5V5h3.5' })),
+                el('span', {}, el('b', { text: c.file }), el('span', { text: c.meta }))))
+            : el('p', {}, c.kind === 'question' || c.kind === 'note' ? [mention(c.to), ' '] : null, c.text))
+      return el('li', { class: `tc-msg m-${c.from}${mine ? ' mine' : ''}${continued ? ' continued' : ''}${fresh}` },
+        mine || continued ? el('span', { class: 'tc-gutter' }) : avatar(c.from),
+        el('div', { class: 'tc-main' },
+          continued ? null : el('div', { class: 'tc-meta' }, el('b', { text: mine ? 'You' : LANE[c.from] }), el('time', { text: clockText(c.t) })),
+          bubble,
+          c.under ? el('div', { class: 'tc-under', text: c.under }) : null))
+    }))
+    chatLog.scrollTop = chatLog.scrollHeight
+    markClipped()
+  }
+  function markClipped() { chatLog.classList.toggle('clipped', chatLog.scrollTop > 4) }
+  chatLog.addEventListener('scroll', markClipped, { passive: true })
 
   function drawLanes() {
     const team = run ? run.team : state.team
@@ -1172,7 +1273,7 @@
     if (!run || run.phase !== 'done') return
     const value = Number(scrubInput.value)
     run.scrub = value >= run.clock - 0.05 ? null : value
-    renderEvents(); renderNarration(); renderStages(); drawLanes()
+    renderChat(); renderNarration(); renderStages(); drawLanes()
     $('#watch-clock').textContent = clockText(run.scrub ?? run.clock)
   })
 

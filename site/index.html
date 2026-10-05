@@ -246,7 +246,7 @@ I can't see the other app's work.
       <p class="ch-body">Every message, tool call and handover lands on a live timeline: <span class="say-live">blue</span> while an agent works, <span class="say-gold">gold</span> where it worked, a dashed outline while the team waits for you. When it's done, drag back to replay any moment.</p>
       <dl class="fine">
         <div><dt>Evidence, not guesses</dt><dd>A skill shows as loaded only when it was actually sent, and a file as opened only when the agent's own stream read it.</dd></div>
-        <div><dt>Agents ask each other</dt><dd>Teammates hand over and ask questions through LoomWatch, so every handover is on the record, not buried in chat.</dd></div>
+        <div><dt>Agents ask each other</dt><dd>A handover, a question back to an earlier step, its answer and your review all read as one team chat, every message taken from the run's record.</dd></div>
         <div><dt>It asks before it reaches</dt><dd>Turn off Researcher's web search in Give, and this run stops to ask you before it searches, unless Researcher is on OpenCode, which never asks.</dd></div>
       </dl>
     </div>
@@ -263,7 +263,13 @@ I can't see the other app's work.
             <label><span class="micro">Replay</span><input type="range" id="scrub-input" min="0" max="100" value="100" step="0.1" aria-label="Drag to replay the run"></label>
           </div>
           <div class="ask-perm" id="ask-perm" hidden></div>
-          <ol class="events" id="events" aria-label="Events"></ol>
+          <section class="tchat" aria-labelledby="tchat-h">
+            <header class="tchat-head">
+              <span class="tchat-faces" id="tchat-faces" aria-hidden="true"></span>
+              <span class="tchat-title"><b id="tchat-h">Team chat</b><span id="tchat-sub">What the agents say to each other</span></span>
+            </header>
+            <ol class="tchat-log" id="tchat-log"><li class="tchat-none">Nothing has passed between the agents yet.</li></ol>
+          </section>
           <a class="needs-you" id="needs-you" href="#review" hidden>The team is waiting for you <span aria-hidden="true">↓</span></a>
         </div>
       </div>

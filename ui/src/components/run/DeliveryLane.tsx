@@ -456,7 +456,7 @@ export function DeliveryLane({
             )
           })}
         </div>
-        {/* What they said to each other, right under the cards that said it, column by column. */}
+        {/* What they said to each other, as a team chat, right under the cards that said it. */}
         {!planned && projection.startedAt && (agents.length > 1 || projection.messages.length > 0) && (
           <Suspense fallback={null}>
             <AgentMessages

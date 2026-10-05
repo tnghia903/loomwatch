@@ -3,7 +3,7 @@
 # Researcher hands over to Writer. Writer asks Researcher a question back through the Team Bus
 # `ask` tool, and Researcher answers from the session it kept open. You review Writer's draft: send
 # it back once, then approve it with a note, which reaches Editor as your direction. Open the run's
-# **Messages between agents** to read all of it in order.
+# **Team chat** to read all of it in order.
 #
 # Every agent runs `ask-back-harness.py`, so nothing calls a model provider. Copy both files into
 # your teams folder (`~/LoomWatch/teams`) to try it. See docs/WATCH.md, "Verifying without a paid
