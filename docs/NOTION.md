@@ -83,6 +83,14 @@ connection. Only one workspace connection is supported per local OS user. Missin
 Keychain access is an error; there is no plaintext fallback. Windows/Linux storage is not yet
 implemented.
 
+macOS asks you to allow `loomwatchd` to read this item. The daemon reads it once each time it
+starts and keeps the connection in memory, updating it whenever it saves (connecting, a renewed
+sign-in, disconnecting), so you are asked at most once per start. **Always Allow** stops the
+question for this build of `loomwatchd`; because LoomWatch's builds are not signed with a Developer
+ID yet, macOS treats a new build (an update, or a rebuild from source) as a different program and
+asks again. After **Deny**, the background checks of the connection stop asking; connecting,
+sending an answer or searching pages asks again.
+
 The connection API is only mounted on loopback listeners. It rejects foreign origins and
 simple cross-site mutation requests, disables response caching, bounds requests and upstream
 responses, times out HTTPS requests, and never follows upstream redirects. The one route Notion's

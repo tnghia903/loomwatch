@@ -69,6 +69,70 @@ impl Endpoints {
     }
 }
 
+/// What this process holds of the Keychain item: read once, then kept up to date by every write
+/// made here.
+///
+/// macOS asks the person to allow each read of the item by a program it does not already trust,
+/// and the daemon reads it for many things: the connection status three parts of the run view show,
+/// each send, each page a run reads. Read every time, one page load asked three times over, and
+/// the browser taking focus back from the dialog asked once more. One read per process, shared by
+/// everything in it, asks once. The item is this program's: a change made to it by another
+/// program shows after a restart.
+static KEYCHAIN: LazyLock<Remembered> = LazyLock::new(Remembered::default);
+
+#[derive(Default)]
+struct Remembered(Mutex<Cached>);
+
+#[derive(Default)]
+enum Cached {
+    #[default]
+    Unread,
+    Known(Option<String>),
+    /// The read was refused: the person chose Deny, or the Keychain is locked. A status check does
+    /// not ask again, or a dialog dismissed with Deny would come straight back each time the
+    /// window takes focus; something the person does with Notion does ask.
+    Refused,
+}
+
+impl Remembered {
+    /// `ask` is false for a status check, which never brings the dialog back after a refusal.
+    async fn load<F, R>(&self, ask: bool, read: F) -> ApiResult<Option<String>>
+    where
+        F: FnOnce() -> R,
+        R: Future<Output = ApiResult<Option<String>>>,
+    {
+        // Held across the read, so requests that arrive together wait for the one dialog.
+        let mut cached = self.0.lock().await;
+        match &*cached {
+            Cached::Known(value) => return Ok(value.clone()),
+            Cached::Refused if !ask => return Err(storage_error()),
+            Cached::Unread | Cached::Refused => {}
+        }
+        let read = read().await;
+        *cached = match &read {
+            Ok(value) => Cached::Known(value.clone()),
+            Err(_) => Cached::Refused,
+        };
+        read
+    }
+
+    async fn save<F, W>(&self, value: Option<String>, write: F) -> ApiResult<()>
+    where
+        F: FnOnce(Option<String>) -> W,
+        W: Future<Output = ApiResult<()>>,
+    {
+        let mut cached = self.0.lock().await;
+        let written = write(value.clone()).await;
+        // A write that failed leaves the item in a state this process does not know.
+        *cached = if written.is_ok() {
+            Cached::Known(value)
+        } else {
+            Cached::Unread
+        };
+        written
+    }
+}
+
 /// Where the connection is kept: the macOS Keychain, or memory in tests.
 #[derive(Clone)]
 enum Store {
@@ -87,9 +151,20 @@ impl Store {
         }
     }
 
+    /// The connection, for something the person is doing with Notion: it may ask macOS for the
+    /// item again after a refusal.
     async fn load(&self) -> ApiResult<Option<Connection>> {
+        self.read(true).await
+    }
+
+    /// The connection, for a status check: it never asks again after a refusal.
+    async fn status(&self) -> ApiResult<Option<Connection>> {
+        self.read(false).await
+    }
+
+    async fn read(&self, ask: bool) -> ApiResult<Option<Connection>> {
         let stored = match self {
-            Self::Keychain => keychain_read().await?,
+            Self::Keychain => KEYCHAIN.load(ask, keychain_read).await?,
             #[cfg(test)]
             Self::Memory(slot) => slot.lock().map_err(|_| storage_error())?.clone(),
         };
@@ -103,7 +178,7 @@ impl Store {
             .map(|connection| serde_json::to_string(connection).map_err(|_| storage_error()))
             .transpose()?;
         match self {
-            Self::Keychain => keychain_write(value).await,
+            Self::Keychain => KEYCHAIN.save(value, keychain_write).await,
             #[cfg(test)]
             Self::Memory(slot) => {
                 *slot.lock().map_err(|_| storage_error())? = value;
@@ -367,7 +442,7 @@ fn public_status(connection: Option<&Connection>) -> Value {
 
 async fn status(State(state): State<NotionState>) -> ApiResult<Json<Value>> {
     let _guard = state.gate.lock().await;
-    Ok(Json(public_status(state.store.load().await?.as_ref())))
+    Ok(Json(public_status(state.store.status().await?.as_ref())))
 }
 
 async fn request(
@@ -1228,6 +1303,111 @@ fn styled_item(content: &str, style: &Style) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Keychain, as [`Remembered`] sees it: how often it was read, and whether it refuses.
+    #[derive(Clone, Default)]
+    struct Keychain {
+        reads: Arc<std::sync::atomic::AtomicUsize>,
+        refuse: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Keychain {
+        fn read(&self) -> impl Future<Output = ApiResult<Option<String>>> + use<> {
+            let this = self.clone();
+            async move {
+                this.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                // Long enough that requests arriving together are all waiting on this one.
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                if this.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+                    Err(storage_error())
+                } else {
+                    Ok(Some("stored".to_owned()))
+                }
+            }
+        }
+
+        fn reads(&self) -> usize {
+            self.reads.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    /// Every read is a dialog on a Mac that does not yet trust this program, so the daemon reads
+    /// once: a page load's three status checks, a send and a run's page reads all share it.
+    #[tokio::test]
+    async fn the_keychain_is_read_once_however_many_ask_at_once() {
+        let keychain = Keychain::default();
+        let remembered = Remembered::default();
+        let asks = (0..3).map(|_| remembered.load(false, || keychain.read()));
+        let answers = futures_util::future::join_all(asks).await;
+        assert!(
+            answers
+                .iter()
+                .all(|answer| answer.as_ref().ok() == Some(&Some("stored".to_owned())))
+        );
+        assert_eq!(
+            remembered.load(true, || keychain.read()).await.ok(),
+            Some(Some("stored".to_owned()))
+        );
+        assert_eq!(keychain.reads(), 1);
+    }
+
+    /// What this process wrote is what it knows: a renewed token is not read back from the Keychain.
+    #[tokio::test]
+    async fn a_write_is_remembered_without_reading_it_back() {
+        let keychain = Keychain::default();
+        let remembered = Remembered::default();
+        remembered
+            .save(Some("renewed".to_owned()), |_| async { Ok(()) })
+            .await
+            .expect("written");
+        assert_eq!(
+            remembered.load(false, || keychain.read()).await.ok(),
+            Some(Some("renewed".to_owned()))
+        );
+        remembered
+            .save(None, |_| async { Ok(()) })
+            .await
+            .expect("forgotten");
+        assert_eq!(
+            remembered.load(false, || keychain.read()).await.ok(),
+            Some(None)
+        );
+        assert_eq!(keychain.reads(), 0);
+        // A write that failed leaves the item unknown, so the next load reads it.
+        let failed = remembered
+            .save(Some("half".to_owned()), |_| async { Err(storage_error()) })
+            .await;
+        assert!(failed.is_err());
+        let _ = remembered.load(false, || keychain.read()).await;
+        assert_eq!(keychain.reads(), 1);
+    }
+
+    /// Deny must stay denied for the checks nobody asked for: the run view checks the connection
+    /// whenever the window takes focus, and the dialog itself takes focus away. Only something the
+    /// person does with Notion asks again.
+    #[tokio::test]
+    async fn after_a_refusal_only_something_the_person_does_asks_again() {
+        let keychain = Keychain::default();
+        keychain
+            .refuse
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let remembered = Remembered::default();
+        assert!(remembered.load(false, || keychain.read()).await.is_err());
+        assert!(remembered.load(false, || keychain.read()).await.is_err());
+        assert_eq!(
+            keychain.reads(),
+            1,
+            "a status check after a refusal must not ask again"
+        );
+        keychain
+            .refuse
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            remembered.load(true, || keychain.read()).await.ok(),
+            Some(Some("stored".to_owned()))
+        );
+        assert_eq!(keychain.reads(), 2);
+    }
     use axum::{
         body::Body,
         http::{Request, header},
