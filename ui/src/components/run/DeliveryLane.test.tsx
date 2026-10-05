@@ -494,8 +494,9 @@ describe('Delivery Lane messages between agents', () => {
       projection: projectRun(events),
     })
     const section = await screen.findByRole('region', { name: 'Messages between agents' })
-    expect(within(section).getByText('Which version?')).toBeInTheDocument()
-    expect(within(section).getByText('0.4')).toBeInTheDocument()
+    const asked = within(section).getByRole('button', { name: /Writer asked Researcher/ })
+    expect(asked).toHaveTextContent('Which version?')
+    expect(asked).toHaveTextContent('↳ Researcher: 0.4')
     // Both took part in both: the researcher wrote the handover and was asked the question.
     const researcher = document.getElementById('delivery-stage-researcher') as HTMLElement
     fireEvent.click(within(researcher).getByRole('button', { name: /2 messages/ }))

@@ -2,9 +2,9 @@ import type { Evidence } from '../watch/events'
 import { OPERATOR_ID, type MessageKind, type TeamMessage } from '../watch/messages'
 
 /**
- * The run's messages laid out for reading (components/run/AgentMessages.tsx): one lane per party
- * that sent or received something, and each message placed between its lanes, like a sequence
- * diagram read top to bottom.
+ * The run's messages made ready to read (components/run/AgentMessages.tsx): who sent each one and
+ * who got it, by the names the run view uses, and one row per message once what merely repeats an
+ * earlier one is folded into it (`fold`).
  *
  * The projection records what was said (lib/watch/messages.ts), including who handed a stage its
  * handover. Runs archived before the daemon recorded that are the one thing filled in here: the
@@ -38,11 +38,9 @@ export interface Conversation {
   lines: Line[]
 }
 
-export type MessageGroup = 'questions' | 'handovers'
-
-export const GROUP_OF: Record<MessageKind, MessageGroup> = {
-  ask: 'questions', question: 'questions', escalate: 'questions',
-  handover: 'handovers', direction: 'handovers', handoff: 'handovers', dispatch: 'handovers', note: 'handovers',
+/** A question that expects an answer, as opposed to work being passed along. */
+export function isQuestion(kind: MessageKind): boolean {
+  return kind === 'ask' || kind === 'question' || kind === 'escalate'
 }
 
 /**
@@ -109,11 +107,61 @@ export function touches(line: Line, laneId: string): boolean {
   return line.senders.includes(laneId) || line.via.includes(laneId) || line.receiver === laneId || line.replier === laneId || line.message.reply?.sentBackTo === laneId
 }
 
-/** Whether a message went back up the line: to a lane before its sender's. */
-export function goesBack(line: Line, lanes: readonly Lane[]): boolean {
-  if (line.receiver === null || line.senders.length !== 1) return false
-  const index = (id: string) => lanes.findIndex((lane) => lane.id === id)
-  return index(line.receiver) < index(line.senders[0])
+/** One row of the list: a message, with the messages that only repeat it folded in. */
+export interface Item {
+  line: Line
+  /**
+   * A review you approved, and where it went on to: the direction carrying your words and the
+   * handover the review step passed on unchanged. Shown in the review's row rather than as two
+   * more rows saying the same thing.
+   */
+  passedOn: { to: string; direction: Line | null; handover: Line | null }[]
+  /** This message's id and the ids folded into it, so a link to any of them lands on this row. */
+  ids: string[]
+}
+
+/**
+ * A review step reads a handover, you approve it, and the next stage is then handed the same
+ * handover and your words as direction. Those last two repeat what the review's row already says,
+ * so they fold into it. Only an exact repeat folds: a direction that joins several stops, or a
+ * handover that is not the one you reviewed, keeps its own row.
+ */
+export function fold(lines: readonly Line[], lanes: readonly Lane[]): Item[] {
+  const you = new Set(lanes.filter((lane) => lane.operator).map((lane) => lane.id))
+  const folded = new Set<string>()
+  const items: Item[] = []
+  lines.forEach((line, index) => {
+    if (folded.has(line.message.id)) return
+    const item: Item = { line, passedOn: [], ids: [line.message.id] }
+    const { message } = line
+    const stop = line.receiver
+    const reply = message.reply
+    if (message.kind === 'handover' && stop !== null && you.has(stop) && reply && !reply.sentBackTo) {
+      for (const later of lines.slice(index + 1)) {
+        const repeat = later.message
+        if (folded.has(repeat.id) || repeat.seq < reply.seq || later.receiver === null) continue
+        const direction = repeat.kind === 'direction' && later.senders.includes(stop) && repeat.text.trim() === reply.text.trim()
+        const forwarded = repeat.kind === 'handover' && later.via.includes(stop) && repeat.text.trim() === message.text.trim()
+        if (!direction && !forwarded) continue
+        folded.add(repeat.id)
+        item.ids.push(repeat.id)
+        let passed = item.passedOn.find((entry) => entry.to === later.receiver)
+        if (!passed) {
+          passed = { to: later.receiver, direction: null, handover: null }
+          item.passedOn.push(passed)
+        }
+        if (direction) passed.direction = later
+        else passed.handover = later
+      }
+    }
+    items.push(item)
+  })
+  return items
+}
+
+/** Whether a row involves this party, counting where an approved review went on to. */
+export function itemTouches(item: Item, laneId: string): boolean {
+  return touches(item.line, laneId) || item.passedOn.some((passed) => passed.to === laneId)
 }
 
 /** Names joined as a person would say them: "Writer", "Writer and Editor", "A, B and C". */

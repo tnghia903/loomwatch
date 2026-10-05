@@ -51,11 +51,13 @@ without saving”). The canvas then shows:
 The Run view also lists **Messages between agents**, in order: each pipeline handover, every
 Team Bus `ask` with the answer it got (and whether the asked agent answered from its open
 session or from a fresh start), `dispatch` and `handoff` tasks, `ask_user` questions with your
-answers, and the direction you gave at a review step. A question to an earlier stage is drawn
-as a thread crossing back up the line and tagged *earlier stage*. Every text is the recorded
-one, verbatim (`ui/src/lib/watch/messages.ts` collects them in the same pass as the rest of the
-projection, so they follow the replay scrubber). A stage card's **N messages** link and the
-timeline's **Read the message** open the same list.
+answers, and the direction you gave at a review step. Each is one row — who to whom, its first
+words, and the answer under it — that opens to the whole text, verbatim, and its record. A review
+you approved is one row that says where it went on: the direction and the handover the next stage
+was then given repeat it, so they fold into it. Only what needs attention is labelled (still
+waiting, failed). `ui/src/lib/watch/messages.ts` collects the messages in the same pass as the
+rest of the projection, so they follow the replay scrubber. A stage card's **N messages** link and
+the timeline's **Read the message** open the same list.
 
 Who said what to whom is read from the record, not from the team file as it is now:
 
@@ -68,7 +70,7 @@ Who said what to whom is read from the record, not from the team file as it is n
 | `operator_answer` message, `raw` | `to` | The kept-alive agent a follow-up of yours went to; its next turn is shown as the answer. |
 
 All five are additive: runs archived before them still read, and a handover sender that had to be
-taken from the team's connections is marked *sender read from the team file, not recorded*.
+taken from the team's connections says so when its row is opened.
 
 The history button beside the composer (`⌘P`) lists live runs and the 100 most recently
 active archived sessions with their prompts; selecting one opens it in **replay**. Deep

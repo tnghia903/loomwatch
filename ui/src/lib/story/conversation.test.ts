@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TeamMessage } from '../watch/messages'
-import { converse, goesBack, lineSentence, nameList } from './conversation'
+import { converse, fold, itemTouches, lineSentence, nameList } from './conversation'
 
 const message = (extra: Partial<TeamMessage> & Pick<TeamMessage, 'id' | 'kind'>): TeamMessage => ({
   from: null, to: null, handedBy: null, text: 't', context: null, eventId: extra.id, evidenceId: null, seq: 1, ts: '2026-10-05T09:00:00Z', offsetMs: 0, state: 'delivered', error: null, reply: null, ...extra,
@@ -49,15 +49,6 @@ describe('converse', () => {
     expect(lanes.map((lane) => lane.id)).toEqual(['editor', 'review', 'fact-checker'])
   })
 
-  it('knows a question that goes back up the line', () => {
-    const { lanes, lines } = converse([
-      message({ id: 'back', kind: 'ask', from: 'writer', to: 'editor' }),
-      message({ id: 'on', kind: 'ask', from: 'editor', to: 'writer' }),
-    ], order, edges)
-    expect(goesBack(lines[0], lanes)).toBe(true)
-    expect(goesBack(lines[1], lanes)).toBe(false)
-  })
-
   it('says your direction comes from the review step before the stage', () => {
     const { lines } = converse([message({ id: 'd', kind: 'direction', from: 'operator', to: 'writer' })], order, edges)
     expect(lines[0].senders).toEqual(['review'])
@@ -69,5 +60,27 @@ describe('nameList', () => {
     expect(nameList(['A'])).toBe('A')
     expect(nameList(['A', 'B'])).toBe('A and B')
     expect(nameList(['A', 'B', 'C'])).toBe('A, B and C')
+  })
+})
+
+describe('fold', () => {
+  const reviewed = message({ id: 'h1', kind: 'handover', to: 'review', text: 'DRAFT', handedBy: { from: ['editor'], via: [] }, seq: 10, state: 'answered', reply: { from: 'review', text: 'Shorter.', eventId: 'r', seq: 12, ts: '', offsetMs: 0, source: null, sentBackTo: null } })
+  const direction = message({ id: 'd', kind: 'direction', from: 'operator', to: 'writer', text: 'Shorter.', handedBy: { from: ['review'], via: [] }, seq: 13 })
+  const passedOn = message({ id: 'h2', kind: 'handover', to: 'writer', text: 'DRAFT', handedBy: { from: ['editor'], via: ['review'] }, seq: 13 })
+
+  it('folds the direction and the passed-on handover into the review you approved', () => {
+    const { lines, lanes } = converse([reviewed, direction, passedOn], order, edges)
+    const items = fold(lines, lanes)
+    expect(items).toHaveLength(1)
+    expect(items[0].ids).toEqual(['h1', 'd', 'h2'])
+    expect(items[0].passedOn).toEqual([expect.objectContaining({ to: 'writer' })])
+    expect(itemTouches(items[0], 'writer')).toBe(true)
+  })
+
+  it('keeps anything that is not an exact repeat', () => {
+    const other = { ...direction, text: '### At the review stop\n\nShorter.' }
+    const sentBack = { ...reviewed, reply: { ...reviewed.reply!, sentBackTo: 'editor' } }
+    expect(fold(...(() => { const c = converse([reviewed, other, passedOn], order, edges); return [c.lines, c.lanes] as const })()).map((item) => item.ids)).toEqual([['h1', 'h2'], ['d']])
+    expect(fold(...(() => { const c = converse([sentBack, direction, passedOn], order, edges); return [c.lines, c.lanes] as const })())).toHaveLength(3)
   })
 })

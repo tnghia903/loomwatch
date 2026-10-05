@@ -37,7 +37,7 @@ import { answerVerdict, type VerdictTone } from '../../lib/story/verdict'
 import { RunReceipt } from './RunReceipt'
 import { NotionSend, type NotionSendRun } from './NotionSend'
 import { WeftBar } from './WeftBar'
-import { converse, touches } from '../../lib/story/conversation'
+import { converse, fold, itemTouches } from '../../lib/story/conversation'
 import type { WeftKnot } from '../../lib/story/weft'
 import { markState } from '../../lib/story/mark'
 import { AgentMark } from '../ui/AgentMark'
@@ -232,7 +232,10 @@ export function DeliveryLane({
   const weftOrder = useMemo(() => agents.map((node) => ({ id: node.id, name: node.data.agent.name, operator: node.data.agent.kind === 'operator', status: node.data.runtime?.status, taskState: node.data.runtime?.taskState })), [agents])
   const terminal = ['succeeded', 'partial', 'failed', 'cancelled'].includes(phase)
   // What passed between the agents: counted per stage for its card, and reached from the timeline.
-  const talk = useMemo(() => converse(projection.messages, weftOrder, handedBy), [projection.messages, weftOrder, handedBy])
+  const talk = useMemo(() => {
+    const conversation = converse(projection.messages, weftOrder, handedBy)
+    return fold(conversation.lines, conversation.lanes)
+  }, [projection.messages, weftOrder, handedBy])
   const [revealMessage, setRevealMessage] = useState<{ id: string; at: number } | null>(null)
   const [messagesOf, setMessagesOf] = useState<{ laneId: string; at: number } | null>(null)
   const messageFor = (knot: WeftKnot) => {
@@ -371,7 +374,6 @@ export function DeliveryLane({
               predecessors={handedBy}
               evidence={projection.evidence}
               live={live && !terminal}
-              pipeline={pipeline}
               onInspectEvidence={onInspectEvidence}
               onInspectHandover={inspectHandover ? (id) => inspectHandover(id) : undefined}
               reveal={revealMessage}
@@ -466,9 +468,9 @@ export function DeliveryLane({
                         : `${required.filter((item) => item.receipt?.state === 'opened').length}/${required.length} opened`}
                     </button>
                   )}
-                  {!planned && talk.lines.some((line) => touches(line, node.id)) && (
+                  {!planned && talk.some((item) => itemTouches(item, node.id)) && (
                     <button className="delivery-link" onClick={() => setMessagesOf({ laneId: node.id, at: Date.now() })}>
-                      <MessagesSquare size={14} /> {messageCount(talk.lines.filter((line) => touches(line, node.id)).length)}{' '}
+                      <MessagesSquare size={14} /> {messageCount(talk.filter((item) => itemTouches(item, node.id)).length)}{' '}
                       <ArrowRight size={13} />
                     </button>
                   )}
