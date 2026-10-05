@@ -780,7 +780,7 @@ fn load_entry(
     let candidate: PathBuf = base.join(&entry.path);
     // `canonicalize` resolves every symlink, so the prefix test below is what refuses an escape.
     // Doing it in one step means there is no window in which a partially-resolved path is read.
-    let resolved = fs::canonicalize(&candidate).map_err(|error| {
+    let resolved = crate::platform::canonicalize(&candidate).map_err(|error| {
         MemoryError::new(format!(
             "cannot read the Brief entry {spelled}: {error}. It is resolved relative to the team file."
         ))
@@ -1160,12 +1160,12 @@ impl TeamIndex {
     /// `team → beta → team` for a file called `team.yaml` would not name anything the operator
     /// could delete.
     fn id_for_path(&self, team_path: &Path) -> String {
-        let resolved = fs::canonicalize(team_path).unwrap_or_else(|_| team_path.to_path_buf());
+        let resolved =
+            crate::platform::canonicalize(team_path).unwrap_or_else(|_| team_path.to_path_buf());
         for (id, paths) in &self.by_id {
-            if paths
-                .iter()
-                .any(|path| fs::canonicalize(path).unwrap_or_else(|_| path.clone()) == resolved)
-            {
+            if paths.iter().any(|path| {
+                crate::platform::canonicalize(path).unwrap_or_else(|_| path.clone()) == resolved
+            }) {
                 return id.clone();
             }
         }
@@ -1258,7 +1258,7 @@ impl Pack {
             )));
         }
         let root = canonical_root(teams_root)?;
-        let resolved = fs::canonicalize(root.join(pack)).map_err(|error| {
+        let resolved = crate::platform::canonicalize(root.join(pack)).map_err(|error| {
             MemoryError::new(format!("cannot read the pack {spelled}: {error}"))
         })?;
         if !resolved.starts_with(&root) {
@@ -1369,7 +1369,7 @@ impl Pack {
         })?;
         // Re-check after creating: an existing symlinked directory on the way down would
         // otherwise place the pack outside the root.
-        let resolved = fs::canonicalize(&target).map_err(|error| {
+        let resolved = crate::platform::canonicalize(&target).map_err(|error| {
             MemoryError::new(format!("cannot resolve the pack {folder}: {error}"))
         })?;
         if !resolved.starts_with(&root) {
@@ -1446,7 +1446,7 @@ fn slug(value: &str) -> String {
 }
 
 fn canonical_root(root: &Path) -> Result<PathBuf, MemoryError> {
-    fs::canonicalize(root).map_err(|error| {
+    crate::platform::canonicalize(root).map_err(|error| {
         MemoryError::new(format!(
             "cannot resolve the root {}: {error}",
             root.display()
@@ -1947,8 +1947,8 @@ pub fn hash_artifact(root: &Path, path: &str) -> Option<String> {
     if candidate.is_absolute() {
         return None;
     }
-    let root = fs::canonicalize(root).ok()?;
-    let resolved = fs::canonicalize(root.join(candidate)).ok()?;
+    let root = crate::platform::canonicalize(root).ok()?;
+    let resolved = crate::platform::canonicalize(root.join(candidate)).ok()?;
     if !resolved.starts_with(&root) || !resolved.is_file() {
         return None;
     }

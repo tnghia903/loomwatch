@@ -37,6 +37,9 @@ chrono-tz = "0.10"
 toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 # Ask LoomWatch checks a proposed team against the same schema the editor enforces before saving.
 jsonschema = { version = "0.58.2", default-features = false }
+# Resolved paths without Windows' `\\?\` prefix, which cmd.exe (and so every npm-installed app)
+# refuses as a working folder. On other systems it is std's own `canonicalize`.
+dunce = "1.0"
 
 [dev-dependencies]
 futures-util = "0.3"
@@ -46,3 +49,8 @@ tower = { version = "0.5", features = ["util"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
+# Ends an app's whole process tree with it: an npm-installed app is cmd.exe running node.
+win32job = "2.0"

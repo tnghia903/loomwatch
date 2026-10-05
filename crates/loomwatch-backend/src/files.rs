@@ -215,15 +215,19 @@ pub(crate) fn opener(resolved: &Path, reveal: bool) -> std::process::Command {
     }
     #[cfg(target_os = "windows")]
     {
-        if reveal {
-            let mut command = std::process::Command::new("explorer");
-            command.arg(format!("/select,{}", resolved.display()));
-            command
+        use std::os::windows::process::CommandExt;
+
+        // Explorer opens a file with its default app, or selects it in its folder. Its command
+        // line is passed exactly: Explorer reads `/select,"…"` its own way, and a Windows path can
+        // never hold a quote. cmd.exe's `start` would also read `&` or `^` in a file name.
+        let mut command = std::process::Command::new("explorer");
+        let quoted = format!("\"{}\"", resolved.display());
+        command.raw_arg(if reveal {
+            format!("/select,{quoted}")
         } else {
-            let mut command = std::process::Command::new("cmd");
-            command.args(["/C", "start", ""]).arg(resolved);
-            command
-        }
+            quoted
+        });
+        command
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
@@ -290,7 +294,8 @@ pub(crate) async fn open(teams_root: &Path, request: &OpenRequest) -> Result<(),
                 format!("could not ask the system to open it: {error}"),
             )
         })?;
-    if status.success() {
+    // Explorer reports failure (exit code 1) even when it opened the file.
+    if status.success() || cfg!(windows) {
         Ok(())
     } else {
         Err(ApiError::new(
@@ -310,7 +315,7 @@ mod tests {
             let path =
                 std::env::temp_dir().join(format!("loomwatch-files-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(path.join(".loomwatch/team/writer")).expect("create workspace");
-            Self(std::fs::canonicalize(path).expect("canonical root"))
+            Self(crate::platform::canonicalize(path).expect("canonical root"))
         }
     }
     impl Drop for Root {

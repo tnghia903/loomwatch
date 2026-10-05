@@ -27,7 +27,7 @@ use serde_json::Value;
 pub fn configured_home() -> Option<PathBuf> {
     select_home(
         std::env::var_os("LOOMWATCH_CAPABILITY_HOME"),
-        std::env::var_os("HOME"),
+        crate::platform::home_dir().map(PathBuf::into_os_string),
     )
 }
 
@@ -382,7 +382,7 @@ fn collect_matching_definitions(
         if !name.eq_ignore_ascii_case(&item.name) || !capability_has_source(&item.source, &source) {
             continue;
         }
-        let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        let canonical = crate::platform::canonicalize(&path).unwrap_or_else(|_| path.clone());
         if !seen.insert(canonical) {
             continue;
         }
@@ -469,7 +469,7 @@ fn add_keyed_capability(
 /// bug. The consequence is that a live team's kept-note count is not stated here — see
 /// [`MemorySourceRef::kept`].
 fn scan_team_memory_sources(teams_root: &Path, sources: &mut BTreeMap<String, CapabilityBuilder>) {
-    let Ok(root) = std::fs::canonicalize(teams_root) else {
+    let Ok(root) = crate::platform::canonicalize(teams_root) else {
         return;
     };
     let Ok(entries) = std::fs::read_dir(&root) else {
@@ -668,14 +668,17 @@ fn skill_roots(home: Option<&Path>, teams_root: &Path) -> Vec<SkillRoot> {
         let label = project_label(name);
         let home_paths = roots
             .iter()
-            .map(|root| fs::canonicalize(&root.path).unwrap_or_else(|_| root.path.clone()))
+            .map(|root| {
+                crate::platform::canonicalize(&root.path).unwrap_or_else(|_| root.path.clone())
+            })
             .collect::<BTreeSet<_>>();
         let position = usize::from(home.is_some()).min(roots.len());
         let project_roots = [".claude/skills", ".agents/skills"]
             .into_iter()
             .map(|relative| SkillRoot::new(project.join(relative), &label, RANK_PERSONAL, Skills))
             .filter(|root| {
-                let path = fs::canonicalize(&root.path).unwrap_or_else(|_| root.path.clone());
+                let path =
+                    crate::platform::canonicalize(&root.path).unwrap_or_else(|_| root.path.clone());
                 !home_paths.contains(&path)
             })
             .collect::<Vec<_>>();
@@ -851,7 +854,8 @@ fn find_skill_files(root: &Path, max_depth: usize, exclude: &[&str]) -> Vec<Path
             continue;
         }
         // Symlinks can point back up their own tree; canonical paths end the loop.
-        let canonical = fs::canonicalize(&directory).unwrap_or_else(|_| directory.clone());
+        let canonical =
+            crate::platform::canonicalize(&directory).unwrap_or_else(|_| directory.clone());
         if !seen.insert(canonical) {
             continue;
         }
@@ -1249,7 +1253,7 @@ pub(crate) fn folder_contents(folder: &Path, provider: &str) -> Vec<CapabilityDe
 /// A live team's kept notes are rows in Postgres and this module never opens a pool, which is why
 /// the inspector points at the Memory panel for those rather than claiming there are none.
 fn memory_contents(teams_root: &Path, reference: &MemorySourceRef) -> Vec<CapabilityDefinition> {
-    let Ok(root) = fs::canonicalize(teams_root) else {
+    let Ok(root) = crate::platform::canonicalize(teams_root) else {
         return Vec::new();
     };
     if let Some(folder) = &reference.pack {

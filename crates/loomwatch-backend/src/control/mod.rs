@@ -196,7 +196,7 @@ struct Proposal {
 impl Control {
     #[must_use]
     pub fn new(options: ControlOptions) -> Self {
-        let runtime_home = std::env::var_os("HOME").map(PathBuf::from);
+        let runtime_home = crate::platform::home_dir();
         let search_path =
             crate::api::augment_search_path(std::env::var_os("PATH"), runtime_home.as_deref());
         Self::with_search_path(options, search_path)

@@ -59,9 +59,9 @@ pub fn files_folder(team_file: &Path) -> PathBuf {
 #[must_use]
 pub fn resolve(team_dir: &Path, path: &Path) -> PathBuf {
     if let Ok(rest) = path.strip_prefix("~")
-        && let Some(home) = std::env::var_os("HOME")
+        && let Some(home) = crate::platform::home_dir()
     {
-        return PathBuf::from(home).join(rest);
+        return home.join(rest);
     }
     if path.is_absolute() {
         path.to_path_buf()
@@ -77,7 +77,7 @@ pub fn resolve(team_dir: &Path, path: &Path) -> PathBuf {
 /// Returns the reason, in a sentence fragment, when the path does not exist or cannot be read.
 pub fn snapshot(team_dir: &Path, path: &Path) -> Result<KnowledgeSnapshot, String> {
     let resolved = resolve(team_dir, path);
-    let canonical = fs::canonicalize(&resolved)
+    let canonical = crate::platform::canonicalize(&resolved)
         .map_err(|_| format!("{} does not exist on this computer", resolved.display()))?;
     if canonical.is_dir() {
         let contents = folder_contents(&canonical, "Linked");
@@ -340,7 +340,7 @@ pub fn list_folder(requested: Option<&Path>, home: Option<&Path>) -> Result<Fold
     if !start.is_absolute() {
         return Err(format!("{} is not a full path", start.display()));
     }
-    let folder = fs::canonicalize(&start)
+    let folder = crate::platform::canonicalize(&start)
         .map_err(|_| format!("{} does not exist on this computer", start.display()))?;
     if !folder.is_dir() {
         return Err(format!("{} is not a folder", folder.display()));
@@ -455,8 +455,8 @@ pub fn store_file(
         .map_err(|error| format!("{} could not be created ({error})", folder.display()))?;
     // Re-checked after creating: a symlinked folder already on the way would put the file outside
     // the team.
-    let resolved = fs::canonicalize(&folder).map_err(|error| error.to_string())?;
-    let team_dir = fs::canonicalize(&team_dir).map_err(|error| error.to_string())?;
+    let resolved = crate::platform::canonicalize(&folder).map_err(|error| error.to_string())?;
+    let team_dir = crate::platform::canonicalize(&team_dir).map_err(|error| error.to_string())?;
     if !resolved.starts_with(&team_dir) {
         return Err(format!(
             "{folder_name} resolves outside the team's own folder"
@@ -544,7 +544,7 @@ mod tests {
                 let path =
                     std::env::temp_dir().join(format!("loomwatch-chosen-{}", uuid::Uuid::new_v4()));
                 std::fs::create_dir_all(&path).expect("scratch dir");
-                Self(std::fs::canonicalize(path).expect("canonical scratch dir"))
+                Self(crate::platform::canonicalize(path).expect("canonical scratch dir"))
             }
 
             pub fn path(&self) -> &Path {

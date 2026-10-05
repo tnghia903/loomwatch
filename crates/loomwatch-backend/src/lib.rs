@@ -21,6 +21,7 @@ pub mod notion;
 pub mod operator;
 pub mod orientation;
 pub mod permissions;
+pub mod platform;
 pub mod runs;
 pub mod schedule;
 pub mod skill_routing;
@@ -2366,8 +2367,7 @@ pub(crate) fn resolve_cwd(team_path: &Path, cwd: &Path) -> Result<PathBuf> {
             .unwrap_or_else(|| Path::new("."))
             .join(cwd)
     };
-    resolved
-        .canonicalize()
+    platform::canonicalize(&resolved)
         .with_context(|| format!("failed to resolve harness cwd {}", resolved.display()))
 }
 

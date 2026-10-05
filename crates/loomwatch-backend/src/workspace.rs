@@ -699,7 +699,8 @@ fn native_memory_file(agent: &AgentConfig, memory: &TeamMemory) -> Option<&'stat
 
 /// Whether `path` lies inside `folder`, both resolved as far as they exist.
 fn holds(folder: &Path, path: &Path) -> bool {
-    let resolved = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let resolved =
+        |path: &Path| crate::platform::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let folder = resolved(folder);
     let path = path.parent().map_or_else(
         || resolved(path),
@@ -894,7 +895,7 @@ mod tests {
         .expect("delivered")
         .expect("a workspace");
         assert!(!workspace.cwd.join(".claude/skills").exists());
-        let folder = fs::canonicalize(&project).expect("canonical");
+        let folder = crate::platform::canonicalize(&project).expect("canonical");
         assert_eq!(
             workspace.delivery.knowledge[0].folders,
             [folder.to_string_lossy()]
@@ -971,7 +972,7 @@ mod tests {
             panic!("two sources: {:?}", workspace.delivery.knowledge);
         };
         assert_eq!(folder.source, "Linked folder");
-        let memo = fs::canonicalize(teams.join("team.files/memo.md")).expect("memo");
+        let memo = crate::platform::canonicalize(teams.join("team.files/memo.md")).expect("memo");
         assert_eq!(file.source, "Added file");
         assert_eq!(file.files, [memo.to_string_lossy()]);
         assert_eq!(file.read_access, Some(crate::delivery::Permission::Granted));
@@ -1411,7 +1412,7 @@ mod tests {
                 r#"{"permissions":{}}"#,
             )
             .expect("project settings");
-            let project = fs::canonicalize(&project).expect("canonical");
+            let project = crate::platform::canonicalize(&project).expect("canonical");
             let mut writer = agent(
                 "npx",
                 &["@agentclientprotocol/claude-agent-acp"],

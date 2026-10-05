@@ -949,7 +949,8 @@ mod tests {
         let [knowledge] = delivery.knowledge.as_slice() else {
             panic!("one knowledge source: {delivery:?}");
         };
-        let folder = fs::canonicalize(teams.parent().expect("project")).expect("canonical");
+        let folder =
+            crate::platform::canonicalize(teams.parent().expect("project")).expect("canonical");
         assert_eq!(knowledge.folders, [folder.to_string_lossy()]);
         assert_eq!(knowledge.read_access, Some(Permission::HarnessPolicy));
         assert!(knowledge.rendered_contents().contains("The product."));

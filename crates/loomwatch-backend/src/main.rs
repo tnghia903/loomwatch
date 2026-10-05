@@ -42,8 +42,9 @@ enum Commands {
         )]
         allow_container_listener: bool,
         /// Where `LoomWatch` keeps its own state, such as which team files you approved to run.
-        /// Defaults to `~/Library/Application Support/LoomWatch` on macOS and
-        /// `$XDG_STATE_HOME/loomwatch` (or `~/.local/state/loomwatch`) elsewhere.
+        /// Defaults to `~/Library/Application Support/LoomWatch` on macOS,
+        /// `%LOCALAPPDATA%\LoomWatch` on Windows, and `$XDG_STATE_HOME/loomwatch` (or
+        /// `~/.local/state/loomwatch`) elsewhere.
         #[arg(long, env = "LOOMWATCH_STATE_DIR")]
         state_dir: Option<PathBuf>,
     },
@@ -110,12 +111,17 @@ async fn recovered_registry(archive: Option<&EventArchive>) -> RunRegistry {
     registry
 }
 
-/// `~/Library/Application Support/LoomWatch` on macOS, `$XDG_STATE_HOME/loomwatch` or
-/// `~/.local/state/loomwatch` elsewhere.
+/// `~/Library/Application Support/LoomWatch` on macOS, `%LOCALAPPDATA%\LoomWatch` on Windows,
+/// `$XDG_STATE_HOME/loomwatch` or `~/.local/state/loomwatch` elsewhere.
 fn default_state_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .filter(|home| home.is_absolute())?;
+    if cfg!(windows)
+        && let Some(local) = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .filter(|local| local.is_absolute())
+    {
+        return Some(local.join("LoomWatch"));
+    }
+    let home = loomwatch_backend::platform::home_dir().filter(|home| home.is_absolute())?;
     if cfg!(target_os = "macos") {
         return Some(home.join("Library/Application Support/LoomWatch"));
     }
@@ -160,9 +166,10 @@ async fn main() -> Result<()> {
             };
             // One canonical root for both the team editor and run control, so a team the
             // editor can open is exactly a team a run may start, and vice versa.
-            let teams_root = std::fs::canonicalize(&teams_root).with_context(|| {
-                format!("failed to resolve teams root {}", teams_root.display())
-            })?;
+            let teams_root =
+                loomwatch_backend::platform::canonicalize(&teams_root).with_context(|| {
+                    format!("failed to resolve teams root {}", teams_root.display())
+                })?;
             // Which team files may run (ADR 0048), kept outside the teams folder. Opened before
             // anything can start a run, and the first time, it approves the teams already there.
             let state_dir = state_dir.or_else(default_state_dir).context(

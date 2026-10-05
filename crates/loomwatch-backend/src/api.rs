@@ -269,6 +269,7 @@ const HARNESSES: &[HarnessSpec] = &[
 /// nothing and the Library says "No agent harnesses found on PATH", which is true and useless.
 /// These are appended *after* the inherited `PATH`, so an operator's own ordering still wins, and
 /// only in [`router`]; [`router_with_path`] stays exactly as deterministic as it was for tests.
+#[cfg(not(windows))]
 const EXTRA_HARNESS_DIRECTORIES: &[&str] = &[
     ".local/bin",
     ".opencode/bin",
@@ -276,6 +277,21 @@ const EXTRA_HARNESS_DIRECTORIES: &[&str] = &[
     ".cargo/bin",
     ".npm-global/bin",
     ".volta/bin",
+];
+
+/// The same on Windows, where npm, pnpm, Volta, Scoop, `WinGet` and Claude's own installer each put
+/// the programs they install in a folder of the user profile.
+#[cfg(windows)]
+const EXTRA_HARNESS_DIRECTORIES: &[&str] = &[
+    "AppData/Roaming/npm",
+    "AppData/Local/pnpm",
+    "AppData/Local/Volta/bin",
+    "AppData/Local/Microsoft/WinGet/Links",
+    "scoop/shims",
+    ".local/bin",
+    ".opencode/bin",
+    ".bun/bin",
+    ".cargo/bin",
 ];
 
 /// One supported harness detected on the daemon's `PATH`.
@@ -557,7 +573,7 @@ pub fn router_with_archive(
     // The inherited `PATH` alone is not enough: see `EXTRA_HARNESS_DIRECTORIES`.
     // Executables come from the runtime home, not the independently configured read-only
     // capability import. Finding a host binary in an import would not make it runnable here.
-    let runtime_home = std::env::var_os("HOME").map(PathBuf::from);
+    let runtime_home = crate::platform::home_dir();
     let run_path = std::env::var_os("PATH");
     let search_path = augment_search_path(run_path.clone(), runtime_home.as_deref());
     router_with(
@@ -618,7 +634,7 @@ fn router_with(
         writes: Arc::default(),
         search_path: paths.detection,
         run_path: paths.run,
-        teams_root: fs::canonicalize(teams_root)?,
+        teams_root: crate::platform::canonicalize(teams_root)?,
         allowed_hosts: allowed_hosts
             .into_iter()
             .map(|host| normalize_hostname(&host))
@@ -1040,7 +1056,7 @@ async fn get_commands(
 /// The host runner uses this exact detector, so its inventory and spawn allowlist cannot drift.
 #[must_use]
 pub fn system_harness_report() -> HarnessReport {
-    let runtime_home = std::env::var_os("HOME").map(PathBuf::from);
+    let runtime_home = crate::platform::home_dir();
     let search_path = augment_search_path(std::env::var_os("PATH"), runtime_home.as_deref());
     HarnessReport {
         harnesses: detect_harnesses(search_path.as_deref()),
@@ -1411,7 +1427,7 @@ pub(crate) fn discover_team_files(teams_root: &Path) -> io::Result<Vec<String>> 
 
             // A file symlink is useful when it still resolves inside the teams root. Broken
             // links and links to files outside the root are not discoverable.
-            let Ok(resolved) = fs::canonicalize(&path) else {
+            let Ok(resolved) = crate::platform::canonicalize(&path) else {
                 continue;
             };
             if !resolved.starts_with(teams_root) || !resolved.is_file() {
@@ -1993,7 +2009,7 @@ async fn put_memory_file(
         })?;
         // Re-check after creating: a pre-existing symlinked directory on the way down would
         // otherwise place the file outside the team.
-        let resolved_parent = fs::canonicalize(parent).map_err(|error| {
+        let resolved_parent = crate::platform::canonicalize(parent).map_err(|error| {
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("failed to resolve {}: {error}", parent.display()),
@@ -2161,7 +2177,7 @@ pub(crate) fn resolve_existing_team_path(
     requested: &Path,
 ) -> Result<PathBuf, ApiError> {
     let candidate = rooted_candidate(teams_root, requested);
-    let resolved = fs::canonicalize(&candidate).map_err(|error| {
+    let resolved = crate::platform::canonicalize(&candidate).map_err(|error| {
         let status = if error.kind() == io::ErrorKind::NotFound {
             StatusCode::NOT_FOUND
         } else {
@@ -2185,7 +2201,7 @@ pub(crate) fn resolve_writable_team_path(
     let candidate = rooted_candidate(teams_root, requested);
     match fs::symlink_metadata(&candidate) {
         Ok(_) => {
-            let resolved = fs::canonicalize(&candidate).map_err(|error| {
+            let resolved = crate::platform::canonicalize(&candidate).map_err(|error| {
                 ApiError::new(
                     StatusCode::BAD_REQUEST,
                     format!(
@@ -2209,7 +2225,7 @@ pub(crate) fn resolve_writable_team_path(
                     format!("team path {} has no parent", requested.display()),
                 )
             })?;
-            let resolved_parent = fs::canonicalize(parent).map_err(|error| {
+            let resolved_parent = crate::platform::canonicalize(parent).map_err(|error| {
                 ApiError::new(
                     StatusCode::BAD_REQUEST,
                     format!(
@@ -2331,19 +2347,33 @@ async fn get_about() -> Json<Value> {
     }))
 }
 
-/// The macOS release, such as `26.0`. Other systems, and a `sw_vers` that fails, report none.
+/// The macOS release, such as `26.0`, or the Windows build, such as `10.0.26100.4652`. Linux, and a
+/// command that fails, report none.
 async fn os_version() -> Option<String> {
-    if !cfg!(target_os = "macos") {
+    let (program, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
+        ("/usr/bin/sw_vers", &["-productVersion"])
+    } else if cfg!(windows) {
+        ("cmd", &["/d", "/c", "ver"])
+    } else {
         return None;
-    }
-    let output = tokio::process::Command::new("/usr/bin/sw_vers")
-        .arg("-productVersion")
+    };
+    let output = tokio::process::Command::new(program)
+        .args(args)
         .output()
         .await
         .ok()
         .filter(|output| output.status.success())?;
-    let version = String::from_utf8(output.stdout).ok()?;
-    Some(version.trim().to_owned()).filter(|version| !version.is_empty())
+    let said = String::from_utf8(output.stdout).ok()?;
+    windows_version(&said)
+        .or_else(|| Some(said.trim()))
+        .map(str::to_owned)
+        .filter(|version| !version.is_empty())
+}
+
+/// `10.0.26100.4652` out of `ver`'s `Microsoft Windows [Version 10.0.26100.4652]`.
+fn windows_version(said: &str) -> Option<&str> {
+    let (_, after) = said.split_once("[Version ")?;
+    after.split_once(']').map(|(version, _)| version.trim())
 }
 
 /// Scan a `PATH` value for every harness in [`HARNESSES`].
@@ -2530,10 +2560,12 @@ fn check_command(
         }
     } else if command.components().count() > 1 {
         (CommandStatus::Unchecked, None)
-    } else if let Some(found) = run_path.and_then(|run_path| find_executable(run_path, cmd)) {
+    } else if let Some(found) =
+        run_path.and_then(|run_path| crate::platform::find_program(run_path, cmd))
+    {
         (CommandStatus::Found, Some(found))
     } else if let Some(found) =
-        detection_path.and_then(|detection_path| find_executable(detection_path, cmd))
+        detection_path.and_then(|detection_path| crate::platform::find_program(detection_path, cmd))
     {
         (CommandStatus::OutsidePath, Some(found))
     } else {
@@ -2548,25 +2580,8 @@ fn check_command(
 
 pub(crate) fn find_executable(search_path: &std::ffi::OsStr, command: &str) -> Option<PathBuf> {
     std::env::split_paths(search_path)
-        .flat_map(|directory| executable_candidates(&directory, command))
+        .flat_map(|directory| crate::platform::program_candidates(&directory.join(command)))
         .find(|candidate| is_executable(candidate))
-}
-
-#[cfg(not(windows))]
-fn executable_candidates(directory: &Path, command: &str) -> Vec<PathBuf> {
-    vec![directory.join(command)]
-}
-
-#[cfg(windows)]
-fn executable_candidates(directory: &Path, command: &str) -> Vec<PathBuf> {
-    let extensions =
-        std::env::var_os("PATHEXT").unwrap_or_else(|| OsString::from(".COM;.EXE;.BAT;.CMD"));
-    extensions
-        .to_string_lossy()
-        .split(';')
-        .filter(|extension| !extension.is_empty())
-        .map(|extension| directory.join(format!("{command}{extension}")))
-        .collect()
 }
 
 #[cfg(unix)]
@@ -2754,7 +2769,7 @@ mod tests {
         let workspace = root.0.join(".loomwatch").join("team").join("writer");
         fs::create_dir_all(&workspace).expect("create workspace");
         fs::write(workspace.join("report.docx"), b"PK").expect("write report");
-        let canonical = fs::canonicalize(&root.0).expect("canonical root");
+        let canonical = crate::platform::canonicalize(&root.0).expect("canonical root");
         let report = canonical.join(".loomwatch/team/writer/report.docx");
 
         let response = test_router(&root.0)
@@ -4147,9 +4162,14 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         // Present even when unknown, so the report says so rather than leaving a gap.
         assert!(about.get("commit").is_some());
         assert!(about.get("osVersion").is_some());
-        if cfg!(target_os = "macos") {
+        if cfg!(any(target_os = "macos", windows)) {
             assert!(about["osVersion"].is_string(), "{about}");
         }
+        assert_eq!(
+            windows_version("\r\nMicrosoft Windows [Version 10.0.26100.4652]\r\n"),
+            Some("10.0.26100.4652")
+        );
+        assert_eq!(windows_version("26.0"), None);
         let text = about.to_string();
         if let Some(home) = std::env::var_os("HOME") {
             assert!(!text.contains(&*home.to_string_lossy()), "{text}");
@@ -4298,7 +4318,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         assert_eq!(
             body["root"],
             json!(
-                fs::canonicalize(&directory.0)
+                crate::platform::canonicalize(&directory.0)
                     .expect("canonical teams root")
                     .to_string_lossy()
             )
@@ -5279,7 +5299,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
     #[test]
     fn two_deletions_in_one_second_get_a_folder_each() {
         let directory = TempDirectory::new();
-        let root = fs::canonicalize(&directory.0).expect("canonical root");
+        let root = crate::platform::canonicalize(&directory.0).expect("canonical root");
         let now = chrono::DateTime::parse_from_rfc3339("2026-10-01T09:00:00Z")
             .expect("timestamp")
             .with_timezone(&chrono::Utc);

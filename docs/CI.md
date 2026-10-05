@@ -9,17 +9,18 @@ version tag.
 
 | Workflow | Runs on | What it proves | Typical time |
 | --- | --- | --- | --- |
-| `ci.yml` — **Frontend**, then **Rust** | push to `main`, every pull request, by hand | UI lint (warnings fail), typecheck, build and tests; then `cargo fmt`, Clippy (`-D warnings`) and the full test suite against PostgreSQL 17.6, building on the exact `ui/dist` the Frontend job produced | 2 + 5–8 min |
+| `ci.yml` — **Frontend**, then **Rust** and **Windows** | push to `main`, every pull request, by hand | UI lint (warnings fail), typecheck, build and tests; then `cargo fmt`, Clippy (`-D warnings`) and the full test suite against PostgreSQL 17.6, building on the exact `ui/dist` the Frontend job produced. **Windows** runs Clippy and the tests on Windows against the runner's own PostgreSQL, then `scripts/smoke-windows.ps1`: it packs the program, installs it with `install.ps1`, starts it with `loomwatch.cmd` and takes the offline demo through its review stop | 2 + 5–8 min; Windows ~20 min |
 | `container.yml` — **Build image** | a change to the Dockerfile or a lockfile/toolchain/manifest it builds from, monthly, by hand | `docker build` still succeeds; the image is never pushed | ~10–15 min (estimate) |
 | `actionlint.yml` | a change under `.github/workflows/` | the workflow files themselves are valid | < 1 min |
-| `pages.yml` — **Publish** | a change to `site/`, `scripts/install.sh`, the README screenshots or fonts it borrows, by hand | builds the landing page with `site/build.sh` and pushes it to the `loomwatch/loomwatch.github.io` repository, which GitHub Pages serves | < 1 min |
-| `release.yml` | a `v*` tag, by hand | builds the browser app once, then `loomwatchd` for macOS (one universal program, on macOS) and Linux x86_64/arm64 (on Ubuntu 22.04), packs each with `scripts/package-release.sh`, and, for a tag, attaches them to a **draft** release. Run by hand, it only builds the files | ~15 min |
+| `pages.yml` — **Publish** | a change to `site/`, `scripts/install.sh` or `scripts/install.ps1`, the README screenshots or fonts it borrows, by hand | builds the landing page with `site/build.sh` and pushes it to the `loomwatch/loomwatch.github.io` repository, which GitHub Pages serves | < 1 min |
+| `release.yml` | a `v*` tag, by hand | builds the browser app once, then `loomwatchd` for macOS (one universal program, on macOS), Linux x86_64/arm64 (on Ubuntu 22.04) and Windows x86_64 (with the C runtime built in), packs each with `scripts/package-release.sh`, and, for a tag, attaches them to a **draft** release. Run by hand, it only builds the files | ~15 min |
 
 ```
 pull request / push to main
         │
         ▼
    Frontend ──ui/dist──▶ Rust (fmt → clippy → test, Postgres service)
+                     └──▶ Windows (clippy → test → install, start, offline demo)
 ```
 
 ## Conventions
@@ -56,7 +57,12 @@ have been tried.
    build once so `Cargo.lock` follows, and push that commit to `main`.
 2. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`. The Release workflow
    checks the tag matches the version and drafts the release with `loomwatch-macos-universal.tar.gz`,
-   `loomwatch-linux-x86_64.tar.gz`, `loomwatch-linux-arm64.tar.gz` and a `.sha256` for each.
+   `loomwatch-linux-x86_64.tar.gz`, `loomwatch-linux-arm64.tar.gz`, `loomwatch-windows-x86_64.zip`
+   and a `.sha256` for each. On a Windows computer, try the draft the same way with
+   `install.ps1`: serve the downloaded files, then set `LOOMWATCH_DOWNLOAD_BASE`,
+   `LOOMWATCH_APP_DIR`, `LOOMWATCH_TEAMS_ROOT`, `LOOMWATCH_PORT` and
+   `COMPOSE_PROJECT_NAME=loomwatch-try` with `$env:NAME = 'value'` and run
+   `powershell -ExecutionPolicy Bypass -File scripts\install.ps1`.
 3. Try the draft with the real installer, in a folder and a database of its own:
 
    ```sh

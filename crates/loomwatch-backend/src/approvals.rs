@@ -409,7 +409,7 @@ mod tests {
             let path =
                 std::env::temp_dir().join(format!("loomwatch-approvals-{}", uuid::Uuid::new_v4()));
             fs::create_dir_all(&path).expect("create temp directory");
-            Self(fs::canonicalize(path).expect("canonical temp directory"))
+            Self(crate::platform::canonicalize(path).expect("canonical temp directory"))
         }
     }
 

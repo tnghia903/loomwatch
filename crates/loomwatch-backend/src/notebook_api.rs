@@ -41,7 +41,7 @@ struct NotebookState {
 /// Build the Notebook router. `teams_root` must be the same canonical root every other surface
 /// uses, so a team the editor can open is exactly a team whose notes can be read.
 pub fn router(archive: Option<EventArchive>, teams_root: PathBuf) -> Router {
-    let teams_root = std::fs::canonicalize(&teams_root).unwrap_or(teams_root);
+    let teams_root = crate::platform::canonicalize(&teams_root).unwrap_or(teams_root);
     Router::new()
         .route("/api/memory/notes", get(list_notes))
         .route("/api/memory/notes/{id}/history", get(note_history))
@@ -420,7 +420,7 @@ mod tests {
     async fn keep_is_refused_when_the_team_file_says_never(pool: sqlx::PgPool) {
         let root = std::env::temp_dir().join(format!("loomwatch-keep-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).expect("root");
-        let root = std::fs::canonicalize(&root).expect("canonical root");
+        let root = crate::platform::canonicalize(&root).expect("canonical root");
         let team = |name: &str, keep: &str| {
             std::fs::write(
                 root.join(name),

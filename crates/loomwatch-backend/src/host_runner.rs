@@ -47,8 +47,7 @@ impl PathMapping {
         if !container.is_absolute() || !host.is_absolute() {
             bail!("path mapping must use absolute paths: {value:?}");
         }
-        let host = host
-            .canonicalize()
+        let host = crate::platform::canonicalize(&host)
             .with_context(|| format!("failed to resolve host path {}", host.display()))?;
         Ok(Self { container, host })
     }
@@ -257,10 +256,7 @@ fn mapped_cwd(cwd: &Path, mappings: &[PathMapping]) -> Result<PathBuf> {
             cwd.display()
         )
     })?;
-    let resolved = mapping
-        .host
-        .join(suffix)
-        .canonicalize()
+    let resolved = crate::platform::canonicalize(mapping.host.join(suffix))
         .with_context(|| format!("failed to resolve mapped host cwd for {}", cwd.display()))?;
     if !resolved.starts_with(&mapping.host) {
         bail!("mapped cwd escaped the allowed host root");

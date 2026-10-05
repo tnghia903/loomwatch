@@ -228,6 +228,8 @@ fn withheld_app_config(spec: &ProcessSpec) -> Result<Option<String>> {
 /// Owns one ACP child and both sides of its line-delimited JSON-RPC stream.
 pub struct AcpProcess {
     child: Child,
+    /// Ends whatever the app started along with it (Windows; see [`crate::platform::ProcessTree`]).
+    _tree: crate::platform::ProcessTree,
     stdin: Option<ChildStdin>,
     stdout: Lines<BufReader<ChildStdout>>,
     stderr: JoinHandle<std::io::Result<String>>,
@@ -272,7 +274,12 @@ impl AcpProcess {
     ///
     /// Returns an error when the process cannot be spawned or its streams are unavailable.
     pub fn spawn(spec: &ProcessSpec) -> Result<Self> {
-        let mut command = Command::new(&spec.cmd);
+        let program = crate::platform::program_path(
+            &spec.cmd,
+            &spec.cwd,
+            std::env::var_os("PATH").as_deref(),
+        );
+        let mut command = Command::new(program);
         for (key, _) in std::env::vars_os() {
             if let Some(key) = key.to_str()
                 && daemon_only(key, spec)
@@ -292,6 +299,7 @@ impl AcpProcess {
             command.env(CODEX_CONFIG, config);
         }
         let mut child = command.spawn()?;
+        let tree = crate::platform::ProcessTree::adopt(&child);
         let stdin = child
             .stdin
             .take()
@@ -313,6 +321,7 @@ impl AcpProcess {
         });
         Ok(Self {
             child,
+            _tree: tree,
             stdin: Some(stdin),
             stdout: BufReader::new(stdout).lines(),
             stderr,
@@ -1822,7 +1831,15 @@ struct ExitReport {
 }
 
 /// Name the signal that killed the child, if one did. `SIGKILL` for the common
-/// timeout/OOM path; unrecognized numbers fall back to `SIG<n>`.
+/// timeout/OOM path; unrecognized numbers fall back to `SIG<n>`. Windows has no signals: a
+/// process ended from outside there reports the exit code it was given.
+#[cfg(not(unix))]
+#[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
+fn signal_death(_status: std::process::ExitStatus) -> Option<String> {
+    None
+}
+
+#[cfg(unix)]
 fn signal_death(status: std::process::ExitStatus) -> Option<String> {
     use std::os::unix::process::ExitStatusExt;
     status.signal().map(|number| {

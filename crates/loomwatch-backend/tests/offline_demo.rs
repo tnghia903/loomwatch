@@ -17,7 +17,14 @@ fn demo_harness() -> PathBuf {
 
 /// One prompt to the demo harness as `agent`, and everything it said back.
 fn answer(agent: &str, prompt: &str) -> String {
-    let mut child = Command::new("python3")
+    // `python3` as the demo team names it, found as a run finds it (on Windows, the Python 3 the
+    // computer has: see `platform::find_program`).
+    let python = loomwatch_backend::platform::program_path(
+        "python3",
+        &std::env::current_dir().expect("current folder"),
+        std::env::var_os("PATH").as_deref(),
+    );
+    let mut child = Command::new(python)
         .arg(demo_harness())
         .arg(agent)
         .stdin(Stdio::piped())
