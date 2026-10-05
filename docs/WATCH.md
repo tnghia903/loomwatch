@@ -51,13 +51,15 @@ without saving”). The canvas then shows:
 Under the stage cards, the Run view shows **what they said to each other**: each pipeline handover,
 every Team Bus `ask` with the answer it got (and whether the asked agent answered from its open
 session or from a fresh start), `dispatch` and `handoff` tasks, `ask_user` questions with your
-answers, and your answers at a review step. There is one column per agent, numbered as its card
-is, and each message is a speech bubble stretching from the speaker's column to the listener's,
-its square corner on the speaker's side. A question to an earlier stage and its answer are two
-bubbles over the same two columns, facing each other; an answer still owed shows as one on its
-way. A review you approved is one bubble from you to the stage it went on to: the direction and
-the handover that stage was then given only repeat it, so they fold into it. A long bubble shows
-its first lines and **Read all** shows it verbatim; **Details** leads to its record.
+answers, and your answers at a review step. It reads as a group chat, **Team chat**: each
+agent has its own colour and initials, numbered as its card is, and your messages sit on the
+right. A question names who it is for with an @mention, and its answer quotes it. A handover
+shows as a document shared with the stage it was for. An answer still owed shows as someone
+writing while the run is live, and as **No answer** after it ends. A plain approval is a short
+note in the chat; a review you approved with a note is one message from you to the stage it went
+on to, and the direction and handover that stage was then given fold into it, as they only
+repeat it. A long message shows its first lines and **Read more** shows it verbatim; **Info**
+says how long the answer took, what the agent did meanwhile, and leads to the record.
 `ui/src/lib/watch/messages.ts` collects the messages in the same pass as the rest of the
 projection, so they follow the replay scrubber, and the timeline's **Read the message** opens one.
 

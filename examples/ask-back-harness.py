@@ -81,7 +81,7 @@ for line in sys.stdin:
             say("Revised the draft: " + feedback)
         elif agent == "researcher" and turns > 1:
             # A later stage's question, answered in the session that did the research.
-            say("Bloomberg reported the 4% drop at 07:12 ET on 4 Oct, and Reuters confirmed the same figure at 07:40 ET.")
+            say("**Two outlets have it.**\n- Bloomberg: the 4% drop, 4 Oct at 07:12 ET.\n- Reuters: the same figure, 07:40 ET.\n\nI have added the Reuters link to the findings.")
         elif agent == "researcher":
             say("Found three stories for today and noted a source for each. No model provider was called.")
         elif agent == "writer":

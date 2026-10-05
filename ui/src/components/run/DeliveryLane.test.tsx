@@ -493,7 +493,7 @@ describe('Delivery Lane messages between agents', () => {
       agents: [node('researcher', 'Researcher'), node('writer', 'Writer')] as unknown as DeliveryLaneProps['agents'],
       projection: projectRun(events),
     })
-    const talk = await screen.findByRole('region', { name: 'What the agents said to each other' })
+    const talk = await screen.findByRole('region', { name: 'Team chat' })
     // Under the cards, not above them: the conversation follows the team it belongs to.
     const stages = screen.getByRole('list', { name: 'Team stages' })
     expect(stages.compareDocumentPosition(talk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
