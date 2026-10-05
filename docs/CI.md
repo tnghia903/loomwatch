@@ -57,16 +57,28 @@ have been tried.
 2. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`. The Release workflow
    checks the tag matches the version and drafts the release with `loomwatch-macos-universal.tar.gz`,
    `loomwatch-linux-x86_64.tar.gz`, `loomwatch-linux-arm64.tar.gz` and a `.sha256` for each.
-3. Try the draft with the real installer, in a folder of its own:
+3. Try the draft with the real installer, in a folder and a database of its own:
 
    ```sh
    gh release download v0.2.0 -D /tmp/lw-release
    python3 -m http.server -d /tmp/lw-release 8765 &
-   LOOMWATCH_DOWNLOAD_BASE=http://127.0.0.1:8765 LOOMWATCH_APP_DIR=/tmp/lw-try/app \
-     LOOMWATCH_TEAMS_ROOT=/tmp/lw-try/teams LOOMWATCH_PORT=3320 bash scripts/install.sh
+   COMPOSE_PROJECT_NAME=loomwatch-try LOOMWATCH_DOWNLOAD_BASE=http://127.0.0.1:8765 \
+     LOOMWATCH_APP_DIR=/tmp/lw-try/app LOOMWATCH_TEAMS_ROOT=/tmp/lw-try/teams LOOMWATCH_PORT=3320 \
+     bash scripts/install.sh
    ```
 
-   Stop it with Ctrl-C, then remove its database with `cd /tmp/lw-try/app && docker compose down -v`.
+   Stop it with Ctrl-C and the file server with `kill %1`, then remove the trial's database and files:
+
+   ```sh
+   (cd /tmp/lw-try/app && COMPOSE_PROJECT_NAME=loomwatch-try docker compose down -v)
+   rm -rf /tmp/lw-try /tmp/lw-release
+   ```
+
+   Keep `COMPOSE_PROJECT_NAME=loomwatch-try` on both commands. Docker Compose finds a database by
+   that project name, and an installed LoomWatch's is `loomwatch-app`. The trial runs the launcher
+   from the release being tried, and launchers up to 0.1.2 name every install `loomwatch-app`.
+   Without the variable, the trial would take over the installed app's database, and `down -v`
+   would delete its run history.
 4. Edit the notes, then publish: `gh release edit v0.2.0 --draft=false`.
 
 ## Repository settings (not in code)

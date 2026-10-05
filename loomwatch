@@ -145,6 +145,34 @@ database_is_running() {
   docker info >/dev/null 2>&1 && [ -n "$(docker compose ps --status running --quiet postgres 2>/dev/null)" ]
 }
 
+# A Docker Compose project name no other folder uses, for a copy whose database must be its own.
+own_project_name() {
+  local prefix=loomwatch
+  if [ "$prebuilt" = 1 ]; then prefix=loomwatch-app; fi
+  printf '%s-%08x\n' "$prefix" "$(printf '%s' "$repo_root" | cksum | cut -d ' ' -f 1)"
+}
+
+# Compose finds a database by its project name alone, so two folders with the same name share one:
+# starting either takes the database over, and `docker compose down -v` in either deletes both
+# histories. Prints the other copy's folder when the database was created from one that is still
+# there. One whose folder is gone is this copy's to adopt, as match_database_password does.
+other_database_owner() {
+  local id owner
+  id=$(docker compose ps --all --quiet postgres 2>/dev/null | head -n 1)
+  [ -n "$id" ] || return 1
+  owner=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$id" 2>/dev/null) || return 1
+  [ -n "$owner" ] || return 1
+  owner=$(cd "$owner" 2>/dev/null && pwd -P) || return 1
+  [ "$owner" != "$repo_root" ] && [ -f "$owner/docker-compose.yml" ] || return 1
+  printf '%s\n' "$owner"
+}
+
+refuse_other_copys_database() {
+  local owner
+  owner=$(other_database_owner) || return 0
+  fail "the LoomWatch copy in $(pretty_path "$owner") uses the same database as this one, and starting it here would take that database over. If you no longer use that copy, delete its folder and run $self again: this copy then keeps the database and its run history. To keep both copies, set COMPOSE_PROJECT_NAME=$(own_project_name) in $(where_is .env) so this one gets a database of its own (it starts with an empty run history), then run $self again."
+}
+
 # Whether the database still holds what LoomWatch set up when it started, not a new, empty one.
 database_has_loomwatch_tables() {
   local found
@@ -277,7 +305,11 @@ ensure_env_file() {
   if [ "$prebuilt" = 1 ]; then
     # Compose names a project after its folder, and this one is called just `app`, like many other
     # projects whose database this would otherwise take over. Compose reads the name from .env.
-    printf '\n# The Docker Compose project that holds the database.\nCOMPOSE_PROJECT_NAME=loomwatch-app\n' >>.env
+    # Only the usual folder is loomwatch-app: a copy installed anywhere else, such as a release
+    # being tried, would otherwise share that copy's database, and removing its own would remove it.
+    local project=loomwatch-app
+    if [ "$repo_root" != "$(cd "$HOME/LoomWatch/app" 2>/dev/null && pwd -P)" ]; then project=$(own_project_name); fi
+    printf '\n# The Docker Compose project that holds the database.\nCOMPOSE_PROJECT_NAME=%s\n' "$project" >>.env
   fi
   chmod 600 .env
   say "Created your settings file (.env) with a random database password."
@@ -286,6 +318,7 @@ ensure_env_file() {
 # Fails before the long build, not after it, when the database's port belongs to something else.
 check_database_port() {
   uses_docker_database || return 0
+  if docker info >/dev/null 2>&1; then refuse_other_copys_database; fi
   local db_port
   db_port=$(env_value POSTGRES_PORT)
   port_in_use "${db_port:-5433}" || return 0
@@ -338,6 +371,7 @@ start_database() {
   db=$(env_value POSTGRES_DB)
   db_port=$(env_value POSTGRES_PORT)
   step "Starting the database"
+  refuse_other_copys_database
   if ! docker compose up --detach --wait postgres; then
     fail "the database did not start. If the message above says port ${db_port:-5433} is already in use, change POSTGRES_PORT in $(where_is .env) to a free port such as $((${db_port:-5433} + 1)), then run $self again."
   fi
@@ -490,8 +524,13 @@ stop() {
   fi
 
   if uses_docker_database && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    docker compose stop postgres
-    say "Stopped the database. Your teams and history are kept."
+    local owner
+    if owner=$(other_database_owner); then
+      say "Left the database alone: it belongs to the LoomWatch copy in $(pretty_path "$owner")."
+    else
+      docker compose stop postgres
+      say "Stopped the database. Your teams and history are kept."
+    fi
   fi
 }
 
