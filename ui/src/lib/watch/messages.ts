@@ -12,9 +12,9 @@ import type { Evidence, PromptSection, RunEvent } from './events'
  *
  * The same rule as the rest of the projection holds: nothing here is read out of what an agent
  * wrote. A message's text is the recorded question, task or handover, verbatim; who it went to is
- * the recorded target. The one thing the record does not name is which stage wrote a pipeline
- * handover — the daemon records what a stage was handed, not who composed it — so `from` is null
- * there and the surface says which configured stage came before.
+ * the recorded target; who handed a stage its handover is the prompt record's `stageResultsFrom`.
+ * Runs archived before the daemon recorded that leave `handedBy` null, and the surface falls back
+ * to the team's connections, saying so.
  */
 
 /** The id your answers are archived under when the team has no review step of its own (docs/TEAM_CONFIG.md). */
@@ -59,13 +59,25 @@ export interface MessageReply {
    * knew only its role and the question. `null` when the record does not say.
    */
   source: 'open' | 'fresh' | null
+  /** Your answer at a review step that sent the work back: the stage it went back to. */
+  sentBackTo: string | null
+}
+
+/** Who a handover or a direction came from, as the prompt record names them. */
+export interface HandedBy {
+  /** The stages that wrote it, or for a direction, the review steps that gave it. */
+  from: string[]
+  /** Review steps a handover passed through on its way, unchanged. */
+  via: string[]
 }
 
 export interface TeamMessage {
   id: string
   kind: MessageKind
-  /** The sender's id; `null` for a handover, whose author the record does not name. */
+  /** The sender's id; `null` for a handover, whose senders are in `handedBy`. */
   from: string | null
+  /** For a handover or a direction: who it came from, as recorded. `null` in runs archived before it was. */
+  handedBy: HandedBy | null
   /** The recipient's id; `null` only for a `note` the record does not address. */
   to: string | null
   /** Verbatim: the question, the task, the handover, the reason, your words. */
@@ -105,6 +117,8 @@ export class Correspondence {
   private readonly byEvidence = new Map<string, TeamMessage>()
   /** Each agent's latest `ask_user` call, so its question can open the call that asked it. */
   private readonly askedUser = new Map<string, string>()
+  /** Agents the record shows as review steps, which pass a handover through rather than write one. */
+  private readonly reviewSteps = new Set<string>()
   private readonly startMs: number
 
   constructor(startMs: number) {
@@ -115,8 +129,8 @@ export class Correspondence {
     return { eventId: event.id, seq: event.seq, ts: event.ts, offsetMs: Date.parse(event.ts) - this.startMs }
   }
 
-  private add(event: RunEvent, message: Omit<TeamMessage, 'eventId' | 'seq' | 'ts' | 'offsetMs' | 'context' | 'evidenceId' | 'error' | 'reply'> & Partial<Pick<TeamMessage, 'context' | 'evidenceId'>>): TeamMessage {
-    const added: TeamMessage = { context: null, evidenceId: null, error: null, reply: null, ...message, ...this.at(event) }
+  private add(event: RunEvent, message: Omit<TeamMessage, 'eventId' | 'seq' | 'ts' | 'offsetMs' | 'context' | 'evidenceId' | 'error' | 'reply' | 'handedBy'> & Partial<Pick<TeamMessage, 'context' | 'evidenceId' | 'handedBy'>>): TeamMessage {
+    const added: TeamMessage = { context: null, evidenceId: null, error: null, reply: null, handedBy: null, ...message, ...this.at(event) }
     this.messages.push(added)
     return added
   }
@@ -129,9 +143,27 @@ export class Correspondence {
   promptRecord(event: RunEvent, sections: readonly PromptSection[]) {
     const find = (kind: PromptSection['kind']) => words(sections.find((section) => section.kind === kind)?.text?.trim())
     const direction = find('direction')
-    if (direction) this.add(event, { id: `direction:${event.id}`, kind: 'direction', from: OPERATOR_ID, to: event.agentId, text: direction, state: 'delivered' })
+    const stops = ids(event.payload.directionFrom)
+    if (direction) this.add(event, { id: `direction:${event.id}`, kind: 'direction', from: OPERATOR_ID, to: event.agentId, text: direction, state: 'delivered', handedBy: stops && { from: stops, via: [] } })
     const handover = find('stage_results')
-    if (handover) this.add(event, { id: `handover:${event.id}`, kind: 'handover', from: null, to: event.agentId, text: handover, state: 'delivered' })
+    const senders = ids(event.payload.stageResultsFrom)
+    if (handover) this.add(event, { id: `handover:${event.id}`, kind: 'handover', from: null, to: event.agentId, text: handover, state: 'delivered', handedBy: senders && this.writers(senders) })
+  }
+
+  /**
+   * A review step passes on the handover it read, unchanged, so the stages that wrote it are the
+   * ones that handed it to the review step — which that step's own record names.
+   */
+  private writers(senders: readonly string[]): HandedBy {
+    const from: string[] = []
+    const via: string[] = []
+    for (const sender of senders) {
+      const read = this.reviewSteps.has(sender) ? this.messages.findLast((message) => message.kind === 'handover' && message.to === sender) : undefined
+      if (!read?.handedBy) { from.push(sender); continue }
+      via.push(...read.handedBy.via, sender)
+      from.push(...read.handedBy.from)
+    }
+    return { from: [...new Set(from)], via: [...new Set(via)] }
   }
 
   /** The pre-record fallback: a handover split out of an archived opening prompt. */
@@ -168,6 +200,7 @@ export class Correspondence {
       text: typeof output.reply === 'string' ? output.reply : '',
       ...this.at(event),
       source: output.live === true ? 'open' : typeof output.sessionId === 'string' ? 'fresh' : null,
+      sentBackTo: null,
     }
   }
 
@@ -181,29 +214,54 @@ export class Correspondence {
       })
       this.askedUser.delete(event.agentId)
     } else if (p.kind === 'review_stop') {
+      this.reviewSteps.add(event.agentId)
       const handover = this.messages.findLast((message) => message.kind === 'handover' && message.to === event.agentId)
       if (handover && handover.state === 'delivered' && !handover.reply) handover.state = 'pending'
     }
   }
 
   /**
-   * Your answer. It answers the earliest thing still waiting on whoever it was archived under —
-   * the handover a review step is reading, or an agent's question — and is a note of its own when
-   * nothing was.
+   * Your answer. The daemon records whose question or review it closes (`askedBy`), whether it
+   * sent the work back (`sendBack`), and for a follow-up to a kept-alive agent, who it went to
+   * (`to`). Older runs record none of these: there it answers the earliest thing still waiting on
+   * whoever it was archived under, then the earliest open question, and is otherwise a note.
    */
   operatorAnswer(event: RunEvent, text: string) {
+    const raw = object(event.raw) ? event.raw : {}
+    const askedBy = words(raw.askedBy)
     const waiting = (message: TeamMessage) => message.state === 'pending' && !message.reply
-    const answered = this.messages.find((message) => waiting(message) && message.kind === 'handover' && message.to === event.agentId)
-      ?? this.messages.find((message) => waiting(message) && message.kind === 'question')
+    const answered = askedBy
+      ? this.messages.find((message) => waiting(message) && ((message.kind === 'handover' && message.to === askedBy) || (message.kind === 'question' && message.from === askedBy)))
+      : this.messages.find((message) => waiting(message) && message.kind === 'handover' && message.to === event.agentId)
+        ?? this.messages.find((message) => waiting(message) && message.kind === 'question')
     if (!answered) {
-      this.add(event, { id: `note:${event.id}`, kind: 'note', from: event.agentId, to: null, text, state: 'delivered' })
+      const to = words(raw.to)
+      // A follow-up to a kept-alive agent: its next turn is the answer (`turnEnded`).
+      this.add(event, { id: `note:${event.id}`, kind: 'note', from: event.agentId, to, text, state: to ? 'pending' : 'delivered' })
       return
     }
     answered.state = 'answered'
-    answered.reply = { from: event.agentId, text, ...this.at(event), source: null }
+    answered.reply = { from: event.agentId, text, ...this.at(event), source: null, sentBackTo: words(raw.sendBack) }
+  }
+
+  /**
+   * An agent's turn ended with this reply. The daemon prompts a kept-alive agent with your note in
+   * the turn right after archiving it, so the first turn to end on that agent after a note is the
+   * one that answered it.
+   */
+  turnEnded(event: RunEvent, reply: string) {
+    const note = this.messages.find((message) => message.kind === 'note' && message.to === event.agentId && message.state === 'pending')
+    if (!note) return
+    note.state = 'answered'
+    note.reply = { from: event.agentId, text: reply, ...this.at(event), source: null, sentBackTo: null }
   }
 
   list(): TeamMessage[] {
     return this.messages.map((message) => ({ ...message, reply: message.reply ? { ...message.reply } : null }))
   }
+}
+
+/** A recorded list of ids, or `null` when the record has none (an older run). */
+function ids(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : null
 }

@@ -7,7 +7,7 @@ import { AgentMessages } from './AgentMessages'
 
 const at = (seconds: number) => new Date(Date.parse('2026-10-05T09:00:00Z') + seconds * 1000).toISOString()
 const message = (extra: Partial<TeamMessage> & Pick<TeamMessage, 'id' | 'kind'>): TeamMessage => ({
-  from: null, to: null, text: '', context: null, eventId: extra.id, evidenceId: null, seq: 1, ts: at(0), offsetMs: 0, state: 'delivered', error: null, reply: null, ...extra,
+  from: null, to: null, handedBy: null, text: '', context: null, eventId: extra.id, evidenceId: null, seq: 1, ts: at(0), offsetMs: 0, state: 'delivered', error: null, reply: null, ...extra,
 })
 
 const order = [
@@ -19,7 +19,7 @@ const order = [
 const handover = message({ id: 'handover:e5', kind: 'handover', to: 'writer', text: '## Findings\nACP is JSON-RPC.', seq: 5, offsetMs: 40_000, ts: at(40) })
 const askBack = message({
   id: 'writer:q1', kind: 'ask', from: 'writer', to: 'researcher', text: 'Which spec version did you read?', evidenceId: 'writer:q1', seq: 8, offsetMs: 52_000, ts: at(52), state: 'answered',
-  reply: { from: 'researcher', text: 'Version 0.4.', eventId: 'e12', seq: 12, ts: at(61), offsetMs: 61_000, source: 'open' },
+  reply: { from: 'researcher', text: 'Version 0.4.', eventId: 'e12', seq: 12, ts: at(61), offsetMs: 61_000, source: 'open', sentBackTo: null },
 })
 const fetched = { id: 'researcher:c1', agentId: 'researcher', seq: 10, kind: 'source', relation: 'consulted source', name: 'Fetch https://agentclientprotocol.com/spec', status: 'succeeded' } as unknown as Evidence
 
@@ -114,7 +114,7 @@ describe('Messages between agents', () => {
   it('reads a question for you and your answer as an exchange with you', () => {
     setup([message({
       id: 'question:e3', kind: 'question', from: 'writer', to: 'operator', text: 'Which budget applies?', context: 'The brief names two.', state: 'answered',
-      reply: { from: 'operator', text: 'The 2026 one.', eventId: 'e9', seq: 9, ts: at(120), offsetMs: 120_000, source: null },
+      reply: { from: 'operator', text: 'The 2026 one.', eventId: 'e9', seq: 9, ts: at(120), offsetMs: 120_000, source: null, sentBackTo: null },
     })])
     const item = screen.getByRole('listitem', { name: /Writer asked you/ })
     expect(within(item).getByText('The brief names two.')).toBeInTheDocument()
@@ -132,5 +132,41 @@ describe('Messages between agents, counting what is waiting', () => {
     setup([message({ id: 'd', kind: 'dispatch', from: 'writer', to: 'researcher', text: 'Collect sources.', state: 'pending' })], { live: false })
     expect(screen.getByText('One message')).toBeInTheDocument()
     expect(screen.queryByText(/never answered/)).not.toBeInTheDocument()
+  })
+})
+
+describe('Messages between agents, from what the run recorded', () => {
+  const reviewed = (sentBackTo: string | null) => message({
+    id: 'handover:e3', kind: 'handover', to: 'review', text: 'HANDOVER ONE', handedBy: { from: ['writer'], via: [] }, state: 'answered',
+    reply: { from: 'review', text: 'Shorter, please.', eventId: 'e4', seq: 4, ts: at(30), offsetMs: 30_000, source: null, sentBackTo },
+  })
+
+  it('says a review answer sent the work back, and to whom', () => {
+    setup([reviewed('writer')])
+    expect(screen.getByText('You sent it back to Writer')).toBeInTheDocument()
+    expect(screen.getByText('Sent back after 30 seconds')).toBeInTheDocument()
+  })
+
+  it('reads an approval as reviewed, not sent back', () => {
+    setup([reviewed(null)])
+    expect(screen.getByText('You answered')).toBeInTheDocument()
+    expect(screen.getByText('Reviewed after 30 seconds')).toBeInTheDocument()
+  })
+
+  it('says when a sender was read from the team file rather than recorded', () => {
+    setup([handover])
+    expect(screen.getByText(/sender read from the team file, not recorded/)).toBeInTheDocument()
+    cleanup()
+    setup([{ ...handover, handedBy: { from: ['researcher'], via: [] } }])
+    expect(screen.queryByText(/sender read from the team file/)).not.toBeInTheDocument()
+  })
+
+  it('names who a follow-up of yours went to, and shows its answer', () => {
+    setup([message({
+      id: 'note:e7', kind: 'note', from: 'operator', to: 'writer', text: 'Also check the footnotes.', state: 'answered',
+      reply: { from: 'writer', text: 'Two links fixed.', eventId: 'e9', seq: 9, ts: at(15), offsetMs: 15_000, source: null, sentBackTo: null },
+    })])
+    expect(screen.getByRole('listitem', { name: /You wrote to Writer/ })).toBeInTheDocument()
+    expect(screen.getByText('Two links fixed.')).toBeInTheDocument()
   })
 })

@@ -199,12 +199,14 @@ function MessageItem({ line, lanes, width, name, isYou, back, live, open, flash,
   // An answer crosses back only where the record says it went back: the Team Bus returns an `ask`'s
   // reply to the asker, and your answer to a question is the asker's next turn. What you answer at a
   // review step goes on to the next stage (or back, if you sent it back), so it stays on your thread.
-  const answersBack = message.kind === 'ask' || message.kind === 'question' || message.kind === 'escalate'
-  const replyTo = answersBack && line.replier !== null && senders.length > 0 ? [senders[0]] : []
+  // A note's answer goes back to you, and a send-back goes to the stage it was sent back to.
+  const answersBack = message.kind === 'ask' || message.kind === 'question' || message.kind === 'escalate' || message.kind === 'note'
+  const sentBack = index(message.reply?.sentBackTo ?? null)
+  const replyTo = sentBack >= 0 ? [sentBack] : answersBack && line.replier !== null && senders.length > 0 ? [senders[0]] : []
   const state = stateWords(line, live)
   const sender = line.senders[0]
   const speaker = (id: string) => (isYou(id) ? 'You' : name(id))
-  const touched = [...senders, receiver, ...line.via.map(index), index(line.replier)]
+  const touched = [...senders, receiver, ...line.via.map(index), index(line.replier), sentBack]
   return (
     <li
       className={`msg k-${message.kind} s-${message.state} ${flash ? 'flash' : ''}`}
@@ -237,7 +239,7 @@ function MessageItem({ line, lanes, width, name, isYou, back, live, open, flash,
               <CornerDownRight size={13} aria-hidden="true" />
               <AgentMark id={line.replier} size={14} operator={isYou(line.replier)} animate={false} />
               <span>
-                <b>{speaker(line.replier)} answered</b>
+                <b>{sentBack >= 0 ? `${speaker(line.replier)} sent it back to ${name(lanes[sentBack].id)}` : `${speaker(line.replier)} answered`}</b>
                 {message.reply.source === 'open' && ', from the session it already had'}
                 {message.reply.source === 'fresh' && ' — a fresh start, so it saw only its role and the question'}
               </span>
@@ -261,7 +263,7 @@ function MessageItem({ line, lanes, width, name, isYou, back, live, open, flash,
             </details>
           )}
           <span className="msg-acts">
-            <code>{expertLine(message)}</code>
+            <code>{expertLine(message)}{line.derived ? ' · sender read from the team file, not recorded' : ''}</code>
             {message.evidenceId && <button type="button" className="delivery-link" onClick={() => onInspectEvidence(message.evidenceId as string)}><FileSearch size={13} aria-hidden="true" />Open the record</button>}
             {message.kind === 'handover' && message.to && onInspectHandover && !isYou(message.to) && (
               <button type="button" className="delivery-link" onClick={() => onInspectHandover(message.to as string)}><FileText size={13} aria-hidden="true" />Everything {name(message.to)} was given</button>
@@ -323,6 +325,7 @@ function stateWords(line: Line, live: boolean): { text: string; tone: 'ok' | 'li
   if (message.state === 'failed') return { text: 'Failed', tone: 'bad' }
   if (message.state === 'answered' && message.reply) {
     const after = waited(message.reply.offsetMs - message.offsetMs)
+    if (message.reply.sentBackTo) return { text: `Sent back after ${after}`, tone: 'plain' }
     return { text: message.kind === 'handover' ? `Reviewed after ${after}` : `Answered after ${after}`, tone: 'ok' }
   }
   if (message.state === 'pending') {
@@ -331,6 +334,7 @@ function stateWords(line: Line, live: boolean): { text: string; tone: 'ok' | 'li
       question: ['Waiting for you', 'Not answered'],
       handover: ['Waiting for your review', 'Not reviewed'],
       escalate: ['Waiting for you', 'Not answered'],
+      note: ['Waiting for an answer', 'No answer recorded'],
     }
     const [waiting, never] = words[message.kind] ?? ['Sending', 'Not confirmed']
     return live ? { text: waiting, tone: 'live' } : { text: never, tone: 'muted' }

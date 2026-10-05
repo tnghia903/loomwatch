@@ -6,10 +6,10 @@ import { OPERATOR_ID, type MessageKind, type TeamMessage } from '../watch/messag
  * that sent or received something, and each message placed between its lanes, like a sequence
  * diagram read top to bottom.
  *
- * The projection records what was said (lib/watch/messages.ts). The one thing added here is who
- * wrote a pipeline handover, which the record does not name: the daemon builds a stage's handover
- * from the stages connected into it (`pipeline_node_prompt`), so the senders are those
- * connections, and a review step it passed through is named as the way it came.
+ * The projection records what was said (lib/watch/messages.ts), including who handed a stage its
+ * handover. Runs archived before the daemon recorded that are the one thing filled in here: the
+ * daemon builds a handover from the stages connected into it (`pipeline_node_prompt`), so the
+ * senders are taken from the team's connections, and the line says it was (`derived`).
  */
 export interface Party {
   id: string
@@ -29,6 +29,8 @@ export interface Line {
   replier: string | null
   /** Review steps a handover passed through on its way, as lane ids. */
   via: string[]
+  /** The senders were read from the team's connections, not from the run's record: an older run. */
+  derived: boolean
 }
 
 export interface Conversation {
@@ -76,19 +78,24 @@ export function converse(messages: readonly TeamMessage[], order: readonly Party
   const lines: Line[] = messages.map((message) => {
     const receiver = message.to === null ? null : laneId(message.to)
     const replier = message.reply ? laneId(message.reply.from) : null
+    const recorded = message.handedBy
+    if ((message.kind === 'handover' || message.kind === 'direction') && recorded) {
+      const senders = recorded.from.map(laneId)
+      return { message, senders: senders.length > 0 || message.kind === 'handover' ? senders : [laneId(OPERATOR_ID)], receiver, replier, via: recorded.via.map(laneId), derived: false }
+    }
     if (message.kind === 'handover' && message.to !== null) {
       const { senders, via } = writers(message.to)
-      return { message, senders, receiver, replier, via }
+      return { message, senders, receiver, replier, via, derived: true }
     }
     if (message.kind === 'direction' && message.to !== null) {
       const stops = before(message.to).filter((id) => known.get(id)?.operator)
-      return { message, senders: stops.length > 0 ? stops : [laneId(OPERATOR_ID)], receiver, replier, via: [] }
+      return { message, senders: stops.length > 0 ? stops : [laneId(OPERATOR_ID)], receiver, replier, via: [], derived: stops.length > 0 }
     }
-    return { message, senders: message.from === null ? [] : [laneId(message.from)], receiver, replier, via: [] }
+    return { message, senders: message.from === null ? [] : [laneId(message.from)], receiver, replier, via: [], derived: false }
   })
 
   // Lanes in the team's order, then anyone the run brought in that the team file does not list.
-  const involved = new Set(lines.flatMap((line) => [...line.senders, ...line.via, line.receiver, line.replier].filter((id): id is string => id !== null)))
+  const involved = new Set(lines.flatMap((line) => [...line.senders, ...line.via, line.receiver, line.replier, line.message.reply?.sentBackTo ?? null].filter((id): id is string => id !== null)))
   const lanes: Lane[] = order.filter((party) => involved.has(party.id))
   for (const id of involved) {
     if (known.has(id)) continue
@@ -99,7 +106,7 @@ export function converse(messages: readonly TeamMessage[], order: readonly Party
 
 /** The parties a line touches, for "show only the messages with this agent". */
 export function touches(line: Line, laneId: string): boolean {
-  return line.senders.includes(laneId) || line.via.includes(laneId) || line.receiver === laneId || line.replier === laneId
+  return line.senders.includes(laneId) || line.via.includes(laneId) || line.receiver === laneId || line.replier === laneId || line.message.reply?.sentBackTo === laneId
 }
 
 /** Whether a message went back up the line: to a lane before its sender's. */
@@ -133,7 +140,7 @@ export function lineSentence(line: Line, name: (laneId: string) => string, opera
     case 'handoff': return `${from} handed the work to ${to}`
     case 'question': return `${from} asked you`
     case 'escalate': return `${from} raised something with you`
-    case 'note': return 'You wrote to the team'
+    case 'note': return to ? `You wrote to ${to}` : 'You wrote to the team'
   }
 }
 

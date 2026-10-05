@@ -9,8 +9,12 @@ const event = (seconds: number, agentId: string, kind: RunEvent['kind'], payload
   return { id: `e${at}`, sessionId: 'run', agentId, seq: at, ts: new Date(T0 + seconds * 1000).toISOString(), kind, payload, ...(raw === undefined ? {} : { raw }) }
 }
 const loomwatch = (phase: string) => ({ source: 'loomwatch', phase })
-const sections = (seconds: number, agentId: string, list: { kind: string; text: string }[]) =>
-  event(seconds, agentId, 'session_meta', { phase: 'prompt_sections', sections: list.map((item) => ({ ...item, heading: `## ${item.kind}` })) }, loomwatch('prompt_sections'))
+const sections = (seconds: number, agentId: string, list: { kind: string; text: string }[], recorded: Record<string, unknown> = {}) =>
+  event(seconds, agentId, 'session_meta', { phase: 'prompt_sections', sections: list.map((item) => ({ ...item, heading: `## ${item.kind}` })), ...recorded }, loomwatch('prompt_sections'))
+const answer = (seconds: number, agentId: string, text: string, raw: Record<string, unknown> = {}) =>
+  event(seconds, agentId, 'message', { role: 'user', content: { type: 'text', text } }, { ...loomwatch('operator_answer'), ...raw })
+const reviewing = (seconds: number, node: string) =>
+  event(seconds, node, 'session_meta', { phase: 'awaiting_operator', kind: 'review_stop', node }, loomwatch('awaiting_operator'))
 const prompt = (seconds: number, agentId: string, text: string) => event(seconds, agentId, 'message', { role: 'user', content: { type: 'text', text } })
 const say = (seconds: number, agentId: string, text: string) => event(seconds, agentId, 'message', { role: 'agent', content: { type: 'text', text } })
 const bus = (seconds: number, agentId: string, callId: string, name: string, rawInput: Record<string, unknown>) =>
@@ -160,5 +164,70 @@ describe('messages between agents', () => {
       event(0, 'writer', 'session_meta', { phase: 'session_replayed' }),
     ])
     expect(messages).toEqual([])
+  })
+
+  it('names who handed a stage its handover from the record, through the review step that passed it on', () => {
+    seq = 0
+    const { messages } = projectRun([
+      sections(0, 'review', [{ kind: 'stage_results', text: 'FINDINGS' }], { stageResultsFrom: ['editor'] }),
+      reviewing(0, 'review'),
+      answer(20, 'review', 'Approved.', { askedBy: 'review' }),
+      sections(21, 'writer', [{ kind: 'direction', text: 'Approved.' }, { kind: 'stage_results', text: 'FINDINGS' }], { stageResultsFrom: ['review'], directionFrom: ['review'] }),
+    ])
+    expect(messages.map(({ kind, to, handedBy }) => ({ kind, to, handedBy }))).toEqual([
+      { kind: 'handover', to: 'review', handedBy: { from: ['editor'], via: [] } },
+      { kind: 'direction', to: 'writer', handedBy: { from: ['review'], via: [] } },
+      // The review step passed on what the editor wrote: the writer was handed the editor's work.
+      { kind: 'handover', to: 'writer', handedBy: { from: ['editor'], via: ['review'] } },
+    ])
+  })
+
+  it('leaves the sender unrecorded for a run archived before the daemon named it', () => {
+    const { messages } = projectRun(pipelineWithAskBack())
+    expect(messages[0].handedBy).toBeNull()
+  })
+
+  it('closes the question your answer names, not merely the oldest one open', () => {
+    seq = 0
+    const question = (seconds: number, agentId: string, text: string) =>
+      event(seconds, agentId, 'session_meta', { phase: 'awaiting_operator', kind: 'question', node: agentId, question: text }, loomwatch('awaiting_operator'))
+    const { messages } = projectRun([
+      question(1, 'lead', 'Which budget?'),
+      question(2, 'helper', 'Which region?'),
+      answer(3, 'operator', 'EMEA.', { askedBy: 'helper' }),
+    ])
+    expect(messages.map(({ from, state, reply }) => ({ from, state, answer: reply?.text ?? null }))).toEqual([
+      { from: 'lead', state: 'pending', answer: null },
+      { from: 'helper', state: 'answered', answer: 'EMEA.' },
+    ])
+  })
+
+  it('says where an answer at a review step sent the work back to', () => {
+    seq = 0
+    const { messages } = projectRun([
+      sections(0, 'review', [{ kind: 'stage_results', text: 'HANDOVER ONE' }], { stageResultsFrom: ['a'] }),
+      reviewing(0, 'review'),
+      answer(20, 'review', 'Shorter, please.', { askedBy: 'review', sendBack: 'a' }),
+      sections(40, 'review', [{ kind: 'stage_results', text: 'HANDOVER TWO' }], { stageResultsFrom: ['a'] }),
+      reviewing(40, 'review'),
+      answer(50, 'review', 'Good.', { askedBy: 'review' }),
+    ])
+    expect(messages.map((message) => message.reply?.sentBackTo)).toEqual(['a', null])
+  })
+
+  it('addresses a follow-up you wrote to a kept-alive agent, and takes its next turn as the answer', () => {
+    seq = 0
+    const { messages } = projectRun([
+      say(1, 'editor', 'Draft done.'),
+      event(2, 'editor', 'turn_end', { stopReason: 'end_turn' }),
+      answer(10, 'operator', 'Also check the footnotes.', { to: 'editor' }),
+      prompt(10, 'editor', 'Also check the footnotes.'),
+      say(15, 'editor', 'Footnotes checked: two links fixed.'),
+      event(16, 'editor', 'turn_end', { stopReason: 'end_turn' }),
+    ])
+    expect(messages).toEqual([expect.objectContaining({
+      kind: 'note', from: 'operator', to: 'editor', state: 'answered',
+      reply: expect.objectContaining({ from: 'editor', text: 'Footnotes checked: two links fixed.' }),
+    })])
   })
 })

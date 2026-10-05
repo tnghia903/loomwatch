@@ -4119,6 +4119,8 @@ mod tests {
             text: "## Role\nDesigner\n\n## Task\nMake a report".into(),
             required_skills: vec![],
             delivery: crate::delivery::Delivery::default(),
+            stage_results_from: Vec::new(),
+            direction_from: Vec::new(),
             sections: vec![
                 crate::memory::PromptSection {
                     kind: crate::memory::PromptSectionKind::Role,
@@ -4338,6 +4340,8 @@ mod tests {
             text: "## Task\nMake a report".into(),
             required_skills: vec![],
             delivery: crate::delivery::Delivery::default(),
+            stage_results_from: Vec::new(),
+            direction_from: Vec::new(),
             sections: vec![crate::memory::PromptSection {
                 kind: crate::memory::PromptSectionKind::Task,
                 heading: "## Task".into(),

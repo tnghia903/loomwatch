@@ -54,10 +54,21 @@ session or from a fresh start), `dispatch` and `handoff` tasks, `ask_user` quest
 answers, and the direction you gave at a review step. A question to an earlier stage is drawn
 as a thread crossing back up the line and tagged *earlier stage*. Every text is the recorded
 one, verbatim (`ui/src/lib/watch/messages.ts` collects them in the same pass as the rest of the
-projection, so they follow the replay scrubber). The record does not name who composed a
-handover, so the sender shown is the stage connected into it, as `pipeline_node_prompt` builds
-it. A stage card's **N messages** link and the timeline's **Read the message** open the same
-list.
+projection, so they follow the replay scrubber). A stage card's **N messages** link and the
+timeline's **Read the message** open the same list.
+
+Who said what to whom is read from the record, not from the team file as it is now:
+
+| Recorded on | Field | Says |
+|---|---|---|
+| `session_meta` `prompt_sections` | `stageResultsFrom` | The stages a handover was built from (the edges into the stage, as `pipeline_node_prompt` reads them). A review step's own record names whose handover it read, so a handover it passed on is shown as written by that stage, *through your review*. |
+| `session_meta` `prompt_sections` | `directionFrom` | The review stops a stage's direction came from. |
+| `operator_answer` message, `raw` | `askedBy` | Whose question or review your answer closes. |
+| `operator_answer` message, `raw` | `sendBack` | The stage your answer sent the work back to; absent for an approval. |
+| `operator_answer` message, `raw` | `to` | The kept-alive agent a follow-up of yours went to; its next turn is shown as the answer. |
+
+All five are additive: runs archived before them still read, and a handover sender that had to be
+taken from the team's connections is marked *sender read from the team file, not recorded*.
 
 The history button beside the composer (`⌘P`) lists live runs and the 100 most recently
 active archived sessions with their prompts; selecting one opens it in **replay**. Deep

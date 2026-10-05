@@ -4,7 +4,7 @@ import type { TeamMessage } from '../watch/messages'
 import { converse, goesBack, lineSentence, nameList } from './conversation'
 
 const message = (extra: Partial<TeamMessage> & Pick<TeamMessage, 'id' | 'kind'>): TeamMessage => ({
-  from: null, to: null, text: 't', context: null, eventId: extra.id, evidenceId: null, seq: 1, ts: '2026-10-05T09:00:00Z', offsetMs: 0, state: 'delivered', error: null, reply: null, ...extra,
+  from: null, to: null, handedBy: null, text: 't', context: null, eventId: extra.id, evidenceId: null, seq: 1, ts: '2026-10-05T09:00:00Z', offsetMs: 0, state: 'delivered', error: null, reply: null, ...extra,
 })
 
 const order = [
@@ -23,6 +23,18 @@ describe('converse', () => {
     expect(lineSentence(lines[0], name, (id) => id === 'review')).toBe('Editor handed over to Writer, through your review')
   })
 
+  it('takes the senders the run recorded over the team file as it is now', () => {
+    // The team has since been rewired (the editor now feeds the writer), but this run recorded
+    // that the collector's work reached the writer through your review.
+    const { lines } = converse([message({ id: 'h', kind: 'handover', to: 'writer', handedBy: { from: ['collector'], via: ['review'] } })], order, new Map([['writer', ['editor']]]))
+    expect(lines[0]).toMatchObject({ senders: ['collector'], via: ['review'], derived: false })
+  })
+
+  it('marks a sender read from the team file, for a run that predates the record', () => {
+    const { lines } = converse([message({ id: 'h', kind: 'handover', to: 'editor' })], order, edges)
+    expect(lines[0]).toMatchObject({ senders: ['collector'], derived: true })
+  })
+
   it('falls back to the stage before in order when it has no connections to go by', () => {
     const { lines } = converse([message({ id: 'h', kind: 'handover', to: 'editor' })], order)
     expect(lines[0].senders).toEqual(['collector'])
@@ -30,7 +42,7 @@ describe('converse', () => {
 
   it('files your reserved id under the review step, and gives a recruited helper a lane of its own', () => {
     const { lanes, lines } = converse([
-      message({ id: 'q', kind: 'question', from: 'editor', to: 'operator', state: 'answered', reply: { from: 'operator', text: 'yes', eventId: 'r', seq: 2, ts: '', offsetMs: 0, source: null } }),
+      message({ id: 'q', kind: 'question', from: 'editor', to: 'operator', state: 'answered', reply: { from: 'operator', text: 'yes', eventId: 'r', seq: 2, ts: '', offsetMs: 0, source: null, sentBackTo: null } }),
       message({ id: 'a', kind: 'ask', from: 'editor', to: 'fact-checker' }),
     ], order, edges)
     expect(lines[0]).toMatchObject({ receiver: 'review', replier: 'review' })

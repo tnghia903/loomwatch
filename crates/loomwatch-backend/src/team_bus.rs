@@ -220,13 +220,16 @@ impl TeamBus {
         let archive = self.state.archive.clone();
         let exit_timeout = self.state.exit_timeout;
         let run_id = process.event_log().map(|log| log.session_id().to_owned());
+        let addressee = agent_id.to_owned();
         let task = tokio::spawn(async move {
             while let Some(request) = requests.recv().await {
                 let prompt = if request.from_operator {
                     if let Some(log) = process.event_log() {
+                        // `to`: which agent the operator wrote to. The answer is archived under the
+                        // reserved operator id, so without it the run view could not say.
                         log.append(crate::config::RESERVED_OPERATOR_ID, EventKind::Message,
                             json!({"role":"user", "content":{"type":"text", "text":request.prompt}}),
-                            Some(json!({"source":"loomwatch", "phase":"operator_answer"}))).await?;
+                            Some(json!({"source":"loomwatch", "phase":"operator_answer", "to": addressee}))).await?;
                     }
                     crate::answer_turn(&request.prompt)
                 } else {
@@ -2568,6 +2571,118 @@ mod tests {
             outcome.exit_code, 0,
             "the released session must close cleanly"
         );
+        bus.shutdown().await?;
+        Ok(())
+    }
+
+    /// A follow-up the operator writes to a kept-alive agent is archived under the reserved
+    /// operator id, so it must say which agent it went to: the run view has no other way to know.
+    /// The agent's script refuses the turn unless the follow-up reaches it, so this cannot pass by
+    /// the event merely being written.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn an_operator_follow_up_records_the_agent_it_went_to(pool: sqlx::PgPool) -> Result<()> {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"live-a","configOptions":[]}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"live-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"main turn done"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r follow_up
+            case "$follow_up" in
+              *'check the footnotes'*) ;;
+              *) printf 'expected the follow-up, got: %s\n' "$follow_up" >&2; exit 23 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"live-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"footnotes checked"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
+        "#;
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "follow-up-team".into(),
+            name: "Follow-up team".into(),
+            entrypoint: "a".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![test_agent("a", "/bin/sh", vec!["-c".into(), script.into()])],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            team,
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Pipeline,
+            Arc::new(crate::memory::TeamMemory::default()),
+            None,
+        )
+        .await?;
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        };
+        let mut process = AcpProcess::spawn(&spec)?;
+        let event_log = EventLog::new(archive.clone(), "follow-up-run".into());
+        let mut context = TeamSessionContext {
+            archive: &archive,
+            exit_timeout: Duration::from_secs(5),
+            bus: None,
+            event_log: Some(event_log),
+            packet: None,
+            composed: None,
+            boundary: None,
+        };
+        let mut recorder = process.open_live("a", "test/model", &mut context).await?;
+        let first = process.prompt_turn(&mut recorder, "do your work").await?;
+        let live = bus.keep_alive("a", process, recorder, first).await;
+
+        // The same channel the operator desk is handed, written to as the desk writes to it.
+        let sender = bus
+            .state
+            .live
+            .lock()
+            .await
+            .get("a")
+            .cloned()
+            .context("a is kept alive")?;
+        let (answer, answered) = oneshot::channel();
+        sender
+            .send(LiveTurn {
+                prompt: "Also check the footnotes.".into(),
+                from_operator: true,
+                answer,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("the kept-alive session stopped taking turns"))?;
+        assert_eq!(answered.await??, "footnotes checked");
+
+        let raw = archive
+            .verify_session("follow-up-run")
+            .await?
+            .into_iter()
+            .find(|event| event.agent_id == crate::config::RESERVED_OPERATOR_ID)
+            .and_then(|event| event.raw)
+            .context("the follow-up was archived")?;
+        assert_eq!(raw["phase"], "operator_answer");
+        assert_eq!(raw["to"], "a", "{raw}");
+
+        // Releasing waits for every sender to go: this clone must go first.
+        drop(sender);
+        bus.release("a", live).await?;
         bus.shutdown().await?;
         Ok(())
     }

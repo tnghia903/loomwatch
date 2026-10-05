@@ -952,6 +952,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         if (!auxiliaryTurns.has(agent.id)) {
           agent.reply = agent.turnPhaseKnown ? agent.turnText.text : agent.turnText.text || agent.reply
           agent.replyPhaseKnown = agent.turnPhaseKnown
+          letters.turnEnded(event, agent.reply)
         }
         agent.turnText = new ReplyText()
         agent.turnPhaseKnown = false
