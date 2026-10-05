@@ -476,3 +476,30 @@ describe('Delivery Lane', () => {
     })
   })
 })
+
+describe('Delivery Lane messages between agents', () => {
+  const ts = (seconds: number) => new Date(Date.parse('2026-10-05T09:00:00Z') + seconds * 1000).toISOString()
+  const events = [
+    { agentId: 'researcher', kind: 'process', payload: { phase: 'spawned', pid: 1 } },
+    { agentId: 'writer', kind: 'session_meta', payload: { phase: 'prompt_sections', sections: [{ kind: 'stage_results', heading: '## Results', text: 'Findings: ACP is JSON-RPC.' }] }, raw: { source: 'loomwatch', phase: 'prompt_sections' } },
+    { agentId: 'writer', kind: 'message', payload: { role: 'user', content: { type: 'text', text: 'prompt' } } },
+    { agentId: 'writer', kind: 'tool_call', payload: { callId: 'q', title: 'Team Bus: ask', name: 'ask', toolKind: 'other', status: 'in_progress', rawInput: { agent: 'researcher', question: 'Which version?' } } },
+    { agentId: 'writer', kind: 'tool_update', payload: { callId: 'q', status: 'completed', rawOutput: { agent: 'researcher', reply: '0.4', live: true } } },
+  ].map((event, seq) => ({ ...event, id: `e${seq}`, seq, sessionId: 'run', ts: ts(seq * 10) })) as unknown as Parameters<typeof projectRun>[0]
+  const node = (id: string, name: string) => ({ id, type: 'agent', position: { x: 0, y: 0 }, data: { label: name, agent: { id, name, role: name } } })
+
+  it('shows the question a stage put back to the one before it, and a stage card opens its messages', async () => {
+    setup({
+      agents: [node('researcher', 'Researcher'), node('writer', 'Writer')] as unknown as DeliveryLaneProps['agents'],
+      projection: projectRun(events),
+    })
+    const section = await screen.findByRole('region', { name: 'Messages between agents' })
+    expect(within(section).getByText('Which version?')).toBeInTheDocument()
+    expect(within(section).getByText('0.4')).toBeInTheDocument()
+    // Both took part in both: the researcher wrote the handover and was asked the question.
+    const researcher = document.getElementById('delivery-stage-researcher') as HTMLElement
+    fireEvent.click(within(researcher).getByRole('button', { name: /2 messages/ }))
+    expect(within(section).getByRole('button', { name: /Showing messages with Researcher/ })).toBeInTheDocument()
+    expect(within(document.getElementById('delivery-stage-writer') as HTMLElement).getByRole('button', { name: /2 messages/ })).toBeInTheDocument()
+  })
+})

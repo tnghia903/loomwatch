@@ -165,6 +165,118 @@ span.story-schedule { cursor: default; }
 .weft-cap .delivery-link { display: inline-flex; align-items: center; gap: 5px; }
 .weft-cap.bad .weft-sentence { color: var(--color-alert); }
 
+/* ---------- messages between agents (Run) ----------
+   A sequence diagram read top to bottom: one warp thread per party on the left, each message a
+   weft thread crossing from its sender to its receiver, and the words on the right. The arrows use
+   the canvas's own edge vocabulary (app.css, EDGES): ask dotted, dispatch dashed, handoff long. */
+.msgs { margin: 0 0 20px; padding: 16px 18px 6px; border: 1px solid var(--color-hairline); border-radius: 10px; background: var(--color-panel); --msgs-gap: 14px; container-type: inline-size; }
+.msgs-empty { padding-bottom: 14px; }
+.msgs-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 10px; }
+.msgs-head h2 { margin: 0; font: 600 15px/1.3 var(--font-sans); letter-spacing: -.01em; }
+.msgs-head > span { font-size: 12.5px; color: var(--color-ink-3); }
+.msgs-none { margin: 0 0 10px; font-size: 12.5px; color: var(--color-ink-3); }
+.msgs-row { display: grid; grid-template-columns: var(--msgs-gutter, 60px) minmax(0, 1fr); column-gap: var(--msgs-gap); }
+.msgs-gutter { position: relative; min-height: 100%; }
+/* The heads stay in view over a long conversation, so a thread is always one glance from its name. */
+.msgs-heads { position: sticky; top: 0; z-index: 1; padding: 6px 0 8px; margin-bottom: 2px; background: var(--color-panel); border-bottom: 1px solid var(--color-hairline); }
+.msgs-heads .msgs-gutter { min-height: 26px; }
+.msgs-party { position: absolute; top: 50%; display: grid; place-items: center; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 7px; opacity: .8; }
+.msgs-party:hover, .msgs-party:focus-visible { opacity: 1; background: var(--color-accent-tint); }
+.msgs-party.on { opacity: 1; background: var(--color-accent-tint); box-shadow: 0 0 0 1.5px var(--color-accent); }
+.msgs-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.msgs-filters > div { display: flex; gap: 3px; }
+.msgs-filters > div button { padding: 4px 9px; border-radius: 5px; font-size: 11.5px; color: var(--color-ink-2); }
+.msgs-filters > div button span { margin-left: 3px; color: var(--color-ink-3); font-variant-numeric: tabular-nums; }
+.msgs-filters > div button[aria-pressed='true'] { background: var(--color-accent-tint); color: var(--color-accent); }
+.msgs-focus { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 99px; border: 1px solid color-mix(in srgb, var(--color-accent) 40%, transparent); font-size: 11.5px; color: var(--color-accent); }
+.msgs-focus:hover, .msgs-focus:focus-visible { background: var(--color-accent-tint); }
+.msgs-list { margin: 0; padding: 0; list-style: none; }
+
+/* The threads: continuous from row to row because every part of a message draws its own length. */
+.msg-life { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--color-warp); opacity: .6; margin-left: -.5px; transition: opacity var(--t-quick) var(--ease-out), border-color var(--t-quick) var(--ease-out); }
+.msg-life.you { border-left-style: dashed; }
+/* Pointing at a message lights the threads it touches, all the way down that message. */
+.msg:hover .msg-life.on, .msg:focus-within .msg-life.on, .msg.flash .msg-life.on { opacity: 1; border-left-color: var(--color-accent); }
+.msg-arrow { position: absolute; left: 0; overflow: visible; pointer-events: none; }
+.msg-arrow line { stroke: var(--color-accent); stroke-width: 2; stroke-linecap: round; }
+.msg-arrow .msg-head, .msg-arrow circle { fill: var(--color-accent); }
+.msg-arrow.k-ask line, .msg-arrow.k-question line, .msg-arrow.k-escalate line { stroke-dasharray: 2 3.5; }
+.msg-arrow.k-dispatch line { stroke-dasharray: 6 4; stroke-width: 1.5; }
+.msg-arrow.k-handoff line { stroke-dasharray: 10 4; stroke-width: 2.5; }
+.msg-arrow.k-direction line, .msg-arrow.k-note line { stroke-width: 1.5; }
+/* An answer coming back: the same dotted thread, in the colour of something settled. */
+.msg-arrow.k-reply line { stroke: var(--color-ok); stroke-dasharray: 2 3.5; }
+.msg-arrow.k-reply .msg-head, .msg-arrow.k-reply circle { fill: var(--color-ok); }
+.msg-arrow.s-pending line { stroke: var(--color-live); animation: weft-breathe 1.6s ease-in-out infinite; }
+.msg-arrow.s-pending .msg-head, .msg-arrow.s-pending circle { fill: var(--color-live); }
+.msg-arrow.s-failed line { stroke: var(--color-alert); }
+.msg-arrow.s-failed circle { fill: var(--color-alert); }
+.msg-arrow.s-failed .msg-head { display: none; }
+.msg-arrow .msg-via { fill: var(--color-panel); stroke: var(--color-accent); stroke-width: 1.5; }
+.msg-arrow .msg-cross { stroke: var(--color-alert); stroke-width: 2; stroke-linecap: round; fill: none; }
+
+.msg { border-radius: 8px; outline: none; transition: background var(--t-move) var(--ease-out); }
+.msg + .msg > .msgs-row:first-child > .msg-body { border-top: 1px solid var(--color-hairline); }
+.msg.flash { background: var(--color-accent-tint); }
+.msg:focus-visible { box-shadow: inset 0 0 0 2px var(--color-accent); }
+.msg-body { min-width: 0; padding-top: 10px; }
+.msg-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; margin: 0 0 7px; }
+.msg-top time, .msg-who time { font: 500 12px/1.4 var(--font-mono); color: var(--color-accent); font-variant-numeric: tabular-nums; }
+.msg-sentence { flex: 1 1 220px; min-width: 0; font: 400 16.5px/1.3 var(--font-serif); color: var(--color-ink); }
+.msg-sentence .agent-mark { display: inline-block; vertical-align: -2px; margin-right: 7px; }
+.msg-tag { display: inline-block; vertical-align: 2px; margin-left: 8px; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--color-warp); font: 500 10.5px/1.5 var(--font-sans); letter-spacing: .02em; color: var(--color-ink-2); }
+.msg-state { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--color-ink-3); white-space: nowrap; }
+.msg-state.tone-ok { color: var(--color-ok); }
+.msg-state.tone-live { color: var(--color-live); }
+.msg-state.tone-bad { color: var(--color-alert); }
+.msg-pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: weft-breathe 1.6s ease-in-out infinite; }
+.msg-said { position: relative; }
+.msg-text { padding: 8px 11px; border-radius: 8px; background: var(--color-ground); border: 1px solid var(--color-hairline); font: 400 13px/1.5 var(--font-sans); color: var(--color-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg-said.answer .msg-text { background: color-mix(in srgb, var(--color-ok) 7%, var(--color-ground)); border-color: color-mix(in srgb, var(--color-ok) 22%, transparent); }
+.msg-said.folded .msg-text { max-height: calc(13px * 1.5 * 4 + 16px); overflow: hidden; -webkit-mask: linear-gradient(#000 55%, transparent); mask: linear-gradient(#000 55%, transparent); }
+.msg-more { margin-top: 3px; font-size: 11.5px; color: var(--color-accent); }
+.msg-more:hover, .msg-more:focus-visible { text-decoration: underline; }
+.msg-context { margin: 6px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--color-ink-2); }
+.msg-context b { margin-right: 4px; font-weight: 600; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
+.msg-error { margin: 6px 0 0; padding: 6px 10px; border-radius: 6px; font: 400 12px/1.45 var(--font-mono); color: var(--color-alert); background: color-mix(in srgb, var(--color-alert) 8%, transparent); overflow-wrap: anywhere; }
+/* The answer sits a step in from the question, so the pair reads as one exchange. */
+.msg-answer { padding: 8px 0 0 22px; }
+.msg-who { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 7px; margin: 0 0 5px 0; font-size: 12.5px; color: var(--color-ink-2); }
+.msg-who > svg:first-child { margin-left: -20px; color: var(--color-ok); }
+.msg-who > span { flex: 1 1 0; min-width: 0; }
+.msg-who b { font-weight: 600; color: var(--color-ink); }
+.msg-who time { flex: none; }
+.msg-foot { display: grid; gap: 6px; padding: 7px 0 12px; }
+.msg-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; }
+.msg-acts code { font: 400 10.5px/1.5 var(--font-mono); color: var(--color-ink-3); }
+.msg-acts .delivery-link { gap: 5px; font-size: 11.5px; }
+.msg-calls summary { cursor: pointer; font-size: 12px; color: var(--color-ink-2); }
+.msg-calls summary:hover { color: var(--color-accent); }
+.msg-calls ul { margin: 6px 0 2px; padding: 0 0 0 14px; display: grid; gap: 3px; border-left: 1px solid var(--color-hairline); }
+.msg-calls .delivery-link { font-size: 12px; color: var(--color-ink-2); }
+.msg-calls .delivery-link:hover, .msg-calls .delivery-link:focus-visible { color: var(--color-accent); }
+@media (max-width: 559px) {
+  .msgs { padding: 14px 12px 4px; }
+}
+/* Too narrow for threads beside the words: the words carry everything, so the threads go, and the
+   marks that pick one agent's messages become a row of their own. */
+@container (max-width: 520px) {
+  .msgs-row { grid-template-columns: minmax(0, 1fr); }
+  .msg .msgs-gutter { display: none; }
+  .msgs-heads .msgs-gutter { display: flex; flex-wrap: wrap; gap: 4px; min-height: 0; margin-bottom: 6px; }
+  .msgs-heads .msgs-party { position: static; margin: 0; }
+  .msg-sentence { font-size: 15px; }
+  .msg-answer { padding-left: 14px; }
+  .msg-who > svg:first-child { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-arrow.s-pending line, .msg-pulse { animation: none; }
+  .msg { transition: none; }
+}
+
+/* The record inspector: a Team Bus message's words, read as words before the call's JSON. */
+.lw-activity .ent-said { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--color-ground); border: 1px solid var(--color-hairline); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-ink); }
+
 /* ---------- run receipt (Run) ---------- */
 .run-receipt { display: flex; justify-content: center; margin: 4px 0 22px; filter: drop-shadow(0 14px 22px color-mix(in srgb, var(--color-black) 28%, transparent)); }
 .receipt-slip {

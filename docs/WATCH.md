@@ -48,6 +48,17 @@ without saving”). The canvas then shows:
   and a scrubber (`←` / `→`) that replays any earlier event as a complete, byte-equivalent
   picture. Scrubbing never alters execution or YAML.
 
+The Run view also lists **Messages between agents**, in order: each pipeline handover, every
+Team Bus `ask` with the answer it got (and whether the asked agent answered from its open
+session or from a fresh start), `dispatch` and `handoff` tasks, `ask_user` questions with your
+answers, and the direction you gave at a review step. A question to an earlier stage is drawn
+as a thread crossing back up the line and tagged *earlier stage*. Every text is the recorded
+one, verbatim (`ui/src/lib/watch/messages.ts` collects them in the same pass as the rest of the
+projection, so they follow the replay scrubber). The record does not name who composed a
+handover, so the sender shown is the stage connected into it, as `pipeline_node_prompt` builds
+it. A stage card's **N messages** link and the timeline's **Read the message** open the same
+list.
+
 The history button beside the composer (`⌘P`) lists live runs and the 100 most recently
 active archived sessions with their prompts; selecting one opens it in **replay**. Deep
 links use `?run=<id>`; the legacy `/watch?session=<id>` route redirects there. A run the

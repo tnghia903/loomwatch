@@ -52,6 +52,8 @@ export interface WeftKnot {
   to: string
   /** The recorded relation ("asked", "handed off to", "dispatched"); a relay stage hands off. */
   relation: string
+  /** The recorded Team Bus call that made this change of hands; absent for a relay's stage order. */
+  evidenceId?: string
 }
 
 export interface Weft {
@@ -213,7 +215,7 @@ export function weave(projection: RunProjection, order: readonly WeftAgent[], no
   // drawn where the next stage's thread begins.
   const knots: WeftKnot[] = projection.evidence
     .filter((item) => item.kind === 'delegation' && item.target && lanes.some((lane) => lane.id === item.target))
-    .map((item) => ({ at: item.offsetMs, from: item.agentId, to: item.target as string, relation: item.relation }))
+    .map((item) => ({ at: item.offsetMs, from: item.agentId, to: item.target as string, relation: item.relation, evidenceId: item.id }))
   if (relay || knots.length === 0) {
     const ran = lanes.filter((lane) => lane.start !== null).sort((a, b) => (a.start ?? 0) - (b.start ?? 0))
     for (let index = 1; index < ran.length; index += 1) {
@@ -247,12 +249,12 @@ export function knotSentence(knot: Pick<WeftKnot, 'relation'>, from: string, to:
 }
 
 /** What the timeline says at `at`: the latest stitch at or before it, else who is working. */
-export function momentAt(weft: Weft, at: number): { sentence: string; code: string | null; evidenceId: string | null; bad: boolean } {
+export function momentAt(weft: Weft, at: number): { sentence: string; code: string | null; evidenceId: string | null; bad: boolean; knot?: WeftKnot } {
   const stitch = [...weft.stitches].reverse().find((item) => item.at <= at)
   const knot = [...weft.knots].reverse().find((item) => item.at <= at)
   const nameOf = (id: string) => weft.lanes.find((lane) => lane.id === id)?.name ?? id
   if (knot && (!stitch || knot.at >= stitch.at)) {
-    return { sentence: knotSentence(knot, nameOf(knot.from), weft.lanes.find((lane) => lane.id === knot.to)?.operator ? 'you' : nameOf(knot.to)), code: knot.relation === 'handed off to' ? 'handoff' : `delegation · ${knot.relation}`, evidenceId: null, bad: false }
+    return { sentence: knotSentence(knot, nameOf(knot.from), weft.lanes.find((lane) => lane.id === knot.to)?.operator ? 'you' : nameOf(knot.to)), code: knot.relation === 'handed off to' ? 'handoff' : `delegation · ${knot.relation}`, evidenceId: null, bad: false, knot }
   }
   if (stitch) return { sentence: stitch.sentence, code: stitch.code, evidenceId: stitch.evidenceId, bad: stitch.bad }
   const working = weft.lanes.filter((lane) => lane.start !== null && lane.start <= at && (lane.end ?? 0) >= at)
