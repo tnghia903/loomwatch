@@ -1,6 +1,6 @@
 import { Background, getNodesBounds, getViewportForBounds, ReactFlow, useNodesInitialized, useReactFlow, useStore, type EdgeChange, type Node, type NodeChange, type OnNodeDrag } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
 import type { DetectedHarness } from '../lib/harnesses'
 import { briefFileNameFor, exportPack, fetchMemory, fetchNoteHistory, fetchNotes, fetchRunCheckpoints, fetchRunContext, reviseNote, writeMemoryFile, type Checkpoint, type ContextPacket, type MemoryView, type Note, type NotebookView } from '../lib/memory/client'
@@ -1228,6 +1228,18 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     if (scheduleEditorOpen && !scheduleWasOpenRef.current) clearSelection()
     scheduleWasOpenRef.current = scheduleEditorOpen
   }, [scheduleEditorOpen, clearSelection])
+
+  // What was selected in Build stays in Build. The Run tab cleared it, but Build's own "Run team",
+  // the run history and the command palette reach a run too, and the agent panel they left open
+  // then sat over the run. Cleared here, where the view changes, so every way in is covered; once
+  // in a run, "Agent details" still opens the panel there (ADR 0041). Before paint, so the panel
+  // never shows over the run for a frame.
+  const inRun = runView || runSetup
+  const wasInRunRef = useRef(inRun)
+  useLayoutEffect(() => {
+    if (inRun && !wasInRunRef.current) clearSelection()
+    wasInRunRef.current = inRun
+  }, [inRun, clearSelection])
 
   const selectedNodes = doc.nodes.filter((node) => node.selected)
   const selectedEdges = doc.edges.filter((edge) => edge.selected)

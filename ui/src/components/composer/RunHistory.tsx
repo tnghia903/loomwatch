@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { relativeTime, type HistoryEntry } from '../../lib/runs/history'
 import { StatusGlyph } from '../ui/glyphs'
@@ -16,6 +17,14 @@ export interface RunHistoryProps {
 export function RunHistory({ entries, currentId, loading, error, onOpen, onClose }: RunHistoryProps) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
+  // A popover, not a modal: a click anywhere else closes it, as Escape and the close button do.
+  // Escape from outside it is the workspace's (useWorkspaceShortcuts); inside, `onKeyDown` below.
+  const root = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const away = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) onClose() }
+    document.addEventListener('pointerdown', away)
+    return () => document.removeEventListener('pointerdown', away)
+  }, [onClose])
   // Filtering flattens the thread on purpose: a search for "pricing" that hid a matching
   // follow-up because its parent did not match would be a filter that lies.
   const filtered = useMemo(() => {
@@ -37,10 +46,11 @@ export function RunHistory({ entries, currentId, loading, error, onOpen, onClose
   }
 
   return (
-    <div className="pop e2 lw-history" role="dialog" aria-label="Run history" onKeyDown={onKeyDown}>
+    <div ref={root} className="pop e2 lw-history" role="dialog" aria-label="Run history" onKeyDown={onKeyDown}>
       <div className="pop-search">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4.3-4.3" /></svg>
         <input autoFocus placeholder="Filter runs" aria-label="Filter runs" value={query} onChange={(event) => { setQuery(event.target.value); setActive(0) }} />
+        <button type="button" className="iconbtn" onClick={onClose} aria-label="Close run history" title="Close (Esc)"><X size={15} aria-hidden="true" /></button>
       </div>
       <div className="pop-list" role="listbox" aria-label="Previous runs">
         {loading && entries.length === 0 && <p className="pop-empty t-meta">Finding runs…</p>}
