@@ -10,7 +10,6 @@ import {
   Download,
   FileText,
   Maximize2,
-  MessagesSquare,
   Minimize2,
   Network,
   Plus,
@@ -37,7 +36,6 @@ import { answerVerdict, type VerdictTone } from '../../lib/story/verdict'
 import { RunReceipt } from './RunReceipt'
 import { NotionSend, type NotionSendRun } from './NotionSend'
 import { WeftBar } from './WeftBar'
-import { converse, fold, itemTouches } from '../../lib/story/conversation'
 import type { WeftKnot } from '../../lib/story/weft'
 import { markState } from '../../lib/story/mark'
 import { AgentMark } from '../ui/AgentMark'
@@ -90,9 +88,6 @@ const ROUTE_SENTENCE: Record<'native' | 'inline' | 'blocked', string> = {
 
 // Loaded with the first run that shows it: the app's chunk is held under its size budget (vite.config.ts).
 const AgentMessages = lazy(() => import('./AgentMessages').then((module) => ({ default: module.AgentMessages })))
-
-/** "One message", "3 messages": what a stage card offers to show. */
-const messageCount = (count: number) => (count === 1 ? 'One message' : `${count} messages`)
 
 /** Run phases as an operator would say them; the raw phase ids are daemon vocabulary. */
 const PHASE_WORDS: Partial<Record<string, string>> = {
@@ -231,13 +226,8 @@ export function DeliveryLane({
   // The loom views of this run: the timeline (who worked when) and, once it ends, the receipt.
   const weftOrder = useMemo(() => agents.map((node) => ({ id: node.id, name: node.data.agent.name, operator: node.data.agent.kind === 'operator', status: node.data.runtime?.status, taskState: node.data.runtime?.taskState })), [agents])
   const terminal = ['succeeded', 'partial', 'failed', 'cancelled'].includes(phase)
-  // What passed between the agents: counted per stage for its card, and reached from the timeline.
-  const talk = useMemo(() => {
-    const conversation = converse(projection.messages, weftOrder, handedBy)
-    return fold(conversation.lines, conversation.lanes)
-  }, [projection.messages, weftOrder, handedBy])
+  // What passed between the agents, reached from the timeline as well as read under the cards.
   const [revealMessage, setRevealMessage] = useState<{ id: string; at: number } | null>(null)
-  const [messagesOf, setMessagesOf] = useState<{ laneId: string; at: number } | null>(null)
   const messageFor = (knot: WeftKnot) => {
     if (knot.evidenceId) return projection.messages.some((message) => message.id === knot.evidenceId) ? knot.evidenceId : null
     // A relay's change of hands is the handover the next stage was given.
@@ -365,22 +355,6 @@ export function DeliveryLane({
         </article>
         {runReceipt && <RunReceipt receipt={runReceipt} onInspectEvidence={onInspectEvidence} onAllow={onAllow} />}
         {!planned && projection.startedAt && <WeftBar projection={projection} order={weftOrder} relay={pipeline} onInspectEvidence={onInspectEvidence} messageFor={messageFor} onReadMessage={(id) => setRevealMessage({ id, at: Date.now() })} />}
-        {/* What the agents said to each other: a handover, a question back up the line and its answer. */}
-        {!planned && projection.startedAt && (agents.length > 1 || projection.messages.length > 0) && (
-          <Suspense fallback={null}>
-            <AgentMessages
-              messages={projection.messages}
-              order={weftOrder}
-              predecessors={handedBy}
-              evidence={projection.evidence}
-              live={live && !terminal}
-              onInspectEvidence={onInspectEvidence}
-              onInspectHandover={inspectHandover ? (id) => inspectHandover(id) : undefined}
-              reveal={revealMessage}
-              focus={messagesOf}
-            />
-          </Suspense>
-        )}
         <div className="delivery-section-head">
           <h2>
             {pipeline && linearPipeline ? 'Team handoff' : 'Team contributions'}
@@ -468,12 +442,6 @@ export function DeliveryLane({
                         : `${required.filter((item) => item.receipt?.state === 'opened').length}/${required.length} opened`}
                     </button>
                   )}
-                  {!planned && talk.some((item) => itemTouches(item, node.id)) && (
-                    <button className="delivery-link" onClick={() => setMessagesOf({ laneId: node.id, at: Date.now() })}>
-                      <MessagesSquare size={14} /> {messageCount(talk.filter((item) => itemTouches(item, node.id)).length)}{' '}
-                      <ArrowRight size={13} />
-                    </button>
-                  )}
                   {(runtime?.hasPacket || runtime?.received) && (
                     <button
                       className="delivery-link"
@@ -488,6 +456,21 @@ export function DeliveryLane({
             )
           })}
         </div>
+        {/* What they said to each other, right under the cards that said it, column by column. */}
+        {!planned && projection.startedAt && (agents.length > 1 || projection.messages.length > 0) && (
+          <Suspense fallback={null}>
+            <AgentMessages
+              messages={projection.messages}
+              order={weftOrder}
+              predecessors={handedBy}
+              evidence={projection.evidence}
+              live={live && !terminal}
+              onInspectEvidence={onInspectEvidence}
+              onInspectHandover={inspectHandover ? (id) => inspectHandover(id) : undefined}
+              reveal={revealMessage}
+            />
+          </Suspense>
+        )}
         <section
           className="delivery-capabilities"
           aria-label="Skills and tools"

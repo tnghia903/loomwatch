@@ -1,220 +1,217 @@
-import { ArrowRight, ChevronDown, FileSearch, FileText, X } from 'lucide-react'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { FileSearch, FileText } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
-import { callsWhileWaiting, converse, fold, isQuestion, itemTouches, lineSentence, waited, type Item, type Party } from '../../lib/story/conversation'
+import { bubbles as layOut, callsWhileWaiting, converse, fold, waited, type Bubble, type Party } from '../../lib/story/conversation'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
 import { clock, describeEvidence } from '../../lib/story/weft'
 import type { Evidence } from '../../lib/watch/events'
 import type { TeamMessage } from '../../lib/watch/messages'
-import { AgentMark } from '../ui/AgentMark'
 
 interface AgentMessagesProps {
   messages: readonly TeamMessage[]
-  /** The team in the run view's order; the review step is `operator`. */
+  /** The team in the stage cards' order, so a column here is the card above it, by number. */
   order: readonly Party[]
   /** The team's connections into each agent, for runs that predate the recorded senders. */
   predecessors?: ReadonlyMap<string, readonly string[]>
   /** Every recorded call, for what an agent did between a question and its answer. */
   evidence: readonly Evidence[]
-  /** Whether the run can still add to this: a waiting question is then waiting, not unanswered. */
+  /** Whether the run can still add to this: an answer not given yet is then on its way. */
   live: boolean
   onInspectEvidence: (id: string) => void
   onInspectHandover?: (agentId: string) => void
   /** Open one message, from outside (the timeline). `at` makes a repeat request count. */
   reveal?: { id: string; at: number } | null
-  /** Show only one agent's messages, from outside (a stage card). */
-  focus?: { laneId: string; at: number } | null
 }
 
+/** Past this a bubble shows its first lines, with the rest one click away. */
+const LONG = { lines: 4, chars: 280 }
+
 /**
- * What the agents said to each other, in order: one row per message, read like a chat list — who
- * to whom, the first words, and the answer under it. A row opens to the whole text, verbatim, and
- * the way to its record. A review you approved is one row, with where it went on to, rather than
- * three rows repeating the same handover.
+ * What the agents said to each other, under the stage cards that said it.
+ *
+ * One column per agent, numbered as its card is. Each message is a speech bubble that stretches
+ * from the column of whoever said it to the column of whoever it was for, its square corner on the
+ * speaker's side, so who is talking to whom is where the bubble is. A question to an earlier stage
+ * and its answer are two bubbles over the same two columns, facing each other; work moving on down
+ * the line moves right. Your own words are tinted, and an answer still owed shows as one on its way.
  */
-export function AgentMessages({ messages, order, predecessors, evidence, live, onInspectEvidence, onInspectHandover, reveal = null, focus = null }: AgentMessagesProps) {
-  const { lanes, items } = useMemo(() => {
+export function AgentMessages({ messages, order, predecessors, evidence, live, onInspectEvidence, onInspectHandover, reveal = null }: AgentMessagesProps) {
+  const { lanes, said } = useMemo(() => {
     const conversation = converse(messages, order, predecessors)
-    return { lanes: conversation.lanes, items: fold(conversation.lines, conversation.lanes) }
-  }, [messages, order, predecessors])
-  const [onlyQuestions, setOnlyQuestions] = useState(false)
-  const [laneFocus, setLaneFocus] = useState<string | null>(null)
+    return { lanes: conversation.lanes, said: layOut(fold(conversation.lines, conversation.lanes), conversation.lanes, live, APPROVAL_TEXT) }
+  }, [messages, order, predecessors, live])
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set())
   const [flash, setFlash] = useState<string | null>(null)
 
-  // Requests from outside, honoured during render so the list they filter arrives with them. Null
-  // to start with, so a request made before this loaded (it is loaded on demand) still counts.
-  const [honouredFocus, setHonouredFocus] = useState<typeof focus>(null)
-  if (focus !== honouredFocus) {
-    setHonouredFocus(focus)
-    if (focus) { setLaneFocus(focus.laneId); setOnlyQuestions(false) }
-  }
-  const [honouredReveal, setHonouredReveal] = useState<typeof reveal>(null)
-  if (reveal !== honouredReveal) {
-    setHonouredReveal(reveal)
-    const row = reveal ? items.find((item) => item.ids.includes(reveal.id)) : undefined
-    if (row) {
-      setLaneFocus(null)
-      setOnlyQuestions(false)
-      setFlash(row.line.message.id)
-      setOpened((current) => new Set(current).add(row.line.message.id))
+  // The timeline asked to see a message: open its first bubble. Null to start with, so a request
+  // made before this loaded (it is loaded on demand) still counts.
+  const [honoured, setHonoured] = useState<typeof reveal>(null)
+  if (reveal !== honoured) {
+    setHonoured(reveal)
+    const bubble = reveal ? said.find((candidate) => candidate.item.ids.includes(reveal.id)) : undefined
+    if (bubble) {
+      setFlash(bubble.key)
+      setOpened((current) => new Set(current).add(bubble.key))
     }
   }
-  const section = useRef<HTMLElement>(null)
-  const list = useRef<HTMLOListElement>(null)
+  const board = useRef<HTMLOListElement>(null)
   useEffect(() => {
     if (!flash) return
-    const row = [...(list.current?.querySelectorAll<HTMLElement>('[data-message]') ?? [])].find((item) => item.dataset.message === flash)
-    row?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
-    row?.querySelector<HTMLElement>('.msg-row')?.focus({ preventScroll: true })
+    const target = [...(board.current?.querySelectorAll<HTMLElement>('[data-bubble]') ?? [])].find((item) => item.dataset.bubble === flash)
+    target?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+    target?.focus({ preventScroll: true })
     const timer = window.setTimeout(() => setFlash(null), 1800)
     return () => window.clearTimeout(timer)
-  }, [flash, honouredReveal])
-  useEffect(() => {
-    if (honouredFocus) section.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
-  }, [honouredFocus])
+  }, [flash, honoured])
 
-  const laneById = useMemo(() => new Map(lanes.map((lane) => [lane.id, lane])), [lanes])
-  const name = (id: string) => laneById.get(id)?.name ?? id
-  const isYou = (id: string) => laneById.get(id)?.operator ?? false
-  const questions = items.filter((item) => isQuestion(item.line.message.kind)).length
-  // Only what expects an answer can be waiting for one.
-  const waiting = items.filter(({ line }) => line.message.state === 'pending' && line.message.kind !== 'dispatch' && line.message.kind !== 'handoff').length
-  const shown = items.filter((item) => (!onlyQuestions || isQuestion(item.line.message.kind)) && (!laneFocus || itemTouches(item, laneFocus)))
-  const focusLane = laneFocus ? laneById.get(laneFocus) : undefined
+  const column = new Map(lanes.map((lane, index) => [lane.id, index]))
+  // The stage cards are numbered by their place in the team; a helper the team file does not list has none.
+  const number = new Map(order.map((party, index) => [party.id, index + 1]))
+  const laneById = new Map(lanes.map((lane) => [lane.id, lane]))
+  const who = (id: string) => ({ id, name: laneById.get(id)?.name ?? id, you: laneById.get(id)?.operator ?? false, number: number.get(id) ?? null })
+  const owed = said.filter((bubble) => bubble.part === 'waiting').length
+  // Every bubble someone actually said counts, answers included; one still owed does not.
+  const count = said.filter((bubble) => bubble.part !== 'waiting').length
 
+  if (count === 0) {
+    return live ? <p className="talk-none">Nothing has passed between the agents yet. What they say to each other appears here, under them.</p> : null
+  }
   return (
-    <section ref={section} className="msgs" aria-label="Messages between agents">
-      <div className="msgs-head">
-        <h2>Messages between agents</h2>
-        <span>
-          {items.length === 0 ? '' : items.length === 1 ? 'One message' : `${items.length} messages`}
-          {waiting > 0 && ` · ${waiting} ${live ? 'waiting for an answer' : 'never answered'}`}
-        </span>
-        <span className="msgs-tools">
-          {focusLane && (
-            <button type="button" className="msgs-focus" onClick={() => setLaneFocus(null)} aria-label={`Showing messages with ${focusLane.operator ? 'you' : focusLane.name}. Show everyone's`}>
-              With {focusLane.operator ? 'you' : focusLane.name}<X size={12} aria-hidden="true" />
-            </button>
-          )}
-          {/* Worth a choice only when there is something to choose between. */}
-          {questions > 0 && questions < items.length && (
-            <span className="msgs-filter" role="group" aria-label="Show">
-              <button type="button" aria-pressed={!onlyQuestions} onClick={() => setOnlyQuestions(false)}>All</button>
-              <button type="button" aria-pressed={onlyQuestions} onClick={() => setOnlyQuestions(true)}>Questions</button>
-            </span>
-          )}
-        </span>
+    <section className="talk" aria-label="What the agents said to each other">
+      <div className="talk-head">
+        <h3>What they said to each other</h3>
+        <span>{count === 1 ? 'One message' : `${count} messages`}{owed > 0 && ` · ${owed} ${live ? 'answer on its way' : 'never answered'}`}</span>
       </div>
-      {items.length === 0 && <p className="msgs-none">{live ? 'Nothing has passed between the agents yet. Handovers, questions and answers appear here as they happen.' : 'No messages passed between the agents in this run.'}</p>}
-      {items.length > 0 && shown.length === 0 && <p className="msgs-none">No {onlyQuestions ? 'questions' : 'messages'}{focusLane ? ` with ${focusLane.operator ? 'you' : focusLane.name}` : ''}.</p>}
-      <ol ref={list} className="msgs-list">
-        {shown.map((item) => {
-          const id = item.line.message.id
-          return (
-            <MessageRow
-              key={id}
-              item={item}
-              name={name}
-              isYou={isYou}
-              live={live}
-              open={opened.has(id)}
-              flash={flash === id}
-              calls={callsWhileWaiting(item.line.message, evidence)}
-              onToggle={() => setOpened((current) => {
-                const next = new Set(current)
-                if (!next.delete(id)) next.add(id)
-                return next
-              })}
-              onInspectEvidence={onInspectEvidence}
-              onInspectHandover={onInspectHandover}
-            />
-          )
-        })}
-      </ol>
+      <div className="talk-board" style={{ ['--lanes' as string]: lanes.length }}>
+        {/* The cards above, in a word each: whose column is whose. */}
+        <div className="talk-lanes" aria-hidden="true">
+          {lanes.map((lane) => <span key={lane.id} className={lane.operator ? 'you' : ''}><Badge party={who(lane.id)} />{lane.operator ? 'You' : lane.name}</span>)}
+        </div>
+        <ol ref={board} className="talk-list">
+          {said.map((bubble, row) => {
+            const ends = [...bubble.from, ...bubble.to].map((id) => column.get(id)).filter((index): index is number => index !== undefined)
+            let first = Math.min(...ends)
+            let last = Math.max(...ends)
+            // A bubble needs room to be read: one that concerns a single column borrows its neighbour.
+            if (first === last) {
+              if (last + 1 < lanes.length) last += 1
+              else if (first > 0) first -= 1
+            }
+            const speaker = bubble.from[0] ?? null
+            const side = speaker !== null && column.get(speaker) === last && first !== last ? 'end' : 'start'
+            return (
+              <SpeechBubble
+                key={bubble.key}
+                bubble={bubble}
+                style={{ ['--from' as string]: first + 1, ['--to' as string]: last + 2, gridRow: row + 1 }}
+                side={side}
+                who={who}
+                open={opened.has(bubble.key)}
+                flash={flash === bubble.key}
+                live={live}
+                calls={bubble.part === 'reply' ? callsWhileWaiting(bubble.item.line.message, evidence) : []}
+                onToggle={() => setOpened((current) => {
+                  const next = new Set(current)
+                  if (!next.delete(bubble.key)) next.add(bubble.key)
+                  return next
+                })}
+                onInspectEvidence={onInspectEvidence}
+                onInspectHandover={onInspectHandover}
+              />
+            )
+          })}
+        </ol>
+      </div>
     </section>
   )
 }
 
-interface MessageRowProps {
-  item: Item
-  name: (laneId: string) => string
-  isYou: (laneId: string) => boolean
-  live: boolean
+type Who = { id: string; name: string; you: boolean; number: number | null }
+
+/** The stage card's number, so a name here and a card above are visibly the same agent. */
+function Badge({ party }: { party: Who }) {
+  return <span className={`talk-badge ${party.you ? 'you' : ''}`} aria-hidden="true">{party.number ?? '+'}</span>
+}
+
+interface SpeechBubbleProps {
+  bubble: Bubble
+  style: CSSProperties
+  side: 'start' | 'end'
+  who: (id: string) => Who
   open: boolean
   flash: boolean
+  live: boolean
   calls: Evidence[]
   onToggle: () => void
   onInspectEvidence: (id: string) => void
   onInspectHandover?: (agentId: string) => void
 }
 
-function MessageRow({ item, name, isYou, live, open, flash, calls, onToggle, onInspectEvidence, onInspectHandover }: MessageRowProps) {
-  const details = useId()
-  const { line, passedOn } = item
-  const { message } = line
+function SpeechBubble({ bubble, style, side, who, open, flash, live, calls, onToggle, onInspectEvidence, onInspectHandover }: SpeechBubbleProps) {
+  const { item, part, text } = bubble
+  const { message } = item.line
+  const speakers = bubble.from.map(who)
+  const listeners = bubble.to.map(who)
+  const voice = speakers[0]
+  const failed = part === 'said' && message.state === 'failed'
+  const long = text.length > LONG.chars || text.split('\n').length > LONG.lines
+  const name = (party: Who) => (party.you ? 'You' : party.name)
+  const said = `${speakers.map(name).join(' and ') || 'Someone'}${listeners.length ? ` to ${listeners.map((party) => (party.you ? 'you' : party.name)).join(' and ')}` : ''}`
+  // What the details hold: the record behind a message, and what a stage was given in full.
+  const handedTo = message.kind === 'handover' && part === 'said' ? listeners.filter((party) => !party.you) : part === 'reply' ? item.passedOn.map((passed) => who(passed.to)) : []
   const reply = message.reply
-  const speaker = (id: string) => (isYou(id) ? 'You' : name(id))
-  const sender = line.senders[0] ?? null
-  const receiver = line.receiver
-  const sentence = lineSentence(line, name, isYou)
-  const badge = attention(message, live)
-  const onwards = passedOn.map((passed) => name(passed.to))
-  const replyLine = reply && line.replier !== null ? replySummary(message, speaker(line.replier), onwards, name) : null
+  // Whether opening shows anything the bubble does not: how it was answered, the record, the rest.
+  const more = part === 'reply' ? Boolean(reply) : Boolean(message.evidenceId || message.context || handedTo.length > 0 || item.line.derived)
   return (
-    <li className={`msg ${open ? 'open' : ''} ${flash ? 'flash' : ''}`} data-message={message.id}>
-      <button type="button" className="msg-row" aria-expanded={open} aria-controls={details} onClick={onToggle}>
-        {/* Who to whom, at a glance: the same marks the stage cards and the timeline wear. */}
-        <span className="msg-who" aria-hidden="true">
-          {sender ? <AgentMark id={sender} size={16} operator={isYou(sender)} animate={false} /> : <span className="msg-who-none" />}
-          <ArrowRight size={12} />
-          {receiver ? <AgentMark id={receiver} size={16} operator={isYou(receiver)} animate={false} /> : <span className="msg-who-none" />}
-        </span>
-        <span className="msg-main">
-          <span className="msg-line">
-            <span className="msg-sentence">{sentence}</span>
-            {badge && <span className={`msg-badge tone-${badge.tone}`}>{badge.tone === 'live' && <i className="msg-pulse" aria-hidden="true" />}{badge.text}</span>}
-          </span>
-          {message.text && <span className="msg-preview">{preview(message.text)}</span>}
-          {replyLine && <span className="msg-preview msg-reply">↳ {replyLine}</span>}
-        </span>
-        <time className="msg-time" dateTime={message.ts} title={new Date(message.ts).toLocaleString()}>{clock(message.offsetMs)}</time>
-        <ChevronDown className="msg-chevron" size={15} aria-hidden="true" />
-      </button>
-      {open && (
-        <div id={details} className="msg-details">
-          {message.text && <div className="msg-text selectable">{message.text}</div>}
-          {message.context && <p className="msg-note"><b>Context:</b> {message.context}</p>}
-          {message.error && <p className="msg-error" role="note">{message.error}</p>}
-          {reply && line.replier !== null && (
-            <div className="msg-answer">
-              <p className="msg-note">
-                <b>{reply.sentBackTo ? `${speaker(line.replier)} sent it back to ${name(reply.sentBackTo)}` : `${speaker(line.replier)} ${message.kind === 'handover' ? 'approved' : 'answered'}`}</b>, {waited(reply.offsetMs - message.offsetMs)} later
-                {reply.source === 'open' && ', from the work it had already done'}
-                {reply.source === 'fresh' && '. A fresh copy answered, so it saw only its role and the question'}.
-              </p>
-              {reply.text && <div className="msg-text answer selectable">{reply.text}</div>}
-            </div>
+    <li
+      className={`talk-bubble part-${part} side-${side} ${voice?.you ? 'you' : ''} ${failed ? 'failed' : ''} ${part === 'waiting' && live ? 'live' : ''} ${flash ? 'flash' : ''}`}
+      style={style}
+      data-bubble={bubble.key}
+      tabIndex={-1}
+      aria-label={`${clock(bubble.offsetMs)}, ${said}: ${bubble.word}`}
+    >
+      <p className="talk-who">
+        {speakers.map((party) => <span key={party.id} className="talk-name"><Badge party={party} />{name(party)}</span>)}
+        {listeners.length > 0 && <span className="talk-arrow" aria-hidden="true">→</span>}
+        {listeners.map((party) => <span key={party.id} className="talk-name to"><Badge party={party} />{party.you ? 'You' : party.name}</span>)}
+        <span className="talk-word">{bubble.word}</span>
+        {/* Time and a short bubble's way in wrap together, so a narrow bubble never gets a line of
+            nothing but a hidden button; a cut one has "Read all" under its text instead. */}
+        <span className="talk-meta">
+          <time dateTime={bubble.ts} title={new Date(bubble.ts).toLocaleString()}>{clock(bubble.offsetMs)}</time>
+          {part !== 'waiting' && !long && (more || open) && (
+            <button type="button" className={`talk-more ${open ? '' : 'quiet'}`} aria-expanded={open} onClick={onToggle}>{open ? 'Less' : 'Details'}</button>
           )}
+        </span>
+      </p>
+      {part === 'waiting' && live && <p className="talk-typing" aria-hidden="true"><i /><i /><i /></p>}
+      {failed && message.error && <p className="talk-error" role="note">{message.error}</p>}
+      {text && <div className={`talk-text selectable ${long && !open ? 'folded' : ''}`}>{open ? text : shown(text)}</div>}
+      {part !== 'waiting' && long && (
+        <button type="button" className="talk-more" aria-expanded={open} onClick={onToggle}>{open ? 'Show less' : 'Read all'}</button>
+      )}
+      {open && (
+        <div className="talk-details">
+          {part === 'reply' && reply && (
+            <p>
+              {waited(reply.offsetMs - message.offsetMs)} later
+              {reply.source === 'open' && ', from the work it had already done'}
+              {reply.source === 'fresh' && '. A fresh copy answered: it saw only its role and the question'}.
+            </p>
+          )}
+          {part === 'said' && message.context && <p><b>Context:</b> {message.context}</p>}
           {calls.length > 0 && (
-            <details className="msg-calls">
-              <summary>{speaker(line.replier ?? '')} made {calls.length === 1 ? 'one call' : `${calls.length} calls`} before answering</summary>
-              <ul>
-                {calls.map((call) => (
-                  <li key={call.id}><button type="button" className="delivery-link" onClick={() => onInspectEvidence(call.id)}>{describeEvidence(speaker(call.agentId), call)}</button></li>
-                ))}
-              </ul>
+            <details className="talk-calls">
+              <summary>{voice ? name(voice) : 'It'} made {calls.length === 1 ? 'one call' : `${calls.length} calls`} before answering</summary>
+              <ul>{calls.map((call) => <li key={call.id}><button type="button" className="delivery-link" onClick={() => onInspectEvidence(call.id)}>{describeEvidence(voice ? name(voice) : 'It', call)}</button></li>)}</ul>
             </details>
           )}
-          <p className="msg-links">
-            {message.evidenceId && <button type="button" className="delivery-link" onClick={() => onInspectEvidence(message.evidenceId as string)}><FileSearch size={13} aria-hidden="true" />Open the record</button>}
-            {message.kind === 'handover' && receiver && !isYou(receiver) && onInspectHandover && (
-              <button type="button" className="delivery-link" onClick={() => onInspectHandover(receiver)}><FileText size={13} aria-hidden="true" />Everything {name(receiver)} was given</button>
-            )}
-            {passedOn.map((passed) => onInspectHandover && (
-              <button key={passed.to} type="button" className="delivery-link" onClick={() => onInspectHandover(passed.to)}><FileText size={13} aria-hidden="true" />Everything {name(passed.to)} was given</button>
+          <p className="talk-links">
+            {part === 'said' && message.evidenceId && <button type="button" className="delivery-link" onClick={() => onInspectEvidence(message.evidenceId as string)}><FileSearch size={13} aria-hidden="true" />Open the record</button>}
+            {onInspectHandover && handedTo.map((party) => (
+              <button key={party.id} type="button" className="delivery-link" onClick={() => onInspectHandover(party.id)}><FileText size={13} aria-hidden="true" />Everything {party.name} was given</button>
             ))}
-            {line.derived && <span className="msg-derived">Sender taken from the team’s connections; this run did not record it.</span>}
+            {part === 'said' && item.line.derived && <span className="talk-derived">Sender taken from the team’s connections; this run did not record it.</span>}
           </p>
         </div>
       )}
@@ -222,36 +219,7 @@ function MessageRow({ item, name, isYou, live, open, flash, calls, onToggle, onI
   )
 }
 
-/** The answer under a message, in a few words: who answered and how it began. */
-function replySummary(message: TeamMessage, who: string, onwards: string[], name: (id: string) => string): string {
-  const reply = message.reply as NonNullable<TeamMessage['reply']>
-  if (reply.sentBackTo) return `${who} sent it back to ${name(reply.sentBackTo)}${reply.text ? `: ${preview(reply.text)}` : ''}`
-  if (message.kind === 'handover') {
-    // Where it went first: the note can be long, and the end of the line is what gets cut.
-    const plain = reply.text.trim() === APPROVAL_TEXT || !reply.text.trim()
-    const passed = onwards.length > 0 ? ` · passed on to ${onwards.join(' and ')}` : ''
-    return plain ? `${who} approved${passed}` : `${who} approved${passed}${passed ? ' with' : ', with'} your note: ${preview(reply.text)}`
-  }
-  return `${who}: ${reply.text ? preview(reply.text) : '(an empty answer)'}`
-}
-
-/** A label only for what needs attention: something still waiting, or something that failed. */
-function attention(message: TeamMessage, live: boolean): { text: string; tone: 'live' | 'muted' | 'bad' } | null {
-  if (message.state === 'failed') return { text: 'Failed', tone: 'bad' }
-  if (message.state !== 'pending') return null
-  const words: Partial<Record<TeamMessage['kind'], [string, string]>> = {
-    ask: ['Waiting for an answer', 'No answer'],
-    note: ['Waiting for an answer', 'No answer'],
-    question: ['Waiting for you', 'Not answered'],
-    escalate: ['Waiting for you', 'Not answered'],
-    handover: ['Waiting for your review', 'Not reviewed'],
-  }
-  const pair = words[message.kind]
-  if (!pair) return null
-  return live ? { text: pair[0], tone: 'live' } : { text: pair[1], tone: 'muted' }
-}
-
-/** The text as one line: Markdown heading marks off, whitespace run together. CSS cuts it to fit. */
-function preview(text: string): string {
-  return text.replace(/^#+\s*/gm, '').replace(/\s+/g, ' ').trim()
+/** The text as a bubble shows it folded: Markdown heading marks off, so a handover reads as words. */
+function shown(text: string): string {
+  return text.replace(/^#+\s*/gm, '')
 }

@@ -488,19 +488,16 @@ describe('Delivery Lane messages between agents', () => {
   ].map((event, seq) => ({ ...event, id: `e${seq}`, seq, sessionId: 'run', ts: ts(seq * 10) })) as unknown as Parameters<typeof projectRun>[0]
   const node = (id: string, name: string) => ({ id, type: 'agent', position: { x: 0, y: 0 }, data: { label: name, agent: { id, name, role: name } } })
 
-  it('shows the question a stage put back to the one before it, and a stage card opens its messages', async () => {
+  it('shows what the stages said to each other right under their cards', async () => {
     setup({
       agents: [node('researcher', 'Researcher'), node('writer', 'Writer')] as unknown as DeliveryLaneProps['agents'],
       projection: projectRun(events),
     })
-    const section = await screen.findByRole('region', { name: 'Messages between agents' })
-    const asked = within(section).getByRole('button', { name: /Writer asked Researcher/ })
-    expect(asked).toHaveTextContent('Which version?')
-    expect(asked).toHaveTextContent('↳ Researcher: 0.4')
-    // Both took part in both: the researcher wrote the handover and was asked the question.
-    const researcher = document.getElementById('delivery-stage-researcher') as HTMLElement
-    fireEvent.click(within(researcher).getByRole('button', { name: /2 messages/ }))
-    expect(within(section).getByRole('button', { name: /Showing messages with Researcher/ })).toBeInTheDocument()
-    expect(within(document.getElementById('delivery-stage-writer') as HTMLElement).getByRole('button', { name: /2 messages/ })).toBeInTheDocument()
+    const talk = await screen.findByRole('region', { name: 'What the agents said to each other' })
+    // Under the cards, not above them: the conversation follows the team it belongs to.
+    const stages = screen.getByRole('list', { name: 'Team stages' })
+    expect(stages.compareDocumentPosition(talk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(talk).getByRole('listitem', { name: /Writer to Researcher: question/ })).toHaveTextContent('Which version?')
+    expect(within(talk).getByRole('listitem', { name: /Researcher to Writer: answer/ })).toHaveTextContent('0.4')
   })
 })

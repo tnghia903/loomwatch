@@ -48,16 +48,18 @@ without saving”). The canvas then shows:
   and a scrubber (`←` / `→`) that replays any earlier event as a complete, byte-equivalent
   picture. Scrubbing never alters execution or YAML.
 
-The Run view also lists **Messages between agents**, in order: each pipeline handover, every
-Team Bus `ask` with the answer it got (and whether the asked agent answered from its open
+Under the stage cards, the Run view shows **what they said to each other**: each pipeline handover,
+every Team Bus `ask` with the answer it got (and whether the asked agent answered from its open
 session or from a fresh start), `dispatch` and `handoff` tasks, `ask_user` questions with your
-answers, and the direction you gave at a review step. Each is one row — who to whom, its first
-words, and the answer under it — that opens to the whole text, verbatim, and its record. A review
-you approved is one row that says where it went on: the direction and the handover the next stage
-was then given repeat it, so they fold into it. Only what needs attention is labelled (still
-waiting, failed). `ui/src/lib/watch/messages.ts` collects the messages in the same pass as the
-rest of the projection, so they follow the replay scrubber. A stage card's **N messages** link and
-the timeline's **Read the message** open the same list.
+answers, and your answers at a review step. There is one column per agent, numbered as its card
+is, and each message is a speech bubble stretching from the speaker's column to the listener's,
+its square corner on the speaker's side. A question to an earlier stage and its answer are two
+bubbles over the same two columns, facing each other; an answer still owed shows as one on its
+way. A review you approved is one bubble from you to the stage it went on to: the direction and
+the handover that stage was then given only repeat it, so they fold into it. A long bubble shows
+its first lines and **Read all** shows it verbatim; **Details** leads to its record.
+`ui/src/lib/watch/messages.ts` collects the messages in the same pass as the rest of the
+projection, so they follow the replay scrubber, and the timeline's **Read the message** opens one.
 
 Who said what to whom is read from the record, not from the team file as it is now:
 

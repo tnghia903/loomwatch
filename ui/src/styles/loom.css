@@ -165,69 +165,79 @@ span.story-schedule { cursor: default; }
 .weft-cap .delivery-link { display: inline-flex; align-items: center; gap: 5px; }
 .weft-cap.bad .weft-sentence { color: var(--color-alert); }
 
-/* ---------- messages between agents (Run) ----------
-   A chat list: one row per message — who to whom, the first words, the answer under it — that
-   opens to the whole text. */
-.msgs { margin: 0 0 20px; padding: 16px 18px 8px; border: 1px solid var(--color-hairline); border-radius: 10px; background: var(--color-panel); }
-.msgs-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 8px; }
-.msgs-head h2 { margin: 0; font: 600 15px/1.3 var(--font-sans); letter-spacing: -.01em; }
-.msgs-head > span:not(.msgs-tools) { font-size: 12.5px; color: var(--color-ink-3); }
-.msgs-tools { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
-.msgs-filter { display: inline-flex; gap: 2px; }
-.msgs-filter button { padding: 3px 9px; border-radius: 5px; font-size: 11.5px; color: var(--color-ink-2); }
-.msgs-filter button[aria-pressed='true'] { background: var(--color-accent-tint); color: var(--color-accent); }
-.msgs-focus { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 99px; border: 1px solid color-mix(in srgb, var(--color-accent) 40%, transparent); font-size: 11.5px; color: var(--color-accent); }
-.msgs-focus:hover, .msgs-focus:focus-visible { background: var(--color-accent-tint); }
-.msgs-none { margin: 4px 0 10px; font-size: 12.5px; color: var(--color-ink-3); }
-.msgs-list { margin: 0; padding: 0; list-style: none; }
+/* ---------- what the agents said to each other (Run) ----------
+   Under the stage cards, one column per agent. A message is a speech bubble stretching from the
+   speaker's column to the listener's, its square corner on the speaker's side. */
+.talk { margin: 2px 0 26px; }
+.talk-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px; margin: 4px 0 10px; }
+.talk-head h3 { margin: 0; font: 600 13.5px/1.3 var(--font-sans); color: var(--color-ink); }
+.talk-head span { font-size: 12px; color: var(--color-ink-3); }
+.talk-none { margin: 4px 0 24px; font-size: 12.5px; color: var(--color-ink-3); }
+.talk-board { container-type: inline-size; }
+.talk-lanes, .talk-list { display: grid; grid-template-columns: repeat(var(--lanes, 2), minmax(0, 1fr)); column-gap: 10px; }
+.talk-lanes { padding-bottom: 8px; margin-bottom: 10px; border-bottom: 1px solid var(--color-hairline); }
+.talk-lanes span { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 600 12px/1.3 var(--font-sans); color: var(--color-ink-2); }
+.talk-lanes span.you { color: var(--color-accent); }
+.talk-list { margin: 0; padding: 0; list-style: none; row-gap: 8px; }
+.talk-badge { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--color-ink) 22%, transparent); font: 600 10px/1 var(--font-sans); color: var(--color-ink-2); }
+.talk-badge.you { border-style: dashed; border-color: var(--color-accent); color: var(--color-accent); }
 
-.msg { border-top: 1px solid var(--color-hairline); transition: background var(--t-move) var(--ease-out); }
-.msg:first-child { border-top: 0; }
-.msg.flash { background: var(--color-accent-tint); border-radius: 8px; }
-.msg-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: start; gap: 12px; width: 100%; padding: 10px 6px; border-radius: 8px; text-align: left; }
-.msg-row:hover { background: color-mix(in srgb, var(--color-ink) 4%, transparent); }
-.msg-row:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
-.msg-who { display: inline-flex; align-items: center; gap: 3px; padding-top: 1px; color: var(--color-ink-3); }
-.msg-who-none { display: inline-block; width: 16px; }
-.msg-main { display: grid; gap: 2px; min-width: 0; }
-.msg-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; }
-.msg-sentence { font: 600 13.5px/1.4 var(--font-sans); color: var(--color-ink); }
-.msg-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--color-ink-3); }
-.msg-badge.tone-live { color: var(--color-live); }
-.msg-badge.tone-bad { color: var(--color-alert); }
-.msg-pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: weft-breathe 1.6s ease-in-out infinite; }
-.msg-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.45; color: var(--color-ink-2); }
-.msg-reply { color: var(--color-ok); }
-.msg-time { padding-top: 2px; font: 500 11.5px/1.4 var(--font-mono); color: var(--color-ink-3); font-variant-numeric: tabular-nums; }
-.msg-chevron { margin-top: 2px; color: var(--color-ink-3); transition: transform var(--t-quick) var(--ease-out); }
-.msg.open .msg-chevron { transform: rotate(180deg); }
-/* Open, the row is a heading: its first words would only repeat the full text below. */
-.msg.open .msg-preview { display: none; }
-/* The opened row: the whole text, verbatim, under the row it belongs to. */
-.msg-details { display: grid; gap: 8px; padding: 0 6px 12px calc(6px + 51px + 12px); }
-.msg-text { max-height: 340px; overflow: auto; padding: 8px 11px; border-radius: 8px; background: var(--color-ground); border: 1px solid var(--color-hairline); font: 400 13px/1.5 var(--font-sans); color: var(--color-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
-.msg-text.answer { background: color-mix(in srgb, var(--color-ok) 7%, var(--color-ground)); border-color: color-mix(in srgb, var(--color-ok) 22%, transparent); }
-.msg-answer { display: grid; gap: 6px; }
-.msg-note { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--color-ink-2); }
-.msg-note b { font-weight: 600; color: var(--color-ink); }
-.msg-error { margin: 0; padding: 6px 10px; border-radius: 6px; font: 400 12px/1.45 var(--font-mono); color: var(--color-alert); background: color-mix(in srgb, var(--color-alert) 8%, transparent); overflow-wrap: anywhere; }
-.msg-links { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; margin: 0; }
-.msg-links .delivery-link { gap: 5px; font-size: 12px; }
-.msg-derived { font-size: 11.5px; color: var(--color-ink-3); }
-.msg-calls summary { cursor: pointer; font-size: 12px; color: var(--color-ink-2); }
-.msg-calls summary:hover { color: var(--color-accent); }
-.msg-calls ul { margin: 6px 0 2px; padding: 0 0 0 14px; display: grid; gap: 3px; border-left: 1px solid var(--color-hairline); list-style: none; }
-.msg-calls .delivery-link { font-size: 12px; color: var(--color-ink-2); }
-.msg-calls .delivery-link:hover, .msg-calls .delivery-link:focus-visible { color: var(--color-accent); }
-@media (max-width: 559px) {
-  .msgs { padding: 14px 10px 6px; }
-  .msg-row { grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; }
-  .msg-chevron { display: none; }
-  .msg-details { padding-left: 6px; }
+.talk-bubble { grid-column: var(--from) / var(--to); min-width: 0; padding: 9px 12px 10px; border-radius: 14px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid); outline: none; transition: box-shadow var(--t-move) var(--ease-out); }
+/* The tail: the speaker's bottom corner, squared, as a chat app marks who is speaking. */
+.talk-bubble.side-start { border-bottom-left-radius: 4px; margin-right: 26px; }
+.talk-bubble.side-end { border-bottom-right-radius: 4px; margin-left: 26px; }
+.talk-bubble.you { background: var(--color-accent-tint); border-color: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+.talk-bubble.part-waiting { background: transparent; border-style: dashed; }
+.talk-bubble.part-waiting.live { border-color: color-mix(in srgb, var(--color-live) 45%, transparent); }
+.talk-bubble.failed { border-color: color-mix(in srgb, var(--color-alert) 55%, transparent); }
+.talk-bubble.flash, .talk-bubble:focus-visible { box-shadow: 0 0 0 2px var(--color-accent); }
+.talk-who { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 6px; margin: 0 0 4px; font-size: 12px; color: var(--color-ink-2); }
+.talk-name { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--color-ink); }
+.talk-name.to { font-weight: 500; color: var(--color-ink-2); }
+.talk-arrow { color: var(--color-ink-3); }
+.talk-word { color: var(--color-ink-3); }
+.part-waiting.live .talk-word { color: var(--color-live); }
+.talk-meta { display: inline-flex; align-items: baseline; gap: 10px; margin-left: auto; white-space: nowrap; }
+.talk-meta time { font: 500 11px/1.4 var(--font-mono); color: var(--color-ink-3); font-variant-numeric: tabular-nums; }
+.talk-text { font: 400 13px/1.5 var(--font-sans); color: var(--color-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.talk-text.folded { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.talk-more { margin-top: 4px; font-size: 12px; color: var(--color-accent); }
+.talk-who .talk-more { margin: 0; font-size: 11.5px; }
+/* "Details" is there when you reach for it — pointing at the bubble or tabbing to it — and always
+   on a touch screen, which has no pointing. "Read all" always shows: the text is cut. */
+@media (hover: hover) {
+  .talk-more.quiet { opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
+  .talk-bubble:hover .talk-more.quiet, .talk-more.quiet:focus-visible { opacity: 1; }
+}
+.talk-more:hover, .talk-more:focus-visible { text-decoration: underline; }
+.talk-error { margin: 0 0 4px; font: 400 12px/1.45 var(--font-mono); color: var(--color-alert); overflow-wrap: anywhere; }
+/* An answer on its way: the three dots of someone typing. */
+.talk-typing { display: flex; gap: 4px; margin: 4px 0 0; }
+.talk-typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--color-live); animation: talk-typing 1.2s ease-in-out infinite; }
+.talk-typing i:nth-child(2) { animation-delay: .15s; }
+.talk-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes talk-typing { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+.talk-details { display: grid; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--color-hairline); font-size: 12px; line-height: 1.45; color: var(--color-ink-2); }
+.talk-details p { margin: 0; }
+.talk-details b { font-weight: 600; color: var(--color-ink); }
+.talk-links { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; }
+.talk-links .delivery-link { gap: 5px; font-size: 12px; }
+.talk-derived { font-size: 11.5px; color: var(--color-ink-3); }
+.talk-calls summary { cursor: pointer; color: var(--color-ink-2); }
+.talk-calls summary:hover { color: var(--color-accent); }
+.talk-calls ul { margin: 6px 0 2px; padding: 0 0 0 12px; display: grid; gap: 3px; border-left: 1px solid var(--color-hairline); list-style: none; }
+.talk-calls .delivery-link { font-size: 12px; color: var(--color-ink-2); }
+/* Too narrow for columns: a plain chat, the speaker's bubbles leaning to their side. */
+@container (max-width: 520px) {
+  .talk-lanes { display: none; }
+  .talk-list { grid-template-columns: minmax(0, 1fr); }
+  .talk-bubble { grid-column: 1 / -1; }
+  .talk-bubble.side-start { margin-right: 28px; margin-left: 0; }
+  .talk-bubble.side-end { margin-left: 28px; margin-right: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .msg-pulse { animation: none; }
-  .msg, .msg-chevron { transition: none; }
+  .talk-typing i { animation: none; opacity: .7; }
+  .talk-bubble { transition: none; }
 }
 
 /* The record inspector: a Team Bus message's words, read as words before the call's JSON. */

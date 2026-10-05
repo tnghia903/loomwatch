@@ -38,10 +38,6 @@ export interface Conversation {
   lines: Line[]
 }
 
-/** A question that expects an answer, as opposed to work being passed along. */
-export function isQuestion(kind: MessageKind): boolean {
-  return kind === 'ask' || kind === 'question' || kind === 'escalate'
-}
 
 /**
  * `predecessors` are the team's connections into each agent. Without them, the stage before in
@@ -102,11 +98,6 @@ export function converse(messages: readonly TeamMessage[], order: readonly Party
   return { lanes, lines }
 }
 
-/** The parties a line touches, for "show only the messages with this agent". */
-export function touches(line: Line, laneId: string): boolean {
-  return line.senders.includes(laneId) || line.via.includes(laneId) || line.receiver === laneId || line.replier === laneId || line.message.reply?.sentBackTo === laneId
-}
-
 /** One row of the list: a message, with the messages that only repeat it folded in. */
 export interface Item {
   line: Line
@@ -159,37 +150,71 @@ export function fold(lines: readonly Line[], lanes: readonly Lane[]): Item[] {
   return items
 }
 
-/** Whether a row involves this party, counting where an approved review went on to. */
-export function itemTouches(item: Item, laneId: string): boolean {
-  return touches(item.line, laneId) || item.passedOn.some((passed) => passed.to === laneId)
+/**
+ * One speech bubble: who says it, to whom, in what words. A message makes one, its answer a
+ * second, and an answer still owed a third that says so — the "typing…" of a chat.
+ */
+export interface Bubble {
+  key: string
+  item: Item
+  part: 'said' | 'reply' | 'waiting'
+  /** Lane ids. A handover built from two stages has two speakers. */
+  from: string[]
+  to: string[]
+  /** What kind of thing was said, in a word: "handover", "question", "answer", "sent back"… */
+  word: string
+  /** Verbatim. Empty for a plain approval and for an answer still owed. */
+  text: string
+  offsetMs: number
+  ts: string
 }
 
-/** Names joined as a person would say them: "Writer", "Writer and Editor", "A, B and C". */
-export function nameList(names: readonly string[]): string {
-  return names.length <= 1 ? names[0] ?? '' : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+const WORD: Record<MessageKind, string> = {
+  handover: 'handover', direction: 'direction', ask: 'question', question: 'question',
+  escalate: 'needs you', dispatch: 'task', handoff: 'handover', note: 'note',
 }
+
+/** Kinds that expect an answer, so an answer not yet given shows as one owed. */
+const ANSWERED: ReadonlySet<MessageKind> = new Set(['ask', 'question', 'escalate', 'note'])
 
 /**
- * What happened, as a sentence a newcomer can read. `name` resolves a lane id to what the run view
- * calls it; you are "you".
+ * The bubbles of a run, in order: each message, then its answer right after it — so a question and
+ * its answer read as one exchange even when other work happened in between.
+ *
+ * `approval` is the text a plain approval is sent as; such an answer says "approved" and nothing
+ * more, rather than quoting words nobody typed.
  */
-export function lineSentence(line: Line, name: (laneId: string) => string, operator: (laneId: string) => boolean): string {
-  const to = line.receiver === null ? '' : operator(line.receiver) ? 'you' : name(line.receiver)
-  const from = nameList(line.senders.map(name))
-  switch (line.message.kind) {
-    case 'handover': {
-      const via = line.via.length > 0 ? ', through your review' : ''
-      if (!from) return `${to === 'you' ? 'You were' : `${to} was`} handed the work${via}`
-      return to === 'you' ? `${from} handed over to you for review` : `${from} handed over to ${to}${via}`
+export function bubbles(items: readonly Item[], lanes: readonly Lane[], live: boolean, approval: string): Bubble[] {
+  const you = new Set(lanes.filter((lane) => lane.operator).map((lane) => lane.id))
+  const out: Bubble[] = []
+  for (const item of items) {
+    const { line, passedOn } = item
+    const { message } = line
+    const key = message.id
+    const to = line.receiver === null ? [] : [line.receiver]
+    out.push({ key: `${key}:said`, item, part: 'said', from: line.senders, to, word: WORD[message.kind], text: message.text, offsetMs: message.offsetMs, ts: message.ts })
+    const reviewing = message.kind === 'handover' && line.receiver !== null && you.has(line.receiver)
+    const reply = message.reply
+    if (reply && line.replier !== null) {
+      const back = reply.sentBackTo
+      const plain = reviewing && !back && reply.text.trim() === approval
+      out.push({
+        key: `${key}:reply`, item, part: 'reply', from: [line.replier],
+        // An answer goes back to whoever asked; your review goes back where you sent it, or on.
+        to: back ? [back] : reviewing ? passedOn.map((passed) => passed.to) : line.senders.slice(0, 1),
+        word: back ? 'sent back' : reviewing ? (plain ? 'approved' : 'approved, with a note') : 'answer',
+        text: plain ? '' : reply.text, offsetMs: reply.offsetMs, ts: reply.ts,
+      })
+    } else if (message.state === 'pending' && line.receiver !== null && (ANSWERED.has(message.kind) || reviewing)) {
+      const owedByYou = you.has(line.receiver)
+      out.push({
+        key: `${key}:waiting`, item, part: 'waiting', from: [line.receiver], to: line.senders.slice(0, 1),
+        word: live ? (reviewing ? 'waiting for your review' : owedByYou ? 'waiting for you' : 'thinking…') : (reviewing ? 'not reviewed' : 'no answer'),
+        text: '', offsetMs: message.offsetMs, ts: message.ts,
+      })
     }
-    case 'direction': return `You gave ${to} direction`
-    case 'ask': return `${from} asked ${to}`
-    case 'dispatch': return `${from} sent part of the work to ${to}`
-    case 'handoff': return `${from} handed the work to ${to}`
-    case 'question': return `${from} asked you`
-    case 'escalate': return `${from} raised something with you`
-    case 'note': return to ? `You wrote to ${to}` : 'You wrote to the team'
   }
+  return out
 }
 
 /**
