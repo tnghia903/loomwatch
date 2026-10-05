@@ -177,7 +177,7 @@ pub fn relocate_copy_note(content: &str, copy_name: &str, folder: &Path) -> Stri
 }
 
 /// The whole text when it is short, or its opening, cut at a line, with where the rest is.
-fn excerpt(text: &str, copy_name: &str) -> (String, Option<TextCopy>) {
+pub(crate) fn excerpt(text: &str, copy_name: &str) -> (String, Option<TextCopy>) {
     let text = text.replace('\u{c}', "\n");
     let total = text.chars().count();
     if total <= FILE_EXCERPT_CHARS {

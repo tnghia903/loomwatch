@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { BookmarkCheck, Bot, Box, ChartColumn, Code2, FileText, Folder, Globe, GripVertical, Info, LocateFixed, Lock, PanelLeftClose, PanelLeftOpen, PenLine, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, Wrench, type LucideIcon } from 'lucide-react'
+import { BookmarkCheck, Bot, Box, ChartColumn, Code2, ExternalLink, FileText, Folder, Globe, GripVertical, Info, LocateFixed, Lock, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, Wrench, type LucideIcon } from 'lucide-react'
 import { harnessProblem, KNOWN_HARNESSES, knownHarness } from '../../lib/harnesses'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
 import { removeJob, savedJobPreset, useSavedJobs } from '../../lib/library/jobs'
@@ -10,8 +10,9 @@ import type { CapabilityDragPayload, CapabilityKind } from '../../lib/composer-l
 import type { DetectedHarness } from '../../lib/harnesses'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import type { Evidence } from '../../lib/watch/events'
-import { CAPABILITY_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
+import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
 import { chosenIsFile } from '../../lib/knowledge/chosen'
+import { CONNECTIONS_HREF, NOTION_PAGE_SOURCE, type NotionConnection } from '../../lib/notion/connection'
 import { PALETTE_WIDTH } from '../../lib/library/paletteWidth'
 import { PaletteResizer } from './PaletteResizer'
 import { SectionHead } from '../ui/SectionHead'
@@ -22,6 +23,7 @@ const USED = 'Used in this run'
 const BUILT_IN = 'Hire by job'
 const YOURS = 'Your jobs'
 const APPS = 'AI apps'
+const CONNECTIONS = 'Connections'
 const FILES = 'Folders & files'
 const MEMORY = 'Team memory'
 
@@ -55,6 +57,8 @@ export interface LibraryProps {
   teamSources?: readonly TeamSource[]
   /** Find a source's card on the canvas and open it. */
   onRevealSource?: (id: string) => void
+  /** Notion as this daemon is connected to it, and the pages this team reads (ADR 0050). */
+  notion?: NotionPanel
   /** The panel's width in pixels, and how dragging its edge changes it. Absent: it cannot be resized. */
   width?: number
   onResize?: (width: number) => void
@@ -71,6 +75,25 @@ export interface TeamSource {
   /** The names of the agents that read it. */
   readers: readonly string[]
   /** What its details panel shows. */
+  item: DetectedCapability
+}
+
+/** The Connections group's Notion rows (ADR 0050). */
+export interface NotionPanel {
+  connection: NotionConnection
+  /** One per Notion page card, with who reads each. */
+  pages: readonly TeamNotionPage[]
+  /** Choose a page with no agent in mind; its card is placed on the canvas. */
+  onChoosePage?: () => void
+}
+
+/** A Notion page this team reads, as the panel lists it. */
+export interface TeamNotionPage {
+  /** Its card's id. */
+  id: string
+  name: string
+  page: string
+  readers: readonly string[]
   item: DetectedCapability
 }
 
@@ -93,6 +116,10 @@ interface PaletteItem {
   onActivate?: () => void
   /** The icon at the end of the row, when a click does not add. */
   Trailing?: LucideIcon
+  /** `false` for a row that can be clicked but not dragged: Notion before it is connected. */
+  draggable?: boolean
+  /** Listed under the row before it: a Notion page under Notion. */
+  nested?: boolean
 }
 
 function jobItem(preset: RolePreset, harnesses: readonly DetectedHarness[], jobId?: string): PaletteItem {
@@ -128,6 +155,43 @@ function sourceItem(source: TeamSource, reveal?: (id: string) => void): PaletteI
   }
 }
 
+/**
+ * Notion in the Connections group (ADR 0050). Connected, it is dragged onto an agent, which then
+ * asks which page; a click asks with no agent, for a card on its own. Not connected, a click opens
+ * Connections, and it cannot be dragged, since there is no page to choose yet.
+ */
+function notionServiceItem(panel: NotionPanel): PaletteItem {
+  const base = { name: 'Notion', Icon: Plug, mime: CONNECTION_DRAG_MIME, event: '', payload: { service: 'notion' } }
+  const openConnections = () => { window.open(CONNECTIONS_HREF, '_blank', 'noopener') }
+  switch (panel.connection.state) {
+    case 'connected':
+      return { ...base, detail: 'Drag onto an agent, then choose a page', engine: panel.connection.workspace, quiet: true, disabled: !panel.onChoosePage, ...(panel.onChoosePage ? { onActivate: panel.onChoosePage } : {}) }
+    case 'disconnected':
+      return { ...base, detail: 'Not connected · click to connect', disabled: false, draggable: false, onActivate: openConnections, Trailing: ExternalLink }
+    case 'loading':
+      return { ...base, detail: 'Checking the connection…', disabled: true }
+    case 'unavailable':
+      return { ...base, detail: panel.connection.message, disabled: true }
+  }
+}
+
+/** A Notion page this team reads: dragged onto an agent to share it, clicked to find its card. */
+function notionPageItem(page: TeamNotionPage, reveal?: (id: string) => void): PaletteItem {
+  const payload: CapabilityDragPayload = { kind: 'knowledge', name: page.name, source: NOTION_PAGE_SOURCE, notion: { page: page.page } }
+  return {
+    name: page.name,
+    detail: page.readers.length ? `Read by ${listOf(page.readers)}` : 'No agent reads it yet',
+    Icon: NotebookText,
+    mime: CAPABILITY_DRAG_MIME,
+    event: 'loomwatch:add-capability',
+    disabled: false,
+    payload,
+    capability: { item: page.item, kind: 'knowledge' },
+    nested: true,
+    ...(reveal ? { onActivate: () => reveal(page.id), Trailing: LocateFixed } : {}),
+  }
+}
+
 /** "Built into the app · Researcher and Fact-checker" — what it is, and who used it. */
 function usedDetail(row: UsedInRun, name: (id: string) => string): string {
   const origin = { app: 'Built into the app', connected: 'Connected tool', team: 'LoomWatch', skill: 'Skill' }[row.origin]
@@ -153,6 +217,7 @@ const EXPLAIN: Record<string, ReactNode> = {
   [APPS]: 'The same agents without a job: an AI app and an empty brief, for when you write the instructions yourself.',
   Skills: 'Skills found on this Mac. Drag one onto an agent to supply its instructions there; skills you connect work with any AI app.',
   Tools: <>Tools found on this Mac. Web search, commands and file edits are built into each AI app instead: switch them on per agent, under <b>Allowed without asking</b>.</>,
+  [CONNECTIONS]: <>Services you connected in Connections. Drag <b>Notion</b> onto an agent and choose a page: the agent is given the page’s text each time the team runs. The pages this team reads are listed under it.</>,
   [FILES]: <>This team’s folders and files. Add one from an agent’s panel, with <b>Folder</b> or <b>File</b> under Given. Then drag it onto another agent to share it, or click it to find its card.</>,
   [MEMORY]: 'Other teams’ memory and imported packs. Drag one onto an agent to supply it there.',
 }
@@ -163,7 +228,7 @@ const EXPLAIN: Record<string, ReactNode> = {
  * second "Library" that the trace drew with other groups, other rows and other words for the
  * same skills and tools.
  */
-export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarnessIds = [], harnessesLoading, harnessesError, onRetry, capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], observedConnected, onRevealEvidence, agentNames, teamSources = [], onRevealSource, width, onResize }: LibraryProps) {
+export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarnessIds = [], harnessesLoading, harnessesError, onRetry, capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], observedConnected, onRevealEvidence, agentNames, teamSources = [], onRevealSource, notion, width, onResize }: LibraryProps) {
   // On a phone the panel would take half the screen, so it starts closed and overlays the canvas
   // when opened; adding something closes it again so the new card is in view.
   const narrow = () => typeof window !== 'undefined' && window.innerWidth < 768
@@ -229,6 +294,8 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
       const kind: CapabilityKind = key === 'skills' ? 'skill' : 'tool'
       return { name: { skills: 'Skills', tools: 'Tools' }[key], items: (capabilityInventory?.[key] ?? []).map(item => capabilityItem(item, kind)) }
     }),
+    // Services connected in Connections, and the pages this team reads from them (ADR 0050).
+    ...(notion ? [{ name: CONNECTIONS, items: [notionServiceItem(notion), ...notion.pages.map(page => notionPageItem(page, onRevealSource))] }] : []),
     // Chosen, not discovered (ADR 0036): only what this team was given, each with its own card.
     { name: FILES, items: teamSources.map(source => sourceItem(source, onRevealSource)) },
     // Other teams' memory and imported packs: the only knowledge this Mac is scanned for.
@@ -236,7 +303,7 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
   ]
   // The agent lists are short and are what a new team needs, so they are shown whole; the
   // capability groups can run to hundreds of entries and fold to three.
-  const limitFor = (group: string) => (group === BUILT_IN ? 8 : group === YOURS ? 6 : group === APPS ? 4 : group === USED || group === FILES ? 6 : 3)
+  const limitFor = (group: string) => (group === BUILT_IN ? 8 : group === YOURS ? 6 : group === APPS ? 4 : group === USED || group === FILES ? 6 : group === CONNECTIONS ? 7 : 3)
   const matches = (text: string) => text.toLowerCase().includes(query.trim().toLowerCase())
   const remove = (item: PaletteItem) => {
     if (!item.jobId) return
@@ -246,7 +313,7 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
     removeJob(item.jobId).catch((error: unknown) => setRemoveError(error instanceof Error ? error.message : String(error)))
   }
   const row = (item: PaletteItem, i: number) => {
-    const add = <button key={`${item.name}-${i}`} className="palette-item" disabled={item.disabled} title={item.engine ? `${item.detail} · ${item.engine}` : item.detail} draggable={!item.disabled} onDragStart={e => { e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData(item.mime, JSON.stringify(item.payload)); e.dataTransfer.setData('text/plain', item.name); onDragStateChange?.(true) }} onDragEnd={() => onDragStateChange?.(false)} onClick={() => { if (item.onActivate) item.onActivate(); else window.dispatchEvent(new CustomEvent(item.event, { detail: JSON.stringify(item.payload) })); if (narrow()) setCollapsed(true) }}><GripVertical size={13} /><span className="palette-icon"><item.Icon size={15} /></span><span><strong>{item.name}</strong><small>{item.detail}</small>{item.engine && <em className={item.quiet ? 'palette-engine quiet' : 'palette-engine'}>{item.engine}</em>}</span>{item.Trailing ? <item.Trailing size={13} aria-hidden="true" /> : <Plus size={13} />}</button>
+    const add = <button key={`${item.name}-${i}`} className={item.nested ? 'palette-item nested' : 'palette-item'} disabled={item.disabled} title={item.engine ? `${item.detail} · ${item.engine}` : item.detail} draggable={!item.disabled && item.draggable !== false} onDragStart={e => { e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData(item.mime, JSON.stringify(item.payload)); e.dataTransfer.setData('text/plain', item.name); onDragStateChange?.(true) }} onDragEnd={() => onDragStateChange?.(false)} onClick={() => { if (item.onActivate) item.onActivate(); else window.dispatchEvent(new CustomEvent(item.event, { detail: JSON.stringify(item.payload) })); if (narrow()) setCollapsed(true) }}><GripVertical size={13} /><span className="palette-icon"><item.Icon size={15} /></span><span><strong>{item.name}</strong><small>{item.detail}</small>{item.engine && <em className={item.quiet ? 'palette-engine quiet' : 'palette-engine'}>{item.engine}</em>}</span>{item.Trailing ? <item.Trailing size={13} aria-hidden="true" /> : <Plus size={13} />}</button>
     if (item.capability && onInspectCapability) {
       const { item: capability, kind } = item.capability
       return <div key={`${item.name}-${i}`} className="palette-job">

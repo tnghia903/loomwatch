@@ -8,7 +8,7 @@ import type { AgentNode } from '../lib/library/nodeFromDrop'
 import type { CapabilityInventory, DetectedCapability } from '../lib/library/client'
 import type { CapabilityRef, ScheduleConfig } from '../lib/team-file/types'
 import { newSchedule } from '../lib/team-file/schedule'
-import type { TeamSource } from './library/ComponentPalette'
+import type { TeamNotionPage, TeamSource } from './library/ComponentPalette'
 import { PALETTE_WIDTH, clampPaletteWidth } from '../lib/library/paletteWidth'
 import { connectedServersByAgent } from '../lib/library/observed'
 import { isTerminalRun, runScheduleNow, scheduleForPath, useSchedules } from '../lib/runs/client'
@@ -28,7 +28,7 @@ import { unifiedYamlDiff } from '../lib/team-file/diff'
 import { useTeamDocument } from '../lib/team-file/useTeamDocument'
 import { organizePipeline, type Positions } from '../lib/composer-layout/organize'
 import { useComposerLayout } from '../lib/composer-layout/useComposerLayout'
-import { RELATION, capabilityForCard, capabilityIsCard, capabilityNodeId, cardId, freeCapabilitySlot, refuseCapabilityEdge, teamFileKind, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
+import { RELATION, capabilityForCard, capabilityIsCard, capabilityNodeId, cardId, freeCapabilitySlot, notionPageKey, refuseCapabilityEdge, teamFileKind, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
 import { chosenIsFile, chosenName, chosenSource } from '../lib/knowledge/chosen'
 import { setThemeMode, useTheme } from '../lib/theme'
 import { startTour } from '../lib/tour/store'
@@ -57,13 +57,14 @@ import { YamlSheet } from './canvas/YamlSheet'
 import { ProvEdgeView, WarpEdgeView, WeftEdgeView } from './canvas/edges'
 import { BuildAgentCard, BuildCapabilityCard, BuildOutputCard } from './canvas/BuildNodeCard'
 import { BuildResourceInspector } from './canvas/BuildResourceInspector'
+import { NotionPagePicker } from './canvas/NotionPagePicker'
 import { BuildInspector } from './canvas/BuildInspector'
 import { ComponentPalette } from './library/ComponentPalette'
 import { MessageSquareText, Play, Wrench } from 'lucide-react'
 import { Composer, type ComposerState } from './composer/Composer'
 import { RoutineNote } from './composer/RoutineNote'
 import { RunHistory } from './composer/RunHistory'
-import { CAPABILITY_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './library'
+import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './library'
 import { BriefEditStrip } from './memory/BriefEditStrip'
 import { CheckpointStrip } from './memory/CheckpointStrip'
 import { MemoryPanel } from './memory/MemoryPanel'
@@ -100,7 +101,7 @@ import { teamSentence } from '../lib/story/teamSentence'
 import { depthForZoom } from '../lib/story/depth'
 import { WorkspaceMenu } from './workspace/WorkspaceMenu'
 import { useAsk } from '../lib/ask/useAsk'
-import { DEFAULT_ROUTINE_NOTION_TITLE } from '../lib/notion/connection'
+import { DEFAULT_ROUTINE_NOTION_TITLE, NOTION_PAGE_SOURCE, useNotionConnection, type NotionPageHit } from '../lib/notion/connection'
 import type { AskContext } from '../lib/ask/client'
 import { AskButton } from './ask/AskButton'
 import type { CardActions } from './ask/AskCards'
@@ -184,6 +185,26 @@ function chosenItem(card: CapabilityNodeConfig): DetectedCapability {
       ? 'A file added to this team. Each agent connected to it is given its text with its instructions: all of it when it is short, otherwise the opening and a full copy it can open.'
       : 'A folder on this computer, read where it is on every run. Each agent connected to it is given the folder\u2019s listing and README with its instructions, and may open any file in it. It never changes the folder.',
   }
+}
+
+/**
+ * What the panel says about a Notion page card (ADR 0050): what every agent connected to it is
+ * given, and that the connection itself stays with LoomWatch.
+ */
+function notionItem(card: CapabilityNodeConfig): DetectedCapability {
+  return {
+    id: card.id,
+    name: card.name,
+    source: NOTION_PAGE_SOURCE,
+    ...(card.notion ? { notion: { page: card.notion.page } } : {}),
+    status: 'Ready',
+    detail: 'A page in your Notion. When each run starts, LoomWatch reads it through your Notion connection and gives each agent connected to it the page\u2019s text with its instructions: all of it when it is short, otherwise the opening and a full copy it can open. The agents never get the connection, and nothing is written to the page.',
+  }
+}
+
+/** The panel's item for a card chosen rather than found: a folder, a file or a Notion page. */
+function chosenCardItem(card: CapabilityNodeConfig): DetectedCapability {
+  return card.notion ? notionItem(card) : chosenItem(card)
 }
 
 function memoryKey(memory: MemoryRef | undefined): string {
@@ -581,10 +602,11 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     const taken = [...doc.nodes.map((node) => node.position), ...composerLayout.nodes.map((node) => node.position), ...memoryCards.map((node) => node.position)]
     for (const node of doc.nodes) {
       for (const capability of node.data.agent.capabilities ?? []) {
-        // Knowledge with no path names nothing (ADR 0036); the agent's Context says so.
-        if (capability.kind === 'knowledge' && !capability.path) continue
-        const path = capability.kind === 'knowledge' ? capability.path : undefined
-        const card = { kind: capability.kind, name: path ? chosenName(path) : capability.name, ...(path ? { path } : {}) }
+        // Knowledge with no path or page names nothing (ADR 0036); the agent's Context says so.
+        if (capability.kind === 'knowledge' && !capability.path && !capability.notion) continue
+        const notion = capability.kind === 'knowledge' ? capability.notion : undefined
+        const path = capability.kind === 'knowledge' && !notion ? capability.path : undefined
+        const card = { kind: capability.kind, name: path ? chosenName(path) : capability.name, ...(path ? { path } : {}), ...(notion ? { notion: { page: notion.page } } : {}) }
         const id = cardId(card)
         // The id too: a sidecar card whose name differs only in case is the same card.
         if ([...composerLayout.nodes, ...memoryCards, ...cards].some((other) => other.id === id || capabilityIsCard(capability, other))) continue
@@ -592,7 +614,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         const installed = inventory.find((item) => item.name.toLowerCase() === capability.name.toLowerCase())
         const position = freeCapabilitySlot({ x: node.position.x, y: node.position.y + 220 }, taken)
         taken.push(position)
-        cards.push({ id, ...card, source: path ? chosenSource(path) : installed?.source ?? 'Not found on this computer', position })
+        cards.push({ id, ...card, source: notion ? NOTION_PAGE_SOURCE : path ? chosenSource(path) : installed?.source ?? 'Not found on this computer', position })
       }
     }
     return cards
@@ -633,10 +655,21 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     readers: wiringEdges.filter((edge) => edge.to === card.id).map((edge) => nodeNames.get(edge.from) ?? edge.from),
     item: chosenItem(card),
   })), [capabilityCards, wiringEdges, nodeNames])
+  /** This team's Notion pages for the add panel's Connections group, with who reads each (ADR 0050). */
+  const notionPages = useMemo<TeamNotionPage[]>(() => capabilityCards.filter((card) => card.notion && !card.memory).map((card) => ({
+    id: card.id,
+    name: card.name,
+    page: card.notion?.page ?? '',
+    readers: wiringEdges.filter((edge) => edge.to === card.id).map((edge) => nodeNames.get(edge.from) ?? edge.from),
+    item: notionItem(card),
+  })), [capabilityCards, wiringEdges, nodeNames])
+  const notionConnection = useNotionConnection(!libraryCollapsed)
+  /** Notion dropped on the canvas or clicked in the panel: which page, and for whom (ADR 0050). */
+  const [notionPicker, setNotionPicker] = useState<{ agentId: string | null; at: { x: number; y: number } } | null>(null)
   const keepUnusedCard = useCallback((card: CapabilityNodeConfig, leaving: string) => {
     if (card.memory || composerLayout.nodes.some((node) => node.id === card.id)) return
     const stillUsed = doc.nodes.some((node) => node.id !== leaving && (node.data.agent.capabilities ?? []).some((capability) => capabilityIsCard(capability, card)))
-    if (!stillUsed) composerLayout.place({ kind: card.kind, name: card.name, source: card.source, ...(card.path ? { path: card.path } : {}) }, card.position)
+    if (!stillUsed) composerLayout.place({ kind: card.kind, name: card.name, source: card.source, ...(card.path ? { path: card.path } : {}), ...(card.notion ? { notion: card.notion } : {}) }, card.position)
   }, [composerLayout, doc.nodes])
   // Taking a capability card off the canvas must also stop the daemon delivering it, or the team
   // file would keep a skill the operator can no longer see.
@@ -1085,7 +1118,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           if (known) composerLayout.move(change.id, change.position)
           else {
             const card = capabilityCards.find((node) => node.id === change.id)
-            if (card) composerLayout.place({ kind: card.kind, name: card.name, source: card.source, memory: card.memory, ...(card.path ? { path: card.path } : {}) }, change.position)
+            if (card) composerLayout.place({ kind: card.kind, name: card.name, source: card.source, memory: card.memory, ...(card.path ? { path: card.path } : {}), ...(card.notion ? { notion: card.notion } : {}) }, change.position)
           }
         }
         if (change.type === 'remove') removeCapabilityCards([change.id])
@@ -1098,9 +1131,10 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           })
           if (change.selected) {
             const capability = capabilityCards.find((node) => node.id === change.id)
-            if (capability?.path) {
-              // A folder or file is chosen, not discovered (ADR 0036), so it has no Library row.
-              setInspectedCapability({ item: chosenItem(capability), kind: capability.kind })
+            if (capability?.path || capability?.notion) {
+              // A folder, file or Notion page is chosen, not discovered (ADR 0036), so it has no
+              // Library row.
+              setInspectedCapability({ item: chosenCardItem(capability), kind: capability.kind })
               setInspectedEvidenceId(null)
               setProvenanceOpen(false)
             } else if (capability) {
@@ -1116,7 +1150,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               setProvenanceOpen(false)
             }
           } else {
-            setInspectedCapability((current) => current && change.id === cardId({ kind: current.kind, name: current.item.name, path: current.item.path }) ? null : current)
+            setInspectedCapability((current) => current && change.id === cardId({ kind: current.kind, name: current.item.name, path: current.item.path, notion: current.item.notion }) ? null : current)
           }
         }
         continue
@@ -1432,14 +1466,14 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     return () => window.removeEventListener('keydown', onKey)
   }, [])
   /** The inspected capability as a card: what wiring and the canvas compare it by. */
-  const inspectedCard = inspectedCapability ? { kind: inspectedCapability.kind, name: inspectedCapability.item.name, source: inspectedCapability.item.source, memory: inspectedCapability.item.memory, ...(inspectedCapability.item.path ? { path: inspectedCapability.item.path } : {}) } : null
+  const inspectedCard = inspectedCapability ? { kind: inspectedCapability.kind, name: inspectedCapability.item.name, source: inspectedCapability.item.source, memory: inspectedCapability.item.memory, ...(inspectedCapability.item.path ? { path: inspectedCapability.item.path } : {}), ...(inspectedCapability.item.notion ? { notion: inspectedCapability.item.notion } : {}) } : null
   // Kind and name identify a card, and a path identifies a folder or file; a recorded source can
   // lag the Library's (see the card-select handler). Cards drawn from the team file count: they
   // are on the canvas whether or not the sidecar has them.
-  const inspectedCapabilityNode = inspectedCard ? (inspectedCard.path
+  const inspectedCapabilityNode = inspectedCard ? (inspectedCard.path || inspectedCard.notion
     ? capabilityCards.find((node) => node.id === cardId(inspectedCard))
-    : capabilityCards.find((node) => !node.path && node.kind === inspectedCard.kind && node.name === inspectedCard.name && node.source === inspectedCard.source)
-      ?? capabilityCards.find((node) => !node.path && node.kind === inspectedCard.kind && node.name.toLowerCase() === inspectedCard.name.toLowerCase())) ?? null : null
+    : capabilityCards.find((node) => !node.path && !node.notion && node.kind === inspectedCard.kind && node.name === inspectedCard.name && node.source === inspectedCard.source)
+      ?? capabilityCards.find((node) => !node.path && !node.notion && node.kind === inspectedCard.kind && node.name.toLowerCase() === inspectedCard.name.toLowerCase())) ?? null : null
   /** The team-file kind the inspected capability is wired as; `null` for memory (ADR 0029). */
   const inspectedTeamKind = inspectedCard ? teamFileKind(inspectedCard) : null
   const wiresInspected = (capability: CapabilityRef) => Boolean(inspectedCard && capabilityIsCard(capability, inspectedCard))
@@ -1454,11 +1488,11 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     setProvenanceOpen(false)
     setInspectedCapability({ item, kind })
   }, [clearSelection])
-  /** A folder or file row in the add panel: frame its card and open it (ADR 0042). */
+  /** A folder, file or Notion page row in the add panel: frame its card and open it (ADR 0042). */
   const revealSource = useCallback((id: string) => {
     const card = capabilityCards.find((node) => node.id === id)
-    if (!card?.path) return
-    inspectCapability(chosenItem(card), 'knowledge')
+    if (!card?.path && !card?.notion) return
+    inspectCapability(chosenCardItem(card), 'knowledge')
     setSelectedCapabilities(new Set([id]))
     const node = flow.getNode(id)
     if (node) void flow.fitView({ nodes: [node], padding: 0.7, maxZoom: 1, duration: 300 })
@@ -1689,7 +1723,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       setStatusAnnouncement(`${name} reads ${payload.name}.`)
       return
     }
-    const card = { kind: payload.kind, name: payload.name, ...(payload.path ? { path: payload.path } : {}) }
+    const card = { kind: payload.kind, name: payload.name, ...(payload.path ? { path: payload.path } : {}), ...(payload.notion ? { notion: payload.notion } : {}) }
     const current = agent.capabilities ?? []
     if (current.some((capability) => capabilityIsCard(capability, card))) {
       setStatusAnnouncement(`${name} already ${RELATION[payload.kind]} ${payload.name}.`)
@@ -1703,6 +1737,19 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     doc.setAgentCapabilities(agentId, [...current, entry])
     setStatusAnnouncement(`${name} ${RELATION[payload.kind]} ${payload.name}. Save the team to keep this change.`)
   }, [doc, nodeNames])
+
+  /**
+   * The page chosen in the Notion picker: connected to the agent Notion was dropped on, like a
+   * dropped card, or placed as a card of its own when there was none.
+   */
+  const chooseNotionPage = useCallback((page: NotionPageHit) => {
+    const target = notionPicker
+    setNotionPicker(null)
+    if (!target) return
+    const payload: CapabilityDragPayload = { kind: 'knowledge', name: page.title, source: NOTION_PAGE_SOURCE, notion: { page: page.id } }
+    if (target.agentId) connectDropped(JSON.stringify(payload), target.agentId)
+    else placeCapability(JSON.stringify(payload), target.at)
+  }, [connectDropped, notionPicker, placeCapability])
 
   /** Whether a flow-space point lands on the permanent Prompt node's card. */
   const overPromptNode = useCallback((point: { x: number; y: number }) => {
@@ -1725,13 +1772,13 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   }, [editable, doc.path, placeCapability, flow])
 
   const onDragOver = useCallback((event: React.DragEvent) => {
-    const plannedSource = event.dataTransfer.types.includes(LIBRARY_DRAG_MIME) || event.dataTransfer.types.includes(CAPABILITY_DRAG_MIME)
+    const plannedSource = event.dataTransfer.types.includes(LIBRARY_DRAG_MIME) || event.dataTransfer.types.includes(CAPABILITY_DRAG_MIME) || event.dataTransfer.types.includes(CONNECTION_DRAG_MIME)
     const evidenceSource = event.dataTransfer.types.includes(EVIDENCE_DRAG_MIME)
     if (!(plannedSource && editable) && !(evidenceSource && runView)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = evidenceSource ? 'move' : 'copy'
     // A capability over an agent's card is connected there on drop, so that card says so now.
-    const over = editable && event.dataTransfer.types.includes(CAPABILITY_DRAG_MIME)
+    const over = editable && (event.dataTransfer.types.includes(CAPABILITY_DRAG_MIME) || event.dataTransfer.types.includes(CONNECTION_DRAG_MIME))
       ? agentAt(flow.screenToFlowPosition({ x: event.clientX, y: event.clientY }))
       : null
     setDropAgentId((current) => (current === over ? current : over))
@@ -1752,6 +1799,13 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       return
     }
     if (!editable) return
+    // A connected service is not a card yet: it asks which page, for the agent it landed on.
+    if (event.dataTransfer.getData(CONNECTION_DRAG_MIME)) {
+      event.preventDefault()
+      const at = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      if (doc.path) setNotionPicker({ agentId: agentAt(at), at })
+      return
+    }
     const capability = event.dataTransfer.getData(CAPABILITY_DRAG_MIME)
     if (capability) {
       event.preventDefault()
@@ -2246,7 +2300,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
 
         {(!runView && !runSetup || runPresentation === 'trace') && (
           // One add panel on both canvases (ADR 0041); a run adds what it used, at the top.
-          <ComponentPalette harnesses={harnesses} harnessSearchPath={harnessSearchPath} knownHarnessIds={knownHarnessIds} harnessesLoading={harnessesLoading} harnessesError={harnessesError} onRetry={onRetryHarnesses} capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={() => { onRetryCapabilities(); onRetryHarnesses() }} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} observedConnected={observedConnected} agentNames={nodeNames} teamSources={teamSources} onRevealSource={revealSource} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} onRevealEvidence={(id) => {
+          <ComponentPalette harnesses={harnesses} harnessSearchPath={harnessSearchPath} knownHarnessIds={knownHarnessIds} harnessesLoading={harnessesLoading} harnessesError={harnessesError} onRetry={onRetryHarnesses} capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={() => { onRetryCapabilities(); onRetryHarnesses() }} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} observedConnected={observedConnected} agentNames={nodeNames} teamSources={teamSources} onRevealSource={revealSource} notion={{ connection: notionConnection, pages: notionPages, ...(editable && doc.path ? { onChoosePage: () => setNotionPicker({ agentId: null, at: flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }) }) } : {}) }} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} onRevealEvidence={(id) => {
             // Folded is the default, so "reveal" means: fan the agent that owns this card, then
             // frame it. Framing the agent rather than the card is deliberate — the evidence node
             // does not exist yet on this render.
@@ -2339,6 +2393,14 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             onClose={() => { setForcedInspectorField(null); doc.onNodesChange([{ id: inspectedNode.id, type: 'select', selected: false }]) }}
           />
         )}
+        {notionPicker && (
+          <NotionPagePicker
+            agentName={notionPicker.agentId ? nodeNames.get(notionPicker.agentId) : undefined}
+            given={new Set((doc.nodes.find((node) => node.id === notionPicker.agentId)?.data.agent.capabilities ?? []).flatMap((capability) => capability.notion ? [notionPageKey(capability.notion.page)] : []))}
+            onChoose={chooseNotionPage}
+            onClose={() => setNotionPicker(null)}
+          />
+        )}
         {inspectedCapability && !inspectedNode && !inspectedEvidence && (
           <BuildResourceInspector
             key={`${inspectedCapability.kind}:${inspectedCapability.item.id}:${inspectedCapabilityNode?.id ?? ''}`}
@@ -2357,7 +2419,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               const others = current.filter((capability) => !wiresInspected(capability))
               const entry = capabilityForCard(inspectedCard, others)
               if (!entry) return
-              if (connected && !inspectedCapabilityNode) placeCapability(JSON.stringify({ kind: inspectedCapability.kind, name, source: inspectedCapability.item.source, path: inspectedCard.path }), flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))
+              if (connected && !inspectedCapabilityNode) placeCapability(JSON.stringify({ kind: inspectedCapability.kind, name, source: inspectedCapability.item.source, path: inspectedCard.path, notion: inspectedCard.notion }), flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))
               if (!connected && inspectedCapabilityNode) keepUnusedCard(inspectedCapabilityNode, id)
               doc.setAgentCapabilities(id, connected ? [...others, entry] : others)
               setStatusAnnouncement(`${name} ${connected ? (kind === 'skill' ? 'is required by' : kind === 'knowledge' ? 'is supplied to' : 'is connected to') : 'was disconnected from'} ${agent.name}. Save the team to keep this change.`)
@@ -2365,7 +2427,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             readOnly={!editable}
             onAdd={() => {
               if (!editable) return
-              const id = placeCapability(JSON.stringify({ kind: inspectedCapability.kind, name: inspectedCapability.item.name, source: inspectedCapability.item.source, path: inspectedCapability.item.path }), flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))
+              const id = placeCapability(JSON.stringify({ kind: inspectedCapability.kind, name: inspectedCapability.item.name, source: inspectedCapability.item.source, path: inspectedCapability.item.path, notion: inspectedCapability.item.notion }), flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))
               if (id) setSelectedCapabilities(new Set([id]))
             }}
             onReveal={() => {

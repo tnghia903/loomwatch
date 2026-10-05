@@ -49,6 +49,14 @@ export interface CapabilityRef {
       added beside the team file (`<team>.files/…`, relative to the team file's folder). `name` is
       then only a label. Knowledge without a path fails the run. */
   path?: string
+  /** Knowledge only, instead of `path` (ADR 0050): a Notion page the run reads through the
+      operator's own Notion connection when it starts. `name` is the page's title when chosen. */
+  notion?: NotionPageRef
+}
+
+/** Which Notion page a knowledge entry or card reads (ADR 0050). */
+export interface NotionPageRef {
+  page: string
 }
 
 /**

@@ -22,6 +22,38 @@ export const DEFAULT_ROUTINE_NOTION_TITLE = '{{team}} — {{date}}'
 /** Where to connect Notion or pick its page; opened beside the canvas so no edit is left behind. */
 export const CONNECTIONS_HREF = '/connections'
 
+/** What a Notion page card says it is, under its title — `NOTION_SOURCE` in delivery.rs. */
+export const NOTION_PAGE_SOURCE = 'Notion page'
+
+/** A page Notion's search found. */
+export interface NotionPageHit {
+  id: string
+  title: string
+}
+
+/**
+ * Pages whose title matches `query`, or recent pages for a blank one, through the operator's own
+ * connection. The same search Connections uses to choose the destination.
+ */
+export async function searchNotionPages(query: string, cursor?: string | null, signal?: AbortSignal): Promise<{ pages: NotionPageHit[]; nextCursor: string | null }> {
+  const response = await daemonFetch('/api/notion/pages', {
+    method: 'POST',
+    signal,
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', 'X-LoomWatch-Request': '1' },
+    body: JSON.stringify({ query, ...(cursor ? { cursor } : {}) }),
+  })
+  if (response.status === 404) throw new Error(NOTION_UNAVAILABLE)
+  const body = (await response.json().catch(() => null)) as { pages?: NotionPageHit[]; nextCursor?: string | null; error?: string } | null
+  if (!response.ok || !body) throw new Error(body?.error ?? 'Notion could not be searched. Try again.')
+  return { pages: body.pages ?? [], nextCursor: body.nextCursor ?? null }
+}
+
+/** The page's address in Notion, from its id — `page_url` in notion/mod.rs. */
+export function notionPageUrl(page: string): string {
+  return `https://www.notion.so/${page.replace(/-/g, '')}`
+}
+
 export async function fetchNotionConnection(signal?: AbortSignal): Promise<NotionConnection> {
   const response = await daemonFetch('/api/notion/connection', { signal, cache: 'no-store', headers: { 'X-LoomWatch-Request': '1' } })
   if (response.status === 404) return { state: 'unavailable', message: NOTION_UNAVAILABLE }

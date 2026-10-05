@@ -84,7 +84,7 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
   }
 
   const entries = `${briefCount} ${briefCount === 1 ? 'entry' : 'entries'}`
-  const broken = capabilities.filter((capability) => capability.kind === 'knowledge' && !capability.path)
+  const broken = capabilities.filter((capability) => capability.kind === 'knowledge' && !capability.path && !capability.notion)
   return (
     <div className="agent-context">
       <SectionHead title="Context" className={headClassName} explain={<>
@@ -121,7 +121,7 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
           <ul className="given-chips" aria-label="Connected to this agent">
             {capabilities.map((capability) => {
               const { Icon, label } = chosenKnowledge(capability) ?? KIND[capability.kind]
-              const missing = capability.kind === 'knowledge' && !capability.path
+              const missing = capability.kind === 'knowledge' && !capability.path && !capability.notion
               return (
                 <li key={`${capability.kind}:${capability.name}`} className={`given-chip ${missing ? 'missing' : ''}`} title={`${capability.name}\n${label}${capability.path ? `\n${capability.path}` : ''}`}>
                   <Icon size={12} aria-hidden="true" />

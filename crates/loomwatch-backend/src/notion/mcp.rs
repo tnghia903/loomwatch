@@ -12,6 +12,7 @@ use super::{
     ApiError, ApiResult, BLOCKS_PER_REQUEST, Page, PublishError, Published, failure,
     markdown_blocks, page_url, sign_in::SIGN_IN_AGAIN, unreachable, unreadable,
 };
+use crate::config::NotionPage;
 
 /// The protocol revision `LoomWatch` asks for; Notion may answer with another it supports.
 const PROTOCOL: &str = "2025-06-18";
@@ -27,6 +28,10 @@ const NOT_PAGES: [&str; 5] = [
     "collection",
     "view",
 ];
+
+/// What a tool's "not found" refusal says. Reading a page an agent is given says it differently.
+pub(super) const PAGE_NOT_FOUND: &str =
+    "Notion cannot open that page. Open Connections and choose the destination page again.";
 
 /// One conversation with Notion's MCP server.
 pub(super) struct Session<'a> {
@@ -236,10 +241,7 @@ fn tool_error(text: &str) -> ApiError {
     .iter()
     .any(|phrase| text.contains(phrase))
     {
-        failure(
-            StatusCode::FORBIDDEN,
-            "Notion cannot open that page. Open Connections and choose the destination page again.",
-        )
+        failure(StatusCode::FORBIDDEN, PAGE_NOT_FOUND)
     } else if text.contains("validation") {
         failure(
             StatusCode::BAD_GATEWAY,
@@ -322,6 +324,41 @@ pub(super) async fn page(session: &mut Session<'_>, id: &str) -> ApiResult<Optio
         id: id.to_owned(),
         title: title_of(&fetched),
     }))
+}
+
+/// Page `id`'s text for an agent to read (ADR 0050), or `None` when it is not a page.
+pub(super) async fn read(session: &mut Session<'_>, id: &str) -> ApiResult<Option<NotionPage>> {
+    let fetched = session.tool("notion-fetch", json!({"id": id})).await?;
+    if NOT_PAGES.contains(&kind(&fetched)) {
+        return Ok(None);
+    }
+    let url = fetched
+        .get("url")
+        .and_then(Value::as_str)
+        .filter(|url| is_notion_url(url))
+        .map_or_else(|| page_url(id), str::to_owned);
+    let truncated = ["/truncated", "/metadata/truncated"]
+        .iter()
+        .any(|at| fetched.pointer(at) == Some(&json!(true)));
+    Ok(Some(NotionPage {
+        title: title_of(&fetched),
+        url,
+        text: page_content(&text_of(&fetched)),
+        truncated,
+    }))
+}
+
+/// A fetched page's body: what its `<content>` holds, without the `<page>` and `<properties>`
+/// Notion wraps it in. The whole text when there is no such tag.
+fn page_content(text: &str) -> String {
+    const OPEN: &str = "<content>";
+    const CLOSE: &str = "</content>";
+    let body = text
+        .find(OPEN)
+        .map(|start| start + OPEN.len())
+        .and_then(|start| Some(&text[start..start + text[start..].rfind(CLOSE)?]))
+        .unwrap_or(text);
+    body.trim().to_owned()
 }
 
 /// Create `title` under `destination` holding `markdown`, unless the destination already has a
@@ -752,6 +789,18 @@ mod tests {
         );
         assert_eq!(kind(&json!({"type": "page"})), "page");
         assert_eq!(kind(&json!({"title": "?"})), "");
+    }
+
+    /// ADR 0050: an agent reads the page's body, not the tags Notion wraps a fetch in. A page that
+    /// quotes `</content>` keeps everything up to the wrapper's own closing tag.
+    #[test]
+    fn a_read_page_is_its_content_without_the_fetch_wrapper() {
+        let fetched = "<page url=\"https://app.notion.com/p/1\">\n<properties>{\"title\":\"Brief\"}</properties>\n<content>\n# Goals\nShip it. `</content>` is a tag.\n<page url=\"https://app.notion.com/p/2\">Child</page>\n</content>\n</page>";
+        assert_eq!(
+            page_content(fetched),
+            "# Goals\nShip it. `</content>` is a tag.\n<page url=\"https://app.notion.com/p/2\">Child</page>"
+        );
+        assert_eq!(page_content("  plain text\n"), "plain text");
     }
 
     #[test]

@@ -109,6 +109,10 @@ export default function Connections() {
               <span className="t-meta">{connection.destination ? connection.destination.title : 'Choose the page your teams’ answers go under.'}</span>
               <span className="t-meta lw-settings-quiet">Each answer becomes a new page under it. To send a team’s answers here, open the team, select its <strong>Team response</strong> on the canvas, and turn on <strong>Send every answer to Notion</strong>.</span>
             </div>
+            <div className="e2 lw-settings-row">
+              <span className="t-body-m">Pages agents read</span>
+              <span className="t-meta lw-settings-quiet">To give an agent a Notion page, open a team and drag <strong>Notion</strong>, under <strong>Connections</strong> in the side panel, onto the agent. LoomWatch reads the page each time the team runs and gives the agent its text. Agents never get this connection.</span>
+            </div>
             <form className="lw-settings-search" onSubmit={(event) => { event.preventDefault(); void act(() => search()) }}>
               <label className="field"><span className="t-meta">Find a page</span><input className="input" value={query} maxLength={200} onChange={(event) => setQuery(event.target.value)} placeholder="Search by title, or leave blank" /></label>
               <button className="btn btn-primary" disabled={busy}>Search</button>
@@ -128,7 +132,7 @@ export default function Connections() {
               setConnection(await request<Connection>('connection', 'DELETE')); setResults(null); setToken(''); setNotice('Disconnected from Notion.')
             })}>Disconnect Notion</button>
           </> : connection && <>
-            <p className="t-body lw-settings-quiet">Connect your Notion account, then choose the page your teams’ answers go under. Each answer becomes a new page there.</p>
+            <p className="t-body lw-settings-quiet">Connect your Notion account to send your teams’ answers to a Notion page, and to give agents Notion pages to read.</p>
             <button type="button" className="btn btn-primary lw-settings-start" disabled={busy} onClick={() => void act(signIn)}>{busy ? 'Opening Notion…' : 'Connect Notion'}</button>
             <p className="t-meta lw-settings-quiet">Notion asks you to allow LoomWatch. Because it sends you back to this computer, it also asks you to tick <strong>I recognize and trust this URL</strong> first. The sign-in is kept in this Mac’s Keychain, outside your team files.</p>
             <details className="lw-settings-advanced">

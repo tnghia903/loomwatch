@@ -3,6 +3,7 @@ import { Fragment, useEffect, useState } from 'react'
 
 import { KIND_LABEL, RELATION, type CapabilityKind } from '../../lib/composer-layout/types'
 import { fetchCapabilityDetails, type CapabilityDetails, type DetectedCapability, type SkillRoute } from '../../lib/library/client'
+import { notionPageUrl } from '../../lib/notion/connection'
 import { EntityGlyph } from '../ui/glyphs'
 
 export interface InspectedCapability {
@@ -55,6 +56,9 @@ const DELIVERY_NOTE: Record<CapabilityKind, string> = {
   knowledge: 'Save the team to keep these connections. Each connected agent may read it wherever that agent works, and never changes it. A run fails up front if it has gone or holds nothing readable.',
 }
 
+/** What connecting a Notion page means (ADR 0050). */
+const NOTION_DELIVERY_NOTE = 'Save the team to keep these connections. When a run starts, LoomWatch reads the page through your Notion connection and gives its text to each connected agent; no agent gets the connection itself. A run stops before it begins if Notion is not connected or can’t open the page.'
+
 /** Plain-words heading for the portability classification. */
 const KIND_NOTE: Record<string, string> = {
   artifact: 'Produces a deliverable',
@@ -73,7 +77,9 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
   // What an agent can be connected to through the team file (ADR 0012, 0029, 0042). Memory is
   // wired through `memory.inherits` on the canvas instead, and knowledge with no path names
   // nothing, so neither has a picker here.
-  const chosen = kind === 'knowledge' && Boolean(item.path)
+  const chosen = kind === 'knowledge' && Boolean(item.path || item.notion)
+  // A Notion page (ADR 0050) is chosen like a file, but it lives in Notion, not at a path.
+  const notionPage = kind === 'knowledge' ? item.notion?.page : undefined
   const wireable = kind !== 'knowledge' || chosen
   const noun = kind === 'skill' ? 'skill' : kind === 'tool' ? 'tool' : chosen ? item.source.toLowerCase().replace(/^(added|linked) /, '') : 'source'
   useEffect(() => {
@@ -128,7 +134,9 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
           <p className="capability-description t-body">{item.detail}</p>
           <dl className="proc-list t-meta capability-facts">
             <dt>Type</dt><dd>{chosen ? item.source : KIND_LABEL[kind]}</dd>
-            {chosen ? <><dt>Path</dt><dd className="t-mono-sm" title={item.path}>{item.path}</dd></> : <><dt>Source</dt><dd>{item.source}</dd></>}
+            {notionPage
+              ? <><dt>Page</dt><dd><a className="link" href={notionPageUrl(notionPage)} target="_blank" rel="noreferrer">Open in Notion</a></dd></>
+              : chosen ? <><dt>Path</dt><dd className="t-mono-sm" title={item.path}>{item.path}</dd></> : <><dt>Source</dt><dd>{item.source}</dd></>}
             <dt>Relation</dt><dd>{RELATION[kind]}{chosen ? ' · read only' : ''}</dd>
           </dl>
         </div>
@@ -182,7 +190,7 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
                 <button type="button" className="btn" disabled={readOnly || !onToggleAgent} onClick={() => onToggleAgent?.(suggestion.id, true)}>Connect to {suggestion.name}</button>
               </p>
             )}
-            <p className="hint t-meta">{DELIVERY_NOTE[kind]}</p>
+            <p className="hint t-meta">{notionPage ? NOTION_DELIVERY_NOTE : DELIVERY_NOTE[kind]}</p>
           </div>
         )}
 

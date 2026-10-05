@@ -146,6 +146,24 @@ PDF is. When a file is longer than that, the prompt carries its opening, and the
 in the prepared folder as `knowledge/<file>`, which the prompt names. Only `knowledge` may have a
 `path`.
 
+Knowledge can also be a **Notion page**, named by `notion.page` (its page id) instead of a `path`;
+`name` is the page's title when it was chosen. Drag **Notion** from **Connections** in the add panel
+onto an agent and choose the page; see [Notion](NOTION.md#give-an-agent-a-notion-page-to-read).
+
+```yaml
+capabilities:
+  - kind: knowledge
+    name: Q3 roadmap
+    notion: { page: 0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0 }
+```
+
+When a run starts, LoomWatch reads every page its agents are given through your own Notion
+connection, once per page, before any agent starts. Each agent gets the page's text the way it gets
+an added file's: all of it up to 12,000 characters, else the opening and a full copy at
+`knowledge/<title>-<id>.md`. No agent is given the connection or a read grant. A page that cannot
+be read, or Notion not being connected, fails the run before it starts and names the page. Only
+`knowledge` may name a Notion page, and never together with a `path`.
+
 **Knowledge** is supplied in the agent's opening prompt as the snapshot described above: a
 folder's top-level listing and README, or a file's text. It is framed as source material, never as
 instructions. A folder or file is also a read grant for it. For an agent that starts in the

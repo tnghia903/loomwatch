@@ -1,6 +1,6 @@
 import { useStore, type NodeProps } from '@xyflow/react'
 import { createElement } from 'react'
-import { Bot, Box, Circle, FileText, Folder, Inbox, Puzzle, Wrench } from 'lucide-react'
+import { Bot, Box, Circle, FileText, Folder, Inbox, NotebookText, Puzzle, Wrench } from 'lucide-react'
 import { KIND_LABEL } from '../../lib/composer-layout/types'
 import { chosenIsFile } from '../../lib/knowledge/chosen'
 import { middleTruncate } from '../../lib/format'
@@ -185,15 +185,16 @@ export function BuildOutputCard({ data, selected }: NodeProps<OutputNode>) {
 }
 
 export function BuildCapabilityCard({ data, selected }: NodeProps<CapabilityNode>) {
-  // A folder or file the operator chose (ADR 0042) says which it is and where it lives.
+  // A folder or file the operator chose (ADR 0042) says which it is and where it lives; a Notion
+  // page (ADR 0050) says it is one, since its address means nothing on a card.
   const file = data.path ? chosenIsFile(data.path) : false
-  const Icon = data.path ? (file ? FileText : Folder) : data.kind === 'skill' ? Puzzle : data.kind === 'tool' ? Wrench : Box
-  const kind = data.path ? (file ? 'file' : 'folder') : data.kind
-  const what = data.path ? `${data.source.toLowerCase()} at ${data.path}` : `${KIND_LABEL[data.kind].toLowerCase()} from ${data.source}`
+  const Icon = data.notionPage ? NotebookText : data.path ? (file ? FileText : Folder) : data.kind === 'skill' ? Puzzle : data.kind === 'tool' ? Wrench : Box
+  const kind = data.notionPage ? 'Notion page' : data.path ? (file ? 'file' : 'folder') : data.kind
+  const what = data.notionPage ? 'a Notion page read when each run starts' : data.path ? `${data.source.toLowerCase()} at ${data.path}` : `${KIND_LABEL[data.kind].toLowerCase()} from ${data.source}`
   return <article className={`build-node kind-${data.kind} ${selected ? 'selected' : ''}`} aria-label={`${data.name}, ${what}, ${data.wiredTo ? `used by ${data.wiredTo} agent${data.wiredTo === 1 ? "" : "s"}` : 'not connected to an agent yet'}`}>
     <CardPorts output={false} connectIn={!data.readOnly} />
     <span className="build-node-icon"><Icon size={18} /></span>
-    <div><span className="node-kind">{kind}</span><strong>{data.name}</strong><small title={data.path ?? data.source}>{data.path ? middleTruncate(data.path, 40) : data.source}</small></div>
+    <div><span className="node-kind">{kind}</span><strong>{data.name}</strong><small title={data.path ?? data.source}>{data.notionPage ? 'Read when each run starts' : data.path ? middleTruncate(data.path, 40) : data.source}</small></div>
     {/* Removed from its panel or with Delete, like an agent card: no second remove button here (ADR 0043). */}
   </article>
 }

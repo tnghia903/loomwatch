@@ -584,6 +584,67 @@ pub struct CapabilityRef {
     /// the Library no longer lists folders a name could point at (ADR 0036).
     #[serde(default)]
     pub path: Option<PathBuf>,
+    /// A Notion page the operator chose, for `knowledge` only and instead of `path` (ADR 0050).
+    /// `name` is then the page's title as it was when chosen.
+    #[serde(default)]
+    pub notion: Option<NotionRef>,
+}
+
+/// Which Notion page a knowledge entry reads (ADR 0050). An object rather than a bare id so a
+/// teamspace can join it later without a second field.
+impl CapabilityRef {
+    /// Where a path or a Notion page may appear, and that a Notion page is named by its id.
+    fn validate(&self) -> Result<(), String> {
+        let (name, kind) = (&self.name, self.kind.as_str());
+        if self.path.is_some() && self.kind != CapabilityKind::Knowledge {
+            return Err(format!(
+                "{name} is a {kind} with a path, but only knowledge can be read from a path"
+            ));
+        }
+        let Some(notion) = &self.notion else {
+            return Ok(());
+        };
+        if self.kind != CapabilityKind::Knowledge {
+            return Err(format!(
+                "{name} is a {kind} with a Notion page, but only knowledge can be read from Notion"
+            ));
+        }
+        if self.path.is_some() {
+            return Err(format!(
+                "{name} names both a path and a Notion page; a knowledge entry reads one of them"
+            ));
+        }
+        if uuid::Uuid::parse_str(&notion.page).is_err() {
+            return Err(format!(
+                "{name} names the Notion page {:?}, which is not a Notion page id",
+                notion.page
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotionRef {
+    pub page: String,
+    /// The page as this run read it. Never in the team file: the run reads every page once,
+    /// before anything spawns, so each stage and helper is given the same text (`lib.rs`,
+    /// `read_notion_pages`).
+    #[serde(skip)]
+    pub read: Option<std::sync::Arc<NotionPage>>,
+}
+
+/// One Notion page's text, read from the operator's own Notion connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotionPage {
+    pub title: String,
+    /// The page's address, as Notion gave it.
+    pub url: String,
+    /// The page in Notion's Markdown.
+    pub text: String,
+    /// Notion said it left part of the page out.
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -1111,14 +1172,9 @@ impl TeamConfig {
         team.responder_id()?;
         for agent in &team.agents {
             for capability in &agent.capabilities {
-                if capability.path.is_some() && capability.kind != CapabilityKind::Knowledge {
-                    bail!(
-                        "agent {:?}: {} is a {} with a path, but only knowledge can be read from a path",
-                        agent.id,
-                        capability.name,
-                        capability.kind.as_str()
-                    );
-                }
+                capability
+                    .validate()
+                    .map_err(|reason| anyhow::anyhow!("agent {:?}: {reason}", agent.id))?;
             }
         }
         if let Some(schedule) = &team.schedule {
@@ -1921,5 +1977,43 @@ edges:
         assert_eq!(describe("30 * * * *", None), "hourly at :30 local time");
         assert_eq!(describe("*/5 * * * *", None), "*/5 * * * * local time");
         assert_eq!(describe("0 8 1 * *", Some("UTC")), "0 8 1 * * UTC");
+    }
+
+    /// ADR 0050: a Notion page is knowledge read from the operator's Notion instead of a path, and
+    /// is named by its page id.
+    #[test]
+    fn a_notion_page_is_knowledge_named_by_its_page_id() {
+        let team = |capability: &str| {
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: claude-agent-acp\n      cwd: .\n    model: test/model\n    capabilities:\n{capability}"
+            ))
+        };
+        let page = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
+        let parsed = team(&format!(
+            "      - kind: knowledge\n        name: Roadmap\n        notion:\n          page: {page}\n"
+        ))
+        .expect("a Notion page");
+        let notion = parsed.agents[0].capabilities[0]
+            .notion
+            .as_ref()
+            .expect("notion");
+        assert_eq!((notion.page.as_str(), notion.read.is_none()), (page, true));
+        for (capability, expected) in [
+            (
+                format!("      - kind: skill\n        name: Roadmap\n        notion:\n          page: {page}\n"),
+                "only knowledge can be read from Notion",
+            ),
+            (
+                format!("      - kind: knowledge\n        name: Roadmap\n        path: notes.md\n        notion:\n          page: {page}\n"),
+                "names both a path and a Notion page",
+            ),
+            (
+                "      - kind: knowledge\n        name: Roadmap\n        notion:\n          page: roadmap\n".to_owned(),
+                "not a Notion page id",
+            ),
+        ] {
+            let error = team(&capability).expect_err(expected).to_string();
+            assert!(error.contains(expected) && error.contains("agent \"a\""), "{error}");
+        }
     }
 }

@@ -499,6 +499,13 @@ impl ComposedPrompt {
                     _ => "\nRead further files in it when they help the task, where your permissions allow.",
                 });
             }
+            // ADR 0050: a Notion page, read through the operator's connection, which the agent
+            // does not have; its address alone would send the agent to a sign-in page.
+            if knowledge.source == crate::delivery::NOTION_SOURCE {
+                text.push_str(
+                    "\nA Notion page, read when this run started. Its text is below; you cannot open it in Notion yourself.",
+                );
+            }
             // ADR 0035: a file the operator added. Its text, or its opening, is below.
             if !knowledge.files.is_empty() {
                 text.push_str("\nFile: ");

@@ -117,6 +117,9 @@ fn resolve_knowledge(
     capability: &crate::config::CapabilityRef,
 ) -> Result<DeliveredKnowledge, String> {
     let name = capability.name.as_str();
+    if let Some(notion) = &capability.notion {
+        return resolve_notion(name, notion);
+    }
     let Some(path) = &capability.path else {
         if find(&inventory.sources, name).is_some_and(|item| item.memory.is_some()) {
             return Err(format!(
@@ -157,6 +160,64 @@ fn resolve_knowledge(
         contents: snapshot.contents,
         text_copy: snapshot.text_copy,
     })
+}
+
+/// A Notion page as the run read it (ADR 0050), supplied like an added file: the whole page when
+/// it is short, else its opening with the full text in the workspace's `knowledge/` folder. No
+/// read grant: the agent is handed the text, never the connection.
+fn resolve_notion(
+    name: &str,
+    notion: &crate::config::NotionRef,
+) -> Result<DeliveredKnowledge, String> {
+    let page = notion.read.as_deref().ok_or_else(|| {
+        format!(
+            "cannot use the Notion page {name}: it was not read from Notion when the run started."
+        )
+    })?;
+    let short = notion.page.split('-').next().unwrap_or_default();
+    let (mut content, text_copy) = if page.text.trim().is_empty() {
+        ("This page is empty in Notion.".to_owned(), None)
+    } else {
+        crate::chosen_knowledge::excerpt(&page.text, &format!("{}-{short}.md", slug(&page.title)))
+    };
+    if page.truncated {
+        content.push_str("\n\nNotion left part of this page out, so this may not be all of it.");
+    }
+    Ok(DeliveredKnowledge {
+        name: name.to_owned(),
+        source: NOTION_SOURCE.to_owned(),
+        folders: Vec::new(),
+        files: Vec::new(),
+        read_access: None,
+        chars: 0,
+        sha256: String::new(),
+        contents: vec![CapabilityDefinition {
+            source: format!("{NOTION_SOURCE} · {}", page.title),
+            path: page.url.clone(),
+            content,
+        }],
+        text_copy,
+    })
+}
+
+/// How a delivered Notion page is labelled in the record and in the prompt.
+pub const NOTION_SOURCE: &str = "Notion page";
+
+/// `Q3 Roadmap: draft!` → `q3-roadmap-draft`, for a file name that is safe everywhere.
+fn slug(title: &str) -> String {
+    let words = title
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>()
+        .join("-");
+    let slug: String = words.chars().take(48).collect();
+    let slug = slug.trim_end_matches('-');
+    if slug.is_empty() {
+        "notion-page".to_owned()
+    } else {
+        slug.to_owned()
+    }
 }
 
 /// Resolve every knowledge source and tool `agent` wires, or say which one cannot be delivered.
@@ -812,6 +873,7 @@ mod tests {
                 kind: *kind,
                 name: (*name).to_owned(),
                 path: None,
+                notion: None,
             })
             .collect();
         agent
@@ -932,6 +994,92 @@ mod tests {
             .expect_err("refused");
             assert!(error.contains(name) && error.contains(expected), "{error}");
         }
+    }
+
+    /// ADR 0050: a Notion page is supplied like an added file, as the text the run read: the whole
+    /// page when short, its opening and a full copy when long, and no read grant, since the agent
+    /// never reaches Notion itself. A page the run did not read is refused rather than left out.
+    #[test]
+    fn a_notion_page_is_supplied_as_the_text_the_run_read() {
+        let (_directory, home, teams) = machine();
+        let inventory = capabilities::detect_capabilities(Some(&home), &teams);
+        let page = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+        let given = |text: Option<String>, truncated: bool| {
+            let mut agent = agent(
+                "claude-agent-acp",
+                &[(CapabilityKind::Knowledge, "Q3 Roadmap")],
+            );
+            agent.capabilities[0].notion = Some(crate::config::NotionRef {
+                page: page.to_owned(),
+                read: text.map(|text| {
+                    std::sync::Arc::new(crate::config::NotionPage {
+                        title: "Q3 Roadmap: draft!".to_owned(),
+                        url: "https://app.notion.com/p/0f1e2d3c4b5a69788796a5b4c3d2e1f0".to_owned(),
+                        text,
+                        truncated,
+                    })
+                }),
+            });
+            prepare_for(Some(&home), &teams, &inventory, &agent, &|_| None, None)
+        };
+
+        let delivery =
+            given(Some("# Goals\nShip the canvas.".to_owned()), false).expect("short page");
+        let [knowledge] = delivery.knowledge.as_slice() else {
+            panic!("one source: {delivery:?}");
+        };
+        assert_eq!(knowledge.source, NOTION_SOURCE);
+        assert_eq!((knowledge.folders.len(), knowledge.files.len()), (0, 0));
+        assert_eq!(
+            knowledge.read_access, None,
+            "nothing to grant: the agent gets the text"
+        );
+        assert_eq!(
+            knowledge.rendered_contents(),
+            "### Notion page · Q3 Roadmap: draft! — https://app.notion.com/p/0f1e2d3c4b5a69788796a5b4c3d2e1f0\n# Goals\nShip the canvas."
+        );
+        assert!(knowledge.text_copy.is_none());
+        let section = crate::compose_prompt(
+            &agent("claude-agent-acp", &[]),
+            &crate::memory::ContextPacket::default(),
+            &crate::NodeTask::goal("Plan Q3"),
+        )
+        .with_delivery(&delivery, true)
+        .sections
+        .into_iter()
+        .find(|section| section.kind == Kind::Knowledge)
+        .expect("a knowledge section");
+        assert_eq!(section.heading, "## Knowledge: Q3 Roadmap");
+        assert!(
+            section
+                .text
+                .contains("you cannot open it in Notion yourself")
+                && section.text.ends_with("Ship the canvas."),
+            "{}",
+            section.text
+        );
+
+        let long = "A line of the roadmap.\n".repeat(1_000);
+        let delivery = given(Some(long.clone()), true).expect("long page");
+        let knowledge = &delivery.knowledge[0];
+        let copy = knowledge
+            .text_copy
+            .as_ref()
+            .expect("the full text is copied");
+        assert_eq!(copy.file_name, "q3-roadmap-draft-0f1e2d3c.md");
+        assert_eq!(copy.text, long);
+        let shown = knowledge.rendered_contents();
+        assert!(
+            shown.contains("knowledge/q3-roadmap-draft-0f1e2d3c.md"),
+            "{shown}"
+        );
+        assert!(shown.ends_with("may not be all of it."), "{shown}");
+
+        let error = given(None, false).expect_err("not read at run start");
+        assert!(
+            error.contains("Q3 Roadmap") && error.contains("not read from Notion"),
+            "{error}"
+        );
     }
 
     /// Wiring is the operator's grant, so it is written — but into their rules, never over them.

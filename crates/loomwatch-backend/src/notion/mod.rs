@@ -10,6 +10,7 @@ mod mcp;
 mod sign_in;
 
 use std::{
+    collections::BTreeMap,
     sync::{Arc, LazyLock},
     time::Duration,
 };
@@ -823,6 +824,165 @@ impl Publisher {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// Reading pages an agent is given
+// ---------------------------------------------------------------------------------------
+
+/// What a run says when an agent is given a Notion page and nothing is connected.
+pub(crate) const READ_NOT_CONNECTED: &str =
+    "Notion is not connected. Open Connections and sign in to Notion.";
+
+/// Why the pages a team is given could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReadError {
+    /// The page that failed, or `None` when no page could be read at all: nothing is connected,
+    /// or the sign-in has ended.
+    pub(crate) page: Option<String>,
+    /// Operator-facing, in the words Connections uses.
+    pub(crate) message: String,
+}
+
+impl ReadError {
+    fn connection(error: &ApiError) -> Self {
+        Self {
+            page: None,
+            message: error.message.to_owned(),
+        }
+    }
+
+    fn page(id: &str, message: &str) -> Self {
+        Self {
+            page: Some(id.to_owned()),
+            message: message.to_owned(),
+        }
+    }
+}
+
+/// Reads the Notion pages agents are given (ADR 0050) through the stored connection. Like
+/// [`Publisher`], only the daemon holds the connection: an agent is handed the text.
+pub(crate) struct Reader {
+    client: Client,
+    store: Store,
+    endpoints: Arc<Endpoints>,
+}
+
+impl Reader {
+    /// A reader for the stored connection, with its own HTTPS client.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTPS client cannot be initialized.
+    pub(crate) fn new() -> anyhow::Result<Self> {
+        Ok(Self {
+            client: build_client()?,
+            store: Store::Keychain,
+            endpoints: Arc::new(Endpoints::notion()),
+        })
+    }
+
+    #[cfg(test)]
+    fn with(store: Store, endpoints: Endpoints) -> Self {
+        Self {
+            client: build_client().expect("HTTPS client"),
+            store,
+            endpoints: Arc::new(endpoints),
+        }
+    }
+
+    /// Every page in `ids`, each read once, through one session with Notion.
+    ///
+    /// # Errors
+    ///
+    /// The first page that cannot be read and why, or why none can.
+    pub(crate) async fn read(
+        &self,
+        ids: &[String],
+    ) -> Result<BTreeMap<String, crate::config::NotionPage>, ReadError> {
+        let connection = self
+            .store
+            .load()
+            .await
+            .map_err(|error| ReadError::connection(&error))?
+            .ok_or_else(|| ReadError {
+                page: None,
+                message: READ_NOT_CONNECTED.to_owned(),
+            })?;
+        let mut pages = BTreeMap::new();
+        match connection.access {
+            Access::Token { token } => {
+                for id in ids {
+                    pages.insert(id.clone(), self.read_with_token(&token, id).await?);
+                }
+            }
+            Access::SignIn { .. } => {
+                let bearer = sign_in::bearer(&self.client, &self.endpoints, &self.store)
+                    .await
+                    .map_err(|error| ReadError::connection(&error))?;
+                let mut session = mcp::Session::open(&self.client, &self.endpoints.mcp, bearer)
+                    .await
+                    .map_err(|error| ReadError::connection(&error))?;
+                for id in ids {
+                    let page = match mcp::read(&mut session, id).await {
+                        Ok(Some(page)) => page,
+                        Ok(None) => return Err(ReadError::page(id, NOT_A_PAGE)),
+                        Err(error) if error.message == mcp::PAGE_NOT_FOUND => {
+                            return Err(ReadError::page(id, PAGE_GONE));
+                        }
+                        Err(error) => return Err(ReadError::page(id, error.message)),
+                    };
+                    pages.insert(id.clone(), page);
+                }
+            }
+        }
+        Ok(pages)
+    }
+
+    /// One page through the REST API, for a connection made with an integration token.
+    async fn read_with_token(
+        &self,
+        token: &str,
+        id: &str,
+    ) -> Result<crate::config::NotionPage, ReadError> {
+        let failed = |error: ApiError| ReadError::page(id, error.message);
+        let (client, api) = (&self.client, self.endpoints.api.as_str());
+        let about = request(
+            client,
+            api,
+            token,
+            Method::GET,
+            &format!("pages/{id}"),
+            None,
+        )
+        .await
+        .map_err(failed)?;
+        let Some(Page { title, .. }) = page(&about) else {
+            return Err(ReadError::page(id, PAGE_GONE));
+        };
+        let markdown = format!("pages/{id}/markdown");
+        let body = request(client, api, token, Method::GET, &markdown, None)
+            .await
+            .map_err(failed)?;
+        let text = body
+            .get("markdown")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ReadError::page(id, unreadable().message))?;
+        Ok(crate::config::NotionPage {
+            title,
+            url: about
+                .get("url")
+                .and_then(Value::as_str)
+                .map_or_else(|| page_url(id), str::to_owned),
+            text: text.trim().to_owned(),
+            truncated: body.get("truncated") == Some(&json!(true)),
+        })
+    }
+}
+
+/// A page the sign-in cannot open, read for an agent rather than chosen as a destination.
+const PAGE_GONE: &str = "Notion can't open this page any more. It may have been deleted, or moved where your Notion account can't see it. Connect the agent to the page again.";
+/// A database or view chosen where a page was expected.
+const NOT_A_PAGE: &str = "this is a Notion database, not a page. Choose a page to give an agent.";
+
 /// The public page URL Notion derives from an id, for responses that carry none.
 fn page_url(id: &str) -> String {
     format!("https://www.notion.so/{}", id.replace('-', ""))
@@ -1315,6 +1475,7 @@ mod tests {
     const DATABASE: &str = "650e8400-e29b-41d4-a716-446655440000";
     const EXISTING: &str = "750e8400-e29b-41d4-a716-446655440000";
     const CREATED: &str = "850e8400-e29b-41d4-a716-446655440000";
+    const MISSING: &str = "950e8400-e29b-41d4-a716-446655440000";
 
     fn notion_url(id: &str) -> String {
         format!("https://app.notion.com/p/{}", id.replace('-', ""))
@@ -1412,7 +1573,7 @@ mod tests {
                 assert_eq!(headers["mcp-protocol-version"], "2025-06-18");
                 let name = message["params"]["name"].as_str().unwrap().to_owned();
                 let arguments = message["params"]["arguments"].clone();
-                fake.tools.push((name.clone(), arguments));
+                fake.tools.push((name.clone(), arguments.clone()));
                 match name.as_str() {
                     // Search answers as an event stream, after a progress notification.
                     "notion-search" => (
@@ -1427,6 +1588,16 @@ mod tests {
                         ),
                     )
                         .into_response(),
+                    "notion-fetch" if arguments["id"] == DATABASE => Json(answer(text(json!({
+                        "metadata": {"type": "database"},
+                        "title": "Tasks",
+                    }))))
+                    .into_response(),
+                    "notion-fetch" if arguments["id"] == MISSING => Json(answer(json!({
+                        "isError": true,
+                        "content": [{"type": "text", "text": "Could not find page with ID: missing"}],
+                    })))
+                    .into_response(),
                     // As Notion fetches a page: wrapped in its own <page>, children as leaves.
                     "notion-fetch" => Json(answer(text(json!({
                         "metadata": {"type": "page"},
@@ -1451,6 +1622,43 @@ mod tests {
         }
     }
 
+    /// The REST API as an integration token reaches it: only `test-token`, only `DESTINATION`.
+    fn rest_refusal(headers: &HeaderMap, id: &str) -> Option<Response> {
+        let authorized = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            == Some("Bearer test-token");
+        if !authorized {
+            return Some(StatusCode::UNAUTHORIZED.into_response());
+        }
+        (id != DESTINATION).then(|| StatusCode::NOT_FOUND.into_response())
+    }
+
+    async fn fake_rest_page(
+        headers: HeaderMap,
+        axum::extract::Path(id): axum::extract::Path<String>,
+    ) -> Response {
+        rest_refusal(&headers, &id).unwrap_or_else(|| {
+            Json(json!({
+                "object": "page",
+                "id": DESTINATION,
+                "url": notion_url(DESTINATION),
+                "properties": {"Name": {"title": [{"plain_text": "Daily"}]}},
+            }))
+            .into_response()
+        })
+    }
+
+    async fn fake_rest_markdown(
+        headers: HeaderMap,
+        axum::extract::Path(id): axum::extract::Path<String>,
+    ) -> Response {
+        rest_refusal(&headers, &id).unwrap_or_else(|| {
+            Json(json!({"object": "page_markdown", "id": DESTINATION, "markdown": "# Goals\nShip it.\n", "truncated": true, "unknown_block_ids": []}))
+                .into_response()
+        })
+    }
+
     async fn fake_notion() -> (Endpoints, Shared) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
@@ -1460,6 +1668,8 @@ mod tests {
             .route("/register", post(fake_register))
             .route("/token", post(fake_token))
             .route("/mcp", post(fake_mcp))
+            .route("/v1/pages/{id}", get(fake_rest_page))
+            .route("/v1/pages/{id}/markdown", get(fake_rest_markdown))
             .with_state(fake.clone());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let endpoints = Endpoints {
@@ -1779,5 +1989,104 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["error"], sign_in::SIGN_IN_AGAIN);
+    }
+
+    /// ADR 0050: a run reads every page its agents are given through the sign-in, in one session,
+    /// as the page's body; a database, a page Notion can no longer open, and no connection at all
+    /// each say what to do instead.
+    #[tokio::test]
+    async fn pages_given_to_agents_are_read_through_the_sign_in() {
+        let (endpoints, fake) = fake_notion().await;
+        let slot: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
+        let store = Store::Memory(slot.clone());
+        let reader = Reader::with(store.clone(), endpoints.clone());
+        assert_eq!(
+            reader.read(&[DESTINATION.to_owned()]).await,
+            Err(ReadError {
+                page: None,
+                message: READ_NOT_CONNECTED.to_owned()
+            })
+        );
+
+        let router = router_with(NotionState {
+            client: build_client().unwrap(),
+            gate: Arc::default(),
+            store,
+            endpoints: Arc::new(endpoints),
+            pending: Arc::default(),
+        });
+        let state = start(&router, &fake).await;
+        send(
+            &router,
+            from_notion(&format!("state={state}&code=code-1")),
+            None,
+        )
+        .await;
+        fake.lock().unwrap().tools.clear();
+        let pages = reader
+            .read(&[DESTINATION.to_owned()])
+            .await
+            .expect("a page reads");
+        assert_eq!(
+            pages[DESTINATION],
+            crate::config::NotionPage {
+                title: "Daily".to_owned(),
+                url: notion_url(DESTINATION),
+                text: format!(
+                    "Intro\n<page url=\"{}\">Existing</page>",
+                    notion_url(EXISTING)
+                ),
+                truncated: false,
+            }
+        );
+        assert_eq!(
+            fake.lock().unwrap().tools,
+            vec![("notion-fetch".to_owned(), json!({"id": DESTINATION}))],
+            "only a fetch: reading changes nothing in Notion"
+        );
+
+        for (id, expected) in [(DATABASE, NOT_A_PAGE), (MISSING, PAGE_GONE)] {
+            assert_eq!(
+                reader.read(&[DESTINATION.to_owned(), id.to_owned()]).await,
+                Err(ReadError::page(id, expected))
+            );
+        }
+    }
+
+    /// An integration token reads a page through the REST API's Markdown endpoint, and a page not
+    /// shared with the integration says how to share it.
+    #[tokio::test]
+    async fn pages_given_to_agents_are_read_with_an_integration_token() {
+        let (endpoints, _) = fake_notion().await;
+        let connection = Connection {
+            access: Access::Token {
+                token: "test-token".into(),
+            },
+            name: "Acme".into(),
+            destination: None,
+        };
+        let slot = Arc::new(std::sync::Mutex::new(Some(
+            serde_json::to_string(&connection).unwrap(),
+        )));
+        let reader = Reader::with(Store::Memory(slot), endpoints);
+        let pages = reader
+            .read(&[DESTINATION.to_owned()])
+            .await
+            .expect("a shared page reads");
+        assert_eq!(
+            pages[DESTINATION],
+            crate::config::NotionPage {
+                title: "Daily".to_owned(),
+                url: notion_url(DESTINATION),
+                text: "# Goals\nShip it.".to_owned(),
+                truncated: true,
+            }
+        );
+        let error = reader
+            .read(&[EXISTING.to_owned()])
+            .await
+            .expect_err("not shared with the integration");
+        assert_eq!(error.page.as_deref(), Some(EXISTING));
+        assert!(error.message.contains("add your integration"), "{error:?}");
     }
 }

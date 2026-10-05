@@ -247,7 +247,7 @@ again.
 
 ### ⏰ Schedules and Notion
 
-Run a team every morning and send the answer to Notion. A review stop still waits for you.
+Run a team every morning and send the answer to Notion. A review stop still waits for you. Give an agent a Notion page to read by dragging Notion onto it.
 
 </td>
 </tr>

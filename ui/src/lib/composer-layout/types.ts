@@ -6,6 +6,8 @@
 // §5: this is editable *intent*. It never claims a capability ran, and §8.4: naming a capability
 // here grants no access — the harness's own authorization still decides.
 
+import type { NotionPageRef } from '../team-file/types'
+
 /**
  * Version 2 (ADR 0016) adds two fields, both additive: a knowledge card may carry the `memory` it
  * stands for, and the sidecar carries agent positions. A version-1 file is read and stamped
@@ -57,6 +59,11 @@ export interface CapabilityNodeConfig {
    * agents' knowledge entries carry. One card per path, however many agents read it.
    */
   path?: string
+  /**
+   * Set on a knowledge card that is a Notion page the operator chose (ADR 0050): the `notion` its
+   * agents' knowledge entries carry. One card per page, however many agents read it.
+   */
+  notion?: NotionPageRef
 }
 
 export interface CapabilityEdgeConfig {
@@ -122,8 +129,22 @@ export function sourceCardId(path: string): string {
   return `knowledge@${sourcePath(path)}`
 }
 
-/** The card id a payload or card gets: by path for a chosen folder or file, by kind and name otherwise. */
-export function cardId(card: Pick<CapabilityNodeConfig, 'kind' | 'name' | 'path'>): string {
+/** A Notion page id as cards compare it: Notion writes the same id with and without dashes. */
+export function notionPageKey(page: string): string {
+  return page.trim().toLowerCase().replace(/-/g, '')
+}
+
+/** The card for a Notion page is keyed by its page, not its title, which can change (ADR 0050). */
+export function notionCardId(page: string): string {
+  return `notion@${notionPageKey(page)}`
+}
+
+/**
+ * The card id a payload or card gets: by path for a chosen folder or file, by page for a Notion
+ * page, by kind and name otherwise.
+ */
+export function cardId(card: Pick<CapabilityNodeConfig, 'kind' | 'name' | 'path' | 'notion'>): string {
+  if (card.kind === 'knowledge' && card.notion) return notionCardId(card.notion.page)
   return card.kind === 'knowledge' && card.path ? sourceCardId(card.path) : capabilityNodeId(card.kind, card.name)
 }
 
@@ -142,6 +163,8 @@ export interface CapabilityDragPayload {
   memory?: { team?: string; pack?: string }
   /** For a folder or file card: the path its agents' knowledge entries will carry (ADR 0042). */
   path?: string
+  /** For a Notion page card: the page its agents' knowledge entries will carry (ADR 0050). */
+  notion?: NotionPageRef
 }
 
 /**
@@ -171,9 +194,9 @@ export function refuseCapabilityEdge(
  * card is wired through `memory.inherits` instead (ADR 0016), and a knowledge card with no path is
  * one the Library placed before ADR 0036: its name alone points at nothing.
  */
-export function teamFileKind(card: Pick<CapabilityNodeConfig, 'kind' | 'memory' | 'path'>): CapabilityKind | null {
+export function teamFileKind(card: Pick<CapabilityNodeConfig, 'kind' | 'memory' | 'path' | 'notion'>): CapabilityKind | null {
   if (card.kind !== 'knowledge') return card.kind
-  return card.path && !card.memory ? 'knowledge' : null
+  return (card.path || card.notion) && !card.memory ? 'knowledge' : null
 }
 
 /**
@@ -181,11 +204,12 @@ export function teamFileKind(card: Pick<CapabilityNodeConfig, 'kind' | 'memory' 
  * may share a name); a folder or file by its path, whatever each agent labels it.
  */
 export function capabilityIsCard(
-  capability: { kind: CapabilityKind; name: string; path?: string },
-  card: Pick<CapabilityNodeConfig, 'kind' | 'name' | 'memory' | 'path'>,
+  capability: { kind: CapabilityKind; name: string; path?: string; notion?: NotionPageRef },
+  card: Pick<CapabilityNodeConfig, 'kind' | 'name' | 'memory' | 'path' | 'notion'>,
 ): boolean {
   const kind = teamFileKind(card)
   if (kind !== capability.kind) return false
+  if (kind === 'knowledge' && card.notion) return Boolean(capability.notion && notionPageKey(capability.notion.page) === notionPageKey(card.notion.page))
   if (kind === 'knowledge') return Boolean(capability.path && card.path && sourcePath(capability.path) === sourcePath(card.path))
   return capability.name === card.name
 }
@@ -196,14 +220,15 @@ export function capabilityIsCard(
  * knowledge of that agent has, as Add folder… and Add file… do.
  */
 export function capabilityForCard(
-  card: Pick<CapabilityNodeConfig, 'kind' | 'name' | 'memory' | 'path'>,
+  card: Pick<CapabilityNodeConfig, 'kind' | 'name' | 'memory' | 'path' | 'notion'>,
   agentCapabilities: readonly { kind: CapabilityKind; name: string }[],
-): { kind: CapabilityKind; name: string; path?: string } | null {
+): { kind: CapabilityKind; name: string; path?: string; notion?: NotionPageRef } | null {
   const kind = teamFileKind(card)
   if (!kind) return null
-  if (kind !== 'knowledge' || !card.path) return { kind, name: card.name }
+  if (kind !== 'knowledge' || !(card.path || card.notion)) return { kind, name: card.name }
   const taken = new Set(agentCapabilities.filter((capability) => capability.kind === 'knowledge').map((capability) => capability.name))
-  return { kind, name: uniqueLabel(card.name, taken), path: card.path }
+  const name = uniqueLabel(card.name, taken)
+  return card.notion ? { kind, name, notion: { page: card.notion.page } } : { kind, name, path: card.path }
 }
 
 /** `report.pdf`, or `report.pdf (2)` when `taken` already has that name; the label is then taken. */

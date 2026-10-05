@@ -1,6 +1,6 @@
-// ADR 0035: how a knowledge entry the operator chose reads in the Context list.
+// ADR 0035, 0050: how a knowledge entry the operator chose reads in the Context list.
 
-import { CircleAlert, FileText, Folder, type LucideIcon } from 'lucide-react'
+import { CircleAlert, FileText, Folder, NotebookText, type LucideIcon } from 'lucide-react'
 
 import type { CapabilityRef } from '../team-file/types'
 
@@ -13,6 +13,7 @@ import type { CapabilityRef } from '../team-file/types'
  */
 export function chosenKnowledge(capability: CapabilityRef): { Icon: LucideIcon; label: string } | null {
   if (capability.kind !== 'knowledge') return null
+  if (capability.notion) return { Icon: NotebookText, label: 'Notion page · read when each run starts · its text is supplied' }
   if (!capability.path) return { Icon: CircleAlert, label: 'No folder or file · disconnect it and add one below' }
   return chosenIsFile(capability.path)
     ? { Icon: FileText, label: 'Added file · read only · its text is supplied' }

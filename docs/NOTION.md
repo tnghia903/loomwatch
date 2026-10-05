@@ -24,9 +24,9 @@ connections use: LoomWatch registers itself for each sign-in, proves the code wi
 a client secret, and asks only for access to that server.
 
 **What it can reach.** Notion's consent page lists it: the sign-in acts with your own Notion
-permissions, not just on one shared page. LoomWatch uses it only to search for the destination
-when you ask and to write new pages under the destination you chose. It holds the sign-in
-itself; agents never receive it.
+permissions, not just on one shared page. LoomWatch uses it only to search for pages when you
+ask, to read the pages you give agents when their team runs, and to write new pages under the
+destination you chose. It holds the sign-in itself; agents never receive it.
 
 **How long it lasts.** The sign-in renews itself (Notion's access tokens last about eight hours).
 Notion ends it after 30 days without use, or after 180 days in all; then Connections and every
@@ -47,8 +47,33 @@ integration token** under **Connect Notion**:
 4. Search for the destination page and select it. Use **Load more pages** when needed.
 
 The daemon validates the token with Notion before saving it, and it uses Notion's REST API
-(version `2026-03-11`) instead of the MCP server. Revoke the integration in Notion to invalidate
-the token itself.
+(version `2026-03-11`) instead of the MCP server; a page an agent reads comes from its
+[Markdown endpoint](https://developers.notion.com/reference/retrieve-page-markdown). An integration
+sees only the pages shared with it, so add it to every page you give an agent the same way as to
+the destination. Revoke the integration in Notion to invalidate the token itself.
+
+## Give an agent a Notion page to read
+
+Open a team. In the add panel on the left, **Connections** lists Notion:
+
+1. Drag **Notion** onto an agent. A page search opens, starting with your recent pages.
+2. Choose a page. It becomes a card on the canvas with a line to that agent, and a row under Notion
+   that says who reads it.
+3. Save the team.
+
+To share the page, drag its row under Notion onto another agent, or draw a line from that agent to
+the card. Click **Notion** without dragging to place a page card on its own and connect it later.
+Give an agent as many pages as it needs, one card each. Until Notion is connected, the row says
+so and opens Connections.
+
+Each time the team runs, LoomWatch reads every page its agents are given, once per page, before any
+agent starts, and gives each agent the page's text as source material. A short page is given
+whole; a long one by its opening, with the full text in a file the agent can open. The agents never
+get your Notion connection, and nothing is written to the page. If Notion is not connected, or can
+no longer open a page, the run stops before it begins and says which page.
+
+A whole teamspace, or a page with all its subpages, is not offered yet. A team file you did not write can name one of your
+pages, so the approval it asks for lists every Notion page it reads.
 
 ## Where it is kept
 

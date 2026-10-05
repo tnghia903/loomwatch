@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { CAPABILITY_CARD, RELATION, capabilityIsCard, capabilityNodeId, freeCapabilitySlot, refuseCapabilityEdge, teamFileKind } from './types'
+import { CAPABILITY_CARD, RELATION, capabilityForCard, capabilityIsCard, capabilityNodeId, cardId, freeCapabilitySlot, refuseCapabilityEdge, teamFileKind } from './types'
 
 describe('capabilityNodeId', () => {
   it('is stable, so dropping the same Library row twice is one card', () => {
@@ -27,6 +27,30 @@ describe('teamFileKind', () => {
   it('never matches a chosen folder to a knowledge card that happens to share its label', () => {
     expect(capabilityIsCard({ kind: 'knowledge', name: 'Reports' }, { kind: 'knowledge', name: 'Reports' })).toBe(false)
     expect(capabilityIsCard({ kind: 'tool', name: 'Computer' }, { kind: 'tool', name: 'Computer' })).toBe(true)
+  })
+})
+
+// ADR 0050: a Notion page is knowledge chosen like a file, keyed by its page rather than its
+// title, which can change in Notion, and by its id however Notion spelled it.
+describe('Notion page cards', () => {
+  const page = '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0'
+  const card = { kind: 'knowledge' as const, name: 'Roadmap', notion: { page } }
+
+  it('is one card per page, with or without the dashes', () => {
+    expect(cardId(card)).toBe('notion@0f1e2d3c4b5a69788796a5b4c3d2e1f0')
+    expect(cardId({ ...card, name: 'Roadmap (renamed)', notion: { page: page.replace(/-/g, '').toUpperCase() } })).toBe(cardId(card))
+    expect(teamFileKind(card)).toBe('knowledge')
+  })
+
+  it('matches the entries that name its page, whatever they are labelled, and nothing else', () => {
+    expect(capabilityIsCard({ kind: 'knowledge', name: 'Roadmap (2)', notion: { page: page.replace(/-/g, '') } }, card)).toBe(true)
+    expect(capabilityIsCard({ kind: 'knowledge', name: 'Roadmap', notion: { page: 'ffffffff-4b5a-6978-8796-a5b4c3d2e1f0' } }, card)).toBe(false)
+    expect(capabilityIsCard({ kind: 'knowledge', name: 'Roadmap', path: '/Users/me/Roadmap' }, card)).toBe(false)
+    expect(capabilityIsCard({ kind: 'knowledge', name: 'Roadmap', notion: { page } }, { kind: 'knowledge', name: 'Roadmap', path: '/Users/me/Roadmap' })).toBe(false)
+  })
+
+  it('writes the page, never a path, with a label no other knowledge of that agent has', () => {
+    expect(capabilityForCard(card, [{ kind: 'knowledge', name: 'Roadmap' }])).toEqual({ kind: 'knowledge', name: 'Roadmap (2)', notion: { page } })
   })
 })
 

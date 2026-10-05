@@ -93,6 +93,18 @@ pub struct CapabilityNode {
     /// agents read it. Absent on every other card. Additive, so the version stays 2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// Set on a knowledge card that is a Notion page the operator chose (ADR 0050): the same
+    /// `notion` its agents' knowledge entries carry. Absent on every other card. Additive, so the
+    /// version stays 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notion: Option<NotionCard>,
+}
+
+/// The Notion page a card stands for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotionCard {
+    pub page: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -192,6 +204,16 @@ impl ComposerLayout {
                     node.id
                 )));
             }
+            if node.notion.is_some()
+                && (node.kind != CapabilityKind::Knowledge
+                    || node.memory.is_some()
+                    || node.path.is_some())
+            {
+                return Err(LayoutError(format!(
+                    "capability {} names a Notion page, which only a Notion page card may do",
+                    node.id
+                )));
+            }
             if let Some(memory) = &node.memory
                 && (memory.team.is_none() == memory.pack.is_none())
             {
@@ -278,6 +300,7 @@ mod tests {
             position: Position { x: 10.0, y: 20.0 },
             memory: None,
             path: None,
+            notion: None,
         }
     }
 
@@ -499,6 +522,46 @@ mod tests {
         .validate()
         .expect_err("only knowledge has a path");
         assert!(error.0.contains("only a folder or file card"), "{error:?}");
+    }
+
+    /// ADR 0050: a Notion page card keeps its page through a save, and only a knowledge card that
+    /// is neither memory nor a folder or file may name one.
+    #[test]
+    fn a_notion_card_keeps_its_page_and_no_other_card_may_have_one() {
+        let page = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+        let notion = || {
+            let mut card = node(&format!("notion@{page}"), CapabilityKind::Knowledge);
+            card.notion = Some(NotionCard {
+                page: page.to_owned(),
+            });
+            card
+        };
+        let layout = ComposerLayout {
+            nodes: vec![notion()],
+            ..Default::default()
+        };
+        layout.validate().expect("a Notion card is valid");
+        let text = serde_json::to_string(&layout).expect("serialise");
+        assert!(
+            text.contains(&format!(r#""notion":{{"page":"{page}"}}"#)),
+            "{text}"
+        );
+        let back: ComposerLayout = serde_json::from_str(&text).expect("read back");
+        assert_eq!(back, layout);
+
+        let mut skill = notion();
+        skill.kind = CapabilityKind::Skill;
+        let mut with_path = notion();
+        with_path.path = Some("/Users/me/reports".into());
+        for card in [skill, with_path] {
+            let error = ComposerLayout {
+                nodes: vec![card],
+                ..Default::default()
+            }
+            .validate()
+            .expect_err("only a Notion page card names a page");
+            assert!(error.0.contains("only a Notion page card"), "{error:?}");
+        }
     }
 
     #[test]

@@ -331,6 +331,12 @@ fn review_agent(agent: &AgentConfig, lines: &mut Vec<ReviewLine>) -> Option<&'st
                     } else {
                         ReviewLine::info(line)
                     });
+                } else if capability.notion.is_some() {
+                    // Read through the operator's own Notion connection (ADR 0050).
+                    lines.push(ReviewLine::warn(format!(
+                        "{who} reads your Notion page {}.",
+                        capability.name
+                    )));
                 }
             }
             CapabilityKind::Tool => lines.push(ReviewLine::info(format!(
@@ -552,5 +558,20 @@ mod tests {
         );
         assert!(texts.contains(&"Runs on its own, daily at 09:00 Asia/Ho_Chi_Minh."));
         assert!(texts.contains(&"Sends its answers to your connected Notion page."));
+    }
+
+    /// ADR 0050: a team someone else wrote can name one of your Notion pages, and running it
+    /// reads that page through your connection, so the review says which.
+    #[test]
+    fn the_review_names_each_notion_page_a_team_reads() {
+        let lines = review(&team(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: claude-agent-acp\n      cwd: .\n    model: x\n    capabilities:\n      - kind: knowledge\n        name: Salaries 2026\n        notion:\n          page: 0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0\n",
+        ));
+        assert!(
+            lines.contains(&ReviewLine::warn(
+                "a reads your Notion page Salaries 2026.".to_owned()
+            )),
+            "{lines:?}"
+        );
     }
 }

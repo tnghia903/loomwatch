@@ -577,9 +577,10 @@ $defs:
           `skill` is copied into the agent's workspace and required in its prompt (ADR 0012, 0019,
           0021). `knowledge` is a folder or file the operator chose, named by `path`: its contents
           are supplied in the prompt as source material and it is a read grant for that folder or
-          file (ADR 0029, 0035, 0036). `tool` passes the operator's own MCP server definition to the
-          harness in ACP `session/new` (ADR 0029). Team memory is wired through `memory.inherits`,
-          never as `knowledge`.
+          file (ADR 0029, 0035, 0036), or, with `notion`, a Notion page read at run start (ADR
+          0050). `tool` passes the operator's own MCP server definition to the harness in ACP
+          `session/new` (ADR 0029). Team memory is wired through `memory.inherits`, never as
+          `knowledge`.
         type: string
         enum:
           - skill
@@ -588,24 +589,50 @@ $defs:
       name:
         description: >-
           The capability's name as the Library reports it. For knowledge, only the label of its
-          `path`.
+          `path` or the title of its Notion page.
         type: string
         minLength: 1
       path:
         description: >-
-          Knowledge only, and required for it (ADR 0035, 0036): the folder or file the operator
-          chose. A folder is linked where it is; an added file is copied beside the team file under
+          Knowledge only, and required for it unless it names a Notion page (ADR 0035, 0036, 0050):
+          the folder or file the operator chose. A folder is linked where it is; an added file is copied beside the team file under
           `<team>.files/` and named relative to the team file's directory. Knowledge without a path
           fails the run, because the Library no longer lists folders a name could point at.
         type: string
         minLength: 1
-    if:
-      required:
-        - path
-    then:
-      properties:
-        kind:
-          const: knowledge
+      notion:
+        description: >-
+          Knowledge only, instead of `path` (ADR 0050): a Notion page the operator chose. `name` is
+          then the page's title as it was when chosen. The run reads the page through the
+          operator's own Notion connection once, before anything spawns, and supplies its text
+          like an added file's; the agent never holds the connection.
+        type: object
+        additionalProperties: false
+        required:
+          - page
+        properties:
+          page:
+            description: The Notion page id.
+            type: string
+            pattern: "^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$"
+    allOf:
+      - if:
+          required:
+            - path
+        then:
+          properties:
+            kind:
+              const: knowledge
+      - if:
+          required:
+            - notion
+        then:
+          properties:
+            kind:
+              const: knowledge
+          not:
+            required:
+              - path
 
   Edge:
     type: object

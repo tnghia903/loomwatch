@@ -239,6 +239,17 @@ async fn run_loaded_team(
             "This pipeline has a review stop. Start it from the app so its question can reach you."
         );
     }
+    // The Notion pages agents are given are read here too, for the same two reasons (ADR 0050).
+    let team = &read_notion_pages(team, |ids| async move {
+        match notion::Reader::new() {
+            Ok(reader) => reader.read(&ids).await,
+            Err(error) => Err(notion::ReadError {
+                page: None,
+                message: error.to_string(),
+            }),
+        }
+    })
+    .await?;
     let memory = Arc::new(memory::TeamMemory::load(
         &memory::MemoryRoots::for_team(team_path, teams_root),
         team_path,
@@ -275,6 +286,69 @@ async fn run_loaded_team(
         )
         .await
     }
+}
+
+/// ADR 0050: `team` with the text of every Notion page its agents are given, read through the
+/// operator's own connection, each page once however many agents read it. Returned unchanged when
+/// no agent is given one, so `read` is never called and nothing touches the Keychain.
+///
+/// # Errors
+///
+/// A page that cannot be read refuses the run, naming the page and an agent given it, before
+/// anything spawns, rather than failing whichever stage reaches it.
+async fn read_notion_pages<F, Fut>(team: &Arc<TeamConfig>, read: F) -> Result<Arc<TeamConfig>>
+where
+    F: FnOnce(Vec<String>) -> Fut,
+    Fut: Future<Output = Result<BTreeMap<String, config::NotionPage>, notion::ReadError>>,
+{
+    let page_id = |notion: &config::NotionRef| {
+        uuid::Uuid::parse_str(&notion.page)
+            .map_or_else(|_| notion.page.clone(), |id| id.to_string())
+    };
+    let ids: std::collections::BTreeSet<String> = team
+        .agents
+        .iter()
+        .flat_map(|agent| &agent.capabilities)
+        .filter_map(|capability| capability.notion.as_ref())
+        .map(page_id)
+        .collect();
+    if ids.is_empty() {
+        return Ok(Arc::clone(team));
+    }
+    let pages = read(ids.into_iter().collect()).await.map_err(|error| {
+        let given = error.page.as_deref().and_then(|failed| {
+            team.agents.iter().find_map(|agent| {
+                let capability = agent.capabilities.iter().find(|capability| {
+                    capability
+                        .notion
+                        .as_ref()
+                        .is_some_and(|notion| page_id(notion) == failed)
+                })?;
+                Some((capability.name.as_str(), agent.name.as_str()))
+            })
+        });
+        match given {
+            Some((page, agent)) => anyhow::anyhow!(
+                "cannot use the Notion page {page}, given to {agent}: {}",
+                error.message
+            ),
+            None => anyhow::anyhow!(
+                "cannot read the Notion pages this team is given: {}",
+                error.message
+            ),
+        }
+    })?;
+    let mut read_team = TeamConfig::clone(team);
+    for capability in read_team
+        .agents
+        .iter_mut()
+        .flat_map(|agent| &mut agent.capabilities)
+    {
+        if let Some(notion) = &mut capability.notion {
+            notion.read = pages.get(&page_id(notion)).cloned().map(Arc::new);
+        }
+    }
+    Ok(Arc::new(read_team))
 }
 
 /// Materialise one agent's workspace with the Team Bus surface the caller is about to give it.
@@ -4812,5 +4886,88 @@ mod tests {
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         assert_eq!(checkpoints.len(), 2, "{checkpoints:?}");
         Ok(())
+    }
+
+    /// ADR 0050: every Notion page a team is given is read once at run start, however many agents
+    /// read it, and the text lands on each of their entries; a team given none never reads at
+    /// all; a page that cannot be read refuses the run naming the page and an agent given it.
+    #[tokio::test]
+    async fn notion_pages_are_read_once_before_anything_spawns() {
+        let page = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+        let agent = |id: &str, page: &str| {
+            format!(
+                "  - id: {id}\n    name: {id}-name\n    spawn:\n      cmd: claude-agent-acp\n      cwd: .\n    model: test/model\n    capabilities:\n      - kind: knowledge\n        name: Roadmap\n        notion:\n          page: {page}\n"
+            )
+        };
+        let team = Arc::new(
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n{}{}",
+                agent("a", page),
+                // The same page without its dashes is the same page.
+                agent("b", &page.replace('-', "")),
+            ))
+            .expect("team"),
+        );
+        let read = read_notion_pages(&team, |ids| async move {
+            assert_eq!(ids, vec![page.to_owned()], "one read per page");
+            Ok(BTreeMap::from([(
+                page.to_owned(),
+                config::NotionPage {
+                    title: "Roadmap".into(),
+                    url: "https://app.notion.com/p/x".into(),
+                    text: "Ship it.".into(),
+                    truncated: false,
+                },
+            )]))
+        })
+        .await
+        .expect("read");
+        for agent in &read.agents {
+            let text = agent.capabilities[0]
+                .notion
+                .as_ref()
+                .and_then(|notion| notion.read.as_ref())
+                .map(|page| page.text.as_str());
+            assert_eq!(text, Some("Ship it."), "{}", agent.id);
+        }
+        assert!(
+            team.agents[0].capabilities[0]
+                .notion
+                .as_ref()
+                .is_some_and(|notion| notion.read.is_none())
+        );
+
+        let plain = Arc::new(TeamConfig::parse("schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: claude-agent-acp\n      cwd: .\n    model: test/model\n").expect("team"));
+        let same = read_notion_pages(&plain, |_| async { unreachable!("nothing to read") })
+            .await
+            .expect("no pages");
+        assert!(Arc::ptr_eq(&same, &plain));
+
+        let failed = read_notion_pages(&team, |_| async move {
+            Err(notion::ReadError {
+                page: Some(page.to_owned()),
+                message: "Notion can't open this page any more.".into(),
+            })
+        })
+        .await
+        .expect_err("refused");
+        assert_eq!(
+            failed.to_string(),
+            "cannot use the Notion page Roadmap, given to a-name: Notion can't open this page any more."
+        );
+        let offline = read_notion_pages(&team, |_| async {
+            Err(notion::ReadError {
+                page: None,
+                message: notion::READ_NOT_CONNECTED.into(),
+            })
+        })
+        .await
+        .expect_err("refused");
+        assert!(
+            offline
+                .to_string()
+                .contains("Open Connections and sign in to Notion"),
+            "{offline}"
+        );
     }
 }

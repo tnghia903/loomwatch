@@ -855,6 +855,7 @@ mod tests {
             kind: CapabilityKind::Skill,
             name: name.to_owned(),
             path: None,
+            notion: None,
         }
     }
 
@@ -873,6 +874,7 @@ mod tests {
             kind: CapabilityKind::Knowledge,
             name: "demo project".to_owned(),
             path: Some(project.clone()),
+            notion: None,
         }];
 
         let workspace = materialise(
@@ -946,6 +948,7 @@ mod tests {
             kind: CapabilityKind::Knowledge,
             name: name.to_owned(),
             path: Some(path.to_path_buf()),
+            notion: None,
         };
         let wired = vec![
             chosen("reports", &reports),
@@ -1418,6 +1421,7 @@ mod tests {
                         kind: CapabilityKind::Knowledge,
                         name: "memo.md".to_owned(),
                         path: Some(PathBuf::from("team.files/memo.md")),
+                        notion: None,
                     },
                 ],
             );

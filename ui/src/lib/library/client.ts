@@ -1,4 +1,5 @@
 import { daemonFetch } from '../daemonFetch'
+import type { NotionPageRef } from '../team-file/types'
 
 export interface DetectedCapability {
   id: string
@@ -20,6 +21,8 @@ export interface DetectedCapability {
    * card of its own. Never from the daemon's scan: knowledge is chosen, not discovered (ADR 0036).
    */
   path?: string
+  /** Present only on a Notion page the operator chose (ADR 0050). Never from the daemon's scan. */
+  notion?: NotionPageRef
 }
 
 export interface MemorySourceRef {

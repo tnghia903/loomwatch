@@ -5,7 +5,7 @@ import type { DetectedHarness } from '../../lib/harnesses'
 import type { CapabilityInventory } from '../../lib/library/client'
 import { projectRun, type RunEvent } from '../../lib/watch/events'
 import { ComponentPalette } from './ComponentPalette'
-import { CAPABILITY_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
+import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
 
 const codex: DetectedHarness = { id: 'codex', name: 'Codex', command: 'codex', executablePath: '/bin/codex', spawn: { cmd: 'codex', args: ['acp'] }, acpAvailable: true }
 
@@ -178,6 +178,44 @@ describe('ComponentPalette in Build and in a run', () => {
     window.removeEventListener('loomwatch:add-capability', placed)
     fireEvent.click(within(files).getByRole('button', { name: 'Details for reports' }))
     expect(inspect).toHaveBeenCalledWith(item, 'knowledge')
+  })
+
+  /**
+   * ADR 0050: Connections holds Notion, which drags onto an agent to choose a page there, and
+   * the pages this team reads under it, which drag and find their card like a file does.
+   */
+  it('lists Notion under Connections, with the pages this team reads under it', () => {
+    const reveal = vi.fn()
+    const choose = vi.fn()
+    const page = '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0'
+    const item = { id: `notion@${page.replace(/-/g, '')}`, name: 'Roadmap', source: 'Notion page', notion: { page }, detail: 'A page in your Notion.', status: 'Ready' as const }
+    render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={capabilities} onRevealSource={reveal}
+      notion={{ connection: { state: 'connected', workspace: 'Acme', destination: null }, pages: [{ id: item.id, name: 'Roadmap', page, readers: ['Researcher'], item }], onChoosePage: choose }} />)
+    const connections = section('Connections')
+    const notion = within(connections).getByRole('button', { name: /^Notion.*Drag onto an agent, then choose a page.*Acme/ })
+    const setData = vi.fn()
+    fireEvent.dragStart(notion, { dataTransfer: { setData, effectAllowed: '' } })
+    expect(setData).toHaveBeenCalledWith(CONNECTION_DRAG_MIME, JSON.stringify({ service: 'notion' }))
+    fireEvent.click(notion)
+    expect(choose).toHaveBeenCalledOnce()
+
+    const roadmap = within(connections).getByRole('button', { name: /^Roadmap.*Read by Researcher/ })
+    expect(roadmap).toHaveClass('nested')
+    fireEvent.dragStart(roadmap, { dataTransfer: { setData, effectAllowed: '' } })
+    expect(setData).toHaveBeenCalledWith(CAPABILITY_DRAG_MIME, JSON.stringify({ kind: 'knowledge', name: 'Roadmap', source: 'Notion page', notion: { page } }))
+    fireEvent.click(roadmap)
+    expect(reveal).toHaveBeenCalledWith(item.id)
+    // A Notion page is not a folder or file, so it is listed once, here.
+    expect(section('Folders & files')).not.toHaveTextContent('Roadmap')
+  })
+
+  it('offers to connect Notion when it is not, without letting it be dragged', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} notion={{ connection: { state: 'disconnected' }, pages: [] }} />)
+    const notion = within(section('Connections')).getByRole('button', { name: /^Notion.*Not connected/ })
+    expect(notion).toHaveAttribute('draggable', 'false')
+    fireEvent.click(notion)
+    expect(open).toHaveBeenCalledWith('/connections', '_blank', 'noopener')
   })
 
   /** The panel's right edge resizes it: dragged, with the arrow keys, and back to default on a double click. */

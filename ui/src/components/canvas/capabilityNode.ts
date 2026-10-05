@@ -13,6 +13,8 @@ export interface CapabilityNodeData extends Record<string, unknown> {
   source: string
   /** For a folder or file the operator chose (ADR 0042): where it is. */
   path?: string
+  /** For a Notion page the operator chose (ADR 0050): its page id. */
+  notionPage?: string
   /** How many agents reach it. Zero reads as "placed but not wired to anything yet". */
   wiredTo: number
   readOnly: boolean

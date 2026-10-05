@@ -103,3 +103,8 @@ body.palette-resizing .lw-canvas { pointer-events: none; }
 
 /* Folders & files: Add folder… and Add file… sit under this team's own sources. */
 .node-palette .palette-sources { padding: 4px 5px 0; }
+
+/* Connections (ADR 0050): the pages a team reads sit under Notion, and Notion before it is
+   connected is clicked, not dragged. */
+.node-palette .palette-item.nested { padding-left: 20px; }
+.node-palette .palette-item[draggable="false"]:not(:disabled) { cursor: pointer; }

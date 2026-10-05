@@ -149,6 +149,51 @@ fn responder_is_an_optional_identifier() {
     assert!(!validator.is_valid(&team));
 }
 
+/// ADR 0050: knowledge reads a Notion page instead of a path, never both, and only knowledge
+/// may name one. The UI validates against this schema, so the rule cannot live in the loader alone.
+#[test]
+fn a_notion_page_is_knowledge_instead_of_a_path() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let schema = read_yaml(&workspace.join("schemas/team.schema.yaml"));
+    let validator = jsonschema::draft202012::new(&schema)
+        .unwrap_or_else(|error| panic!("failed to compile team schema: {error}"));
+    let with_capability = |capability: Value| {
+        let mut team = read_yaml(&workspace.join("examples/research-team.yaml"));
+        team["agents"][0]["capabilities"] = json!([capability]);
+        team
+    };
+    let page = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+    assert!(validator.is_valid(&with_capability(
+        json!({"kind": "knowledge", "name": "Roadmap", "notion": {"page": page}})
+    )));
+    assert!(
+        validator.is_valid(&with_capability(
+            json!({"kind": "knowledge", "name": "Roadmap", "notion": {"page": page.replace('-', "")}})
+        )),
+        "Notion writes ids without dashes in its addresses"
+    );
+    for (capability, why) in [
+        (
+            json!({"kind": "skill", "name": "Roadmap", "notion": {"page": page}}),
+            "only knowledge reads Notion",
+        ),
+        (
+            json!({"kind": "knowledge", "name": "Roadmap", "path": "notes.md", "notion": {"page": page}}),
+            "a path or a page, not both",
+        ),
+        (
+            json!({"kind": "knowledge", "name": "Roadmap", "notion": {"page": "roadmap"}}),
+            "a page id",
+        ),
+        (
+            json!({"kind": "knowledge", "name": "Roadmap", "notion": {"page": page, "teamspace": page}}),
+            "no other key yet",
+        ),
+    ] {
+        assert!(!validator.is_valid(&with_capability(capability)), "{why}");
+    }
+}
+
 /// `memory.inherits` entries name exactly one of `team` and `pack`, and the schema says so rather
 /// than leaving the loader as the only thing that knows.
 ///
