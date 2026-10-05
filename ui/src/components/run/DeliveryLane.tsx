@@ -2,7 +2,7 @@ import { CapabilityGraph } from './CapabilityGraph'
 import { Markdown } from '../ui/Markdown'
 import { preloadMarkdown } from '../ui/preloadMarkdown'
 import { SuppliedInstructions } from './SuppliedInstructions'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowRight,
   Check,
@@ -36,6 +36,7 @@ import { answerVerdict, type VerdictTone } from '../../lib/story/verdict'
 import { RunReceipt } from './RunReceipt'
 import { NotionSend, type NotionSendRun } from './NotionSend'
 import { WeftBar } from './WeftBar'
+import type { WeftKnot } from '../../lib/story/weft'
 import { markState } from '../../lib/story/mark'
 import { AgentMark } from '../ui/AgentMark'
 import { FileCard } from '../ui/FileCard'
@@ -69,6 +70,8 @@ export interface DeliveryLaneProps extends RunColumnProps {
    * the receipt is missing stages that did run, and the verdict beside the answer waits for it.
    */
   evidenceComplete?: boolean
+  /** The team's connections into each agent: who a stage's handover came from (`pipeline_node_prompt`). */
+  handedBy?: ReadonlyMap<string, readonly string[]>
 }
 
 /**
@@ -82,6 +85,9 @@ const ROUTE_SENTENCE: Record<'native' | 'inline' | 'blocked', string> = {
   inline: 'In-prompt, translated — the harness cannot be relied on to run it as written, so its body was inlined with a mapping note.',
   blocked: 'Blocked — LoomWatch knows no project skill directory for this harness.',
 }
+
+// Loaded with the first run that shows it: the app's chunk is held under its size budget (vite.config.ts).
+const AgentMessages = lazy(() => import('./AgentMessages').then((module) => ({ default: module.AgentMessages })))
 
 /** Run phases as an operator would say them; the raw phase ids are daemon vocabulary. */
 const PHASE_WORDS: Partial<Record<string, string>> = {
@@ -123,6 +129,7 @@ export function DeliveryLane({
   sendsTo = null,
   focusAgentId = null,
   evidenceComplete = true,
+  handedBy,
 }: DeliveryLaneProps) {
   // The answer is what this view exists for; fetch its renderer before the first token arrives.
   useEffect(() => preloadMarkdown(), [])
@@ -219,6 +226,13 @@ export function DeliveryLane({
   // The loom views of this run: the timeline (who worked when) and, once it ends, the receipt.
   const weftOrder = useMemo(() => agents.map((node) => ({ id: node.id, name: node.data.agent.name, operator: node.data.agent.kind === 'operator', status: node.data.runtime?.status, taskState: node.data.runtime?.taskState })), [agents])
   const terminal = ['succeeded', 'partial', 'failed', 'cancelled'].includes(phase)
+  // What passed between the agents, reached from the timeline as well as read under the cards.
+  const [revealMessage, setRevealMessage] = useState<{ id: string; at: number } | null>(null)
+  const messageFor = (knot: WeftKnot) => {
+    if (knot.evidenceId) return projection.messages.some((message) => message.id === knot.evidenceId) ? knot.evidenceId : null
+    // A relay's change of hands is the handover the next stage was given.
+    return projection.messages.find((message) => message.kind === 'handover' && message.to === knot.to)?.id ?? null
+  }
   const runReceipt = useMemo(() => (planned || !terminal ? null : buildReceipt({
     attempt,
     prompt,
@@ -340,7 +354,7 @@ export function DeliveryLane({
           </p>
         </article>
         {runReceipt && <RunReceipt receipt={runReceipt} onInspectEvidence={onInspectEvidence} onAllow={onAllow} />}
-        {!planned && projection.startedAt && <WeftBar projection={projection} order={weftOrder} relay={pipeline} onInspectEvidence={onInspectEvidence} />}
+        {!planned && projection.startedAt && <WeftBar projection={projection} order={weftOrder} relay={pipeline} onInspectEvidence={onInspectEvidence} messageFor={messageFor} onReadMessage={(id) => setRevealMessage({ id, at: Date.now() })} />}
         <div className="delivery-section-head">
           <h2>
             {pipeline && linearPipeline ? 'Team handoff' : 'Team contributions'}
@@ -442,6 +456,21 @@ export function DeliveryLane({
             )
           })}
         </div>
+        {/* What they said to each other, as a team chat, right under the cards that said it. */}
+        {!planned && projection.startedAt && (agents.length > 1 || projection.messages.length > 0) && (
+          <Suspense fallback={null}>
+            <AgentMessages
+              messages={projection.messages}
+              order={weftOrder}
+              predecessors={handedBy}
+              evidence={projection.evidence}
+              live={live && !terminal}
+              onInspectEvidence={onInspectEvidence}
+              onInspectHandover={inspectHandover ? (id) => inspectHandover(id) : undefined}
+              reveal={revealMessage}
+            />
+          </Suspense>
+        )}
         <section
           className="delivery-capabilities"
           aria-label="Skills and tools"

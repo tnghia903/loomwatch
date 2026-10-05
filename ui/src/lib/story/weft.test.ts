@@ -20,6 +20,7 @@ function projection(extra: Partial<RunProjection> = {}): RunProjection {
     agents: [agent('collector', 0, 110), agent('editor', 112, 165)],
     evidence: [evidence('e1', 'collector', 4), evidence('e2', 'editor', 140, { kind: 'file', relation: 'read file', name: '/Users/x/skills/newsletter/SKILL.md', status: 'failed' })],
     delegations: [],
+    messages: [],
     attention: [],
     prompt: 'Monday edition',
     promptAgentId: 'collector',
@@ -285,7 +286,7 @@ describe('knots from recorded delegations', () => {
   it('says what the call was, not just that work moved', () => {
     const asked = projection({ evidence: [evidence('e9', 'editor', 120, { kind: 'delegation', relation: 'asked', name: 'ask', target: 'collector' })] })
     const weft = weave(asked, order, Date.now(), false)
-    expect(weft.knots).toEqual([{ at: 120_000, from: 'editor', to: 'collector', relation: 'asked' }])
+    expect(weft.knots).toEqual([{ at: 120_000, from: 'editor', to: 'collector', relation: 'asked', evidenceId: 'e9' }])
     expect(weave(asked, order).knots.map((knot) => knot.relation)).toEqual(['handed off to', 'asked'])
     expect(momentAt(weft, 121_000).sentence).toBe('News Editor asked News Collector a question.')
     expect(narrate(weft).map((beat) => beat.text)).toContain('News Editor asked News Collector a question.')

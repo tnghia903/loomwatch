@@ -48,6 +48,34 @@ without saving”). The canvas then shows:
   and a scrubber (`←` / `→`) that replays any earlier event as a complete, byte-equivalent
   picture. Scrubbing never alters execution or YAML.
 
+Under the stage cards, the Run view shows **what they said to each other**: each pipeline handover,
+every Team Bus `ask` with the answer it got (and whether the asked agent answered from its open
+session or from a fresh start), `dispatch` and `handoff` tasks, `ask_user` questions with your
+answers, and your answers at a review step. It reads as a group chat, **Team chat**: each
+agent has its own colour and initials, numbered as its card is, and your messages sit on the
+right. A question names who it is for with an @mention, and its answer quotes it. A handover
+shows as a document shared with the stage it was for. An answer still owed shows as someone
+writing while the run is live, and as **No answer** after it ends. A plain approval is a short
+note in the chat; a review you approved with a note is one message from you to the stage it went
+on to, and the direction and handover that stage was then given fold into it, as they only
+repeat it. A long message shows its first lines and **Read more** shows it verbatim; **Info**
+says how long the answer took, what the agent did meanwhile, and leads to the record.
+`ui/src/lib/watch/messages.ts` collects the messages in the same pass as the rest of the
+projection, so they follow the replay scrubber, and the timeline's **Read the message** opens one.
+
+Who said what to whom is read from the record, not from the team file as it is now:
+
+| Recorded on | Field | Says |
+|---|---|---|
+| `session_meta` `prompt_sections` | `stageResultsFrom` | The stages a handover was built from (the edges into the stage, as `pipeline_node_prompt` reads them). A review step's own record names whose handover it read, so a handover it passed on is shown as written by that stage, *through your review*. |
+| `session_meta` `prompt_sections` | `directionFrom` | The review stops a stage's direction came from. |
+| `operator_answer` message, `raw` | `askedBy` | Whose question or review your answer closes. |
+| `operator_answer` message, `raw` | `sendBack` | The stage your answer sent the work back to; absent for an approval. |
+| `operator_answer` message, `raw` | `to` | The kept-alive agent a follow-up of yours went to; its next turn is shown as the answer. |
+
+All five are additive: runs archived before them still read, and a handover sender that had to be
+taken from the team's connections says so when its row is opened.
+
 The history button beside the composer (`⌘P`) lists live runs and the 100 most recently
 active archived sessions with their prompts; selecting one opens it in **replay**. Deep
 links use `?run=<id>`; the legacy `/watch?session=<id>` route redirects there. A run the

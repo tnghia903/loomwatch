@@ -1,7 +1,7 @@
-import { BookOpen, ChevronLeft, ChevronRight, FileSearch, Radio } from 'lucide-react'
+import { BookOpen, ChevronLeft, ChevronRight, FileSearch, MessagesSquare, Radio } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { clock, momentAt, narrate, weave, type WeftAgent } from '../../lib/story/weft'
+import { clock, momentAt, narrate, weave, type WeftAgent, type WeftKnot } from '../../lib/story/weft'
 import { markState } from '../../lib/story/mark'
 import type { AgentStatus } from '../../lib/team-file/types'
 import type { TaskState } from '../../lib/watch/events'
@@ -14,6 +14,9 @@ interface WeftBarProps {
   /** A pipeline hands work along in order; team mode only knows the handoffs it recorded. */
   relay: boolean
   onInspectEvidence: (id: string) => void
+  /** The message a change of hands carried, when the run recorded one (lib/watch/messages.ts). */
+  messageFor?: (knot: WeftKnot) => string | null
+  onReadMessage?: (id: string) => void
 }
 
 const ROW = 30
@@ -23,7 +26,7 @@ const ROW = 30
  * stitch per recorded call and a knot per handoff. Dragging across it reads the run back; the
  * caption says the moment in a sentence and, for an expert, the event kind and sequence number.
  */
-export function WeftBar({ projection, order, relay, onInspectEvidence }: WeftBarProps) {
+export function WeftBar({ projection, order, relay, onInspectEvidence, messageFor, onReadMessage }: WeftBarProps) {
   const [now, setNow] = useState(() => Date.now())
   const weft = useMemo(() => weave(projection, order, now, relay), [projection, order, now, relay])
   // A live run's threads grow with the clock, not only when an event arrives.
@@ -38,6 +41,7 @@ export function WeftBar({ projection, order, relay, onInspectEvidence }: WeftBar
   const beats = useMemo(() => (reading ? narrate(weft) : []), [reading, weft])
   const position = Math.min(at ?? weft.duration, weft.duration)
   const moment = momentAt(weft, position)
+  const said = moment.knot && messageFor ? messageFor(moment.knot) : null
   const tracks = useRef<HTMLDivElement>(null)
   const dragging = useRef(false)
   const pct = (value: number) => `${Math.max(0, Math.min(100, (value / weft.duration) * 100))}%`
@@ -133,6 +137,7 @@ export function WeftBar({ projection, order, relay, onInspectEvidence }: WeftBar
         <span className="weft-sentence">{moment.sentence}</span>
         {moment.code && <code>{moment.code}</code>}
         {moment.evidenceId && <button type="button" className="delivery-link" onClick={() => onInspectEvidence(moment.evidenceId as string)}><FileSearch size={13} aria-hidden="true" />Open the record</button>}
+        {said && onReadMessage && <button type="button" className="delivery-link" onClick={() => onReadMessage(said)}><MessagesSquare size={13} aria-hidden="true" />Read the message</button>}
       </p>
     </section>
   )

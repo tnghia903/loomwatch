@@ -1,4 +1,5 @@
 import type { AgentStatus } from '../team-file/types'
+import { Correspondence, type TeamMessage } from './messages'
 import { ACTIVITY_KINDS, ReplyText } from './replyText'
 
 export const eventKinds = ['message', 'thought', 'tool_call', 'tool_update', 'plan', 'permission', 'session_meta', 'usage', 'turn_end', 'process'] as const
@@ -311,6 +312,8 @@ export interface RunProjection {
   agents: ProjectedAgent[]
   evidence: Evidence[]
   delegations: Delegation[]
+  /** What the agents said to each other — handovers, questions and answers, tasks — in order (./messages). */
+  messages: TeamMessage[]
   attention: Attention[]
   prompt: string | null
   promptAgentId: string | null
@@ -645,6 +648,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
   /** Call ids deduped as harness echoes of a Team Bus call (§4.5): their updates are dedup, not loss. */
   const echoes = new Set<string>()
   const startMs = events.length > 0 ? Date.parse(events[0].ts) : NaN
+  const letters = new Correspondence(startMs)
 
   const ensureAgent = (id: string, event: RunEvent) => {
     let agent = agents.get(id)
@@ -709,7 +713,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         if (p.phase === 'set_config_option' && p.configId === 'model' && typeof p.value === 'string') agent.model = p.value
         if (p.phase === 'set_model' && typeof p.value === 'string') agent.model = p.value
         if (p.phase === 'set_config_option_skipped' && typeof p.value === 'string') agent.model = p.value
-        if (p.phase === 'awaiting_operator') { agent.status = 'waiting'; agent.task = 'Waiting for you' }
+        if (p.phase === 'awaiting_operator') { agent.status = 'waiting'; agent.task = 'Waiting for you'; letters.awaiting(event) }
         if (p.phase === 'team_bus_unavailable') agent.busUnavailable = true
         if (isTurnResumed(event)) {
           // One turn, cut by the app and carried on: its reply keeps going, and its cost counts.
@@ -726,7 +730,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           agent.memory = { chars: p.chars, budgetChars: p.budgetChars }
         }
         const sections = promptSections(event)
-        if (sections) agent.promptSections ??= sections
+        if (sections) { agent.promptSections ??= sections; letters.promptRecord(event, sections) }
         if (object(event.raw) && event.raw.source === 'loomwatch') {
           if (p.phase === 'prompt_sections' && agent.requiredSkills === undefined) agent.requiredSkills = skillReceipts(p.requiredSkills, 'prepared', event.id)
           const servers = p.phase === 'prompt_sections' && agent.connectedServers === undefined ? connectedServers(p.tools) : undefined
@@ -762,6 +766,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           agent.allText.endMessage()
           if (object(event.raw) && event.raw.phase === 'operator_answer') {
             agent.status = 'succeeded'; agent.task = 'Decision received'; agent.reply = text
+            letters.operatorAnswer(event, text)
             evidence.push({ id: event.id, kind: 'source', relation: 'directed', name: 'Your answer', detail: text, agentId: agent.id, seq: event.seq, order: 0, ts: event.ts, status: 'succeeded', capture: 'recorded', offsetMs: Date.parse(event.ts) - startMs, callId: null, toolKind: null, rawInput: null, rawOutput: text, content: text, locations: [], target: null, events: [event] })
             break
           }
@@ -772,6 +777,10 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           if (prompt === null) {
             prompt = recordedTask ?? legacyOperatorPrompt(text)
             promptAgentId = agent.id
+          }
+          if (agent.received === null && !agent.promptSections) {
+            const legacy = legacyHandoverText(text)
+            if (legacy) letters.legacyHandover(event, legacy)
           }
           agent.received ??= agent.promptSections ? recordedHandover : legacyHandoverText(text)
           agent.task = 'Reading the task'
@@ -874,6 +883,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         }
         calls.set(item.id, item)
         evidence.push(item)
+        letters.toolCall(item, item.busName, name, title)
         agent.toolCalls += 1
         // The pairing ledger (CONTRACT §12, tools row): a call stays open until a terminal
         // update pairs it. A call whose own event already carried a terminal status never
@@ -903,6 +913,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         }
         if (p.status === 'completed' || p.status === 'failed') {
           call.status = p.status === 'completed' ? 'succeeded' : 'failed'
+          letters.toolSettled(call, event, p.status)
           agent.openCalls.delete(key)
           if (agent.openCalls.size === 0 && agent.status === 'running') agent.task = call.status === 'failed' ? `${call.name} failed` : 'Working'
           if (call.busName) {
@@ -941,6 +952,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         if (!auxiliaryTurns.has(agent.id)) {
           agent.reply = agent.turnPhaseKnown ? agent.turnText.text : agent.turnText.text || agent.reply
           agent.replyPhaseKnown = agent.turnPhaseKnown
+          letters.turnEnded(event, agent.reply)
         }
         agent.turnText = new ReplyText()
         agent.turnPhaseKnown = false
@@ -1036,6 +1048,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
     agents: list.map(({ streaming: _s, thinking: _t, turnText: _x, allText: _a, turnPhaseKnown: _p, handedOff: _h, openCalls, ...agent }) => ({ ...agent, openCalls: openCalls.size })),
     evidence,
     delegations: [...delegations.values()],
+    messages: letters.list(),
     attention,
     prompt,
     promptAgentId,

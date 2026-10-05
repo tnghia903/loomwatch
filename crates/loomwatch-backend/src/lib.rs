@@ -1071,6 +1071,7 @@ async fn run_review_stop(
         log.append(&node.id, EventKind::SessionMeta, serde_json::json!({
             "phase": "prompt_sections",
             "sections": [{"kind": "stage_results", "heading": STAGE_RESULTS_HEADING, "text": handover}],
+            "stageResultsFrom": predecessors(team, &node.id),
         }), None).await?;
         let tier = parked
             .as_ref()
@@ -1251,7 +1252,7 @@ async fn archive_operator_answer(
                 "messageId": null,
                 "content": {"type": "text", "text": answer.text},
             }),
-            Some(serde_json::json!({"source": "loomwatch", "phase": "operator_answer"})),
+            Some(operator_answer_raw(asked_by, answer.send_back.as_deref())),
         )
         .await
     {
@@ -1264,6 +1265,19 @@ async fn archive_operator_answer(
     {
         eprintln!("warning: could not close the question {asked_by} asked: {error}");
     }
+}
+
+/// The metadata archived beside an answer: whose question or review it answers
+/// (`askedBy`), and the stage it was sent back to (`sendBack`), when it was. Without these the run
+/// view had to guess which waiting question an answer closed, and could not tell an approval from
+/// a send-back at all.
+fn operator_answer_raw(asked_by: &str, send_back: Option<&str>) -> serde_json::Value {
+    let mut raw =
+        serde_json::json!({"source": "loomwatch", "phase": "operator_answer", "askedBy": asked_by});
+    if let Some(stage) = send_back {
+        raw["sendBack"] = serde_json::json!(stage);
+    }
+    raw
 }
 
 /// The display name of a node, falling back to its id.
@@ -1405,6 +1419,19 @@ fn stage_task(
     if let Some(replayed) = lineage.replayed_stage_results.get(agent_id) {
         task.stage_results = Some(replayed.clone());
         task.direction = lineage.replayed_directions.get(agent_id).cloned();
+        task.direction_from = if task.direction.is_some() {
+            predecessors(team, agent_id)
+                .into_iter()
+                .filter(|from| {
+                    team.agents
+                        .iter()
+                        .any(|agent| agent.id == *from && agent.is_operator())
+                })
+                .map(str::to_owned)
+                .collect()
+        } else {
+            Vec::new()
+        };
         task.ask_offer = None;
     }
     if first_executed {
@@ -1907,6 +1934,11 @@ fn node_task(
     NodeTask {
         goal: prompt.to_owned(),
         direction: direction_for(team, agent_id, directions),
+        direction_from: direction_stops(team, agent_id, directions),
+        stage_results_from: predecessors(team, agent_id)
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
         // A stop that reviewed nothing — the whole chain before it was replayed — hands its
         // successor an empty pass-through, and an empty `## Results from preceding stages` reads
         // as "your predecessors produced nothing", which is a different claim from "there were
@@ -2134,13 +2166,7 @@ fn pipeline_node_prompt(
     node_id: &str,
     replies: &BTreeMap<String, String>,
 ) -> String {
-    let predecessors: Vec<&str> = team
-        .edges
-        .iter()
-        .filter(|edge| edge.to == node_id)
-        .map(|edge| edge.from.as_str())
-        .collect();
-    match predecessors.as_slice() {
+    match predecessors(team, node_id).as_slice() {
         [only] => replies.get(*only).cloned().unwrap_or_default(),
         many => many
             .iter()
@@ -2153,6 +2179,30 @@ fn pipeline_node_prompt(
             .collect::<Vec<_>>()
             .join("\n\n"),
     }
+}
+
+/// The stages connected into `node_id`, in the order their edges are declared: whose replies make
+/// up its handover. One definition, so the handover and the record of who wrote it cannot drift.
+fn predecessors<'team>(team: &'team TeamConfig, node_id: &str) -> Vec<&'team str> {
+    team.edges
+        .iter()
+        .filter(|edge| edge.to == node_id)
+        .map(|edge| edge.from.as_str())
+        .collect()
+}
+
+/// The review stops before `node_id` whose answers make up its direction, as [`direction_for`]
+/// joins them.
+fn direction_stops(
+    team: &TeamConfig,
+    node_id: &str,
+    directions: &BTreeMap<String, String>,
+) -> Vec<String> {
+    predecessors(team, node_id)
+        .into_iter()
+        .filter(|from| directions.contains_key(*from))
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Compose one opening prompt, and the record of what it is made of.
@@ -2219,7 +2269,10 @@ pub(crate) fn compose_prompt(
     // Above the results, and above the notes, on purpose: §9's trust boundary makes this the one
     // heading rendered as instruction, and a stage that read the operator's decision *after* the
     // material it overrules would have already formed a view of it.
+    let mut direction_from = Vec::new();
+    let mut stage_results_from = Vec::new();
     if let Some(direction) = &task.direction {
+        direction_from.clone_from(&task.direction_from);
         text.push_str(DIRECTION_SECTION);
         text.push_str(direction);
         sections.push(PromptSection {
@@ -2229,6 +2282,7 @@ pub(crate) fn compose_prompt(
         });
     }
     if let Some(results) = &task.stage_results {
+        stage_results_from.clone_from(&task.stage_results_from);
         text.push_str(STAGE_RESULTS_SECTION);
         text.push_str(results);
         sections.push(PromptSection {
@@ -2260,6 +2314,8 @@ pub(crate) fn compose_prompt(
         sections,
         required_skills: Vec::new(),
         delivery: delivery::Delivery::default(),
+        stage_results_from,
+        direction_from,
     }
 }
 
@@ -2298,7 +2354,13 @@ pub(crate) struct NodeTask {
     /// What the operator answered at a review stop before this stage. The one part of a prompt
     /// that is rendered as instruction rather than as source material.
     pub(crate) direction: Option<String>,
+    /// The review stops `direction` came from. Recorded beside the prompt so the run view can say
+    /// whose decision a stage was handed without reading the team file as it is now.
+    pub(crate) direction_from: Vec<String>,
     pub(crate) stage_results: Option<String>,
+    /// The stages `stage_results` was built from: the ones connected into this stage, as
+    /// [`pipeline_node_prompt`] reads them. Recorded for the same reason as `direction_from`.
+    pub(crate) stage_results_from: Vec<String>,
     /// The followed run's canonical reply, for the first stage a follow-up actually executes.
     /// `None` on a fresh run, and also on a follow-up of a run that produced no answer.
     pub(crate) previous_output: Option<String>,
@@ -3588,6 +3650,42 @@ mod tests {
         Ok(())
     }
 
+    /// A stage's prompt record names who handed it over and whose decision its direction is, from
+    /// the same edges the handover text was built from. The run view reads these instead of the
+    /// team file as it is now, which may have been rewired since the run.
+    #[test]
+    fn a_stage_record_names_who_handed_it_over_and_whose_direction_it_carries() {
+        let team = stop_team(
+            "record-senders",
+            pipeline_agent("a", Vec::new()),
+            pipeline_agent("b", Vec::new()),
+            5,
+        );
+        let empty = memory::ContextPacket::default();
+        let handovers = BTreeMap::from([("review".to_owned(), "the findings".to_owned())]);
+        let directions = BTreeMap::from([("review".to_owned(), "Approved.".to_owned())]);
+        let after_stop = node_task(&team, "b", 2, "goal", &handovers, &directions);
+        let meta = compose_prompt(&pipeline_agent("b", Vec::new()), &empty, &after_stop).meta();
+        assert_eq!(meta["stageResultsFrom"], serde_json::json!(["review"]));
+        assert_eq!(meta["directionFrom"], serde_json::json!(["review"]));
+        // The first stage is handed nothing, so its record names no one.
+        let first = node_task(&team, "a", 0, "goal", &handovers, &directions);
+        let meta = compose_prompt(&pipeline_agent("a", Vec::new()), &empty, &first).meta();
+        assert!(meta.get("stageResultsFrom").is_none());
+        assert!(meta.get("directionFrom").is_none());
+    }
+
+    /// An answer says whose question or review it closes, and where it was sent back to, so the
+    /// run view pairs it exactly and can tell a send-back from an approval.
+    #[test]
+    fn an_answer_records_whose_question_it_closes_and_where_it_was_sent_back() {
+        assert_eq!(
+            operator_answer_raw("review", None),
+            serde_json::json!({"source": "loomwatch", "phase": "operator_answer", "askedBy": "review"})
+        );
+        assert_eq!(operator_answer_raw("review", Some("a"))["sendBack"], "a");
+    }
+
     /// Byte-compatibility: a team with no `memory:` block must produce the prompt it produced
     /// before memory existed. `agent_prompt` is the one place that could regress this, so it is
     /// pinned directly rather than inferred from a run completing.
@@ -4373,6 +4471,28 @@ mod tests {
             .find(|section| section.kind == memory::PromptSectionKind::StageResults)
             .expect("the stop passed the handover through as source material");
         assert!(results.text.contains("three harnesses auto-approve"));
+        // Who handed what, recorded where it happened: the writer was handed the review stop's
+        // pass-through and its direction, and the review stop read what `a` handed over.
+        let record = |agent: &str| {
+            events
+                .iter()
+                .find(|event| {
+                    event.agent_id == agent
+                        && event.kind == EventKind::SessionMeta
+                        && event.payload["phase"] == "prompt_sections"
+                })
+                .map(|event| event.payload.clone())
+                .expect("a prompt record")
+        };
+        assert_eq!(
+            record("b")["stageResultsFrom"],
+            serde_json::json!(["review"])
+        );
+        assert_eq!(record("b")["directionFrom"], serde_json::json!(["review"]));
+        assert_eq!(
+            record("review")["stageResultsFrom"],
+            serde_json::json!(["a"])
+        );
         Ok(())
     }
 
@@ -4470,6 +4590,19 @@ mod tests {
         let second = answering.await?;
         assert_eq!(outcome.reply, "wrote the second pass");
         assert_eq!(second.context.as_deref(), Some("HANDOVER TWO"));
+        // Each answer says whose review it closed; only the first was sent back, and to `a`.
+        let answers: Vec<serde_json::Value> = archive
+            .verify_session(&run_id)
+            .await?
+            .into_iter()
+            .filter_map(|event| event.raw)
+            .filter(|raw| raw["phase"] == "operator_answer")
+            .collect();
+        assert_eq!(answers.len(), 2, "{answers:?}");
+        assert_eq!(answers[0]["askedBy"], "review");
+        assert_eq!(answers[0]["sendBack"], "a");
+        assert_eq!(answers[1]["askedBy"], "review");
+        assert!(answers[1].get("sendBack").is_none(), "{:?}", answers[1]);
         // A send-back leaves its own checkpoint: the stage was asked again, so where it got to
         // moved.
         let checkpoints = archive

@@ -42,3 +42,15 @@ describe('ActivityPanel for a failed call', () => {
     expect(screen.queryByRole('button', { name: /worked/ })).toBeNull()
   })
 })
+
+describe('ActivityPanel for a question to another agent', () => {
+  it('reads the question and the answer as words, not only as the call’s JSON', () => {
+    const asked = projectRun(record([
+      { agentId: 'writer', ts: at(0), kind: 'tool_call', payload: { callId: 'q', title: 'Team Bus: ask', name: 'ask', toolKind: 'other', status: 'in_progress', rawInput: { agent: 'researcher', question: 'Which spec version did you read?' } } },
+      { agentId: 'writer', ts: at(9), kind: 'tool_update', payload: { callId: 'q', status: 'completed', rawOutput: { agent: 'researcher', reply: 'Version 0.4.', live: true } } },
+    ])).evidence[0]
+    render(<ActivityPanel evidence={asked} ownerLabel="Writer" calls={[asked]} onInspectEvidence={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.getByText('Question').nextElementSibling).toHaveTextContent('Which spec version did you read?')
+    expect(screen.getByText('Answer from researcher').nextElementSibling).toHaveTextContent('Version 0.4.')
+  })
+})

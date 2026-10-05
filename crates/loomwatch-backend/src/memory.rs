@@ -464,6 +464,10 @@ pub struct ComposedPrompt {
     /// The knowledge sources and tools this prompt names (ADR 0029). Recorded beside the sections
     /// so the archive can say what was delivered without re-reading the prompt.
     pub delivery: crate::delivery::Delivery,
+    /// The stages the `stage_results` section was built from, by id. Empty when it has none.
+    pub stage_results_from: Vec<String>,
+    /// The review stops the `direction` section came from, by id. Empty when it has none.
+    pub direction_from: Vec<String>,
 }
 
 impl ComposedPrompt {
@@ -687,6 +691,14 @@ impl ComposedPrompt {
         }
         if !self.delivery.tools.is_empty() {
             meta["tools"] = serde_json::json!(self.delivery.tools);
+        }
+        // Who handed this stage what: the run view names them from here rather than from the team
+        // file as it is now, which may have been rewired since the run.
+        if !self.stage_results_from.is_empty() {
+            meta["stageResultsFrom"] = serde_json::json!(self.stage_results_from);
+        }
+        if !self.direction_from.is_empty() {
+            meta["directionFrom"] = serde_json::json!(self.direction_from);
         }
         meta
     }

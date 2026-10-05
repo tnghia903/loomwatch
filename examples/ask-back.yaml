@@ -1,0 +1,77 @@
+# Messages between agents, offline: a question put back to an earlier stage, and a review step.
+#
+# Researcher hands over to Writer. Writer asks Researcher a question back through the Team Bus
+# `ask` tool, and Researcher answers from the session it kept open. You review Writer's draft: send
+# it back once, then approve it with a note, which reaches Editor as your direction. Open the run's
+# **Team chat** to read all of it in order.
+#
+# Every agent runs `ask-back-harness.py`, so nothing calls a model provider. Copy both files into
+# your teams folder (`~/LoomWatch/teams`) to try it. See docs/WATCH.md, "Verifying without a paid
+# harness".
+schemaVersion: 1
+id: ask-back
+name: Ask-back demo
+entrypoint: researcher
+
+conversation:
+  stop:
+    keepAliveMinutes: 15
+
+agents:
+  - id: researcher
+    name: Researcher
+    role: Find today's stories, with a source for each, and answer questions about them.
+    spawn:
+      cmd: python3
+      args:
+        - ask-back-harness.py
+        - researcher
+      env: {}
+      cwd: .
+    model: fake/offline
+
+  - id: writer
+    name: Writer
+    role: Turn the findings into a short draft. Check anything unclear with the researcher.
+    spawn:
+      cmd: python3
+      args:
+        - ask-back-harness.py
+        - writer
+      env: {}
+      cwd: .
+    model: fake/offline
+
+  - id: review
+    kind: operator
+    name: You
+    role: Writer is done. Approve the draft, or send it back with what to change.
+
+  - id: editor
+    name: Editor
+    role: Finish the digest the way the operator directed.
+    spawn:
+      cmd: python3
+      args:
+        - ask-back-harness.py
+        - editor
+      env: {}
+      cwd: .
+    model: fake/offline
+
+edges:
+  - from: researcher
+    to: writer
+    layer: configured
+    kind: sequence
+    ts: "2026-10-05T00:00:00Z"
+  - from: writer
+    to: review
+    layer: configured
+    kind: sequence
+    ts: "2026-10-05T00:00:00Z"
+  - from: review
+    to: editor
+    layer: configured
+    kind: sequence
+    ts: "2026-10-05T00:00:00Z"

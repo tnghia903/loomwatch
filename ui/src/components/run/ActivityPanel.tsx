@@ -24,6 +24,18 @@ function contentText(content: unknown): string {
   }).filter(Boolean).join('\n')
 }
 
+/** What a Team Bus message said, verbatim: the question, task or reason, and an answer if one came back. */
+function messageWords(evidence: Evidence): [string, string][] {
+  const input = evidence.rawInput && typeof evidence.rawInput === 'object' ? evidence.rawInput as Record<string, unknown> : {}
+  const output = evidence.rawOutput && typeof evidence.rawOutput === 'object' ? evidence.rawOutput as Record<string, unknown> : {}
+  const words: [string, string][] = []
+  if (typeof input.question === 'string') words.push(['Question', input.question])
+  if (typeof input.task === 'string') words.push(['Task', input.task])
+  if (typeof input.reason === 'string') words.push(['Reason', input.reason])
+  if (typeof output.reply === 'string') words.push([`Answer from ${evidence.target ?? 'the agent'}`, output.reply])
+  return words
+}
+
 interface ActivityPanelProps {
   evidence: Evidence
   ownerLabel: string
@@ -41,6 +53,7 @@ export function ActivityPanel({ evidence, ownerLabel, calls, onInspectEvidence, 
   const status = evidence.status === 'succeeded' ? 'succeeded' : evidence.status === 'failed' || evidence.status === 'rejected' ? 'failed' : evidence.status === 'pending' ? 'starting' : 'running'
   // A failed call the agent put right says so, and opens the call that did it.
   const mend = status === 'failed' && evidence.kind !== 'permission' ? mendOf(evidence, calls) : null
+  const said = evidence.kind === 'delegation' ? messageWords(evidence) : []
   const output = contentText(evidence.content) || (evidence.rawOutput !== null && evidence.rawOutput !== undefined ? pretty(evidence.rawOutput) : '')
   return (
     <aside className="panel right top e1 lw-activity" aria-labelledby="activity-title activity-raw" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
@@ -71,6 +84,13 @@ export function ActivityPanel({ evidence, ownerLabel, calls, onInspectEvidence, 
           {evidence.locations.length > 0 && <><dt>Paths</dt><dd>{evidence.locations.map((location) => location.path + (location.line ? `:${location.line}` : '')).join('\n')}</dd></>}
         </dl>
       </div>
+      {/* A message to another agent reads as what was said, before the call that carried it. */}
+      {said.map(([label, text]) => (
+        <div className="zone" key={label}>
+          <div className="zone-head t-micro">{label}</div>
+          <p className="ent-said t-body selectable">{text}</p>
+        </div>
+      ))}
       {evidence.rawInput !== null && evidence.rawInput !== undefined && (
         <div className="zone">
           <div className="zone-head t-micro">Input</div>

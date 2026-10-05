@@ -178,9 +178,16 @@ fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
-/// Write the record readable by this user only, all at once: a crash mid-write leaves the old
-/// record, never half of one.
 fn write_record(path: &Path, record: &Record) -> io::Result<()> {
+    write_private(
+        path,
+        &serde_json::to_vec_pretty(record).map_err(io::Error::other)?,
+    )
+}
+
+/// Write a file of the state folder readable by this user only, all at once: a crash mid-write
+/// leaves the old file, never half of one. One process writes a given file one write at a time.
+pub(crate) fn write_private(path: &Path, text: &[u8]) -> io::Result<()> {
     let directory = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(directory)?;
     #[cfg(unix)]
@@ -188,7 +195,6 @@ fn write_record(path: &Path, record: &Record) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
     }
-    let text = serde_json::to_vec_pretty(record).map_err(io::Error::other)?;
     let partial = directory.join(format!(
         ".{}.{}.partial",
         path.file_name()
@@ -205,7 +211,7 @@ fn write_record(path: &Path, record: &Record) -> io::Result<()> {
             options.mode(0o600);
         }
         let mut file = options.open(&partial)?;
-        io::Write::write_all(&mut file, &text)?;
+        io::Write::write_all(&mut file, text)?;
         file.sync_all()?;
     }
     fs::rename(&partial, path).inspect_err(|_| {

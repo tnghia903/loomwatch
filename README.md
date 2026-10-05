@@ -194,8 +194,8 @@ one plain sentence before anything runs.
 
 ### 👀 Watch every step
 
-Live stages, tool calls, handovers and a run receipt. Drag the timeline to replay what happened, and
-when.
+Live stages, tool calls, a team chat of what the agents said to each other, and a run receipt. Drag
+the timeline to replay what happened, and when.
 
 </td>
 </tr>

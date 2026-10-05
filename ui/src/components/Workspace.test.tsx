@@ -1421,6 +1421,18 @@ describe('switching workspace tab closes the node inspector', () => {
     restore()
   })
 
+  // The Run tab cleared the selection itself; Build's own "Run team" did not, and the panel then sat
+  // over the next run. Every way into a run must close it, not just the tab.
+  it('closes it when Build’s Run team opens the next run', async () => {
+    const restore = selectionBackedByState('researcher')
+    renderWorkspace()
+    expect(nodePanel()).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+    expect(screen.getByRole('heading', { name: /New run/ })).toBeInTheDocument()
+    await waitFor(() => expect(nodePanel()).not.toBeInTheDocument())
+    restore()
+  })
+
   it('closes it on Run → Build too', async () => {
     const restore = selectionBackedByState('researcher')
     sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]

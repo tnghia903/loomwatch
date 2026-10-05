@@ -476,3 +476,28 @@ describe('Delivery Lane', () => {
     })
   })
 })
+
+describe('Delivery Lane messages between agents', () => {
+  const ts = (seconds: number) => new Date(Date.parse('2026-10-05T09:00:00Z') + seconds * 1000).toISOString()
+  const events = [
+    { agentId: 'researcher', kind: 'process', payload: { phase: 'spawned', pid: 1 } },
+    { agentId: 'writer', kind: 'session_meta', payload: { phase: 'prompt_sections', sections: [{ kind: 'stage_results', heading: '## Results', text: 'Findings: ACP is JSON-RPC.' }] }, raw: { source: 'loomwatch', phase: 'prompt_sections' } },
+    { agentId: 'writer', kind: 'message', payload: { role: 'user', content: { type: 'text', text: 'prompt' } } },
+    { agentId: 'writer', kind: 'tool_call', payload: { callId: 'q', title: 'Team Bus: ask', name: 'ask', toolKind: 'other', status: 'in_progress', rawInput: { agent: 'researcher', question: 'Which version?' } } },
+    { agentId: 'writer', kind: 'tool_update', payload: { callId: 'q', status: 'completed', rawOutput: { agent: 'researcher', reply: '0.4', live: true } } },
+  ].map((event, seq) => ({ ...event, id: `e${seq}`, seq, sessionId: 'run', ts: ts(seq * 10) })) as unknown as Parameters<typeof projectRun>[0]
+  const node = (id: string, name: string) => ({ id, type: 'agent', position: { x: 0, y: 0 }, data: { label: name, agent: { id, name, role: name } } })
+
+  it('shows what the stages said to each other right under their cards', async () => {
+    setup({
+      agents: [node('researcher', 'Researcher'), node('writer', 'Writer')] as unknown as DeliveryLaneProps['agents'],
+      projection: projectRun(events),
+    })
+    const talk = await screen.findByRole('region', { name: 'Team chat' })
+    // Under the cards, not above them: the conversation follows the team it belongs to.
+    const stages = screen.getByRole('list', { name: 'Team stages' })
+    expect(stages.compareDocumentPosition(talk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(talk).getByRole('listitem', { name: /Writer to Researcher: question/ })).toHaveTextContent('Which version?')
+    expect(within(talk).getByRole('listitem', { name: /Researcher to Writer: answer/ })).toHaveTextContent('0.4')
+  })
+})
