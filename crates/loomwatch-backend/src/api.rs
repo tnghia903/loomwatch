@@ -2527,7 +2527,10 @@ pub(crate) fn augment_search_path(
         .unwrap_or_default();
     if let Some(home) = home {
         for extra in EXTRA_HARNESS_DIRECTORIES {
-            let candidate = home.join(extra);
+            // Joined part by part, so a Windows path reads `C:\Users\ana\AppData\Roaming\npm`.
+            let candidate = extra
+                .split('/')
+                .fold(home.to_path_buf(), |path, part| path.join(part));
             if !directories.contains(&candidate) {
                 directories.push(candidate);
             }
@@ -2622,8 +2625,6 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
-
     use axum::body::Body;
     use axum::http::{Request, header};
     use http_body_util::BodyExt;
@@ -2655,16 +2656,7 @@ mod tests {
     }
 
     fn create_executable_with_contents(directory: &Path, name: &str, contents: &str) {
-        let path = directory.join(name);
-        let mut file = fs::File::create(&path).expect("create executable");
-        file.write_all(contents.as_bytes())
-            .expect("write executable");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(path, fs::Permissions::from_mode(0o755))
-                .expect("set executable bit");
-        }
+        crate::test_support::fake_program(&directory.join(name), contents);
     }
 
     fn test_router(teams_root: &Path) -> Router {
@@ -3215,6 +3207,7 @@ mod tests {
     /// Part B root cause (b): a daemon launched without the per-user prefixes on its `PATH` finds
     /// nothing. The production router appends them; the inherited order still comes first.
     #[test]
+    #[cfg(unix)]
     fn augmenting_the_search_path_adds_the_per_user_prefixes_after_the_inherited_ones() {
         let home = Path::new("/home/tester");
         let augmented = augment_search_path(Some(OsString::from("/usr/bin:/bin")), Some(home))
@@ -3236,6 +3229,7 @@ mod tests {
     /// An operator who already put `~/.local/bin` on the `PATH` must not see it twice, and their
     /// ordering must survive.
     #[test]
+    #[cfg(unix)]
     fn augmenting_the_search_path_does_not_duplicate_a_directory_already_present() {
         let home = Path::new("/home/tester");
         let augmented = augment_search_path(
@@ -3252,6 +3246,29 @@ mod tests {
                 .filter(|entry| entry.as_str() == "/home/tester/.local/bin")
                 .count(),
             1,
+            "{directories:?}"
+        );
+    }
+
+    /// On Windows the per-user folders are where npm, pnpm and the other installers put apps, and
+    /// an operator's own `PATH` still comes first.
+    #[test]
+    #[cfg(windows)]
+    fn on_windows_the_search_path_adds_the_folders_installers_use() {
+        let home = Path::new(r"C:\Users\tester");
+        let npm = r"C:\Users\tester\AppData\Roaming\npm";
+        let augmented = augment_search_path(
+            Some(OsString::from(format!(r"{npm};C:\Windows\system32"))),
+            Some(home),
+        )
+        .expect("augmented path");
+        let directories = searched_directories(Some(augmented.as_os_str()));
+
+        assert_eq!(directories[0], npm);
+        assert_eq!(directories[1], r"C:\Windows\system32");
+        assert_eq!(directories.iter().filter(|entry| *entry == npm).count(), 1);
+        assert!(
+            directories.contains(&r"C:\Users\tester\scoop\shims".to_owned()),
             "{directories:?}"
         );
     }

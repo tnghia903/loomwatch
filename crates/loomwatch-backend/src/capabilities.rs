@@ -244,7 +244,7 @@ pub fn detect_capabilities(home: Option<&Path>, teams_root: &Path) -> Capability
     }
 
     if let Some(home) = home {
-        scan_codex_mcp(&home.join(".codex/config.toml"), &mut tools);
+        scan_codex_mcp(&home.join(".codex").join("config.toml"), &mut tools);
         scan_json_connectors(
             &home.join(".claude.json"),
             "Claude Code",
@@ -252,13 +252,13 @@ pub fn detect_capabilities(home: Option<&Path>, teams_root: &Path) -> Capability
             &mut tools,
         );
         scan_json_connectors(
-            &home.join(".claude/settings.json"),
+            &home.join(".claude").join("settings.json"),
             "Claude Code",
             "mcpServers",
             &mut tools,
         );
         scan_json_connectors(
-            &home.join(".config/opencode/opencode.json"),
+            &home.join(".config").join("opencode").join("opencode.json"),
             "OpenCode",
             "mcp",
             &mut tools,
@@ -694,13 +694,13 @@ fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
         return Vec::new();
     };
     let mut roots = vec![SkillRoot::new(
-        home.join(".claude/skills"),
+        home.join(".claude").join("skills"),
         "Claude Code",
         RANK_PERSONAL,
         Skills,
     )];
     roots.push(SkillRoot::new(
-        home.join(".codex/skills"),
+        home.join(".codex").join("skills"),
         "Codex",
         RANK_HARNESS,
         Skills,
@@ -715,7 +715,7 @@ fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
         ));
     }
     roots.push(SkillRoot::new(
-        home.join(".gemini/skills"),
+        home.join(".gemini").join("skills"),
         "Gemini",
         RANK_HARNESS,
         Skills,
@@ -724,12 +724,12 @@ fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
     // Its own source checkout and optional-skills catalog are not installed skills, so they are
     // not read.
     roots.push(SkillRoot::new(
-        home.join(".hermes/skills"),
+        home.join(".hermes").join("skills"),
         "Hermes",
         RANK_HARNESS,
         Skills,
     ));
-    for profile in subfolders(&home.join(".hermes/profiles")) {
+    for profile in subfolders(&home.join(".hermes").join("profiles")) {
         roots.push(SkillRoot::new(
             profile.join("skills"),
             "Hermes",
@@ -750,13 +750,13 @@ fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
         ));
     }
     roots.push(SkillRoot::new(
-        home.join(".pi/agent/skills"),
+        home.join(".pi").join("agent").join("skills"),
         "pi",
         RANK_HARNESS,
         Skills,
     ));
     roots.push(SkillRoot::new(
-        home.join(".agents/skills"),
+        home.join(".agents").join("skills"),
         "Shared",
         RANK_SHARED,
         Skills,
@@ -764,13 +764,13 @@ fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
     // Plugins last. Claude Code's `marketplaces/` is the catalog of every plugin a marketplace
     // offers, installed or not; listing it showed uninstalled plugins as ready to use.
     roots.push(SkillRoot::new(
-        home.join(".codex/plugins/cache"),
+        home.join(".codex").join("plugins").join("cache"),
         "Codex",
         RANK_INSTALLED,
         Plugins,
     ));
     let mut claude_plugins = SkillRoot::new(
-        home.join(".claude/plugins"),
+        home.join(".claude").join("plugins"),
         "Claude Code",
         RANK_INSTALLED,
         Plugins,
@@ -778,7 +778,7 @@ fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
     claude_plugins.exclude = &["marketplaces"];
     roots.push(claude_plugins);
     roots.push(SkillRoot::new(
-        home.join(".gemini/extensions"),
+        home.join(".gemini").join("extensions"),
         "Gemini",
         RANK_INSTALLED,
         Plugins,
@@ -1116,14 +1116,14 @@ pub fn tool_definitions_for(home: &Path, item: &DetectedCapability) -> Vec<ToolD
         };
     for path in [
         home.join(".claude.json"),
-        home.join(".claude/settings.json"),
+        home.join(".claude").join("settings.json"),
     ] {
         let servers = read_json(&path)
             .map(|value| json_definitions(&value, "mcpServers"))
             .unwrap_or_default();
         add("Claude Code", ToolFormat::Claude, path, servers);
     }
-    let codex = home.join(".codex/config.toml");
+    let codex = home.join(".codex").join("config.toml");
     let servers = fs::read_to_string(&codex)
         .ok()
         .and_then(|source| source.parse::<toml::Table>().ok())
@@ -1135,7 +1135,7 @@ pub fn tool_definitions_for(home: &Path, item: &DetectedCapability) -> Vec<ToolD
         })
         .unwrap_or_default();
     add("Codex", ToolFormat::Codex, codex, servers);
-    let opencode = home.join(".config/opencode/opencode.json");
+    let opencode = home.join(".config").join("opencode").join("opencode.json");
     let servers = read_json(&opencode)
         .map(|value| json_definitions(&value, "mcp"))
         .unwrap_or_default();

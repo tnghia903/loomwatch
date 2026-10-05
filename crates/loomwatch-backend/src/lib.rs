@@ -2373,8 +2373,54 @@ pub(crate) fn resolve_cwd(team_path: &Path, cwd: &Path) -> Result<PathBuf> {
 
 #[cfg(test)]
 pub(crate) mod test_support {
+    /// The POSIX shell the fake apps in these tests are written for: `/bin/sh`, or on Windows the
+    /// `sh` that Git for Windows puts on `PATH`, as it is on GitHub's Windows runners.
+    pub(crate) const SH: &str = if cfg!(windows) { "sh" } else { "/bin/sh" };
+
+    /// `path` as a fixture writes it into a team file or a shell script: `/`-separated, which
+    /// YAML's double quotes and Git's `sh` on Windows both read as written.
+    pub(crate) fn sh_path(path: &std::path::Path) -> String {
+        path.display().to_string().replace('\\', "/")
+    }
+
+    /// Write `script`, a POSIX shell script, as a program named `path` and return what to start.
+    ///
+    /// Elsewhere that is `path` itself, made executable. Windows starts no shell script, so there
+    /// it is also given a `.cmd` beside it that runs it with [`SH`], the way npm gives every app
+    /// it installs a `.cmd`, and the `.cmd` is returned: a `PATH` lookup finds it by `path`'s name.
+    pub(crate) fn fake_program(path: &std::path::Path, script: &str) -> std::path::PathBuf {
+        std::fs::write(path, script).expect("write the fake program");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+                .expect("make the fake program executable");
+            path.to_path_buf()
+        }
+        #[cfg(not(unix))]
+        {
+            let name = path.file_name().expect("a program name").to_string_lossy();
+            let wrapper = path.with_file_name(format!("{name}.cmd"));
+            std::fs::write(&wrapper, format!("@{SH} \"%~dp0{name}\" %*\r\n"))
+                .expect("write the fake program's .cmd");
+            wrapper
+        }
+    }
+
+    /// Whether `pid` is still a live process.
+    #[cfg(windows)]
+    pub(crate) fn process_is_alive(pid: u32) -> bool {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+            .output()
+            .is_ok_and(|output| {
+                String::from_utf8_lossy(&output.stdout).contains(&format!("\"{pid}\""))
+            })
+    }
+
     /// Whether `pid` is still a live process. A zombie counts as gone: it has been killed
     /// and only awaits reaping by tokio's orphan queue.
+    #[cfg(not(windows))]
     pub(crate) fn process_is_alive(pid: u32) -> bool {
         std::process::Command::new("ps")
             .args(["-o", "stat=", "-p", &pid.to_string()])
@@ -3984,7 +4030,7 @@ mod tests {
             name: format!("{id} name"),
             role: format!("{id} role"),
             spawn: SpawnConfig {
-                cmd: "/bin/sh".into(),
+                cmd: test_support::SH.into(),
                 args,
                 env: BTreeMap::new(),
                 cwd: PathBuf::from("."),

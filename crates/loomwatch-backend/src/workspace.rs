@@ -595,7 +595,7 @@ fn prepare_root(
     // workspace does not allow. Carrying the declared cwd's settings across keeps that contract
     // with the operator's own file rather than inventing a policy here. An agent that starts in a
     // folder the operator chose reads that folder's settings itself (ADR 0042).
-    let managed_settings = root.join(".claude/settings.json");
+    let managed_settings = root.join(".claude").join("settings.json");
     if let Some(settings) = carried.and_then(read_settings) {
         fs::create_dir_all(root.join(".claude")).map_err(|error| error.to_string())?;
         fs::write(&managed_settings, settings).map_err(|error| error.to_string())?;
@@ -710,7 +710,7 @@ fn holds(folder: &Path, path: &Path) -> bool {
 }
 
 fn read_settings(declared_cwd: &Path) -> Option<Vec<u8>> {
-    fs::read(declared_cwd.join(".claude/settings.json")).ok()
+    fs::read(declared_cwd.join(".claude").join("settings.json")).ok()
 }
 
 /// Copy the skill's whole directory, not just its `SKILL.md`: a skill may ship scripts, references
@@ -1100,7 +1100,7 @@ mod tests {
     fn a_claude_skill_is_delivered_to_a_codex_agents_shared_skill_directory() {
         let temp = TempDirectory::new();
         let home = temp.path().join("home");
-        let source = home.join(".claude/skills/claude-design");
+        let source = home.join(".claude").join("skills").join("claude-design");
         fs::create_dir_all(&source).expect("skill directory");
         fs::write(
             source.join("SKILL.md"),

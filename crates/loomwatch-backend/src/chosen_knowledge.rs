@@ -663,14 +663,10 @@ mod tests {
     }
 
     fn fake_pdftotext(dir: &Path, body: &str) -> PathBuf {
-        let path = dir.join("fake-pdftotext");
-        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        path
+        crate::test_support::fake_program(
+            &dir.join("fake-pdftotext"),
+            &format!("#!/bin/sh\n{body}\n"),
+        )
     }
 
     /// ADR 0048: a PDF that keeps `pdftotext` busy, or makes it write without end, costs a bounded

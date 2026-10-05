@@ -131,10 +131,16 @@ fn lexically_under(root: &Path, requested: &Path) -> bool {
         && candidate != root
 }
 
+/// The folder `file` is in, relative to `root` and `/`-separated, as the browser app names files.
 fn folder_of(root: &Path, file: &Path) -> Option<String> {
-    file.parent()
-        .and_then(|parent| parent.strip_prefix(root).ok())
-        .map(|relative| relative.to_string_lossy().into_owned())
+    let relative = file.parent()?.strip_prefix(root).ok()?;
+    Some(
+        relative
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/"),
+    )
 }
 
 fn iso(time: SystemTime) -> String {

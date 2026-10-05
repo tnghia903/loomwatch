@@ -3342,7 +3342,7 @@ mod tests {
             .replace("FIRST_ID", first_id)
             .replace("SECOND_ID", second_id);
             let spec = ProcessSpec {
-                cmd: "/bin/sh".into(),
+                cmd: crate::test_support::SH.into(),
                 args: vec!["-c".into(), script],
                 env: BTreeMap::new(),
                 cwd: std::env::current_dir().expect("cwd"),
@@ -3419,7 +3419,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -3513,7 +3513,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -3577,7 +3577,7 @@ mod tests {
             ..Default::default()
         };
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: cwd.clone(),
@@ -3633,7 +3633,7 @@ mod tests {
         let cwd = std::env::current_dir().expect("cwd");
         let archive = EventArchive::from_pool(pool);
         let run = |args: String, permissions| ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), args],
             env: BTreeMap::new(),
             cwd: cwd.clone(),
@@ -3733,7 +3733,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into(), "claude-agent-acp".into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -3795,7 +3795,7 @@ mod tests {
             ))
         };
         let run = |app: &str, script: String, permissions| ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script, app.into()],
             env: BTreeMap::from([("CODEX_CONFIG".to_owned(), teams.to_owned())]),
             cwd: cwd.clone(),
@@ -3882,7 +3882,7 @@ mod tests {
         let cwd = std::env::current_dir().expect("cwd");
         let archive = EventArchive::from_pool(pool);
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: cwd.clone(),
@@ -3993,7 +3993,7 @@ mod tests {
         "#;
         let cwd = std::env::current_dir().expect("cwd");
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: cwd.clone(),
@@ -4062,7 +4062,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4118,7 +4118,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4337,7 +4337,7 @@ mod tests {
         session: &str,
     ) -> Vec<crate::RunEvent> {
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.to_owned()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4503,7 +4503,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4582,7 +4582,7 @@ mod tests {
             exit 7
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4680,7 +4680,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":3,"error":{"code":-32000,"message":"model rejected"}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4730,7 +4730,7 @@ mod tests {
             kill -KILL $$
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4779,7 +4779,7 @@ mod tests {
             printf 'cancel-frame: %s\n' "$cancel" >&2
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4939,7 +4939,7 @@ mod tests {
         "#;
         let cwd = std::env::current_dir().expect("cwd");
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: cwd.clone(),
@@ -4967,7 +4967,7 @@ mod tests {
     ) -> AcpProcess {
         let cwd = std::env::current_dir().expect("cwd");
         AcpProcess::spawn(&ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: cwd.clone(),

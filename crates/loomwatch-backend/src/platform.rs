@@ -175,8 +175,10 @@ fn is_store_alias_folder(directory: &Path) -> bool {
 /// Elsewhere it holds nothing: the child's own `kill_on_drop` ends the app, as it always has.
 #[derive(Default)]
 pub struct ProcessTree {
+    /// Held, not read: closing it is what ends the tree.
     #[cfg(windows)]
-    _job: Option<win32job::Job>,
+    #[cfg_attr(not(test), allow(dead_code))]
+    job: Option<win32job::Job>,
 }
 
 impl ProcessTree {
@@ -193,13 +195,22 @@ impl ProcessTree {
                 job.assign_process(handle as isize).ok()?;
                 Some(job)
             });
-            Self { _job: job }
+            Self { job }
         }
         #[cfg(not(windows))]
         {
             let _ = child;
             Self {}
         }
+    }
+
+    /// The processes in this tree now, by id.
+    #[cfg(all(test, windows))]
+    fn process_ids(&self) -> Vec<usize> {
+        self.job
+            .as_ref()
+            .and_then(|job| job.query_process_id_list().ok())
+            .unwrap_or_default()
     }
 }
 
@@ -399,14 +410,10 @@ mod tests {
         #[tokio::test]
         async fn dropping_the_tree_ends_the_apps_grandchildren_too() {
             let scratch = Scratch::new("tree");
-            let marker = scratch.0.join("grandchild.pid");
-            // cmd.exe starts PowerShell, which writes its own process id and then waits.
+            // cmd.exe starts ping, which then waits two minutes: an app's node behind its .cmd.
             fs::write(
                 scratch.0.join("app.cmd"),
-                format!(
-                    "@echo off\r\npowershell -NoProfile -Command \"Set-Content -LiteralPath '{}' -Value $PID; Start-Sleep -Seconds 60\"\r\n",
-                    marker.display()
-                ),
+                "@echo off\r\nping -n 120 127.0.0.1 >nul\r\n",
             )
             .expect("cmd");
             let mut command = tokio::process::Command::new(scratch.0.join("app.cmd"));
@@ -417,28 +424,32 @@ mod tests {
                 .kill_on_drop(true);
             let child = command.spawn().expect("start app");
             let tree = ProcessTree::adopt(&child);
-            let mut grandchild = None;
-            for _ in 0..200 {
-                if let Some(pid) = fs::read_to_string(&marker)
-                    .ok()
-                    .and_then(|text| text.trim().parse::<u32>().ok())
-                {
-                    grandchild = Some(pid);
+            let mut started = Vec::new();
+            for _ in 0..300 {
+                started = tree.process_ids();
+                if started.len() >= 2 {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            let grandchild = grandchild.expect("the app started its grandchild");
-            assert!(process_is_running(grandchild), "grandchild is running");
+            assert!(
+                started.len() >= 2,
+                "cmd.exe and the ping it started are both in the app's tree: {started:?}"
+            );
+            let started: Vec<u32> = started
+                .into_iter()
+                .map(|pid| u32::try_from(pid).expect("a process id"))
+                .collect();
+            assert!(started.iter().all(|&pid| process_is_running(pid)));
             drop(tree);
             drop(child);
-            for _ in 0..50 {
-                if !process_is_running(grandchild) {
+            for _ in 0..100 {
+                if started.iter().all(|&pid| !process_is_running(pid)) {
                     return;
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            panic!("process {grandchild} outlived the app that started it");
+            panic!("processes {started:?} outlived the app that started them");
         }
 
         fn process_is_running(pid: u32) -> bool {

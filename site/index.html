@@ -77,7 +77,7 @@
         <p class="open-sub">One app researches, another writes, a third double-checks, and you carry every answer between them by hand, hoping the first step was right.</p>
       </div>
       <div class="open-after">
-        <span class="micro">Free and open source · for macOS · runs on your computer</span>
+        <span class="micro">Free and open source · for macOS and Windows · runs on your computer</span>
         <h1 id="open-h">Put the AI apps you have to work <em>as one team.</em></h1>
         <p class="open-sub">Mix the command-line AI apps on your Mac, such as Claude Code, Codex and OpenCode, on one team. Ask in plain words, watch every step as it happens, and decide before the next agent builds on it.</p>
         <div class="cta">
@@ -377,14 +377,14 @@ I can't see the other app's work.
       <div class="band-head">
         <span class="ch-n"><b>10</b> Start</span>
         <h2 id="start-h">One command, and your first team is already waiting.</h2>
-        <p class="ch-body">Paste it into Terminal on your Mac. It downloads a ready-built LoomWatch (about 21 MB), checks it, and opens it in your browser with an offline demo team you can run before you connect any AI app. Nothing is compiled.</p>
+        <p class="ch-body">Paste it into Terminal on your Mac, or the PowerShell line below it on Windows. It downloads a ready-built LoomWatch (about 21 MB), checks it, and opens it in your browser with an offline demo team you can run before you connect any AI app. Nothing is compiled.</p>
         <dl class="needs">
-          <div><dt>A Mac</dt><dd>macOS 11 or newer, Apple silicon or Intel. Linux builds exist but are untested, and Windows isn't supported yet.</dd></div>
+          <div><dt>A Mac or a Windows PC</dt><dd>macOS 11 or newer, Apple silicon or Intel, or 64-bit Windows 10 or 11. Linux builds exist but are untested.</dd></div>
           <div><dt>Docker Desktop or OrbStack</dt><dd>For the database that keeps your run history. If it's missing, LoomWatch says so.</dd></div>
           <div><dt>One command-line AI app</dt><dd>For real runs, such as Claude Code, Codex or OpenCode. OpenCode has free models and needs no account. The demo team needs none.</dd></div>
           <div><dt>No GitHub account needed</dt><dd>The installer fetches the public release, so anyone can install it.</dd></div>
         </dl>
-        <p class="start-alt"><a href="https://github.com/tnghia903/loomwatch/blob/main/scripts/install.sh">Read the installer</a> before you run it, or <a href="https://github.com/tnghia903/loomwatch#build-from-source">build from source</a>.</p>
+        <p class="start-alt">Read the installer (<a href="https://github.com/tnghia903/loomwatch/blob/main/scripts/install.sh">Mac</a>, <a href="https://github.com/tnghia903/loomwatch/blob/main/scripts/install.ps1">Windows</a>) before you run it, or <a href="https://github.com/tnghia903/loomwatch#build-from-source">build from source</a>.</p>
       </div>
       <div class="termbox">
         <div class="termbox-bar"><span class="micro">Terminal</span><button class="btn" type="button" id="copy-cmds">Copy</button></div>
@@ -397,6 +397,7 @@ Created your teams folder at ~/LoomWatch/teams, with an offline demo team in it.
 <b>==&gt; LoomWatch is starting at http://127.0.0.1:3000</b>
 Keep this window open while you use LoomWatch. Press Ctrl-C to stop it.</span></pre>
         <p class="termbox-foot"><code>~/LoomWatch/app/loomwatch</code> starts it again and lists anything missing. Add <code>stop</code> to also stop its database, <code>update</code> for the newest release, or <code>help</code> for the rest. Your teams and history are kept either way.</p>
+        <p class="termbox-foot">On Windows, paste <code>irm https://loomwatch.github.io/install.ps1 | iex</code> into PowerShell instead. Afterwards <code>loomwatch</code> works the same way in any new terminal window.</p>
       </div>
     </div>
 

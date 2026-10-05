@@ -824,8 +824,9 @@ mod tests {
     /// A scheduled team whose single agent is the shell-script harness at `harness`.
     fn scheduled_team_yaml(harness: &Path, schedule_yaml: &str) -> String {
         format!(
-            "schemaVersion: 1\nid: routine\nname: Routine team\nentrypoint: solo\nschedule:\n{schedule_yaml}agents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n",
-            harness.display()
+            "schemaVersion: 1\nid: routine\nname: Routine team\nentrypoint: solo\nschedule:\n{schedule_yaml}agents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    spawn:\n      cmd: {sh}\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n",
+            crate::test_support::sh_path(harness),
+            sh = crate::test_support::SH
         )
     }
 
