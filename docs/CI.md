@@ -47,6 +47,12 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 DATABASE_URL=postgres://… cargo test --workspace --locked
 ```
 
+Code that only Windows compiles (`#[cfg(windows)]`) can be type-checked from a Mac or Linux with the
+MinGW toolchain, without running it: `brew install mingw-w64` (or your distribution's
+`mingw-w64`), `rustup target add x86_64-pc-windows-gnu`, then
+`cargo clippy --target x86_64-pc-windows-gnu --workspace --all-targets --locked -- -D warnings`.
+Only the **Windows** CI job runs it.
+
 ## Making a release
 
 The installer (`curl -fsSL https://loomwatch.github.io/install.sh | bash`) always downloads the

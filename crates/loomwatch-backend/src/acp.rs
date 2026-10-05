@@ -4799,9 +4799,12 @@ mod tests {
             asker: None,
         };
         let archive = EventArchive::from_pool(pool);
+        // Every request has this long, the handshake included: Git's `sh` on a busy Windows runner
+        // can take longer than 200 ms just to start, and the handshake then timed out instead.
+        let request_timeout = Duration::from_millis(if cfg!(windows) { 3_000 } else { 200 });
         let mut process = AcpProcess::spawn(&spec)
             .expect("spawn")
-            .with_request_timeout(Duration::from_millis(200));
+            .with_request_timeout(request_timeout);
         let error = process
             .run_session(
                 "agent",
