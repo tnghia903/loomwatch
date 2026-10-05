@@ -4,6 +4,7 @@ import { Moon, Sun, Workflow, Undo2 } from 'lucide-react'
 import { useTheme } from '../../lib/theme'
 import { DEPTHS, DEPTH_LABEL, DEPTH_ZOOM, depthForZoom, type Depth } from '../../lib/story/depth'
 import { SegmentThumb } from '../ui/SegmentThumb'
+import { keys } from '../../lib/platform'
 
 /**
  * Story · Team · Trace: the zoom levels at which cards change what they say (lib/story/depth.ts).
@@ -68,11 +69,11 @@ export function ViewControls({ onOrganize, onUndoOrganize, onFit, organizeDisabl
     // The bar is a fixed landmark: it does not shift when a right panel opens (the panels
     // stop above it instead), so it takes no layout input from the rest of the shell.
     <div className={`panel right bottom e1 lw-viewctl ${mode === 'system' ? 'theme-system' : ''}`} aria-label="View controls" role="toolbar">
-      {onOrganize && <button type="button" className="btn organize-button" title="Organize agents and resources (⌥⌘L)" disabled={organizeDisabled} onClick={onOrganize}><Workflow size={15} aria-hidden="true" /> Organize</button>}
+      {onOrganize && <button type="button" className="btn organize-button" title={`Organize agents and resources (${keys('⌥⌘L')})`} disabled={organizeDisabled} onClick={onOrganize}><Workflow size={15} aria-hidden="true" /> Organize</button>}
       {onUndoOrganize && <button type="button" className="iconbtn" aria-label="Undo organize" title="Restore the previous arrangement" onClick={onUndoOrganize}><Undo2 size={15} aria-hidden="true" /></button>}
       <DepthDial onStory={onFit} />
-      <span className="zoomlvl t-mono-sm" title="Zoom level: scroll or pinch, ⌘− and ⌘+; ⌘0 resets to 100%">{Math.round(zoom * 100)}%</span>
-      <button type="button" className="iconbtn" title={resolved === 'dark' ? 'Switch to light (⌘⇧L)' : 'Switch to dark (⌘⇧L)'} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={toggle}>
+      <span className="zoomlvl t-mono-sm" title={`Zoom level: scroll or pinch, ${keys('⌘−')} and ${keys('⌘+')}; ${keys('⌘0')} resets to 100%`}>{Math.round(zoom * 100)}%</span>
+      <button type="button" className="iconbtn" title={`${resolved === 'dark' ? 'Switch to light' : 'Switch to dark'} (${keys('⌘⇧L')})`} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={toggle}>
         {resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
         <span className="sysdot" aria-hidden="true" />
       </button>

@@ -30,7 +30,7 @@ export interface AboutLoomWatch {
   commit: string | null
   /** Rust's name for the system: `macos`, `linux`, `windows`. */
   os: string
-  /** The macOS release, such as `26.0`. */
+  /** The macOS release, such as `26.0`, or the Windows build, such as `10.0.26100.4652`. */
   osVersion: string | null
   arch: string
 }

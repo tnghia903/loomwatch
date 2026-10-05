@@ -13,6 +13,7 @@ import { AgentContext } from './AgentContext'
 import { AgentPermissions } from './AgentPermissions'
 import { AgentWorkFolder } from './AgentWorkFolder'
 import { roleGlyph } from './roleGlyph'
+import { keys } from '../../lib/platform'
 
 export interface InspectorProps {
   node: AgentNode
@@ -190,7 +191,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
 
       {!readOnly && (
         <footer className="insp-foot">
-          <span className="t-meta" style={{ color: 'var(--color-ink-3)' }}>Edits are in memory until ⌘S</span>
+          <span className="t-meta" style={{ color: 'var(--color-ink-3)' }}>Edits are in memory until {keys('⌘S')}</span>
           <button type="button" className="btn btn-danger" style={{ border: 0 }} onClick={onDelete}>Delete</button>
         </footer>
       )}

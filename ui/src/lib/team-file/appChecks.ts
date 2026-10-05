@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
+import { dirName } from '../files/paths'
 import { shortenDirectory } from './problems'
 import type { AgentConfig } from './types'
 
@@ -62,7 +63,7 @@ export function appProblemsFor(agents: readonly AgentConfig[], checks: ReadonlyM
     const app = `“${cmd}”`
     const other = `choose another AI app for ${name}`
     if (check.status === 'outside_path') {
-      const folder = check.path?.includes('/') ? shortenDirectory(check.path.slice(0, check.path.lastIndexOf('/'))) : 'a folder of your own'
+      const folder = check.path && /[\\/]/.test(check.path) ? shortenDirectory(dirName(check.path)) : 'a folder of your own'
       return [{ agentId: agent.id, cmd, status: check.status, sentence: `${name}’s app ${app} is installed in ${folder}, but LoomWatch was started without that folder.`, remedy: `Restart LoomWatch from a terminal where ${app} works, or ${other}.` }]
     }
     if (check.status === 'not_executable') {

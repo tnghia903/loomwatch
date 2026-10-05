@@ -389,9 +389,14 @@ fn quote(word: &str) -> String {
 }
 
 /// Whether a path a team names leaves the team's own folder: absolute, home-relative, or climbing
-/// out with `..`. Relative paths resolve against the team file's folder.
+/// out with `..`. Relative paths resolve against the team file's folder. On Windows `\\Users` (the
+/// current drive's root) and `D:notes` (another drive) leave it too, though neither is absolute.
 fn outside_team_folder(path: &Path) -> bool {
     path.is_absolute()
+        || path.has_root()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::Prefix(_)))
         || path.starts_with("~")
         || path
             .components()

@@ -2551,8 +2551,12 @@ fn check_command(
 ) -> CommandCheck {
     let command = Path::new(cmd);
     let (status, path) = if command.is_absolute() {
-        if is_executable(command) {
-            (CommandStatus::Found, Some(command.to_path_buf()))
+        // On Windows `C:\tools\agent` runs `agent.exe` or `agent.cmd`, as a run starts it.
+        if let Some(found) = crate::platform::program_candidates(command)
+            .into_iter()
+            .find(|candidate| is_executable(candidate))
+        {
+            (CommandStatus::Found, Some(found))
         } else if fs::metadata(command).is_ok() {
             (CommandStatus::NotExecutable, None)
         } else {

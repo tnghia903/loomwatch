@@ -2,6 +2,7 @@ import { applyEdgeChanges, applyNodeChanges } from '@xyflow/react'
 import { MarkerType, type Connection, type Edge, type EdgeChange, type NodeChange } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { baseName, isAbsolutePath, joinUnderRoot, splitPath } from '../files/paths'
 import type { AgentNode } from '../library/nodeFromDrop'
 import { nodeFromDrop } from '../library/nodeFromDrop'
 import { fetchConfigSchema, fetchTeamFile, fetchTeamsDiscovery, saveTeamFile, TeamFileApiError } from './client'
@@ -92,9 +93,9 @@ function parseFailure(error: TeamFileParseError, source: string): LoadFailure {
 
 /** Resolve a daemon-approved relative team path against its canonical discovery root. */
 export function absoluteTeamPath(root: string, requestedPath: string): string {
-  if (requestedPath.startsWith('/')) return requestedPath
+  if (isAbsolutePath(requestedPath)) return requestedPath
   const parts: string[] = []
-  for (const part of requestedPath.split('/')) {
+  for (const part of splitPath(requestedPath)) {
     if (!part || part === '.') continue
     if (part === '..') {
       if (parts.length === 0) throw new Error('Team path escapes the configured teams directory.')
@@ -104,7 +105,7 @@ export function absoluteTeamPath(root: string, requestedPath: string): string {
     parts.push(part)
   }
   if (parts.length === 0) throw new Error('Team path does not name a file.')
-  return `${root.replace(/\/+$/, '')}/${parts.join('/')}`
+  return joinUnderRoot(root, parts.join('/'))
 }
 
 /**
@@ -139,8 +140,7 @@ export function slugifyTeamName(name: string): string {
  * by it, so a shared id silently handed the second team the first one's notes.
  */
 export function teamIdForPath(path: string): string {
-  const file = path.split('/').pop() ?? path
-  return slugifyTeamName(file.replace(/\.ya?ml$/i, ''))
+  return slugifyTeamName(baseName(path).replace(/\.ya?ml$/i, ''))
 }
 
 function edgeFromConfig(edge: EdgeConfig): ConfiguredEdge {

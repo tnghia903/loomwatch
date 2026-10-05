@@ -1,6 +1,7 @@
 import { ArrowLeft } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { credentialStore, isWindows } from '../lib/platform'
 import { ConnectAiApps } from './ask/ConnectAiApps'
 
 type Page = { id: string; title: string }
@@ -17,7 +18,7 @@ const SIGN_IN_OUTCOMES: Record<string, { notice?: string; error?: string }> = {
   denied: { error: 'Notion sign-in was canceled. Nothing changed.' },
   expired: { error: 'That sign-in took too long or was already used. Click Connect Notion to try again.' },
   failed: { error: 'Notion sign-in didn’t finish. Check your internet connection and try again.' },
-  storage: { error: 'The secure credential store is unavailable. Unlock your macOS Keychain and try again.' },
+  storage: { error: `The secure credential store is unavailable. ${isWindows() ? 'Sign in to Windows with your own account' : 'Unlock your macOS Keychain'} and try again.` },
 }
 const readSignInOutcome = () => new URLSearchParams(window.location.search).get('notion')
 
@@ -148,7 +149,7 @@ export default function Connections() {
               }) }}>
                 <label className="t-meta" htmlFor="notion-token">Notion integration token</label>
                 <input id="notion-token" type="password" autoComplete="off" spellCheck={false} value={token} onChange={(event) => setToken(event.target.value)} maxLength={4096} className="input mono" />
-                <span className="hint t-meta">Stored securely in macOS Keychain, outside your team files. LoomWatch never displays the saved token.</span>
+                <span className="hint t-meta">Stored securely in {credentialStore()}, outside your team files. LoomWatch never displays the saved token.</span>
                 <button disabled={busy || !token.trim()} className="btn lw-settings-start">{busy ? 'Connecting…' : 'Connect with token'}</button>
               </form>
             </details>

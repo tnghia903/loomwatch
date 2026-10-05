@@ -327,6 +327,24 @@ fn find<'a>(
     })
 }
 
+/// An absolute path as Claude Code matches it in a permission rule, without a trailing separator.
+/// On Windows Claude Code compares paths in POSIX form, `C:\Users\ana` as `/c/Users/ana`, so a
+/// rule written with the Windows spelling would never match and the grant would do nothing.
+fn rule_path(path: &str, windows: bool) -> String {
+    if !windows {
+        return path.trim_end_matches('/').to_owned();
+    }
+    let forward = path.replace('\\', "/");
+    let mut chars = forward.chars();
+    let posix = match (chars.next(), chars.next()) {
+        (Some(drive), Some(':')) if drive.is_ascii_alphabetic() => {
+            format!("/{}{}", drive.to_ascii_lowercase(), chars.as_str())
+        }
+        _ => forward,
+    };
+    posix.trim_end_matches('/').to_owned()
+}
+
 /// Write the grants wiring implies into a Claude Code workspace's `.claude/settings.json`.
 ///
 /// `base` is the settings carried over from the agent's declared cwd (ADR 0012 decision 3), or
@@ -390,11 +408,15 @@ pub fn grant_claude_access(
     // `//` is Claude Code's spelling of an absolute path in a permission rule.
     let mut allow = folders
         .iter()
-        .map(|folder| format!("Read(/{}/**)", folder.trim_end_matches('/')))
+        .map(|folder| format!("Read(/{}/**)", rule_path(folder, cfg!(windows))))
         .collect::<Vec<_>>();
     // An added file is granted on its own, not through its folder: `<team>.files/` holds every
     // file added to the team, and this agent was given one of them (ADR 0035).
-    allow.extend(files.iter().map(|file| format!("Read(/{file})")));
+    allow.extend(
+        files
+            .iter()
+            .map(|file| format!("Read(/{})", rule_path(file, cfg!(windows)))),
+    );
     allow.extend(
         delivery
             .tools
@@ -843,6 +865,18 @@ mod tests {
     use crate::config::CapabilityRef;
     use crate::memory::PromptSectionKind as Kind;
 
+    /// Claude Code matches Windows paths in POSIX form, so a grant must be written that way.
+    #[test]
+    fn a_granted_path_is_written_as_claude_code_matches_it() {
+        assert_eq!(rule_path("/Users/ana/Docs/", false), "/Users/ana/Docs");
+        assert_eq!(rule_path(r"C:\Users\ana\Docs\", true), "/c/Users/ana/Docs");
+        assert_eq!(rule_path(r"D:\notes\plan.md", true), "/d/notes/plan.md");
+        assert_eq!(
+            format!("Read(/{}/**)", rule_path(r"C:\Users\ana\Docs", true)),
+            "Read(//c/Users/ana/Docs/**)"
+        );
+    }
+
     struct TempDirectory(PathBuf);
 
     impl TempDirectory {
@@ -1113,7 +1147,7 @@ mod tests {
             written["permissions"]["allow"],
             json!([
                 "WebSearch",
-                format!("Read(/{folder}/**)"),
+                format!("Read(/{}/**)", rule_path(folder, cfg!(windows))),
                 "mcp__agentmemory"
             ])
         );

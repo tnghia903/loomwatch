@@ -1,4 +1,5 @@
 import { listNames } from '../format'
+import { keys } from '../platform'
 
 /**
  * The getting-started guide, one card per step.
@@ -223,7 +224,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'any',
     view: () => ({
       title: 'You’re all set',
-      body: 'That is the whole loop: build a team, ask it, review the result. To see this guide again, press ⌘K and choose Getting started guide, or use the menu in any team.',
+      body: `That is the whole loop: build a team, ask it, review the result. To see this guide again, press ${keys('⌘K')} and choose Getting started guide, or use the menu in any team.`,
       advance: 'finish',
     }),
   },

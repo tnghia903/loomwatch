@@ -1,4 +1,5 @@
 import { knownHarness, type DetectedHarness, type HarnessModel } from './harnesses'
+import { baseName } from './files/paths'
 import type { AgentConfig } from './team-file/types'
 
 // A team file may omit `spawn.args`: the daemon defaults it to none, though the schema requires it.
@@ -49,10 +50,10 @@ const OFFLINE_DEMO_SCRIPT = 'operator-stop-harness.py'
 export function appLabelForAgent(agent: AgentConfig, harnesses: readonly DetectedHarness[]): string {
   if (agent.kind === 'operator') return 'You (review step)'
   // Named for what it is: "Custom command: python3" read as if an AI app was involved.
-  if ((agent.spawn?.args ?? []).some((arg) => arg.split('/').pop() === OFFLINE_DEMO_SCRIPT)) return 'Offline demo (no AI)'
+  if ((agent.spawn?.args ?? []).some((arg) => baseName(arg) === OFFLINE_DEMO_SCRIPT)) return 'Offline demo (no AI)'
   const id = harnessIdForAgent(agent, harnesses)
   if (id) return harnesses.find((harness) => harness.id === id)?.name ?? `${knownHarness(id).name} (not installed)`
-  const cmd = agent.spawn?.cmd.split('/').pop()
+  const cmd = agent.spawn?.cmd ? baseName(agent.spawn.cmd) : undefined
   return cmd ? `Custom command: ${cmd}` : 'Not set'
 }
 
