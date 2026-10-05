@@ -330,7 +330,7 @@ fn find<'a>(
 /// An absolute path as Claude Code matches it in a permission rule, without a trailing separator.
 /// On Windows Claude Code compares paths in POSIX form, `C:\Users\ana` as `/c/Users/ana`, so a
 /// rule written with the Windows spelling would never match and the grant would do nothing.
-fn rule_path(path: &str, windows: bool) -> String {
+pub(crate) fn rule_path(path: &str, windows: bool) -> String {
     if !windows {
         return path.trim_end_matches('/').to_owned();
     }

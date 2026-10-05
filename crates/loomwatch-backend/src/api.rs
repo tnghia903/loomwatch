@@ -279,14 +279,15 @@ const EXTRA_HARNESS_DIRECTORIES: &[&str] = &[
     ".volta/bin",
 ];
 
-/// The same on Windows, where npm, pnpm, Volta, Scoop, `WinGet` and Claude's own installer each put
-/// the programs they install in a folder of the user profile.
+/// The same on Windows, where npm, pnpm, Volta, Scoop, `WinGet`, and Claude's and Codex's own
+/// installers each put the programs they install in a folder of the user profile.
 #[cfg(windows)]
 const EXTRA_HARNESS_DIRECTORIES: &[&str] = &[
     "AppData/Roaming/npm",
     "AppData/Local/pnpm",
     "AppData/Local/Volta/bin",
     "AppData/Local/Microsoft/WinGet/Links",
+    "AppData/Local/Programs/OpenAI/Codex/bin",
     "scoop/shims",
     ".local/bin",
     ".opencode/bin",
@@ -2651,12 +2652,14 @@ mod tests {
         }
     }
 
-    fn create_executable(directory: &Path, name: &str) {
-        create_executable_with_contents(directory, name, "#!/bin/sh\n");
+    /// A program named `name` in `directory`, and the file a `PATH` lookup finds for it
+    /// (`name.cmd` on Windows).
+    fn create_executable(directory: &Path, name: &str) -> PathBuf {
+        create_executable_with_contents(directory, name, "#!/bin/sh\n")
     }
 
-    fn create_executable_with_contents(directory: &Path, name: &str, contents: &str) {
-        crate::test_support::fake_program(&directory.join(name), contents);
+    fn create_executable_with_contents(directory: &Path, name: &str, contents: &str) -> PathBuf {
+        crate::test_support::fake_program(&directory.join(name), contents)
     }
 
     fn test_router(teams_root: &Path) -> Router {
@@ -2957,8 +2960,8 @@ mod tests {
     async fn harness_endpoint_scans_path_in_catalog_order() {
         let first = TempDirectory::new();
         let second = TempDirectory::new();
-        create_executable(&first.0, "opencode");
-        create_executable(&second.0, "claude");
+        let opencode = create_executable(&first.0, "opencode");
+        let claude = create_executable(&second.0, "claude");
         fs::write(first.0.join("codex"), b"not executable").expect("write non-executable");
         let search_path = std::env::join_paths([&first.0, &second.0]).expect("join search path");
 
@@ -2981,7 +2984,7 @@ mod tests {
                         "id": "claude",
                         "name": "Claude",
                         "command": "claude",
-                        "executablePath": second.0.join("claude").to_string_lossy(),
+                        "executablePath": claude.to_string_lossy(),
                         "acpAvailable": false,
                         "unavailableReason": "neither claude-agent-acp nor npx (for the @agentclientprotocol/claude-agent-acp@0.85.1 bridge) is on the searched PATH.",
                         "spawn": {"cmd": "claude-agent-acp", "args": []}
@@ -2990,7 +2993,7 @@ mod tests {
                         "id": "opencode",
                         "name": "OpenCode",
                         "command": "opencode",
-                        "executablePath": first.0.join("opencode").to_string_lossy(),
+                        "executablePath": opencode.to_string_lossy(),
                         "acpAvailable": true,
                         "spawn": {"cmd": "opencode", "args": ["acp"]}
                     }
@@ -3075,12 +3078,14 @@ mod tests {
         let bin = root.0.join("bin");
         fs::create_dir(&bin).expect("create bin");
         let ran = root.0.join("ran");
-        create_executable_with_contents(
+        let installed = create_executable_with_contents(
             &bin,
             "npx",
-            &format!("#!/bin/sh\ntouch '{}'\n", ran.display()),
+            &format!(
+                "#!/bin/sh\ntouch '{}'\n",
+                crate::test_support::sh_path(&ran)
+            ),
         );
-        let installed = bin.join("npx");
         let not_a_program = root.0.join("notes.txt");
         fs::write(&not_a_program, "not a program").expect("write a plain file");
         let gone = root.0.join("gone/agent");
@@ -3147,7 +3152,7 @@ mod tests {
     async fn a_command_only_in_a_per_user_folder_is_outside_the_run_path() {
         let system = TempDirectory::new();
         let per_user = TempDirectory::new();
-        create_executable(&per_user.0, "opencode");
+        let opencode = create_executable(&per_user.0, "opencode");
         let run_path = std::env::join_paths([&system.0]).expect("run path");
         let detection_path =
             std::env::join_paths([&system.0, &per_user.0]).expect("detection path");
@@ -3172,7 +3177,7 @@ mod tests {
             json!({"commands": [{
                 "cmd": "opencode",
                 "status": "outside_path",
-                "path": per_user.0.join("opencode").to_string_lossy(),
+                "path": opencode.to_string_lossy(),
             }]})
         );
         // The list says the same, so nothing offers the app as ready before a restart.

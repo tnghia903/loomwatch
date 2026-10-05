@@ -1,9 +1,10 @@
 import { Check, Copy, ExternalLink } from 'lucide-react'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 
-import { APP_SETUP_GUIDES, appSetupState, checkSignature, type AppSetupGuide, type AppSetupState } from '../../lib/appSetup'
+import { APP_SETUP_GUIDES, appSetupState, checkSignature, installCommand, type AppSetupGuide, type AppSetupState } from '../../lib/appSetup'
 import { listNames } from '../../lib/format'
 import { fetchHarnesses, fetchHarnessModels, type DetectedHarness } from '../../lib/harnesses'
+import { isWindows } from '../../lib/platform'
 import { ChipDot, type ChipState } from '../ui/glyphs'
 
 /** How often the panel asks the daemon what is installed. A PATH scan, never an app start. */
@@ -66,6 +67,8 @@ type CardGuide = Pick<AppSetupGuide, 'id' | 'name'> & Partial<AppSetupGuide>
 
 function AppCard({ guide, state, connector, onCheck }: { guide: CardGuide; state: AppSetupState; connector: boolean; onCheck: () => void }) {
   const status = STATUS[state.kind]
+  // The launcher as it is typed here: `loomwatch` on Windows, where the installer puts it on PATH.
+  const launcher = isWindows() ? 'loomwatch' : './loomwatch'
   const checkAgain = <button type="button" className="btn" onClick={onCheck}>Check again</button>
   return (
     <li className={`hs-app ${state.kind}`} aria-label={`${guide.name}: ${status.text}`}>
@@ -77,7 +80,7 @@ function AppCard({ guide, state, connector, onCheck }: { guide: CardGuide; state
 
       {state.kind === 'missing' && guide.install && (
         <ol className="hs-steps">
-          <li><span>Install it. Paste this into Terminal and press Return:</span><CommandLine command={guide.install} /></li>
+          <li><span>{isWindows() ? 'Install it. Paste this into PowerShell and press Enter:' : 'Install it. Paste this into Terminal and press Return:'}</span><CommandLine command={installCommand(guide) ?? guide.install} /></li>
           {guide.signIn
             ? <li><span>Then sign in. This opens your browser:</span><CommandLine command={guide.signIn} /></li>
             : <li><span>That’s all. LoomWatch notices it here on its own.</span></li>}
@@ -112,7 +115,7 @@ function AppCard({ guide, state, connector, onCheck }: { guide: CardGuide; state
         <div className="hs-fix">
           <span>
             {guide.name} was installed after LoomWatch started, so LoomWatch can’t start it yet. Stop LoomWatch (press Ctrl-C in
-            its Terminal window, or run <code className="t-mono-sm">./loomwatch stop</code>), then open a new Terminal window and run <code className="t-mono-sm">./loomwatch</code> again.
+            its terminal window, or run <code className="t-mono-sm">{launcher} stop</code>), then open a new terminal window and run <code className="t-mono-sm">{launcher}</code> again.
           </span>
         </div>
       )}
@@ -266,7 +269,7 @@ export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: Ap
           />
         ))}
       </ul>
-      <p className="home-setup-foot t-meta">Terminal is in Applications › Utilities. LoomWatch also works with Hermes, OpenClaw, and Gemini CLI with a Gemini API key, if you already use them.</p>
+      <p className="home-setup-foot t-meta">{isWindows() ? 'PowerShell is in the Start menu.' : 'Terminal is in Applications › Utilities.'} LoomWatch also works with Hermes, OpenClaw, and Gemini CLI with a Gemini API key, if you already use them.</p>
     </section>
   )
 }

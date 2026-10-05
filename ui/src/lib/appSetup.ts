@@ -5,9 +5,13 @@
 //   Claude Code  https://code.claude.com/docs/en/setup   (native installer → ~/.local/bin/claude)
 //   Codex        https://learn.chatgpt.com/docs/codex/cli (standalone installer → ~/.local/bin/codex)
 //   OpenCode     https://opencode.ai/docs/                (install script → ~/.opencode/bin/opencode)
-// The daemon finds all three install folders without a restart (api.rs EXTRA_HARNESS_DIRECTORIES).
+// and on Windows on 2026-10-05: Claude's install.ps1 (→ %USERPROFILE%\.local\bin\claude.exe),
+// Codex's install.ps1 (→ %LOCALAPPDATA%\Programs\OpenAI\Codex\bin), and OpenCode's npm package
+// (→ %APPDATA%\npm), OpenCode's install script being for macOS and Linux only.
+// The daemon finds all of these install folders without a restart (api.rs EXTRA_HARNESS_DIRECTORIES).
 // The sign-in commands match the daemon's own "isn’t signed in" sentence (api.rs SignInCheck).
 import { harnessSaid, type DetectedHarness } from './harnesses'
+import { isWindows } from './platform'
 
 export interface AppSetupGuide {
   /** The daemon's harness id. */
@@ -18,6 +22,8 @@ export interface AppSetupGuide {
   account: string
   /** One command for Terminal. */
   install: string
+  /** The same for PowerShell on Windows. */
+  windowsInstall: string
   /** The command that signs in, or `null` for an app that works without an account. */
   signIn: string | null
   /** For an app that works without an account: the command that adds one, for more models. */
@@ -35,6 +41,7 @@ export const APP_SETUP_GUIDES: readonly AppSetupGuide[] = [
     // Anthropic asks apps built on its Agent SDK, as Claude Code's ACP bridge is, to use API keys.
     account: 'Needs a Claude Pro, Max, Team or Enterprise plan; the free Claude plan doesn’t include it. Or use an Anthropic API key: set ANTHROPIC_API_KEY before starting LoomWatch.',
     install: 'curl -fsSL https://claude.ai/install.sh | bash',
+    windowsInstall: 'irm https://claude.ai/install.ps1 | iex',
     signIn: 'claude auth login',
     docs: 'https://code.claude.com/docs/en/setup',
   },
@@ -43,6 +50,7 @@ export const APP_SETUP_GUIDES: readonly AppSetupGuide[] = [
     name: 'Codex',
     account: 'Sign in with your ChatGPT account, or use an OpenAI API key.',
     install: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
+    windowsInstall: 'irm https://chatgpt.com/codex/install.ps1 | iex',
     signIn: 'codex login',
     docs: 'https://learn.chatgpt.com/docs/codex/cli',
   },
@@ -51,12 +59,18 @@ export const APP_SETUP_GUIDES: readonly AppSetupGuide[] = [
     name: 'OpenCode',
     account: 'Works right away with free models, no account needed. Free models come and go, and some let their maker learn from what you send, so keep private work for a model you pay for.',
     install: 'curl -fsSL https://opencode.ai/install | bash',
+    windowsInstall: 'npm install -g opencode-ai',
     signIn: null,
     optionalSignIn: 'opencode auth login',
     badge: 'No account needed',
     docs: 'https://opencode.ai/docs/',
   },
 ]
+
+/** The command that installs `guide`'s app on this computer. */
+export function installCommand(guide: Partial<Pick<AppSetupGuide, 'install' | 'windowsInstall'>>, windows = isWindows()): string | undefined {
+  return (windows && guide.windowsInstall) || guide.install
+}
 
 /** Where one app stands, from first install to ready, as the panel tells it. */
 export type AppSetupState =

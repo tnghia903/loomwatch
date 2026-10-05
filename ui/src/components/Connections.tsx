@@ -103,8 +103,8 @@ export default function Connections() {
           {connection?.connected ? <>
             <p className="t-body">Connected to <strong>{connection.name}</strong></p>
             <p className="t-meta lw-settings-quiet">{connection.via === 'signIn'
-              ? 'Connected with your Notion account. LoomWatch keeps the sign-in in this Mac’s Keychain and renews it on its own; if it ever lapses, connect again here. Disconnecting removes it; existing Notion pages remain.'
-              : 'Your token is stored in this Mac’s Keychain. Disconnecting removes LoomWatch’s saved credentials; existing Notion pages remain.'}</p>
+              ? `Connected with your Notion account. LoomWatch keeps the sign-in in ${credentialStore()} and renews it on its own; if it ever lapses, connect again here. Disconnecting removes it; existing Notion pages remain.`
+              : `Your token is stored in ${credentialStore()}. Disconnecting removes LoomWatch’s saved credentials; existing Notion pages remain.`}</p>
             <div className="e2 lw-settings-row">
               <span className="t-body-m">Destination page</span>
               <span className="t-meta">{connection.destination ? connection.destination.title : 'Choose the page your teams’ answers go under.'}</span>

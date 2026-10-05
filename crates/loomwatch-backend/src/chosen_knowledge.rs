@@ -240,6 +240,9 @@ fn extract_text(program: &Path, file: &Path, deadline: Duration, limit: usize) -
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
+    // Whatever it starts goes with it: on Windows a `pdftotext.cmd` is cmd.exe running the real
+    // program, which would otherwise keep writing into the pipe after cmd.exe is stopped.
+    let mut tree = Some(crate::platform::ProcessTree::adopt_std(&child));
     let stdout = child.stdout.take()?;
     let full = Arc::new(AtomicBool::new(false));
     let reader = {
@@ -264,6 +267,9 @@ fn extract_text(program: &Path, file: &Path, deadline: Duration, limit: usize) -
             // Enough text: the rest is never read, so the program is stopped rather than left
             // blocked on a full pipe.
             Ok(None) if full.load(Ordering::Acquire) => {
+                if let Some(tree) = tree.take() {
+                    tree.end();
+                }
                 let _ = child.kill();
                 let _ = child.wait();
                 break true;
@@ -272,6 +278,9 @@ fn extract_text(program: &Path, file: &Path, deadline: Duration, limit: usize) -
                 std::thread::sleep(Duration::from_millis(20));
             }
             _ => {
+                if let Some(tree) = tree.take() {
+                    tree.end();
+                }
                 let _ = child.kill();
                 let _ = child.wait();
                 break false;

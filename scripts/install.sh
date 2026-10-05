@@ -42,9 +42,9 @@ platform() {
       esac
       ;;
     MINGW* | MSYS* | CYGWIN*)
-      fail "Windows is not supported yet. LoomWatch may work inside WSL (Windows Subsystem for Linux): open an Ubuntu window and run this command there."
+      fail "this installer is for macOS and Linux. On Windows, open PowerShell and run: irm https://loomwatch.github.io/install.ps1 | iex"
       ;;
-    *) fail "LoomWatch runs on macOS (and, untested, Linux). This computer runs $(uname -s)." ;;
+    *) fail "LoomWatch runs on macOS and Windows (and, untested, Linux). This computer runs $(uname -s)." ;;
   esac
 }
 

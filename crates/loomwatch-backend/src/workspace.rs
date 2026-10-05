@@ -585,7 +585,11 @@ fn prepare_root(
         .iter()
         .any(|capability| capability.kind == CapabilityKind::Skill)
     {
-        let directory = root.join(Harness::of(agent).delivery_directory());
+        // Joined part by part, so Windows reads `…\.claude\skills`, as the agent is told it.
+        let directory = Harness::of(agent)
+            .delivery_directory()
+            .split('/')
+            .fold(root.to_path_buf(), |path, part| path.join(part));
         fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
         Some(directory)
     } else {
@@ -903,7 +907,10 @@ mod tests {
         let settings = fs::read_to_string(workspace.cwd.join(".claude/settings.json"))
             .expect("the grant is written");
         assert!(
-            settings.contains(&format!("Read(/{}/**)", folder.display())),
+            settings.contains(&format!(
+                "Read(/{}/**)",
+                crate::delivery::rule_path(&folder.display().to_string(), cfg!(windows))
+            )),
             "{settings}"
         );
 
@@ -979,7 +986,10 @@ mod tests {
         let settings =
             fs::read_to_string(workspace.cwd.join(".claude/settings.json")).expect("grants");
         assert!(
-            settings.contains(&format!("Read(/{})", memo.display())),
+            settings.contains(&format!(
+                "Read(/{})",
+                crate::delivery::rule_path(&memo.display().to_string(), cfg!(windows))
+            )),
             "{settings}"
         );
         assert!(
@@ -1505,7 +1515,12 @@ mod tests {
             &crate::NodeTask::goal("Summarise the memo"),
             Some(&workspace),
         );
-        let skill_file = workspace.root.join(".claude/skills/report-writer/SKILL.md");
+        let skill_file = workspace
+            .root
+            .join(".claude")
+            .join("skills")
+            .join("report-writer")
+            .join("SKILL.md");
         assert!(
             prompt
                 .text

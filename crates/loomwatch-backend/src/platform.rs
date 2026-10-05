@@ -188,20 +188,43 @@ impl ProcessTree {
     pub fn adopt(child: &tokio::process::Child) -> Self {
         #[cfg(windows)]
         {
-            let job = child.raw_handle().and_then(|handle| {
-                let mut limits = win32job::ExtendedLimitInfo::new();
-                limits.limit_kill_on_job_close();
-                let job = win32job::Job::create_with_limit_info(&limits).ok()?;
-                job.assign_process(handle as isize).ok()?;
-                Some(job)
-            });
-            Self { job }
+            Self::adopt_handle(child.raw_handle())
         }
         #[cfg(not(windows))]
         {
             let _ = child;
             Self {}
         }
+    }
+
+    /// End every process in the tree now, rather than when it is dropped.
+    pub fn end(self) {}
+
+    /// [`Self::adopt`] for a child started with `std::process`.
+    #[must_use]
+    pub fn adopt_std(child: &std::process::Child) -> Self {
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            Self::adopt_handle(Some(child.as_raw_handle()))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = child;
+            Self {}
+        }
+    }
+
+    #[cfg(windows)]
+    fn adopt_handle(handle: Option<std::os::windows::io::RawHandle>) -> Self {
+        let job = handle.and_then(|handle| {
+            let mut limits = win32job::ExtendedLimitInfo::new();
+            limits.limit_kill_on_job_close();
+            let job = win32job::Job::create_with_limit_info(&limits).ok()?;
+            job.assign_process(handle as isize).ok()?;
+            Some(job)
+        });
+        Self { job }
     }
 
     /// The processes in this tree now, by id.

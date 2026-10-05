@@ -4759,8 +4759,19 @@ mod tests {
         let last = events.last().unwrap();
         assert_eq!(last.kind, EventKind::Process);
         assert_eq!(last.payload["phase"], "crashed");
-        assert_eq!(last.payload["exitCode"], -1);
-        assert_eq!(last.payload["signal"], "SIGKILL");
+        if cfg!(unix) {
+            assert_eq!(last.payload["exitCode"], -1);
+            assert_eq!(last.payload["signal"], "SIGKILL");
+        } else {
+            // Windows has no signals: an app ended from outside reports only its exit code, and
+            // the marker names no signal rather than inventing one.
+            assert_ne!(last.payload["exitCode"], 0);
+            assert!(
+                last.payload.get("signal").is_none_or(Value::is_null),
+                "{}",
+                last.payload
+            );
+        }
     }
 
     #[sqlx::test(migrations = "../../migrations")]

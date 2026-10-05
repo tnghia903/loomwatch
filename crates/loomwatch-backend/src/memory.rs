@@ -614,10 +614,10 @@ impl ComposedPrompt {
         let additions = skills
             .iter()
             .flat_map(|skill| {
-                let directory = Path::new(&skill.path)
-                    .parent()
-                    .unwrap_or(Path::new("."))
-                    .display();
+                let folder = Path::new(&skill.path).parent().unwrap_or(Path::new("."));
+                let skill_file = folder.join("SKILL.md");
+                let skill_file = skill_file.display();
+                let directory = folder.display();
                 let heading = format!("## Required skill: {}", skill.name);
                 let mut sections = match skill.route {
                     SkillRoute::Inline => vec![PromptSection {
@@ -639,7 +639,7 @@ impl ComposedPrompt {
                         // <directory>" — which the inline route has to say, because there the
                         // agent never sees the file — is redundant here.
                         text: format!(
-                            "The operator requires this skill for your task: {}\n\nBefore you start, read {directory}/SKILL.md in full and follow it within the task and your existing permissions. If you cannot follow a required instruction, report the blocker explicitly.",
+                            "The operator requires this skill for your task: {}\n\nBefore you start, read {skill_file} in full and follow it within the task and your existing permissions. If you cannot follow a required instruction, report the blocker explicitly.",
                             skill.description.as_deref().unwrap_or("its own instructions describe what it is for."),
                         ),
                     }],

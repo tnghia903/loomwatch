@@ -110,7 +110,7 @@ describe('harness readiness', () => {
     const failing = { ...gemini, health: 'error' as const, healthReason: 'Gemini: sign-in or version problem — run "gemini" in Terminal to fix' }
     expect(isHarnessRunnable(failing)).toBe(false)
     expect(harnessProblem(failing)).toBe('Gemini: sign-in or version problem — run "gemini" in Terminal to fix')
-    expect(harnessProblem({ ...failing, healthReason: undefined })).toBe('Gemini: sign-in or version problem — run "gemini" in Terminal to fix')
+    expect(harnessProblem({ ...failing, healthReason: undefined })).toBe('Gemini: sign-in or version problem — run "gemini" in a terminal window to fix')
   })
 
   it('does not offer an app a run cannot start until LoomWatch restarts, however well it checked', () => {

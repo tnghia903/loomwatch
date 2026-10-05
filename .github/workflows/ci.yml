@@ -130,14 +130,19 @@ jobs:
           $env:PGPASSWORD = 'root'
           & (Join-Path $env:PGBIN 'psql.exe') -U postgres -h localhost -c 'create database loomwatch'
       - name: Clippy
+        id: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --workspace --locked --no-fail-fast
+      # Run even when a test failed: whether LoomWatch installs and runs on Windows is worth
+      # knowing on its own. The job fails either way.
       - name: Pack
+        if: ${{ !cancelled() && steps.clippy.outcome == 'success' }}
         shell: bash
         run: |
           cargo build --locked --bin loomwatchd
           scripts/package-release.sh windows-x86_64 target/debug/loomwatchd.exe dist
       - name: Install, start, and run the offline demo
+        if: ${{ !cancelled() && steps.clippy.outcome == 'success' }}
         shell: pwsh
         run: scripts/smoke-windows.ps1 -Dist dist -DatabaseUrl $env:DATABASE_URL
