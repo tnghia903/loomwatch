@@ -1528,7 +1528,7 @@ mod tests {
             "{}",
             prompt.text
         );
-        let copy = workspace.root.join("knowledge/memo.md");
+        let copy = workspace.root.join("knowledge").join("memo.md");
         assert!(
             prompt
                 .text
