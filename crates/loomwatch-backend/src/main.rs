@@ -232,7 +232,7 @@ async fn main() -> Result<()> {
                 .merge(notebook)
                 .merge(routines);
             if listen.ip().is_loopback() || allow_container_listener {
-                app = app.merge(loomwatch_backend::notion::router()?);
+                app = app.merge(loomwatch_backend::notion::router(&state_dir)?);
             }
             axum::serve(listener, app).await?;
         }

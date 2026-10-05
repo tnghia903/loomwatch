@@ -83,13 +83,24 @@ connection. Only one workspace connection is supported per local OS user. Missin
 Keychain access is an error; there is no plaintext fallback. Windows/Linux storage is not yet
 implemented.
 
-macOS asks you to allow `loomwatchd` to read this item. The daemon reads it once each time it
-starts and keeps the connection in memory, updating it whenever it saves (connecting, a renewed
-sign-in, disconnecting), so you are asked at most once per start. **Always Allow** stops the
-question for this build of `loomwatchd`; because LoomWatch's builds are not signed with a Developer
-ID yet, macOS treats a new build (an update, or a rebuild from source) as a different program and
-asks again. After **Deny**, the background checks of the connection stop asking; connecting,
-sending an answer or searching pages asks again.
+What Connections shows of it is also kept, with no token, in `notion-connection.json` in
+LoomWatch's state folder (`~/Library/Application Support/LoomWatch`, or `LOOMWATCH_STATE_DIR`):
+whether a workspace is connected, its name, whether it was connected by sign-in or token, and the
+destination page's title and id. LoomWatch rewrites it every time it saves the connection.
+Sending, searching and reading pages still use only the Keychain item, so editing or deleting the
+file changes only what is shown.
+
+macOS asks you to allow `loomwatchd` to read the Keychain item. Showing whether Notion is connected
+never reads it; the daemon reads it only when it is about to use Notion (connecting, choosing a
+page, searching, sending an answer, or a run reading pages), once each time it starts unless you
+click **Deny**, and keeps the connection in memory after that. The one exception is the first start after updating
+from a LoomWatch without `notion-connection.json`: showing the status reads the item once to
+write the file. **Always Allow** stops the question for this build of `loomwatchd`; because
+LoomWatch's builds are not signed with a Developer ID yet, macOS treats a new build (an update, or
+a rebuild from source) as a different program and asks again the next time Notion is used. After
+**Deny**, that first-start status check does not ask again; connecting, sending an answer or
+searching pages does. If the Keychain item is removed outside LoomWatch, the next search or
+choice of page says to connect again, and Connections stops showing the old connection.
 
 The connection API is only mounted on loopback listeners. It rejects foreign origins and
 simple cross-site mutation requests, disables response caching, bounds requests and upstream

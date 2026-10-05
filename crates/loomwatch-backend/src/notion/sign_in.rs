@@ -19,7 +19,7 @@ use url::form_urlencoded::Serializer;
 
 use super::{
     Access, ApiResult, Connection, Endpoints, MAX_RESPONSE_BYTES, NotionState, Store, WRITES,
-    failure, loopback_host, read_bounded, storage_error, unreachable, unreadable,
+    failure, loopback_host, not_connected, read_bounded, storage_error, unreachable, unreadable,
 };
 
 /// Where Notion sends the browser back.
@@ -241,16 +241,16 @@ async fn complete(state: &NotionState, back: Return) -> Result<(), Refusal> {
     .await
     .map_err(|_| Refusal::Failed)?;
     let grant = granted(&answer, pending.client, None).ok_or(Refusal::Failed)?;
-    keep(&state.store, grant, workspace_name(&answer))
+    keep(state, grant, workspace_name(&answer))
         .await
         .map_err(|_| Refusal::Storage)
 }
 
 /// Store a fresh sign-in. Signing in again to the same workspace keeps the page answers go
 /// under, so repairing a lapsed sign-in is one click.
-async fn keep(store: &Store, grant: Grant, name: String) -> ApiResult<()> {
+async fn keep(state: &NotionState, grant: Grant, name: String) -> ApiResult<()> {
     let _writes = WRITES.lock().await;
-    let destination = match store.load().await {
+    let destination = match state.store.load().await {
         Ok(Some(Connection {
             access: Access::SignIn { sign_in: previous },
             destination,
@@ -260,7 +260,7 @@ async fn keep(store: &Store, grant: Grant, name: String) -> ApiResult<()> {
         }
         _ => None,
     };
-    store
+    state
         .save(Some(&Connection {
             access: Access::SignIn { sign_in: grant },
             name,
@@ -278,10 +278,7 @@ pub(super) async fn bearer(
     store: &Store,
 ) -> ApiResult<String> {
     let _writes = WRITES.lock().await;
-    let mut connection = store
-        .load()
-        .await?
-        .ok_or_else(|| failure(StatusCode::CONFLICT, "Connect your Notion workspace first."))?;
+    let mut connection = store.load().await?.ok_or_else(not_connected)?;
     let Access::SignIn { sign_in: grant } = &mut connection.access else {
         return Err(failure(
             StatusCode::CONFLICT,

@@ -11,6 +11,7 @@ mod sign_in;
 
 use std::{
     collections::BTreeMap,
+    path::{Path, PathBuf},
     sync::{Arc, LazyLock},
     time::Duration,
 };
@@ -73,11 +74,10 @@ impl Endpoints {
 /// made here.
 ///
 /// macOS asks the person to allow each read of the item by a program it does not already trust,
-/// and the daemon reads it for many things: the connection status three parts of the run view show,
-/// each send, each page a run reads. Read every time, one page load asked three times over, and
-/// the browser taking focus back from the dialog asked once more. One read per process, shared by
-/// everything in it, asks once. The item is this program's: a change made to it by another
-/// program shows after a restart.
+/// and the daemon reads it for many things: each send, each search, each page a run reads. Read
+/// every time, one run could ask several times over. One read per process, shared by everything in
+/// it, asks once. The connection status never reads it at all ([`Shown`]). The item is this
+/// program's: a change made to it by another program shows after a restart.
 static KEYCHAIN: LazyLock<Remembered> = LazyLock::new(Remembered::default);
 
 #[derive(Default)]
@@ -139,6 +139,9 @@ enum Store {
     Keychain,
     #[cfg(test)]
     Memory(Arc<std::sync::Mutex<Option<String>>>),
+    /// A Keychain that refuses every read and write, for tests that show something never reads it.
+    #[cfg(test)]
+    Refusing,
 }
 
 impl Store {
@@ -147,7 +150,7 @@ impl Store {
         match self {
             Self::Keychain => cfg!(target_os = "macos"),
             #[cfg(test)]
-            Self::Memory(_) => true,
+            Self::Memory(_) | Self::Refusing => true,
         }
     }
 
@@ -157,7 +160,8 @@ impl Store {
         self.read(true).await
     }
 
-    /// The connection, for a status check: it never asks again after a refusal.
+    /// The connection, for a status check with nothing [`Shown`] yet: it never asks again after a
+    /// refusal.
     async fn status(&self) -> ApiResult<Option<Connection>> {
         self.read(false).await
     }
@@ -167,6 +171,8 @@ impl Store {
             Self::Keychain => KEYCHAIN.load(ask, keychain_read).await?,
             #[cfg(test)]
             Self::Memory(slot) => slot.lock().map_err(|_| storage_error())?.clone(),
+            #[cfg(test)]
+            Self::Refusing => return Err(storage_error()),
         };
         stored
             .map(|value| serde_json::from_str(&value).map_err(|_| storage_error()))
@@ -184,6 +190,60 @@ impl Store {
                 *slot.lock().map_err(|_| storage_error())? = value;
                 Ok(())
             }
+            #[cfg(test)]
+            Self::Refusing => Err(storage_error()),
+        }
+    }
+}
+
+/// What the connection status shows, kept in `LoomWatch`'s state folder: whether a workspace is
+/// connected, its name, how, and the page answers go under. None of it is a credential.
+///
+/// Connections, the team editor and the Run view all show the status, on every page load and
+/// whenever the window takes focus, and on a Mac that does not yet trust this build every read of
+/// the Keychain is a dialog. So the status is read from here, and the Keychain only when
+/// `LoomWatch` is about to use the connection. The Keychain item still holds all of it, the
+/// destination included, and is what every send and read uses: this file only changes what is
+/// shown.
+struct Shown {
+    path: PathBuf,
+}
+
+impl Shown {
+    fn in_folder(state_dir: &Path) -> Self {
+        Self {
+            path: state_dir.join("notion-connection.json"),
+        }
+    }
+
+    /// What was last saved, or `None` when nothing has been (the connection was made by a
+    /// `LoomWatch` from before this file) or the file cannot be read as one.
+    async fn read(&self) -> Option<Option<Public>> {
+        let bytes = tokio::fs::read(&self.path).await.ok()?;
+        let status: Value = serde_json::from_slice(&bytes).ok()?;
+        if status.get("connected")?.as_bool()? {
+            serde_json::from_value(status).ok().map(Some)
+        } else {
+            Some(None)
+        }
+    }
+
+    /// Callers hold [`WRITES`]. A status that cannot be written is removed instead, so the next
+    /// check reads the Keychain rather than show an old one.
+    async fn write(&self, public: Option<&Public>) {
+        let path = self.path.clone();
+        let text = status_of(public).to_string();
+        let written = tokio::task::spawn_blocking(move || {
+            crate::approvals::write_private(&path, text.as_bytes()).inspect_err(|_| {
+                let _ = std::fs::remove_file(&path);
+            })
+        })
+        .await;
+        if let Ok(Err(error)) = written {
+            eprintln!(
+                "warning: could not keep the Notion connection status in {}: {error}",
+                self.path.display()
+            );
         }
     }
 }
@@ -193,6 +253,7 @@ struct NotionState {
     client: Client,
     gate: Arc<Mutex<()>>,
     store: Store,
+    shown: Arc<Shown>,
     endpoints: Arc<Endpoints>,
     /// The sign-in the operator started and Notion has not sent back yet.
     pending: Arc<Mutex<Option<sign_in::Pending>>>,
@@ -203,6 +264,27 @@ impl NotionState {
     async fn session(&self) -> ApiResult<mcp::Session<'_>> {
         let bearer = sign_in::bearer(&self.client, &self.endpoints, &self.store).await?;
         mcp::Session::open(&self.client, &self.endpoints.mcp, bearer).await
+    }
+
+    /// Save the connection, then what the status shows of it. Callers hold [`WRITES`].
+    async fn save(&self, connection: Option<&Connection>) -> ApiResult<()> {
+        self.store.save(connection).await?;
+        self.shown.write(connection.map(Public::of).as_ref()).await;
+        Ok(())
+    }
+
+    /// The stored connection, for something the person is doing with Notion. When the Keychain
+    /// has none, the status stops showing one: the item was removed outside `LoomWatch`, or by
+    /// a build from before [`Shown`].
+    async fn connection(&self) -> ApiResult<Connection> {
+        if let Some(connection) = self.store.load().await? {
+            return Ok(connection);
+        }
+        let _writes = WRITES.lock().await;
+        if self.store.load().await?.is_none() {
+            self.shown.write(None).await;
+        }
+        Err(not_connected())
     }
 }
 
@@ -236,15 +318,47 @@ struct Page {
     title: String,
 }
 
-/// The caller must only mount this router on a loopback listener.
+/// What the status shows of a connection: never a credential.
+#[derive(Serialize, Deserialize)]
+struct Public {
+    name: String,
+    via: Via,
+    #[serde(default)]
+    destination: Option<Page>,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+enum Via {
+    #[serde(rename = "signIn")]
+    SignIn,
+    #[serde(rename = "token")]
+    Token,
+}
+
+impl Public {
+    fn of(connection: &Connection) -> Self {
+        Self {
+            name: connection.name.clone(),
+            via: match connection.access {
+                Access::SignIn { .. } => Via::SignIn,
+                Access::Token { .. } => Via::Token,
+            },
+            destination: connection.destination.clone(),
+        }
+    }
+}
+
+/// The caller must only mount this router on a loopback listener. What the connection status
+/// shows is kept in `state_dir` ([`Shown`]).
 ///
 /// # Errors
 /// Returns an error if the HTTPS client cannot be initialized.
-pub fn router() -> anyhow::Result<Router> {
+pub fn router(state_dir: &Path) -> anyhow::Result<Router> {
     Ok(router_with(NotionState {
         client: build_client()?,
         gate: Arc::new(Mutex::new(())),
         store: Store::Keychain,
+        shown: Arc::new(Shown::in_folder(state_dir)),
         endpoints: Arc::new(Endpoints::notion()),
         pending: Arc::new(Mutex::new(None)),
     }))
@@ -428,21 +542,27 @@ async fn keychain_write(value: Option<String>) -> ApiResult<()> {
 }
 
 fn public_status(connection: Option<&Connection>) -> Value {
-    connection.map_or_else(
+    status_of(connection.map(Public::of).as_ref())
+}
+
+fn status_of(public: Option<&Public>) -> Value {
+    public.map_or_else(
         || json!({"connected": false}),
-        |c| {
-            let via = match c.access {
-                Access::SignIn { .. } => "signIn",
-                Access::Token { .. } => "token",
-            };
-            json!({"connected": true, "name": c.name, "destination": c.destination, "via": via})
-        },
+        |p| json!({"connected": true, "name": p.name, "destination": p.destination, "via": p.via}),
     )
 }
 
+/// `GET /api/notion/connection`, from what [`Shown`] kept. Only when nothing is kept yet does it
+/// read the Keychain, once, and keep what it found.
 async fn status(State(state): State<NotionState>) -> ApiResult<Json<Value>> {
     let _guard = state.gate.lock().await;
-    Ok(Json(public_status(state.store.status().await?.as_ref())))
+    if let Some(public) = state.shown.read().await {
+        return Ok(Json(status_of(public.as_ref())));
+    }
+    let _writes = WRITES.lock().await;
+    let public = state.store.status().await?.as_ref().map(Public::of);
+    state.shown.write(public.as_ref()).await;
+    Ok(Json(status_of(public.as_ref())))
 }
 
 async fn request(
@@ -527,7 +647,7 @@ async fn connect(
     };
     let status = public_status(Some(&connection));
     let _writes = WRITES.lock().await;
-    state.store.save(Some(&connection)).await?;
+    state.save(Some(&connection)).await?;
     Ok(Json(status))
 }
 
@@ -538,7 +658,7 @@ async fn disconnect(State(state): State<NotionState>) -> ApiResult<Json<Value>> 
     let _writes = WRITES.lock().await;
     // An entry that no longer reads must still be removable.
     let previous = state.store.load().await.ok().flatten();
-    state.store.save(None).await?;
+    state.save(None).await?;
     if let Some(Connection {
         access: Access::SignIn { sign_in },
         ..
@@ -549,11 +669,8 @@ async fn disconnect(State(state): State<NotionState>) -> ApiResult<Json<Value>> 
     Ok(Json(public_status(None)))
 }
 
-async fn connected(store: &Store) -> ApiResult<Connection> {
-    store
-        .load()
-        .await?
-        .ok_or_else(|| failure(StatusCode::CONFLICT, "Connect your Notion workspace first."))
+fn not_connected() -> ApiError {
+    failure(StatusCode::CONFLICT, "Connect your Notion workspace first.")
 }
 
 #[derive(Deserialize)]
@@ -571,7 +688,7 @@ async fn pages(
         return Err(failure(StatusCode::BAD_REQUEST, "Search text is too long."));
     }
     let _guard = state.gate.lock().await;
-    let token = match connected(&state.store).await?.access {
+    let token = match state.connection().await?.access {
         Access::Token { token } => token,
         Access::SignIn { .. } => {
             // Notion's search tool has no cursor: one answer holds every page it will show.
@@ -647,7 +764,7 @@ async fn destination(
         )
     })?;
     let _guard = state.gate.lock().await;
-    let chosen = match connected(&state.store).await?.access {
+    let chosen = match state.connection().await?.access {
         Access::Token { token } => page(
             &request(
                 &state.client,
@@ -669,10 +786,10 @@ async fn destination(
     })?;
     let _writes = WRITES.lock().await;
     // Read again: renewing the sign-in may have rotated its grant since the read above.
-    let mut connection = connected(&state.store).await?;
+    let mut connection = state.store.load().await?.ok_or_else(not_connected)?;
     connection.destination = Some(chosen);
     let status = public_status(Some(&connection));
-    state.store.save(Some(&connection)).await?;
+    state.save(Some(&connection)).await?;
     Ok(Json(status))
 }
 
@@ -1638,7 +1755,8 @@ mod tests {
             if marker {
                 request = request.header("x-loomwatch-request", "1");
             }
-            let response = router()
+            let folder = Folder::new();
+            let response = router(&folder.0)
                 .unwrap()
                 .oneshot(request.body(Body::empty()).unwrap())
                 .await
@@ -1921,6 +2039,42 @@ mod tests {
         query["state"].clone()
     }
 
+    /// `LoomWatch`'s state folder for one test, removed after it.
+    struct Folder(PathBuf);
+
+    impl Folder {
+        fn new() -> Self {
+            Self(std::env::temp_dir().join(format!("loomwatch-notion-{}", uuid::Uuid::new_v4())))
+        }
+
+        /// The status kept there, as written.
+        fn shown(&self) -> String {
+            std::fs::read_to_string(self.0.join("notion-connection.json")).unwrap_or_default()
+        }
+    }
+
+    impl Drop for Folder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn state_with(store: Store, endpoints: Endpoints, folder: &Folder) -> NotionState {
+        NotionState {
+            client: build_client().unwrap(),
+            gate: Arc::default(),
+            store,
+            shown: Arc::new(Shown::in_folder(&folder.0)),
+            endpoints: Arc::new(endpoints),
+            pending: Arc::default(),
+        }
+    }
+
+    async fn shown_by(router: &Router) -> (StatusCode, Value) {
+        let (status, _, body) = send(router, from_ui("GET", "/api/notion/connection"), None).await;
+        (status, body)
+    }
+
     fn stored(slot: &Arc<std::sync::Mutex<Option<String>>>) -> Value {
         slot.lock()
             .unwrap()
@@ -1934,13 +2088,8 @@ mod tests {
         let (endpoints, fake) = fake_notion().await;
         let slot: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
         let store = Store::Memory(slot.clone());
-        let router = router_with(NotionState {
-            client: build_client().unwrap(),
-            gate: Arc::default(),
-            store: store.clone(),
-            endpoints: Arc::new(endpoints.clone()),
-            pending: Arc::default(),
-        });
+        let folder = Folder::new();
+        let router = router_with(state_with(store.clone(), endpoints.clone(), &folder));
 
         // Starting is the UI's call alone; finishing is open to Notion's redirect, but only
         // on this computer, and only with the state of the sign-in in progress.
@@ -2126,17 +2275,97 @@ mod tests {
         assert_eq!(fake.lock().unwrap().revoked, ["refresh-2"]);
     }
 
+    /// macOS asks to allow every read of the Keychain by a build it does not trust yet, and the
+    /// status is checked on every page load and whenever the window takes focus. So a daemon
+    /// started later shows what the last one saved without reading the Keychain at all, and what
+    /// it keeps to do that holds no credential.
+    #[tokio::test]
+    async fn the_status_shows_without_reading_the_keychain() {
+        let (endpoints, fake) = fake_notion().await;
+        let folder = Folder::new();
+        let slot: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
+        let router = router_with(state_with(
+            Store::Memory(slot.clone()),
+            endpoints.clone(),
+            &folder,
+        ));
+        let later = router_with(state_with(Store::Refusing, endpoints, &folder));
+
+        let state = start(&router, &fake).await;
+        send(
+            &router,
+            from_notion(&format!("state={state}&code=code-1")),
+            None,
+        )
+        .await;
+        let (_, signed_in) = shown_by(&router).await;
+        assert_eq!(signed_in["connected"], true);
+        assert_eq!(shown_by(&later).await, (StatusCode::OK, signed_in));
+        let grant = stored(&slot)["signIn"].clone();
+        for secret in ["accessToken", "refreshToken", "clientId"] {
+            let secret = grant[secret].as_str().unwrap();
+            assert!(!folder.shown().contains(secret), "{}", folder.shown());
+        }
+
+        // Choosing the page answers go under, and disconnecting, show the same way.
+        let (_, _, chosen) = send(
+            &router,
+            from_ui("PUT", "/api/notion/destination"),
+            Some(json!({"pageId": DESTINATION})),
+        )
+        .await;
+        assert_eq!(shown_by(&later).await, (StatusCode::OK, chosen));
+        send(&router, from_ui("DELETE", "/api/notion/connection"), None).await;
+        assert_eq!(
+            shown_by(&later).await,
+            (StatusCode::OK, json!({"connected": false}))
+        );
+    }
+
+    /// A connection saved by a `LoomWatch` from before the status was kept is read once, and shown
+    /// from then on; one removed from the Keychain outside `LoomWatch` stops showing as soon as
+    /// something done with Notion finds it gone.
+    #[tokio::test]
+    async fn a_connection_saved_before_the_status_was_kept_is_read_once() {
+        let folder = Folder::new();
+        std::fs::create_dir_all(&folder.0).unwrap();
+        // Something else's file, or half of one: read the Keychain instead.
+        std::fs::write(folder.0.join("notion-connection.json"), "{").unwrap();
+        let slot = Arc::new(std::sync::Mutex::new(Some(format!(
+            r#"{{"token":"secret_abc","name":"Team space","destination":{{"id":"{DESTINATION}","title":"Daily"}}}}"#
+        ))));
+        let router = router_with(state_with(
+            Store::Memory(slot.clone()),
+            Endpoints::notion(),
+            &folder,
+        ));
+        let later = router_with(state_with(Store::Refusing, Endpoints::notion(), &folder));
+        let shown = json!({"connected": true, "name": "Team space", "destination": {"id": DESTINATION, "title": "Daily"}, "via": "token"});
+        assert_eq!(shown_by(&router).await, (StatusCode::OK, shown.clone()));
+        assert_eq!(shown_by(&later).await, (StatusCode::OK, shown));
+        assert!(!folder.shown().contains("secret_abc"), "{}", folder.shown());
+
+        *slot.lock().unwrap() = None;
+        let (status, _, body) = send(
+            &router,
+            from_ui("POST", "/api/notion/pages"),
+            Some(json!({"query": ""})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["error"], "Connect your Notion workspace first.");
+        assert_eq!(
+            shown_by(&later).await,
+            (StatusCode::OK, json!({"connected": false}))
+        );
+    }
+
     #[tokio::test]
     async fn a_declined_or_lapsed_sign_in_says_so_and_keeps_nothing() {
         let (endpoints, fake) = fake_notion().await;
         let slot: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
-        let router = router_with(NotionState {
-            client: build_client().unwrap(),
-            gate: Arc::default(),
-            store: Store::Memory(slot.clone()),
-            endpoints: Arc::new(endpoints),
-            pending: Arc::default(),
-        });
+        let folder = Folder::new();
+        let router = router_with(state_with(Store::Memory(slot.clone()), endpoints, &folder));
         let state = start(&router, &fake).await;
         let (_, headers, _) = send(
             &router,
@@ -2188,13 +2417,8 @@ mod tests {
             })
         );
 
-        let router = router_with(NotionState {
-            client: build_client().unwrap(),
-            gate: Arc::default(),
-            store,
-            endpoints: Arc::new(endpoints),
-            pending: Arc::default(),
-        });
+        let folder = Folder::new();
+        let router = router_with(state_with(store, endpoints, &folder));
         let state = start(&router, &fake).await;
         send(
             &router,
