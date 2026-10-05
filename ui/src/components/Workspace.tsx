@@ -2393,7 +2393,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             status={routine ? <RoutineNote schedule={routine} onRunNow={() => void runRoutineNow()} busy={routineBusy} /> : undefined}
           />
         )}
-        {inspectedEvidence && <ActivityPanel evidence={inspectedEvidence} ownerLabel={ownerLabels.get(inspectedEvidence.agentId) ?? inspectedEvidence.agentId} onClose={() => setInspectedEvidenceId(null)} />}
+        {inspectedEvidence && <ActivityPanel evidence={inspectedEvidence} ownerLabel={ownerLabels.get(inspectedEvidence.agentId) ?? inspectedEvidence.agentId} calls={projection.evidence.filter((item) => item.agentId === inspectedEvidence.agentId)} onInspectEvidence={setInspectedEvidenceId} onClose={() => setInspectedEvidenceId(null)} />}
         {handover && (
           <HandoverPanel
             modal={runPresentation === 'delivery'}

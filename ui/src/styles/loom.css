@@ -150,6 +150,9 @@ span.story-schedule { cursor: default; }
 /* A stitch is a short cut across the thread in the ground colour — what a recorded call looks like on cloth. */
 .weft-stitch { position: absolute; width: 2px; height: 11px; margin: -5.5px 0 0 -1px; border-radius: 1px; background: var(--color-ground); opacity: .9; pointer-events: none; }
 .weft-stitch.bad { width: 3px; height: 15px; margin: -7.5px 0 0 -1.5px; background: var(--color-alert); opacity: 1; }
+/* A failed call the agent put right: a muted cut, darned over the thread to the call that mended it. */
+.weft-stitch.mended { width: 3px; height: 13px; margin: -6.5px 0 0 -1.5px; background: color-mix(in srgb, var(--color-alert) 50%, var(--color-ground)); opacity: 1; }
+.weft-darn { position: absolute; height: 8px; margin-top: -12px; border: 1.5px solid var(--color-ok); border-bottom: 0; border-radius: 8px 8px 0 0; pointer-events: none; }
 .weft-unwoven { position: absolute; top: -4px; bottom: -4px; right: 0; background: color-mix(in srgb, var(--color-panel) 64%, transparent); pointer-events: none; }
 .weft-playhead { position: absolute; top: -8px; bottom: -6px; width: 0; border-left: 2px solid var(--color-accent); margin-left: -1px; pointer-events: none; }
 .weft-playhead::before { content: ""; position: absolute; top: -5px; left: -6px; width: 10px; height: 10px; border-radius: 50%; background: var(--color-accent); }
@@ -384,6 +387,10 @@ span.story-schedule { cursor: default; }
 .delivery-stage-select .agent-mark { --mark-ground: var(--color-panel-solid); }
 /* The record's exact call under its plain heading: wrapped, at most three lines, full text on hover. */
 .insp-raw { margin-top: 4px; color: var(--color-ink-3); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* A failed call the agent put right: what happened after, as a link to that call (the timeline's darn, in words). */
+.insp-mend { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 0; border: 0; background: none; color: var(--color-ok); font: inherit; text-align: left; cursor: pointer; }
+.insp-mend:hover { text-decoration: underline; text-underline-offset: 2px; }
+.insp-mend:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: 3px; }
 
 /* ---------- files the agents produced (ADR 0026) ---------- */
 /* The deliverable: a sheet of paper on a card with a gilt selvedge — the finished edge of cloth. */

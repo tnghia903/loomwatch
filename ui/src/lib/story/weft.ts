@@ -1,5 +1,6 @@
 import type { Evidence, RunProjection } from '../watch/events'
-import { failuresOf, skillName, workCount, type WorkCount } from './reads'
+import { commandName } from './commands'
+import { failuresOf, mendOf, skillName, workCount, type MendHow, type WorkCount } from './reads'
 
 /**
  * A run as woven cloth, for the weft timeline.
@@ -31,8 +32,14 @@ export interface WeftStitch {
   evidenceId: string
   /** The recorded call, so the story can judge it by outcome as the receipt does (lib/story/reads.ts). */
   evidence: Evidence
-  /** The call itself failed. It stays red even when the agent got what it was after another way. */
+  /** The call failed and nothing the agent did after made up for it, as the receipt judges it. */
   bad: boolean
+  /**
+   * The call failed, but the agent got what it was after another way: ran the command again, read
+   * the files in a folder it could not read as a file. Drawn as a muted stitch darned to `at`, the
+   * call that mended it, rather than as a red one the receipt no longer counts.
+   */
+  mended: { evidenceId: string; at: number; how: MendHow } | null
   /** For a newcomer: "Researcher read file README.md." */
   sentence: string
   /** For an expert: "file · read file · #212". */
@@ -89,7 +96,7 @@ export function shortName(name: string): string {
 }
 
 /** One recorded call as a sentence, in the words a person would use for that kind of call. */
-export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'relation' | 'name' | 'status' | 'target'>): string {
+export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'relation' | 'name' | 'status' | 'target'> & Partial<Pick<Evidence, 'rawInput'>>): string {
   const what = shortName(item.name)
   const failed = item.status === 'failed' || item.status === 'rejected'
   const quoted = what ? `“${what}”` : 'something'
@@ -103,15 +110,50 @@ export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'r
       const base: Record<string, string> = { read: 'read', edited: 'edit', deleted: 'delete', moved: 'move' }
       return failed ? `${agent} couldn’t ${base[verb] ?? 'use'} ${what || 'a file'}.` : `${agent} ${verb} ${what || 'a file'}.`
     }
-    case 'command': return failed ? `${agent}’s command ${quoted} failed.` : `${agent} ran ${quoted}.`
+    case 'command': {
+      // Named by the program it ran, not the folder it ran in: `cd /tmp/build && python3 build.py`
+      // is "python3 build.py", where the first path in it would make every command there "build".
+      const named = commandName(item.name)
+      const command = named ? `“${named}”` : quoted
+      return failed ? `${agent}’s command ${command} failed.` : `${agent} ran ${command}.`
+    }
     case 'skill': {
       // A skill read as its SKILL.md is named by its folder; Claude's Skill tool ("Load skill: x") by its input.
       const named = skillName(item)
       const skill = named ? `“${named}”` : quoted
       return failed ? `${agent} couldn’t use the skill ${skill}.` : `${agent} used the skill ${skill}.`
     }
-    case 'permission': return `${agent} asked permission for ${quoted}${failed ? ', and it was refused' : ''}.`
+    case 'permission': {
+      // A request to run a command names it as the command itself is named once it runs.
+      const request = item.rawInput as { toolCall?: { kind?: unknown } } | null | undefined
+      const named = request?.toolCall?.kind === 'execute' ? commandName(item.name) : null
+      return `${agent} asked permission for ${named ? `“${named}”` : quoted}${failed ? ', and it was refused' : ''}.`
+    }
     default: return failed ? `${agent}’s ${quoted} call failed.` : `${agent} used ${quoted}.`
+  }
+}
+
+/** How a mended stitch's sentence ends: "Editor’s command “python3 build.py” failed, then worked when run again." */
+const MENDED: Record<MendHow, string> = {
+  'ran again': 'then worked when run again',
+  'tried again': 'then worked on another try',
+  'read before': 'but had already read it',
+  'read inside': 'but read the files in it',
+  'opened another way': 'but opened it another way',
+}
+
+/**
+ * The line the record's panel shows under a failed call that was mended, as a link to the call
+ * that mended it. `afterMs` is how long after the failure that call came (negative: before it).
+ */
+export function mendNote(how: MendHow, afterMs: number): string {
+  const gap = span(Math.abs(afterMs))
+  switch (how) {
+    case 'ran again': return `Ran again ${gap} later and worked`
+    case 'tried again': return `Worked on another try ${gap} later`
+    case 'read before': return `Already read ${gap} earlier`
+    case 'read inside': return 'Read the files in it instead'
+    case 'opened another way': return 'Opened the skill another way'
   }
 }
 
@@ -144,18 +186,27 @@ export function weave(projection: RunProjection, order: readonly WeftAgent[], no
   })
 
   const label = (id: string) => name.get(id) ?? id
+  // Each agent's calls, as the receipt is given them, so a failure is judged the same way in both.
+  const callsOf = new Map<string, Evidence[]>()
+  for (const item of projection.evidence) callsOf.set(item.agentId, [...(callsOf.get(item.agentId) ?? []), item])
   const stitches: WeftStitch[] = projection.evidence
     .filter((item) => item.kind !== 'plan')
-    .map((item) => ({
-      at: item.offsetMs,
-      laneId: item.agentId,
-      kind: item.kind,
-      evidenceId: item.id,
-      evidence: item,
-      bad: item.status === 'failed' || item.status === 'rejected',
-      sentence: stitchSentence(label(item.agentId), item.target ? { ...item, target: label(item.target) } : item),
-      code: `${item.kind} · ${item.relation} · #${item.seq}`,
-    }))
+    .map((item) => {
+      const failed = item.status === 'failed' || item.status === 'rejected'
+      const mend = failed && item.kind !== 'permission' ? mendOf(item, callsOf.get(item.agentId) ?? []) : null
+      const sentence = stitchSentence(label(item.agentId), item.target ? { ...item, target: label(item.target) } : item)
+      return {
+        at: item.offsetMs,
+        laneId: item.agentId,
+        kind: item.kind,
+        evidenceId: item.id,
+        evidence: item,
+        bad: failed && !mend,
+        mended: mend ? { evidenceId: mend.by.id, at: mend.by.offsetMs, how: mend.how } : null,
+        sentence: mend ? `${sentence.replace(/\.$/, '')}, ${MENDED[mend.how]}.` : sentence,
+        code: `${item.kind} · ${item.relation} · #${item.seq}`,
+      }
+    })
     .sort((a, b) => a.at - b.at)
 
   // Knots: a recorded delegation is the honest source; a pipeline's stage order is the fallback,

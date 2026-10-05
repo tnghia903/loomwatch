@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { projectRun, type Evidence, type RunEvent } from '../watch/events'
-import { failuresOf, readCount, readPhrase, skillName, skillsUsed } from './reads'
+import { failuresOf, mendOf, readCount, readPhrase, skillName, skillsUsed } from './reads'
 import { buildReceipt } from './receipt'
 import { answerVerdict } from './verdict'
 import { describeEvidence, narrate, weave } from './weft'
@@ -109,11 +109,15 @@ describe('a linked folder read as a file, then the files in it', () => {
     expect(judge(events).verdict).toMatchObject({ tone: 'ok', label: 'Nothing flagged', detail: 'Every step finished, reading 3 files, and nothing in the record was flagged.' })
   })
 
-  it('keeps the failed call in the record itself', () => {
+  it('keeps the failed call in the record itself, darned to the read that made up for it', () => {
     const { projection } = judge(events)
     const folder = projection.evidence.find((item) => item.id === 'researcher:folder')
     expect(folder).toMatchObject({ kind: 'file', relation: 'read file', status: 'failed' })
-    expect(weave(projection, agents).stitches.find((stitch) => stitch.evidenceId === 'researcher:folder')).toMatchObject({ bad: true, sentence: 'Researcher couldn’t read q3-reports.' })
+    expect(weave(projection, agents).stitches.find((stitch) => stitch.evidenceId === 'researcher:folder')).toMatchObject({
+      bad: false,
+      mended: { evidenceId: 'researcher:README.md', how: 'read inside' },
+      sentence: 'Researcher couldn’t read q3-reports, but read the files in it.',
+    })
   })
 
   it('tells the same run as a story with the receipt’s counts and no failure', () => {
@@ -166,6 +170,71 @@ describe('a source that really could not be read', () => {
   })
 })
 
+/**
+ * Claude Code's Bash as claude-agent-acp reports it, copied from a recorded run (6ca4befe): the call
+ * starts as a bare "Terminal", the command arrives as the title of the next update, and the result
+ * comes after the permission answer.
+ */
+function bash(callId: string, command: string, output: string, failed = false): Step[] {
+  return [
+    ['researcher', 'tool_call', { name: 'Bash', title: 'Terminal', callId, status: 'pending', content: [], rawInput: {}, toolKind: 'execute' }],
+    ['researcher', 'tool_update', { title: command, callId, rawInput: { command } }],
+    ['researcher', 'permission', { toolCall: { toolCallId: callId, kind: 'execute', name: 'Bash', title: command, status: 'pending', rawInput: { command } }, options: [{ optionId: 'allow-once', kind: 'allow_once', name: 'Yes' }, { optionId: 'reject', kind: 'reject_once', name: 'No' }] }],
+    ['researcher', 'permission', { outcome: { outcome: 'selected', optionId: 'allow-once' } }],
+    ['researcher', 'tool_update', { callId, status: failed ? 'failed' : 'completed', rawOutput: output, content: [{ type: 'content', content: { type: 'text', text: output } }] }],
+  ]
+}
+
+const BUILD = "mkdir -p /tmp/build && cat > /tmp/build/build.py <<'E'\nprint(f'{\"\\\"\"}')\nE\ncd /tmp/build && python3 build.py && ls -la out.docx"
+const SYNTAX_ERROR = 'Exit code 1\n  File "/private/tmp/build/build.py", line 1\nSyntaxError: f-string expression part cannot include a backslash'
+const REBUILD = "cd /tmp/build && python3 - <<'E'\ns=open('build.py').read()\nE\npython3 build.py && ls -la out.docx; pdfinfo out.pdf | grep Pages"
+const MONTAGE = 'cd /tmp/build && python3 -c "\nfrom PIL import Image\nprint(1)"'
+
+describe('a command that failed', () => {
+  // The run that prompted this: the receipt said "Editor’s command “build” failed, and carried on
+  // without it" twice — once for a script it fixed and ran again, once for a different command that
+  // only shared its folder.
+  it('is not a red line once the agent fixed it and ran it again', () => {
+    const events = marketBrief([...bash('build', BUILD, SYNTAX_ERROR, true), ...bash('rebuild', REBUILD, '-rw-r--r-- out.docx\nPages: 9')])
+    const { projection, receipt, verdict } = judge(events)
+    // Not a failure line, and not hidden either: the count says one command needed another try.
+    expect(receipt.lines.map((line) => [line.tone, line.text])).toEqual([
+      ['ok', 'Researcher finished · used 1 skill, ran 2 commands (1 needed another try)'],
+      ['ok', 'You gave your decision'],
+      ['ok', 'Writer finished'],
+    ])
+    expect(verdict).toMatchObject({ tone: 'ok', label: 'Nothing flagged' })
+    expect(narrate(weave(projection, agents)).filter((beat) => beat.bad)).toEqual([])
+    // Its permission request is named the same way.
+    expect(weave(projection, agents).stitches.filter((stitch) => stitch.kind === 'permission').map((stitch) => stitch.sentence)).toContain('Researcher asked permission for “python3 build.py”.')
+    // The timeline still shows the call that failed, named by what it ran, darned to the rerun.
+    expect(weave(projection, agents).stitches.find((stitch) => stitch.evidenceId === 'researcher:build')).toMatchObject({
+      bad: false,
+      mended: { evidenceId: 'researcher:rebuild', how: 'ran again' },
+      sentence: 'Researcher’s command “python3 build.py” failed, then worked when run again.',
+    })
+  })
+
+  it('counts a command that took several tries once', () => {
+    const { receipt } = judge(marketBrief([...bash('build', BUILD, SYNTAX_ERROR, true), ...bash('build-2', BUILD, SYNTAX_ERROR, true), ...bash('rebuild', REBUILD, 'ok')]))
+    expect(receipt.lines[0].text).toBe('Researcher finished · used 1 skill, ran 3 commands (1 needed another try)')
+    expect(receipt.lines.filter((line) => line.tone === 'bad')).toEqual([])
+  })
+
+  it('stays a red line, named by what it ran, when nothing ran it again', () => {
+    const { receipt } = judge(marketBrief([...bash('build', BUILD, SYNTAX_ERROR, true), ...bash('rebuild', REBUILD, 'ok'), ...bash('montage', MONTAGE, "Exit code 1\nModuleNotFoundError: No module named 'PIL'", true)]))
+    expect(receipt.lines.filter((line) => line.tone === 'bad').map((line) => line.text)).toEqual(['Researcher’s command “python3 -c …” failed, and carried on without it'])
+  })
+
+  it('stays a red line when the run again failed, came first, or could have failed unseen', () => {
+    const red = (steps: Step[]) => judge(marketBrief(steps)).receipt.lines.filter((line) => line.tone === 'bad').map((line) => line.text)
+    const failedLine = 'Researcher’s command “python3 build.py” failed, and carried on without it'
+    expect(red([...bash('build', BUILD, SYNTAX_ERROR, true), ...bash('rebuild', REBUILD, SYNTAX_ERROR, true)])).toEqual([failedLine, 'Researcher’s command “python3 - …” failed, and carried on without it'])
+    expect(red([...bash('rebuild', REBUILD, 'ok'), ...bash('build', BUILD, SYNTAX_ERROR, true)])).toEqual([failedLine])
+    expect(red([...bash('build', BUILD, SYNTAX_ERROR, true), ...bash('tail', 'cd /tmp/build && python3 build.py 2>&1 | tail -5', SYNTAX_ERROR)])).toEqual([failedLine])
+  })
+})
+
 const item = (id: string, extra: Partial<Evidence>): Evidence =>
   ({ id, agentId: 'researcher', kind: 'file', relation: 'read file', name: id, status: 'succeeded', toolKind: 'read', rawInput: null, locations: [], ...extra }) as unknown as Evidence
 
@@ -181,6 +250,19 @@ describe('counting things, not calls', () => {
     expect(skillName(item('e', { kind: 'skill', relation: 'used skill', name: 'Skill(claude-design)' }))).toBe('claude-design')
     expect(skillName(item('f', { kind: 'skill', relation: 'used skill', name: 'Read .claude/skills/house-style/examples.md' }))).toBe('house-style')
     expect(describeEvidence('Writer', used[0])).toBe('Writer used the skill “house-style”.')
+  })
+
+  it('says how a failed read was made up for, and by which call', () => {
+    const miss = item('miss', { status: 'failed', locations: [{ path: `${FOLDER}/q3-sales.md` }] })
+    const again = item('again', { locations: [{ path: `${FOLDER}/q3-sales.md` }] })
+    expect(mendOf(miss, [miss, again])).toEqual({ by: again, how: 'tried again' })
+    expect(mendOf(miss, [again, miss])).toEqual({ by: again, how: 'read before' })
+    // A try after the failure is the one that put it right, though one before it read the file too.
+    const before = item('before', { locations: [{ path: `${FOLDER}/q3-sales.md` }] })
+    expect(mendOf(miss, [before, miss, again])).toEqual({ by: again, how: 'tried again' })
+    const folder = item('folder', { status: 'failed', locations: [{ path: FOLDER }] })
+    expect(mendOf(folder, [folder, again])).toEqual({ by: again, how: 'read inside' })
+    expect(mendOf(miss, [miss])).toBeNull()
   })
 
   it('counts a skill the agent could not load once it loaded it another way', () => {

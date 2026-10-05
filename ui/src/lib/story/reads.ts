@@ -1,4 +1,5 @@
 import type { Evidence } from '../watch/events'
+import { commandRedone } from './commands'
 
 /**
  * What an agent's calls came to, judged by outcome rather than call by call.
@@ -9,6 +10,7 @@ import type { Evidence } from '../watch/events'
  * gets `EISDIR`, then reads the files inside it: that call failed, but the folder was read. So a
  * failed read is a failure only when no read of the same thing succeeded — the same path or a path
  * inside it, the same page, the same skill. A folder none of whose files could be read still is.
+ * A failed command is a failure until the agent runs it again and it works (lib/story/commands.ts).
  *
  * Counts are of things, not calls: a skill the agent opened and LoomWatch then recorded as opened
  * is one skill, and a file read in two pages is one file.
@@ -73,15 +75,46 @@ const aboutSkill = (item: Item) => item.kind === 'skill' || skillFileRead(item)
 /** A skill the agent opened or invoked. Supplied in its prompt is delivery, not use. */
 const skillUse = (item: Item) => aboutSkill(item) && item.status === 'succeeded' && item.relation !== 'loaded into prompt'
 
-/** Whether something else the agent did got what this failed call was after. */
-function madeUpFor(miss: Item, items: readonly Item[]): boolean {
-  if (aboutSkill(miss) && items.some((item) => skillUse(item) && skillKey(item) === skillKey(miss))) return true
-  if (!isRead(miss)) return false
+/**
+ * How a failed call was made up for: the command `ran again` and worked; the same thing was read
+ * on a later try (`tried again`) or `read before`; a folder's files were read (`read inside`); a
+ * skill was `opened another way`.
+ */
+export type MendHow = 'ran again' | 'tried again' | 'read before' | 'read inside' | 'opened another way'
+
+export interface Mend<T> {
+  /** The call that got what the failed one was after. */
+  by: T
+  how: MendHow
+}
+
+/** What else the agent did that got what this failed call was after, or `null` when nothing did. */
+export function mendOf<T extends Item>(miss: T, items: readonly T[]): Mend<T> | null {
+  const at = items.indexOf(miss)
+  // A command counts only once it ran again after the failure: fixing a script and rerunning it.
+  if (miss.kind === 'command') {
+    const later = items.slice(at + 1).filter((item) => item.kind === 'command' && item.status === 'succeeded')
+    const index = commandRedone(miss.name, later.map((item) => item.name))
+    return index === null ? null : { by: later[index], how: 'ran again' }
+  }
+  if (aboutSkill(miss)) {
+    const by = items.find((item) => skillUse(item) && skillKey(item) === skillKey(miss))
+    if (by) return { by, how: 'opened another way' }
+  }
+  if (!isRead(miss)) return null
   const reads = items.filter((item) => item.status === 'succeeded' && isRead(item))
-  if (miss.relation === 'consulted source') return reads.some((item) => item.relation === 'consulted source' && pageOf(item) === pageOf(miss))
-  if (miss.relation === 'retrieved') return reads.some((item) => item.relation === 'retrieved' && noteOf(item) === noteOf(miss))
+  // The same thing read again: the first try after the failure, else one before it.
+  const same = (matches: T[]): Mend<T> | null => {
+    const by = matches.find((item) => items.indexOf(item) > at) ?? matches[0]
+    return by ? { by, how: items.indexOf(by) > at ? 'tried again' : 'read before' } : null
+  }
+  if (miss.relation === 'consulted source') return same(reads.filter((item) => item.relation === 'consulted source' && pageOf(item) === pageOf(miss)))
+  if (miss.relation === 'retrieved') return same(reads.filter((item) => item.relation === 'retrieved' && noteOf(item) === noteOf(miss)))
   const targets = pathsOf(miss)
-  return reads.some((item) => pathsOf(item).some((path) => targets.some((target) => path === target || path.startsWith(`${target}/`))))
+  const again = same(reads.filter((item) => pathsOf(item).some((path) => targets.includes(path))))
+  if (again) return again
+  const inside = reads.find((item) => pathsOf(item).some((path) => targets.some((target) => path.startsWith(`${target}/`))))
+  return inside ? { by: inside, how: 'read inside' } : null
 }
 
 /**
@@ -89,7 +122,13 @@ function madeUpFor(miss: Item, items: readonly Item[]): boolean {
  * permission requests are left out: the receipt tells those apart by what was not allowed.
  */
 export function failuresOf<T extends Item>(items: readonly T[]): T[] {
-  return items.filter((item) => failed(item) && item.kind !== 'permission' && !madeUpFor(item, items))
+  return items.filter((item) => failed(item) && item.kind !== 'permission' && mendOf(item, items) === null)
+}
+
+/** Commands that failed and then worked when the agent ran them again, each counted once. */
+export function retriedCommands(items: readonly Item[]): number {
+  const menders = items.filter((item) => item.kind === 'command' && failed(item)).map((item) => mendOf(item, items)?.by).filter(Boolean)
+  return new Set(menders).size
 }
 
 /** The skills the agent used, each named once however many calls it took. */
@@ -146,6 +185,8 @@ export interface WorkCount {
   searches: number
   changed: number
   commands: number
+  /** Of those commands, how many failed and then worked when run again. */
+  retried: number
 }
 
 export function workCount(items: readonly Item[]): WorkCount {
@@ -155,5 +196,6 @@ export function workCount(items: readonly Item[]): WorkCount {
     searches: items.filter((item) => item.kind === 'search').length,
     changed: changedFiles(items),
     commands: items.filter((item) => item.kind === 'command').length,
+    retried: retriedCommands(items),
   }
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { Evidence, ProjectedAgent, RunProjection } from '../watch/events'
 import { buildReceipt, receiptMarkdown } from './receipt'
-import { clock, describeEvidence, momentAt, narrate, shortName, weave } from './weft'
+import { clock, describeEvidence, mendNote, momentAt, narrate, shortName, weave } from './weft'
 
 const T0 = Date.parse('2026-09-29T08:00:00Z')
 const iso = (seconds: number) => new Date(T0 + seconds * 1000).toISOString()
@@ -91,6 +91,15 @@ describe('describeEvidence', () => {
   it('says the operator answered, not that they "opened Your answer"', () => {
     expect(describeEvidence('You', { kind: 'source', relation: 'directed', name: 'Your answer', status: 'succeeded', target: null })).toBe('You answered.')
     expect(describeEvidence('Researcher', { kind: 'source', relation: 'consulted source', name: 'https://www.ft.com/x', status: 'succeeded', target: null })).toBe('Researcher opened ft.com.')
+  })
+})
+
+describe('mendNote', () => {
+  it('says what put a failed call right, and when', () => {
+    expect(mendNote('ran again', 14_200)).toBe('Ran again 14 seconds later and worked')
+    expect(mendNote('tried again', 1_000)).toBe('Worked on another try 1 second later')
+    expect(mendNote('read before', -125_000)).toBe('Already read 2 minutes earlier')
+    expect(mendNote('read inside', 3_000)).toBe('Read the files in it instead')
   })
 })
 
@@ -233,7 +242,7 @@ describe('narrate', () => {
       ['Researcher worked for 40 seconds: it used one skill and read 3 files.', false],
       ['The run ended after 40 seconds.', false],
     ])
-    expect(weave(record(calls), researcher).stitches.find((stitch) => stitch.evidenceId === 'e4')).toMatchObject({ bad: true, sentence: 'Researcher couldn’t read q3-reports.' })
+    expect(weave(record(calls), researcher).stitches.find((stitch) => stitch.evidenceId === 'e4')).toMatchObject({ bad: false, mended: { evidenceId: 'e5', at: 6_000, how: 'read inside' }, sentence: 'Researcher couldn’t read q3-reports, but read the files in it.' })
   })
 
   it('still tells a folder as a failure when nothing in it was read', () => {

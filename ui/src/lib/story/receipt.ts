@@ -65,14 +65,16 @@ export interface ReceiptInput {
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
 
 function workSummary(items: readonly Evidence[]): string {
-  const { skills, read: count, searches, changed, commands } = workCount(items)
+  const { skills, read: count, searches, changed, commands, retried } = workCount(items)
   const read = readPhrase(count)
+  // A command the agent fixed and ran again is not a failure line, but it is not hidden either.
+  const retries = retried ? ` (${retried} needed another try)` : ''
   const parts = [
     skills && `used ${plural(skills, 'skill')}`,
     read && `read ${read}`,
     searches && `ran ${plural(searches, 'search', 'searches')}`,
     changed && `changed ${plural(changed, 'file')}`,
-    commands && `ran ${plural(commands, 'command')}`,
+    commands && `ran ${plural(commands, 'command')}${retries}`,
   ].filter(Boolean)
   return parts.length ? ` · ${parts.join(', ')}` : ''
 }

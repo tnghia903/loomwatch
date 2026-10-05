@@ -102,8 +102,13 @@ export function WeftBar({ projection, order, relay, onInspectEvidence }: WeftBar
             const to = laneIndex.get(knot.to) ?? 0
             return <i key={`k${index}`} className="weft-knot" style={{ left: pct(knot.at), top: Math.min(from, to) * ROW + ROW / 2, height: Math.abs(to - from) * ROW }} />
           })}
+          {/* A failed call the agent put right is darned to the call that mended it. */}
+          {weft.stitches.filter((stitch) => stitch.mended).map((stitch) => {
+            const mended = stitch.mended as NonNullable<typeof stitch.mended>
+            return <i key={`d${stitch.evidenceId}`} className="weft-darn" style={{ left: pct(Math.min(stitch.at, mended.at)), width: `max(6px, ${pct(Math.abs(mended.at - stitch.at))})`, top: (laneIndex.get(stitch.laneId) ?? 0) * ROW + ROW / 2 }} />
+          })}
           {weft.stitches.map((stitch) => (
-            <i key={stitch.evidenceId} className={`weft-stitch ${stitch.bad ? 'bad' : ''}`} title={stitch.sentence} style={{ left: pct(stitch.at), top: (laneIndex.get(stitch.laneId) ?? 0) * ROW + ROW / 2 }} />
+            <i key={stitch.evidenceId} className={`weft-stitch ${stitch.bad ? 'bad' : stitch.mended ? 'mended' : ''}`} title={stitch.sentence} style={{ left: pct(stitch.at), top: (laneIndex.get(stitch.laneId) ?? 0) * ROW + ROW / 2 }} />
           ))}
           <i className="weft-unwoven" style={{ left: pct(position) }} />
           <i className="weft-playhead" style={{ left: pct(position) }} />

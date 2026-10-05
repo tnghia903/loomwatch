@@ -1,7 +1,8 @@
-import { X } from 'lucide-react'
+import { ArrowRight, CheckCircle2, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
-import { describeEvidence } from '../../lib/story/weft'
+import { mendOf } from '../../lib/story/reads'
+import { describeEvidence, mendNote } from '../../lib/story/weft'
 import { formatOffset, type Evidence } from '../../lib/watch/events'
 import { EntityGlyph, StatusGlyph } from '../ui/glyphs'
 
@@ -23,12 +24,23 @@ function contentText(content: unknown): string {
   }).filter(Boolean).join('\n')
 }
 
+interface ActivityPanelProps {
+  evidence: Evidence
+  ownerLabel: string
+  /** The same agent's calls, as the receipt is given them: what tells a failure the agent put right. */
+  calls: readonly Evidence[]
+  onInspectEvidence: (id: string) => void
+  onClose: () => void
+}
+
 // Live activity uses a compact inspection panel. It is deliberately not modal: the run stays
 // visible and Escape/Close returns focus to the card that opened it.
-export function ActivityPanel({ evidence, ownerLabel, onClose }: { evidence: Evidence; ownerLabel: string; onClose: () => void }) {
+export function ActivityPanel({ evidence, ownerLabel, calls, onInspectEvidence, onClose }: ActivityPanelProps) {
   const closeButton = useRef<HTMLButtonElement>(null)
   useEffect(() => { closeButton.current?.focus() }, [evidence.id])
   const status = evidence.status === 'succeeded' ? 'succeeded' : evidence.status === 'failed' || evidence.status === 'rejected' ? 'failed' : evidence.status === 'pending' ? 'starting' : 'running'
+  // A failed call the agent put right says so, and opens the call that did it.
+  const mend = status === 'failed' && evidence.kind !== 'permission' ? mendOf(evidence, calls) : null
   const output = contentText(evidence.content) || (evidence.rawOutput !== null && evidence.rawOutput !== undefined ? pretty(evidence.rawOutput) : '')
   return (
     <aside className="panel right top e1 lw-activity" aria-labelledby="activity-title activity-raw" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
@@ -40,6 +52,11 @@ export function ActivityPanel({ evidence, ownerLabel, onClose }: { evidence: Evi
           <div className="insp-raw t-mono-sm" id="activity-raw" title={evidence.name}>{evidence.name}</div>
           <div className="insp-id t-mono">#{String(evidence.order).padStart(2, '0')} · {formatOffset(evidence.offsetMs)} · seq {evidence.seq}</div>
           <div className="insp-status t-micro"><StatusGlyph status={status} /> {evidence.status} observed activity</div>
+          {mend && (
+            <button type="button" className="insp-mend t-meta" onClick={() => onInspectEvidence(mend.by.id)}>
+              <CheckCircle2 size={13} aria-hidden="true" />{mendNote(mend.how, mend.by.offsetMs - evidence.offsetMs)}<ArrowRight size={12} aria-hidden="true" />
+            </button>
+          )}
         </span>
         <button ref={closeButton} type="button" className="iconbtn" onClick={onClose} aria-label="Close activity details" title="Close (Esc)"><X size={15} aria-hidden="true" /></button>
       </header>
