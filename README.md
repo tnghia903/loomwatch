@@ -416,12 +416,40 @@ reads them only on your computer; nothing is uploaded.
 | Start LoomWatch, or open it if it is already running | `~/LoomWatch/app/loomwatch` |
 | Stop LoomWatch | Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in its window |
 | Also stop the database, for example before quitting Docker Desktop | `~/LoomWatch/app/loomwatch stop` |
-| Update to the newest release (stop it first) | `~/LoomWatch/app/loomwatch update` |
+| Update to the newest release | `~/LoomWatch/app/loomwatch update` |
+| Go back to the version the last update replaced | `~/LoomWatch/app/loomwatch rollback` |
+| See which version you have, and whether a newer one is out | `~/LoomWatch/app/loomwatch version` |
 | See every option | `~/LoomWatch/app/loomwatch help` |
 
 When the installer added the `loomwatch` shortcut, plain `loomwatch` works too. Your teams and
 history are kept in every case. The database starts again by itself whenever Docker Desktop does,
-until you run `loomwatch stop`. Running the install command again also updates LoomWatch.
+until you run `loomwatch stop`.
+
+### Updating
+
+LoomWatch checks once a day whether a newer release is out. When one is, Home shows **Update
+available** and the terminal running LoomWatch says so too. Click it to read what changed and how
+to install it; <kbd>⌘</kbd><kbd>K</kbd> → **Check for updates…** opens the same window at any
+time. Nothing is installed until you run the update yourself:
+
+1. Wait until no team is working, then press <kbd>Ctrl</kbd>+<kbd>C</kbd> in LoomWatch's window.
+2. In that window, run `~/LoomWatch/app/loomwatch update`.
+
+`update` first saves a copy of your run history in `~/LoomWatch/backups` (the three newest copies
+are kept). Then it downloads the release, checks it against the release's checksum, and starts it;
+if any step fails, the version you had stays as it was. Run `update` while LoomWatch is running and
+it asks before stopping it. Already on the newest release, it only starts LoomWatch.
+
+The version an update replaced is kept. If the new one gives you trouble,
+`~/LoomWatch/app/loomwatch rollback` puts it back. When the newer version changed how the run
+history is stored, the older one cannot read it, so `rollback` also puts back the copy saved before
+the update. It asks first, and saves what you recorded since in another copy. To install one
+particular release, run `LOOMWATCH_VERSION=v0.1.4 ~/LoomWatch/app/loomwatch update`.
+
+The daily check asks GitHub for the newest version number and sends nothing about you, your teams
+or your runs. Turn it off in the **Check for updates** window, or for good on this computer with
+`LOOMWATCH_UPDATE_CHECK=off`. Running the install command again also updates LoomWatch, without
+the copy of the run history.
 
 To stop one run, click **Stop** beside the request box. Closing the browser tab does not stop LoomWatch or
 its runs. Scheduled teams run only while LoomWatch and its database are running and the computer is
@@ -445,9 +473,11 @@ awake. For scheduled runs and optional Notion delivery, see [Routines](docs/WATC
 3. Delete the program: `rm -rf ~/LoomWatch/app`, and `rm ~/.local/bin/loomwatch` if the installer
    made that shortcut.
 4. Your teams are kept in `~/LoomWatch/teams` until you delete `~/LoomWatch` too. It also holds your
-   saved jobs, deleted teams and the agents' working folders.
-5. LoomWatch remembers which teams you approved to run in `~/Library/Application Support/LoomWatch`
-   (`~/.local/state/loomwatch` on Linux). Delete that folder too to leave nothing behind.
+   saved jobs, deleted teams, the agents' working folders, and in `backups` the copies of your run
+   history that updates saved.
+5. LoomWatch remembers which teams you approved to run, and your update-check choices, in
+   `~/Library/Application Support/LoomWatch` (`~/.local/state/loomwatch` on Linux). Delete that
+   folder too to leave nothing behind.
 
 For a copy built from source, run `./loomwatch stop` and `docker compose down -v` in its folder,
 then delete the folder.
@@ -461,6 +491,8 @@ then delete the folder.
 | Database | PostgreSQL in Docker | `LOOMWATCH_DATABASE_URL=postgres://… ~/LoomWatch/app/loomwatch` uses your own PostgreSQL, and Docker is not needed |
 | Install folder | `~/LoomWatch/app` | `curl -fsSL https://loomwatch.github.io/install.sh \| LOOMWATCH_APP_DIR=~/Apps/LoomWatch bash` |
 | Version | The newest release | `curl -fsSL https://loomwatch.github.io/install.sh \| LOOMWATCH_VERSION=v0.1.0 bash` |
+| Copies of the run history saved by `update` | `~/LoomWatch/backups` | `LOOMWATCH_BACKUP_DIR=~/Backups/LoomWatch ~/LoomWatch/app/loomwatch update` |
+| Daily check for a newer version | On | `LOOMWATCH_UPDATE_CHECK=off ~/LoomWatch/app/loomwatch`, or turn it off in **Check for updates** |
 
 `loomwatch --no-open` starts without opening the browser, and `loomwatch help` lists everything.
 
@@ -485,9 +517,10 @@ cd loomwatch
 
 The first start builds the browser app and the program, which takes a few minutes, then does what
 the installed copy does. Use `./loomwatch` from that folder wherever this guide says
-`~/LoomWatch/app/loomwatch`. In a copy of the source, `./loomwatch update` pulls the newest `main`
-and rebuilds, and `./loomwatch --rebuild` builds again even when nothing changed. `main` moves
-faster than the releases, so expect rough edges. If you installed LoomWatch from source before,
+`~/LoomWatch/app/loomwatch`. In a copy of the source, `./loomwatch update` pulls the newest `main`,
+saves a copy of the run history when anything changed, and rebuilds; `rollback` is for installed
+copies, since Git keeps every version of yours. `./loomwatch --rebuild` builds again even when
+nothing changed. `main` moves faster than the releases, so expect rough edges. If you installed LoomWatch from source before,
 `./loomwatch` keeps using your existing settings, teams folder and database.
 
 <details>
@@ -887,7 +920,9 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | AI apps you connected to LoomWatch | `.loomwatch/connections.json` in your teams folder. It holds each app's private key. |
 | Team chats (your messages and every run), recorded events, Notebook entries and Ask conversations | The local PostgreSQL Docker volume |
 | Database settings | `.env` in the LoomWatch folder (`~/LoomWatch/app`, or your copy of the source) |
-| Which team files you approved to run | `~/Library/Application Support/LoomWatch` on macOS, `~/.local/state/loomwatch` on Linux |
+| Which team files you approved to run, and your update-check choices | `~/Library/Application Support/LoomWatch` on macOS, `~/.local/state/loomwatch` on Linux |
+| Copies of the run history saved by `loomwatch update` | `~/LoomWatch/backups`, one folder per database, the three newest in each |
+| The version the last update replaced, for `loomwatch rollback` | `.previous` in `~/LoomWatch/app` |
 | Provider sign-in | Managed by each host agent app; Compose-only deployments use `loomwatch-home` |
 
 Back up your teams folder and PostgreSQL database if you want to move or preserve your work.

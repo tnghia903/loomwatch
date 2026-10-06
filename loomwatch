@@ -2,7 +2,9 @@
 # One command to set up, build, start, update and stop LoomWatch on this computer.
 #
 #   ./loomwatch            set up anything missing, build if the code changed, start, open the browser
-#   ./loomwatch update     download the latest version, rebuild, and start
+#   ./loomwatch update     save a copy of the run history, download the latest version, and start
+#   ./loomwatch rollback   go back to the version the last update replaced (ready-built copies)
+#   ./loomwatch version    say which version this is, and whether a newer one is out
 #   ./loomwatch stop       stop LoomWatch and its database (your teams and history are kept)
 #
 # The same script runs a copy of the source code, which it builds, and a ready-built copy put in
@@ -13,6 +15,8 @@
 #   LOOMWATCH_TEAMS_ROOT    where your teams live (default: ~/LoomWatch/teams)
 #   LOOMWATCH_PORT          browser port (default: LOOMWATCH_PORT in .env, else 3000)
 #   LOOMWATCH_DATABASE_URL  use your own PostgreSQL instead of the one this script runs in Docker
+#   LOOMWATCH_BACKUP_DIR    where updates keep copies of the run history (default: ~/LoomWatch/backups)
+#   LOOMWATCH_UPDATE_CHECK  off: never ask GitHub whether a newer version is out
 #
 # Developers who want the daemon against ./teams with their own flags can keep using scripts/dev.sh.
 # Written for the bash 3.2 that ships with macOS: no associative arrays, no empty-array expansion.
@@ -61,12 +65,17 @@ export PATH
 command=start
 open_browser=1
 force_rebuild=0
+back_up=1
+assume_yes=0
 for arg in "$@"; do
   case $arg in
-    start | update | stop) command=$arg ;;
+    start | update | rollback | stop) command=$arg ;;
+    version | --version) command=version ;;
     help | -h | --help) command=help ;;
     --no-open) open_browser=0 ;;
     --rebuild) force_rebuild=1 ;;
+    --no-backup) back_up=0 ;;
+    --yes | -y) assume_yes=1 ;;
     *)
       failure_heading=LoomWatch
       fail "unknown option '$arg'. Run $self help to see the options."
@@ -75,6 +84,7 @@ for arg in "$@"; do
 done
 
 teams_root=${LOOMWATCH_TEAMS_ROOT:-$HOME/LoomWatch/teams}
+backup_root=${LOOMWATCH_BACKUP_DIR:-$HOME/LoomWatch/backups}
 # A ready-built copy has its program in bin/ and no source code to build it from.
 if [ -x bin/loomwatchd ] && [ ! -f Cargo.toml ]; then
   prebuilt=1
@@ -87,6 +97,7 @@ else
 fi
 build_stamp=target/release/.loomwatch-build
 pid_file=$state_dir/loomwatchd.pid
+database_started=0
 
 # Someone running a copy of the source is in its folder; someone running a ready-built copy may be
 # anywhere, so instructions name that copy's files and folder in full.
@@ -351,6 +362,8 @@ start_database() {
     DATABASE_URL=$LOOMWATCH_DATABASE_URL
     return 0
   fi
+  # Already started by this run of the script, as an update does before it saves the history.
+  if [ "$database_started" = 1 ]; then return 0; fi
   if ! docker info >/dev/null 2>&1; then
     if is_macos && docker_app >/dev/null; then
       say "Waiting for Docker to finish starting…"
@@ -377,6 +390,7 @@ start_database() {
   fi
   match_database_password
   DATABASE_URL="postgres://$user:$password@127.0.0.1:${db_port:-5433}/$db"
+  database_started=1
 }
 
 # PostgreSQL keeps the password it was created with, and Compose names the database after this
@@ -462,6 +476,13 @@ start() {
     LOOMWATCH_COMMIT=$(git describe --always --dirty --abbrev=7 2>/dev/null || true)
   fi
   export LOOMWATCH_COMMIT
+  # How this copy is updated, for the app's notice that a newer version is out (ADR 0052).
+  LOOMWATCH_INSTALL=source
+  if [ "$prebuilt" = 1 ]; then LOOMWATCH_INSTALL=release; fi
+  # Typed as ./loomwatch only works from this folder, so the command says to go there first.
+  LOOMWATCH_UPDATE_COMMAND="$self update"
+  case $self in ./*) LOOMWATCH_UPDATE_COMMAND="cd $folder_display && $self update" ;; esac
+  export LOOMWATCH_INSTALL LOOMWATCH_UPDATE_COMMAND
 
   # Open the browser once the server answers. This runs beside the daemon, which replaces this
   # script below so Ctrl-C reaches it exactly as if it had been started by hand.
@@ -534,33 +555,352 @@ stop() {
   fi
 }
 
-update() {
-  failure_heading='LoomWatch could not update'
-  if loomwatch_is_running; then
+# --- Updating (ADR 0052) -------------------------------------------------------------------------
+# An update never starts by itself: the app only says a newer version is out. `update` saves a copy
+# of the run history before anything can change the database, and in a ready-built copy keeps the
+# version it replaces in .previous, so `rollback` can put it back.
+
+# The version this copy runs: VERSION's first word in a ready-built copy, the program's own in a
+# copy of the source.
+installed_version() {
+  if [ "$prebuilt" = 1 ]; then
+    cut -d ' ' -f 1 VERSION 2>/dev/null || true
+  else
+    sed -n 's/^version = "\(.*\)"$/\1/p' crates/loomwatch-backend/Cargo.toml 2>/dev/null | head -n 1
+  fi
+}
+
+is_version_core() {
+  case $1 in '' | *[!0-9.]* | .* | *. | *..*) return 1 ;; esac
+  [ "$(printf '%s' "$1" | tr -cd . | wc -c | tr -d ' ')" = 2 ]
+}
+
+# True when version $1 is newer than $2. Compares MAJOR.MINOR.PATCH, ignoring a leading v and any
+# -pre-release or +build part. Anything that is not a version is never newer.
+newer_than() {
+  local a=${1#v} b=${2#v} a1 a2 a3 b1 b2 b3
+  a=${a%%[-+]*}
+  b=${b%%[-+]*}
+  is_version_core "$a" && is_version_core "$b" || return 1
+  IFS=. read -r a1 a2 a3 <<EOF
+$a
+EOF
+  IFS=. read -r b1 b2 b3 <<EOF
+$b
+EOF
+  if [ "$a1" -ne "$b1" ]; then [ "$a1" -gt "$b1" ]; return; fi
+  if [ "$a2" -ne "$b2" ]; then [ "$a2" -gt "$b2" ]; return; fi
+  [ "$a3" -gt "$b3" ]
+}
+
+update_check_off() {
+  case $(printf '%s' "${LOOMWATCH_UPDATE_CHECK:-}" | tr '[:upper:]' '[:lower:]') in
+    0 | off | false | no) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The newest published release, such as v0.1.6. Fails when GitHub cannot be asked, and for a trial
+# of files served from elsewhere (LOOMWATCH_DOWNLOAD_BASE), which say nothing about GitHub.
+latest_release() {
+  [ -z "${LOOMWATCH_DOWNLOAD_BASE:-}" ] || return 1
+  local installer=scripts/install.sh
+  if [ "$prebuilt" = 1 ]; then installer=./install.sh; fi
+  bash "$installer" --latest 2>/dev/null
+}
+
+# Asks a yes-or-no question. No is the answer when there is no one at a terminal to ask, unless
+# --yes answered for them.
+confirm() {
+  if [ "$assume_yes" = 1 ]; then return 0; fi
+  [ -t 0 ] || return 1
+  local answer
+  printf '%s [y/N] ' "$1"
+  read -r answer || return 1
+  case $answer in [yY] | [yY][eE][sS]) return 0 ;; *) return 1 ;; esac
+}
+
+# The database layout LoomWatch set up: the newest migration applied. Empty when the database
+# holds no LoomWatch tables, such as before LoomWatch first started.
+database_layout() {
+  printf '%s\n' "select max(version) from _sqlx_migrations where success;" |
+    docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA' 2>/dev/null |
+    tr -d '[:space:]' || true
+}
+
+# One folder of copies per database, named as Docker Compose names this copy's database.
+backup_folder() {
+  local project=${COMPOSE_PROJECT_NAME:-$(env_value COMPOSE_PROJECT_NAME)}
+  project=${project:-$(basename "$repo_root" | tr '[:upper:]' '[:lower:]')}
+  printf '%s/%s\n' "$backup_root" "$project"
+}
+
+# Saves the run history in one file that only this account can read, in pg_dump's own format, and
+# keeps the newest three copies. Sets backup_file. $1 is added to the file's name.
+save_database() {
+  local folder
+  folder=$(backup_folder)
+  mkdir -p "$folder"
+  chmod 700 "$backup_root" "$folder" 2>/dev/null || true
+  # Named from the time first, so sorting the names sorts the copies oldest first.
+  backup_file="$folder/loomwatch-$(date -u +%Y%m%dT%H%M%SZ)-$(installed_version)$1.dump"
+  if ! (umask 077 && docker compose exec -T postgres sh -c \
+    'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' >"$backup_file.partial") ||
+    [ ! -s "$backup_file.partial" ]; then
+    rm -f "$backup_file.partial"
+    return 1
+  fi
+  mv "$backup_file.partial" "$backup_file"
+  local copies
+  copies=$(find "$folder" -maxdepth 1 -name 'loomwatch-*.dump' | sort)
+  if [ "$(printf '%s\n' "$copies" | wc -l | tr -d ' ')" -gt 3 ]; then
+    printf '%s\n' "$copies" | sed -n "1,$(($(printf '%s\n' "$copies" | wc -l) - 3))p" |
+      while IFS= read -r old; do rm -f "$old"; done
+  fi
+}
+
+# Before an update can change the database: notes its layout, so rollback can tell whether the
+# earlier version can still read it, and saves a copy of the run history. Sets layout_before and
+# backup_file, each empty when there was nothing to note or save.
+back_up_before_update() {
+  layout_before=
+  backup_file=
+  if ! uses_docker_database; then
+    say "Note: LoomWatch copies only the database it runs in Docker. Back up your own PostgreSQL (LOOMWATCH_DATABASE_URL) before you start the new version."
+    return 0
+  fi
+  # Never started here: there is no database yet, so nothing to keep.
+  if [ ! -f .env ] || ! command -v docker >/dev/null 2>&1; then return 0; fi
+  wake_docker
+  start_database
+  layout_before=$(database_layout)
+  [ -n "$layout_before" ] || return 0
+  if [ "$back_up" = 0 ]; then
+    say "Not saving a copy of your run history (--no-backup)."
+    return 0
+  fi
+  step "Saving a copy of your run history"
+  save_database '' ||
+    fail "the copy of your run history could not be saved, so LoomWatch was not changed. The messages above say why. To update without a copy, run: $self update --no-backup"
+  say "Saved in $(pretty_path "$backup_file"). The three newest copies are kept."
+}
+
+# `update` while LoomWatch runs from this folder: stop it first, if the operator agrees.
+stop_before_update() {
+  local pid folder=
+  pid=$(listener_pid "$port" || true)
+  if [ -n "$pid" ]; then folder=$(process_folder "$pid" || true); fi
+  if [ -n "$folder" ] && [ "$folder" != "$repo_root" ]; then
+    fail "another copy of LoomWatch is running at $url (process $pid, from $folder). Stop it first, then run $self update."
+  fi
+  if ! confirm "LoomWatch is running. Updating stops it, and any team still working stops too. Stop it and update now?"; then
     fail "it is still running. Stop it first (press Ctrl-C in its window, or run $self stop), then run $self update."
   fi
+  stop
+  failure_heading='LoomWatch could not update'
+  if loomwatch_is_running; then
+    fail "it is still running. Stop it first (press Ctrl-C in its window), then run $self update."
+  fi
+}
+
+# What rollback needs, beside the version the installer kept: which version that is, the database
+# layout it ran on, and the copy of the run history saved before the update.
+remember_for_rollback() {
+  [ -d .previous ] || return 0
+  {
+    printf 'version=%s\n' "$1"
+    printf 'layout=%s\n' "$layout_before"
+    printf 'backup=%s\n' "$backup_file"
+  } >.previous/ROLLBACK
+}
+
+rollback_value() { sed -n "s/^$1=//p" .previous/ROLLBACK 2>/dev/null | tail -n 1; }
+
+# This script, started again from the files now in this folder.
+start_again() {
+  if [ "$open_browser" = 0 ]; then exec "$repo_root/loomwatch" start --no-open; fi
+  exec "$repo_root/loomwatch" start
+}
+
+update() {
+  failure_heading='LoomWatch could not update'
+  if loomwatch_is_running; then stop_before_update; fi
+  local installed latest
+  installed=$(installed_version)
   if [ "$prebuilt" = 1 ]; then
-    # The installer that put this copy here fetches the newest release and replaces it in place;
-    # this script keeps running from the copy it started as, then hands over to the new one.
-    bash ./install.sh --update --dir "$repo_root" || fail "the download did not finish. The messages above say why."
-    if [ "$open_browser" = 0 ]; then exec "$repo_root/loomwatch" start --no-open; fi
-    exec "$repo_root/loomwatch" start
+    # A release asked for by name is installed even when it is older: that is how to go back
+    # further than rollback does.
+    if [ -z "${LOOMWATCH_VERSION:-}" ] && latest=$(latest_release) && ! newer_than "$latest" "$installed"; then
+      say "LoomWatch $installed is the newest version."
+      start_again
+    fi
+    back_up_before_update
+    # The installer that put this copy here fetches the release and replaces it in place, keeping
+    # the version it replaces in .previous. This script keeps running from the copy it started as,
+    # then hands over to the new one.
+    bash ./install.sh --update --dir "$repo_root" ||
+      fail "the download did not finish, and LoomWatch $installed was left as it was. The messages above say why."
+    remember_for_rollback "$installed"
+    if [ -d .previous ]; then say "If the new version gives you trouble, $self rollback goes back to $installed."; fi
+    start_again
   fi
   command -v git >/dev/null 2>&1 || fail "updating needs Git. Install it with: xcode-select --install"
   step "Downloading the latest LoomWatch"
+  local before
+  before=$(git rev-parse HEAD)
   git pull --ff-only ||
     fail "the download did not finish. If Git says your local changes would be overwritten, ask whoever changed files in this folder before discarding them."
+  # The new code runs its database changes when it starts, after it is built.
+  if [ "$(git rev-parse HEAD)" != "$before" ]; then
+    back_up_before_update
+    say "To go back to the code you had: git checkout $(git rev-parse --short "$before")"
+  fi
   failure_heading='LoomWatch could not start'
   start
 }
 
+# Restores a copy into a database of its own, then swaps it in by renaming, so the run history in
+# use is replaced only once the copy has gone in whole.
+restore_database() {
+  local backup=$1
+  maintenance_sql <<'SQL' || fail "could not prepare a database for the copy, so nothing was changed. The messages above say why."
+DROP DATABASE IF EXISTS loomwatch_restoring;
+DROP DATABASE IF EXISTS loomwatch_replaced;
+CREATE DATABASE loomwatch_restoring;
+SQL
+  if ! docker compose exec -T postgres sh -c \
+    'pg_restore --exit-on-error --single-transaction --no-owner -U "$POSTGRES_USER" -d loomwatch_restoring' <"$backup"; then
+    printf '%s\n' 'DROP DATABASE IF EXISTS loomwatch_restoring;' | maintenance_sql || true
+    fail "the copy in $(pretty_path "$backup") could not be restored, so nothing was changed. The messages above say why."
+  fi
+  if ! maintenance_sql <<'SQL'; then
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db' AND pid <> pg_backend_pid();
+ALTER DATABASE :"db" RENAME TO loomwatch_replaced;
+SQL
+    printf '%s\n' 'DROP DATABASE IF EXISTS loomwatch_restoring;' | maintenance_sql || true
+    fail "the run history in use could not be set aside, so nothing was changed. The messages above say why."
+  fi
+  if ! printf '%s\n' 'ALTER DATABASE loomwatch_restoring RENAME TO :"db";' | maintenance_sql; then
+    printf '%s\n' 'ALTER DATABASE loomwatch_replaced RENAME TO :"db";' | maintenance_sql ||
+      fail "the run history could not be put back, and the one in use is now the database loomwatch_replaced. Report this at https://github.com/tnghia903/loomwatch/issues"
+    fail "the copy could not be put in place, so nothing was changed. The messages above say why."
+  fi
+  printf '%s\n' 'DROP DATABASE loomwatch_replaced;' | maintenance_sql || true
+}
+
+# SQL from standard input, run on the server's own database with the LoomWatch database's name as
+# :"db". Statement by statement: creating, renaming and dropping a database cannot share one.
+# Warnings and errors only: "does not exist, skipping" is not news.
+maintenance_sql() {
+  docker compose exec -T postgres sh -c \
+    'PGOPTIONS="-c client_min_messages=warning" psql -v ON_ERROR_STOP=1 -v db="$POSTGRES_DB" -U "$POSTGRES_USER" -d postgres -q' >/dev/null
+}
+
+# An update may have changed how the run history is stored, which the earlier version cannot read.
+# Then the run history goes back to the copy saved before the update, after what was recorded
+# since is saved to a copy of its own.
+restore_database_if_needed() {
+  local current=$1 previous=$2 layout_then layout_now backup
+  layout_then=$(rollback_value layout)
+  backup=$(rollback_value backup)
+  [ -n "$layout_then" ] || return 0
+  if ! uses_docker_database; then
+    say "Note: if LoomWatch $previous does not start, restore the backup of your own PostgreSQL made before the update."
+    return 0
+  fi
+  wake_docker
+  start_database
+  layout_now=$(database_layout)
+  if [ -z "$layout_now" ] || [ "$layout_now" = "$layout_then" ]; then return 0; fi
+  if [ -z "$backup" ] || [ ! -f "$backup" ]; then
+    fail "LoomWatch $current changed how your run history is stored, and $previous cannot read it. The copy saved before the update ${backup:+($(pretty_path "$backup")) }is gone, so nothing was changed. Keep using $current by running: $self"
+  fi
+  say "LoomWatch $current changed how your run history is stored, and $previous cannot read it. Going back also puts the run history back to the copy saved before the update, $(pretty_path "$backup"). What was recorded since is saved to another copy first; $previous will not show it."
+  confirm "Go back to $previous, with the run history from before the update?" || fail "nothing was changed."
+  step "Putting the run history back"
+  save_database -before-rollback ||
+    fail "the run history recorded since the update could not be saved, so nothing was changed. The messages above say why."
+  say "Saved the run history recorded since the update in $(pretty_path "$backup_file")."
+  restore_database "$backup"
+}
+
+# Moves the kept version's files over the current ones. Each is a rename in this folder; the
+# current version's files wait in a scratch folder until every one is in place.
+put_previous_back() {
+  local scratch item name
+  scratch=$(mktemp -d "$repo_root/.loomwatch-rollback.XXXXXX")
+  for item in .previous/* .previous/.[!.]*; do
+    [ -e "$item" ] || continue
+    name=$(basename "$item")
+    [ "$name" != ROLLBACK ] || continue
+    if [ -e "$name" ] && ! mv "$name" "$scratch/$name"; then
+      fail "could not move $name aside. The files of both versions are in $folder_display and $(pretty_path "$scratch")."
+    fi
+    mv "$item" "$name" ||
+      fail "could not put $name back. The files of both versions are in $folder_display and $(pretty_path "$scratch")."
+  done
+  rm -rf .previous "$scratch"
+}
+
+rollback() {
+  failure_heading='LoomWatch could not go back'
+  if [ "$prebuilt" = 0 ]; then
+    fail "rollback is for a ready-built copy. In a copy of the source code, Git keeps every version: find the one you want with git log, git checkout it, then run $self"
+  fi
+  if [ ! -x .previous/bin/loomwatchd ] || [ ! -f .previous/loomwatch ]; then
+    fail "no earlier version is kept in $folder_display. Each update keeps the version it replaced, until the next update. To install a particular release instead, run: LOOMWATCH_VERSION=v0.1.4 $self update (the versions are listed at https://github.com/tnghia903/loomwatch/releases)"
+  fi
+  if loomwatch_is_running; then
+    fail "it is still running. Stop it first (press Ctrl-C in its window, or run $self stop), then run $self rollback."
+  fi
+  local current previous
+  current=$(installed_version)
+  previous=$(cut -d ' ' -f 1 .previous/VERSION 2>/dev/null || true)
+  previous=${previous:-the earlier version}
+  step "Going back from LoomWatch $current to $previous"
+  restore_database_if_needed "$current" "$previous"
+  put_previous_back
+  say "LoomWatch is back to $previous. Run $self update when you want the newest version again."
+  start_again
+}
+
+show_version() {
+  local installed commit latest
+  installed=$(installed_version)
+  if [ "$prebuilt" = 1 ]; then
+    commit=$(cut -d ' ' -f 2 VERSION 2>/dev/null || true)
+  else
+    commit=$(git describe --always --dirty --abbrev=7 2>/dev/null || true)
+  fi
+  say "LoomWatch ${installed:-(version unknown)}${commit:+ ($commit)}"
+  if update_check_off; then
+    say "Checking for new versions is off (LOOMWATCH_UPDATE_CHECK)."
+  elif latest=$(latest_release); then
+    if newer_than "$latest" "$installed"; then
+      say "LoomWatch ${latest#v} is out. Update with: $self update"
+    elif newer_than "$installed" "$latest"; then
+      say "This is newer than the newest release, ${latest#v}."
+    else
+      say "This is the newest release."
+    fi
+  else
+    say "Could not ask GitHub for the newest release."
+  fi
+  if [ "$prebuilt" = 1 ] && [ -f .previous/VERSION ]; then
+    say "The version it replaced, $(cut -d ' ' -f 1 .previous/VERSION), is kept: $self rollback goes back to it."
+  fi
+}
+
 usage() {
   local start_does='Set up anything missing, build if needed, start LoomWatch and open it (the default)'
-  local update_does='Download the latest LoomWatch, rebuild it and start it' rebuild_option='
-  --rebuild   Build again even if nothing changed'
+  local update_does='Save a copy of the run history, download the latest LoomWatch, rebuild it and start it'
+  local rollback_line='' rebuild_option='
+  --rebuild     Build again even if nothing changed'
   if [ "$prebuilt" = 1 ]; then
     start_does='Set up anything missing, start LoomWatch and open it (the default)'
-    update_does='Download and install the newest release, then start it'
+    update_does='Save a copy of the run history, install the newest release, then start it'
+    rollback_line='
+  rollback  Go back to the version the last update replaced'
     rebuild_option=
   fi
   cat <<EOF
@@ -568,23 +908,30 @@ Usage: $self [command] [options]
 
 Commands:
   start     $start_does
-  update    $update_does
+  update    $update_does$rollback_line
+  version   Say which version this is, and whether a newer one is out
   stop      Stop LoomWatch and its database. Your teams and history are kept.
   help      Show this help
 
 Options:
-  --no-open   Do not open the browser$rebuild_option
+  --no-open     Do not open the browser
+  --no-backup   Update without saving a copy of the run history first
+  --yes         Answer yes to questions, such as stopping LoomWatch to update it$rebuild_option
 
 Settings (environment variables):
   LOOMWATCH_TEAMS_ROOT     Where your teams live (now: $(pretty_path "$teams_root"))
   LOOMWATCH_PORT           Browser port (now: $port)
   LOOMWATCH_DATABASE_URL   Use your own PostgreSQL instead of the one in Docker
+  LOOMWATCH_BACKUP_DIR     Where updates save copies of the run history (now: $(pretty_path "$backup_root"))
+  LOOMWATCH_UPDATE_CHECK   off: never ask GitHub whether a newer version is out
 EOF
 }
 
 case $command in
   start) start ;;
   update) update ;;
+  rollback) rollback ;;
+  version) show_version ;;
   stop) stop ;;
   help) usage ;;
 esac

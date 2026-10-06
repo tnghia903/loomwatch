@@ -57,6 +57,21 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # The launcher and installer are what an update runs on every operator's computer (ADR 0052).
+  launcher:
+    name: Launcher
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # ShellCheck comes with the runner image.
+      - name: ShellCheck
+        run: shellcheck loomwatch scripts/install.sh scripts/package-release.sh scripts/test-update.sh
+      - name: Update and rollback
+        run: scripts/test-update.sh
+
   rust:
     name: Rust
     needs: frontend

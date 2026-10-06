@@ -33,6 +33,7 @@ import { chosenIsFile, chosenName, chosenSource } from '../lib/knowledge/chosen'
 import { setThemeMode, useTheme } from '../lib/theme'
 import { startTour } from '../lib/tour/store'
 import { openFeedback } from '../lib/feedback/report'
+import { openUpdates } from '../lib/updates/client'
 import { useAnnouncementQueue } from '../lib/useAnnouncementQueue'
 import { useNow } from '../lib/useNow'
 import type { AgentField } from '../lib/team-file/validation'
@@ -2139,6 +2140,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     { label: 'Connections…', run: () => window.location.assign('/connections') },
     { label: 'Getting started guide', run: startTour },
     { label: 'Send feedback…', run: () => openFeedback({ screen: !doc.path ? 'home' : runView ? 'run' : 'build' }) },
+    { label: 'Check for updates…', run: openUpdates },
   ], [doc, editable, composerText, submit, openNewTeam, toggleLibrary, windowWidth, runView, detailsOpen, closeDetails, closeRun, cycleProblem, problems.length, theme, notificationsOn, enableNotifications, layersVisible, fitCanvas, organize, canOrganize, askFor])
   // Words the palette has no command for are a request: hand them to Ask LoomWatch.
   const askUnavailable = ask.unavailable

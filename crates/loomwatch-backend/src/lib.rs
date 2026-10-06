@@ -27,6 +27,7 @@ pub mod schedule;
 pub mod skill_routing;
 pub mod spa;
 mod team_bus;
+pub mod updates;
 pub mod watch_api;
 pub mod workspace;
 
