@@ -1,6 +1,9 @@
 /* Component anatomy copied from the selected interactive prototype. */
 .lw-shell { font-family:'Inter',sans-serif; --font-sans:'Inter',sans-serif; }
-.lw-shell .btn-primary { background:var(--gold); color:var(--color-accent-on-fill); }
+/* A dark label needs the fill gold. Light's text gold (--gold) is too dark for it, 3.6:1; the fill gold
+   is 5.6:1 and still stands 3:1 off the page. Dark keeps the prototype's brighter gold. */
+.lw-shell .btn-primary { background:var(--color-accent-fill); color:var(--color-accent-on-fill); }
+[data-theme="dark"] .lw-shell .btn-primary { background:var(--gold); }
 /* The gold above outranks app.css's disabled look, so a button that cannot be pressed read as one that can. */
 .lw-shell .btn-primary:disabled { background:var(--color-hairline); color:var(--color-ink-3); }
 .delivery-heading h1 { flex-wrap:wrap; }
