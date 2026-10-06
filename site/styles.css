@@ -130,7 +130,8 @@ em { font-style: italic; }
 .btn:hover { background: var(--accent-tint); color: var(--ink); border-color: var(--accent-dim); }
 .btn-primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--accent-on-fill); font-weight: 600; }
 .btn-primary:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-on-fill); }
-:root[data-theme="light"] .btn-primary:hover { background: #9C7C1C; border-color: #9C7C1C; }
+/* Light's text gold is too dark under a dark label, so hover brightens the fill as it does in dark: 6.8:1. */
+:root[data-theme="light"] .btn-primary:hover { background: #BF9A2C; border-color: #BF9A2C; }
 .btn-lg { height: 46px; padding: 0 26px; border-radius: 10px; font-size: 15px; }
 .btn[disabled] { opacity: .45; cursor: not-allowed; }
 .link { color: var(--accent); text-decoration: none; font-weight: 500; font-size: 15px; }
