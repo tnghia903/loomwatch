@@ -24,9 +24,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: a three-step team is built, the request is typed, the team pauses for the operator's review, the operator approves, and the team response appears with a run receipt.">
+  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on the Build canvas, then its chat. The operator writes @team Prepare a short getting-started guide for new users. Researcher's handover appears in the chat and the team waits. The operator approves it with the note Keep it to one page, and Writer's answer appears in the chat, marked Nothing flagged.">
   <br>
-  <sub>The bundled offline demo: build a team, ask in plain words, approve at the review step, read the result.</sub>
+  <sub>The bundled offline demo: ask the team in its chat, approve the handover with a note, read the answer.</sub>
 </p>
 
 **Install on a Mac** (macOS 11 or newer, with [Docker Desktop](https://docs.docker.com/desktop/)
@@ -84,7 +84,7 @@ drag back to replay.
 <td valign="middle">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-watch-dark.png">
-  <img src="docs/assets/readme/step-watch-light.png" alt="A live timeline with rows for Researcher, You and Writer, and the latest event: Researcher handed the work to you.">
+  <img src="docs/assets/readme/step-watch-light.png" alt="The team's chat while it works: the request @team Prepare a short getting-started guide for new users, then a note for Researcher, Assume readers have never used an AI app, which waits for Researcher's current step to end. Below them: Researcher is working.">
 </picture>
 </td>
 </tr>
@@ -92,7 +92,7 @@ drag back to replay.
 <td valign="middle">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-review-dark.png">
-  <img src="docs/assets/readme/step-review-light.png" alt="The review stop: Researcher is done. Approve the findings, or say what to change. Buttons: Send back to Researcher, Approve, Stop.">
+  <img src="docs/assets/readme/step-review-light.png" alt="Researcher's handover to You in the chat: a summary, and the open question Which format should Writer use? Below it, your turn: Approve, or Send back to Researcher. To send it back, write what to change in the box below.">
 </picture>
 </td>
 <td valign="middle">
