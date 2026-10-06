@@ -14,7 +14,11 @@
 #   LOOMWATCH_VERSION    a release such as v0.1.0 (default: the newest)
 #   LOOMWATCH_NO_START   1 to install without starting LoomWatch
 #
-# Options: --no-start (install only), --update and --dir DIR (used by `loomwatch update`).
+# Options: --no-start (install only), --update and --dir DIR (used by `loomwatch update`), and
+# --latest, which only prints the newest release's tag, such as v0.1.6.
+#
+# An update keeps the version it replaces in .previous inside the install folder, for
+# `loomwatch rollback`, and replaces nothing at all when any part of it fails.
 #
 # Written for the bash 3.2 that ships with macOS. Everything runs from main() on the last line, so
 # a download cut off halfway never runs half a script.
@@ -58,6 +62,19 @@ sha256_of() {
   fi
 }
 
+# The newest published release's tag, such as v0.1.6, from where GitHub's releases/latest page
+# leads: a page, not the API, so it never meets the API's hourly limit.
+latest_tag() {
+  local effective tag
+  effective=$(curl -fsSIL --proto '=https' --proto-redir '=https' --retry 2 --max-time 30 -o /dev/null \
+    -w '%{url_effective}' "https://github.com/$repo/releases/latest") || return 1
+  tag=${effective##*/releases/tag/}
+  [ "$tag" != "$effective" ] || return 1
+  case $tag in v[0-9]*.[0-9]*.[0-9]*) ;; *) return 1 ;; esac
+  case $tag in *[!0-9A-Za-z.+-]*) return 1 ;; esac
+  printf '%s\n' "$tag"
+}
+
 # Shows a path under the home folder the way it is typed: ~/LoomWatch/app.
 pretty() {
   case $1 in
@@ -76,13 +93,24 @@ still_running() {
   esac
 }
 
+# Undoes a half-finished install: removes the files already placed, then moves the old ones back.
+put_back() {
+  local app_dir=$1 replaced=$2 name item
+  for name in $3; do rm -rf "${app_dir:?}/$name"; done
+  for item in "$replaced"/* "$replaced"/.[!.]*; do
+    [ -e "$item" ] || continue
+    mv "$item" "$app_dir/$(basename "$item")" || true
+  done
+}
+
 main() {
-  local app_dir=${LOOMWATCH_APP_DIR:-$HOME/LoomWatch/app} start=1 updating=0
+  local app_dir=${LOOMWATCH_APP_DIR:-$HOME/LoomWatch/app} start=1 updating=0 latest_only=0
   if [ "${LOOMWATCH_NO_START:-}" = 1 ]; then start=0; fi
   while [ $# -gt 0 ]; do
     case $1 in
       --no-start) start=0 ;;
       --update) updating=1 start=0 ;;
+      --latest) latest_only=1 ;;
       --dir)
         [ $# -ge 2 ] || fail "--dir needs a folder."
         app_dir=$2
@@ -97,6 +125,10 @@ main() {
   for tool in curl tar uname mktemp; do
     command -v "$tool" >/dev/null 2>&1 || fail "this computer is missing '$tool', which the installer needs."
   done
+  if [ "$latest_only" = 1 ]; then
+    latest_tag || fail "could not ask GitHub for the newest release."
+    return 0
+  fi
 
   local target asset base label protocols='=https'
   target=$(platform)
@@ -154,21 +186,31 @@ main() {
   mkdir "$tmp/unpacked"
   tar -xzf "$tmp/$asset" -C "$tmp/unpacked" || fail "the download could not be unpacked."
   local new="$tmp/unpacked/loomwatch"
-  [ -x "$new/bin/loomwatchd" ] && [ -x "$new/loomwatch" ] || fail "the download is missing parts of LoomWatch."
+  if [ ! -x "$new/bin/loomwatchd" ] || [ ! -x "$new/loomwatch" ]; then
+    fail "the download is missing parts of LoomWatch."
+  fi
 
   local version
   version=$(cut -d ' ' -f 1 <"$new/VERSION" 2>/dev/null || true)
   step "Installing LoomWatch ${version:-} in $(pretty "$app_dir")"
   mkdir -p "$app_dir" "$tmp/replaced"
   # Every packaged file and folder replaces its old copy. Anything else in the folder stays: your
-  # settings (.env) and the running state.
-  local item name
+  # settings (.env), the running state and the version kept from the last update.
+  local item name placed=''
   for item in "$new"/* "$new"/.[!.]*; do
     [ -e "$item" ] || continue
     name=$(basename "$item")
-    if [ -e "$app_dir/$name" ]; then mv "$app_dir/$name" "$tmp/replaced/$name"; fi
-    mv "$item" "$app_dir/$name"
+    if { [ -e "$app_dir/$name" ] && ! mv "$app_dir/$name" "$tmp/replaced/$name"; } || ! mv "$item" "$app_dir/$name"; then
+      put_back "$app_dir" "$tmp/replaced" "$placed"
+      fail "LoomWatch could not be put in place in $(pretty "$app_dir"), so the version there was left as it was."
+    fi
+    placed="$placed $name"
   done
+  # The version just replaced, kept whole for `loomwatch rollback` until the next update.
+  if [ -n "$(ls -A "$tmp/replaced")" ]; then
+    rm -rf "$app_dir/.previous"
+    mv "$tmp/replaced" "$app_dir/.previous"
+  fi
 
   # A `loomwatch` command, for the usual install only, when ~/.local/bin is a folder the terminal
   # already searches and nothing else there is called loomwatch.

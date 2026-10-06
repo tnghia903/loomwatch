@@ -10,6 +10,7 @@ version tag.
 | Workflow | Runs on | What it proves | Typical time |
 | --- | --- | --- | --- |
 | `ci.yml` — **Frontend**, then **Rust** | push to `main`, every pull request, by hand | UI lint (warnings fail), typecheck, build and tests; then `cargo fmt`, Clippy (`-D warnings`) and the full test suite against PostgreSQL 17.6, building on the exact `ui/dist` the Frontend job produced | 2 + 5–8 min |
+| `ci.yml` — **Launcher** | the same, beside Frontend | ShellCheck on the launcher and installer, and `scripts/test-update.sh`: `update`, `rollback` and `version` on an installed copy, with stand-ins for Docker, GitHub and the program | < 1 min |
 | `container.yml` — **Build image** | a change to the Dockerfile or a lockfile/toolchain/manifest it builds from, monthly, by hand | `docker build` still succeeds; the image is never pushed | ~10–15 min (estimate) |
 | `actionlint.yml` | a change under `.github/workflows/` | the workflow files themselves are valid | < 1 min |
 | `pages.yml` — **Publish** | a change to `site/`, `scripts/install.sh`, the README screenshots or fonts it borrows, by hand | builds the landing page with `site/build.sh` and pushes it to the `loomwatch/loomwatch.github.io` repository, which GitHub Pages serves | < 1 min |
@@ -20,6 +21,7 @@ pull request / push to main
         │
         ▼
    Frontend ──ui/dist──▶ Rust (fmt → clippy → test, Postgres service)
+   Launcher (shellcheck → update/rollback test)
 ```
 
 ## Conventions
@@ -44,7 +46,15 @@ cd ui && pnpm install --frozen-lockfile && pnpm run lint --deny-warnings && pnpm
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 DATABASE_URL=postgres://… cargo test --workspace --locked
+shellcheck loomwatch scripts/install.sh scripts/package-release.sh scripts/test-update.sh
+scripts/test-update.sh
 ```
+
+`scripts/test-update.sh` touches nothing outside its scratch folder: Docker, GitHub and the program
+are stand-ins on its `PATH`. It cannot prove the database commands against a real PostgreSQL; for a
+change to how `update` saves or `rollback` restores the run history, also try it on a release
+trial (step 3 below): stop the trial, run its `loomwatch update`, add a row to `_sqlx_migrations`
+with a newer version, and run `loomwatch rollback`.
 
 ## Making a release
 
@@ -79,7 +89,10 @@ have been tried.
    from the release being tried, and launchers up to 0.1.2 name every install `loomwatch-app`.
    Without the variable, the trial would take over the installed app's database, and `down -v`
    would delete its run history.
-4. Edit the notes, then publish: `gh release edit v0.2.0 --draft=false`.
+4. Edit the notes, then publish: `gh release edit v0.2.0 --draft=false`. Write the notes for the
+   people using LoomWatch: every copy on an older version shows them in its **Update available**
+   dialog within a day (ADR 0052), as Markdown without images. Say when a release changes how the
+   run history is stored, since going back from it means putting back the copy `update` saved.
 
 ## Repository settings (not in code)
 

@@ -231,6 +231,10 @@ async fn main() -> Result<()> {
                         .map(|command| command.split_whitespace().map(str::to_owned).collect()),
                 },
             );
+            // ADR 0052: says when a newer LoomWatch is out and how to install it. The check runs
+            // once a day in the background; installing stays the operator's own step.
+            let updates = loomwatch_backend::updates::Updates::from_env(&state_dir);
+            updates.spawn_checks();
             let mut app = loomwatch_backend::spa::router()
                 .merge(control.router())
                 .merge(api)
@@ -238,7 +242,8 @@ async fn main() -> Result<()> {
                 .merge(runs)
                 .merge(chat)
                 .merge(notebook)
-                .merge(routines);
+                .merge(routines)
+                .merge(loomwatch_backend::updates::router(updates));
             if listen.ip().is_loopback() || allow_container_listener {
                 app = app.merge(loomwatch_backend::notion::router(&state_dir)?);
             }

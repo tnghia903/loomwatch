@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { RunEvent } from '../watch/events'
@@ -52,7 +52,10 @@ beforeEach(() => {
     return json(404, { error: `unexpected ${url}` })
   }))
 })
-afterEach(() => vi.unstubAllGlobals())
+// Without `globals`, Testing Library never unmounts on its own. A mounted useAsk keeps its inbox
+// timers running, and one firing after the test file's window is gone fails the run with
+// "window is not defined".
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('useAsk', () => {
   it('starts a conversation on the first message and says where the person is', async () => {
