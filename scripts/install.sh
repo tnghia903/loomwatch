@@ -186,7 +186,9 @@ main() {
   mkdir "$tmp/unpacked"
   tar -xzf "$tmp/$asset" -C "$tmp/unpacked" || fail "the download could not be unpacked."
   local new="$tmp/unpacked/loomwatch"
-  [ -x "$new/bin/loomwatchd" ] && [ -x "$new/loomwatch" ] || fail "the download is missing parts of LoomWatch."
+  if [ ! -x "$new/bin/loomwatchd" ] || [ ! -x "$new/loomwatch" ]; then
+    fail "the download is missing parts of LoomWatch."
+  fi
 
   local version
   version=$(cut -d ' ' -f 1 <"$new/VERSION" 2>/dev/null || true)
