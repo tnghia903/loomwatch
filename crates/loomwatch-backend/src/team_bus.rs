@@ -396,7 +396,11 @@ impl TeamBus {
             Some("tools/list") => rpc_result(
                 &id,
                 &json!({
-                    "tools": tool_definitions(self.state.mode, self.state.memory.notebook_enabled)
+                    "tools": tool_definitions(
+                        self.state.mode,
+                        self.state.memory.notebook_enabled,
+                        self.state.operator.is_some(),
+                    )
                 }),
             ),
             Some("tools/call") => match self.call_tool(token, request).await {
@@ -615,6 +619,13 @@ impl TeamBus {
             "memory_read" => self.memory_read(session, event_log, arguments).await,
             "memory_write" => self.memory_write(session, event_log, arguments).await,
             "checkpoint" => self.checkpoint(session, event_log, arguments).await,
+            "earlier_work" => {
+                let Some(desk) = self.state.operator.as_ref() else {
+                    bail!("earlier_work is not available: this run has no team chat to read");
+                };
+                let work = required_string(arguments, "work")?;
+                crate::chat::earlier_work(desk.registry(), event_log.session_id(), &work).await
+            }
             other => bail!("unknown Team Bus tool {other:?}"),
         }
     }
@@ -1263,7 +1274,7 @@ fn tool_error(message: &str) -> Value {
 /// The four memory tools, named once so the gate and the definitions cannot disagree.
 const MEMORY_TOOLS: [&str; 4] = ["memory_search", "memory_read", "memory_write", "checkpoint"];
 
-fn tool_definitions(mode: TeamBusMode, notebook: bool) -> Vec<Value> {
+fn tool_definitions(mode: TeamBusMode, notebook: bool, chat: bool) -> Vec<Value> {
     let mut tools = vec![tool(
         "roster",
         "List the team, capabilities, and live status",
@@ -1313,6 +1324,16 @@ fn tool_definitions(mode: TeamBusMode, notebook: bool) -> Vec<Value> {
     ));
     if notebook {
         tools.extend(memory_tool_definitions());
+    }
+    // ADR 0051: the conversation shows older work one line each; this reads one piece in full.
+    // Offered only where there is a team chat to read — a run started from the app.
+    if chat {
+        tools.push(tool(
+            "earlier_work",
+            "Read one earlier piece of this team's work in full: what the operator asked and the \
+             team's whole answer. Use a work id from `## Conversation so far`.",
+            &one_string("work", "The work id, such as 3f2a9c1e"),
+        ));
     }
     tools
 }

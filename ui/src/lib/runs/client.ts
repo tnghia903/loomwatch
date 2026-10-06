@@ -124,6 +124,24 @@ export interface RunRecord {
    * reload — unlike the React `Map` the workspace still keeps for retries.
    */
   retryOfRunId?: string | null
+  /** The team's chat this run belongs to (ADR 0051): its file's `id`, or `path:<path>`. */
+  teamKey?: string
+  /** A one-agent turn (ADR 0051): the one agent the operator wrote to with an @mention. */
+  onlyAgent?: string | null
+  /** Agents in the middle of a turn of work right now, which the chat shows as working. */
+  working?: string[]
+  /** Notes waiting for an agent's current turn to end (ADR 0051). */
+  queuedNotes?: QueuedNote[]
+}
+
+/** A note sent to an agent at work, waiting for its current turn to end (ADR 0051). */
+export interface QueuedNote {
+  id: string
+  agent: string
+  text: string
+  sentAt: string
+  /** "Send now": it asked to stop the agent's turn rather than wait for it. */
+  now?: boolean
 }
 
 /** §1.5: the file moved between the save and the start, so no run was created. */
@@ -176,7 +194,7 @@ function teamReview(body: unknown): TeamReview | null {
 export const TERMINAL_RUN_STATUSES: readonly RunStatus[] = ['succeeded', 'failed', 'cancelled']
 export const isTerminalRun = (status: RunStatus | null | undefined) => !!status && TERMINAL_RUN_STATUSES.includes(status)
 
-async function readRun<T>(response: Response): Promise<T> {
+export async function readRun<T>(response: Response): Promise<T> {
   const body = (await response.json().catch(() => null)) as T | { error?: string; code?: string } | null
   if (!response.ok) {
     const message = body && typeof body === 'object' && 'error' in body && body.error ? String(body.error) : `${response.status} ${response.statusText}`

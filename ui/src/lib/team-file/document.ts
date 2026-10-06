@@ -84,6 +84,11 @@ export class TeamFileModel {
     this.doc.set('name', name)
   }
 
+  /** The team's identity: what its chat (ADR 0051) and its notebook are filed under. */
+  setId(id: string): void {
+    this.doc.set('id', id)
+  }
+
   setEntrypoint(agentId: string): void {
     this.doc.set('entrypoint', agentId)
   }

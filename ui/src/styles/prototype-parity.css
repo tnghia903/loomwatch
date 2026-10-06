@@ -3,12 +3,10 @@
 .lw-shell .btn-primary { background:var(--gold); color:var(--color-accent-on-fill); }
 /* The gold above outranks app.css's disabled look, so a button that cannot be pressed read as one that can. */
 .lw-shell .btn-primary:disabled { background:var(--color-hairline); color:var(--color-ink-3); }
-.delivery-review-state { display:flex; gap:8px; align-items:center; color:var(--gold); font-size:12px; font-weight:400; letter-spacing:0; border-left:1px solid var(--line); padding-left:13px; }
 .delivery-heading h1 { flex-wrap:wrap; }
 /* Green is earned: only a finished run reads as success. The other phases keep delivery.css's colours. */
 .delivery-heading .delivery-status { font-size:12px; }
 .delivery-heading .delivery-status.status-succeeded { color:var(--success); }
-.delivery-output>footer { display:none; }
 .delivery-capabilities { position:relative; }
 .delivery-verification { display:block; padding:0 20px 12px; }
 .delivery-verification summary { cursor:pointer; font-size:10px; color:var(--muted); }
@@ -20,13 +18,11 @@
 .delivery-filters>div[role=group] { flex:1; }
 .delivery-filters button { border-radius:0; }
 .delivery-filters button[aria-pressed=true] { background:transparent; border-bottom:2px solid var(--gold); }
-@media(max-width:767px) { .prototype-workspace-menu { display:none; } .delivery-review-state { display:none; } .delivery-heading h1 { font-size:24px; } .delivery-response { padding:24px; } .build-workspace .node-inspector { position:fixed; top:auto; right:14px; bottom:14px; width:min(270px,calc(100vw - 28px)); max-height:60vh; } }
-.delivery-response h1,.delivery-response h2,.delivery-response h3,.delivery-output-placeholder h3 { font-family:'Instrument Serif',Georgia,serif; font-weight:400; }
+@media(max-width:767px) { .prototype-workspace-menu { display:none; } .delivery-heading h1 { font-size:24px; } .delivery-response { padding:24px; } .build-workspace .node-inspector { position:fixed; top:auto; right:14px; bottom:14px; width:min(270px,calc(100vw - 28px)); max-height:60vh; } }
+.delivery-response h1,.delivery-response h2,.delivery-response h3 { font-family:'Instrument Serif',Georgia,serif; font-weight:400; }
 .delivery-response h1 { font-size:42px; }
 .delivery-response { font-size:16px; padding:34px 36px; }
 .delivery-response h2 { font-size:28px; }
-.delivery-request-label { display:flex; justify-content:space-between; align-items:center; }
-.delivery-request-label button { display:flex; align-items:center; gap:6px; font-size:11px; }
 .delivery-stages { gap:98px; }
 .prototype-handoff.delivery-handoff-arrow { position:absolute; left:-91px; width:84px; top:50%; transform:translateY(-50%); display:flex; align-items:center; flex-direction:column; gap:5px; color:var(--muted); background:transparent; border:0; font-size:11px; }
 .prototype-handoff small { font-size:10px; opacity:0; }
@@ -159,7 +155,6 @@
 
 /* Match the reference rhythm while allowing real stage names and evidence. */
 .delivery-shown .delivery-heading { height:115px; min-height:115px; padding:24px 0; }
-.delivery-shown .delivery-request { padding:27px 0 24px; }
 .delivery-stages { padding-bottom:8px; }
 .delivery-stage { min-height:274px; }
 .delivery-stage-select { min-height:82px; }

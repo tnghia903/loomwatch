@@ -48,14 +48,12 @@
 /* Selected is a tint, not a fill: the screen's one gold fill belongs to its primary action (Run team,
    Review output), DESIGN_LANGUAGE §8 Law 2. Same selected-segment look as the depth dial. */
 .lw-shell .workspace-view-tabs button[aria-pressed=true] { background:var(--color-accent-tint); color:var(--color-accent); font-weight:600; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent); }
-.delivery-shown .delivery-lane { inset:64px 0 0; grid-template-columns:minmax(0,60.7fr) minmax(0,39.3fr); gap:0; background:transparent; }
+.delivery-shown .delivery-lane { inset:64px 0 0; grid-template-columns:minmax(0,1fr); gap:0; background:transparent; }
 .delivery-shown .delivery-work { padding:0 30px 24px; background:transparent; border:0; border-radius:0; box-shadow:none; backdrop-filter:none; }
 .delivery-heading { min-height:115px; padding:26px 0 22px; margin-bottom:0; border-bottom:1px solid var(--color-hairline); }
 .delivery-run-kicker { display:none; }
 .delivery-heading h1 { margin:0 0 12px; font-size:28px; letter-spacing:-.6px; }
 .delivery-heading .delivery-status { border:0; padding:0; font-size:12px; }
-.delivery-request { padding:23px 0; background:transparent; border:0; border-bottom:1px solid var(--color-hairline); border-radius:0; }
-.delivery-request p { font-size:14px; line-height:1.5; color:var(--color-ink-2); }
 .delivery-section-head { margin:22px 0 16px; }
 .delivery-section-head h2 { font-size:13px; font-weight:500; }
 .delivery-stages { gap:56px; padding-bottom:24px; }
@@ -77,11 +75,7 @@
 .delivery-capabilities>.delivery-section-head { padding:17px 20px; margin:0; }
 .delivery-capabilities>.delivery-section-head h2 { font-size:14px; font-weight:550; }
 .delivery-verification { font-size:11px; margin:0; padding:0 20px 14px; line-height:1.5; }
-.delivery-shown .delivery-output { border-radius:0; border:0; border-left:1px solid var(--color-hairline); box-shadow:none; padding-bottom:calc(var(--lw-composer-height,150px) + 28px); }
-.delivery-output>header { padding:26px 30px 22px; border-bottom:0; }
-.delivery-output-title { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:8px 14px; margin:12px 0 8px; }
 /* The title keeps at least 240 px; narrower than that, the verdict drops beneath it. */
-.delivery-output-title h2 { flex:1 1 240px; min-width:0; margin:0; font-size:26px; font-weight:590; letter-spacing:-.45px; }
 /* The verdict on the answer (lib/story/verdict.ts): a hairline pill, its word and glyph in the
    colour of what it means — gold where the reader has something to check, never a fill. */
 .delivery-output-badge { flex:none; display:inline-flex; align-items:center; gap:6px; margin-top:3px; font:inherit; font-size:12px; font-weight:550; line-height:1; white-space:nowrap; border:1px solid var(--color-hairline); border-radius:var(--r-full); padding:7px 11px; background:transparent; color:var(--color-ink-2); }
@@ -93,12 +87,7 @@
 button.delivery-output-badge { cursor:pointer; transition:background var(--t-move, .15s) ease, border-color var(--t-move, .15s) ease; }
 button.delivery-output-badge:hover { border-color:currentColor; }
 button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tint); color:var(--color-ink); }
-.delivery-output-scroll { padding:0 30px 20px; }
-.delivery-output-quality { font-size:11px; margin-bottom:12px; }
 /* A finding is the line worth reading before the answer: a notice with a 3 px rule, not a whisper. */
-.delivery-output-quality:is(.tone-look,.tone-bad) { font-size:13px; line-height:1.55; color:var(--color-ink-2); padding:10px 14px; border:1px solid var(--color-hairline); border-radius:7px; box-shadow:inset 3px 0 0 var(--color-accent); }
-.delivery-output-quality.tone-bad { box-shadow:inset 3px 0 0 var(--color-alert); }
-.delivery-output-quality .delivery-link { font-size:inherit; white-space:nowrap; }
 .delivery-review-findings { margin:18px 0 0; padding:12px 14px; border:1px solid var(--color-hairline); border-radius:10px; }
 .delivery-review-findings ul { max-height:220px; overflow:auto; }
 .delivery-review-findings li { font-size:13px; line-height:1.5; color:var(--color-ink-2); }
@@ -106,13 +95,8 @@ button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tin
 .delivery-response { border:1px solid var(--color-hairline); border-radius:7px; padding:28px; background:var(--color-panel); font-size:15px; line-height:1.65; white-space:normal; }
 .delivery-response h1 { font-family:Georgia,serif; font-size:39px; line-height:1.13; letter-spacing:-1px; font-weight:500; margin-top:0; padding-bottom:23px; border-bottom:1px solid var(--color-hairline); }
 .delivery-response h2,.delivery-response h3 { font-family:Georgia,serif; font-size:24px; font-weight:500; }
-.delivery-output-placeholder { align-items:flex-start; text-align:left; min-height:320px; }
-.delivery-output-placeholder h3 { font-size:38px; color:var(--color-ink); }
-.delivery-output-placeholder p { font-size:14px; line-height:1.7; }
 .delivery-shown .lw-composer { left:calc(60.7% + 30px); right:30px; bottom:21px; width:auto; transform:none; border:1px solid var(--color-hairline); border-radius:8px; }
 .delivery-shown .lw-composer-notices { left:calc(60.7% + 30px); right:30px; width:auto; transform:none; bottom:calc(var(--lw-composer-height,150px) + 33px); }
-.delivery-shown .delivery-lane.output-expanded { grid-template-columns:1fr; }
-.delivery-shown:has(.output-expanded) .lw-composer,.delivery-shown:has(.output-expanded) .lw-composer-notices { left:30px; right:30px; width:auto; }
 .build-workspace-heading { position:absolute; top:64px; left:0; right:0; min-height:112px; padding:24px 30px; display:flex; align-items:center; justify-content:space-between; gap:18px; border-bottom:1px solid var(--color-hairline); background:var(--workspace-glass); z-index:30; }
 .build-workspace-heading h1 { display:inline; font-size:28px; font-weight:620; letter-spacing:-.6px; }
 .build-workspace-heading span { margin-left:16px; color:var(--color-ink-3); font-size:12px; }
@@ -140,7 +124,6 @@ button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tin
  .lw-shell .workspace-chrome>.lw-chip,.lw-shell .workspace-chrome>div:has(.lw-chip) { display:none; }
  .lw-shell .workspace-view-tabs button { min-width:60px; }
  .delivery-shown .delivery-lane { display:flex; flex-direction:column; overflow:auto; bottom:calc(var(--lw-composer-height,150px) + 28px); }
- .delivery-shown .delivery-output { order:-1; min-height:360px; max-height:55vh; padding-bottom:0; flex-shrink:0; }
  .delivery-shown .delivery-work { overflow:visible; }
  .delivery-shown .lw-composer,.delivery-shown .lw-composer-notices { left:14px; right:14px; width:auto; }
  .build-workspace-heading { padding:18px; flex-wrap:wrap; }

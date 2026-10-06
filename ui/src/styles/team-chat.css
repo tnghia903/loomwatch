@@ -1,0 +1,589 @@
+/* ADR 0051 — a team's chat: the Run tab is the one place you work with a team. Bubbles, avatars
+   and name colours are the agent chat's own (.chat-* in loom.css); this file lays out the screen
+   around them: the members and their presence, the log grouped by day, each piece of work, and
+   the message box that says where a message goes before it is sent. */
+
+/* With Details open — the default on a wide screen — the chat is a narrow column on the left and the
+   record of the piece it follows takes the rest. */
+.lw-shell { --tc-chat-w: clamp(380px, 32vw, 480px); }
+
+.tc {
+  position: absolute;
+  inset: 112px 0 0 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: var(--color-ground);
+  container-type: inline-size;
+}
+@media (min-width: 768px) {
+  .tc { top: 64px; }
+}
+@media (min-width: 1100px) {
+  .details-open .tc { right: auto; width: var(--tc-chat-w); border-right: 1px solid var(--color-hairline); }
+}
+
+/* ---------- who is on the team ---------- */
+.tc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  flex-wrap: wrap;
+  padding: 12px clamp(16px, 4cqi, 40px);
+  border-bottom: 1px solid var(--color-hairline);
+  background: var(--color-panel);
+}
+.tc-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; min-width: 0; }
+.tc-title h2 { margin: 0; font: 600 16px/1.3 var(--font-sans); color: var(--color-ink); }
+.tc-members { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; list-style: none; }
+.tc-member { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--color-ink-2); }
+.tc-member .chat-avatar { position: relative; }
+.tc-member .chat-avatar::after {
+  content: '';
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--color-panel-solid);
+  background: var(--color-ink-3);
+}
+.tc-member.working .chat-avatar::after { background: var(--color-live); }
+.tc-member.waiting .chat-avatar::after { background: var(--color-accent); }
+.tc-member.away .chat-avatar::after { background: transparent; border-color: var(--color-ink-3); }
+.tc-member em { font-style: normal; font-size: 11.5px; color: var(--color-ink-3); }
+.tc-member.working em { color: var(--color-live); }
+.tc-member.waiting em { color: var(--color-accent); }
+.tc-routine { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 12px; color: var(--color-ink-3); }
+
+/* ---------- the log ---------- */
+.tc-scroll { position: relative; overflow-y: auto; overscroll-behavior: contain; scroll-padding-bottom: 24px; }
+.tc-log {
+  display: grid;
+  gap: 0;
+  width: min(820px, 100%);
+  margin: 0 auto;
+  padding: 8px clamp(14px, 4cqi, 32px) 28px;
+  list-style: none;
+}
+.tc-older { display: flex; justify-content: center; padding: 16px 0 0; }
+.tc-loading { margin: 32px auto; text-align: center; font-size: 13px; color: var(--color-ink-3); }
+.tc-day { display: flex; justify-content: center; margin: 22px 0 2px; }
+.tc-day span { padding: 3px 12px; border-radius: 99px; background: color-mix(in srgb, var(--color-ink) 6%, transparent); font-size: 11.5px; font-weight: 600; color: var(--color-ink-2); }
+
+.tc-piece { display: grid; gap: 2px; padding: 6px 0 14px; border-bottom: 1px dashed color-mix(in srgb, var(--color-hairline) 70%, transparent); }
+.tc-piece:last-child { border-bottom: 0; }
+/* The piece Details shows: a gold thread down its side, tying the chat to the record beside it. */
+.tc-piece { position: relative; }
+.tc-piece.in-details { padding-left: 12px; margin-left: -12px; }
+.tc-piece.in-details::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(var(--color-accent), color-mix(in srgb, var(--color-accent) 25%, transparent));
+  transform-origin: top;
+}
+.tc-to { font-size: 11.5px; color: var(--color-ink-3); }
+.tc-plain { white-space: pre-wrap; }
+.tc-schedule { display: inline-grid; place-items: center; }
+
+/* The talk between the agents, folded to one line. */
+.tc-talk {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 10px 0 2px 42px;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+}
+/* The team on a piece as a thread: knots for the agents, gold as far as the work has come. */
+.tc-weft { position: relative; display: inline-flex; align-items: center; gap: 14px; }
+.tc-weft .chat-avatar { position: relative; z-index: 1; }
+.tc-weft-track, .tc-weft-fill { position: absolute; left: 11px; right: 11px; top: 50%; height: 2px; margin-top: -1px; border-radius: 2px; }
+.tc-weft-track { background: var(--color-hairline); }
+.tc-weft-fill { background: var(--color-accent); transform-origin: left center; scale: var(--weft-fill, 1) 1; }
+.tc-weft.st-failed .tc-weft-fill { background: color-mix(in srgb, var(--color-alert) 70%, transparent); }
+.tc-weft.st-cancelled .tc-weft-fill { background: var(--color-halt); }
+.tc-weft-bead {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  z-index: 2;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--color-live);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-live) 22%, transparent);
+  translate: calc(26px + var(--weft-at, 0) * 36px) 0;
+}
+.tc-weft.waiting .tc-weft-bead { background: var(--color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 25%, transparent); }
+.tc-talk-line { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--color-ink-2); }
+.tc-talk-line b { font-weight: 600; color: var(--color-ink); }
+.tc-piece.live .tc-talk-line b { color: var(--color-live); }
+.tc-talk-acts { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; margin-left: auto; }
+.tc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--color-ink-3);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.tc-link:hover, .tc-link:focus-visible, .tc-link[aria-pressed='true'], .tc-link[aria-expanded='true'] { color: var(--color-accent); }
+.tc-link.danger:hover, .tc-link.danger:focus-visible { color: var(--color-alert); }
+.tc-link:disabled { opacity: .5; cursor: default; }
+.tc-said { margin: 4px 0 0 42px; }
+.tc-said .chat { margin: 6px 0 4px; }
+
+/* What the team waits on you for: a message with its buttons. */
+.tc-decision {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 2px 42px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
+  border-radius: 14px;
+  background: var(--color-accent-tint);
+  font-size: 13.5px;
+  color: var(--color-ink);
+}
+.tc-decision p { margin: 0; }
+.tc-handover { padding: 8px 10px; border-radius: 10px; background: var(--color-panel-solid); border: 1px solid var(--color-hairline); }
+.tc-handover summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--color-ink-2); }
+.tc-handover .chat-text { margin-top: 6px; max-height: 18em; overflow: auto; font-size: 13px; }
+.tc-context { font-size: 13px; }
+.tc-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.tc-acts .btn { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 6px 12px; }
+.tc-tip { margin: 0; font-size: 12px; color: var(--color-ink-3); }
+.tc-piece .permission-prompt.inline {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0 2px 42px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
+  background: var(--color-panel-solid);
+}
+
+/* The answer leads: in full, beside who gave it. */
+.tc-answer { margin-top: 10px; }
+.tc-answer .chat-bubble { font-size: 14px; line-height: 1.55; }
+/* The answer's caret sits at the end of its last line, as `.caret` does elsewhere: solid while
+   words arrive, then a soft breath. A new piece of text flips `data-tick`, which swaps between two
+   identical keyframes and so restarts it. */
+.tc-answer .chat-bubble.streaming .chat-text > :last-child:not(ul, ol, pre, table, blockquote)::after,
+.tc-answer .chat-bubble.streaming .chat-text > :is(ul, ol):last-child > li:last-child::after {
+  content: ''; display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; border-radius: 1px;
+  background: var(--color-accent); vertical-align: -.15em;
+  animation: caret-blink var(--t-caret) ease-in-out var(--t-caret) infinite alternate;
+}
+.tc-answer .chat-bubble.streaming[data-tick="1"] .chat-text > :last-child:not(ul, ol, pre, table, blockquote)::after,
+.tc-answer .chat-bubble.streaming[data-tick="1"] .chat-text > :is(ul, ol):last-child > li:last-child::after { animation-name: caret-blink-again; }
+@keyframes caret-blink-again { 0%, 20% { opacity: 1 } 70%, 100% { opacity: 0 } }
+.tc-answer .chat-meta .chat-name { color: var(--hue); }
+.tc-answer .chat-under { gap: 4px 14px; }
+.tc-answer .chat-under .delivery-link { font-size: 12px; }
+.tc-stopped { display: grid; gap: 8px; margin: 10px 0 2px 42px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid); font-size: 13px; color: var(--color-ink-2); }
+.tc-stopped p { margin: 0; }
+.tc-stopped.bad { border-color: color-mix(in srgb, var(--color-alert) 55%, transparent); }
+.tc-stopped.bad b { color: var(--color-alert); }
+.tc-continue { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin: 8px 0 0 42px; }
+.tc-continue .btn { display: inline-flex; align-items: center; gap: 6px; }
+
+.tc-note .chat-bubble, .tc-team-note .chat-bubble { border-style: dashed; background: transparent; }
+.tc-team-note { margin: 12px 0 6px; }
+.tc-team-note .chat-under, .tc-note .chat-under { justify-content: flex-end; }
+.tc-pending { margin-top: 12px; opacity: .8; }
+.tc-pending.failed { opacity: 1; }
+.tc-pending.failed .chat-bubble { border-color: color-mix(in srgb, var(--color-alert) 55%, transparent); }
+.tc-pending-acts { justify-content: flex-end; }
+
+.tc-empty { display: grid; justify-items: center; gap: 10px; max-width: 520px; margin: 12vh auto 0; padding: 0 20px; text-align: center; color: var(--color-ink-2); }
+.tc-empty h3 { margin: 0; font: 600 18px/1.3 var(--font-sans); color: var(--color-ink); }
+.tc-empty p { margin: 0; font-size: 13.5px; line-height: 1.55; }
+.tc-suggest { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin-top: 6px; white-space: normal; text-align: left; }
+.tc-error { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 12px auto; font-size: 13px; color: var(--color-alert); }
+.tc-error p { margin: 0; }
+.tc-jump { position: absolute; left: 50%; bottom: calc(var(--tc-composer-h, 120px) + 12px); transform: translateX(-50%); display: inline-flex; align-items: center; gap: 6px; z-index: 2; box-shadow: 0 6px 24px #0004; }
+
+/* ---------- the message box ---------- */
+.tc-composer {
+  display: grid;
+  gap: 6px;
+  width: min(820px, 100%);
+  margin: 0 auto;
+  padding: 10px clamp(14px, 4cqi, 32px) max(14px, env(safe-area-inset-bottom));
+}
+.tc-where { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-height: 20px; font-size: 12.5px; font-weight: 600; color: var(--color-ink-2); }
+.tc-where.route-team, .tc-where.route-agent { color: var(--color-accent); }
+.tc-where.route-note { color: var(--color-live); }
+.tc-where.route-answer { color: var(--color-accent); }
+.tc-where.route-hint { font-weight: 400; color: var(--color-ink-3); }
+.tc-where.route-hint b { font-weight: 600; color: var(--color-ink-2); }
+.tc-where .tc-swap { position: relative; }
+.tc-where-hint { font-style: normal; font-weight: 400; color: var(--color-ink-3); }
+.tc-where-escape { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; padding: 0; border: 0; background: none; font-size: 12px; font-weight: 400; color: var(--color-ink-3); cursor: pointer; }
+.tc-where-escape:hover, .tc-where-escape:focus-visible { color: var(--color-accent); }
+.tc-box {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 16px;
+  background: var(--color-panel-solid);
+  box-shadow: 0 6px 24px #0002;
+  transition: border-color var(--t-quick) var(--ease-out);
+}
+/* One ripple per message sent: the words leaving the box. */
+.tc-ripple { position: absolute; inset: -1px; border-radius: inherit; border: 1px solid var(--color-accent); opacity: 0; pointer-events: none; }
+.tc-box:focus-within { border-color: color-mix(in srgb, var(--color-accent) 60%, transparent); }
+.tc-composer.answering .tc-box { border-color: color-mix(in srgb, var(--color-accent) 60%, transparent); }
+.tc-input {
+  flex: 1;
+  /* One line is exactly the height of the send button beside it, so the two sit centred. */
+  min-height: 34px;
+  max-height: 40vh;
+  padding: 6px 0;
+  line-height: 22px;
+  border: 0;
+  outline: none;
+  resize: none;
+  field-sizing: content;
+  background: transparent;
+  font: 400 14.5px/1.5 var(--font-sans);
+  color: var(--color-ink);
+}
+.tc-input::placeholder { color: var(--color-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tc-send { display: flex; align-items: center; gap: 6px; flex: none; }
+.tc-send .btn { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 12px; font-size: 13px; border-radius: 11px; }
+.tc-now { color: var(--color-live); }
+.tc-disabled { margin: 0; font-size: 12px; color: var(--color-ink-3); }
+.tc-picker {
+  position: absolute;
+  left: 8px;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  display: grid;
+  min-width: min(340px, calc(100cqi - 32px));
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  background: var(--color-panel-solid);
+}
+.tc-picker li { display: grid; grid-template-columns: 16px auto minmax(0, 1fr); align-items: center; gap: 4px 8px; padding: 7px 10px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+.tc-picker li b { font-weight: 600; color: var(--color-ink); }
+.tc-picker li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-ink-3); }
+.tc-picker li.picked { background: var(--color-accent-tint); }
+.tc-picker li svg { color: var(--color-accent); }
+
+/* ---------- Details: the full record of one piece, beside the chat ---------- */
+.tc-details {
+  position: absolute;
+  top: 112px;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  width: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--color-ground);
+  border-left: 1px solid var(--color-hairline);
+  box-shadow: -18px 0 48px #0003;
+  container-type: inline-size;
+}
+@media (min-width: 768px) { .tc-details { top: 64px; } }
+@media (min-width: 1100px) { .tc-details { left: var(--tc-chat-w); width: auto; box-shadow: none; } }
+.tc-details-head { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--color-hairline); background: var(--color-panel); }
+.tc-details-head h2 { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.3 var(--font-sans); color: var(--color-ink); }
+.tc-details-head .btn { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; }
+.tc-details-body { position: relative; min-height: 0; }
+.tc-details .delivery-lane, .delivery-shown .tc-details .delivery-lane { position: absolute; inset: 0; }
+.details-open .lw-composer-notices { left: auto !important; right: 0 !important; transform: none !important; width: 100% !important; bottom: 12px !important; }
+@media (min-width: 1100px) {
+  .details-open .lw-composer-notices { width: calc(100% - var(--tc-chat-w)) !important; }
+}
+
+@container (max-width: 560px) {
+  .tc-talk, .tc-decision, .tc-said, .tc-stopped, .tc-continue, .tc-piece .permission-prompt.inline { margin-left: 0; }
+  .tc-talk-acts { margin-left: 0; }
+}
+@container (max-width: 400px) {
+  .tc-send .btn span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tc-answer .chat-bubble.streaming .chat-text *::after { animation: none !important; }
+}
+.tc-decided { margin-top: 8px; }
+.tc-decided .chat-bubble { background: transparent; border-style: dashed; }
+
+/* ---------- Home: each team as a chat ---------- */
+.home-card-chat { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13px; color: var(--color-ink-2); }
+.home-card-line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-card-chat time { flex: none; font: 500 11px/1.4 var(--font-mono); color: var(--color-ink-3); }
+.home-card.unread .home-card-line { color: var(--color-ink); font-weight: 600; }
+.home-card-unread { display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: var(--color-accent); vertical-align: middle; }
+.tc-head-acts { display: flex; align-items: center; gap: 14px; }
+.tc-search { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--color-hairline); border-radius: 8px; background: var(--color-panel-solid); color: var(--color-ink-3); }
+.tc-search input { width: min(240px, 40cqi); border: 0; outline: none; background: transparent; font-size: 13px; color: var(--color-ink); }
+.tc-search-count { width: min(820px, 100%); margin: 14px auto 0; padding: 0 clamp(14px, 4cqi, 32px); font-size: 12.5px; color: var(--color-ink-2); }
+
+/* ---------- Motion: a chat that is alive (DESIGN.md § Motion) ----------
+   Only what arrives while you watch moves (lib/chat/appear.ts): opening a chat or reading back an
+   older page draws it still. Entrances use the individual `translate` / `scale` properties and
+   never move position, opacity and scale at once. Everything sits behind reduced motion. */
+.tc-swap { display: inline-block; }
+.tc-talk-line.tc-swap { display: inline-flex; }
+@media (prefers-reduced-motion: no-preference) {
+  /* A message rises into place; yours comes up from the box it was written in. */
+  .tc-appear { animation: tc-rise var(--t-entrance) var(--ease-out) both; }
+  .chat-msg.mine.tc-appear { animation-name: tc-rise-mine; }
+  /* A new piece of work fades in as one; its parts arrive later, each on its own. */
+  .tc-appear-soft { animation: tc-fade var(--t-move) var(--ease-out) both; }
+  /* What waits on you rises, then calls once with a gold ring that spreads and fades. */
+  .tc-decision.tc-appear { animation: tc-rise var(--t-entrance) var(--ease-out) both, tc-attention var(--t-settle) var(--ease-out) var(--t-entrance) 1; }
+  /* Words that change in place — who is working, where a message goes — slide in. */
+  .tc-swap { animation: tc-swap var(--t-move) var(--ease-out) both; }
+  /* Whoever is working breathes a blue ring, in the header and on the piece. */
+  .tc-member.working .chat-avatar::before,
+  .tc-weft .chat-avatar.working::before {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    border: 2px solid var(--color-live);
+    pointer-events: none;
+    animation: tc-ring var(--t-flow) var(--ease-out) infinite;
+  }
+  .tc-weft .chat-avatar { transition: translate var(--t-move) var(--ease-out); }
+  .tc-weft .chat-avatar.working { translate: 0 -2px; }
+  /* The work passing on: the gold runs to the next agent and the bead slides after it. */
+  .tc-weft-fill { transition: scale var(--t-settle) var(--ease-out); }
+  .tc-weft-bead { transition: translate var(--t-settle) var(--ease-out); animation: tc-bead var(--t-flow) ease-in-out infinite; }
+  .tc-weft.waiting .tc-weft-bead { animation-duration: var(--t-breathe); }
+  /* The Details thread draws down the piece it ties to the record. */
+  .tc-piece.in-details::before { animation: tc-draw-down var(--t-entrance) var(--ease-out) both; }
+  /* An answer arrives woven in: a gold thread runs down its edge as the words settle, then rests. */
+  .tc-answer.tc-appear .chat-bubble { position: relative; }
+  .tc-answer.tc-appear .chat-bubble::before {
+    content: '';
+    position: absolute;
+    left: -1px;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--color-accent);
+    transform-origin: top;
+    animation: tc-draw-down 640ms var(--ease-out) both, tc-thread-rest var(--t-settle) var(--ease-out) 1100ms both;
+  }
+  /* Sending: one gold ripple off the box. */
+  .tc-ripple { animation: tc-ripple 620ms var(--ease-out) both; }
+  /* A message that will start work underlines where it goes, once, from left to right. */
+  .tc-where.route-team .tc-swap::after,
+  .tc-where.route-agent .tc-swap::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -3px;
+    height: 1px;
+    background: currentColor;
+    transform-origin: left;
+    animation: tc-sweep var(--t-entrance) var(--ease-out) 80ms both;
+  }
+  /* Details turning to another piece settles into place rather than snapping. */
+  .tc-details .delivery-lane { animation: tc-settle-in var(--t-move) var(--ease-out) both; }
+  /* The empty chat weaves LoomWatch's mark: the weft first, then the warp over it. */
+  .tc-weave path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: tc-weave 1100ms var(--ease-out) forwards; }
+  .tc-weave .tc-weave-warp { animation-delay: 380ms; }
+  .tc-member em, .tc-where { transition: color var(--t-move) var(--ease-out); }
+  .tc-member .chat-avatar::after { transition: background-color var(--t-move) var(--ease-out); }
+  .tc-note .chat-bubble { transition: border-color var(--t-move) var(--ease-out), background-color var(--t-move) var(--ease-out); }
+  .tc-picker, .tc-jump { animation: tc-pop var(--t-quick) var(--ease-out) both; }
+  .tc-picker { transform-origin: bottom left; }
+  .tc-go { transition: background-color var(--t-quick) var(--ease-out), color var(--t-quick) var(--ease-out); }
+  .tc-details { animation: tc-slide var(--t-entrance) var(--ease-out) both; }
+}
+/* A note the agent took settles from dashed to solid. */
+.tc-note.taken .chat-bubble { border-style: solid; background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+@keyframes tc-rise { from { opacity: 0; translate: 0 10px; } }
+@keyframes tc-rise-mine { from { opacity: 0; translate: 12px 10px; } }
+@keyframes tc-fade { from { opacity: 0; } }
+@keyframes tc-swap { from { opacity: 0; translate: 0 5px; } }
+@keyframes tc-pop { from { opacity: 0; scale: .96; } }
+@keyframes tc-slide { from { translate: 24px 0; } }
+@keyframes tc-ring { 0% { scale: .9; opacity: .8; } 100% { scale: 1.45; opacity: 0; } }
+@keyframes tc-bead { 50% { scale: .55; } }
+@keyframes tc-draw-down { from { scale: 1 0; } }
+@keyframes tc-thread-rest { to { opacity: 0; } }
+@keyframes tc-ripple { from { opacity: .7; scale: 1; } to { opacity: 0; scale: 1.035 1.18; } }
+@keyframes tc-sweep { from { scale: 0 1; } to { scale: 1 1; opacity: .55; } }
+@keyframes tc-settle-in { from { opacity: 0; translate: 10px 0; } }
+@keyframes tc-weave { to { stroke-dashoffset: 0; } }
+@keyframes tc-attention {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent); }
+  100% { box-shadow: 0 0 0 12px color-mix(in srgb, var(--color-accent) 0%, transparent); }
+}
+
+/* The mark at rest, and where motion is reduced: drawn, not woven. */
+.tc-weave { color: var(--color-accent); }
+.tc-weave .tc-weave-weft { stroke: var(--color-accent); }
+.tc-weave .tc-weave-warp { stroke: var(--color-ink-3); opacity: .55; }
+
+/* ---------- What the agents said, inside the chat ---------- */
+.tc-said .chat.bare { margin: 2px 0 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.tc-said .chat.bare .chat-log { padding: 0 0 4px; }
+/* Your turn, on the message that asks: the buttons stand where "waiting for you" would. */
+.chat-your-turn { display: grid; justify-items: end; gap: 6px; margin-top: 2px; }
+.chat-your-turn .tc-acts { justify-content: flex-end; }
+.chat-your-turn .tc-tip { text-align: right; }
+/* What an agent picked up from earlier work: one quiet line, its text a click away. */
+.chat-picked { margin-top: 6px; }
+.chat-picked-toggle { border: 0; background: none; padding: 0; font: inherit; font-size: 12px; color: var(--color-accent); cursor: pointer; }
+.chat-picked-toggle:hover { text-decoration: underline; }
+.chat-picked-body { flex-basis: 100%; display: grid; gap: 10px; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--color-hairline); border-radius: var(--r-md); text-align: left; color: var(--color-ink-2); font-size: 13px; }
+.chat-picked-body h4 { margin: 0 0 2px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--color-ink-3); }
+
+/* ---------- The edge between the chat and Details: drag it to give either more room ---------- */
+.tc-resize { display: none; }
+@media (min-width: 1100px) {
+  .details-open .tc-resize {
+    display: block;
+    position: absolute;
+    top: 64px;
+    bottom: 0;
+    left: var(--tc-chat-w);
+    z-index: 31;
+    width: 9px;
+    translate: -5px 0;
+    cursor: col-resize;
+    touch-action: none;
+    outline: none;
+  }
+  .tc-resize::after { content: ''; position: absolute; inset: 0 4px; background: transparent; transition: background-color var(--t-quick) var(--ease-out); }
+  .tc-resize:hover::after, .tc-resize:focus-visible::after, .chat-resizing .tc-resize::after { background: var(--color-accent); }
+}
+.chat-resizing { cursor: col-resize; user-select: none; }
+
+/* ---------- The answer: its record's verdict, its files, and what you do with it ---------- */
+.tc-answer .chat-under { flex-wrap: wrap; align-items: center; }
+.tc-verdict { margin-top: 0; padding: 4px 9px; font-size: 11.5px; }
+/* An explicit width: `.delivery-files` is a size container, so in a column sized to its content it would shrink to nothing. */
+.tc-files { width: min(100%, 460px); margin: 8px 0 2px; }
+
+/* A long answer is a document: a card in the chat, read in full in the pane beside it. */
+.tc-doc {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: min(100%, 460px);
+  padding: 12px 14px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 16px;
+  border-top-left-radius: 5px;
+  background: var(--color-panel-solid);
+  color: var(--color-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--t-quick) var(--ease-out), box-shadow var(--t-quick) var(--ease-out);
+}
+.tc-doc:hover { border-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-hairline)); }
+.tc-doc:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.tc-doc.open { border-color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.tc-doc-icon { flex: none; display: grid; place-items: center; width: 34px; height: 42px; margin-top: 1px; border-radius: 6px; background: var(--color-accent-tint); color: var(--color-accent); }
+.tc-doc-body { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.tc-doc-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14.5px/1.35 var(--font-sans); }
+.tc-doc-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 13px; line-height: 1.5; color: var(--color-ink-2); }
+.tc-doc-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 2px; font-size: 12px; color: var(--color-ink-3); }
+.tc-doc-meta > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-doc-open { display: inline-flex; align-items: center; gap: 4px; color: var(--color-accent); font-weight: 550; white-space: nowrap; }
+.tc-doc.open .tc-doc-open { color: var(--color-ink-2); font-weight: 400; }
+.tc-doc.streaming .tc-doc-meta > span:first-child { color: var(--color-live); }
+.tc-files-more { align-self: flex-start; margin-left: 2px; }
+/* In the chat a file is an attachment: one slim row — its sheet, its name and size, and Open —
+   at any width, not the deliverable card Details used to give it. */
+.tc-files { gap: 6px; }
+.tc-files .file-card.compact { grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 10px; padding: 6px 8px 6px 14px; border-radius: 10px; box-shadow: none; }
+.tc-files .file-card.compact::before { width: 3px; }
+.tc-files .file-card.compact .file-sheet { width: 24px; height: 30px; }
+.tc-files .file-card.compact .file-card-name { font-size: 12.5px; }
+.tc-files .file-card-meta { overflow: hidden; font-size: 11.5px; color: var(--color-ink-3); text-overflow: ellipsis; white-space: nowrap; }
+.tc-files .file-card-acts { grid-column: auto; gap: 4px; }
+.tc-files .file-card-acts > .file-card-open { flex: none; height: 28px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent); background: transparent; color: var(--color-accent); font-size: 12px; }
+.tc-files .file-card-acts > .file-card-open:hover:not(:disabled) { background: var(--color-accent-tint); filter: none; }
+.tc-files .file-card.compact .file-card-icon { width: 28px; height: 28px; }
+.tc-files .file-card-said { grid-column: 1 / -1; }
+
+/* The pane beside the chat: one piece's answer or its record, chosen at its top. */
+.tc-pane-tabs { flex: none; display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid); }
+.tc-pane-tabs button { padding: 4px 12px; border: 0; border-radius: 5px; background: transparent; color: var(--color-ink-2); font: 500 12.5px/1.3 var(--font-sans); cursor: pointer; transition: background-color var(--t-quick) var(--ease-out), color var(--t-quick) var(--ease-out); }
+.tc-pane-tabs button:hover { color: var(--color-ink); }
+.tc-pane-tabs button[aria-selected='true'] { background: var(--color-accent-tint); color: var(--color-accent); }
+.tc-pane-title { flex: none; font: 600 14px/1.3 var(--font-sans); color: var(--color-ink); }
+.tc-details-head h2 { font-weight: 400; color: var(--color-ink-2); }
+.tc-document { position: absolute; inset: 0; overflow-y: auto; background: var(--color-ground); }
+.tc-document-by { max-width: 760px; margin: 26px auto 0; padding: 0 36px; font-size: 12px; color: var(--color-ink-3); }
+.tc-document .tc-document-page { max-width: 760px; margin: 0 auto; padding: 4px 36px 72px; }
+@media (prefers-reduced-motion: no-preference) {
+  .tc-document { animation: tc-fade var(--t-move) var(--ease-out) both; }
+}
+
+/* ---------- Older work is quiet ----------
+   What you can do with a piece shows when you point at it or reach it with the keyboard. The
+   newest piece, work still going, and the piece open beside the chat always show it; so does every
+   piece on a screen without a pointer to hover with. Nothing is removed — only kept out of sight. */
+.tc-quiet { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+@media (hover: hover) {
+  .tc-piece:not(.newest, .live, .in-details) :is(.tc-talk-acts, .tc-quiet) { opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
+  .tc-piece:not(.newest, .live, .in-details):is(:hover, :focus-within) :is(.tc-talk-acts, .tc-quiet) { opacity: 1; }
+  /* A file's copy-path button waits for the file itself to be pointed at. */
+  .tc-files .file-card-icon { opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
+  .tc-files .file-card:is(:hover, :focus-within) .file-card-icon { opacity: 1; }
+}
+
+/* Share: saving and sending behind one button. */
+.tc-share { position: relative; display: inline-flex; }
+.tc-share-menu {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-md);
+  background: var(--color-panel-solid);
+  box-shadow: var(--e2-shadow);
+}
+.tc-share-menu > button { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--color-ink); font: 400 13px/1.3 var(--font-sans); text-align: left; cursor: pointer; }
+.tc-share-menu > button:hover:not(:disabled), .tc-share-menu > button:focus-visible { background: var(--color-accent-tint); outline: none; }
+.tc-share-menu > button:disabled { color: var(--color-ink-3); cursor: default; }
+.tc-share-menu > .notion-send-note { padding: 7px 10px; font-size: 12px; line-height: 1.45; color: var(--color-ink-3); }
+@media (prefers-reduced-motion: no-preference) {
+  .tc-share-menu { animation: tc-fade var(--t-quick) var(--ease-out) both; }
+}
+
+/* Details leads with how the work went — "Finished · 27 s" — and names the run above it. */
+.delivery-heading h1 .delivery-outcome { color: var(--color-ink); }
+.delivery-heading h1 .delivery-outcome.status-succeeded { color: var(--color-ok); }
+.delivery-heading h1 .delivery-outcome:is(.status-failed, .status-partial) { color: var(--color-alert); }
+.delivery-heading h1 .delivery-outcome:is(.status-running, .status-starting, .status-queued) { color: var(--color-live); }
+.delivery-heading h1 .delivery-took { margin-left: 10px; font-size: .55em; font-weight: 400; color: var(--color-ink-3); }

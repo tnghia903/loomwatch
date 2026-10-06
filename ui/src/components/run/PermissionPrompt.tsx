@@ -14,6 +14,11 @@ interface PermissionPromptProps {
    * no switch covers.
    */
   onAlwaysAllow?: (agentId: string, key: AllowSwitch) => void
+  /**
+   * Shown as a message in the team's chat (ADR 0051) rather than floating over the screen: the
+   * ask belongs to the piece of work it pauses.
+   */
+  inline?: boolean
 }
 
 const SWITCH_LABEL: Record<AllowSwitch, string> = { web: 'web', commands: 'commands', edits: 'file edits' }
@@ -23,7 +28,7 @@ const SWITCH_LABEL: Record<AllowSwitch, string> = { web: 'web', commands: 'comma
  * these on the spot and the agent carried on without — a web search that "failed" because nobody
  * was asked. Now the app holds, this card asks, and whatever you choose is the answer it gets.
  */
-export function PermissionPrompt({ run, onAlwaysAllow }: PermissionPromptProps) {
+export function PermissionPrompt({ run, onAlwaysAllow, inline = false }: PermissionPromptProps) {
   const now = useNow(true)
   // Answered here, before the next poll of the run takes them off the record.
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set())
@@ -53,7 +58,7 @@ export function PermissionPrompt({ run, onAlwaysAllow }: PermissionPromptProps) 
   }
 
   return (
-    <section className="permission-prompt e2" aria-label="Waiting for your permission" role="region">
+    <section className={inline ? 'permission-prompt inline' : 'permission-prompt e2'} aria-label="Waiting for your permission" role="region">
       {open.map((request) => (
         <article key={request.id} className="permission-ask" aria-live="polite">
           <header>

@@ -87,7 +87,7 @@ pub fn for_stage(
     } else {
         let _ = write!(
             text,
-            "\nBefore you: {}. What came before you is in the sections below the task.",
+            "\nBefore you: {}. What came before you is in the sections above the task.",
             names(&before)
         );
     }
@@ -105,6 +105,24 @@ pub fn for_stage(
         text.push_str(FINAL_ANSWER);
     }
     Some(text)
+}
+
+/// An agent the operator wrote to directly with an @mention (ADR 0051).
+///
+/// It works alone this time, and it has to be told so: its usual orientation names a successor
+/// that will not run and a final answer it is not writing. What it is asked for is a new version
+/// of its own work — the brief the operator's message is the objective of — so the boundaries are
+/// stated here: the whole result, and nothing changed that was not asked for.
+#[must_use]
+pub fn for_one_agent(team: &TeamConfig, agent: &AgentConfig) -> String {
+    format!(
+        "You are {}, on {}. The operator wrote to you directly, so this time you work alone: \
+         nobody else on the team runs, and your reply goes straight back to the operator.\n\
+         Reply with the complete new version of your work, not a description of what changed, \
+         and keep everything the task does not ask you to change.",
+        agent.name,
+        team_label(team)
+    )
 }
 
 /// A helper another agent brought in through the Team Bus.

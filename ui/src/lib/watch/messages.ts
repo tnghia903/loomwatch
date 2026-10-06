@@ -95,6 +95,12 @@ export interface TeamMessage {
   /** Why a failed message failed, as the Team Bus said it. */
   error: string | null
   reply: MessageReply | null
+  /**
+   * Handed on from the work this run follows, not said in it: a follow-up or a one-agent turn is
+   * given the earlier handover and your earlier review again (`replayed` on the prompt record,
+   * ADR 0051). The chat says the agent picked it up rather than drawing it as a new message.
+   */
+  carried: boolean
 }
 
 /** Team Bus tools that carry a message from one agent to another. */
@@ -129,8 +135,8 @@ export class Correspondence {
     return { eventId: event.id, seq: event.seq, ts: event.ts, offsetMs: Date.parse(event.ts) - this.startMs }
   }
 
-  private add(event: RunEvent, message: Omit<TeamMessage, 'eventId' | 'seq' | 'ts' | 'offsetMs' | 'context' | 'evidenceId' | 'error' | 'reply' | 'handedBy'> & Partial<Pick<TeamMessage, 'context' | 'evidenceId' | 'handedBy'>>): TeamMessage {
-    const added: TeamMessage = { context: null, evidenceId: null, error: null, reply: null, handedBy: null, ...message, ...this.at(event) }
+  private add(event: RunEvent, message: Omit<TeamMessage, 'eventId' | 'seq' | 'ts' | 'offsetMs' | 'context' | 'evidenceId' | 'error' | 'reply' | 'handedBy' | 'carried'> & Partial<Pick<TeamMessage, 'context' | 'evidenceId' | 'handedBy' | 'carried'>>): TeamMessage {
+    const added: TeamMessage = { context: null, evidenceId: null, error: null, reply: null, handedBy: null, carried: false, ...message, ...this.at(event) }
     this.messages.push(added)
     return added
   }
@@ -142,12 +148,13 @@ export class Correspondence {
    */
   promptRecord(event: RunEvent, sections: readonly PromptSection[]) {
     const find = (kind: PromptSection['kind']) => words(sections.find((section) => section.kind === kind)?.text?.trim())
+    const carried = event.payload.replayed === true
     const direction = find('direction')
     const stops = ids(event.payload.directionFrom)
-    if (direction) this.add(event, { id: `direction:${event.id}`, kind: 'direction', from: OPERATOR_ID, to: event.agentId, text: direction, state: 'delivered', handedBy: stops && { from: stops, via: [] } })
+    if (direction) this.add(event, { id: `direction:${event.id}`, kind: 'direction', from: OPERATOR_ID, to: event.agentId, text: direction, state: 'delivered', handedBy: stops && { from: stops, via: [] }, carried })
     const handover = find('stage_results')
     const senders = ids(event.payload.stageResultsFrom)
-    if (handover) this.add(event, { id: `handover:${event.id}`, kind: 'handover', from: null, to: event.agentId, text: handover, state: 'delivered', handedBy: senders && this.writers(senders) })
+    if (handover) this.add(event, { id: `handover:${event.id}`, kind: 'handover', from: null, to: event.agentId, text: handover, state: 'delivered', handedBy: senders && this.writers(senders), carried })
   }
 
   /**

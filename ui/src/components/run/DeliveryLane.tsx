@@ -1,25 +1,15 @@
 import { CapabilityGraph } from './CapabilityGraph'
-import { Markdown } from '../ui/Markdown'
-import { preloadMarkdown } from '../ui/preloadMarkdown'
 import { SuppliedInstructions } from './SuppliedInstructions'
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
-  Check,
-  Copy,
-  Download,
   FileText,
-  Maximize2,
-  Minimize2,
   Network,
-  Plus,
   Search,
   ShieldCheck,
   Wrench,
   Code2,
   CheckCircle2,
-  CircleAlert,
-  CircleDot,
 } from 'lucide-react'
 import {
   capabilityEvidence,
@@ -28,20 +18,13 @@ import {
 import { formatOffset } from '../../lib/watch/events'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import type { RunColumnProps } from './RunColumn'
-import { StripLine } from './StoryNodes'
 import { useCanvasActions } from '../canvas/CanvasActionsContext'
-import { readCount } from '../../lib/story/reads'
-import { buildReceipt, type ReceiptLine } from '../../lib/story/receipt'
-import { answerVerdict, type VerdictTone } from '../../lib/story/verdict'
+import { buildReceipt } from '../../lib/story/receipt'
 import { RunReceipt } from './RunReceipt'
-import { NotionSend, type NotionSendRun } from './NotionSend'
 import { WeftBar } from './WeftBar'
 import type { WeftKnot } from '../../lib/story/weft'
 import { markState } from '../../lib/story/mark'
 import { AgentMark } from '../ui/AgentMark'
-import { FileCard } from '../ui/FileCard'
-import { fileRefsIn, withFolderPaths } from '../../lib/files/fileRefs'
-import { liftInto, noteShownRequest } from '../../lib/motion/lift'
 
 export interface DeliveryLaneProps extends RunColumnProps {
   harnessLabels?: ReadonlyMap<string, string>
@@ -53,12 +36,6 @@ export interface DeliveryLaneProps extends RunColumnProps {
   onTrace: () => void
   /** ADR 0037: allow what a refused receipt line names, for that agent's next runs. */
   onAllow?: (agentId: string, key: AllowSwitch) => void
-  /** Leave this finished run for a blank request, for a task that is not a follow-up of it. */
-  onNewRun?: () => void
-  /** The run's record, for where its answer went (ADR 0038). Absent for a plan or a replay the daemon forgot. */
-  run?: NotionSendRun | null
-  /** A plan only: where the answer will also go, from the team file (ADR 0038). */
-  sendsTo?: string | null
   /**
    * A stage to bring into view, raised from outside the lane — today, the operator clicking an
    * Attention alert to reach the agent it belongs to. It is a request, not the selection itself:
@@ -66,12 +43,10 @@ export interface DeliveryLaneProps extends RunColumnProps {
    */
   focusAgentId?: string | null
   /**
-   * Every archived event of a finished run has arrived. A replay pages its record in, so until then
-   * the receipt is missing stages that did run, and the verdict beside the answer waits for it.
+   * The timeline's "Read the message": what the agents said lives in the team's chat beside this
+   * lane (ADR 0051), so the lane asks the chat to show the message rather than drawing it again.
    */
-  evidenceComplete?: boolean
-  /** The team's connections into each agent: who a stage's handover came from (`pipeline_node_prompt`). */
-  handedBy?: ReadonlyMap<string, readonly string[]>
+  onRevealMessage?: (messageId: string) => void
 }
 
 /**
@@ -86,21 +61,11 @@ const ROUTE_SENTENCE: Record<'native' | 'inline' | 'blocked', string> = {
   blocked: 'Blocked — LoomWatch knows no project skill directory for this harness.',
 }
 
-// Loaded with the first run that shows it: the app's chunk is held under its size budget (vite.config.ts).
-const AgentMessages = lazy(() => import('./AgentMessages').then((module) => ({ default: module.AgentMessages })))
 
 /** Run phases as an operator would say them; the raw phase ids are daemon vocabulary. */
 const PHASE_WORDS: Partial<Record<string, string>> = {
   queued: 'Queued', starting: 'Starting', running: 'Running', succeeded: 'Finished',
   partial: 'Finished with gaps', failed: 'Failed', cancelled: 'Stopped',
-}
-
-/** Each verdict differs by glyph as well as colour; `live` wears the breathing dot from CSS instead. */
-const VERDICT_ICON: Record<VerdictTone, ReactNode> = {
-  ok: <CheckCircle2 size={14} aria-hidden="true" />,
-  look: <CircleDot size={14} aria-hidden="true" />,
-  bad: <CircleAlert size={14} aria-hidden="true" />,
-  live: null,
 }
 
 /** Run is a reading surface. The saved team canvas remains the editing surface, and detailed
@@ -124,35 +89,21 @@ export function DeliveryLane({
   onSelectAgent,
   onTrace,
   onAllow,
-  onNewRun,
-  run = null,
-  sendsTo = null,
   focusAgentId = null,
-  evidenceComplete = true,
-  handedBy,
+  onRevealMessage,
 }: DeliveryLaneProps) {
-  // The answer is what this view exists for; fetch its renderer before the first token arrives.
-  useEffect(() => preloadMarkdown(), [])
   const [selectedId, setSelectedId] = useState<string | null>(output.producer)
   const [filter, setFilter] = useState<'all' | 'skill' | 'tool'>('all')
   const [query, setQuery] = useState('')
   const [layout, setLayout] = useState<'graph' | 'list'>('graph')
   const [scope, setScope] = useState<'agent' | 'team'>('agent')
-  const [expanded, setExpanded] = useState(false)
   const [receiptSelection, setReceipt] = useState<RunCapability | null>(null)
-  const [copyStatus, setCopyStatus] = useState('')
-  const [reviewOpen, setReviewOpen] = useState(false)
   const [sourceAgent, setSourceAgent] = useState<string | null>(null)
   const sourceDialog = useRef<HTMLDialogElement>(null)
   useEffect(() => { if (sourceAgent) sourceDialog.current?.showModal() }, [sourceAgent])
-  const [reviewChecked, setReviewChecked] = useState(false)
-  const [reviewedText, setReviewedText] = useState<string | null>(null)
-  const reviewDialog = useRef<HTMLDialogElement>(null)
-  const reviewed = Boolean(output.text && reviewedText === output.text)
-  useEffect(() => { if (reviewOpen) reviewDialog.current?.showModal() }, [reviewOpen])
   const receiptBack = useRef<HTMLButtonElement>(null)
   const capabilityButtons = useRef(new Map<string, HTMLButtonElement>())
-  const { inspectHandover, toggleProvenance, reusePrompt } =
+  const { inspectHandover, toggleProvenance } =
     useCanvasActions()
   const selected =
     agents.find((node) => node.id === selectedId) ??
@@ -227,7 +178,6 @@ export function DeliveryLane({
   const weftOrder = useMemo(() => agents.map((node) => ({ id: node.id, name: node.data.agent.name, operator: node.data.agent.kind === 'operator', status: node.data.runtime?.status, taskState: node.data.runtime?.taskState })), [agents])
   const terminal = ['succeeded', 'partial', 'failed', 'cancelled'].includes(phase)
   // What passed between the agents, reached from the timeline as well as read under the cards.
-  const [revealMessage, setRevealMessage] = useState<{ id: string; at: number } | null>(null)
   const messageFor = (knot: WeftKnot) => {
     if (knot.evidenceId) return projection.messages.some((message) => message.id === knot.evidenceId) ? knot.evidenceId : null
     // A relay's change of hands is the handover the next stage was given.
@@ -244,29 +194,6 @@ export function DeliveryLane({
     harnessLabels: new Map(agents.map((node) => [node.id, snapshots.get(node.id)?.[0]?.harness ?? harnessLabels.get(node.id) ?? ''])),
     answered: Boolean(output.text),
   })), [planned, terminal, attempt, prompt, phase, elapsed, agents, projection, evidenceByAgent, snapshots, harnessLabels, output.text])
-  // Beside the answer's title: what its record holds to check before using it (lib/story/verdict.ts).
-  const read = useMemo(() => readCount([...evidenceByAgent.values()].flat()), [evidenceByAgent])
-  const verdict = planned ? null : answerVerdict({ phase, text: output.text, streaming: output.streaming, terminal: terminal || output.terminal, settled: evidenceComplete, reviewed, receipt: runReceipt, read })
-  const openReview = () => { setReviewChecked(false); setReviewOpen(true) }
-  const fileMakers = useMemo(() => agents.map((node) => ({ id: node.id, name: node.data.agent.name })), [agents])
-  const deliveredFiles = useMemo(() => (output.streaming ? [] : fileRefsIn(output.text)), [output.text, output.streaming])
-  // Names listed under a folder ("Files are in `…/outputs`: - `plan.pdf`") read as files in the
-  // sentence too, not only in the header. Copy, download and Notion keep the agent's own words.
-  const shownText = useMemo(() => withFolderPaths(output.text), [output.text])
-  const showStage = (id: string) => {
-    select(id)
-    document.getElementById(`delivery-stage-${id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }
-  const openFinding = (line: ReceiptLine) => {
-    setReviewOpen(false)
-    if (line.evidenceId) onInspectEvidence(line.evidenceId)
-    else if (line.agentId) {
-      // The stages sit beside the answer, so an expanded answer gives way to show one.
-      const id = line.agentId
-      setExpanded(false)
-      requestAnimationFrame(() => showStage(id))
-    }
-  }
   // An Attention alert names the agent it belongs to; opening that stage is what "go to it" means
   // on this surface, where the skills and tools panel is already scoped to the selected stage.
   // Adjusted during render rather than in an effect (React's "adjusting state when a prop
@@ -284,77 +211,38 @@ export function DeliveryLane({
   }
   // Stage motion follows the session, not a recorded status: a replay never shows work in motion.
   const live = mode === 'live' && !planned
-  // The request the composer just sent lifts into place here (lib/motion/lift.ts). Before paint, so
-  // the text never shows in its final spot first.
-  const requestText = useRef<HTMLParagraphElement>(null)
-  useLayoutEffect(() => {
-    liftInto(requestText.current, prompt)
-    noteShownRequest(prompt)
-    return () => noteShownRequest('')
-  }, [prompt])
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(output.text)
-      setCopyStatus('Response copied')
-    } catch {
-      setCopyStatus('Copy unavailable. Select and copy the response text.')
-    }
-  }
   return (
     <main
-      className={`delivery-lane ${expanded ? 'output-expanded' : ''} ${live ? 'live' : ''}`}
+      className={`delivery-lane ${live ? 'live' : ''}`}
       aria-label="Run workspace"
       onKeyDown={(event) => {
-        if (event.key !== 'Escape' || (!receipt && !expanded)) return
+        if (event.key !== 'Escape' || !receipt) return
         event.stopPropagation()
-        if (receipt) closeReceipt()
-        else setExpanded(false)
+        closeReceipt()
       }}
     >
       <section className="delivery-work" aria-label="Team work">
         <header className="delivery-heading">
           <div>
-            <span className="delivery-eyebrow delivery-run-kicker">
-              {planned
-                ? 'Next run'
-                : mode === 'replay'
-                  ? 'Run replay'
-                  : 'Current run'}
-            </span>
+            {/* How it went leads; which run it was is a label above it, for the receipt and the trace. */}
+            <span className="delivery-eyebrow delivery-run-kicker">{planned ? 'Next run' : `Run ${attempt}`}</span>
             <h1>
-              {planned ? 'New run' : `Run ${attempt}`}
-              <span className={`delivery-status status-${phase}`}>
-                {planned ? 'Not started' : PHASE_WORDS[phase] ?? phase}
-              </span>
-              {output.text && !planned && <span className="delivery-review-state"><CircleDot size={14} />{reviewed ? 'Reviewed by you' : 'Review pending'}</span>}
+              {planned
+                ? <>New run<span className="delivery-status status-idle">Not started</span></>
+                : <><span className={`delivery-outcome status-${phase}`}>{PHASE_WORDS[phase] ?? phase}</span>{elapsed && <span className="delivery-took">{elapsed}</span>}</>}
             </h1>
-            <p>
-              {prompt || (planned ? 'Describe the result you want to create.' : `${elapsed} · ${agents.length} agents`)}
-            </p>
+            {planned && <p>Describe the result you want to create.</p>}
           </div>
-          {/* One control per thing (ADR 0043): the full trace opens only here, review only here, and
-              a plan goes back to its team through the Build tab. */}
+          {/* One control per thing (ADR 0043, 0051): the full trace opens only here. What was asked,
+              the answer, and its review live in the chat beside this record, so they are not here. */}
           {!planned && (
             <div className="delivery-heading-acts">
-              {/* A finished run otherwise only offers to continue itself; a different task needs a
-                  way back to the blank request without a detour through Build. */}
-              {onNewRun && terminal && <button className="btn" onClick={onNewRun}><Plus size={15} /> New run</button>}
               <button className="btn" onClick={onTrace}><Network size={15} /> Full trace</button>
-              {output.text && !output.streaming && <button className="btn btn-primary" onClick={openReview}>{reviewed ? 'View review' : 'Review output'} <ArrowRight size={15} /></button>}
             </div>
           )}
         </header>
-        <article className="delivery-request">
-          <div className="delivery-request-label"><span className="delivery-eyebrow">Request</span></div>
-          <p ref={requestText} className="selectable">
-            {prompt ||
-              (planned
-                ? 'Type your request in the box at the bottom right, then press Enter.'
-                : 'No original prompt was captured.')}
-          </p>
-        </article>
         {runReceipt && <RunReceipt receipt={runReceipt} onInspectEvidence={onInspectEvidence} onAllow={onAllow} />}
-        {!planned && projection.startedAt && <WeftBar projection={projection} order={weftOrder} relay={pipeline} onInspectEvidence={onInspectEvidence} messageFor={messageFor} onReadMessage={(id) => setRevealMessage({ id, at: Date.now() })} />}
+        {!planned && projection.startedAt && <WeftBar projection={projection} order={weftOrder} relay={pipeline} onInspectEvidence={onInspectEvidence} messageFor={messageFor} onReadMessage={onRevealMessage} />}
         <div className="delivery-section-head">
           <h2>
             {pipeline && linearPipeline ? 'Team handoff' : 'Team contributions'}
@@ -456,21 +344,6 @@ export function DeliveryLane({
             )
           })}
         </div>
-        {/* What they said to each other, as a team chat, right under the cards that said it. */}
-        {!planned && projection.startedAt && (agents.length > 1 || projection.messages.length > 0) && (
-          <Suspense fallback={null}>
-            <AgentMessages
-              messages={projection.messages}
-              order={weftOrder}
-              predecessors={handedBy}
-              evidence={projection.evidence}
-              live={live && !terminal}
-              onInspectEvidence={onInspectEvidence}
-              onInspectHandover={inspectHandover ? (id) => inspectHandover(id) : undefined}
-              reveal={revealMessage}
-            />
-          </Suspense>
-        )}
         <section
           className="delivery-capabilities"
           aria-label="Skills and tools"
@@ -768,128 +641,7 @@ export function DeliveryLane({
           </footer>}
         </section>
       </section>
-      <aside className="delivery-output" aria-label="Team output" data-tour="output">
-        <header>
-          <div className="delivery-output-kicker">
-            <span className="delivery-eyebrow">
-              <FileText size={15} /> Team output
-            </span>
-            <div>
-              {output.text && (
-                <button
-                  className="iconbtn"
-                  aria-label="Save team output as Markdown"
-                  onClick={() => {
-                    const url = URL.createObjectURL(
-                      new Blob([output.text], {
-                        type: 'text/markdown;charset=utf-8',
-                      }),
-                    )
-                    const link = document.createElement('a')
-                    link.href = url
-                    link.download = `loomwatch-run-${attempt}-response.md`
-                    link.click()
-                    setTimeout(() => URL.revokeObjectURL(url), 1000)
-                  }}
-                >
-                  <Download size={15} />
-                </button>
-              )}
-              {output.text && (
-                <button
-                  className="iconbtn"
-                  onClick={() => void copy()}
-                  aria-label="Copy team output"
-                >
-                  <Copy size={15} />
-                </button>
-              )}
-              <button
-                className="iconbtn"
-                onClick={() => setExpanded(!expanded)}
-                aria-label={
-                  expanded ? 'Restore split view' : 'Expand team output'
-                }
-              >
-                {expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-              </button>
-            </div>
-          </div>
-          <div className="delivery-output-title"><h2>{output.text.match(/^#\s+(.+)$/m)?.[1] ?? 'Team response'}</h2>{/* A status: Review output in the heading is where review opens (ADR 0043). */}{verdict && <span className={`delivery-output-badge tone-${verdict.tone}`}>{VERDICT_ICON[verdict.tone]}{verdict.label}</span>}</div>
-          <p>
-            {output.text
-              ? `Written by ${agents.find((node) => node.id === output.producer)?.data.agent.name ?? output.producerLabel}`
-              : `Assigned to ${output.producerLabel}`}
-          </p>
-          {run && !planned && terminal && <NotionSend run={run} answered={Boolean(output.text) && !output.streaming} />}
-          {planned && sendsTo && <p className="notion-send-plan">Also sent to {sendsTo} once the team answers.</p>}
-          {!planned && !terminal && run?.deliverTitle && <p className="notion-send-plan">Goes to Notion as “{run.deliverTitle}” once the team answers.</p>}
-          {/* A file the reply names is the deliverable: up here, ready to open, not buried as a path. */}
-          {deliveredFiles.length > 0 && (
-            <div className="delivery-files" role="group" aria-label="Files in this reply">
-              {deliveredFiles.map((path) => <FileCard key={path} path={path} compact={deliveredFiles.length > 1} agents={fileMakers} />)}
-            </div>
-          )}
-        </header>
-        <div className="delivery-output-scroll">
-          <p className={`delivery-output-quality tone-${verdict?.tone ?? 'plan'}`}>
-            {verdict?.detail ?? 'The team’s answer will appear here.'}
-            {verdict?.reviewable && !reviewed && verdict.findings.length > 1 && <> {verdict.findings.length - 1} more to check in the review.</>}
-          </p>
-          {output.text && (
-            <div className="delivery-response selectable">
-              <Markdown>{shownText}</Markdown>
-              {output.streaming && (
-                <span className="caret" aria-label="Streaming" />
-              )}
-            </div>
-          )}
-          {!output.text && (
-            <div className="delivery-output-placeholder">
-              <FileText size={36} />
-              <h3>
-                {planned
-                  ? 'What should the team do?'
-                  : output.terminal
-                    ? 'No response produced'
-                    : 'Waiting for the team'}
-              </h3>
-              <p>
-                {planned
-                  ? 'Say what you want done, in plain words. You will see each agent’s work as the team answers.'
-                  : output.phaseText}
-              </p>
-              {output.terminal && (
-                <button className="btn" onClick={reusePrompt}>
-                  Reuse request
-                </button>
-              )}
-            </div>
-          )}
-          {output.strip && <StripLine strip={output.strip} />}
-        </div>
-        <footer>
-          <span role="status">
-            {copyStatus && (
-              <>
-                <Check size={13} />
-                {copyStatus}
-              </>
-            )}
-          </span>
-        </footer>
-      </aside>
       {sourceAgent && <dialog ref={sourceDialog} className="delivery-review-dialog" aria-label="Agent sources" onCancel={() => setSourceAgent(null)} onClose={() => setSourceAgent(null)}><h2>{agents.find(node => node.id === sourceAgent)?.data.agent.name}’s sources</h2><p>Sources recorded in this run.</p>{(evidenceByAgent.get(sourceAgent) ?? []).filter(item => item.kind === 'source').map(item => <button key={item.id} className="source-record" onClick={() => { setSourceAgent(null); onInspectEvidence(item.id) }}><FileText size={18} /><span>{item.name}</span><ArrowRight size={14} /></button>)}<div><button className="btn" onClick={() => setSourceAgent(null)}>Close</button></div></dialog>}
-      {reviewOpen && <dialog ref={reviewDialog} className="delivery-review-dialog" aria-label="Review team output" onCancel={() => setReviewOpen(false)} onClose={() => setReviewOpen(false)}>
-        <h2>Review team output</h2>
-        <p>{reads}/{requirements.length} required skills have loading evidence.</p>
-        {verdict?.findings.length
-          ? <section className="receipt-checks delivery-review-findings" aria-label="Worth a look"><b>Worth a look</b><ul>{verdict.findings.map((line, index) => <li key={index} className={`tone-${line.tone}`}><span>{line.text}</span>{(line.evidenceId || line.agentId) && <button type="button" className="receipt-open" aria-label={`Open: ${line.text}`} title={line.evidenceId ? 'Open the record' : 'Show this helper’s work'} onClick={() => openFinding(line)}><ArrowRight size={12} aria-hidden="true" /></button>}</li>)}</ul></section>
-          : <p>Nothing in this run’s record was flagged.</p>}
-        <p>Read the response and its receipts before marking your review. This acknowledgement lasts while this run stays open.</p>
-        {reviewed ? <p className="delivery-review-success">Reviewed by you in this session.</p> : <label><input type="checkbox" checked={reviewChecked} onChange={(event) => setReviewChecked(event.target.checked)} />I have reviewed this response and its supporting evidence.</label>}
-        <div><button className="btn" onClick={() => setReviewOpen(false)}>Keep reading</button>{!reviewed && <button className="btn btn-primary" disabled={!reviewChecked || reads !== requirements.length || !output.text || output.streaming} onClick={() => { setReviewedText(output.text); setReviewOpen(false) }}>Mark reviewed</button>}</div>
-      </dialog>}
     </main>
   )
 }

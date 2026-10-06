@@ -433,7 +433,24 @@ pub enum PromptSectionKind {
     Tool,
     /// `## What the team knows` — the context packet.
     Memory,
-    /// The operator's own words. This is what the Prompt node shows.
+    /// `## Conversation so far` — the recent messages between the operator and this team: their
+    /// requests, notes and decisions, and the team's answers (ADR 0051). Built when the run starts
+    /// from the team's chat, so the same chat always gives the same section. Source material: old
+    /// requests are context, and the task is what applies now. Added here and in
+    /// `ui/src/lib/watch/events.ts` in one change.
+    Conversation,
+    /// `## Results from preceding stages` — the handover a later stage reads.
+    StageResults,
+    /// `## Asking the stage before you`. Directly under the handover it offers to explain.
+    AskOffer,
+    /// `## Previous output` — the canonical reply of the run a follow-up follows. A separate kind
+    /// from [`Self::StageResults`] because they are different facts: one is what the stage before
+    /// this one handed over *in this run*, the other is what a *previous run* answered. Collapsing
+    /// them would make the packet inspector unable to say which. A one-agent turn (ADR 0051)
+    /// renders the same kind as `## Your previous output`: what that agent itself wrote last time.
+    PreviousOutput,
+    /// The operator's own words. This is what the Prompt node shows. After everything the agent is
+    /// handed, so the request is what it reads last before it starts (ADR 0051).
     Task,
     /// `## Direction from you` — what the operator answered at a review stop before this stage.
     ///
@@ -442,17 +459,9 @@ pub enum PromptSectionKind {
     /// a previous run's output — arrives under a caution that says so; the operator's own words do
     /// not, because the operator is the authority in the room. Nothing an agent writes can be
     /// promoted into this section: it is written only from an answer the daemon accepted through
-    /// `POST /api/runs/{id}/answers`.
+    /// `POST /api/runs/{id}/answers`. Last of all, so the operator's latest decision is the
+    /// freshest thing in the prompt.
     Direction,
-    /// `## Results from preceding stages` — the handover a later stage reads.
-    StageResults,
-    /// `## Previous output` — the canonical reply of the run a follow-up follows. A separate kind
-    /// from [`Self::StageResults`] because they are different facts: one is what the stage before
-    /// this one handed over *in this run*, the other is what a *previous run* answered. Collapsing
-    /// them would make the packet inspector unable to say which.
-    PreviousOutput,
-    /// `## Asking the stage before you`.
-    AskOffer,
 }
 
 /// A composed opening prompt: the text to send, and what it is made of.
@@ -468,6 +477,8 @@ pub struct ComposedPrompt {
     pub stage_results_from: Vec<String>,
     /// The review stops the `direction` section came from, by id. Empty when it has none.
     pub direction_from: Vec<String>,
+    /// The handover and direction were handed on from the work this run follows, not sent in it.
+    pub replayed: bool,
 }
 
 impl ComposedPrompt {
@@ -699,6 +710,9 @@ impl ComposedPrompt {
         }
         if !self.direction_from.is_empty() {
             meta["directionFrom"] = serde_json::json!(self.direction_from);
+        }
+        if self.replayed {
+            meta["replayed"] = serde_json::json!(true);
         }
         meta
     }

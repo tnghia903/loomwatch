@@ -1,4 +1,5 @@
 import { listNames } from '../format'
+import { currentRun } from './currentRun'
 
 /**
  * The getting-started guide, one card per step.
@@ -144,20 +145,20 @@ export const TOUR_STEPS: readonly TourStep[] = [
     id: 'run-team',
     screen: 'workspace',
     view: () => ({
-      title: 'Open the Run view',
-      body: 'Press Run team. The Run view is where you tell the team what to do and watch it work.',
+      title: 'Open the team’s chat',
+      body: 'Press Run team. The team’s chat is where you tell it what to do, watch it work and read its answers.',
       target: ['[data-tour="run-team"]', '[data-tour="view-tabs"]'],
       sides: ['bottom', 'left'],
       advance: 'action',
     }),
-    done: () => present('[data-tour="stages"]'),
+    done: () => present('[data-tour="composer"]'),
   },
   {
     id: 'ask',
     screen: 'workspace',
     view: () => ({
       title: 'Ask in plain words',
-      body: 'Type what you want done in this box and press Enter. Not sure what to ask? Use the example below, then press Enter.',
+      body: 'Write @team and what you want done, then press Enter: only an @ starts work. Not sure what to ask? Use the example below, then press Enter.',
       target: ['[data-tour="composer"]'],
       sides: ['top', 'left'],
       advance: 'action',
@@ -165,7 +166,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     }),
     // A run that started since this step began: reopening an earlier run does not count.
     done: ({ runAtStepStart }) => {
-      const run = new URLSearchParams(window.location.search).get('run')
+      const run = currentRun()
       return run !== null && run !== runAtStepStart
     },
     whenMissing: 'run-team',
@@ -175,7 +176,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'workspace',
     view: () => ({
       title: 'Watch it work',
-      body: 'Each step shows blue while its agent is working. Click a step to see what that agent is doing right now. If something goes wrong, the step says why and you can retry.',
+      body: 'The chat says who is working. “What they said” shows what the agents told each other, and Details opens every step’s record. If something goes wrong, the chat says why and offers Try again.',
       target: ['[data-tour="stages"]'],
       sides: ['bottom', 'right', 'top'],
       advance: 'next',
@@ -187,7 +188,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'workspace',
     view: () => ({
       title: 'Read the result',
-      body: 'The answer appears here as it is written. The buttons at the top copy it, save it as a file, or make it bigger. To change something, type what should change in the box below and press Enter.',
+      body: 'The team’s answer appears here in full. To change it, write @ and an agent’s name with what should change, and that agent alone works on it.',
       target: ['[data-tour="output"]'],
       sides: ['left', 'bottom'],
       advance: 'next',
@@ -211,7 +212,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'workspace',
     view: () => ({
       title: 'Change the team any time',
-      body: 'Switch to Build to add agents from the list on the left, connect cards so work passes from one to the next, or add a review step that waits for you. Save, then come back to Run.',
+      body: 'Switch to Build to add agents from the list on the left, connect cards so work passes from one to the next, or add a review step that waits for you. Save, then come back to Chat.',
       target: ['[data-tour="view-tabs"]'],
       sides: ['bottom'],
       advance: 'next',

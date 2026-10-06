@@ -50,6 +50,36 @@ describe('Home', () => {
     expect(assign).toHaveBeenCalledWith('/?path=new.yaml')
   })
 
+  // ADR 0051: teams are listed as chats — the newest work first, a line of it, and a mark for
+  // what came in since you last looked; a team with history opens in its chat.
+  it('lists teams as chats: newest work first, its last line, an unread mark, and opens the chat', async () => {
+    fetchMock.mockImplementation(() => respond({
+      root: '/teams',
+      files: ['quiet.yaml', 'news.yaml'],
+      teams: [
+        { path: 'quiet.yaml', name: 'Quiet desk', agentCount: 1, modifiedAt: '2026-10-05T00:00:00Z' },
+        { path: 'news.yaml', name: 'News desk', agentCount: 2, modifiedAt: '2026-01-01T00:00:00Z' },
+      ],
+    }))
+    window.localStorage.setItem('lw-chat-seen', JSON.stringify({ 'news.yaml': '2026-10-06T01:00:00.000Z' }))
+    const runs = [{
+      runId: 'r1', sessionId: 'r1', teamPath: 'news.yaml', prompt: 'today’s digest', status: 'succeeded' as const, mode: 'pipeline' as const,
+      entrypoint: 'a', responder: 'b', agentIds: ['a', 'b'], createdAt: '2026-10-06T02:00:00.000Z', startedAt: '2026-10-06T02:00:00.000Z',
+      finishedAt: '2026-10-06T02:04:00.000Z', error: null, exitCode: 0, eventCount: 3, reply: '# Today’s AI digest\nChips lead.',
+    }]
+    render(<Home harnesses={[claude]} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onCreateBlank={vi.fn()} onPalette={vi.fn()} runs={runs} />)
+    const cards = await screen.findAllByRole('button', { name: /desk/ })
+    expect(cards.map((card) => within(card).getByText(/desk$/).textContent)).toEqual(['News desk', 'Quiet desk'])
+    expect(within(cards[0]).getByText('Today’s AI digest')).toBeInTheDocument()
+    expect(within(cards[0]).getByLabelText('New since you looked')).toBeInTheDocument()
+    expect(within(cards[1]).queryByLabelText('New since you looked')).not.toBeInTheDocument()
+    fireEvent.click(cards[0])
+    expect(assign).toHaveBeenCalledWith('/?path=news.yaml&view=chat')
+    fireEvent.click(cards[1])
+    expect(assign).toHaveBeenLastCalledWith('/?path=quiet.yaml')
+    window.localStorage.removeItem('lw-chat-seen')
+  })
+
   it('falls back to file names when an older daemon sends no summaries', async () => {
     fetchMock.mockImplementation(() => respond({ root: '/teams', files: ['nested/research-team.yaml'] }))
     renderHome()

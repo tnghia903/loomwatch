@@ -11,12 +11,12 @@ import { newSchedule } from '../lib/team-file/schedule'
 import type { TeamNotionPage, TeamSource } from './library/ComponentPalette'
 import { PALETTE_WIDTH, clampPaletteWidth } from '../lib/library/paletteWidth'
 import { connectedServersByAgent } from '../lib/library/observed'
-import { isTerminalRun, runScheduleNow, scheduleForPath, useSchedules } from '../lib/runs/client'
+import { approveTeam, isTerminalRun, runScheduleNow, scheduleForPath, useSchedules, type TeamReview } from '../lib/runs/client'
 import { ownerLabelFor } from '../lib/runs/graph'
 import { appLabelForAgent, harnessIdForAgent, modelOptionsForAgent } from '../lib/models'
 import type { OutputNode } from '../lib/runs/graph'
 import { causalOrder, DOCK } from '../lib/runs/runOverlay'
-import { historyRunUrl, mergeHistory, threadHistory } from '../lib/runs/history'
+import { mergeHistory } from '../lib/runs/history'
 import { useRunHistory } from '../lib/runs/useRunHistory'
 import { useRunSession } from '../lib/runs/useRunSession'
 import { snapToGrid } from '../lib/grid'
@@ -47,6 +47,7 @@ import { DeleteTeamDialog } from './home/DeleteTeamDialog'
 import { TeamReviewDialog } from './run/TeamReviewDialog'
 import { Home } from './home/Home'
 import { ALLOW_SWITCHES } from '../lib/team-file/allow'
+import type { AllowSwitch } from '../lib/team-file/types'
 import type { InspectedCapability } from './canvas/CapabilityInspector'
 import { LayerLegend, type LayerSolo } from './canvas/LayerLegend'
 import { ParseFailureModal } from './canvas/ParseFailureModal'
@@ -60,10 +61,9 @@ import { BuildResourceInspector } from './canvas/BuildResourceInspector'
 import { NotionPagePicker } from './canvas/NotionPagePicker'
 import { BuildInspector } from './canvas/BuildInspector'
 import { ComponentPalette } from './library/ComponentPalette'
-import { MessageSquareText, Play, Wrench } from 'lucide-react'
+import { MessageSquareText, MessagesSquare, Wrench, X } from 'lucide-react'
 import { Composer, type ComposerState } from './composer/Composer'
 import { RoutineNote } from './composer/RoutineNote'
-import { RunHistory } from './composer/RunHistory'
 import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './library'
 import { BriefEditStrip } from './memory/BriefEditStrip'
 import { CheckpointStrip } from './memory/CheckpointStrip'
@@ -74,6 +74,13 @@ import { HandoverPanel } from './run/HandoverPanel'
 import { LifecycleStrip } from './run/LifecycleStrip'
 import { ProvenancePanel } from './run/ProvenancePanel'
 import { DeliveryLane } from './run/DeliveryLane'
+import { AnswerDocument } from './chat/AnswerDocument'
+import { ChatResizer } from './chat/ChatResizer'
+import { TeamChat, type Prepared } from './chat/TeamChat'
+import type { TeamView } from './chat/WorkPiece'
+import { CHAT_WIDTH, clampChatWidth } from '../lib/chat/chatWidth'
+import { isDocument } from '../lib/chat/document'
+import type { ReceiptLine } from '../lib/story/receipt'
 import { PermissionPrompt } from './run/PermissionPrompt'
 import { EvidenceNodeCard, MoreEvidenceCard, OutputNodeCard, PromptNodeCard, RunNodeCard } from './run/StoryNodes'
 import { ChipDot } from './ui/glyphs'
@@ -125,6 +132,7 @@ const EMPTY_CAPABILITY_INVENTORY: CapabilityInventory = { skills: [], tools: [],
 const EMPTY_EVIDENCE: readonly Evidence[] = []
 /** Where this browser keeps the add panel's width. */
 const PALETTE_WIDTH_KEY = 'loomwatch.paletteWidth'
+const CHAT_WIDTH_KEY = 'loomwatch.chatWidth'
 
 interface WorkspaceProps {
   harnesses: DetectedHarness[]
@@ -142,7 +150,6 @@ interface WorkspaceProps {
   onRetryCapabilities?: () => void
   onDocumentOpen: () => void
   initialRunId: string | null
-  initialHistoryOpen?: boolean
 }
 
 type AnyNode = Node
@@ -221,7 +228,21 @@ function writeRunToUrl(runId: string | null) {
   window.history.replaceState({}, '', query ? `/?${query}` : '/')
 }
 
-export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds = [], harnessesLoading, harnessesError, onRetryHarnesses, capabilityInventory = EMPTY_CAPABILITY_INVENTORY, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities = () => {}, onDocumentOpen, initialRunId, initialHistoryOpen = false }: WorkspaceProps) {
+/** Whether the window is wide enough for Details beside the chat rather than over it. */
+function useWideScreen(): boolean {
+  const query = '(min-width: 1100px)'
+  const [wide, setWide] = useState(() => typeof window.matchMedia !== 'function' || window.matchMedia(query).matches)
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const media = window.matchMedia(query)
+    const change = () => setWide(media.matches)
+    media.addEventListener?.('change', change)
+    return () => media.removeEventListener?.('change', change)
+  }, [])
+  return wide
+}
+
+export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds = [], harnessesLoading, harnessesError, onRetryHarnesses, capabilityInventory = EMPTY_CAPABILITY_INVENTORY, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities = () => {}, onDocumentOpen, initialRunId }: WorkspaceProps) {
   const doc = useTeamDocument()
   const flow = useReactFlow()
   // Semantic zoom: the canvas carries its depth so every card can say more or less (lib/story/depth.ts).
@@ -237,7 +258,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   // ---- chrome state --------------------------------------------------------------------
   const [outputEditorOpen, setOutputEditorOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [historyOpen, setHistoryOpen] = useState(initialHistoryOpen)
   const [problemsOpen, setProblemsOpen] = useState(false)
   const [yamlOpen, setYamlOpen] = useState(false)
   const [compareOpen, setCompareOpen] = useState(false)
@@ -274,6 +294,24 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       // Not kept; the panel still has this width until the page is closed.
     }
   }, [paletteWidth])
+  // The chat's width beside Details, dragged at its edge (ADR 0051): kept in this browser only, like
+  // the add panel's, and `null` — CSS's own default — until someone drags it.
+  const [chatWidth, setChatWidth] = useState<number | null>(() => {
+    try {
+      const saved = Number(window.localStorage.getItem(CHAT_WIDTH_KEY))
+      return saved ? clampChatWidth(saved, window.innerWidth) : null
+    } catch {
+      return null
+    }
+  })
+  useEffect(() => {
+    try {
+      if (chatWidth === null) window.localStorage.removeItem(CHAT_WIDTH_KEY)
+      else window.localStorage.setItem(CHAT_WIDTH_KEY, String(chatWidth))
+    } catch {
+      // Not kept; the chat still has this width until the page is closed.
+    }
+  }, [chatWidth])
   /** The agent a skill, tool, folder or file is being dragged over, so its card can say it takes it. */
   const [dropAgentId, setDropAgentId] = useState<string | null>(null)
   const [solo, setSolo] = useState<LayerSolo>('both')
@@ -306,9 +344,10 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
 
   // ---- run state -----------------------------------------------------------------------
   const [activeRunId, setActiveRunId] = useState<string | null>(initialRunId)
-  const [runSetup, setRunSetup] = useState(false)
+  // A team opened from its chat in the team list lands in that chat (ADR 0051); with a piece of
+  // work named too — the chat reloaded — it lands there with that piece open in Details.
+  const [runSetup, setRunSetup] = useState(() => !initialRunId && new URLSearchParams(window.location.search).get('view') === 'chat')
   const [runPresentation, setRunPresentation] = useState<'delivery' | 'trace'>('delivery')
-  const [lastOpenedRun, setLastOpenedRun] = useState<{ id: string; path: string | null } | null>(initialRunId ? { id: initialRunId, path: doc.path } : null)
   // §15.2.1: the *configured* graph's positions are the document's in every state, so what is left
   // here is presentation-only: the two docked anchors, the Run card, and the evidence cards the
   // operator has dragged out of their fan. `runPositions` — which used to hold every agent's
@@ -337,7 +376,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const [followUpTarget, setFollowUpTarget] = useState<string | null>(null)
   /** The stopped run's checkpoints, read over REST so the strip can offer to continue from one. */
   const [checkpoints, setCheckpoints] = useState<{ runId: string; rows: Checkpoint[] } | null>(null)
-  const history = useRunHistory(historyOpen)
+  // Read for what still counts runs — the run's number in Details — never shown as a list: past
+  // work is in each team's chat (ADR 0051).
+  const history = useRunHistory(false)
   const schedules = useSchedules()
   const [routineBusy, setRoutineBusy] = useState(false)
   const inferredResponder = doc.mode === 'pipeline'
@@ -392,7 +433,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     setActiveRunId(runId)
     setRunPresentation('delivery')
     setRunSetup(false)
-    if (runId) setLastOpenedRun({ id: runId, path: doc.path })
     writeRunToUrl(runId)
     setOverlayPositions({})
     setFannedAgentId(null)
@@ -406,7 +446,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     setCheckpoints(null)
     // Solo is per-run view state too: a layer soloed in one story must not bleed into the next.
     setSolo('both')
-  }, [doc.path])
+  }, [])
   // The add panel is composition chrome; once a run is on screen it folds. Keyed on the path too:
   // before the document loads there is no panel mounted to hear the event. The full trace mounts
   // the panel again, and reviewing a run starts with the graph, not the catalogue — the folded
@@ -424,13 +464,12 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   // §15.2.2: the permanent Prompt node is the composer seen in a second place, so clicking it
   // puts the caret in the one editor rather than opening another.
   const focusComposer = useCallback(() => {
-    document.querySelector<HTMLTextAreaElement>('.lw-composer textarea')?.focus()
+    document.querySelector<HTMLTextAreaElement>('.tc-input, .lw-composer textarea')?.focus()
   }, [])
 
   const closeRun = useCallback(() => {
-    if (activeRunId) setLastOpenedRun({ id: activeRunId, path: doc.path })
     showRun(null)
-  }, [activeRunId, doc.path, showRun])
+  }, [showRun])
 
   // ---- team graph ----------------------------------------------------------------------
   const stepById = useMemo(() => new Map(doc.pipelineSteps.map((step) => [step.id, { ...step, step: step.step + (doc.teamSchedule ? 1 : 0) }])), [doc.pipelineSteps, doc.teamSchedule])
@@ -871,7 +910,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     return retried ? `Retry of Run ${attemptOf(retried)}` : null
   }, [activeRunId, record, retryOf, history.records, history.sessions])
 
-  const leadId = record?.entrypoint ?? doc.entrypoint ?? projection.promptAgentId
+  // Who the request goes to first: the one agent of a one-agent turn (ADR 0051), the stage a run
+  // started at, or the team's entrypoint.
+  const leadId = record?.onlyAgent ?? record?.startAt ?? record?.entrypoint ?? doc.entrypoint ?? projection.promptAgentId
   const agentOrder = useMemo(() => (runView ? causalOrder(doc.pipelineSteps.map((step) => step.id), projection.agents, leadId) : []), [runView, doc.pipelineSteps, projection.agents, leadId])
   const orderedAgentIds = useMemo(() => {
     if (!runView) return []
@@ -1450,6 +1491,76 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const memoryPanelOpen = Boolean(memoryOpen && !inspectedNode && !inspectedCapability && !inspectedEvidence && !handoverAgentId && !provenanceOpen && !scheduleOpen)
   /** Whether the deliverable, rather than the canvas, is the surface on screen. */
   const deliveryShown = (runView || runSetup) && runPresentation === 'delivery'
+  // ADR 0051: the Run tab is the team's chat. A run open beside it is its Details.
+  const detailsOpen = deliveryShown && runView
+  // Details' timeline asks to read a message: the chat shows it, in the piece it belongs to.
+  const [chatReveal, setChatReveal] = useState<{ runId: string; id: string; at: number } | null>(null)
+  const chatAgents = useMemo(() => {
+    const step = (id: string) => stepById.get(id)?.step ?? Infinity
+    return [...doc.nodes].sort((left, right) => step(left.id) - step(right.id)).map((node) => ({ id: node.id, name: node.data.agent.name || node.id, operator: node.data.agent.kind === 'operator' }))
+  }, [doc.nodes, stepById])
+  const chatTeam = useMemo<TeamView>(() => {
+    const members = chatAgents.filter((agent) => !agent.operator)
+    return {
+      names: new Map(chatAgents.map((agent) => [agent.id, agent.operator ? 'You' : agent.name])),
+      hues: new Map(chatAgents.map((agent) => [agent.id, agent.operator ? 0 : (members.indexOf(agent) % 6) + 1])),
+      parties: chatAgents.map((agent) => ({ id: agent.id, name: agent.name, operator: agent.operator })),
+      predecessors: handedBy,
+      order: doc.mode === 'pipeline' ? chatAgents.map((agent) => agent.id) : [],
+      operators: new Set(chatAgents.filter((agent) => agent.operator).map((agent) => agent.id)),
+      configs: new Map(doc.nodes.map((node) => [node.id, node.data.agent])),
+    }
+  }, [chatAgents, handedBy, doc.mode, doc.nodes])
+  /** Work starts on an exact snapshot of the file, as Run always has: save first (TNG89 §1.4). */
+  const prepareChat = useCallback(async (): Promise<Prepared> => {
+    if (['dirty', 'new'].includes(doc.documentChipState)) {
+      const saved = await doc.save()
+      if (!saved) return { ok: false, error: 'The team file could not be saved, so nothing was started.' }
+    }
+    return { ok: true, revision: doc.currentRevision() }
+  }, [doc])
+  const [chatReview, setChatReview] = useState<{ review: TeamReview; retry: () => void } | null>(null)
+  // ADR 0051: Details is open by default on a wide screen, beside the chat, and follows the newest
+  // piece of work — until you open an older piece (it stays there) or close it (it stays closed).
+  // Starting work from the chat follows again. A narrow screen keeps the chat first.
+  const wide = useWideScreen()
+  const [detailsFollow, setDetailsFollow] = useState(() => !initialRunId)
+  const [newestPiece, setNewestPiece] = useState<string | null>(null)
+  // The pane beside the chat shows one piece at a time: its answer, read as a document, or its
+  // record. A long answer is the document; a short one is read in the chat and has no Answer tab.
+  // `null` is the pane's own choice: following the newest work, a finished document is what you
+  // would read next, while work in progress shows its record.
+  const [paneTab, setPaneTab] = useState<'answer' | 'details' | null>(null)
+  const paneDocument = useMemo(() => detailsOpen && isDocument(responseText), [detailsOpen, responseText])
+  const shownTab = paneDocument && (paneTab ?? (detailsFollow && session.terminal ? 'answer' : 'details')) === 'answer' ? 'answer' : 'details'
+  const closeDetails = useCallback(() => { setDetailsFollow(false); closeRun(); setRunSetup(true) }, [closeRun])
+  const openDetails = useCallback((runId: string) => {
+    if (detailsOpen && activeRunId === runId && shownTab === 'details') { closeDetails(); return }
+    setDetailsFollow(runId === newestPiece)
+    setPaneTab('details')
+    if (activeRunId !== runId || !detailsOpen) showRun(runId)
+  }, [detailsOpen, activeRunId, shownTab, closeDetails, newestPiece, showRun])
+  const openAnswer = useCallback((runId: string) => {
+    if (detailsOpen && activeRunId === runId && shownTab === 'answer') { closeDetails(); return }
+    setDetailsFollow(runId === newestPiece)
+    setPaneTab('answer')
+    if (activeRunId !== runId || !detailsOpen) showRun(runId)
+  }, [detailsOpen, activeRunId, shownTab, closeDetails, newestPiece, showRun])
+  const followNewest = useCallback((runId: string | null) => {
+    setNewestPiece(runId)
+    if (runId && detailsFollow && wide && runId !== activeRunId) { setPaneTab(null); showRun(runId) }
+  }, [detailsFollow, wide, activeRunId, showRun])
+  const followStarted = useCallback((runId: string) => {
+    setDetailsFollow(true)
+    setPaneTab(null)
+    if (wide) showRun(runId)
+  }, [wide, showRun])
+  const allowAlways = useCallback((agentId: string, key: AllowSwitch) => {
+    doc.updateAgentAllow(agentId, key, true)
+    void doc.save()
+    const name = doc.nodes.find((node) => node.id === agentId)?.data.agent.name ?? agentId
+    setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === key)?.label.toLowerCase() ?? key} from now on.`)
+  }, [doc])
   const inspecting = Boolean(inspectedNode || inspectedCapability || inspectedEvidence || provenanceOpen || scheduleOpen || memoryPanelOpen)
   // Ask docks where the inspector does. It waits behind whatever holds the dock, and asking for it
   // again — the header button, ⌘J, the palette — clears the dock for it.
@@ -1914,6 +2025,14 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   // move to the stage that owns it. Trace frames the node on the canvas; Delivery opens the
   // stage, whose skills and tools panel is already scoped to it.
   const [attentionFocusAgentId, setAttentionFocusAgentId] = useState<string | null>(null)
+  // A finding of an answer's review is shown in Details: the record it points at, or the agent's work.
+  const openFinding = useCallback((runId: string, line: ReceiptLine) => {
+    setDetailsFollow(runId === newestPiece)
+    setPaneTab('details')
+    showRun(runId)
+    if (line.evidenceId) setInspectedEvidenceId(line.evidenceId)
+    else if (line.agentId) setAttentionFocusAgentId(line.agentId)
+  }, [newestPiece, showRun])
   const revealAttention = useCallback((alert: Attention) => {
     const evidence = alert.evidenceId ? projection.evidence.find((item) => item.id === alert.evidenceId) : undefined
     if (evidence) {
@@ -1999,8 +2118,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     // §1.2: the palette advertises ⌘↵, so it must do what ⌘↵ does. With nothing typed there is
     // no goal to run yet, and focusing the field is the honest half of the promise.
     { label: 'Run the team…', shortcut: '⌘↵', run: () => { if (composerText.trim()) void submit(); else document.querySelector<HTMLTextAreaElement>('.lw-composer textarea')?.focus() }, disabled: !doc.path },
-    { label: 'Run history', run: () => setHistoryOpen(true) },
-    ...(runView ? [{ label: 'Clear the run', shortcut: 'Esc', run: closeRun }] : []),
+    // In the chat, Esc closes Details and keeps the chat; the Build tab is how you leave it.
+    ...(runView ? [detailsOpen ? { label: 'Close details', shortcut: 'Esc', run: closeDetails } : { label: 'Clear the run', shortcut: 'Esc', run: closeRun }] : []),
     { label: 'Add agent…', run: toggleLibrary, disabled: !doc.path || !editable },
     { label: 'Save', shortcut: '⌘S', run: () => void doc.save(), disabled: !doc.path || !editable || !doc.isValid },
     { label: 'Open team…', run: () => setOpenPathOpen(true) },
@@ -2020,7 +2139,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     { label: 'Connections…', run: () => window.location.assign('/connections') },
     { label: 'Getting started guide', run: startTour },
     { label: 'Send feedback…', run: () => openFeedback({ screen: !doc.path ? 'home' : runView ? 'run' : 'build' }) },
-  ], [doc, editable, composerText, submit, openNewTeam, toggleLibrary, windowWidth, runView, closeRun, cycleProblem, problems.length, theme, notificationsOn, enableNotifications, layersVisible, fitCanvas, organize, canOrganize, askFor])
+  ], [doc, editable, composerText, submit, openNewTeam, toggleLibrary, windowWidth, runView, detailsOpen, closeDetails, closeRun, cycleProblem, problems.length, theme, notificationsOn, enableNotifications, layersVisible, fitCanvas, organize, canOrganize, askFor])
   // Words the palette has no command for are a request: hand them to Ask LoomWatch.
   const askUnavailable = ask.unavailable
   const askFallback = useCallback((query: string): CommandAction | null => {
@@ -2067,9 +2186,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
 
   useWorkspaceShortcuts({
     editable, doc, flow, theme, windowWidth, runView, layersVisible, session,
-    submit, openNewTeam, toggleLibrary, cycleProblem, clearSelection, closeRun, organize, fitCanvas,
+    submit, openNewTeam, toggleLibrary, cycleProblem, clearSelection, closeRun, closeDetails: detailsOpen ? closeDetails : undefined, organize, fitCanvas,
     pendingNodeDelete, setPendingNodeDelete, requestNodeDelete, deleteNodes, discardConfirm, setDiscardConfirm,
-    paletteOpen, setPaletteOpen, historyOpen, setHistoryOpen, problemsOpen, setProblemsOpen,
+    paletteOpen, setPaletteOpen, problemsOpen, setProblemsOpen,
     yamlOpen, setYamlOpen, compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
     handoverAgentId, setHandoverAgentId, inspectedCapability, provenanceOpen, setProvenanceOpen, memoryOpen, setMemoryOpen,
     fannedAgentId, setFannedAgentId, setSolo, setSweeping,
@@ -2161,7 +2280,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   }, [projection.startedAt, record?.startedAt, record?.createdAt])
 
   // Lineage as a thread: follow-ups indented under the run they follow, retries labelled as today.
-  const historyEntries = useMemo(() => threadHistory(mergeHistory(history.records, history.sessions)), [history.records, history.sessions])
   const leadAgent = projection.agents.find((agent) => agent.id === leadId)
   const lifecycleResult = phase === 'queued' || phase === 'starting' ? 'not started' : phase === 'running' ? (responseText ? 'streaming' : 'pending') : phase === 'succeeded' ? 'done' : phase
   const loadedYaml = doc.loadedYaml ?? ''
@@ -2212,16 +2330,16 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     // `build-graph` is the canvas's own presentation — card and edge anatomy, handles, backdrop —
     // and both surfaces that draw the graph set it. `build-workspace` is Build's page layout alone.
     'lw-shell', !runView && !runSetup ? 'build-workspace' : '', runPresentation === 'trace' || (!runView && !runSetup) ? 'build-graph' : '', `mode-${doc.mode}`, libraryDragging ? 'dragging' : '', nodeDragging ? 'node-dragging' : '', inspecting ? 'inspecting' : '', sweeping ? 'sweeping' : '',
-    soloActive === 'configured' ? 'solo-configured' : soloActive === 'observed' ? 'solo-observed' : '', runView ? 'run-shown' : '', deliveryShown ? 'delivery-shown' : '',
+    soloActive === 'configured' ? 'solo-configured' : soloActive === 'observed' ? 'solo-observed' : '', runView ? 'run-shown' : '', deliveryShown ? 'delivery-shown' : '', detailsOpen ? 'details-open' : '',
     libraryCollapsed ? 'lib-collapsed' : 'lib-open',
     ask.open && !askDockBusy ? 'ask-docked' : '',
   ].filter(Boolean).join(' ')
 
   return (
     <CanvasActionsContext.Provider value={canvasActions}>
-      <div className={shellClass} style={{ '--lw-palette-w': `${paletteWidth}px` } as CSSProperties} data-tour="workspace" data-tour-agents={doc.nodes.length} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME) || event.dataTransfer.types.includes(EVIDENCE_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) { setLibraryDragging(false); setDropAgentId(null) } }}>
+      <div className={shellClass} style={{ '--lw-palette-w': `${paletteWidth}px`, ...(chatWidth === null ? {} : { '--tc-chat-w': `clamp(${CHAT_WIDTH.min}px, ${chatWidth}px, calc(100vw - ${CHAT_WIDTH.details}px))` }) } as CSSProperties} data-tour="workspace" data-tour-agents={doc.nodes.length} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME) || event.dataTransfer.types.includes(EVIDENCE_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) { setLibraryDragging(false); setDropAgentId(null) } }}>
         {/* ADR 0040: an agent paused on a request its switches do not cover, waiting for you. */}
-        {runView && record && (record.permissionRequests?.length ?? 0) > 0 && (
+        {runView && !deliveryShown && record && (record.permissionRequests?.length ?? 0) > 0 && (
           <PermissionPrompt
             run={record}
             onAlwaysAllow={editable && sameTeamFile(doc.path, record.teamPath) ? (agentId, key) => {
@@ -2233,37 +2351,79 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           />
         )}
         {deliveryShown ? (
-          <DeliveryLane
-            key={activeRunId ?? 'new-run'}
-            planned={runSetup}
-            appProblems={appProblemByAgent}
-            onNewRun={() => { closeRun(); setRunSetup(true); window.setTimeout(focusComposer, 0) }}
-            run={record && !runSetup ? record : null}
-            sendsTo={runSetup && doc.teamDeliver?.notion ? 'Notion' : null}
-            harnessLabels={new Map(doc.nodes.map((node) => [node.id, appLabelForAgent(node.data.agent, harnesses)]))}
-            pipeline={(record?.mode ?? doc.mode) === 'pipeline'}
-            linearPipeline={doc.edges.length === doc.nodes.length - 1 && doc.nodes.every((node) => doc.edges.filter((edge) => edge.source === node.id).length <= 1 && doc.edges.filter((edge) => edge.target === node.id).length <= 1)}
-            onTrace={() => { if (runSetup) closeRun(); else setRunPresentation('trace') }}
-            onAllow={editable ? (agentId, key) => {
-              // ADR 0037: switched on and saved in one step, so the next run is not refused again.
-              doc.updateAgentAllow(agentId, key, true)
-              void doc.save()
-              const name = doc.nodes.find((node) => node.id === agentId)?.data.agent.name ?? agentId
-              setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === key)?.label.toLowerCase() ?? key} from the next run.`)
-            } : undefined}
-            prompt={record?.prompt ?? projection.prompt ?? composerText} attempt={attempt} phase={phase} branch={retryOf.get(activeRunId ?? '') ? 'Retry of an earlier run' : 'Initiating branch'} elapsed={elapsed} mode={session.mode}
-            agents={graph.nodes.filter((node): node is AgentNode => node.type === 'agent').sort((a, b) => runSetup ? (stepById.get(a.id)?.step ?? Infinity) - (stepById.get(b.id)?.step ?? Infinity) : 0)}
-            evidenceByAgent={new Map(orderedAgentIds.map((id) => [id, projection.evidence.filter((item) => item.agentId === id)]))}
-            ownerLabels={ownerLabels}
-            output={(graph.nodes.find((node) => node.id === '__output') as OutputNode | undefined)?.data ?? { text: responseText, phase, phaseText: '', producer: null, producerLabel: 'the responder', mode: session.mode, streaming: false, pending: false, strip: null, compact: false, expanded: false, terminal: session.terminal }}
-            projection={projection}
-            evidenceComplete={session.evidenceComplete}
-            selectedEvidenceId={inspectedEvidenceId}
-            focusAgentId={attentionFocusAgentId}
-            handedBy={handedBy}
-            onInspectEvidence={(id) => setInspectedEvidenceId(id)}
-            onSelectAgent={(id) => doc.onNodesChange(doc.nodes.map((node) => ({ id: node.id, type: 'select' as const, selected: node.id === id })))}
+          <>
+          <TeamChat
+            teamPath={doc.path}
+            teamName={doc.teamName ?? (doc.path.split('/').pop() ?? doc.path).replace(/\.ya?ml$/i, '')}
+            agents={chatAgents}
+            team={chatTeam}
+            steps={doc.pipelineSteps.length || doc.nodes.length}
+            suggestion={doc.teamSchedule?.prompt?.trim() || null}
+            routine={routine ? <RoutineNote schedule={routine} onRunNow={() => void runRoutineNow()} busy={routineBusy} /> : undefined}
+            detailsRunId={detailsOpen ? activeRunId : null}
+            answerRunId={detailsOpen && shownTab === 'answer' ? activeRunId : null}
+            onOpenAnswer={openAnswer}
+            blocked={composerState.kind === 'blocked' ? composerState.reason : null}
+            prepare={prepareChat}
+            onDetails={openDetails}
+            onNewest={followNewest}
+            onStarted={followStarted}
+            onTeamReview={(review, retry) => setChatReview({ review, retry })}
+            onStale={() => void doc.checkDiskRevision()}
+            onAlwaysAllow={editable ? allowAlways : undefined}
+            announce={setStatusAnnouncement}
+            reveal={chatReveal}
+            onOpenFinding={openFinding}
           />
+          {detailsOpen && wide && <ChatResizer width={chatWidth} onResize={setChatWidth} />}
+          {detailsOpen && (
+            <aside className="tc-details" aria-label="Details of this piece of work">
+              <header className="tc-details-head">
+                {paneDocument ? (
+                  <div className="tc-pane-tabs" role="tablist" aria-label="Show">
+                    <button type="button" role="tab" id="tc-pane-answer" aria-selected={shownTab === 'answer'} aria-controls="tc-pane-body" onClick={() => setPaneTab('answer')}>Answer</button>
+                    <button type="button" role="tab" id="tc-pane-details" aria-selected={shownTab === 'details'} aria-controls="tc-pane-body" onClick={() => setPaneTab('details')}>Details</button>
+                  </div>
+                ) : <span className="tc-pane-title">Details</span>}
+                <h2>{record?.prompt ? record.prompt.split('\n')[0] : ''}</h2>
+                <button type="button" className="btn btn-icon" onClick={closeDetails} aria-label="Close details"><X size={15} aria-hidden="true" /></button>
+              </header>
+              <div className="tc-details-body" id="tc-pane-body" role={paneDocument ? 'tabpanel' : undefined} aria-labelledby={paneDocument ? `tc-pane-${shownTab}` : undefined}>
+                {shownTab === 'answer' ? (
+                  <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} />
+                ) : (
+                <DeliveryLane
+                  key={activeRunId ?? 'new-run'}
+                  planned={runSetup}
+                  appProblems={appProblemByAgent}
+                  harnessLabels={new Map(doc.nodes.map((node) => [node.id, appLabelForAgent(node.data.agent, harnesses)]))}
+                  pipeline={(record?.mode ?? doc.mode) === 'pipeline'}
+                  linearPipeline={doc.edges.length === doc.nodes.length - 1 && doc.nodes.every((node) => doc.edges.filter((edge) => edge.source === node.id).length <= 1 && doc.edges.filter((edge) => edge.target === node.id).length <= 1)}
+                  onTrace={() => { if (runSetup) closeRun(); else setRunPresentation('trace') }}
+                  onAllow={editable ? (agentId, key) => {
+                    // ADR 0037: switched on and saved in one step, so the next run is not refused again.
+                    doc.updateAgentAllow(agentId, key, true)
+                    void doc.save()
+                    const name = doc.nodes.find((node) => node.id === agentId)?.data.agent.name ?? agentId
+                    setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === key)?.label.toLowerCase() ?? key} from the next run.`)
+                  } : undefined}
+                  prompt={record?.prompt ?? projection.prompt ?? composerText} attempt={attempt} phase={phase} branch={retryOf.get(activeRunId ?? '') ? 'Retry of an earlier run' : 'Initiating branch'} elapsed={elapsed} mode={session.mode}
+                  agents={graph.nodes.filter((node): node is AgentNode => node.type === 'agent' && (!record?.onlyAgent || node.id === record.onlyAgent)).sort((a, b) => runSetup ? (stepById.get(a.id)?.step ?? Infinity) - (stepById.get(b.id)?.step ?? Infinity) : 0)}
+                  evidenceByAgent={new Map(orderedAgentIds.map((id) => [id, projection.evidence.filter((item) => item.agentId === id)]))}
+                  ownerLabels={ownerLabels}
+                  output={(graph.nodes.find((node) => node.id === '__output') as OutputNode | undefined)?.data ?? { text: responseText, phase, phaseText: '', producer: null, producerLabel: 'the responder', mode: session.mode, streaming: false, pending: false, strip: null, compact: false, expanded: false, terminal: session.terminal }}
+                  projection={projection}
+                  selectedEvidenceId={inspectedEvidenceId}
+                  focusAgentId={attentionFocusAgentId}
+                  onInspectEvidence={(id) => setInspectedEvidenceId(id)}
+                  onRevealMessage={activeRunId ? (id) => setChatReveal({ runId: activeRunId, id, at: Date.now() }) : undefined}
+                  onSelectAgent={(id) => doc.onNodesChange(doc.nodes.map((node) => ({ id: node.id, type: 'select' as const, selected: node.id === id })))}
+                />
+                )}
+              </div>
+            </aside>
+          )}
+          </>
         ) : (
         <div ref={canvasRef} role="application" aria-label={runView ? 'Run graph' : 'Team canvas'} className="lw-canvas" data-depth={depth}>
           <ReactFlow
@@ -2335,11 +2495,11 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>
           {/* The brand is the way home: every team is one click from the list of all teams. */}
           <a className="delivery-brand" href="/" aria-label="LoomWatch — all teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}>LoomWatch</a>
-          <WorkspaceMenu runView={runView} onHistory={() => setHistoryOpen(true)} onMemory={() => { clearSelection(); setMemoryOpen(true) }} />
+          <WorkspaceMenu runView={runView} onMemory={() => { clearSelection(); setMemoryOpen(true) }} />
           <div className="needs-you-anchor"><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray(runView ? activeRunId : null)}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
             <SegmentThumb />
-            <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); if (activeRunId) setRunPresentation('delivery'); else if (lastOpenedRun?.path === doc.path) showRun(lastOpenedRun.id); else { setRunSetup(true); setRunPresentation('delivery') } }}><Play size={15} />Run</button>
+            <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); setRunPresentation('delivery'); if (!activeRunId) setRunSetup(true) }}><MessagesSquare size={15} />Chat</button>
             <button type="button" aria-pressed={!runView && !runSetup} onClick={() => { clearSelection(); closeRun() }}><Wrench size={15} />Build</button>
           </nav>
           <DocumentSwitcher
@@ -2569,7 +2729,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         )}
         </div>
 
-        <Composer compact={deliveryShown} agentNames={nodeNames}
+        {!deliveryShown && <Composer compact={deliveryShown} agentNames={nodeNames}
           reviewContext={waiting?.context ? { label: `What ${nodeNames.get(waiting.handoverFrom ?? '') ?? waiting.name} handed over`, text: waiting.context } : undefined}
           replyAgents={(record?.replyableAgents ?? []).map((id) => ({ id, name: nodeNames.get(id) ?? id }))}
           onReply={(id) => void replyToAgent(id)} replySending={answerSending}
@@ -2580,16 +2740,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           followUpStages={followUpStages} followUpTarget={followUpTarget} onFollowUpTargetChange={setFollowUpTarget}
           onFollowUp={runView && activeRunId ? () => void followUp() : undefined}
           switchBanner={doc.modeSwitchBanner}
-        />
-        {/* Opened from the menu on every screen (ADR 0043), so it is the shell's, not the
-            composer's: Build hides the composer, and the drawer with it. */}
-        {historyOpen && (
-          <RunHistory entries={historyEntries} currentId={activeRunId} loading={!history.loaded} error={history.error ?? history.unavailable} onOpen={(entry) => {
-            setHistoryOpen(false)
-            if (entry.teamPath && entry.teamPath !== doc.path) window.location.assign(historyRunUrl(entry))
-            else showRun(entry.id)
-          }} onClose={() => setHistoryOpen(false)} />
-        )}
+        />}
 
         {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
         {discardConfirm && <InlineConfirm message="Discard changes and reload from disk?" confirmLabel="Discard changes" onConfirm={() => { setDiscardConfirm(false); void doc.reloadFromDisk() }} onCancel={() => setDiscardConfirm(false)} />}
@@ -2601,6 +2752,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         {deleteTeamOpen && doc.path && <DeleteTeamDialog path={doc.path} name={doc.teamName ?? (doc.path.split('/').pop() ?? doc.path).replace(/\.ya?ml$/i, '')} onDeleted={() => window.location.assign('/')} onClose={() => setDeleteTeamOpen(false)} />}
         {/* ADR 0048: a team from outside LoomWatch is checked before its first run. */}
         {teamReview && <TeamReviewDialog review={teamReview} onTrust={trustAndRun} onClose={dismissReview} />}
+        {chatReview && <TeamReviewDialog review={chatReview.review} onTrust={async () => { await approveTeam(chatReview.review.teamPath, chatReview.review.teamRevision); const { retry } = chatReview; setChatReview(null); retry() }} onClose={() => setChatReview(null)} />}
         {yamlOpen && <YamlSheet title={yamlHighlightLine ? `YAML preview · line ${yamlHighlightLine}` : 'YAML preview'} yaml={doc.yamlPreview} highlightLine={yamlHighlightLine} onClose={() => { setYamlOpen(false); setYamlHighlightLine(null) }} />}
         {compareOpen && doc.externalChange && (
           <YamlSheet title="Disk ↔ in-memory YAML" yaml={unifiedYamlDiff(doc.externalChange.diskYaml, doc.yamlPreview)} onClose={() => setCompareOpen(false)} footer={<ConflictSheetFooter onKeepMine={doc.keepMine} onUseDisk={() => void doc.useDisk()} />} />

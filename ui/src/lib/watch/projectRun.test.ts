@@ -27,6 +27,29 @@ const pipeline: RunEvent[] = [
 ]
 
 describe('projectRun', () => {
+  // ADR 0051: "Send now" stops an agent's turn so your note goes in at once. That cancel is what
+  // you asked for: it is not an alert, and the note's turn is the agent's answer.
+  it('takes a turn stopped for your note as expected, and never lists you as an agent', () => {
+    const events: RunEvent[] = [
+      event(0, 'process', { phase: 'spawned', pid: 1 }, 'writer'),
+      event(1, 'message', { role: 'user', content: { type: 'text', text: 'Write the digest.' } }, 'writer'),
+      event(2, 'session_meta', { phase: 'turn_interrupted', reason: 'operator_note' }, 'writer'),
+      event(3, 'turn_end', { stopReason: 'cancelled' }, 'writer'),
+      event(4, 'message', { role: 'user', content: { type: 'text', text: 'Keep it short.' } }, 'operator'),
+      event(5, 'message', { role: 'user', content: { type: 'text', text: '## A note from you\nKeep it short.' } }, 'writer'),
+      event(6, 'message', { role: 'agent', content: { type: 'text', text: 'Short digest.' } }, 'writer'),
+      event(7, 'turn_end', { stopReason: 'end_turn' }, 'writer'),
+    ].map((item, index) => index === 2 || index === 4 ? { ...item, raw: { source: 'loomwatch', phase: index === 2 ? 'turn_interrupted' : 'operator_answer', to: 'writer' } } : item)
+    const projection = projectRun(events, Infinity, { responder: 'writer' })
+    expect(projection.attention).toEqual([])
+    expect(projection.agents.map((agent) => agent.id)).toEqual(['writer'])
+    expect(projection.agents[0].reply).toBe('Short digest.')
+
+    // The counterfactual: a cancel nobody asked for is still an alert.
+    const unasked = projectRun(events.filter((item) => item.seq !== 2), Infinity, { responder: 'writer' })
+    expect(unasked.attention.map((alert) => alert.message)).toEqual(['Turn ended: cancelled'])
+  })
+
   it('reads the prompt from the first user message and the reply from the responder', () => {
     const projection = projectRun(pipeline, Infinity, { responder: 'reviewer' })
     expect(projection.prompt).toBe('Compare the two strategies.')

@@ -39,8 +39,6 @@ function shortcuts(overrides: Partial<WorkspaceShortcutContext> = {}) {
     setDiscardConfirm: vi.fn(),
     paletteOpen: false,
     setPaletteOpen: vi.fn(),
-    historyOpen: false,
-    setHistoryOpen: vi.fn(),
     problemsOpen: false,
     setProblemsOpen: vi.fn(),
     yamlOpen: false,
