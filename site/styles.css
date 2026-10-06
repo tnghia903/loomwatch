@@ -324,10 +324,35 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .dial button:hover, .seg button:hover { color: var(--ink); }
 .dial button[aria-checked="true"], .seg button[aria-checked="true"] { background: var(--accent-tint); color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
 
-/* 03 · Ask */
-.serif-h { margin: 0 0 16px; font: 400 30px/1.15 var(--serif); letter-spacing: -.01em; }
+/* 04–07 · The team's chat: one chat, four views of it, and one message box that goes where the work is. */
+.chat-body { display: grid; gap: 14px; }
+.chat-body > *, .watch-body > * { min-width: 0; }
+.members { list-style: none; margin: 0; padding: 0 0 12px; display: flex; flex-wrap: wrap; gap: 6px 16px; border-bottom: 1px solid var(--hairline); }
+.mem { display: inline-flex; align-items: center; gap: 7px; font: 500 13px/1 var(--sans); color: var(--ink); }
+.mem .tc-av { width: 22px; height: 22px; font-size: 8.5px; }
+.mem em { font: 400 12px/1 var(--sans); font-style: normal; color: var(--ink-3); }
+.mem.working em { color: var(--live); }
+.mem.waiting em { color: var(--accent); }
+.tc-av.working { border-color: var(--live); animation: ring 2.4s ease-in-out infinite; }
+@keyframes ring { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 28%, transparent); } }
+.clog { display: grid; align-content: start; gap: 10px; max-height: 300px; overflow-y: auto; overscroll-behavior: contain; padding: 2px; }
+.tc-empty { text-align: center; padding: 6px 8px 2px; }
+.tc-empty h3 { margin: 0; font: 400 26px/1.15 var(--serif); letter-spacing: -.01em; }
+.tc-empty p { margin: 8px auto 0; max-width: 420px; font-size: 13.5px; line-height: 1.5; color: var(--ink-2); }
+.tc-empty b { color: var(--accent); font-weight: 600; }
+.ask-piece { display: grid; gap: 6px; }
+.piece-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; font-size: 12.5px; color: var(--ink-2); }
+.piece-line b { color: var(--ink); font-weight: 600; }
+.piece-line .link { font-size: 12.5px; }
+/* The team on a piece of work as a thread on the loom: each agent a knot on one gold line. */
+.weft { position: relative; display: inline-flex; gap: 8px; flex: none; }
+.weft::before { content: ''; position: absolute; left: 11px; right: 11px; top: 50%; height: 1.5px; margin-top: -.75px; background: var(--accent-dim); }
+.weft .tc-av { position: relative; width: 22px; height: 22px; font-size: 8.5px; }
+.tc-to { font-size: 12px; color: var(--ink-3); }
+.req-h { margin-bottom: -6px; }
+.req-h[hidden], .requests[hidden] { display: none; }
 .requests { display: grid; gap: 8px; }
-.req { display: grid; grid-template-columns: 18px 1fr; gap: 2px 12px; align-items: start; width: 100%; padding: 11px 14px; text-align: left; border: 1px solid var(--hairline-2); border-radius: 10px; background: transparent; cursor: pointer; }
+.req { display: grid; grid-template-columns: 18px 1fr; gap: 2px 12px; align-items: start; width: 100%; padding: 10px 14px; text-align: left; border: 1px solid var(--hairline-2); border-radius: 10px; background: transparent; cursor: pointer; }
 .req:hover { border-color: var(--accent-dim); }
 .req[aria-checked="true"] { background: var(--accent-tint); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .req .dot { grid-row: span 2; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--hairline-2); margin-top: 2px; display: grid; place-items: center; }
@@ -336,37 +361,52 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .req .t { font: 500 14.5px/1.4 var(--sans); color: var(--ink); }
 .req .m { font: 400 12px/1.4 var(--sans); color: var(--ink-3); }
 .req .m b { font-weight: 500; color: var(--ink-2); }
-.composer { margin-top: 16px; border: 1px solid var(--hairline-2); border-radius: 14px; background: var(--panel); padding: 12px 12px 10px 16px; }
-.composer:focus-within { border-color: var(--accent-dim); }
-.composer textarea { width: 100%; border: 0; background: transparent; resize: none; color: var(--ink); font: 400 15px/1.5 var(--sans); outline: none; padding: 0; }
-.composer-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px; }
-.hint { font-size: 12px; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; }
-.sim-note { margin: 12px 0 0; font-size: 12px; color: var(--ink-3); }
+.sim-note { margin: 0; font-size: 12px; color: var(--ink-3); }
 
-/* 04 · Watch */
-.stages { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr)); gap: 8px; }
-.stage { position: relative; padding: 10px 12px; border: 1px solid var(--hairline-2); border-radius: 8px; min-width: 0; transition: border-color .24s var(--ease), box-shadow .24s var(--ease); }
-.stage .top-line { display: flex; align-items: center; gap: 7px; font: 600 10px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
-.stage .top-line .n { font: 500 11px/1 var(--mono); letter-spacing: 0; color: var(--ink-3); }
-.stage .nm { font: 600 13.5px/1.2 var(--sans); margin-top: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.stage .ap { font: 400 11px/1 var(--mono); color: var(--ink-3); margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.stage.you { border-style: dashed; border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
-.stage[data-state="running"] { border-color: var(--live); box-shadow: 0 0 0 1px var(--live) inset; animation: perimeter 2.4s ease-in-out infinite; }
-.stage[data-state="running"] .top-line { color: var(--live); }
-.stage[data-state="waiting"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-.stage[data-state="waiting"] .top-line { color: var(--accent); }
-.stage[data-state="done"] .top-line { color: var(--ok); }
-@keyframes perimeter { 50% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--live) 30%, transparent) inset; } }
+/* The message box. The line above it says where a message goes before it is sent. */
+.box { display: grid; gap: 8px; padding: 10px 10px 10px 14px; border: 1px solid var(--hairline-2); border-radius: 14px; background: var(--panel); animation: ev-in .24s var(--ease); }
+.box:focus-within { border-color: var(--accent-dim); }
+.box-where { margin: 0; display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: start; gap: 2px 8px; font: 500 12.5px/1.35 var(--sans); color: var(--ink-2); }
+.box-where svg { width: 14px; height: 14px; margin-top: 1px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.box-where em { grid-column: 2; }
+.box[data-route="team"] .box-where, .box[data-route="agent"] .box-where { color: var(--accent); }
+.box[data-route="note"] .box-where { color: var(--live); }
+.box-where em { font-style: normal; font-weight: 400; color: var(--ink-3); }
+.box-where em.off { color: var(--alert); }
+.box-try { display: flex; flex-wrap: wrap; gap: 6px; }
+.box-try[hidden] { display: none; }
+.try { max-width: 100%; height: 26px; padding: 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px dashed var(--hairline-2); border-radius: 999px; background: transparent; color: var(--ink-2); font: 400 12px/1 var(--sans); cursor: pointer; }
+.try:hover { border-color: var(--accent-dim); color: var(--ink); }
+.box-field { display: flex; align-items: flex-end; gap: 10px; }
+.box textarea { flex: 1; min-width: 0; padding: 2px 0; border: 0; background: transparent; resize: none; color: var(--ink); font: 400 15px/1.5 var(--sans); outline: none; }
+.box textarea::placeholder { color: var(--ink-3); }
+.box-send { display: flex; gap: 6px; flex: none; }
+.box-send [hidden] { display: none; }
+.box-now { color: var(--live); border-color: color-mix(in srgb, var(--live) 40%, transparent); }
+.box-away { margin: 0; padding: 10px 12px; border: 1px dashed var(--hairline-2); border-radius: 10px; font-size: 12.5px; color: var(--ink-3); }
+.box-away .link { font-size: 12.5px; }
+.box-slot:empty { display: none; }
 
-/* Status shapes: shape first, colour second, word third. */
-.st { width: 10px; height: 10px; flex: none; display: inline-block; border-radius: 50%; border: 1.5px solid var(--ink-3); position: relative; }
-[data-state="running"] > .top-line .st { background: var(--live); border-color: var(--live); animation: breathe 2.4s ease-in-out infinite; }
-[data-state="waiting"] > .top-line .st { border-radius: 1.5px; transform: rotate(45deg) scale(.85); border-color: var(--accent); }
-[data-state="done"] > .top-line .st { background: var(--ok); border-color: var(--ok); }
-[data-state="done"] > .top-line .st::after { content: ''; position: absolute; left: 2.6px; top: .6px; width: 2.6px; height: 5px; border: solid var(--panel-solid); border-width: 0 1.4px 1.4px 0; transform: rotate(45deg); }
-[data-state="skipped"] > .top-line .st { border-style: dashed; opacity: .5; }
-
-.narration { margin: 18px 0 6px; font: 400 21px/1.35 var(--serif); color: var(--ink); min-height: 1.35em; text-wrap: pretty; }
+/* 05 · Watch: the piece of work, what the agents say, and Details beside it. */
+.watch-body { display: grid; gap: 12px; }
+.piece { display: grid; gap: 10px; }
+.piece-head { display: grid; gap: 8px; }
+.piece-head:empty { display: none; }
+.picked { margin: 0; justify-self: end; font-size: 12px; font-style: italic; color: var(--ink-3); }
+.talk { display: flex; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px dashed var(--hairline-2); }
+.talk-line { flex: 1; min-width: 0; font-size: 13px; color: var(--ink-2); }
+.talk-line b { color: var(--ink); font-weight: 600; }
+.talk-line .tc-dots { margin-left: 6px; color: var(--live); vertical-align: 1px; }
+.tlink { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 28px; padding: 0 9px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ink-2); font: 500 12.5px/1 var(--sans); cursor: pointer; }
+.tlink svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+.tlink:hover { color: var(--ink); border-color: var(--hairline-2); }
+.tlink[aria-expanded="true"] { color: var(--accent); }
+.details { padding-top: 12px; border-top: 1px solid var(--hairline); }
+.details[hidden] { display: none; }
+.details-head { margin: 0; display: flex; align-items: baseline; gap: 8px; }
+.details-head b { font: 600 10.5px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.details-head span { font-size: 12px; color: var(--ink-3); }
+.narration { margin: 10px 0 4px; font: 400 19px/1.35 var(--serif); color: var(--ink); min-height: 1.35em; text-wrap: pretty; }
 .lanes-wrap { margin-top: 8px; }
 .lanes { width: 100%; height: auto; display: block; overflow: visible; }
 .ln-name { font: 600 11.5px var(--sans); fill: var(--ink-2); }
@@ -379,22 +419,17 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .ln-stitch { stroke: var(--ink-2); stroke-width: 1.4; }
 .ln-hand { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 3; fill: none; }
 .ln-dot { fill: var(--accent); }
+.ln-note { fill: var(--accent); stroke: var(--panel-solid); stroke-width: 1.5; }
+.ln-cut { stroke: var(--ink); stroke-width: 1.6; }
 .ln-head { stroke: var(--accent); stroke-width: 1.5; }
 .ln-axis { font: 400 10px var(--mono); fill: var(--ink-3); }
 .scrub { margin-top: 10px; }
 .scrub label { display: flex; align-items: center; gap: 12px; }
 .scrub input { flex: 1; accent-color: var(--accent-fill); height: 24px; }
-.tchat { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); }
-.tchat-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.tchat-faces { display: flex; flex: none; gap: 3px; }
-.tchat-faces .tc-av { width: 26px; height: 26px; font-size: 9.5px; }
-.tchat-title { display: grid; min-width: 0; line-height: 1.3; }
-.tchat-title b { font: 600 13px/1.3 var(--sans); color: var(--ink); }
-.tchat-title span { font-size: 12px; color: var(--ink-3); }
-.tchat-log { list-style: none; margin: 0; padding: 2px 2px 4px; display: grid; align-content: start; gap: 9px; min-height: 120px; max-height: 420px; overflow-y: auto; overscroll-behavior: contain; }
+.tchat-log { list-style: none; margin: 0; padding: 2px 2px 4px; display: grid; align-content: start; gap: 9px; max-height: 340px; overflow-y: auto; overscroll-behavior: contain; }
 /* Scrolled down: earlier messages fade out at the top, so there is plainly more above. */
 .tchat-log.clipped { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 36px); mask-image: linear-gradient(to bottom, transparent, #000 36px); }
-.tchat-none { color: var(--ink-3); font: italic 400 16px/1.4 var(--serif); }
+.tchat-none { color: var(--ink-3); font: italic 400 15px/1.4 var(--serif); }
 /* Each member keeps one colour: neither gold, which is you, nor blue, which is working now. */
 .m-researcher { --m: var(--m-researcher); }
 .m-writer { --m: var(--m-writer); }
@@ -440,11 +475,23 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 @keyframes ev-in { from { opacity: 0; transform: translateY(4px); } }
 .needs-you { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 14px; height: 40px; border-radius: 9px; border: 1px dashed var(--accent); color: var(--accent); background: var(--accent-tint); text-decoration: none; font: 500 14px/1 var(--sans); }
 .needs-you:hover { border-style: solid; }
+.piece .needs-you, .piece .ask-perm { margin-top: 0; }
+/* Your notes: a team note starts nothing, so its outline is dashed; a note to an agent says when it was taken. */
+.tc-msg.teamnote .tc-bubble { border-style: dashed; }
+.tc-msg.note .tc-under { color: var(--live); }
+.tc-msg.note.taken .tc-under { color: var(--ok); }
 
-/* 05 · Review */
+
+/* 06 · Review: decided on the message that asks */
 .win-review[data-state="waiting"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
-.rv-q { margin: 0; font: 400 24px/1.25 var(--serif); text-wrap: pretty; }
-.rv-box { margin-top: 16px; padding: 14px 16px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--ground); }
+.rv-q { margin: 0; font: 400 19px/1.3 var(--serif); text-wrap: pretty; }
+.rv-msg .tc-main, .ans-msg .tc-main { justify-items: stretch; }
+.rv-msg .tc-bubble, .ans-msg .tc-bubble { max-width: 100%; padding: 12px 14px; }
+.tc-turn { display: grid; gap: 6px; justify-items: end; margin-top: 6px; }
+.tc-turn .rv-acts { margin-top: 0; }
+.tc-tip { margin: 0; font-size: 12px; color: var(--ink-3); }
+.tc-tip[hidden] { display: none; }
+.rv-box { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--ground); }
 .rv-box ol { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 8px; font-size: 14px; line-height: 1.5; }
 .rv-box li::marker { font: 500 12px var(--mono); color: var(--ink-3); }
 .src { display: inline-flex; align-items: center; height: 19px; padding: 0 7px; margin-left: 6px; border-radius: 4px; border: 1px solid var(--hairline-2); font: 400 10.5px/1 var(--mono); color: var(--ink-2); vertical-align: 1px; white-space: nowrap; }
@@ -471,11 +518,30 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .rv-log { margin: 18px 0 0; padding: 0; list-style: none; text-align: left; display: grid; gap: 6px; font-size: 13.5px; color: var(--ink-2); border-top: 1px solid var(--hairline); padding-top: 14px; }
 .rv-log b { color: var(--accent); font-weight: 600; }
 
-/* 06 · Result */
+/* 07 · Result: the answer in the chat, and its record in Details */
 .res-empty { text-align: center; padding: 40px 10px; }
 .res-empty .big { margin: 0; font: 400 26px/1.25 var(--serif); }
 .res-empty p { color: var(--ink-2); font-size: 14px; margin: 10px auto 0; max-width: 360px; }
-.result-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
+.result-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.res-chat { display: grid; gap: 12px; }
+.res-chat > .piece-line { padding-left: 2px; }
+.ans-msg .reader h3 { margin-top: 0; font-size: 28px; }
+.ans-doc { display: grid; gap: 4px; }
+.ans-doc b { font: 400 20px/1.2 var(--serif); }
+.ans-doc span { font-size: 13px; color: var(--ink-2); }
+.ans-doc .m { font: 400 11px/1.3 var(--mono); color: var(--ink-3); }
+.ans-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }
+.ans-tools .copied { font-size: 12px; color: var(--ok); }
+.verdict, .tbtn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--hairline-2); background: transparent; font: 500 12px/1 var(--sans); cursor: pointer; }
+.verdict { border-radius: 999px; }
+.verdict::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.verdict.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.verdict.warn { color: var(--alert); border: 1px dashed var(--alert); }
+.tbtn { border-radius: 7px; color: var(--ink-2); }
+.tbtn:hover { color: var(--ink); border-color: var(--accent-dim); }
+.res-details { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--hairline); }
+.slip .worth.flash { animation: worth 1.2s var(--ease); }
+@keyframes worth { 30% { background: color-mix(in srgb, var(--accent) 30%, transparent); } }
 .reader .micro { color: var(--ink-3); }
 .reader h3 { margin: 8px 0 0; font: 400 32px/1.1 var(--serif); letter-spacing: -.01em; }
 .reader .intro { margin: 8px 0 0; font: 400 18px/1.45 var(--serif); color: var(--ink-2); }
@@ -499,7 +565,7 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 .slip .worth { margin-top: 10px; padding-top: 10px; border-top: 1px dashed color-mix(in srgb, var(--slip-ink) 30%, transparent); }
 .slip .worth b { font-weight: 600; }
 .slip .worth .bad { color: #B42E28; }
-.slip .foot { margin-top: 10px; color: var(--slip-ink-2); font-size: 10.5px; }
+.slip .slip-foot { margin-top: 10px; color: var(--slip-ink-2); font-size: 10.5px; }
 .res-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .res-acts .copied { font-size: 12.5px; color: var(--ok); }
 
@@ -769,10 +835,12 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
   .card { flex-basis: auto; min-width: 0; }
   .edge { flex: 0 0 22px; width: 2px; height: 22px; align-self: center; }
   .edge::after { right: auto; top: auto; left: -4px; bottom: -1px; border: 5px solid transparent; border-top: 7px solid var(--warp); border-bottom: 0; }
-  .stages { gap: 6px; }
-  .stage { padding: 8px; }
-  .stage .top-line .word { display: none; }
-  .narration { font-size: 18px; }
+  .narration { font-size: 17px; }
+  .members { gap: 6px 12px; }
+  .box { padding: 10px; }
+  .box-field { flex-wrap: wrap; }
+  .box-send { width: 100%; justify-content: flex-end; }
+  .talk { flex-wrap: wrap; }
   .tchat-log { max-height: 340px; }
   .tc-notice { border-radius: 12px; }
   .btn, .dial button, .seg button, .tabs button { min-height: 44px; }

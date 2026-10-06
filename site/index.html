@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LoomWatch — Put AI agents to work as a team</title>
-  <meta name="description" content="A free, open-source Mac app that turns the command-line AI apps on your Mac, such as Claude Code, Codex and OpenCode, into one team. Hand each agent your folders, files and skills, ask in plain words, watch every step, and decide before the next agent builds on it.">
+  <meta name="description" content="A free, open-source Mac app that turns the command-line AI apps on your Mac, such as Claude Code, Codex and OpenCode, into one team. Hand each agent your folders, files and skills, talk to the team in one chat, watch every step, and decide before the next agent builds on it.">
   <meta name="theme-color" content="#08080A">
   <meta property="og:site_name" content="LoomWatch">
   <meta property="og:title" content="LoomWatch — Put AI agents to work as a team">
@@ -46,7 +46,7 @@
   <div class="top-row">
     <a class="brand" href="#top" aria-label="LoomWatch, back to top"><svg aria-hidden="true"><use href="#mark"/></svg>LoomWatch</a>
     <nav class="top-nav" aria-label="Sections">
-      <a href="#threads">The run</a>
+      <a href="#threads">The chat</a>
       <a href="#tomorrow">Tomorrow</a>
       <a href="#why">Why a loom</a>
       <a href="#start">Start</a>
@@ -79,7 +79,7 @@
       <div class="open-after">
         <span class="micro">Free and open source · for macOS · runs on your computer</span>
         <h1 id="open-h">Put the AI apps you have to work <em>as one team.</em></h1>
-        <p class="open-sub">Mix the command-line AI apps on your Mac, such as Claude Code, Codex and OpenCode, on one team. Ask in plain words, watch every step as it happens, and decide before the next agent builds on it.</p>
+        <p class="open-sub">Mix the command-line AI apps on your Mac, such as Claude Code, Codex and OpenCode, on one team, and work with it in one chat. Ask in plain words, watch every step as it happens, and decide before the next agent builds on it.</p>
         <div class="cta">
           <a class="btn btn-primary btn-lg" href="#threads">Weave a team, right here</a>
           <a class="link" href="#start">Or install it ↓</a>
@@ -114,8 +114,8 @@ I can't see the other app's work.
 <div class="story" id="story">
 
   <div class="story-intro">
-    <span class="micro eyebrow">One run, start to finish</span>
-    <p class="story-lede">This page is a LoomWatch run, and you're the operator. Choose your apps, build a team, ask it for something, and decide what happens when it stops for you.</p>
+    <span class="micro eyebrow">One team, one chat</span>
+    <p class="story-lede">This page is a team's chat, and you're in it. Choose your apps, build a team, @ it with a job, and decide what happens when it stops for you.</p>
     <p class="story-note">Everything below runs in your browser. Nothing calls a model, and nothing you type leaves this page.</p>
   </div>
 
@@ -211,28 +211,37 @@ I can't see the other app's work.
   <article class="chapter" id="ask" data-chapter="4" aria-labelledby="ask-h">
     <div class="ch-copy">
       <span class="ch-n"><b>04</b> Ask</span>
-      <h2 id="ask-h">Say what you need, in plain words.</h2>
-      <p class="ch-body">No prompt chains and no glue code. Type the job, press <span class="kbd">↵</span>, and the first agent starts. Each step starts when the one before it hands over.</p>
+      <h2 id="ask-h">Talk to the team in its chat. <em>Only an @ starts work.</em></h2>
+      <p class="ch-body">Each team has one chat. Write <b class="say-gold">@team</b> and the job to start everyone, or <b class="say-gold">@</b> an agent's name to ask it alone. Before you send, the line above the box says where your message will go. Without an @, nothing starts: it's a note the team reads the next time it works.</p>
       <dl class="fine">
+        <div><dt>Nothing guessed from your words</dt><dd>Work starts only when you @ someone, so a passing thought never sets a team running.</dd></div>
+        <div><dt>It remembers the conversation</dt><dd>Every new piece of work is handed the conversation so far, so “shorter, please” needs no explaining.</dd></div>
         <div><dt>Every agent knows its place</dt><dd>Each one is told its step, who hands work to it, and who gets its answer.</dd></div>
-        <div><dt>A Brief they all read</dt><dd>Shared instructions and files every run of the team starts from.</dd></div>
       </dl>
     </div>
     <div class="ch-panel">
-      <div class="win">
-        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono">research-and-write.yaml</span></span><span class="badge" data-run-badge>Ready</span></div>
-        <div class="win-body ask-body">
-          <h3 class="serif-h">What should the team do?</h3>
-          <div class="requests" id="requests" role="radiogroup" aria-label="Requests this page can play"></div>
-          <form class="composer" id="composer">
-            <label class="sr" for="request-text">Your request</label>
-            <textarea id="request-text" rows="2" readonly></textarea>
-            <div class="composer-row">
-              <span class="hint"><span class="kbd">↵</span> runs the team</span>
-              <button class="btn btn-primary" type="submit" id="run-team">Run team</button>
-            </div>
-          </form>
-          <p class="sim-note">This page plays a recorded run for each request, so it can't take free text.</p>
+      <div class="win chatwin">
+        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono">the team's chat</span></span><span class="badge" data-run-badge>Ready</span></div>
+        <div class="win-body chat-body">
+          <ul class="members" data-members aria-label="Who is on the team"></ul>
+          <div class="clog" id="ask-log" role="log" aria-label="The team's chat"></div>
+          <span class="micro req-h" id="requests-h">Try asking</span>
+          <div class="requests" id="requests" role="radiogroup" aria-labelledby="requests-h"></div>
+          <div class="box-slot" data-slot="ask">
+            <form class="box" id="box" data-route="team">
+              <p class="box-where" id="box-where" aria-live="polite"><span>Starts the team · 3 steps</span></p>
+              <div class="box-try" id="box-try" hidden></div>
+              <div class="box-field">
+                <label class="sr" for="box-text">Message the team</label>
+                <textarea id="box-text" rows="2" readonly aria-describedby="box-where">@team Prepare today's AI and tech news digest, and link every claim.</textarea>
+                <div class="box-send">
+                  <button class="btn box-now" type="button" id="box-now" hidden>Send now</button>
+                  <button class="btn btn-primary" type="submit" id="box-go">Start</button>
+                </div>
+              </div>
+            </form>
+          </div>
+          <p class="sim-note">This page plays a recorded run for each request, so a request can't be free text. A note can, and it never leaves this page.</p>
         </div>
       </div>
     </div>
@@ -242,35 +251,41 @@ I can't see the other app's work.
   <article class="chapter" id="watch" data-chapter="5" aria-labelledby="watch-h">
     <div class="ch-copy">
       <span class="ch-n"><b>05</b> Watch</span>
-      <h2 id="watch-h">Watch every thread as it's woven.</h2>
-      <p class="ch-body">Every message, tool call and handover lands on a live timeline: <span class="say-live">blue</span> while an agent works, <span class="say-gold">gold</span> where it worked, a dashed outline while the team waits for you. When it's done, drag back to replay any moment.</p>
+      <h2 id="watch-h">Watch it work. <em>Talk to it while it works.</em></h2>
+      <p class="ch-body">Your message starts a piece of work in the chat. The chat says who is working, and what the agents tell each other appears as they say it. Write while an agent works, and your note joins its next turn. Send now stops its current step and hands it your note at once.</p>
       <dl class="fine">
+        <div><dt>Details, beside the chat</dt><dd>Every tool call and handover on a timeline: <span class="say-live">blue</span> while an agent works, <span class="say-gold">gold</span> where it worked, dashed while the team waits for you. When it's done, drag back to replay any moment.</dd></div>
         <div><dt>Evidence, not guesses</dt><dd>A skill shows as loaded only when it was actually sent, and a file as opened only when the agent's own stream read it.</dd></div>
-        <div><dt>Agents ask each other</dt><dd>A handover, a question back to an earlier step, its answer and your review all read as one team chat, every message taken from the run's record.</dd></div>
-        <div><dt>It asks before it reaches</dt><dd>Turn off Researcher's web search in Give, and this run stops to ask you before it searches, unless Researcher is on OpenCode, which never asks.</dd></div>
+        <div><dt>It asks before it reaches</dt><dd>Turn off Researcher's web search in Give, and the work stops to ask you before it searches, unless Researcher is on OpenCode, which never asks.</dd></div>
       </dl>
     </div>
     <div class="ch-panel">
-      <div class="win">
+      <div class="win chatwin">
         <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono" id="watch-clock">0:00</span></span><span class="badge" data-run-badge>Ready</span></div>
         <div class="win-body watch-body">
-          <ol class="stages" id="stages" aria-label="The team's steps"></ol>
-          <p class="narration" id="narration" aria-live="polite">The team starts when you ask.</p>
-          <div class="lanes-wrap">
-            <svg class="lanes" id="lanes" viewBox="0 0 560 120" role="img" aria-label="Timeline, one lane per step"></svg>
+          <ul class="members" data-members aria-label="Who is on the team"></ul>
+          <div class="piece">
+            <div class="piece-head" id="piece-head"></div>
+            <div class="talk">
+              <span class="weft" id="weft" aria-hidden="true"></span>
+              <span class="talk-line" id="talk-line" aria-live="polite">Nobody is working. The team starts when you write <b>@team</b>.</span>
+              <button class="tlink" type="button" id="details-toggle" aria-expanded="true" aria-controls="details"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="2"/><path d="M10 2.5v11"/></svg>Details</button>
+            </div>
+            <ol class="tchat-log" id="tchat-log" aria-label="What the agents said to each other"><li class="tchat-none">Nothing has passed between the agents yet.</li></ol>
+            <div class="ask-perm" id="ask-perm" hidden></div>
+            <a class="needs-you" id="needs-you" href="#review" hidden>The team is waiting for you <span aria-hidden="true">↓</span></a>
           </div>
-          <div class="scrub" id="scrub" hidden>
-            <label><span class="micro">Replay</span><input type="range" id="scrub-input" min="0" max="100" value="100" step="0.1" aria-label="Drag to replay the run"></label>
-          </div>
-          <div class="ask-perm" id="ask-perm" hidden></div>
-          <section class="tchat" aria-labelledby="tchat-h">
-            <header class="tchat-head">
-              <span class="tchat-faces" id="tchat-faces" aria-hidden="true"></span>
-              <span class="tchat-title"><b id="tchat-h">Team chat</b><span id="tchat-sub">What the agents say to each other</span></span>
-            </header>
-            <ol class="tchat-log" id="tchat-log"><li class="tchat-none">Nothing has passed between the agents yet.</li></ol>
+          <div class="box-slot" data-slot="watch"></div>
+          <section class="details" id="details" aria-label="Details: how this work was made">
+            <p class="details-head"><b>Details</b><span>how it was made</span></p>
+            <p class="narration" id="narration" aria-live="polite">The team starts when you @ it.</p>
+            <div class="lanes-wrap">
+              <svg class="lanes" id="lanes" viewBox="0 0 560 120" role="img" aria-label="Timeline, one lane per step"></svg>
+            </div>
+            <div class="scrub" id="scrub" hidden>
+              <label><span class="micro">Replay</span><input type="range" id="scrub-input" min="0" max="100" value="100" step="0.1" aria-label="Drag to replay the work"></label>
+            </div>
           </section>
-          <a class="needs-you" id="needs-you" href="#review" hidden>The team is waiting for you <span aria-hidden="true">↓</span></a>
         </div>
       </div>
     </div>
@@ -281,18 +296,21 @@ I can't see the other app's work.
     <div class="ch-copy">
       <span class="ch-n"><b>06</b> Review</span>
       <h2 id="review-h">Nothing moves on until you decide.</h2>
-      <p class="ch-body">Put yourself on the team as a step. When the run reaches you, it stops and shows what was handed over. Approve it, or say what to change and send it back, so a weak first step never quietly shapes everything after it.</p>
+      <p class="ch-body">Put yourself on the team as a step. When the work reaches you, it stops, and the handover waits in the chat with Approve and Send back on it. Say what to change in the box and send it back, so a weak first step never quietly shapes everything after it.</p>
       <dl class="fine">
         <div><dt>Easy answers stay easy</dt><dd>Approve without a comment, or send it back with one line.</dd></div>
-        <div><dt>Agents can ask you, too</dt><dd>Mid-run, an agent can stop and put a question to you.</dd></div>
+        <div><dt>Agents can ask you, too</dt><dd>Mid-run, an agent can stop and put a question to you. You answer it in the chat.</dd></div>
         <div><dt>It waits, even on a schedule</dt><dd>A review step in a 10:00 run still waits for you.</dd></div>
-        <div><dt>Never decided for you</dt><dd>Ask LoomWatch can propose teams and start runs, but it can never answer a review step.</dd></div>
+        <div><dt>Never decided for you</dt><dd>Ask LoomWatch can propose teams and start work, but it can never answer a review step.</dd></div>
       </dl>
     </div>
     <div class="ch-panel">
-      <div class="win win-review" id="review-win">
-        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Review step</b><span class="mono">You</span></span><span class="badge" data-run-badge>Ready</span></div>
-        <div class="win-body" id="review-body"></div>
+      <div class="win win-review chatwin" id="review-win">
+        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono">your review</span></span><span class="badge" data-run-badge>Ready</span></div>
+        <div class="win-body chat-body">
+          <div id="review-body"></div>
+          <div class="box-slot" data-slot="review"></div>
+        </div>
       </div>
     </div>
   </article>
@@ -301,18 +319,21 @@ I can't see the other app's work.
   <article class="chapter" id="result" data-chapter="7" aria-labelledby="result-h">
     <div class="ch-copy">
       <span class="ch-n"><b>07</b> Result</span>
-      <h2 id="result-h">The answer comes with its receipt.</h2>
-      <p class="ch-body">The team's answer opens in a reader, beside a run receipt: what you asked, who did what, how long it took, and anything worth a second look. Not quite right? Follow up, or redo from the step that went wrong.</p>
+      <h2 id="result-h">The answer lands in the chat, <em>with its receipt.</em></h2>
+      <p class="ch-body">The team's answer is the last message of its piece of work, with a check of its record, the files it made, and Copy under it. Details keeps the receipt: what you asked, who did what, how long it took, and anything worth a second look. Not quite right? @ the agent whose step should change.</p>
       <dl class="fine">
-        <div><dt>Follow up</dt><dd>Ask for another pass on the result, and the team picks up from there.</dd></div>
-        <div><dt>Redo from a step</dt><dd>Run again from the step that went wrong. The steps before it keep their work.</dd></div>
+        <div><dt>@ one agent</dt><dd>Only that agent works again, with the conversation so far. The steps before it keep their work.</dd></div>
+        <div><dt>Continue with the team</dt><dd>@ an agent before your review step, and its new version comes back to you. Continue with the team counts as your review and runs the steps after it.</dd></div>
         <div><dt>Files, not paths</dt><dd>A file the team made opens as a card: open it, show it in its folder, or copy its path.</dd></div>
       </dl>
     </div>
     <div class="ch-panel">
-      <div class="win">
-        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Team response</b><span class="mono" id="result-file">digest.md</span></span><span class="badge" data-run-badge>Ready</span></div>
-        <div class="win-body" id="result-body"></div>
+      <div class="win chatwin">
+        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono" id="result-file">digest.md</span></span><span class="badge" data-run-badge>Ready</span></div>
+        <div class="win-body chat-body">
+          <div id="result-body"></div>
+          <div class="box-slot" data-slot="result"></div>
+        </div>
       </div>
     </div>
   </article>
@@ -366,11 +387,11 @@ I can't see the other app's work.
 
     <ol class="pillars">
       <li><span class="p-n">i</span><h3>Any app, one team</h3><p>Claude Code, Codex and OpenCode side by side (Hermes and OpenClaw too), each on the job it does best.</p></li>
-      <li><span class="p-n">ii</span><h3>On your computer</h3><p>LoomWatch runs on your Mac and opens in your browser, at an address only your Mac can reach. Run history stays in a database on your Mac, your teams are plain files, and your folders stay where they are.</p></li>
+      <li><span class="p-n">ii</span><h3>On your computer</h3><p>LoomWatch runs on your Mac and opens in your browser, at an address only your Mac can reach. Each team's chat and its history stay in a database on your Mac, your teams are plain files, and your folders stay where they are.</p></li>
       <li><span class="p-n">iii</span><h3>Nothing new to sign up for</h3><p>LoomWatch is free and has no account. Each agent uses its own app's sign-in or API key, so that provider's terms and limits apply.</p></li>
-      <li><span class="p-n">iv</span><h3>With you in it</h3><p>You're a step on the team, not a spectator. It stops wherever you put yourself.</p></li>
+      <li><span class="p-n">iv</span><h3>With you in it</h3><p>You're in the team's chat and a step on the team, not a spectator. It stops wherever you put yourself.</p></li>
       <li><span class="p-n">v</span><h3>Proof, not a guess</h3><p>Handovers are recorded as calls, not read out of chat, so the receipt only says what happened.</p></li>
-      <li><span class="p-n">vi</span><h3>Context that outlives a switch</h3><p>The Brief, the Notebook, every folder and file you handed over, and every run stay with your team, whichever app you swap in.</p></li>
+      <li><span class="p-n">vi</span><h3>Context that outlives a switch</h3><p>The Brief, the Notebook, the team's chat, and every folder and file you handed over stay with your team, whichever app you swap in.</p></li>
     </ol>
     <p class="footnote">To be exact about privacy: LoomWatch itself sends nothing anywhere unless you turn on Send to Notion, which posts the team's answer to your Notion. Each agent's own app still sends prompts and files to its model provider, as it does when you use it directly.</p>
   </div>
@@ -386,7 +407,7 @@ I can't see the other app's work.
         <p class="ch-body">Paste it into Terminal on your Mac. It downloads a ready-built LoomWatch (about 21 MB), checks it, and opens it in your browser with an offline demo team you can run before you connect any AI app. Nothing is compiled.</p>
         <dl class="needs">
           <div><dt>A Mac</dt><dd>macOS 11 or newer, Apple silicon or Intel. Linux builds exist but are untested, and Windows isn't supported yet.</dd></div>
-          <div><dt>Docker Desktop or OrbStack</dt><dd>For the database that keeps your run history. If it's missing, LoomWatch says so.</dd></div>
+          <div><dt>Docker Desktop or OrbStack</dt><dd>For the database that keeps your team chats and their history. If it's missing, LoomWatch says so.</dd></div>
           <div><dt>One command-line AI app</dt><dd>For real runs, such as Claude Code, Codex or OpenCode. OpenCode has free models and needs no account. The demo team needs none.</dd></div>
           <div><dt>No GitHub account needed</dt><dd>The installer fetches the public release, so anyone can install it.</dd></div>
         </dl>
@@ -412,7 +433,7 @@ Keep this window open while you use LoomWatch. Press Ctrl-C to stop it.</span></
         <div class="tabs" role="tablist" aria-label="Screens">
           <button role="tab" aria-selected="true" aria-controls="real-shot" id="tab-home" data-screen="home">Home</button>
           <button role="tab" aria-selected="false" aria-controls="real-shot" id="tab-build" data-screen="build" tabindex="-1">Build</button>
-          <button role="tab" aria-selected="false" aria-controls="real-shot" id="tab-run" data-screen="run" tabindex="-1">Run</button>
+          <button role="tab" aria-selected="false" aria-controls="real-shot" id="tab-chat" data-screen="chat" tabindex="-1">Chat</button>
         </div>
       </div>
       <figure class="real-shot" id="real-shot" role="tabpanel" aria-labelledby="tab-home">
