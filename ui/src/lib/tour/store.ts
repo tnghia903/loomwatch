@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
+import { currentRun } from './currentRun'
 import { TOUR_STEPS, type TourStepId } from './steps'
 
 /**
@@ -73,9 +74,7 @@ export function readTourState(): TourState | null {
   return read()
 }
 
-function currentRun(): string | null {
-  return new URLSearchParams(window.location.search).get('run')
-}
+
 
 /** Start (or restart) the guide from its first card. The menu, ⌘K and Home's link all call this. */
 export function startTour() {

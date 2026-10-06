@@ -151,27 +151,89 @@ describe('Workspace', () => {
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
-  // The hidden "Preview next run" card was a second Run team (ADR 0043); the responder is chosen
-  // on the Team response node.
-  it('opens the next run from Run team without starting a job', async () => {
+  // ADR 0051: Run team opens the team's chat, where work starts only when you send @team.
+  it('opens the team’s chat from Run team without starting work', async () => {
     renderWorkspace(undefined, 'delivery')
     expect(screen.queryByRole('button', {name: 'Preview next run'})).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', {name: 'Run team'}))
-    expect(screen.getByRole('heading', {name: /New run/})).toBeInTheDocument()
-    expect(screen.getByText('The team’s answer will appear here.')).toBeInTheDocument()
+    expect(screen.getByRole('region', {name: /chat$/})).toBeInTheDocument()
+    expect(screen.getByRole('textbox', {name: 'Message the team'})).toBeInTheDocument()
+    expect(await screen.findByRole('heading', {name: /^Talk to /})).toBeInTheDocument()
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', {name: 'Build'}))
     expect(screen.getByRole('application', {name: 'Team canvas'})).toBeInTheDocument()
   })
 
-  it('opens the output by default and returns to the same run after Build', async () => {
+  // ADR 0051: Details opens by default beside the chat, on the newest piece of work, and stays
+  // closed once you close it.
+  it('opens Details on the newest piece by default, and keeps it closed once closed', async () => {
+    const fallback = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith('/api/chat?')) {
+        return new Response(JSON.stringify({ teamKey: 'demo', teamPath: 'demo.yaml', more: false, items: [{ kind: 'work', run: runRecord, request: null, notes: [] }] }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return fallback(input, init)
+    }))
+    renderWorkspace()
+    fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+    const details = await screen.findByRole('complementary', { name: 'Details of this piece of work' })
+    expect(within(details).getByRole('main', { name: 'Run workspace' })).toBeInTheDocument()
+    expect(window.location.search).toContain('run=run-1')
+    fireEvent.click(within(details).getByRole('button', { name: 'Close details' }))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
+  })
+
+  // ADR 0051: a long answer is a document. Following the newest work, the pane beside the chat opens
+  // on it once it is finished; its record is the other tab, and the card in the chat opens it again.
+  it('opens a finished long answer on its Answer tab beside the chat, with its record a tab away', async () => {
+    const fallback = globalThis.fetch
+    const report = `# Market brief\n\n${'The market moved again today. '.repeat(40)}`
+    const finished = { ...runRecord, runId: 'run-2', sessionId: 'run-2', status: 'succeeded', finishedAt: at(60), reply: report }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('/api/chat?')) return new Response(JSON.stringify({ teamKey: 'demo', teamPath: 'demo.yaml', more: false, items: [{ kind: 'work', run: finished, request: null, notes: [] }] }), { status: 200 })
+      if (url.includes('/api/runs/run-2')) return new Response(JSON.stringify(finished), { status: 200 })
+      return fallback(input, init)
+    }))
+    renderWorkspace()
+    fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+    const pane = await screen.findByRole('complementary', { name: 'Details of this piece of work' })
+    await waitFor(() => expect(within(pane).getByRole('tab', { name: 'Answer' })).toHaveAttribute('aria-selected', 'true'))
+    expect(await within(pane).findByRole('heading', { name: 'Market brief', level: 1 })).toBeInTheDocument()
+    fireEvent.click(within(pane).getByRole('tab', { name: 'Details' }))
+    expect(within(pane).getByRole('main', { name: 'Run workspace' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Market brief, .* Open$/ }))
+    expect(within(pane).getByRole('tab', { name: 'Answer' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('button', { name: /^Market brief, .* Showing beside the chat$/ })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  // A run opened by link is the chat with that piece's Details beside it; the Run tab comes back
+  // to the chat, the one place you work with the team.
+  it('opens a run’s Details beside the chat, and Run comes back to the chat after Build', async () => {
+    // As a reloaded chat's address has it: the chat, and the piece open in Details.
+    window.history.replaceState({}, '', '/?path=demo.yaml&view=chat&run=run-1')
     renderWorkspace('run-1', 'delivery')
-    expect(screen.getByRole('main', { name: 'Run workspace' })).toBeInTheDocument()
+    expect(screen.queryByText('Not started')).not.toBeInTheDocument()
+    const details = screen.getByRole('complementary', { name: 'Details of this piece of work' })
+    expect(within(details).getByRole('main', { name: 'Run workspace' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
+    // The answer is read in the chat; Details is the record of how it was made, without a copy.
+    expect(within(details).queryByRole('complementary', { name: 'Team output' })).toBeNull()
+    // The chat's edge can be dragged, or moved with the keyboard, to give either side more room.
+    expect(screen.getByRole('separator', { name: 'Resize the chat' })).toBeInTheDocument()
+    // Esc closes Details, even on work still going, and keeps the chat: leaving the chat is the
+    // Build tab's job. Its close button does the same.
+    expect(within(details).getByRole('button', { name: 'Close details' })).toBeInTheDocument()
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
+    expect(window.location.search).not.toContain('run=run-1')
     fireEvent.click(screen.getByRole('button', { name: 'Build' }))
     expect(screen.getByRole('application', { name: 'Team canvas' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
-    expect(screen.getByRole('main', { name: 'Run workspace' })).toBeInTheDocument()
-    expect(window.location.search).toContain('run=run-1')
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }))
+    expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
@@ -884,9 +946,10 @@ describe('Workspace', () => {
       const { container } = renderWorkspace()
       expect(nodeKinds(container)).not.toContain('prompt')
       fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
-      expect(screen.getByRole('heading', { name: /New run/ })).toBeInTheDocument()
-      fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Audit the harnesses' } })
-      expect(screen.getByLabelText('What should the team do?')).toHaveValue('Audit the harnesses')
+      fireEvent.change(screen.getByRole('textbox', { name: 'Message the team' }), { target: { value: '@team Audit the harnesses' } })
+      expect(screen.getByRole('textbox', { name: 'Message the team' })).toHaveValue('@team Audit the harnesses')
+      expect(screen.getByText(/^Starts the team/)).toBeInTheDocument()
+      expect(nodeKinds(container)).not.toContain('prompt')
     })
 
     it('draws the planned Output and names the stage that will fill it', () => {
@@ -1411,7 +1474,7 @@ describe('switching workspace tab closes the node inspector', () => {
     renderWorkspace()
     expect(nodePanel()).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }))
     await waitFor(() => expect(nodePanel()).not.toBeInTheDocument())
 
     // Closed, not merely hidden behind a selection that is still set.
@@ -1428,7 +1491,7 @@ describe('switching workspace tab closes the node inspector', () => {
     renderWorkspace()
     expect(nodePanel()).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
-    expect(screen.getByRole('heading', { name: /New run/ })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
     await waitFor(() => expect(nodePanel()).not.toBeInTheDocument())
     restore()
   })
@@ -1503,15 +1566,11 @@ describe('an agent whose app is not on this computer', () => {
     expect(screen.getByRole('button', { name: /2 things to finish, open team switcher/ })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
-    // The planned stages say so too, rather than "Ready" above a composer that refuses to run.
-    const stages = screen.getByRole('list', { name: 'Team stages' })
-    expect(within(stages).getAllByText('Can’t start')).toHaveLength(2)
-    expect(within(stages).queryByText('Ready')).not.toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
+    // The team's chat says so before you write, rather than offering a box that cannot start work.
     const reason = '2 agents’ apps can’t start on this computer: Researcher, Reviewer.'
     expect(screen.getByText(reason)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Run ↵/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /^Run ↵/ })).toHaveAttribute('title', reason)
+    expect(screen.getByRole('textbox', { name: 'Message the team' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Send note' })).toBeDisabled()
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
@@ -1523,11 +1582,10 @@ describe('an agent whose app is not on this computer', () => {
     expect(await screen.findByRole('heading', { name: 'Your team is ready' })).toBeInTheDocument()
     expect(document.querySelector('.build-node-app-problem')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
-    expect(within(screen.getByRole('list', { name: 'Team stages' })).getAllByText('Ready')).toHaveLength(2)
-    fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-    // Ready, the composer sends with its own "Run team" arrow; blocked, it showed a disabled "Run ↵".
-    expect(screen.getByRole('button', { name: 'Run team' })).toBeEnabled()
-    expect(screen.queryByRole('button', { name: /^Run ↵/ })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message the team' }), { target: { value: '@team Summarise the repo' } })
+    // Ready, the box says where the message goes and starts the team with it.
+    expect(screen.getByText(/^Starts the team/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled()
     expect(screen.queryByText(/can’t start on this computer/)).not.toBeInTheDocument()
   })
 })

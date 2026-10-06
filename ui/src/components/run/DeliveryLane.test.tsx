@@ -17,9 +17,8 @@ vi.mock('@xyflow/react', () => ({
   MarkerType: { ArrowClosed: 'arrowclosed' },
   ReactFlow: ({ nodes, nodeTypes }: { nodes: Array<{ id: string; type: string; data: unknown }>; nodeTypes: Record<string, ComponentType<{ data: unknown }>> }) => <>{nodes.map(node => createElement(nodeTypes[node.type], { key: node.id, data: node.data }))}</>,
 }))
-import { projectRun, type Evidence, type RunProjection } from '../../lib/watch/events'
+import { projectRun } from '../../lib/watch/events'
 import type { AgentRuntime } from '../../lib/runs/graph'
-import { markLiftOrigin, noteShownRequest } from '../../lib/motion/lift'
 const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
   const actions = {
     renameAgent: vi.fn(),
@@ -86,14 +85,22 @@ const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
 }
 afterEach(cleanup)
 describe('Delivery Lane', () => {
-  it('keeps the output visible while inspecting an unverified required skill', () => {
+  // ADR 0051: Details is the record of how the answer was made. The request, the answer and its
+  // review are in the chat beside it, so none of them is repeated here.
+  it('is the record only: no request, answer, review or second way to start work', () => {
     setup()
-    expect(
-      within(
-        screen.getByRole('complementary', { name: 'Team output' }),
-      ).getByRole('heading', { name: 'Market report', level: 1 }),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Team output' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Market report' })).toBeNull()
+    expect(screen.queryByText('Request')).toBeNull()
+    // The receipt still prints what was asked: it is a slip of the record, copied whole.
+    expect(screen.queryByText('Research LoomWatch', { selector: 'p, h1, h2' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Review output|New run|Copy team output/ })).toBeNull()
+    // How it went leads, with how long it took; which run it was is the label above.
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Finished2m 53s')
+    expect(screen.getByText('Run 15')).toBeInTheDocument()
+  })
+  it('inspects an unverified required skill', () => {
+    setup()
     fireEvent.click(
       screen.getByRole('button', {
         name: 'Inspect claude-design: Load unverified',
@@ -101,9 +108,6 @@ describe('Delivery Lane', () => {
     )
     expect(
       screen.getByText(/No matching read receipt was captured/),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('heading', { name: 'Market report', level: 1 }),
     ).toBeInTheDocument()
   })
   /**
@@ -171,31 +175,6 @@ describe('Delivery Lane', () => {
     expect(screen.getByText(/Delivery is not use/)).toBeInTheDocument()
   })
 
-  it('distinguishes missing output from a successful process and disables copying', () => {
-    const { props } = setup({
-      output: {
-        text: '',
-        phase: 'succeeded',
-        phaseText: 'No text was captured',
-        producer: 'designer',
-        producerLabel: 'Designer',
-        mode: 'replay',
-        streaming: false,
-        pending: false,
-        strip: null,
-        compact: false,
-        expanded: false,
-        terminal: true,
-      },
-    })
-    expect(props.phase).toBe('succeeded')
-    expect(
-      screen.getByRole('heading', { name: 'No response produced' }),
-    ).toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: 'Copy team output' }),
-    ).toBeNull()
-  })
   // ADR 0043: the receipt's See every event and the answer's own Full trace link did what the
   // heading's Full trace does, and Request a change only focused the box that is already there.
   // Field report (2026-10-04): a team with no required skill showed "0/0 required loaded" and
@@ -222,96 +201,18 @@ describe('Delivery Lane', () => {
     expect(screen.queryByRole('button', { name: 'Request a change' })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Inspect handoff/ })).toBeNull()
   })
-  it('does not allow review acknowledgement to bypass missing skill evidence', () => {
-    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', '') }
-    setup()
-    fireEvent.click(screen.getByRole('button', { name: 'Review output' }))
-    const review = within(screen.getByRole('dialog', { name: 'Review team output' }))
-    fireEvent.click(review.getByRole('checkbox'))
-    expect(review.getByRole('button', { name: 'Mark reviewed' })).toBeDisabled()
-    fireEvent.click(review.getByRole('button', { name: 'Keep reading' }))
-    expect(screen.queryByRole('dialog')).toBeNull()
-  })
-  it('records a review only after the user checks the acknowledgement', () => {
-    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', '') }
-    setup({ agents: [] })
-    fireEvent.click(screen.getByRole('button', { name: 'Review output' }))
-    const review = within(screen.getByRole('dialog', { name: 'Review team output' }))
-    expect(review.getByRole('button', { name: 'Mark reviewed' })).toBeDisabled()
-    fireEvent.click(review.getByRole('checkbox'))
-    fireEvent.click(review.getByRole('button', { name: 'Mark reviewed' }))
-    expect(screen.getByRole('button', { name: 'View review' })).toBeInTheDocument()
-    expect(screen.getByText('Reviewed by you', { selector: '.delivery-output-badge' })).toBeInTheDocument()
-  })
-  // The badge beside the answer's title read "Response available" over a response already in
-  // view. It now says what the run's record holds to check, and opens the review that lists it.
-  it('says what is worth a look beside the answer, and opens the review on it', () => {
-    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', '') }
-    const refused = { id: 'p1', agentId: 'designer', seq: 1, offsetMs: 0, kind: 'permission', relation: 'asked permission for', name: 'Web search', status: 'rejected', target: null, rawInput: { toolCall: { kind: 'fetch' } } } as unknown as Evidence
-    const projection = { ...projectRun([]), agents: [{ id: 'designer', status: 'succeeded', openCalls: 0, exitCode: null, stopReason: null, requiredSkills: [] }] } as unknown as RunProjection
-    const { props } = setup({ projection, evidenceByAgent: new Map([['designer', [refused]]]) })
-    const output = within(screen.getByRole('complementary', { name: 'Team output' }))
-    expect(output.queryByText(/Response available/i)).toBeNull()
-    expect(output.getByText('Designer wasn’t allowed to search the web, and carried on without it.')).toBeInTheDocument()
-    // The verdict is a status; Review output in the heading is the one way into the review (ADR 0043).
-    expect(output.queryByRole('button', { name: /review this answer/ })).toBeNull()
-    expect(output.getByText('1 thing to check')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /^Review output/ }))
-    const review = within(screen.getByRole('dialog', { name: 'Review team output' }))
-    fireEvent.click(within(review.getByRole('region', { name: 'Worth a look' })).getByRole('button', { name: /^Open: Designer wasn’t allowed/ }))
-    expect(props.onInspectEvidence).toHaveBeenCalledWith('p1')
-    expect(screen.queryByRole('dialog')).toBeNull()
-  })
-  it('says nothing was flagged when the record holds nothing to check', () => {
-    setup({ agents: [] })
-    expect(screen.getByText('Nothing flagged')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /review this answer/ })).toBeNull()
-    expect(screen.getByText('Every step finished and nothing in the record was flagged.')).toBeInTheDocument()
-  })
-  // A linked folder read as a file (EISDIR), then the files in it, read as "1 thing to check"; and
-  // a clean run "read 1 source", which was your own answer at the review stop.
-  it('neither flags a folder whose files were read nor counts your answer as a source', () => {
-    const folder = '/Users/Shared/harbor-pine/q3-reports'
-    const read = (id: string, path: string, status = 'succeeded') => ({ id, agentId: 'researcher', seq: 1, offsetMs: 0, kind: 'file', relation: 'read file', name: `Read ${path}`, status, toolKind: 'read', rawInput: { file_path: path }, locations: [{ path, line: 1 }], target: null }) as unknown as Evidence
-    const answer = { id: 'a1', agentId: 'review', seq: 9, offsetMs: 0, kind: 'source', relation: 'directed', name: 'Your answer', status: 'succeeded', toolKind: null, rawInput: null, locations: [], target: null } as unknown as Evidence
-    const projection = { ...projectRun([]), agents: [{ id: 'researcher', status: 'succeeded', openCalls: 0, exitCode: null, stopReason: null, requiredSkills: [] }] } as unknown as RunProjection
-    setup({
-      projection,
-      agents: [{ id: 'researcher', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Researcher', agent: { id: 'researcher', name: 'Researcher', role: 'Find what changed' } } }],
-      evidenceByAgent: new Map([
-        ['researcher', [read('r0', folder, 'failed'), ...['README.md', 'q3-sales.md', 'q3-churn.md'].map((file, index) => read(`r${index + 1}`, `${folder}/${file}`))]],
-        ['review', [answer]],
-      ]),
-    })
-    const output = within(screen.getByRole('complementary', { name: 'Team output' }))
-    expect(output.getByText('Nothing flagged')).toBeInTheDocument()
-    expect(output.getByText('Every step finished, reading 3 files, and nothing in the record was flagged.')).toBeInTheDocument()
-  })
-  it('supports filters and output expansion without changing the team', () => {
-    const { container, props } = setup()
+  it('supports filters without changing the team', () => {
+    const { props } = setup()
     fireEvent.click(screen.getByRole('button', { name: 'Tools' }))
     expect(
       screen.getByText('No capabilities match this filter.'),
     ).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Expand team output' }))
-    expect(container.querySelector('.delivery-lane')).toHaveClass(
-      'output-expanded',
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Restore split view' }))
-    expect(container.querySelector('.delivery-lane')).not.toHaveClass(
-      'output-expanded',
-    )
     expect(props.agents[0].data.agent.capabilities).toEqual([
       { kind: 'skill', name: 'claude-design' },
     ])
   })
-  it('copies the exact Markdown and unwinds evidence before leaving the Run view', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined)
-    Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText}})
-    const {props} = setup()
-    fireEvent.click(screen.getByRole('button', {name: 'Copy team output'}))
-    expect(writeText).toHaveBeenCalledWith(props.output.text)
-    expect(await screen.findByText('Response copied')).toBeInTheDocument()
+  it('unwinds evidence before leaving the Run view', () => {
+    setup()
     fireEvent.click(screen.getByRole('button', {name: 'Inspect claude-design: Load unverified'}))
     const back = screen.getByRole('button', {name: '← Back to graph'})
     expect(back).toHaveFocus()
@@ -330,77 +231,7 @@ describe('Delivery Lane', () => {
     expect(screen.getByRole('button', {name: 'Inspect claude-design: Load unverified · Researcher'})).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', {name: 'Inspect claude-design: Load unverified · Designer'}))
     expect(screen.getByText('Designer', {selector: '.delivery-receipt-owner'})).toBeInTheDocument()
-    expect(screen.getByRole('heading', {name: 'Market report', level: 1})).toBeInTheDocument()
   })
-  it('puts a file the reply names in the output header, ready to open', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({
-      path: '/teams/.loomwatch/demo/designer/report.docx', name: 'report.docx', exists: true, isDir: false, sizeBytes: 2048,
-      modifiedAt: null, kind: 'document', folder: '.loomwatch/demo/designer', openable: true,
-    })))))
-    const { container } = setup({
-      output: {
-        text: 'Done.\n\n**File:** `/teams/.loomwatch/demo/designer/report.docx`',
-        phase: 'succeeded', phaseText: 'Answered', producer: 'designer', producerLabel: 'Designer', mode: 'replay',
-        streaming: false, pending: false, strip: null, compact: false, expanded: false, terminal: true,
-      },
-    })
-    const files = screen.getByRole('group', { name: 'Files in this reply' })
-    expect(within(files).getByRole('button', { name: 'Open report.docx' })).toHaveTextContent('Open document')
-    expect(within(files).getByText('Report')).toBeInTheDocument()
-    // The file sits in the Designer's workspace, so the card credits the Designer by name.
-    expect(await within(files).findByText('Made by Designer · demo')).toBeInTheDocument()
-    expect(container.querySelector('.delivery-response .file-chip')).not.toBeNull()
-    vi.unstubAllGlobals()
-  })
-  it('puts files the reply lists by name under a folder in the output header too', async () => {
-    const folder = '/teams/.loomwatch/demo/designer/outputs'
-    vi.stubGlobal('fetch', vi.fn((url: string) => {
-      const path = new URL(url, 'http://localhost').searchParams.get('path') ?? ''
-      return Promise.resolve(new Response(JSON.stringify({
-        path, name: path.split('/').at(-1), exists: true, isDir: false, sizeBytes: 2048,
-        modifiedAt: null, kind: path.endsWith('.pdf') ? 'pdf' : 'document', folder: '.loomwatch/demo/designer/outputs', openable: true,
-      })))
-    }))
-    const { container } = setup({
-      output: {
-        text: `Done.\n\nFiles are in \`${folder}\`:\n- \`plan.docx\`\n- \`plan.pdf\``,
-        phase: 'succeeded', phaseText: 'Answered', producer: 'designer', producerLabel: 'Designer', mode: 'replay',
-        streaming: false, pending: false, strip: null, compact: false, expanded: false, terminal: true,
-      },
-    })
-    const files = screen.getByRole('group', { name: 'Files in this reply' })
-    expect(within(files).getByRole('button', { name: 'Open plan.docx' })).toBeInTheDocument()
-    expect(within(files).getByRole('button', { name: 'Open plan.pdf' })).toBeInTheDocument()
-    // Two cards are rows, so the answer under them stays in view in the narrow output panel.
-    expect(files.querySelectorAll('.file-card.compact')).toHaveLength(2)
-    expect(container.querySelectorAll('.delivery-response .file-chip')).toHaveLength(2)
-    vi.unstubAllGlobals()
-  })
-  it('does not execute raw HTML or load embedded remote images in a report', () => {
-    const { container } = setup({
-      output: {
-        text: '<script>alert(1)</script>\n\n![tracking](https://example.com/pixel)',
-        phase: 'succeeded',
-        phaseText: 'Answered',
-        producer: 'designer',
-        producerLabel: 'Designer',
-        mode: 'replay',
-        streaming: false,
-        pending: false,
-        strip: null,
-        compact: false,
-        expanded: false,
-        terminal: true,
-      },
-    })
-    expect(container.querySelector('.delivery-response script')).toBeNull()
-    expect(container.querySelector('.delivery-response img')).toBeNull()
-    expect(screen.getByText('[Image: tracking]')).toBeInTheDocument()
-  })
-
-  // A planned stage used to read "Ready" even when its app was not on this computer, while the
-  // composer beneath it refused to run for exactly that reason.
-  // The breathing perimeter and the handoff sweep (styles/motion.css) hang off these classes.
   describe('the stage that is working', () => {
     const runtime = (status: AgentRuntime['status']) => ({ status, taskState: 'RUNNING', task: 'Writing', ownerLabel: '', live: status === 'running' }) as AgentRuntime
     const agents = (writerStatus: AgentRuntime['status']) => [
@@ -434,23 +265,6 @@ describe('Delivery Lane', () => {
   })
 
   // lib/motion/lift.ts decides when; this is the Run view collecting it.
-  describe('the request the composer just sent', () => {
-    afterEach(() => {
-      delete (HTMLElement.prototype as Partial<HTMLElement>).animate
-      document.querySelectorAll('.lift-ghost').forEach((ghost) => ghost.remove())
-    })
-
-    it('lifts into the Request box of the run it started', () => {
-      HTMLElement.prototype.animate = vi.fn(() => ({ finished: Promise.resolve() }) as unknown as Animation)
-      noteShownRequest('An earlier request')
-      markLiftOrigin(document.body.appendChild(document.createElement('textarea')), 'Research LoomWatch')
-      setup({ mode: 'live', phase: 'running' })
-      expect(document.querySelector('.lift-ghost')).toHaveTextContent('Research LoomWatch')
-      // The copy flies, and the real line stays hidden until it lands.
-      expect(HTMLElement.prototype.animate).toHaveBeenCalledTimes(2)
-    })
-  })
-
   describe('a planned stage whose app is not on this computer', () => {
     const sentence = 'Designer’s app “acme-agent-cli” isn’t installed on this computer.'
     const stage = () => document.getElementById('delivery-stage-designer') as HTMLElement
@@ -488,16 +302,18 @@ describe('Delivery Lane messages between agents', () => {
   ].map((event, seq) => ({ ...event, id: `e${seq}`, seq, sessionId: 'run', ts: ts(seq * 10) })) as unknown as Parameters<typeof projectRun>[0]
   const node = (id: string, name: string) => ({ id, type: 'agent', position: { x: 0, y: 0 }, data: { label: name, agent: { id, name, role: name } } })
 
-  it('shows what the stages said to each other right under their cards', async () => {
+  // ADR 0051: what the agents said lives in the chat beside Details, not in it twice.
+  it('leaves what the agents said to the chat, and reads a message there from the timeline', async () => {
+    const onRevealMessage = vi.fn()
     setup({
       agents: [node('researcher', 'Researcher'), node('writer', 'Writer')] as unknown as DeliveryLaneProps['agents'],
       projection: projectRun(events),
+      onRevealMessage,
     })
-    const talk = await screen.findByRole('region', { name: 'Team chat' })
-    // Under the cards, not above them: the conversation follows the team it belongs to.
-    const stages = screen.getByRole('list', { name: 'Team stages' })
-    expect(stages.compareDocumentPosition(talk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(talk).getByRole('listitem', { name: /Writer to Researcher: question/ })).toHaveTextContent('Which version?')
-    expect(within(talk).getByRole('listitem', { name: /Researcher to Writer: answer/ })).toHaveTextContent('0.4')
+    expect(screen.queryByRole('region', { name: 'Team chat' })).not.toBeInTheDocument()
+    const previous = screen.getByRole('button', { name: 'Previous moment' })
+    for (let tries = 0; tries < events.length && !screen.queryByRole('button', { name: 'Read the message' }); tries += 1) fireEvent.click(previous)
+    fireEvent.click(screen.getByRole('button', { name: 'Read the message' }))
+    expect(onRevealMessage).toHaveBeenCalledWith(expect.any(String))
   })
 })

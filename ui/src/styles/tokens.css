@@ -188,6 +188,7 @@
   --t-flow:    1400ms;
   --t-breathe: 2400ms;
   --t-settle:   900ms;
+  --t-caret:    530ms;   /* half a caret's breath (an editor's 1.06 s blink), and how long it holds after new text */
 }
 
 /* ---------------------------------------------------------------------------

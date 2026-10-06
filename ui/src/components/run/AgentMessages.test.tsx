@@ -8,7 +8,7 @@ import { AgentMessages } from './AgentMessages'
 
 const at = (seconds: number) => new Date(Date.parse('2026-10-05T09:00:00Z') + seconds * 1000).toISOString()
 const message = (extra: Partial<TeamMessage> & Pick<TeamMessage, 'id' | 'kind'>): TeamMessage => ({
-  from: null, to: null, handedBy: null, text: '', context: null, eventId: extra.id, evidenceId: null, seq: 1, ts: at(0), offsetMs: 0, state: 'delivered', error: null, reply: null, ...extra,
+  from: null, to: null, handedBy: null, text: '', context: null, eventId: extra.id, evidenceId: null, seq: 1, ts: at(0), offsetMs: 0, state: 'delivered', error: null, reply: null, carried: false, ...extra,
 })
 const answer = (from: string, text: string, seconds: number, extra: Partial<MessageReply> = {}): MessageReply => ({
   from, text, eventId: `r${seconds}`, seq: seconds, ts: at(seconds), offsetMs: seconds * 1000, source: null, sentBackTo: null, ...extra,
@@ -52,6 +52,14 @@ describe('Team chat', () => {
     ])
     expect(screen.getByRole('heading', { name: 'Team chat' })).toBeInTheDocument()
     expect(screen.getByText('Researcher and Writer · 3 messages')).toBeInTheDocument()
+  })
+
+  // ADR 0051: inside the team's chat, the talk wears the time of day as every other message there
+  // does; "0:40" beside "12:35 PM" read as two clocks.
+  it('tells the time of day inside the team’s chat', () => {
+    setup([handover], { bare: true })
+    const time = new Date(at(40)).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    expect(said()[0]).toHaveAttribute('aria-label', `${time}, Researcher to Writer: handover`)
   })
 
   it('addresses a question with an @mention, and the answer quotes the question instead', () => {
@@ -159,6 +167,25 @@ describe('Team chat', () => {
     setup([message({ id: 'note:e7', kind: 'note', from: 'operator', to: 'writer', text: 'Also check the footnotes.', state: 'answered', reply: answer('writer', 'Two links fixed.', 15) })])
     expect(within(msg(/You to Writer: note/)).getByText('@Writer')).toBeInTheDocument()
     expect(msg(/Writer to you: answer/)).toHaveTextContent('Two links fixed.')
+  })
+
+  // ADR 0051: "@Writer longer" gives Writer the earlier handover and your earlier review again;
+  // they were not said in this piece of work, and must not read as if you just said them.
+  it('says an agent picked up the earlier handover and review, instead of drawing them as new messages', () => {
+    // As the record has it when the review step did not run again: handed on by the review step.
+    const carriedHandover = message({ ...handover, handedBy: { from: ['review'], via: [] }, carried: true })
+    const carriedReview = message({ id: 'direction:e5', kind: 'direction', from: 'operator', to: 'writer', text: 'Approved. Continue as planned.', handedBy: { from: ['review'], via: [] }, carried: true })
+    setup([carriedHandover, carriedReview], { live: true, bare: true, reveal: { id: carriedHandover.id, at: 1 }, predecessors: new Map([['review', ['researcher']], ['writer', ['review']]]) })
+    const line = screen.getByText('Writer picked up Researcher’s handover and your review from earlier work')
+    expect(line).toBeInTheDocument()
+    // Nothing is drawn as said: no bubble from you, no handover shared now.
+    expect(screen.queryByRole('listitem', { name: /You to Writer/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('listitem', { name: /Researcher to Writer/ })).not.toBeInTheDocument()
+    // The timeline asked for the handover: the line opens on what was picked up.
+    expect(screen.getByRole('button', { name: 'Hide' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('region', { name: 'Your review' })).toHaveTextContent('Approved. Continue as planned.')
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }))
+    expect(screen.queryByText('ACP is JSON-RPC.')).not.toBeInTheDocument()
   })
 
   it('shows nothing for a finished run in which nothing passed between the agents', () => {

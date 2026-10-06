@@ -1,5 +1,5 @@
 import type { AgentStatus } from '../team-file/types'
-import { Correspondence, type TeamMessage } from './messages'
+import { Correspondence, OPERATOR_ID, type TeamMessage } from './messages'
 import { ACTIVITY_KINDS, ReplyText } from './replyText'
 
 export const eventKinds = ['message', 'thought', 'tool_call', 'tool_update', 'plan', 'permission', 'session_meta', 'usage', 'turn_end', 'process'] as const
@@ -493,6 +493,12 @@ export type PromptSectionKind =
   | 'capabilities'
   | 'required_skill'
   | 'memory'
+  /**
+   * `## Conversation so far` — the recent messages between you and the team, from its chat (ADR
+   * 0051): your requests, notes and decisions, and the team's answers. Handed to every agent a run
+   * starts, above its task. Added here and in `memory::PromptSectionKind` in the same change.
+   */
+  | 'conversation'
   | 'task'
   | 'stage_results'
   /**
@@ -669,6 +675,8 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
 
   const replaying = new Set<string>()
   const auxiliaryTurns = new Map<string, string>()
+  // Agents whose turn you stopped with "Send now" (ADR 0051): its `cancelled` is what you asked for.
+  const interrupted = new Set<string>()
   /** Agents whose next prompt is LoomWatch's request to carry on, not a new task. */
   const resuming = new Set<string>()
   for (const event of events) {
@@ -715,6 +723,10 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         if (p.phase === 'set_config_option_skipped' && typeof p.value === 'string') agent.model = p.value
         if (p.phase === 'awaiting_operator') { agent.status = 'waiting'; agent.task = 'Waiting for you'; letters.awaiting(event) }
         if (p.phase === 'team_bus_unavailable') agent.busUnavailable = true
+        if (p.phase === 'turn_interrupted' && object(event.raw) && event.raw.source === 'loomwatch') {
+          interrupted.add(agent.id)
+          agent.task = 'Stopped for your note'
+        }
         if (isTurnResumed(event)) {
           // One turn, cut by the app and carried on: its reply keeps going, and its cost counts.
           agent.resumedTurns = (agent.resumedTurns ?? 0) + 1
@@ -962,7 +974,10 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         if (object(p.usage)) {
           if (typeof p.usage.totalTokens === 'number') agent.tokens = (agent.tokens ?? 0) + p.usage.totalTokens
         }
-        if (agent.stopReason !== 'end_turn') {
+        if (agent.stopReason === 'cancelled' && interrupted.delete(agent.id)) {
+          // You stopped it to hand it a note; nothing went wrong, and the note's turn follows.
+          agent.task = 'Stopped for your note'
+        } else if (agent.stopReason !== 'end_turn') {
           attention.push({ id: event.id, seq: event.seq, agentId: agent.id, message: `Turn ended: ${agent.stopReason}` })
           agent.task = `Turn ended: ${agent.stopReason}`
         } else if (agent.status === 'running') {
@@ -985,7 +1000,9 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
 
   evidence.forEach((item, index) => { item.order = index + 1 })
 
-  const list = [...agents.values()].sort((a, b) => a.firstSeq - b.firstSeq)
+  // Your words are archived under the reserved operator id — answers to a question, notes to an
+  // agent at work (ADR 0051) — and you are not one of the team's agents: no card, no receipt line.
+  const list = [...agents.values()].filter((agent) => agent.id !== OPERATOR_ID).sort((a, b) => a.firstSeq - b.firstSeq)
   const spawned = list.filter((agent) => agent.pid !== null || agent.status !== 'idle' && agent.status !== 'waiting')
   const live = list.some((agent) => agent.status === 'running' || agent.status === 'starting')
   const outstanding = [...delegations.values()].some((delegation) => {

@@ -10,6 +10,8 @@ import { useTheme } from '../../lib/theme'
 import { offerTourIfFirstRun, startTour } from '../../lib/tour/store'
 import { ChipDot, LoomMark } from '../ui/glyphs'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
+import { chatPreview, listTime } from '../../lib/chat/preview'
+import { isUnread } from '../../lib/chat/seen'
 import { fabricFor } from '../../lib/story/fabric'
 import { TeamFabric } from './TeamFabric'
 import { AppSetup } from './AppSetup'
@@ -106,11 +108,14 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
     if (nothingRuns) setSetupOpen(true)
   }
   const openSetup = () => { setCreating(false); setSetupOpen(true) }
+  // Teams are listed as chats (ADR 0051): the one with the newest work first, then the rest.
+  const previews = useMemo(() => new Map((teams ?? []).map((team) => [team.path, chatPreview(runs, team.path)])), [teams, runs])
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    if (!teams || !needle) return teams ?? []
-    return teams.filter((team) => teamDisplayName(team).toLowerCase().includes(needle) || team.path.toLowerCase().includes(needle))
-  }, [teams, query])
+    const matching = !teams ? [] : !needle ? teams : teams.filter((team) => teamDisplayName(team).toLowerCase().includes(needle) || team.path.toLowerCase().includes(needle))
+    const at = (path: string) => previews.get(path)?.at ?? ''
+    return [...matching].sort((left, right) => at(right.path).localeCompare(at(left.path)))
+  }, [teams, query, previews])
 
   // Someone who has never run a team is offered the getting-started guide, once per browser; see
   // lib/tour/store.ts. Asked once per visit to Home, not on every refresh of the team list.
@@ -207,10 +212,15 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
             <ul className="home-grid">
               {shown.map((team, index) => {
                 const fabric = fabricFor(runs, team.path)
+                const preview = previews.get(team.path) ?? null
+                const unread = preview ? isUnread(team.path, preview.at) : false
                 return (
                 <li key={team.path} style={{ ['--card-i' as string]: index }}>
-                  <button type="button" className={`home-card ${fabric.waiting ? 'waiting' : ''}`} onClick={() => openTeam(team.path)}>
-                    <span className="home-card-name">{teamDisplayName(team)}{fabric.waiting && <em className="home-card-waiting">Waiting for you</em>}</span>
+                  <button type="button" className={`home-card ${fabric.waiting ? 'waiting' : ''}${unread ? ' unread' : ''}`} onClick={() => openTeam(team.path, preview ? 'chat' : 'build')}>
+                    <span className="home-card-name">{teamDisplayName(team)}{fabric.waiting && <em className="home-card-waiting">Waiting for you</em>}{unread && <i className="home-card-unread" aria-label="New since you looked" />}</span>
+                    {preview && (
+                      <span className="home-card-chat"><span className="home-card-line">{preview.line}</span><time dateTime={preview.at}>{listTime(preview.at)}</time></span>
+                    )}
                     <span className="home-card-meta">{describeTeam(team)}</span>
                     <TeamFabric fabric={fabric} />
                     <span className="home-card-file t-mono-sm">{team.path}</span>

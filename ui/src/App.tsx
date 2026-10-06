@@ -61,7 +61,7 @@ function useCapabilities() {
   return { inventory, loading, error, scannedAt, retry }
 }
 
-function Editor({ initialRunId, initialHistoryOpen }: { initialRunId: string | null; initialHistoryOpen: boolean }) {
+function Editor({ initialRunId }: { initialRunId: string | null }) {
   const { harnesses, searchedPath, knownIds, loading, error, retry } = useHarnesses()
   const capabilities = useCapabilities()
   const [, setDocumentOpen] = useState(() => new URLSearchParams(window.location.search).has('path'))
@@ -85,7 +85,6 @@ function Editor({ initialRunId, initialHistoryOpen }: { initialRunId: string | n
         onRetryCapabilities={capabilities.retry}
         onDocumentOpen={() => setDocumentOpen(true)}
         initialRunId={initialRunId}
-        initialHistoryOpen={initialHistoryOpen}
       />
     </ReactFlowProvider>
   )
@@ -97,8 +96,8 @@ export default function App() {
   if (pathname === '/connections') {
     return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading connections…</p>}><Connections /></Suspense>
   }
-  // The old /watch route folds into the workspace: a session id opens that run in replay,
-  // and a bare /watch opens the run history.
+  // The old /watch route folds into the workspace: a session id opens that run in replay, and a
+  // bare /watch opens the team list, where each team's chat holds its past work (ADR 0051).
   const params = new URLSearchParams(search)
   if (pathname === '/watch') {
     const session = params.get('session')
@@ -107,7 +106,7 @@ export default function App() {
     if (session) next.set('run', session)
     const query = next.toString()
     window.history.replaceState({}, '', query ? `/?${query}` : '/')
-    return <Editor initialRunId={session} initialHistoryOpen={!session} />
+    return <Editor initialRunId={session} />
   }
-  return <Editor initialRunId={params.get('run')} initialHistoryOpen={false} />
+  return <Editor initialRunId={params.get('run')} />
 }

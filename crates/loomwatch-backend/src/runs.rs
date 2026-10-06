@@ -10,6 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, PoisonError, RwLock};
 use std::time::Duration;
 
@@ -217,6 +218,68 @@ pub struct RunRecord {
     /// emptied when the run ends and never stored, since a restart ends every run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub permission_requests: Vec<crate::permissions::PermissionRequest>,
+    /// The team this run belongs to, as its chat knows it (ADR 0051): the team file's `id`, or its
+    /// path when it has none. Stored, so a team whose file is renamed keeps its chat.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub team_key: String,
+    /// A one-agent turn (ADR 0051): the one agent this run executed, after the operator wrote to
+    /// it with an @mention. Its reply is the run's answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub only_agent: Option<String>,
+    /// Agents in the middle of a turn of work right now, which the chat shows as working (ADR
+    /// 0051). Live only, like `permission_requests`: a restart ends every run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub working: Vec<String>,
+    /// Notes the operator sent to an agent at work, waiting for its current turn to end (ADR
+    /// 0051). Live only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queued_notes: Vec<QueuedNote>,
+}
+
+/// A note sent to an agent at work, waiting for its current turn to end (ADR 0051).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedNote {
+    /// The chat message id, so the note in the chat and the note in the run record are one thing.
+    pub id: String,
+    pub agent: String,
+    pub text: String,
+    pub sent_at: String,
+    /// Whether the operator asked for it to go in at once ("Send now"), stopping the agent's turn.
+    #[serde(default)]
+    pub now: bool,
+}
+
+/// "Send now" (ADR 0051): a request to stop an agent's current turn so a note can go in at once.
+///
+/// A flag and a wake-up rather than a channel: the turn being read is the only listener, a second
+/// request before it notices is the same request, and a request made between turns must not cut
+/// the *next* turn short — which is why the turn that delivers the note clears it first.
+#[derive(Debug, Default)]
+pub struct Interrupt {
+    requested: AtomicBool,
+    notify: tokio::sync::Notify,
+}
+
+impl Interrupt {
+    pub fn request(&self) {
+        self.requested.store(true, Ordering::SeqCst);
+        self.notify.notify_one();
+    }
+
+    pub fn clear(&self) {
+        self.requested.store(false, Ordering::SeqCst);
+    }
+
+    /// Resolves once a stop has been requested, consuming the request.
+    pub async fn requested(&self) {
+        loop {
+            if self.requested.swap(false, Ordering::SeqCst) {
+                return;
+            }
+            self.notify.notified().await;
+        }
+    }
 }
 
 impl RunRecord {
@@ -239,6 +302,7 @@ impl RunRecord {
         };
         let responder = team.responder_id()?;
         let run_id = Uuid::new_v4().to_string();
+        let team_key = team.chat_key(&team_path);
         Ok(Self {
             session_id: run_id.clone(),
             run_id,
@@ -266,6 +330,10 @@ impl RunRecord {
             retry_of_run_id: None,
             waiting_on: None,
             permission_requests: Vec::new(),
+            team_key,
+            only_agent: None,
+            working: Vec::new(),
+            queued_notes: Vec::new(),
         })
     }
 }
@@ -315,6 +383,9 @@ struct RegistryInner {
     /// What the operator allowed for the rest of a run, keyed `run_id\0agent_id\0scope`, where the
     /// scope is a tool kind or one MCP tool (`permissions::grant_scope`).
     allowed_for_run: BTreeSet<String>,
+    /// What "Send now" pulls for each agent at work, keyed `run_id\0agent_id` (ADR 0051). An agent
+    /// is shown as working exactly while it has an entry here.
+    interrupts: BTreeMap<String, Arc<Interrupt>>,
 }
 
 /// One run parked on the operator.
@@ -389,9 +460,9 @@ impl RunStore {
              (run_id, session_id, team_path, prompt, status, mode, entrypoint, responder,
               agent_ids, created_at, started_at, finished_at, error, exit_code, error_code,
               stop_reason, event_count, reply, trigger, delivery, follows_run_id, start_at,
-              retry_of_run_id, waiting_on, start_key, start_fingerprint)
+              retry_of_run_id, waiting_on, start_key, start_fingerprint, team_key, only_agent)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-                     $18, $19, $20, $21, $22, $23, $24, $25, $26)
+                     $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
              ON CONFLICT (run_id) DO UPDATE SET
                status = EXCLUDED.status,
                started_at = EXCLUDED.started_at,
@@ -446,6 +517,8 @@ impl RunStore {
         .bind(&record.waiting_on)
         .bind(start_key)
         .bind(start_fingerprint)
+        .bind((!record.team_key.is_empty()).then_some(record.team_key.as_str()))
+        .bind(&record.only_agent)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -491,7 +564,7 @@ const fn status_str(status: RunStatus) -> &'static str {
     }
 }
 
-fn decode_run(row: &sqlx::postgres::PgRow) -> Result<StoredRun, sqlx::Error> {
+pub(crate) fn decode_run(row: &sqlx::postgres::PgRow) -> Result<StoredRun, sqlx::Error> {
     use sqlx::Row as _;
     let status: String = row.try_get("status")?;
     let trigger: String = row.try_get("trigger")?;
@@ -539,6 +612,12 @@ fn decode_run(row: &sqlx::postgres::PgRow) -> Result<StoredRun, sqlx::Error> {
             retry_of_run_id: row.try_get("retry_of_run_id")?,
             waiting_on: row.try_get("waiting_on")?,
             permission_requests: Vec::new(),
+            team_key: row
+                .try_get::<Option<String>, _>("team_key")?
+                .unwrap_or_default(),
+            only_agent: row.try_get("only_agent")?,
+            working: Vec::new(),
+            queued_notes: Vec::new(),
         },
         start_key: row.try_get("start_key")?,
         start_fingerprint: row.try_get("start_fingerprint")?,
@@ -1008,6 +1087,8 @@ impl RunRegistry {
         entry.record.status = RunStatus::Cancelled;
         entry.record.finished_at = Some(now());
         let open = std::mem::take(&mut entry.record.permission_requests);
+        entry.record.working.clear();
+        entry.record.queued_notes.clear();
         let cancelled = entry.record.clone();
         forget_permissions(&mut inner, run_id, &open);
         CancelOutcome::Cancelled(cancelled)
@@ -1178,9 +1259,121 @@ impl RunRegistry {
             entry.record.waiting_on = None;
             entry.handle = None;
             let open = std::mem::take(&mut entry.record.permission_requests);
+            entry.record.working.clear();
+            entry.record.queued_notes.clear();
             forget_permissions(&mut inner, run_id, &open);
         }
         true
+    }
+
+    /// ADR 0051: `agent_id` began a turn of work in `run_id`. It is shown as working until
+    /// [`Self::settle_work`] finds no note waiting for it; the returned handle is what "Send now"
+    /// pulls to stop its turn.
+    pub(crate) fn begin_work(&self, run_id: &str, agent_id: &str) -> Arc<Interrupt> {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        let interrupt = Arc::clone(
+            inner
+                .interrupts
+                .entry(live_key(run_id, agent_id))
+                .or_default(),
+        );
+        if let Some(entry) = inner.runs.get_mut(run_id)
+            && !entry.record.working.iter().any(|id| id == agent_id)
+        {
+            entry.record.working.push(agent_id.to_owned());
+        }
+        interrupt
+    }
+
+    /// The notes waiting for `agent_id`, taken off the record; or, when none is, the agent stops
+    /// being shown as working. One lock for both, so a note can never land in the gap between
+    /// "nothing is waiting" and "no longer working" and be lost.
+    pub(crate) fn settle_work(&self, run_id: &str, agent_id: &str) -> Vec<QueuedNote> {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        let Some(entry) = inner.runs.get_mut(run_id) else {
+            inner.interrupts.remove(&live_key(run_id, agent_id));
+            return Vec::new();
+        };
+        let (mine, others): (Vec<QueuedNote>, Vec<QueuedNote>) =
+            std::mem::take(&mut entry.record.queued_notes)
+                .into_iter()
+                .partition(|note| note.agent == agent_id);
+        entry.record.queued_notes = others;
+        if mine.is_empty() {
+            entry.record.working.retain(|id| id != agent_id);
+            inner.interrupts.remove(&live_key(run_id, agent_id));
+        }
+        mine
+    }
+
+    /// Stop showing `agent_id` as working, whatever is waiting for it: its work ended without
+    /// reaching [`Self::settle_work`]. Notes still waiting stay in the chat, unsent.
+    pub(crate) fn end_work(&self, run_id: &str, agent_id: &str) {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        inner.interrupts.remove(&live_key(run_id, agent_id));
+        if let Some(entry) = inner.runs.get_mut(run_id) {
+            entry.record.working.retain(|id| id != agent_id);
+            entry
+                .record
+                .queued_notes
+                .retain(|note| note.agent != agent_id);
+        }
+    }
+
+    /// Queue a note for an agent at work in a live run (ADR 0051), and stop its current turn when
+    /// the note asks to go in now.
+    ///
+    /// # Errors
+    ///
+    /// A conflict when the agent is not working in that run: it finished, or never started.
+    pub fn queue_note(&self, run_id: &str, note: QueuedNote) -> Result<RunRecord, OperatorError> {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        let Some(interrupt) = inner
+            .interrupts
+            .get(&live_key(run_id, &note.agent))
+            .cloned()
+        else {
+            return Err(OperatorError::conflict(format!(
+                "{} is not working right now, so there is no turn for this note to join.",
+                note.agent
+            )));
+        };
+        let Some(entry) = inner.runs.get_mut(run_id) else {
+            return Err(OperatorError::not_found(format!(
+                "run {run_id} does not exist"
+            )));
+        };
+        if entry.record.status.is_terminal() {
+            return Err(OperatorError::conflict("That run has already finished."));
+        }
+        let now = note.now;
+        entry.record.queued_notes.push(note);
+        let record = entry.record.clone();
+        if now {
+            interrupt.request();
+        }
+        Ok(record)
+    }
+
+    /// The live runs of one team, newest first (ADR 0051): what the chat's message box routes
+    /// against.
+    #[must_use]
+    pub fn live_runs_of(&self, team_key: &str, team_path: &str) -> Vec<RunRecord> {
+        self.list()
+            .into_iter()
+            .filter(|record| {
+                !record.status.is_terminal()
+                    && (record.team_key == team_key || record.team_path == team_path)
+            })
+            .collect()
+    }
+
+    /// Where a chat message's rows live: the `runs` table's pool, when this registry is durable.
+    #[must_use]
+    pub(crate) fn chat_store(&self) -> Option<crate::chat::ChatStore> {
+        self.store
+            .as_ref()
+            .map(|store| crate::chat::ChatStore::new(store.pool.clone()))
     }
 }
 
@@ -1198,6 +1391,7 @@ fn forget_permissions(
     inner
         .allowed_for_run
         .retain(|key| !key.starts_with(&prefix));
+    inner.interrupts.retain(|key, _| !key.starts_with(&prefix));
 }
 
 #[derive(Clone)]
@@ -1232,9 +1426,9 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
         })
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct StartRunRequest {
+pub(crate) struct StartRunRequest {
     team_path: String,
     prompt: String,
     /// Optional during the compatibility rollout; the UI sends the revision returned by
@@ -1266,17 +1460,51 @@ struct StartRunRequest {
     /// and refusing would make the label worse rather than the data better.
     #[serde(default)]
     retry_of_run_id: Option<String>,
+    /// A one-agent turn (ADR 0051): run only this agent, given its own last output, and stop.
+    #[serde(default)]
+    only_agent: Option<String>,
+}
+
+impl StartRunRequest {
+    /// A run started from the team's chat (ADR 0051).
+    pub(crate) fn from_chat(
+        team_path: &str,
+        prompt: &str,
+        expected_revision: Option<String>,
+        start_key: Option<String>,
+    ) -> Self {
+        Self {
+            team_path: team_path.to_owned(),
+            prompt: prompt.to_owned(),
+            expected_revision,
+            start_key,
+            ..Self::default()
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn only(mut self, agent: &str) -> Self {
+        self.only_agent = Some(agent.to_owned());
+        self
+    }
+
+    #[must_use]
+    pub(crate) fn continuing(mut self, run_id: &str, start_at: &str) -> Self {
+        self.follows_run_id = Some(run_id.to_owned());
+        self.start_at = Some(start_at.to_owned());
+        self
+    }
 }
 
 #[derive(Debug)]
-enum StartRunOutcome {
+pub(crate) enum StartRunOutcome {
     Accepted(RunRecord),
     Duplicate(RunRecord),
     IdempotencyConflict { run_id: String },
 }
 
 #[derive(Debug)]
-enum LaunchError {
+pub(crate) enum LaunchError {
     Api(ApiError),
     StaleRevision { current: String },
     NeedsReview(Box<NeedsReview>),
@@ -1285,7 +1513,7 @@ enum LaunchError {
 /// What the operator is shown before trusting a team file nobody approved here (ADR 0048).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct NeedsReview {
+pub(crate) struct NeedsReview {
     team_path: String,
     team_name: String,
     /// Approving this exact revision is what `POST /api/team/approve` takes.
@@ -1300,7 +1528,7 @@ impl From<ApiError> for LaunchError {
 }
 
 impl LaunchError {
-    fn into_api_error(self) -> ApiError {
+    pub(crate) fn into_api_error(self) -> ApiError {
         match self {
             Self::Api(error) => error,
             Self::StaleRevision { current } => ApiError::new(
@@ -1336,12 +1564,22 @@ async fn start_run(
         &request,
     )
     .await;
+    start_response(&state.registry, outcome).await
+}
+
+/// The answer to a start request, shared by `POST /api/runs` and the chat (ADR 0051), so both
+/// speak the same codes: a stale revision, a team that needs review, a duplicate start key.
+pub(crate) async fn start_response(
+    registry: &RunRegistry,
+    outcome: Result<StartRunOutcome, LaunchError>,
+) -> Result<Response, ApiError> {
+    let state_registry = registry;
     match outcome {
         Ok(StartRunOutcome::Accepted(record)) => {
             // Persist before answering: a record the operator has been given a run id for has to
             // outlive the process, and the start key it was bound to has to outlive it too or a
             // resubmit after a restart starts a second run.
-            persist_or_log(&state.registry, &record.run_id).await;
+            persist_or_log(state_registry, &record.run_id).await;
             Ok((StatusCode::ACCEPTED, Json(record)).into_response())
         }
         Ok(StartRunOutcome::Duplicate(record)) => {
@@ -1445,7 +1683,7 @@ async fn approve_team(
         .into_response())
 }
 
-async fn launch_manual(
+pub(crate) async fn launch_manual(
     registry: &RunRegistry,
     archive: Option<EventArchive>,
     teams_root: &Path,
@@ -1459,6 +1697,7 @@ async fn launch_manual(
             && request.start_at.is_none()
             && request.from_checkpoint_id.is_none()
             && request.retry_of_run_id.is_none()
+            && request.only_agent.is_none()
         {
             base
         } else {
@@ -1467,7 +1706,8 @@ async fn launch_manual(
                 request.follows_run_id,
                 request.start_at,
                 request.from_checkpoint_id,
-                request.retry_of_run_id
+                request.retry_of_run_id,
+                request.only_agent
             ])
             .to_string()
         }
@@ -1504,7 +1744,10 @@ async fn launch_manual(
     // Resolve and check the lineage *before* the run is registered or a harness spawns. Every
     // refusal here is a 4xx on a run that never existed, which is the only place they can be
     // without having already cost the operator a process.
-    resolve_continuation(registry, &mut prepared, request).await?;
+    match request.only_agent.as_deref() {
+        Some(only) => resolve_one_agent(registry, &mut prepared, only).await?,
+        None => resolve_continuation(registry, &mut prepared, request).await?,
+    }
     // Retry lineage is a column, not a `Map` in the browser: a reloaded page still says
     // "Retry of Run 07". Written after `resolve_continuation` so an explicit `retryOfRunId` wins
     // over the one a checkpoint continuation derives, which is the more specific claim.
@@ -1565,6 +1808,7 @@ async fn launch_manual(
 /// The handover is read from the followed run's archived **prompt record** (`prompt_sections`'
 /// `stage_results` section), not from `context_packets`: a packet holds the memory section, and the
 /// handover a stage was given is in the prompt record. That is the only place the exact text lives.
+#[allow(clippy::too_many_lines)]
 async fn resolve_continuation(
     registry: &RunRegistry,
     prepared: &mut PreparedRun,
@@ -1644,11 +1888,15 @@ async fn resolve_continuation(
     // Decision 8: following a *failed* run is allowed, and its output section is then simply
     // absent. Refusing would force a re-run of the stages that did not fail, which is the
     // expensive half of a bad trade.
+    //
+    // "Continue with the team" after a one-agent turn (ADR 0051) is not handed that agent's reply
+    // as a previous output: what the next stage reads is the handover the agent wrote, which is
+    // replayed below, and the reply is in the conversation.
     lineage.previous_output = followed
         .reply
         .as_deref()
         .map(str::trim)
-        .filter(|reply| !reply.is_empty())
+        .filter(|reply| !reply.is_empty() && followed.only_agent.is_none())
         .map(str::to_owned);
     if let Some(point) = checkpoint {
         let stale = crate::memory::checkpoint_staleness(
@@ -1659,14 +1907,30 @@ async fn resolve_continuation(
         lineage.checkpoint = Some((point, stale));
     }
 
-    seed_replayed_handovers(
-        &prepared.archive,
-        &follows,
-        &prepared.order,
-        &prepared.predecessors,
-        &mut lineage,
-    )
-    .await?;
+    match followed.only_agent.as_deref() {
+        Some(only) => {
+            seed_after_one_agent(
+                &prepared.archive,
+                &follows,
+                only,
+                &prepared.order,
+                &prepared.predecessors,
+                prepared.operator_nodes.as_slice(),
+                &mut lineage,
+            )
+            .await?;
+        }
+        None => {
+            seed_replayed_handovers(
+                &prepared.archive,
+                &follows,
+                &prepared.order,
+                &prepared.predecessors,
+                &mut lineage,
+            )
+            .await?;
+        }
+    }
 
     prepared.record.follows_run_id = Some(follows.clone());
     prepared.record.start_at.clone_from(&lineage.start_at);
@@ -1677,6 +1941,196 @@ async fn resolve_continuation(
         prepared.record.retry_of_run_id = Some(follows);
     }
     prepared.lineage = lineage;
+    Ok(())
+}
+
+/// The operator's words when they approve without a note: what the run view and the needs-you
+/// tray send, and what "Continue with the team" records in place of a review it stands for.
+pub(crate) const APPROVAL_TEXT: &str = "Approved. Continue as planned.";
+
+/// ADR 0051: a one-agent turn, resolved like a follow-up of the team's latest work that agent took
+/// part in. It is handed what it was given then — its predecessors' handover, the operator's
+/// direction — and what it wrote then, and it stops after its own turn.
+///
+/// Nothing found is not a refusal: an agent that has never worked here still gets the conversation
+/// and the operator's message, which is what a first @mention means.
+async fn resolve_one_agent(
+    registry: &RunRegistry,
+    prepared: &mut PreparedRun,
+    only: &str,
+) -> Result<(), LaunchError> {
+    let bad = |message: String| LaunchError::Api(ApiError::new(StatusCode::BAD_REQUEST, message));
+    let Some(agent) = prepared.team.agents.iter().find(|agent| agent.id == only) else {
+        return Err(bad(format!("{only} is not an agent of this team.")));
+    };
+    if agent.is_operator() {
+        return Err(bad(format!(
+            "{} is a review step, which is you. Write to an agent instead.",
+            agent.name
+        )));
+    }
+    let mut lineage = std::mem::take(&mut prepared.lineage);
+    lineage.only = Some(only.to_owned());
+    prepared.record.only_agent = Some(only.to_owned());
+    only.clone_into(&mut prepared.record.responder);
+    if !prepared.order.is_empty() {
+        lineage.start_at = Some(only.to_owned());
+        prepared.record.start_at = Some(only.to_owned());
+    }
+    if let Some(source) = latest_work_of(registry, &prepared.record, only, &prepared.order) {
+        lineage.previous_output =
+            own_output(&prepared.archive, &source, only, &prepared.predecessors).await?;
+        lineage.own_output = lineage.previous_output.is_some();
+        if !prepared.order.is_empty() {
+            let given = stored_stage_results(&prepared.archive, &source.run_id).await?;
+            if let Some(handover) = given.get(only) {
+                lineage
+                    .replayed_stage_results
+                    .insert(only.to_owned(), handover.clone());
+            }
+            let directions = stored_prompt_section(
+                &prepared.archive,
+                &source.run_id,
+                crate::memory::PromptSectionKind::Direction,
+            )
+            .await?;
+            if let Some(direction) = directions.get(only) {
+                lineage
+                    .replayed_directions
+                    .insert(only.to_owned(), direction.clone());
+            }
+        }
+        prepared.record.follows_run_id = Some(source.run_id);
+    }
+    prepared.lineage = lineage;
+    Ok(())
+}
+
+/// The newest finished work of this team in which `agent` worked: a run of the whole team that
+/// reached it, or an earlier one-agent turn of the same agent.
+fn latest_work_of(
+    registry: &RunRegistry,
+    record: &RunRecord,
+    agent: &str,
+    order: &[String],
+) -> Option<RunRecord> {
+    let position = |id: &str| order.iter().position(|stage| stage == id);
+    registry.list().into_iter().find(|run| {
+        run.run_id != record.run_id
+            && run.status.is_terminal()
+            && (run.team_key == record.team_key || run.team_path == record.team_path)
+            && run.agent_ids.iter().any(|id| id == agent)
+            && run.only_agent.as_deref().is_none_or(|only| only == agent)
+            && match (run.start_at.as_deref().and_then(position), position(agent)) {
+                (Some(start), Some(at)) => start <= at,
+                _ => true,
+            }
+    })
+}
+
+/// What `agent` wrote in `source`: the run's answer when it gave it, otherwise the handover it
+/// wrote for the stage after it, as that stage (or a review stop) was given it.
+async fn own_output(
+    archive: &EventArchive,
+    source: &RunRecord,
+    agent: &str,
+    predecessors: &BTreeMap<String, Vec<String>>,
+) -> Result<Option<String>, LaunchError> {
+    let present = |text: &str| {
+        let text = text.trim();
+        (!text.is_empty()).then(|| text.to_owned())
+    };
+    if source.responder == agent || source.only_agent.as_deref() == Some(agent) {
+        return Ok(source.reply.as_deref().and_then(present));
+    }
+    if let Some(handover) = stored_stage_handover(archive, &source.run_id, agent).await? {
+        return Ok(present(&handover));
+    }
+    let given = stored_stage_results(archive, &source.run_id).await?;
+    Ok(predecessors
+        .iter()
+        .find(|(_, feeding)| feeding.as_slice() == [agent.to_owned()])
+        .and_then(|(stage, _)| given.get(stage))
+        .and_then(|text| present(text)))
+}
+
+/// The handover a one-agent turn's agent wrote for the stage after it (ADR 0051).
+async fn stored_stage_handover(
+    archive: &EventArchive,
+    run_id: &str,
+    agent: &str,
+) -> Result<Option<String>, LaunchError> {
+    let events = archive.load_session(run_id).await.map_err(|error| {
+        LaunchError::Api(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to read run {run_id}: {error:#}"),
+        ))
+    })?;
+    Ok(events
+        .iter()
+        .rev()
+        .find(|event| {
+            event.kind == EventKind::SessionMeta
+                && event.payload["phase"] == "stage_handover"
+                && event.payload["stage"] == agent
+        })
+        .and_then(|event| event.payload["text"].as_str())
+        .map(str::to_owned))
+}
+
+/// "Continue with the team" (ADR 0051): the stages after a one-agent turn are handed the handover
+/// that agent wrote in it. A review stop straight after the agent is passed rather than run:
+/// pressing Continue was the operator's review of that work, and it is recorded as their
+/// direction, exactly as approving at the stop would have been.
+async fn seed_after_one_agent(
+    archive: &EventArchive,
+    follows: &str,
+    only: &str,
+    order: &[String],
+    predecessors: &BTreeMap<String, Vec<String>>,
+    operator_nodes: &[String],
+    lineage: &mut crate::RunLineage,
+) -> Result<(), LaunchError> {
+    let bad = |message: String| LaunchError::Api(ApiError::new(StatusCode::BAD_REQUEST, message));
+    let start_index = lineage.start_index(order);
+    let skipped = &order[..start_index];
+    let handover = stored_stage_handover(archive, follows, only)
+        .await?
+        .ok_or_else(|| {
+            bad(format!(
+                "{only} wrote no handover in that turn, so there is nothing to continue from. \
+                 Write @team to run everyone."
+            ))
+        })?;
+    for stage in &order[start_index..] {
+        let feeding = predecessors.get(stage).map_or(&[][..], Vec::as_slice);
+        let (replayed, live): (Vec<&String>, Vec<&String>) =
+            feeding.iter().partition(|from| skipped.contains(from));
+        if replayed.is_empty() {
+            continue;
+        }
+        let through_stop = |from: &String| {
+            operator_nodes.contains(from)
+                && predecessors.get(from).map(Vec::as_slice) == Some(&[only.to_owned()][..])
+        };
+        let fed_by_only = replayed.len() == 1
+            && live.is_empty()
+            && (replayed[0] == only || through_stop(replayed[0]));
+        if !fed_by_only {
+            return Err(bad(format!(
+                "{stage} needs more than {only}'s work to start, so the team cannot continue \
+                 from this turn alone. Write @team to run everyone."
+            )));
+        }
+        lineage
+            .replayed_stage_results
+            .insert(stage.clone(), handover.clone());
+        if replayed[0] != only {
+            lineage
+                .replayed_directions
+                .insert(stage.clone(), APPROVAL_TEXT.to_owned());
+        }
+    }
     Ok(())
 }
 
@@ -1781,7 +2235,7 @@ async fn seed_replayed_handovers(
 
 /// Every stage of one run and the `## Results from preceding stages` text it was given, read from
 /// the archived prompt record.
-async fn stored_stage_results(
+pub(crate) async fn stored_stage_results(
     archive: &EventArchive,
     run_id: &str,
 ) -> Result<BTreeMap<String, String>, LaunchError> {
@@ -1881,8 +2335,13 @@ struct PreparedRun {
     revision: String,
     /// What this run continues, once `POST /api/runs` has resolved and checked it.
     lineage: crate::RunLineage,
+    /// The team file this run executes, as parsed: a one-agent turn checks its agent against it.
+    team: TeamConfig,
+    /// The review stops in this team, by id: "Continue with the team" passes one (ADR 0051).
+    operator_nodes: Vec<String>,
 }
 
+#[allow(clippy::too_many_lines)]
 fn prepare_run(
     archive: Option<EventArchive>,
     teams_root: &Path,
@@ -1992,6 +2451,13 @@ fn prepare_run(
             ..crate::RunLineage::default()
         },
         revision: current_revision,
+        operator_nodes: team
+            .agents
+            .iter()
+            .filter(|agent| agent.is_operator())
+            .map(|agent| agent.id.clone())
+            .collect(),
+        team,
     })
 }
 
@@ -2287,6 +2753,12 @@ async fn execute(
         return;
     }
     persist_or_log(&registry, &run_id).await;
+    // ADR 0051: every run is handed the conversation so far, built now — after the run exists and
+    // before anything spawns — so it is the same text for every agent in the run.
+    let lineage = Arc::new(crate::RunLineage {
+        conversation: crate::chat::conversation(&registry, &archive, &team_path, &run_id).await,
+        ..(*lineage).clone()
+    });
     let run = crate::run_team_session_with_session_id(
         &team_path,
         Some(&teams_root),
@@ -2804,6 +3276,7 @@ async fn continue_released_question(
         start_at: None,
         from_checkpoint_id: Some(checkpoint),
         retry_of_run_id: None,
+        only_agent: None,
     };
     match launch_manual(
         &state.registry,

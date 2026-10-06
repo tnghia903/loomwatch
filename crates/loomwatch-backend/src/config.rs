@@ -1117,6 +1117,19 @@ fn weekday_name(token: &str) -> Option<&'static str> {
 }
 
 impl TeamConfig {
+    /// The key this team's chat is filed under (ADR 0051): its `id`, so renaming or moving the
+    /// file keeps the chat; or, for a file with no `id`, its path relative to the teams root,
+    /// prefixed so it can never collide with an `id`.
+    #[must_use]
+    pub fn chat_key(&self, relative_path: &str) -> String {
+        let id = self.id.trim();
+        if id.is_empty() {
+            format!("path:{relative_path}")
+        } else {
+            id.to_owned()
+        }
+    }
+
     /// Read and minimally validate a Phase-02 team file.
     ///
     /// # Errors

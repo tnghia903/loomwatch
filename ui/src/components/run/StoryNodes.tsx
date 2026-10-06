@@ -157,7 +157,7 @@ export function OutputNodeCard({ data }: NodeProps<OutputNode>) {
       {data.pending ? (
         <div className="rt-body rr-body"><div className="skel-bars"><i className="skel-bar" style={{ width: '88%' }} /><i className="skel-bar" style={{ width: '96%' }} /><i className="skel-bar" style={{ width: '64%' }} /></div></div>
       ) : terminalEmpty && !awaiting ? null : (
-        <div className={cx('rt-body t-body rr-body selectable', !data.text && 'empty')}>{data.text || placeholder}{data.streaming && <span className="caret" aria-hidden="true" />}</div>
+        <div className={cx('rt-body t-body rr-body selectable', !data.text && 'empty')}>{data.text || placeholder}{data.streaming && <span key={data.text.length} className="caret" aria-hidden="true" />}</div>
       )}
       {data.streaming && data.mode === 'live' && <div className="rr-stream" aria-hidden="true" />}
       {data.strip && <div className={cx('rt-strip t-meta', data.strip.tone)}><span className="msg">{data.strip.message}</span><span className="wm">{data.strip.watermark}</span></div>}

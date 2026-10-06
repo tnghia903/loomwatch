@@ -3,8 +3,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { fetchTeamsDiscovery, teamDisplayName, teamSummaries, type TeamSummary } from './client'
 
 /** Open a team by its path. A full navigation, so every per-team state starts clean. */
-export function openTeam(path: string) {
-  window.location.assign(`/?path=${encodeURIComponent(path)}`)
+/** Open a team: in Build, or — for a team with history — in its chat (ADR 0051). */
+export function openTeam(path: string, view: 'build' | 'chat' = 'build') {
+  window.location.assign(`/?path=${encodeURIComponent(path)}${view === 'chat' ? '&view=chat' : ''}`)
 }
 
 /** How often a failed list asks again: the usual cause is a daemon that is being restarted. */

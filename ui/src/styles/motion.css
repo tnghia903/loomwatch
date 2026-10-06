@@ -117,10 +117,6 @@
   box-shadow: none;
 }
 
-/* ---- The request lifting into the Run view (lib/motion/lift.ts) ------------- */
-
-.lift-ghost { position: fixed; z-index: 300; margin: 0; pointer-events: none; }
-
 @media (prefers-reduced-motion: no-preference) {
   .segment-thumb.ready { transition: translate var(--t-move) var(--ease-out), width var(--t-move) var(--ease-out); }
 
@@ -157,4 +153,4 @@
 }
 
 @keyframes canvas-pip-breathe { 50% { background-color: color-mix(in srgb, currentColor 35%, transparent); } }
-@keyframes canvas-caret-blink { 50% { background-color: transparent; } }
+@keyframes canvas-caret-blink { 0%, 20% { background-color: var(--color-live); } 70%, 100% { background-color: transparent; } }

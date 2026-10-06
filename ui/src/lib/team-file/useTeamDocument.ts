@@ -663,6 +663,14 @@ export function useTeamDocument() {
     saveInFlightRef.current = true
     setSaveState('saving')
     try {
+      // A copy is a new team: it gets its own id from its file, so it starts its own chat and
+      // notebook rather than writing into the original's (ADR 0051).
+      const currentId = modelRef.current.snapshot().id
+      if (currentId) {
+        // Same file name in another folder: the folder tells the two apart.
+        const fromFile = teamIdForPath(targetPath)
+        modelRef.current.setId(fromFile !== currentId ? fromFile : slugifyTeamName(targetPath.replace(/\.ya?ml$/i, '')))
+      }
       const yaml = modelRef.current.toYaml()
       let root = teamsRoot
       if (!targetPath.startsWith('/') && !root) {

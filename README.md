@@ -124,7 +124,7 @@ the evidence to check before you use it.
 | You find out what an agent did by scrolling back through its terminal. | Every message, tool call and file it touched is recorded, and you can replay it. |
 | A weak first step quietly shapes everything after it. | A review step stops the team until you approve, or send the work back. |
 | Each app has its own skills, tools and folders. | Skills, MCP tools and the folders and files you choose are delivered to the agents that need them. |
-| Doing the job again means retyping the prompt. | Saved teams, follow-ups, **Redo from** any step, and daily schedules. |
+| Doing the job again means retyping the prompt. | One chat per team that remembers the conversation, **@** an agent to redo one step, and daily schedules. |
 
 ## How a run works
 
@@ -237,10 +237,10 @@ that carry from one run to the next.
 </td>
 <td valign="top">
 
-### 🔁 Follow up or redo
+### 💬 One chat per team
 
-Ask for another pass on the result, or **Redo from** a chosen step, without starting the whole team
-again.
+Write **@team** to start everyone, **@Writer** to ask one agent, or a note the team reads next time.
+A note to an agent at work goes into its next turn, so it revises with everything it already has.
 
 </td>
 <td valign="top">
@@ -522,19 +522,22 @@ To try a team without calling a model provider, pick **Review stop demo** under 
 demo is a three-step workflow: **Researcher → You → Writer**. Its agents produce fixed responses so
 you can learn the interface without calling a model provider.
 
-1. Click **Run team**, type `Prepare a short getting-started guide for new users.` in the box at
-   the bottom right, and press <kbd>Enter</kbd> (<kbd>Shift</kbd>+<kbd>Enter</kbd> adds a new line).
-2. When the team pauses for you, open **What Researcher handed over** to read it.
-3. To ask for changes, type `Use the short guide and remove the detailed walkthrough.` and click
-   **Send back to Researcher**. The researcher revises its work and asks again.
+1. Click **Run team** to open the team's chat, type
+   `@team Prepare a short getting-started guide for new users.` in the message box at the bottom,
+   and press <kbd>Enter</kbd> (<kbd>Shift</kbd>+<kbd>Enter</kbd> adds a new line). Only a message
+   with an **@** starts work; the box says where each message goes before you send it.
+2. When the team pauses for you, the chat shows what Researcher handed over, with **Approve** and
+   **Send back to Researcher** under it.
+3. To ask for changes, type `Use the short guide and remove the detailed walkthrough.` in the box
+   and click **Send back to Researcher**. The researcher revises its work and asks again.
 4. Click **Approve** to let the team continue. To pass on a note, type it first; the button then
-   says **Continue**, and your note goes on as your direction.
-5. Read the **Team response**. The demo writer echoes the direction it received, and the run
-   finishes as **Finished**.
+   says **Approve with your note**, and your note goes on as your direction.
+5. Read the team's answer in the chat. The demo writer echoes the direction it received.
 
-To reopen an earlier run, choose **Run history** from the ☰ menu, or press <kbd>⌘</kbd><kbd>P</kbd>. The replay slider lets you
-inspect earlier events without running the agents again. To request another pass, type
-new instructions and choose **Follow up**; **Redo from** can start again at a selected step.
+Everything the team has done stays in its chat: scroll up, or search it with the magnifier at the
+top. **Details** on any piece opens its stages, timeline and record beside the chat, and **Full
+trace** there has the replay slider. To change one step's work, write **@** and that agent's name
+with what should change; under its new version, **Continue with the team** runs the steps after it.
 
 ## Run your own agents
 
@@ -882,7 +885,7 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Files you add to an agent (**Add file…**) | `<team>.files/` beside the team file |
 | Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
 | AI apps you connected to LoomWatch | `.loomwatch/connections.json` in your teams folder. It holds each app's private key. |
-| Run history, recorded events, Notebook entries and Ask conversations | The local PostgreSQL Docker volume |
+| Team chats (your messages and every run), recorded events, Notebook entries and Ask conversations | The local PostgreSQL Docker volume |
 | Database settings | `.env` in the LoomWatch folder (`~/LoomWatch/app`, or your copy of the source) |
 | Which team files you approved to run | `~/Library/Application Support/LoomWatch` on macOS, `~/.local/state/loomwatch` on Linux |
 | Provider sign-in | Managed by each host agent app; Compose-only deployments use `loomwatch-home` |

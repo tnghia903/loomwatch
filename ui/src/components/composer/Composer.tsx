@@ -1,7 +1,6 @@
 import { ArrowRight, MessageSquare, Asterisk, Square, Workflow } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
-import { markLiftOrigin } from '../../lib/motion/lift'
 import { Markdown } from '../ui/Markdown'
 
 import type { WaitingOn } from '../../lib/runs/client'
@@ -110,11 +109,9 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
   // "When the Output arrives the composer does not go dark. It offers Follow up." Available only
   // on a terminal run, because a follow-up is a child of a run that is over.
   const canFollowUp = terminal && onFollowUp !== undefined
-  // A send that starts a run leaves where its text was, so the run can lift it into its Request box.
-  const sending = (send: (() => void) | undefined) => () => { markLiftOrigin(textarea.current, value); send?.() }
-  const submit = sending(onSubmit)
-  const newRun = sending(onNewRun)
-  const followUp = sending(onFollowUp)
+  const submit = onSubmit
+  const newRun = onNewRun
+  const followUp = () => onFollowUp?.()
   const targetName = followUpTarget
     ? followUpStages.find((stage) => stage.id === followUpTarget)?.name ?? followUpTarget
     : null

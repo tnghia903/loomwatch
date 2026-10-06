@@ -48,12 +48,13 @@ without saving”). The canvas then shows:
   and a scrubber (`←` / `→`) that replays any earlier event as a complete, byte-equivalent
   picture. Scrubbing never alters execution or YAML.
 
-Under the stage cards, the Run view shows **what they said to each other**: each pipeline handover,
+Each piece of work in the team's chat shows **what they said to each other**: each pipeline handover,
 every Team Bus `ask` with the answer it got (and whether the asked agent answered from its open
 session or from a fresh start), `dispatch` and `handoff` tasks, `ask_user` questions with your
-answers, and your answers at a review step. It reads as a group chat, **Team chat**: each
+answers, and your answers at a review step. It reads as a group chat inside the team's chat: each
 agent has its own colour and initials, numbered as its card is, and your messages sit on the
-right. A question names who it is for with an @mention, and its answer quotes it. A handover
+right. A review's **Approve** and **Send back** stand where your reply goes, under the handover
+they decide. A question names who it is for with an @mention, and its answer quotes it. A handover
 shows as a document shared with the stage it was for. An answer still owed shows as someone
 writing while the run is live, and as **No answer** after it ends. A plain approval is a short
 note in the chat; a review you approved with a note is one message from you to the stage it went
@@ -61,7 +62,8 @@ on to, and the direction and handover that stage was then given fold into it, as
 repeat it. A long message shows its first lines and **Read more** shows it verbatim; **Info**
 says how long the answer took, what the agent did meanwhile, and leads to the record.
 `ui/src/lib/watch/messages.ts` collects the messages in the same pass as the rest of the
-projection, so they follow the replay scrubber, and the timeline's **Read the message** opens one.
+projection, so they follow the replay scrubber, and the timeline's **Read the message** in
+Details opens the piece in the chat and lands on that message.
 
 Who said what to whom is read from the record, not from the team file as it is now:
 
@@ -76,9 +78,19 @@ Who said what to whom is read from the record, not from the team file as it is n
 All five are additive: runs archived before them still read, and a handover sender that had to be
 taken from the team's connections says so when its row is opened.
 
-The history button beside the composer (`⌘P`) lists live runs and the 100 most recently
-active archived sessions with their prompts; selecting one opens it in **replay**. Deep
-links use `?run=<id>`; the legacy `/watch?session=<id>` route redirects there. A run the
+Past work lives in each team's chat (ADR 0051): the Chat tab lists the team's runs as pieces of
+work, oldest first. The newest piece and any piece still working show the talk between agents as
+it happens; older pieces fold it to one line. **Details** on a piece opens this view beside the
+chat, and Esc closes it. The chat holds what was said and Details how it was made: a piece's
+answer is read only in the chat, with its record's verdict (which opens the review), the files it
+names, **Copy**, **Download** and **Send to Notion** under it; Details shows the receipt,
+timeline, stages and tools. A long answer (or a titled one past a few lines) is a document: the
+chat shows a card with its title, opening words and length, and **Open** shows it in full in the
+pane beside the chat, under an **Answer** tab next to **Details**. Once a document answer
+arrives, the pane following the newest work switches to it. Drag the edge between them to resize; double-click
+resets it. The chat is paged from `GET /api/chat` and searchable with its
+`q`. Deep links use `?run=<id>`, which opens the chat with that run's Details; the legacy
+`/watch?session=<id>` route redirects there, and a bare `/watch` opens the team list. A run the
 daemon no longer remembers (restart) is read from the archive alone.
 
 Escalations, abnormal turn endings, crashes and rejected Team Bus calls

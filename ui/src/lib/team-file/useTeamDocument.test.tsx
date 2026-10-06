@@ -375,6 +375,11 @@ describe('useTeamDocument', () => {
     expect(result.current.fileGone).toBe(false)
     expect(result.current.path).toBe('/Users/operator/.loomwatch/teams/copies/research-team.yaml')
     expect(fetchMock).toHaveBeenCalledWith('/api/team', expect.objectContaining({ method: 'PUT' }))
+    // A copy is a new team with its own id, so it starts its own chat rather than the original's.
+    const put = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+    expect(put).toBeDefined()
+    const written = JSON.parse(String((put![1] as RequestInit).body)) as { yaml: string }
+    expect(written.yaml).toMatch(/^id: copies-research-team$/m)
   })
 
   it('enters the File is gone recovery state when the pre-save fetch 404s instead of a generic save error', async () => {

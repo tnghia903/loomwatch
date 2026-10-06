@@ -5,7 +5,6 @@
 .lw-shell .build-outcome,
 .lw-shell .workspace-view-tabs,
 .delivery-shown .delivery-work,
-.delivery-shown .delivery-output,
 .delivery-shown .workspace-chrome,
 .delivery-shown .lw-composer {
   background: var(--workspace-glass);
@@ -19,10 +18,8 @@
   background: transparent;
   gap: 16px;
 }
-.delivery-shown .delivery-work,
-.delivery-shown .delivery-output { min-width: 0; }
+.delivery-shown .delivery-work { min-width: 0; }
 .delivery-shown .delivery-work { padding: 24px; }
-.delivery-shown .delivery-output { overflow: hidden; }
 .lw-shell .build-outcome { padding: 20px; }
 .build-wiring-hint {
   margin: 0 0 16px;
@@ -42,11 +39,7 @@
   }
   .delivery-shown .delivery-lane {
     inset: 92px 20px 20px;
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  }
-  .delivery-shown .delivery-lane.output-expanded { grid-template-columns: 1fr; }
-  .delivery-shown .delivery-output {
-    padding-bottom: calc(var(--lw-composer-height, 150px) + 20px);
+    grid-template-columns: minmax(0, 1fr);
   }
   .delivery-shown .lw-composer {
     left: calc(60% + 7.6px);
@@ -63,12 +56,6 @@
     width: auto;
     transform: none;
     bottom: calc(var(--lw-composer-height, 150px) + 44px);
-  }
-  .delivery-shown:has(.output-expanded) .lw-composer,
-  .delivery-shown:has(.output-expanded) .lw-composer-notices {
-    left: 32px;
-    right: 32px;
-    width: auto;
   }
 }
 @media (max-width: 767px) {

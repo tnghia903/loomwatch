@@ -1300,7 +1300,9 @@ impl AcpProcess {
                 None,
             )
             .await?;
+        let listening = recorder.interrupt.take();
         let answer = self.prompt_turn(recorder, prompt).await;
+        recorder.interrupt = listening;
         recorder
             .append(
                 EventKind::SessionMeta,
@@ -1353,8 +1355,40 @@ impl AcpProcess {
         method: &str,
         mut recorder: Option<&mut Recorder>,
     ) -> Result<RpcResult> {
+        // "Send now" (ADR 0051) can stop a work turn: `session/cancel` once, then read on until the
+        // app answers the prompt — with `cancelled` — exactly as it would after any other cancel.
+        let interrupt = if method == "session/prompt" {
+            recorder
+                .as_deref()
+                .and_then(|recorder| recorder.interrupt.clone())
+        } else {
+            None
+        };
+        let mut interrupted = false;
         loop {
-            let Ok(read) = timeout(self.request_timeout, self.stdout.next_line()).await else {
+            let next = match interrupt.as_deref() {
+                Some(stop) if !interrupted => tokio::select! {
+                    biased;
+                    () = stop.requested() => None,
+                    read = timeout(self.request_timeout, self.stdout.next_line()) => Some(read),
+                },
+                _ => Some(timeout(self.request_timeout, self.stdout.next_line()).await),
+            };
+            let Some(next) = next else {
+                interrupted = true;
+                self.cancel_current_turn().await;
+                if let Some(recorder) = recorder.as_deref_mut() {
+                    recorder
+                        .append(
+                            EventKind::SessionMeta,
+                            json!({"phase": "turn_interrupted", "reason": "operator_note"}),
+                            Some(json!({"source": "loomwatch", "phase": "turn_interrupted"})),
+                        )
+                        .await?;
+                }
+                continue;
+            };
+            let Ok(read) = next else {
                 self.cancel_current_turn().await;
                 bail!(
                     "timed out after {:?} waiting for ACP response to {method}",
@@ -2472,6 +2506,10 @@ pub(crate) struct Recorder {
     event_log: EventLog,
     acp_session_id: String,
     agent_id: String,
+    /// What "Send now" pulls while this agent works on the operator's task (ADR 0051). Listened to
+    /// only during a work turn: a handover or checkpoint is the coordinator's turn, not the task,
+    /// and cutting one short would lose what the next stage reads.
+    pub(crate) interrupt: Option<Arc<crate::runs::Interrupt>>,
 }
 
 /// One delivered skill, as the open-detector needs it.
@@ -2513,6 +2551,7 @@ impl Recorder {
             reply_phase_known: false,
             required_skills: Vec::new(),
             delivered_skills: Vec::new(),
+            interrupt: None,
         }
     }
 
@@ -4121,6 +4160,7 @@ mod tests {
             delivery: crate::delivery::Delivery::default(),
             stage_results_from: Vec::new(),
             direction_from: Vec::new(),
+            replayed: false,
             sections: vec![
                 crate::memory::PromptSection {
                     kind: crate::memory::PromptSectionKind::Role,
@@ -4342,6 +4382,7 @@ mod tests {
             delivery: crate::delivery::Delivery::default(),
             stage_results_from: Vec::new(),
             direction_from: Vec::new(),
+            replayed: false,
             sections: vec![crate::memory::PromptSection {
                 kind: crate::memory::PromptSectionKind::Task,
                 heading: "## Task".into(),

@@ -195,6 +195,13 @@ async fn main() -> Result<()> {
                 teams_root.clone(),
                 registry.clone(),
             );
+            // ADR 0051: each team's chat, on the same registry, so a message that starts work
+            // starts an ordinary run.
+            let chat = loomwatch_backend::chat::router(
+                archive.clone(),
+                teams_root.clone(),
+                registry.clone(),
+            );
             // The Notebook's own router: loopback-only, and it reads the same canonical root.
             let notebook =
                 loomwatch_backend::notebook_api::router(archive.clone(), teams_root.clone());
@@ -229,6 +236,7 @@ async fn main() -> Result<()> {
                 .merge(api)
                 .merge(loomwatch_backend::watch_api::router(archive))
                 .merge(runs)
+                .merge(chat)
                 .merge(notebook)
                 .merge(routines);
             if listen.ip().is_loopback() || allow_container_listener {

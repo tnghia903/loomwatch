@@ -182,6 +182,20 @@ describe('messages between agents', () => {
     ])
   })
 
+  // ADR 0051: a one-agent turn is handed the earlier handover and review again; the record says so.
+  it('marks a handover and review handed on from the work a run follows as carried, not said in it', () => {
+    seq = 0
+    const { messages } = projectRun([
+      sections(0, 'writer', [{ kind: 'direction', text: 'Approved.' }, { kind: 'stage_results', text: 'FINDINGS' }], { stageResultsFrom: ['review'], directionFrom: ['review'], replayed: true }),
+      sections(9, 'editor', [{ kind: 'stage_results', text: 'DRAFT' }], { stageResultsFrom: ['writer'] }),
+    ])
+    expect(messages.map(({ kind, to, carried }) => ({ kind, to, carried }))).toEqual([
+      { kind: 'direction', to: 'writer', carried: true },
+      { kind: 'handover', to: 'writer', carried: true },
+      { kind: 'handover', to: 'editor', carried: false },
+    ])
+  })
+
   it('leaves the sender unrecorded for a run archived before the daemon named it', () => {
     const { messages } = projectRun(pipelineWithAskBack())
     expect(messages[0].handedBy).toBeNull()

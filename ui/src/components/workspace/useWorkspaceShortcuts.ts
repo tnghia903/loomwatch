@@ -30,6 +30,8 @@ export interface WorkspaceShortcutContext {
   cycleProblem: (direction: 1 | -1) => void
   clearSelection: () => void
   closeRun: () => void
+  /** Details open beside the team's chat (ADR 0051): Esc closes it, live work or not, and keeps the chat. */
+  closeDetails?: () => void
   organize: () => void
   fitCanvas: () => void
   // Esc unwinds these, deepest disclosure first.
@@ -41,8 +43,6 @@ export interface WorkspaceShortcutContext {
   setDiscardConfirm: Setter<boolean>
   paletteOpen: boolean
   setPaletteOpen: Setter<boolean>
-  historyOpen: boolean
-  setHistoryOpen: Setter<boolean>
   problemsOpen: boolean
   setProblemsOpen: Setter<boolean>
   yamlOpen: boolean
@@ -94,9 +94,9 @@ export function useWorkspaceShortcuts(context: WorkspaceShortcutContext) {
 function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutContext) {
   const {
     editable, doc, flow, theme, windowWidth, runView, layersVisible, session, submit, openNewTeam,
-    toggleLibrary, cycleProblem, clearSelection, closeRun, organize, fitCanvas, pendingNodeDelete,
+    toggleLibrary, cycleProblem, clearSelection, closeRun, closeDetails, organize, fitCanvas, pendingNodeDelete,
     setPendingNodeDelete, requestNodeDelete, deleteNodes, discardConfirm, setDiscardConfirm, paletteOpen,
-    setPaletteOpen, historyOpen, setHistoryOpen, problemsOpen, setProblemsOpen,
+    setPaletteOpen, problemsOpen, setProblemsOpen,
     yamlOpen, setYamlOpen, compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
     handoverAgentId, setHandoverAgentId, inspectedCapability, provenanceOpen, setProvenanceOpen, memoryOpen,
     setMemoryOpen, fannedAgentId, setFannedAgentId, setSolo, setSweeping, selectedNodes, selectedEdges,
@@ -110,13 +110,12 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
     if (mod && key === 's') { event.preventDefault(); if (editable) void doc.save(); return }
     if (mod && event.shiftKey && key === 'l') { event.preventDefault(); setSweeping(true); window.setTimeout(() => setSweeping(false), 340); setThemeMode(theme === 'dark' ? 'light' : 'dark'); return }
     if (mod && key === 'n') { event.preventDefault(); openNewTeam(); return }
-    if (mod && key === 'p') { event.preventDefault(); setHistoryOpen((open) => !open); return }
     // §1.2: ⌘↵ submits from anywhere in the app, including a focused canvas — above the
     // `editingText` guard below, which would otherwise swallow it in every other field. The
     // composer's own textarea binds it directly (there it also serves Retry and New run), so
     // it is skipped here rather than submitted twice.
     if (mod && event.key === 'Enter') {
-      if (!(event.target instanceof HTMLElement && event.target.closest('.lw-composer'))) { event.preventDefault(); void submit() }
+      if (!(event.target instanceof HTMLElement && event.target.closest('.lw-composer, .tc-composer'))) { event.preventDefault(); void submit() }
       return
     }
     if (event.key === 'F8') { event.preventDefault(); cycleProblem(event.shiftKey ? -1 : 1); return }
@@ -124,7 +123,6 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
       if (pendingNodeDelete.length > 0) setPendingNodeDelete([])
       else if (discardConfirm) setDiscardConfirm(false)
       else if (paletteOpen) setPaletteOpen(false)
-      else if (historyOpen) setHistoryOpen(false)
       else if (problemsOpen) setProblemsOpen(false)
       else if (yamlOpen) setYamlOpen(false)
       else if (compareOpen) setCompareOpen(false)
@@ -139,6 +137,7 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
       else if (fannedAgentId) setFannedAgentId(null)
       else if (selectedNodes.length > 0 || selectedEdges.length > 0 || selectedCapabilityEdgeIds.size > 0) clearSelection()
       else if (editingText) (event.target as HTMLElement).blur()
+      else if (closeDetails) closeDetails()
       else if (runView && session.terminal) closeRun()
       return
     }

@@ -118,8 +118,11 @@
 .rt-response .rr-body code { font: 400 12px/17px var(--font-mono); background: var(--color-hairline); padding: 1px 4px; border-radius: var(--r-xs); }
 .rt-response .rr-stream { height: 2px; margin: auto calc(-1 * var(--sp-4)) calc(-1 * var(--sp-3)); background: linear-gradient(90deg, transparent, var(--color-live), transparent); background-size: 40% 100%; animation: streamline 1600ms linear infinite; }
 @keyframes streamline { from { background-position: -40% 0 } to { background-position: 140% 0 } }
-.caret { display: inline-block; width: 2px; height: 15px; background: var(--color-live); vertical-align: -2px; animation: caret 1000ms steps(1) infinite; }
-@keyframes caret { 50% { opacity: 0 } }
+/* The caret of an answer still being written. It holds while words arrive — each new piece of
+   text restarts it (keyed on the text, or `data-tick` in the chat), and the delay keeps it solid —
+   and once the writer pauses it breathes: a soft fade out and back, never a hard on/off. */
+.caret { display: inline-block; width: 2px; height: 1.05em; margin-left: 1px; border-radius: 1px; background: var(--color-live); vertical-align: -.15em; animation: caret-blink var(--t-caret) ease-in-out var(--t-caret) infinite alternate; }
+@keyframes caret-blink { 0%, 20% { opacity: 1 } 70%, 100% { opacity: 0 } }
 .rt-strip { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--color-hairline); color: var(--color-ink-3); }
 .rt-strip.halt { box-shadow: inset 3px 0 0 var(--color-halt); }
 .rt-strip.alert { box-shadow: inset 3px 0 0 var(--color-alert); color: var(--color-ink-2); }
@@ -187,13 +190,6 @@
 /* ---------------------------------------------------------------------------
    RUN HISTORY — reopening prior runs. Bounded list; long goals ellipsize.
    --------------------------------------------------------------------------- */
-.lw-history { width: min(420px, calc(100vw - 32px)); left: 50%; bottom: calc(var(--lw-panel-inset) + 68px); transform: translateX(-50%); }
-.lw-history .pop-list { max-height: min(60vh, 360px); overflow-y: auto; }
-.lw-history .pop-row { min-height: 44px; padding: var(--sp-2) var(--sp-3); align-items: center; }
-.lw-history .pop-row .hrow-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.lw-history .pop-row .goal { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-ink); }
-.lw-history .pop-row .sub { color: var(--color-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lw-history .pop-row .when { color: var(--color-ink-3); flex: none; }
 
 /* provenance empty / offline */
 .prov-empty { width: 360px; padding: var(--sp-4); border: 1px dashed var(--color-hairline); border-radius: var(--r-md); color: var(--color-ink-3); display: flex; flex-direction: column; gap: var(--sp-2); }

@@ -144,7 +144,7 @@ export function RunColumn({ prompt, attempt, phase, branch, elapsed, mode, agent
         {output.pending ? (
           <div className="rr-body"><div className="skel-bars"><i className="skel-bar" style={{ width: '88%' }} /><i className="skel-bar" style={{ width: '96%' }} /><i className="skel-bar" style={{ width: '64%' }} /></div></div>
         ) : terminalEmpty ? null : (
-          <div className={cx('rr-body selectable', !output.text && 'empty')}>{output.text || 'No response text yet.'}{output.streaming && <span className="caret" aria-hidden="true" />}</div>
+          <div className={cx('rr-body selectable', !output.text && 'empty')}>{output.text || 'No response text yet.'}{output.streaming && <span key={output.text.length} className="caret" aria-hidden="true" />}</div>
         )}
         {output.streaming && mode === 'live' && <div className="rr-stream" aria-hidden="true" />}
         {output.strip && <StripLine strip={output.strip} />}
