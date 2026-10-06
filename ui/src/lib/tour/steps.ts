@@ -71,7 +71,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'any',
     view: () => ({
       title: 'Welcome to LoomWatch',
-      body: 'LoomWatch runs a team of AI agents on your computer, using the AI apps you already have. This guide walks you through your first run. You do each step yourself, and it takes about three minutes.',
+      body: 'LoomWatch runs a team of AI agents on your computer, using the AI apps you already have, and each team has its own chat where you work with it. This guide walks you through your first team and its first answer. You do each step yourself, and it takes about three minutes.',
       advance: 'start',
     }),
   },
@@ -158,7 +158,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'workspace',
     view: () => ({
       title: 'Ask in plain words',
-      body: 'Write @team and what you want done, then press Enter: only an @ starts work. Not sure what to ask? Use the example below, then press Enter.',
+      body: 'Write @team and what you want done, then press Enter. Only an @ starts work, and the line above the box says where your message will go before you send it. Not sure what to ask? Use the example below, then press Enter.',
       target: ['[data-tour="composer"]'],
       sides: ['top', 'left'],
       advance: 'action',
@@ -176,7 +176,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'workspace',
     view: () => ({
       title: 'Watch it work',
-      body: 'The chat says who is working. “What they said” shows what the agents told each other, and Details opens every step’s record. If something goes wrong, the chat says why and offers Try again.',
+      body: 'The chat says who is working, and what the agents tell each other shows up here as they say it. Write while an agent works, and your note joins its next turn; Send now stops its current step first. Details opens the full record beside the chat.',
       target: ['[data-tour="stages"]'],
       sides: ['bottom', 'right', 'top'],
       advance: 'next',
@@ -187,8 +187,8 @@ export const TOUR_STEPS: readonly TourStep[] = [
     id: 'review',
     screen: 'workspace',
     view: () => ({
-      title: 'Read the result',
-      body: 'The team’s answer appears here in full. To change it, write @ and an agent’s name with what should change, and that agent alone works on it.',
+      title: 'Read the answer',
+      body: 'The answer arrives here, with a check of its record, Copy and Share under it. To change it, write @ and an agent’s name with what should change. Only that agent works again, and it is given the conversation so far.',
       target: ['[data-tour="output"]'],
       sides: ['left', 'bottom'],
       advance: 'next',
@@ -200,7 +200,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'workspace',
     view: () => ({
       title: 'When a team needs you',
-      body: 'Some teams stop to ask you a question or to wait for your approval. When one does, it shows up here, from any team and on every screen.',
+      body: 'Some teams stop to ask you a question or to wait for your approval. You answer on the message that asks, in the chat. It also shows up here, from any team and on every screen.',
       target: ['[data-tour="workspace"] [data-tour="needs-you"]'],
       sides: ['bottom', 'left'],
       advance: 'next',
@@ -224,7 +224,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'any',
     view: () => ({
       title: 'You’re all set',
-      body: 'That is the whole loop: build a team, ask it, review the result. To see this guide again, press ⌘K and choose Getting started guide, or use the menu in any team.',
+      body: 'That is the whole loop: build a team, talk to it in its chat, and review what comes back. The chat keeps it all, so later work picks up from there. To see this guide again, press ⌘K and choose Getting started guide, or use the menu in any team.',
       advance: 'finish',
     }),
   },

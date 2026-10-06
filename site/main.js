@@ -1,6 +1,6 @@
-// LoomWatch landing page. The page is one LoomWatch run that the visitor operates: choose apps,
-// build a team, ask, watch, review, read the result. No dependencies, no network calls, and the
-// static page stays readable without it.
+// LoomWatch landing page. The page is one team's chat, and the visitor is in it: choose apps, build
+// a team, @ it with a job, write to it while it works, review, read the answer, @ one agent for
+// another pass. No dependencies, no network calls, and the static page stays readable without it.
 (() => {
   'use strict'
 
@@ -65,6 +65,7 @@
       note: 'Link claim 3, or drop it.',
       fix: { tool: 'fetch · official notice for claim 3', src: 'official notice' },
       ask: { q: 'Which release notes back claim 2?', a: "Both browser makers' notes from this week. The links are under claim 2 in findings.md." },
+      tell: { researcher: 'Only stories from the last seven days.', writer: 'Lead with the model release.' },
       title2: 'AI and tech, today',
       intro: (n, sourced) => `${n === 4 ? 'Four' : 'Three'} stories worth your morning${sourced ? ', each with its source' : ''}.`,
       file: 'digest.md',
@@ -86,6 +87,7 @@
       note: 'Drop claim 4 unless a source backs it.',
       fix: { tool: 'web search · “cloud backup restore time”', drop: 'nothing backed it, and restore speed depends on your connection' },
       ask: { q: 'Which page says hourly, for claim 1?', a: "Apple's Time Machine guide. The link is under claim 1 in findings.md." },
+      tell: { researcher: 'Include one option that costs nothing.', writer: 'Put the pick first, then why.' },
       title2: 'Backing up your Mac',
       intro: () => 'The pick: Time Machine at your desk, plus one copy somewhere else.',
       file: 'mac-backup.md',
@@ -107,6 +109,7 @@
       note: 'Drop claim 4: nothing in the project says that.',
       fix: { tool: 'search · “windows”', drop: 'nothing in the folder supports it' },
       ask: { q: 'Claim 2: which command runs too early?', a: 'The install command on line 18. It runs before the cd into the project folder.' },
+      tell: { researcher: 'Check the Makefile for the real install steps.', writer: 'Keep it under fifteen lines.' },
       title2: 'Getting started, rewritten',
       intro: (n, sourced, reviewed) => `A new section for the README, written from ${reviewed ? 'the findings you approved' : 'what Researcher found'}.`,
       file: 'README.md',
@@ -400,7 +403,7 @@
       parts.push('and then ', agentChip('writer'), ' writes the answer. ',
         el('button', { type: 'button', class: 'repair', text: 'Add a review step before Writer', onclick: () => setReview(true) }))
     }
-    if (busy()) parts.push(el('span', { class: 'micro', style: 'display:block;margin-top:8px;letter-spacing:.05em', text: 'The team is running · changes apply to the next run' }))
+    if (busy()) parts.push(el('span', { class: 'micro', style: 'display:block;margin-top:8px;letter-spacing:.05em', text: 'The team is working · changes apply to its next piece of work' }))
     sentence.replaceChildren(...parts)
   }
   function setReview(on) {
@@ -501,7 +504,7 @@
     renderCanvas(flash)
     renderYaml()
     renderGive()
-    if (!run) { renderStages(); drawLanes(); renderChat() }
+    if (!run) renderChatUI()
   }
 
   // Ask LoomWatch: one of your own apps proposes the team, and nothing changes until Apply.
@@ -751,58 +754,306 @@
       el('p', { class: 'pk-foot', text: asksFirst ? 'Anything else it asks for waits for your answer during the run.' : "OpenCode doesn't ask before it acts, so these switches can't hold it back." }))
   }
 
-  /* ================================================================ 04 · Ask */
+  /* ================================================================ 04–07 · The team's chat */
 
+  // A team has one chat (ADR 0051 in LoomWatch): what you wrote to it and each piece of work, oldest
+  // first. Chapters 04 to 07 are four views of that chat, and its one message box moves down the
+  // page with the work, the way the box at the bottom of a LoomWatch chat always says where a
+  // message will go before you send it. Only an @ starts work; anything else is a note.
+  const chatItems = []
+  const TEAM_NOTE = 'Keep it short, in plain words.'
+  const FOLLOW = { text: 'Just the top three, please.', intro: 'The top three, most important first, from the same findings.' }
+  // What the box holds for each thing it can do. A request and the follow-up are recorded runs, so
+  // they are the page's words; notes are yours.
+  const drafts = { request: '', teamnote: '', note: '', review: '', followup: `@Writer ${FOLLOW.text}` }
+  // In Ask, the box holds a request or a team note. After the work it holds the follow-up, until
+  // you pick a new request or the follow-up has been answered, and it goes back up to Ask.
+  let home = 'request'
+  let boxHome = true
+
+  const askLog = $('#ask-log')
   const requestsBox = $('#requests')
-  const requestText = $('#request-text')
-  const runButton = $('#run-team')
+  const requestsHead = $('#requests-h')
+  const boxEl = $('#box')
+  const boxText = $('#box-text')
+  const boxWhere = $('#box-where')
+  const boxTry = $('#box-try')
+  const boxNow = $('#box-now')
+  const boxGo = $('#box-go')
+  const CHAPTER = { ask: 'Ask', watch: 'Watch', review: 'Review', result: 'Result' }
+
+  const ROUTE_ICON = {
+    team: 'M6 7.6a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8zM1.6 13.4c.6-2.3 2.2-3.5 4.4-3.5s3.8 1.2 4.4 3.5M10.6 2.9a2.4 2.4 0 0 1 0 4.6M12.2 9.9c1.3.4 2.1 1.6 2.4 3.5',
+    agent: 'M10.6 8a2.6 2.6 0 1 1-5.2 0 2.6 2.6 0 0 1 5.2 0zM10.6 8v1.1c0 1.2.9 1.9 1.9 1.9s1.9-.9 1.9-2.6A6.4 6.4 0 1 0 11.6 13.4',
+    note: 'M2.5 3.2h11v7.3H7.6l-3.1 2.4v-2.4h-2z',
+  }
+  const routeIcon = (route) => el('svg:svg', { viewBox: '0 0 16 16', 'aria-hidden': 'true' }, el('svg:path', { d: ROUTE_ICON[route] || ROUTE_ICON.note }))
+
+  function boxPlace() {
+    if (run && ['running', 'asking'].includes(run.phase)) return 'watch'
+    if (run && run.phase === 'review') return 'review'
+    if (run && run.phase === 'done' && !boxHome) return 'result'
+    return 'ask'
+  }
+  const boxMode = () => ({ watch: 'note', review: 'review', result: 'followup' })[boxPlace()] || home
+  // The agent a note reaches: the one at work.
+  const workingNow = () => (run && ['running', 'asking'].includes(run.phase) ? run.working : null)
+  // The first @mention in a message, as LoomWatch reads one: @team, or an agent's name.
+  function mentionIn(text) {
+    const found = text.match(/(?:^|[\s(“"'])@(team|researcher|writer)(?![\p{L}\p{N}_-])/iu)
+    return found ? found[1].toLowerCase() : null
+  }
+
+  // Where the message in the box would go, said before it is sent.
+  function where() {
+    const mode = boxMode()
+    const steps = seq(state.team).length
+    const starts = (to) => (to === 'team' ? { route: 'team', label: `Starts the team · ${steps} steps` } : { route: 'agent', label: `Starts ${LANE[to]} only` })
+    if (mode === 'request') return { ...starts('team'), go: 'Start' }
+    if (mode === 'followup') return { ...starts('writer'), go: 'Start', tip: 'Researcher keeps its findings.' }
+    if (mode === 'review') return { route: 'answer', label: "A note to go with your review of Researcher's work · press Approve or Send back above" }
+    const to = mentionIn(drafts[mode])
+    if (mode === 'note') {
+      const who = workingNow()
+      if (!who) return { route: 'note', label: run.segs.length ? 'Handing over…' : 'Starting…', go: 'Send note', off: '' }
+      if (!to || to === who) return { route: 'note', label: `Note for ${LANE[who]} · after its current step`, go: 'Send note', now: true }
+      return { ...starts(to), go: 'Start', off: `This page plays one piece of work at a time. Leave out the @ to write to ${LANE[who]}.` }
+    }
+    if (to) return { ...starts(to), go: 'Start', off: 'This page starts work only from the requests above.' }
+    return { route: 'team_note', label: 'Team note · starts nothing', go: 'Send note', tip: drafts.teamnote.trim() ? 'Add @team to start work.' : null }
+  }
+
+  function tryChip(text, onclick) {
+    return el('button', { type: 'button', class: 'try', text, onclick })
+  }
+
+  function renderBox() {
+    const place = boxPlace()
+    const mode = boxMode()
+    // The box goes where the work is; where it was, a line says where it went.
+    for (const slot of $$('.box-slot')) {
+      const name = slot.dataset.slot
+      if (name === place) {
+        if (boxEl.parentElement !== slot) {
+          const focused = boxEl.contains(document.activeElement)
+          slot.replaceChildren(boxEl)
+          if (focused) boxText.focus({ preventScroll: true })
+        }
+        continue
+      }
+      const away = name === 'ask' && run
+        ? el('p', { class: 'box-away' }, 'The message box went with the work. ', el('a', { class: 'link', href: `#${place}`, text: `${CHAPTER[place]} ↓` }))
+        : name === 'result' && place === 'ask' && run && run.phase === 'done'
+          ? el('p', { class: 'box-away' }, 'New work starts from the message box, back in ', el('a', { class: 'link', href: '#ask', text: 'Ask ↑' }))
+          : null
+      slot.replaceChildren(...(away ? [away] : []))
+    }
+    if (mode === 'request') drafts.request = `@team ${preset(state.request).request}`
+    if (boxText.value !== drafts[mode]) boxText.value = drafts[mode]
+    boxText.readOnly = mode === 'request' || mode === 'followup'
+    const who = workingNow()
+    const flagged = run && run.findings.some((f) => !f.src && !f.dropped)
+    boxText.placeholder = mode === 'teamnote' ? 'A note the team reads the next time it works'
+      : mode === 'note' ? `A note for ${who ? LANE[who] : 'the agent at work'}`
+        : mode === 'review' ? (flagged ? 'To send it back, say what to change' : 'Optional. A note here goes on with the work.') : ''
+    const w = where()
+    boxEl.dataset.route = w.route
+    boxWhere.replaceChildren(routeIcon(w.route), el('span', { text: w.label }),
+      ...(w.off ? [el('em', { class: 'off', text: w.off })] : w.tip ? [el('em', { text: w.tip })] : []))
+    const tries = []
+    if (mode === 'request') {
+      tries.push(tryChip('Or a note, with no @', () => { home = 'teamnote'; if (!drafts.teamnote.trim()) drafts.teamnote = TEAM_NOTE; renderAsk(); boxText.focus() }))
+    } else if (mode === 'teamnote') {
+      tries.push(tryChip('Back to a request', () => { home = 'request'; renderAsk(); boxText.focus() }))
+    } else if (mode === 'note' && who && !drafts.note.trim()) {
+      const text = run.preset.tell[who]
+      tries.push(tryChip(`Try: “${text}”`, () => { drafts.note = text; renderBox(); boxText.focus() }))
+    } else if (mode === 'review' && flagged && !drafts.review.trim()) {
+      tries.push(tryChip(`Try: “${run.preset.note}”`, () => { drafts.review = run.preset.note; renderBox(); labelReview(); boxText.focus() }))
+    }
+    boxTry.replaceChildren(...tries)
+    boxTry.hidden = tries.length === 0
+    const text = drafts[mode].trim()
+    boxNow.hidden = !w.now
+    boxNow.disabled = !text
+    if (who) boxNow.title = `Stop ${LANE[who]}'s current step and give it this at once`
+    // A review is decided with the buttons on its message; the box only holds the note.
+    boxGo.hidden = mode === 'review'
+    boxGo.textContent = w.go || 'Send'
+    boxGo.disabled = !text || w.off !== undefined
+  }
+
+  boxText.addEventListener('input', () => {
+    if (boxText.readOnly) return
+    const mode = boxMode()
+    drafts[mode] = boxText.value
+    renderBox()
+    if (mode === 'review') labelReview()
+  })
+  boxText.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+    event.preventDefault()
+    // Enter never decides a review by accident.
+    if (boxMode() !== 'review') send(false)
+  })
+  boxEl.addEventListener('submit', (event) => { event.preventDefault(); send(false) })
+  boxNow.addEventListener('click', () => send(true))
+
+  function send(now) {
+    const mode = boxMode()
+    const w = where()
+    const text = drafts[mode].trim()
+    if (!text || w.off !== undefined || mode === 'review') return
+    if (mode === 'request') { startRun(); scrollToId('watch'); return }
+    if (mode === 'followup') { startFollowUp(); return }
+    if (mode === 'teamnote') {
+      chatItems.push({ kind: 'teamnote', text, readBy: null })
+      drafts.teamnote = ''
+      home = 'request'
+      renderAsk()
+      return
+    }
+    // A note to the agent at work joins its next turn; Send now stops its current step first.
+    const who = workingNow()
+    run.told.push({ to: who, text, now, t: run.clock, takenAt: null })
+    if (now) run.interrupt = who
+    drafts.note = ''
+    log('you', `You wrote to ${LANE[who]}`, { say: now ? `You stopped ${LANE[who]}'s current step to give it your note.` : `Your note waits for ${LANE[who]}'s current step to end.` })
+    renderPiece()
+    renderBox()
+  }
+
+  /* ---------------- 04 · Ask: the chat, and what you can write to it */
+
   function renderRequests() {
+    const open = boxPlace() === 'ask' || (run && run.phase === 'done')
+    requestsBox.hidden = !open
+    requestsHead.hidden = !open
+    requestsHead.textContent = chatItems.some((i) => i.kind === 'piece') ? 'Ask for something else' : 'Try asking'
+    const checked = (r) => r.id === state.request && home === 'request' && boxPlace() === 'ask'
     requestsBox.replaceChildren(...REQUESTS.map((r) => el('button', {
-      type: 'button', class: 'req', role: 'radio', 'aria-checked': String(r.id === state.request),
-      onclick: () => { state.request = r.id; renderRequests() },
+      type: 'button', class: 'req', role: 'radio', 'aria-checked': String(checked(r)),
+      onclick: () => { state.request = r.id; home = 'request'; boxHome = true; renderAsk() },
     },
     el('span', { class: 'dot', 'aria-hidden': 'true' }),
     el('span', { class: 't', text: r.title }),
     el('span', { class: 'm' }, 'Researcher reads ', el('b', { text: r.reads })))))
-    requestText.value = preset(state.request).request
   }
   requestsBox.addEventListener('keydown', (event) => {
     if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return
     const at = REQUESTS.findIndex((r) => r.id === state.request)
     state.request = REQUESTS[(at + (event.key === 'ArrowDown' ? 1 : REQUESTS.length - 1)) % REQUESTS.length].id
-    renderRequests()
-    $('.req[aria-checked="true"]', requestsBox).focus()
+    home = 'request'
+    boxHome = true
+    renderAsk()
+    $('.req[aria-checked="true"]', requestsBox)?.focus()
     event.preventDefault()
-  })
-  $('#composer').addEventListener('submit', (event) => {
-    event.preventDefault()
-    if (busy()) { scrollToId('watch'); return }
-    startRun()
-    scrollToId('watch')
-  })
-  requestText.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#composer').requestSubmit() }
   })
 
-  /* ================================================================ The run */
+  const INITIALS = { researcher: 'Re', writer: 'Wr', you: 'You' }
+  const avatar = (who, working = false) => el('span', { class: `tc-av m-${who}${working ? ' working' : ''}`, text: INITIALS[who] })
+  const mention = (who) => el('span', { class: `tc-at m-${who}`, text: `@${who === 'you' ? 'You' : LANE[who]}` })
+  const dots = () => el('span', { class: 'tc-dots', 'aria-hidden': 'true' }, el('i'), el('i'), el('i'))
+  // Your message as the chat shows it, its @ picked out.
+  function withMention(text) {
+    const found = text.match(/^@(\S+)\s+/)
+    return found ? [el('span', { class: 'tc-at m-you', text: `@${found[1]}` }), ' ', text.slice(found[0].length)] : [text]
+  }
+  // One message: an agent's on the left, yours on the right in gold.
+  function msg({ from, meta, to, time, body, under, cls = '' }) {
+    const mine = from === 'you'
+    return el('div', { class: `tc-msg m-${from}${mine ? ' mine' : ''} ${cls}` },
+      mine ? el('span', { class: 'tc-gutter' }) : avatar(from),
+      el('div', { class: 'tc-main' },
+        el('div', { class: 'tc-meta' }, el('b', { text: meta }), to ? el('span', { class: 'tc-to', text: to }) : null, time !== undefined ? el('time', { text: time }) : null),
+        body ? el('div', { class: 'tc-bubble' }, ...body) : null,
+        under ? el('div', { class: 'tc-under', text: under }) : null))
+  }
+  const workersOf = (r) => (r && r.only ? [r.only] : ['researcher', 'writer'])
+  const worked = (r) => `${listText(workersOf(r).map((w) => LANE[w]))} worked on this · ${clockText(r.clock)}`
+  // The team on a piece of work as a thread: each agent a knot, blue while it works.
+  const weft = (r) => el('span', { class: 'weft', 'aria-hidden': 'true' }, workersOf(r).map((w) => avatar(w, Boolean(r && r === run && r.scrub === null && r.stages[w] === 'running'))))
+
+  function memberState(who) {
+    if (!run || (run.only && who !== run.only)) return 'ready'
+    const value = stageAt(who)
+    return value === 'running' ? 'working' : value === 'waiting' ? 'waiting' : 'ready'
+  }
+  const MEMBER_WORD = { ready: 'ready', working: 'working', waiting: 'waiting for you' }
+  function renderMembers() {
+    const team = run ? run.team : state.team
+    for (const list of $$('[data-members]')) {
+      list.replaceChildren(...['researcher', 'writer'].map((who) => {
+        const value = memberState(who)
+        return el('li', { class: `mem ${value}`, title: `${LANE[who]} on ${app(team[who]).name} · ${MEMBER_WORD[value]}` },
+          avatar(who, value === 'working'), el('span', { text: LANE[who] }), el('em', { text: MEMBER_WORD[value] }))
+      }))
+    }
+  }
+
+  // A piece of work, as the top of the chat lists it: who worked on it, and where it is now.
+  function pieceLine(r) {
+    const live = r === run && r.phase !== 'done'
+    const [text, href, go] = !live
+      ? [worked(r), r === run ? '#result' : null, r === run ? 'Read the answer ↓' : null]
+      : r.phase === 'review' ? ["Waiting for you · Researcher's work is ready for your review", '#review', 'Review it ↓']
+        : r.phase === 'asking' ? ['Waiting for you · Researcher asked you something', '#watch', 'Answer it ↓']
+          : [`${LANE[r.working] || 'The team'} is working`, '#watch', 'Watch it ↓']
+    return el('div', { class: 'piece-line' }, weft(r), el('span', { text }), href ? el('a', { class: 'link', href, text: go }) : null)
+  }
+
+  function renderAskLog() {
+    if (!chatItems.length) {
+      askLog.replaceChildren(el('div', { class: 'tc-empty' },
+        el('h3', { text: 'Talk to Research and write' }),
+        el('p', {}, 'Write ', el('b', { text: '@team' }), ' and what you need to start the whole team, or ', el('b', { text: '@' }), ' a name to ask one agent. Anything without an @ is a note the team reads the next time it works.')))
+      return
+    }
+    askLog.replaceChildren(...chatItems.map((item) => {
+      if (item.kind === 'teamnote') {
+        return msg({ from: 'you', meta: 'You', to: 'team note', body: [el('p', { text: item.text })], under: item.readBy ? 'Read by the work after it' : 'Starts nothing · the next work reads it', cls: 'teamnote' })
+      }
+      const r = item.run
+      return el('div', { class: 'ask-piece' },
+        msg({ from: 'you', meta: 'You', to: `→ ${r.only ? LANE[r.only] : 'the team'}`, body: [el('p', {}, ...withMention(r.asked))] }),
+        pieceLine(r))
+    }))
+    askLog.scrollTop = askLog.scrollHeight
+  }
+
+  function renderAsk() {
+    renderMembers()
+    renderAskLog()
+    renderRequests()
+    renderBox()
+  }
+
+  /* ================================================================ The work */
 
   let run = null
   let runCount = 0
-  // Running, waiting at the review step, or waiting for a permission answer.
+  // Working, waiting at the review step, or waiting for a permission answer.
   const busy = () => Boolean(run && ['running', 'review', 'asking'].includes(run.phase))
   const CANCEL = Symbol('cancel')
   const SIM_MS = 430 // one simulated second, in real milliseconds
 
-  function freshRun() {
-    const p = preset(state.request)
+  // A piece of work: the whole team on a request, or one agent on a follow-up to an earlier piece.
+  function freshRun(only = null, prev = null) {
+    const p = prev ? prev.preset : preset(state.request)
     return {
       n: ++runCount,
-      team: { ...state.team },
+      only,
+      prev,
+      asked: only ? drafts.followup : `@team ${p.request}`,
+      // Every piece is handed the conversation so far: earlier work, and team notes not yet read.
+      earlier: chatItems.some((i) => i.kind === 'piece'),
+      carried: chatItems.filter((i) => i.kind === 'teamnote' && !i.readBy),
+      team: { ...(prev ? prev.team : state.team) },
       give: JSON.parse(JSON.stringify(state.give)),
       allow: JSON.parse(JSON.stringify(state.allow)),
       permission: null,
       preset: p,
-      findings: p.findings.map((f) => ({ ...f })),
+      findings: (prev ? prev.findings : p.findings).map((f) => ({ ...f })),
       phase: 'running',
       clock: 0,
       events: [],
@@ -810,12 +1061,16 @@
       segs: [],
       stitches: [],
       hands: [],
+      marks: [],
       stages: { researcher: 'idle', you: 'idle', writer: 'idle' },
       stageLog: [],
       pass: 0,
       sendBacks: 0,
-      approved: false,
+      approved: prev ? prev.approved : false,
       notes: [],
+      told: [],
+      working: null,
+      interrupt: null,
       waitedMs: 0,
       waitSince: 0,
       tools: { researcher: 0, writer: 0 },
@@ -823,6 +1078,7 @@
     }
   }
 
+  // Time passing while an agent works. Send now ends the agent's current step early.
   function work(sec) {
     const mine = run
     return new Promise((resolve, reject) => {
@@ -831,6 +1087,7 @@
       let last = performance.now()
       function frame(now) {
         if (run !== mine) { reject(CANCEL); return }
+        if (mine.interrupt && mine.interrupt === mine.working) { mine.interrupt = null; renderLive(); resolve(); return }
         mine.clock = Math.min(target, mine.clock + Math.min(now - last, 64) / SIM_MS)
         last = now
         renderLive()
@@ -841,6 +1098,23 @@
     })
   }
 
+  // A note waits for the end of the agent's current step, then joins its next turn.
+  async function takeNotes(who) {
+    const r = run
+    const due = r.told.filter((n) => n.to === who && n.takenAt === null)
+    if (!due.length) return
+    const now = due.some((n) => n.now)
+    for (const n of due) n.takenAt = r.clock
+    r.marks.push({ lane: who, t: r.clock, now })
+    log(who, `${LANE[who]} took your note`, { say: now ? `${LANE[who]} stopped its current step and took your note: “${due.at(-1).text}”` : `${LANE[who]} took your note into its next turn: “${due.at(-1).text}”` })
+    renderPiece()
+    await work(1.1)
+  }
+  async function step(who, sec) {
+    await work(sec)
+    await takeNotes(who)
+  }
+
   function log(who, text, extra = {}) {
     run.events.push({ t: run.clock, who, text, ...extra })
     if (extra.tool) run.stitches.push({ lane: who, t: run.clock })
@@ -849,8 +1123,8 @@
   }
   function segStart(lane, kind = 'work') { run.segs.push({ lane, kind, from: run.clock, to: null }) }
   function segEnd(lane) { const seg = [...run.segs].reverse().find((s) => s.lane === lane && s.to === null); if (seg) seg.to = run.clock }
-  function setStage(lane, value) { run.stages[lane] = value; run.stageLog.push({ t: run.clock, lane, value }); renderStages(); renderBadges() }
-  // During a replay the step cards show what each step was doing at that moment.
+  function setStage(lane, value) { run.stages[lane] = value; run.stageLog.push({ t: run.clock, lane, value }); renderChatUI() }
+  // During a replay the chat shows what each agent was doing at that moment.
   function stageAt(lane) {
     if (!run) return 'idle'
     if (run.scrub === null) return run.stages[lane]
@@ -861,14 +1135,15 @@
 
   async function startRun() {
     askPerm.hidden = true
+    boxHome = false
     run = freshRun()
+    for (const note of run.carried) note.readBy = run.n
+    chatItems.push({ kind: 'piece', run })
     const mine = run
-    renderRunUI()
-    renderReview(true)
-    renderResult(true)
+    renderChatUI(true)
     renderSentence()
     try {
-      log('you', `You asked: “${mine.preset.short}”`, { say: `You asked the team: “${mine.preset.request}”` })
+      log('you', `You asked: “${mine.preset.short}”`, { say: `You wrote to the team: “${mine.asked}”` })
       await work(0.8)
       await researcherPass()
       if (mine.team.review) await reviewLoop()
@@ -883,16 +1158,38 @@
     }
   }
 
+  // @Writer on finished work: Writer alone does one more pass, with the conversation so far.
+  async function startFollowUp() {
+    const prev = run
+    if (!prev || prev.phase !== 'done' || prev.only) return
+    askPerm.hidden = true
+    run = freshRun('writer', prev)
+    for (const note of run.carried) note.readBy = run.n
+    chatItems.push({ kind: 'piece', run })
+    const mine = run
+    renderChatUI(true)
+    try {
+      log('you', `You asked Writer: “${FOLLOW.text}”`, { say: `You wrote to Writer alone: “${FOLLOW.text}” Researcher's findings stay as they are.` })
+      await work(0.6)
+      await writerAgain()
+    } catch (error) {
+      if (error !== CANCEL) throw error
+    }
+    if (run === mine) scrollToId('result')
+  }
+
   async function researcherPass() {
     const r = run
     const name = app(r.team.researcher).name
     r.pass += 1
+    r.working = 'researcher'
     setStage('researcher', 'running')
     segStart('researcher')
     if (r.pass === 1) {
-      log('researcher', `Researcher started on ${name}`, { say: `Researcher started on ${name}, reading ${r.preset.reads}.` })
+      const context = r.carried.length ? ', with the conversation so far and your note in it' : r.earlier ? ', with the conversation so far' : ''
+      log('researcher', `Researcher started on ${name}`, { say: `Researcher started on ${name}${context}, reading ${r.preset.reads}.` })
       for (const id of r.give.researcher) {
-        await work(1.1)
+        await step('researcher', 1.1)
         r.tools.researcher += 1
         log('researcher', 'Researcher', { tool: source(id).reads, say: `Researcher opened ${source(id).name}, which you handed it.` })
       }
@@ -901,26 +1198,26 @@
       if (web && !r.allow.researcher.web && r.team.researcher === 'opencode') log('researcher', 'Researcher searched the web without asking', { say: "Researcher's web switch is off, but OpenCode doesn't ask before it acts, so it searched anyway." })
       else if (web && !r.allow.researcher.web && !(await askPermission('researcher', r.preset.tools[0]))) r.deniedWeb = true
       for (const tool of r.deniedWeb ? r.preset.tools.filter((t) => !/^(web search|fetch)/.test(t)) : r.preset.tools) {
-        await work(1.7)
+        await step('researcher', 1.7)
         r.tools.researcher += 1
         log('researcher', 'Researcher', { tool, say: `Researcher is working: ${tool.replace(' · ', ', ')}.` })
       }
       if (r.deniedWeb) log('researcher', 'Researcher carried on without the web', { say: `Researcher carried on without the web, from ${r.give.researcher.length ? 'what you handed it' : 'what it already knew'}.` })
-      await work(1.6)
+      await step('researcher', 1.6)
       log('researcher', `Researcher wrote findings.md`, { tool: 'write · findings.md', say: `Researcher wrote down ${r.findings.length} findings, each with its source, or a gap where it had none.` })
     } else {
-      log('researcher', 'Researcher picked up your note', { say: `Researcher picked up your note: “${r.notes.at(-1)?.text || ''}”` })
-      await work(1.6)
+      log('researcher', 'Researcher picked up your note', { say: `Researcher picked up your review: “${r.notes.at(-1)?.text || ''}”` })
+      await step('researcher', 1.6)
       r.tools.researcher += 1
       log('researcher', 'Researcher', { tool: r.preset.fix.tool, say: `Researcher is checking: ${r.preset.fix.tool.replace(' · ', ', ')}.` })
-      await work(1.4)
+      await step('researcher', 1.4)
       const flagged = r.findings.find((f) => !f.src && !f.dropped)
       if (flagged) {
         if (r.preset.fix.src) { flagged.src = r.preset.fix.src; flagged.fixed = true } else { flagged.dropped = true; flagged.why = r.preset.fix.drop }
       }
       log('researcher', 'Researcher updated findings.md', { tool: 'write · findings.md', say: r.preset.fix.src ? `Researcher found a source for claim ${r.findings.indexOf(flagged) + 1}.` : `Researcher dropped claim ${r.findings.indexOf(flagged) + 1}: ${r.preset.fix.drop}.` })
     }
-    await work(0.9)
+    await step('researcher', 0.9)
     segEnd('researcher')
     setStage('researcher', 'done')
   }
@@ -932,11 +1229,11 @@
       const handed = post({ kind: 'handover', from: 'researcher', to: 'you', file: 'findings.md', meta: findingsMeta(r) })
       log('researcher', 'Researcher handed over to you', { say: 'Researcher handed over. The team has stopped, and it is waiting for you.' })
       const owed = owe('you', 'researcher', 'Waiting for your review')
-      setStage('you', 'waiting')
-      segStart('you', 'wait')
       r.phase = 'review'
       r.waitSince = Date.now()
-      renderBadges(); renderNeedsYou(); renderReview(); renderResult(); renderSentence()
+      segStart('you', 'wait')
+      setStage('you', 'waiting')
+      renderSentence()
       waitTicker(r)
       const decision = await new Promise((resolve) => { r.decide = resolve })
       if (run !== r) throw CANCEL
@@ -948,20 +1245,19 @@
       if (decision.text) r.notes.push({ t: r.clock, text: decision.text, kind: decision.kind })
       if (decision.kind === 'approve') {
         r.approved = true
-        setStage('you', 'done')
+        r.approvedAt = r.clock
         if (decision.text) post({ kind: 'note', from: 'you', to: 'writer', text: decision.text, quote, under: 'approved · passed on to Writer' })
         else post({ kind: 'notice', from: 'you', text: 'You approved Researcher’s handover · passed on to Writer' })
         log('you', decision.text ? `You approved: “${decision.text}”` : 'You approved', { say: decision.text ? `You approved, with a note for Writer: “${decision.text}”` : 'You approved the findings as they were.' })
         handOver('you', 'writer')
-        renderNeedsYou(); renderReview(); renderResult()
+        setStage('you', 'done')
         return
       }
       r.sendBacks += 1
-      setStage('you', 'idle')
       post({ kind: 'sentback', from: 'you', to: 'researcher', text: decision.text || 'Try again.', quote, under: 'sent back' })
       log('you', `You sent it back: “${decision.text || 'Try again.'}”`, { say: `You sent it back to Researcher: “${decision.text || 'Try again.'}”` })
       handOver('you', 'researcher')
-      renderNeedsYou(); renderReview(); renderResult()
+      setStage('you', 'idle')
       await work(0.6)
       await researcherPass()
     }
@@ -985,50 +1281,76 @@
   async function writerPass() {
     const r = run
     const name = app(r.team.writer).name
+    r.working = 'writer'
     setStage('writer', 'running')
-    renderResult()
     segStart('writer')
     log('writer', `Writer started on ${name}`, { say: `Writer started on ${name}, with ${r.team.review ? 'the findings you approved' : 'whatever Researcher found'}.` })
     for (const id of r.give.writer) {
-      await work(0.9)
+      await step('writer', 0.9)
       r.tools.writer += 1
       const x = source(id)
       log('writer', 'Writer', { tool: x.reads, say: x.kind === 'skill' ? `Writer opened ${x.name}, which it is required to follow.` : `Writer opened ${x.name}, which you handed it.` })
     }
-    await work(1.4)
+    await step('writer', 1.4)
     r.tools.writer += 1
     log('writer', 'Writer', { tool: 'read · findings.md', say: 'Writer is reading the findings.' })
     // A question back to an earlier step goes through the Team Bus, which OpenClaw can't reach.
     if (r.team.writer !== 'openclaw') {
-      await work(1.2)
+      await step('writer', 1.2)
       const asked = post({ kind: 'question', from: 'writer', to: 'researcher', text: r.preset.ask.q })
       handOver('writer', 'researcher')
       log('writer', 'Writer asked Researcher', { say: `Writer asked Researcher: “${r.preset.ask.q}”` })
       const owed = owe('researcher', 'writer', 'Researcher is writing an answer')
+      r.working = 'researcher'
+      setStage('researcher', 'running')
       segStart('researcher')
-      await work(1.8)
+      await step('researcher', 1.8)
       segEnd('researcher')
+      setStage('researcher', 'done')
       paid(owed)
       post({ kind: 'answer', from: 'researcher', to: 'writer', text: r.preset.ask.a, quote: { from: 'writer', text: asked.text } })
       handOver('researcher', 'writer')
+      r.working = 'writer'
       log('researcher', 'Researcher answered Writer', { say: 'Researcher answered, and Writer carried on with the answer in hand.' })
     }
-    await work(2.6)
+    await step('writer', 2.6)
     r.tools.writer += 1
     log('writer', `Writer wrote ${r.preset.file}`, { tool: `write · ${r.preset.file}`, say: `Writer wrote ${r.preset.file}.` })
-    await work(1)
+    await step('writer', 1)
     segEnd('writer')
-    setStage('writer', 'done')
     r.phase = 'done'
-    log('team', 'Writer answered. The run is finished.', { say: 'Writer answered. The run is finished, and the answer has a receipt.' })
+    log('team', 'Writer answered. The work is finished.', { say: "Writer answered in the chat. The work is finished, and its record has a receipt." })
     r.scrub = null
-    renderRunUI()
-    renderReview(true)
-    renderResult(true)
+    setStage('writer', 'done')
+    renderChatUI(true)
     renderSentence()
   }
 
-  // ADR 0040 on the page: an agent wants something its switches don't allow, so the run stops and
+  async function writerAgain() {
+    const r = run
+    const name = app(r.team.writer).name
+    r.working = 'writer'
+    setStage('writer', 'running')
+    segStart('writer')
+    log('writer', `Writer started on ${name}, alone`, { say: `Writer started alone on ${name}, with the conversation so far: your request, ${r.team.review ? 'the findings you approved' : "Researcher's findings"} and its last answer.` })
+    await step('writer', 1.3)
+    r.tools.writer += 1
+    log('writer', 'Writer', { tool: `read · ${r.preset.file}`, say: 'Writer is reading its last answer.' })
+    await step('writer', 1.8)
+    r.tools.writer += 1
+    log('writer', `Writer rewrote ${r.preset.file}`, { tool: `write · ${r.preset.file}`, say: `Writer cut ${r.preset.file} down to the top three.` })
+    await step('writer', 0.8)
+    segEnd('writer')
+    r.phase = 'done'
+    // The follow-up is answered, so the box goes back up to Ask for new work.
+    boxHome = true
+    log('team', 'Writer answered you.', { say: 'Writer answered you in the chat. Researcher’s findings were kept as they were.' })
+    r.scrub = null
+    setStage('writer', 'done')
+    renderChatUI(true)
+  }
+
+  // ADR 0040 on the page: an agent wants something its switches don't allow, so the work stops and
   // asks. Allow is this once; Always allow turns the switch on in Give; Deny lets it carry on without.
   const askPerm = $('#ask-perm')
   async function askPermission(who, tool) {
@@ -1037,9 +1359,8 @@
     r.phase = 'asking'
     segEnd(who)
     segStart(who, 'wait')
-    setStage(who, 'waiting')
     r.waitSince = Date.now()
-    log(who, `${LANE[who]} asked to search the web`, { say: `${LANE[who]} wants to search the web, and its switch is off. The run waits for your answer.` })
+    log(who, `${LANE[who]} asked to search the web`, { say: `${LANE[who]} wants to search the web, and its switch is off. The work waits for your answer.` })
     const answerWith = (value) => () => { if (r.answerPermission) { const resolve = r.answerPermission; r.answerPermission = null; resolve(value) } }
     askPerm.hidden = false
     askPerm.replaceChildren(
@@ -1048,7 +1369,8 @@
         el('button', { type: 'button', class: 'btn', text: 'Deny', onclick: answerWith('deny') }),
         el('button', { type: 'button', class: 'btn', text: 'Always allow', title: `Turns on Search the web for ${LANE[who]}, in Give`, onclick: answerWith('always') }),
         el('button', { type: 'button', class: 'btn btn-primary', text: 'Allow', onclick: answerWith('once') })))
-    renderBadges(); renderSentence()
+    setStage(who, 'waiting')
+    renderSentence()
     waitTicker(r)
     const answer = await new Promise((resolve) => { r.answerPermission = resolve })
     if (run !== r) throw CANCEL
@@ -1058,38 +1380,49 @@
     segEnd(who)
     segStart(who)
     r.phase = 'running'
-    setStage(who, 'running')
     if (answer === 'always') { state.allow[who].web = true; r.allow[who].web = true; renderYaml(); renderPacket() }
     log('you', answer === 'deny' ? 'You said no to the web' : answer === 'always' ? 'You allowed the web from now on' : 'You allowed the web, once', {
       say: answer === 'deny' ? `You said no. ${LANE[who]} carries on without the web.` : answer === 'always' ? `You allowed it, and turned on Search the web for ${LANE[who]}.` : `You allowed it, for this run only.`,
     })
-    renderBadges(); renderSentence()
+    setStage(who, 'running')
+    renderSentence()
     return answer !== 'deny'
   }
 
-  // A decision from the review panel.
+  // A decision from the buttons on Researcher's handover; the note is what the box holds.
   function decide(kind) {
     if (!run || run.phase !== 'review' || !run.decide) return
-    const note = $('#rv-note')
-    const text = note ? note.value.trim() : ''
+    const text = drafts.review.trim()
     if (kind === 'send' && !text) return // the button stays off until there is a note
+    drafts.review = ''
     const resolve = run.decide
     run.decide = null
     resolve({ kind, text })
   }
 
-  /* ---------------- Run rendering */
+  /* ---------------- Drawing the chat */
 
-  const stagesBox = $('#stages')
+  const talkWeft = $('#weft')
+  const talkLine = $('#talk-line')
+  const detailsToggle = $('#details-toggle')
+  const details = $('#details')
+  const pieceHead = $('#piece-head')
   const narration = $('#narration')
   const lanes = $('#lanes')
   const scrub = $('#scrub')
   const scrubInput = $('#scrub-input')
   const needsYou = $('#needs-you')
-  const STAGE_WORD = { idle: 'Idle', running: 'Working', waiting: 'Waiting for you', done: 'Done' }
 
-  function renderRunUI() {
-    renderStages(); renderBadges(); renderChat(); renderNarration(); drawLanes(); renderNeedsYou(); renderScrub(); renderAskButton()
+  function renderChatUI(force = false) {
+    renderAsk()
+    renderPiece()
+    renderNarration()
+    drawLanes()
+    renderScrub()
+    renderBadges()
+    renderNeedsYou()
+    renderReview(force)
+    renderResult(force)
     $('#watch-clock').textContent = clockText(run ? (run.scrub ?? run.clock) : 0)
   }
   function renderLive() {
@@ -1097,34 +1430,16 @@
     $('#watch-clock').textContent = clockText(run ? run.clock : 0)
   }
 
-  function renderStages() {
-    const team = run ? run.team : state.team
-    const order = seq(team)
-    stagesBox.style.setProperty('--n', String(order.length))
-    stagesBox.replaceChildren(...order.map((who, i) => {
-      const value = stageAt(who)
-      return el('li', { class: `stage${who === 'you' ? ' you' : ''}`, 'data-state': value },
-        el('div', { class: 'top-line' }, el('i', { class: 'st', 'aria-hidden': 'true' }), el('span', { class: 'n', text: String(i + 1) }), el('span', { class: 'word', text: STAGE_WORD[value] })),
-        el('div', { class: 'nm', text: LANE[who] }),
-        el('div', { class: 'ap', text: who === 'you' ? 'review step' : `on ${app(team[who]).name}` }))
-    }))
-  }
-
   function badgeFor() {
     if (!run) return ['idle', 'Ready']
     if (run.phase === 'review' || run.phase === 'asking') return ['waiting', 'Waiting for you']
-    if (run.phase === 'done') return ['done', 'Finished']
-    return ['running', 'Running']
+    if (run.phase === 'done') return ['done', 'Answered']
+    return ['running', 'Working']
   }
   function renderBadges() {
     const [value, word] = badgeFor()
     $$('[data-run-badge]').forEach((badge) => { badge.dataset.state = value; badge.textContent = word })
     $('#review-win').dataset.state = value
-    renderAskButton()
-  }
-  function renderAskButton() {
-    if (!run || run.phase === 'done') { runButton.disabled = false; runButton.textContent = run ? 'Run again' : 'Run team' }
-    else { runButton.disabled = false; runButton.textContent = run.phase === 'running' ? 'Running ↓' : 'Waiting for you ↓' }
   }
 
   function visibleEvents() {
@@ -1134,19 +1449,63 @@
   }
   function renderNarration() {
     const list = visibleEvents()
-    narration.textContent = list.length ? (list.at(-1).say || list.at(-1).text) : 'The team starts when you ask.'
+    narration.textContent = list.length ? (list.at(-1).say || list.at(-1).text) : 'The team starts when you @ it.'
   }
   function renderNeedsYou() { needsYou.hidden = !(run && run.phase === 'review') }
 
-  /* ---------------- 05 · Watch: Team chat */
+  /* ---------------- 05 · Watch: the piece of work, and what the agents say */
 
-  // What the agents said to each other, as the app's Run view shows it: only messages (a
-  // handover, a question and its answer, your review), each at the moment it was sent, so a
-  // replay shows the chat as it stood then. Tool calls stay on the timeline above it.
+  function noteMsg(n) {
+    const at = run.scrub ?? Infinity
+    const taken = n.takenAt !== null && n.takenAt <= at + 1e-6
+    const state = taken ? (n.now ? `${LANE[n.to]} stopped its step and took it` : `${LANE[n.to]} took it in its next turn`)
+      : run.phase === 'done' && run.scrub === null ? 'The work ended before it was taken'
+        : n.now ? `Stopping ${LANE[n.to]}'s current step…` : `Waits for ${LANE[n.to]}'s current step to end`
+    return msg({ from: 'you', meta: 'Note', to: `→ ${LANE[n.to]}`, time: clockText(n.t), body: [el('p', { text: n.text })], under: state, cls: `note${taken ? ' taken' : ''}` })
+  }
+
+  let talkKey = ''
+  function renderPiece() {
+    if (!run) {
+      pieceHead.replaceChildren()
+    } else {
+      const at = run.scrub ?? Infinity
+      const kids = [msg({ from: 'you', meta: 'You', to: `→ ${run.only ? LANE[run.only] : 'the team'}`, time: '0:00', body: [el('p', {}, ...withMention(run.asked))] })]
+      if (run.carried.length || run.earlier) {
+        kids.push(el('p', { class: 'picked', text: run.carried.length
+          ? `${run.only ? 'Writer' : 'The team'} read the conversation so far, with your note “${run.carried.at(-1).text}”`
+          : `${run.only ? 'Writer' : 'The team'} read the conversation so far` }))
+      }
+      for (const n of run.told) if (n.t <= at + 1e-6) kids.push(noteMsg(n))
+      pieceHead.replaceChildren(...kids)
+    }
+    const key = run ? `${run.n}:${run.phase}:${run.scrub === null ? 'live' : Math.round(run.scrub)}:${workersOf(run).map(stageAt).join(',')}` : 'none'
+    if (key !== talkKey) {
+      talkKey = key
+      talkWeft.replaceChildren(...weft(run).childNodes)
+      const r = run
+      const live = r && r.scrub === null
+      const working = r ? workersOf(r).filter((w) => stageAt(w) === 'running') : []
+      talkLine.replaceChildren(...(!r ? ['Nobody is working. The team starts when you write ', el('b', { text: '@team' }), '.']
+        : live && r.phase === 'review' ? [el('b', { text: 'Waiting for you' }), " · Researcher's work is ready for your review"]
+          : live && r.phase === 'asking' ? [el('b', { text: 'Waiting for you' }), ' · Researcher asked to search the web']
+            : live && r.phase === 'done' ? [worked(r)]
+              : working.length ? [el('b', { text: listText(working.map((w) => LANE[w])) }), working.length === 1 ? ' is working' : ' are working', live ? dots() : '']
+                : [!live ? `Replaying · ${clockText(r.scrub)}` : r.segs.length ? 'Handing over…' : 'Starting…']))
+    }
+  }
+
+  detailsToggle.addEventListener('click', () => {
+    const open = detailsToggle.getAttribute('aria-expanded') !== 'true'
+    detailsToggle.setAttribute('aria-expanded', String(open))
+    details.hidden = !open
+    if (open) drawLanes()
+  })
+
+  // What the agents said to each other, inline in the piece as LoomWatch shows it: only messages (a
+  // handover, a question and its answer, your review), each at the moment it was sent, so a replay
+  // shows the talk as it stood then. Tool calls stay on the timeline in Details.
   const chatLog = $('#tchat-log')
-  const chatFaces = $('#tchat-faces')
-  const chatSub = $('#tchat-sub')
-  const INITIALS = { researcher: 'Re', writer: 'Wr', you: 'You' }
   const chatSeen = { n: 0, ids: new Set(), key: '' }
 
   function post(item) {
@@ -1169,23 +1528,18 @@
     const at = (run.scrub ?? Infinity) + 1e-6
     return run.chat.filter((c) => c.t <= at && !(c.kind === 'waiting' && c.until !== null && c.until <= at))
   }
-  const avatar = (who) => el('span', { class: `tc-av m-${who}`, text: INITIALS[who] })
-  const mention = (who) => el('span', { class: `tc-at m-${who}`, text: `@${who === 'you' ? 'You' : LANE[who]}` })
 
   function renderChat() {
-    const team = run ? run.team : state.team
-    const members = team.review ? ['researcher', 'writer', 'you'] : ['researcher', 'writer']
     const list = visibleChat()
-    const key = `${run ? run.n : 0}:${members.join(',')}:${list.map((c) => c.id).join(',')}`
+    const key = `${run ? run.n : 0}:${list.map((c) => `${c.id}${c.until === null ? '' : '.'}`).join(',')}`
     if (key === chatSeen.key) return
     chatSeen.key = key
     if (!run || run.n !== chatSeen.n) { chatSeen.n = run ? run.n : 0; chatSeen.ids.clear() }
-    chatFaces.replaceChildren(...members.map(avatar))
-    const count = list.filter((c) => c.kind !== 'waiting').length
-    chatSub.textContent = count
-      ? `${listText(members.map((w) => (w === 'you' ? 'you' : LANE[w])))} · ${count} message${count === 1 ? '' : 's'}`
-      : 'What the agents say to each other'
-    if (!list.length) { chatLog.replaceChildren(el('li', { class: 'tchat-none', text: 'Nothing has passed between the agents yet.' })); markClipped(); return }
+    if (!list.length) {
+      chatLog.replaceChildren(el('li', { class: 'tchat-none', text: run && run.only ? 'Writer is working alone, so nothing passes between the agents.' : 'Nothing has passed between the agents yet.' }))
+      markClipped()
+      return
+    }
     const live = run.scrub === null
     chatLog.replaceChildren(...list.map((c, i) => {
       const fresh = live && !chatSeen.ids.has(c.id) ? ' fresh' : ''
@@ -1195,7 +1549,7 @@
       const continued = prev && prev.kind !== 'notice' && prev.from === c.from
       const mine = c.from === 'you'
       const bubble = c.kind === 'waiting'
-        ? el('div', { class: 'tc-bubble typing' }, el('span', { class: 'tc-dots', 'aria-hidden': 'true' }, el('i'), el('i'), el('i')), el('span', { text: c.word }))
+        ? el('div', { class: 'tc-bubble typing' }, dots(), el('span', { text: c.word }))
         : el('div', { class: 'tc-bubble' },
           c.quote ? el('blockquote', { class: `tc-quote m-${c.quote.from}` }, el('b', { text: LANE[c.quote.from] }), el('span', { text: c.quote.text })) : null,
           c.kind === 'handover'
@@ -1220,7 +1574,7 @@
 
   function drawLanes() {
     const team = run ? run.team : state.team
-    const order = seq(team)
+    const order = run && run.only ? [run.only] : seq(team)
     const W = 560
     const left = 92
     const right = W - 10
@@ -1257,6 +1611,14 @@
         kids.push(el('svg:path', { class: 'ln-hand', d: `M${hx} ${y(h.from)}L${hx} ${y(h.to)}` }))
         kids.push(el('svg:circle', { class: 'ln-dot', cx: hx, cy: y(h.to), r: 2.6 }))
       }
+      // Where a note of yours joined an agent's turn: a gold diamond, cut first when it was Send now.
+      for (const m of run.marks) {
+        if (!order.includes(m.lane) || m.t > now) continue
+        const mx = x(m.t)
+        const my = y(m.lane)
+        if (m.now) kids.push(el('svg:line', { class: 'ln-cut', x1: mx - 5, x2: mx - 5, y1: my - 9, y2: my + 9 }))
+        kids.push(el('svg:rect', { class: 'ln-note', x: mx - 4, y: my - 4, width: 8, height: 8, transform: `rotate(45 ${mx} ${my})` }))
+      }
       kids.push(el('svg:line', { class: 'ln-head', x1: x(now), x2: x(now), y1: top - 6, y2: H - 14 }))
     }
     kids.push(el('svg:text', { class: 'ln-axis', x: left, y: H - 2, text: '0:00' }))
@@ -1273,43 +1635,59 @@
     if (!run || run.phase !== 'done') return
     const value = Number(scrubInput.value)
     run.scrub = value >= run.clock - 0.05 ? null : value
-    renderChat(); renderNarration(); renderStages(); drawLanes()
+    renderChat(); renderNarration(); renderMembers(); renderPiece(); drawLanes()
     $('#watch-clock').textContent = clockText(run.scrub ?? run.clock)
   })
 
-  /* ---------------- 05 · Review panel */
+  /* ---------------- 06 · Review: decided on the message that asks */
 
   const reviewBody = $('#review-body')
   let reviewKey = ''
+  let reviewButtons = null
+  // Approve needs no note and says so once one is typed, because the note then goes on with the
+  // work; sending it back needs a note that says what to change.
+  function labelReview() {
+    if (!reviewButtons) return
+    const typed = Boolean(drafts.review.trim())
+    reviewButtons.go.textContent = typed ? 'Approve with your note' : 'Approve'
+    reviewButtons.back.disabled = !typed
+    if (typed) reviewButtons.back.removeAttribute('title'); else reviewButtons.back.title = 'Write what should change in the box below first.'
+    reviewButtons.tip.hidden = typed
+  }
   function renderReview(force = false) {
     const key = run ? `${run.n}:${run.phase}:${run.pass}:${run.sendBacks}:${run.approved}:${run.team.review}:${state.team.review}` : `none:${state.team.review}`
     if (!force && key === reviewKey) return
     reviewKey = key
+    reviewButtons = null
     const quiet = (shape, big, text, ...more) => el('div', { class: 'rv-quiet' },
       el('div', { class: `rv-shape ${shape}`, 'aria-hidden': 'true' }, el('i')),
       el('p', { class: 'big', text: big }), text ? el('p', { text }) : null, ...more)
 
     if (!run) {
-      // One control per thing: the run starts from Ask, and a review step is added in the sentence.
+      // One control per thing: the work starts from the chat's box, and a review step is added in the sentence.
       reviewBody.replaceChildren(state.team.review
-        ? quiet('', 'Nothing to review yet.', 'Run the team from Ask, above. When Researcher hands over, the run stops here and waits for you.')
+        ? quiet('', 'Nothing to review yet.', 'Write to the team in Ask, above. When Researcher hands over, the work stops here, in the chat, and waits for you.')
         : quiet('warn', 'This team has no review step.', "Researcher's findings would go straight to Writer, unchecked.",
           el('a', { class: 'link', href: '#build', style: 'display:inline-block;margin-top:16px', text: 'Add one in the team sentence ↑' })))
+      return
+    }
+    if (run.only) {
+      reviewBody.replaceChildren(quiet('done', 'Nothing waits for you on this piece.', 'You asked Writer alone, after your review. Its new version comes straight back to you in the chat.'))
       return
     }
     if (!run.team.review) {
       const flagged = run.findings.findIndex((f) => !f.src)
       const done = run.phase === 'done'
-      reviewBody.replaceChildren(quiet('warn', 'Nothing waited for you on this run.',
+      reviewBody.replaceChildren(quiet('warn', 'Nothing waited for you this time.',
         done ? `This team had no review step, so Writer used everything Researcher found, including claim ${flagged + 1}, which has no source.`
           : "This team has no review step, so Researcher's findings go straight to Writer, unchecked.",
         state.team.review
-          ? el('p', { text: 'The review step is on the team now. Run it again from Ask, and it stops here.' })
+          ? el('p', { text: 'The review step is on the team now. @team again, and the work stops here.' })
           : el('a', { class: 'link', href: '#build', style: 'display:inline-block;margin-top:16px', text: 'Add one in the team sentence ↑' })))
       return
     }
     if (run.phase === 'review') {
-      const pass = run.pass
+      const handed = run.chat.filter((c) => c.kind === 'handover' && c.to === 'you').at(-1)
       const flaggedIndex = run.findings.findIndex((f) => !f.src && !f.dropped)
       const list = el('ol', {}, run.findings.map((f) => {
         if (f.dropped) return el('li', {}, el('span', { class: 'dropped', text: f.text }), el('span', { class: 'src fixed', text: 'dropped' }))
@@ -1319,74 +1697,85 @@
       const flag = flaggedIndex >= 0
         ? el('p', { class: 'rv-flag' }, el('b', { text: `Claim ${flaggedIndex + 1} has no source.` }), ' Approve it as it is, or send it back with a note.')
         : el('p', { class: 'rv-flag good' }, el('b', { text: fixedOne?.dropped ? `Claim ${run.findings.indexOf(fixedOne) + 1} is gone.` : 'Every claim has a source now.' }), fixedOne?.dropped ? ` Researcher dropped it: ${fixedOne.why}.` : ' Approve to hand the findings to Writer.')
-      // As in LoomWatch: Approve needs no note and reads Continue once one is typed, because the note
-      // then goes on with the work; sending it back needs a note that says what to change.
-      const note = el('textarea', { id: 'rv-note', rows: '2', placeholder: flaggedIndex >= 0 ? `To send it back, say what to change. For example: ${run.preset.note}` : 'Optional. A note here goes on with the work.' })
-      const sendBack = el('button', { type: 'button', class: 'btn', text: 'Send back to Researcher', onclick: () => decide('send') })
       const go = el('button', { type: 'button', class: 'btn btn-primary', onclick: () => decide('approve') })
-      const labelButtons = () => {
-        const typed = Boolean(note.value.trim())
-        go.textContent = typed ? 'Continue' : 'Approve'
-        sendBack.disabled = !typed
-        if (typed) sendBack.removeAttribute('title'); else sendBack.title = 'Type what should change first.'
-      }
-      note.addEventListener('input', labelButtons)
-      labelButtons()
-      reviewBody.replaceChildren(
-        el('p', { class: 'rv-q', text: pass === 1 ? 'Researcher is done. Approve the findings, or say what to change.' : 'Researcher made your change. Approve the findings, or send them back again.' }),
-        el('div', { class: 'rv-box' }, el('span', { class: 'micro', text: 'What Researcher handed over' }), list),
-        flag,
-        el('div', { class: 'rv-note' }, el('label', { class: 'micro', for: 'rv-note', text: 'Your note' }), note),
-        el('div', { class: 'rv-acts' }, sendBack, go))
+      const back = el('button', { type: 'button', class: 'btn', text: 'Send back to Researcher', onclick: () => decide('send') })
+      const tip = el('p', { class: 'tc-tip', text: 'To send it back, write what to change in the box below.' })
+      reviewButtons = { go, back, tip }
+      labelReview()
+      reviewBody.replaceChildren(el('div', { class: 'tc-msg m-researcher rv-msg' },
+        avatar('researcher'),
+        el('div', { class: 'tc-main' },
+          el('div', { class: 'tc-meta' }, el('b', { text: 'Researcher' }), el('span', { class: 'tc-to', text: '→ You · handover' }), el('time', { text: clockText(handed ? handed.t : run.clock) })),
+          el('div', { class: 'tc-bubble' },
+            el('p', { class: 'rv-q', text: run.pass === 1 ? 'Here’s what I found, for your review.' : 'I made your change. Here it is again.' }),
+            el('div', { class: 'rv-box' }, el('span', { class: 'micro', text: 'findings.md' }), list),
+            flag),
+          el('div', { class: 'tc-turn', role: 'group', 'aria-label': "Review Researcher's work" }, el('div', { class: 'rv-acts' }, back, go), tip))))
       return
     }
     if (!run.approved) {
       reviewBody.replaceChildren(quiet('live', run.sendBacks ? 'Researcher is making your change.' : 'Researcher is still working.',
-        run.sendBacks ? 'When it hands over again, the review step opens with what changed.' : "The review step opens when it hands over. You'll see exactly what it found, and where it came from."))
+        run.sendBacks ? 'When it hands over again, its new findings wait here, in the chat, for you.' : "When it hands over, the work stops here and waits for you, with exactly what it found and where it came from."))
       return
     }
-    const log = el('ul', { class: 'rv-log' }, run.events.filter((e) => e.who === 'you' && e.t > 0).map((e) => el('li', {}, el('b', { text: clockText(e.t) }), ` ${e.text}`)))
+    const note = run.notes.filter((n) => n.kind === 'approve').at(-1)
     const flaggedLeft = run.findings.some((f) => !f.src && !f.dropped)
-    reviewBody.replaceChildren(quiet(run.phase === 'done' ? 'done' : 'gold',
-      run.sendBacks ? `You approved, after ${run.sendBacks === 1 ? 'one send-back' : `${run.sendBacks} send-backs`}.` : 'You approved.',
-      run.phase === 'done'
-        ? (flaggedLeft ? 'The answer is ready below. The receipt flags the claim you let through, so it stays worth a look.' : 'The answer is ready below, built only on findings you checked.')
-        : 'Writer is writing the answer from the findings you approved.',
-      log))
+    reviewBody.replaceChildren(
+      msg({ from: 'you', meta: 'You', to: run.sendBacks ? `approved Researcher's work, after ${run.sendBacks === 1 ? 'one send-back' : `${run.sendBacks} send-backs`}` : "approved Researcher's work", time: clockText(run.approvedAt ?? run.clock), body: note ? [el('p', { text: note.text })] : null }),
+      quiet(run.phase === 'done' ? 'done' : 'gold',
+        run.phase === 'done' ? 'Writer has answered.' : 'Writer is writing.',
+        run.phase === 'done'
+          ? (flaggedLeft ? 'The answer is below. Its receipt flags the claim you let through, so it stays worth a look.' : 'The answer is below, built only on findings you checked.')
+          : 'It writes the answer from the findings you approved.'))
   }
 
-  /* ---------------- 06 · Result panel */
+  /* ---------------- 07 · Result: the answer in the chat, its record in Details */
 
   const resultBody = $('#result-body')
   let resultKey = ''
-  function receiptRows(r) {
-    const apps = [...new Set(['researcher', 'writer'].map((w) => app(r.team[w]).name))]
-    const flagged = r.findings.map((f, i) => ({ ...f, i })).filter((f) => !f.src && !f.dropped)
-    const call = !r.team.review ? 'No review step on this team'
-      : r.sendBacks ? `Sent back ${r.sendBacks === 1 ? 'once' : `${r.sendBacks} times`}, then approved` : r.notes.length ? 'Approved, with a note' : 'Approved'
-    const rows = [
-      ['Asked', `“${r.preset.short}”`],
-      ['Team', seq(r.team).map((w) => LANE[w]).join(' → ')],
-      ['Ran on', `${listText(apps)} · your own accounts`],
-      ['Took', clockText(r.clock)],
+  const keptOf = (r) => { const kept = r.findings.filter((f) => !f.dropped); return r.only ? kept.slice(0, 3) : kept }
+  // Your words that shaped the answer: team notes it read, your note on approving, notes to Writer.
+  function writtenWith(r) {
+    const texts = [
+      ...r.carried.map((n) => n.text),
+      ...r.notes.filter((n) => n.kind === 'approve').map((n) => n.text),
+      ...r.told.filter((n) => n.to === 'writer' && n.takenAt !== null).map((n) => n.text),
     ]
-    const handed = GIVEN_TO.filter((w) => r.give[w].length).map((w) => `${LANE[w]}: ${r.give[w].map((id) => source(id).name).join(', ')}`)
-    rows.push(['Handed over', handed.length ? handed.join(' · ') : 'nothing'])
-    if (r.permission) rows.push(['Asked you', `Researcher wanted the web · ${r.permission === 'deny' ? 'you said no' : r.permission === 'always' ? 'allowed from now on' : 'allowed once'}`])
-    if (r.team.review || r.permission) rows.push(['Waited on you', waitText(r.waitedMs)])
-    rows.push(['Your call', call])
-    rows.push(['Researcher', `${r.findings.filter((f) => !f.dropped).length} findings · ${r.tools.researcher} tool call${r.tools.researcher === 1 ? '' : 's'}`])
-    rows.push(['Writer', `wrote ${r.preset.file}`])
+    return texts.length ? `Written with your ${texts.length === 1 ? 'note' : 'notes'}: ${texts.map((t) => `“${t}”`).join(' · ')}` : null
+  }
+  function receiptRows(r) {
+    const kept = keptOf(r)
+    const flagged = r.findings.map((f, i) => ({ ...f, i })).filter((f) => !f.src && !f.dropped && kept.some((k) => k.text === f.text))
+    const rows = []
+    if (r.only) {
+      rows.push(['Asked', `“${FOLLOW.text}”`], ['Team', 'Writer only'], ['Ran on', `${app(r.team.writer).name} · your own account`], ['Took', clockText(r.clock)],
+        ['Read first', `the conversation so far: your request, ${r.team.review ? 'the findings you approved' : "Researcher's findings"}, and its last answer`],
+        ['Kept', "Researcher's findings, as they were"])
+    } else {
+      const apps = [...new Set(['researcher', 'writer'].map((w) => app(r.team[w]).name))]
+      const call = !r.team.review ? 'No review step on this team'
+        : r.sendBacks ? `Sent back ${r.sendBacks === 1 ? 'once' : `${r.sendBacks} times`}, then approved` : r.notes.length ? 'Approved, with a note' : 'Approved'
+      rows.push(['Asked', `“${r.preset.short}”`], ['Team', seq(r.team).map((w) => LANE[w]).join(' → ')], ['Ran on', `${listText(apps)} · your own accounts`], ['Took', clockText(r.clock)])
+      const handed = GIVEN_TO.filter((w) => r.give[w].length).map((w) => `${LANE[w]}: ${r.give[w].map((id) => source(id).name).join(', ')}`)
+      rows.push(['Handed over', handed.length ? handed.join(' · ') : 'nothing'])
+      if (r.permission) rows.push(['Asked you', `Researcher wanted the web · ${r.permission === 'deny' ? 'you said no' : r.permission === 'always' ? 'allowed from now on' : 'allowed once'}`])
+      if (r.team.review || r.permission) rows.push(['Waited on you', waitText(r.waitedMs)])
+      rows.push(['Your call', call])
+    }
+    if (r.carried.length) rows.push(['From the chat', r.carried.map((n) => `“${n.text}”`).join(' · ')])
+    if (r.told.length) rows.push(['Your notes', r.told.map((n) => `“${n.text}” to ${LANE[n.to]}, ${n.takenAt === null ? 'not taken before the end' : n.now ? 'which stopped its step for it' : 'taken in its next turn'}`).join(' · ')])
+    if (!r.only) rows.push(['Researcher', `${r.findings.filter((f) => !f.dropped).length} findings · ${r.tools.researcher} tool call${r.tools.researcher === 1 ? '' : 's'}`])
+    rows.push(['Writer', `${r.only ? 'rewrote' : 'wrote'} ${r.preset.file}`])
     const worth = [
       ...flagged.slice(0, 1).map((f) => `claim ${f.i + 1} has no source.`),
-      ...(r.deniedWeb ? ['Researcher wasn’t allowed to search the web, so check where its claims came from.'] : []),
+      ...(!r.only && r.deniedWeb ? ['Researcher wasn’t allowed to search the web, so check where its claims came from.'] : []),
     ]
     return { rows, flagged, worth }
   }
   function receiptMarkdown(r) {
     const { rows, worth } = receiptRows(r)
     return [
-      `**Run receipt · Run ${r.n} · Finished**`,
+      `**Run receipt · Run ${r.n} · Answered**`,
       '',
       ...rows.map(([k, v]) => `- **${k}:** ${v}`),
       '',
@@ -1395,52 +1784,98 @@
       '_Simulated on the LoomWatch landing page. No model was called._',
     ].join('\n')
   }
+  const introOf = (r) => (r.only ? FOLLOW.intro : r.preset.intro(keptOf(r).length, r.findings.every((f) => f.src || f.dropped), r.team.review))
+  function answerMarkdown(r) {
+    return [`# ${r.preset.title2}`, '', introOf(r), '', ...keptOf(r).map((f) => `- ${f.text}${f.src ? ` (${f.src})` : ''}`), '',
+      '_Simulated on the LoomWatch landing page. No model was called._'].join('\n')
+  }
+  // The answer as Writer posts it: in full, or as a document card once newer work follows it.
+  function answerMsg(r, folded) {
+    const items = keptOf(r)
+    const tag = r.team.review ? 'no source · approved as it was' : 'no source · nobody checked'
+    const written = writtenWith(r)
+    const body = folded
+      ? el('div', { class: 'ans-doc' }, el('b', { text: r.preset.title2 }), el('span', { text: introOf(r) }), el('span', { class: 'm', text: `${items.length} items · ${r.preset.file}` }))
+      : el('div', { class: 'reader' },
+        el('h3', { text: r.preset.title2 }),
+        el('p', { class: 'intro', text: introOf(r) }),
+        el('ul', {}, items.map((f) => el('li', { class: f.src ? '' : 'unchecked' }, f.text, el('span', { class: `src${f.src ? '' : ' missing'}`, text: f.src || tag })))),
+        written ? el('p', { class: 'written', text: written }) : null,
+        el('div', { class: 'filecard' },
+          el('span', { class: 'ico', 'aria-hidden': 'true', text: r.preset.file.split('.').pop().toUpperCase() }),
+          el('span', {}, el('div', { class: 'fn', text: r.preset.file }), el('div', { class: 'fm', text: `${r.preset.kind} · changed just now · Research and write › Writer` })),
+          el('span', { class: 'acts', 'aria-hidden': 'true' }, el('span', { text: 'Open' }), el('span', { text: 'Show in folder' }))))
+    return el('div', { class: `tc-msg m-writer ans-msg${folded ? ' folded' : ''}` },
+      avatar('writer'),
+      el('div', { class: 'tc-main' },
+        el('div', { class: 'tc-meta' }, el('b', { text: 'Writer' }), el('span', { class: 'tc-to', text: r.only ? 'to you' : "the team's answer" }), el('time', { text: `took ${clockText(r.clock)}` })),
+        el('div', { class: 'tc-bubble' }, body),
+        folded ? null : answerTools(r)))
+  }
+  function answerTools(r) {
+    const { worth } = receiptRows(r)
+    const said = el('span', { class: 'copied', 'aria-live': 'polite' })
+    const flash = (text) => { said.textContent = text; window.setTimeout(() => { said.textContent = '' }, 1800) }
+    return el('div', { class: 'ans-tools' },
+      el('button', { type: 'button', class: `verdict ${worth.length ? 'warn' : 'ok'}`, text: worth.length ? `${worth.length} thing to check` : 'Nothing flagged', onclick: () => {
+        const line = $('.slip .worth', resultBody)
+        if (!line) return
+        line.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' })
+        line.classList.remove('flash'); void line.offsetWidth; line.classList.add('flash')
+      } }),
+      el('button', { type: 'button', class: 'tbtn', text: 'Copy', onclick: async () => {
+        try { await navigator.clipboard.writeText(answerMarkdown(r)); flash('Copied') } catch { flash('Copy failed') }
+      } }),
+      el('button', { type: 'button', class: 'tbtn', text: 'Download', title: `Save the answer as ${r.preset.file.replace(/\.\w+$/, '')}.md`, onclick: () => {
+        const link = el('a', { href: URL.createObjectURL(new Blob([answerMarkdown(r)], { type: 'text/markdown' })), download: `${r.preset.file.replace(/\.\w+$/, '')}.md` })
+        link.click()
+        window.setTimeout(() => URL.revokeObjectURL(link.href), 1000)
+      } }),
+      said)
+  }
   function renderResult(force = false) {
     // Writer's stage is in the key: the panel says who is working, and that changes when Writer starts.
     const key = run ? `${run.n}:${run.phase}:${run.approved}:${run.sendBacks}:${run.stages.writer}` : 'none'
     if (!force && key === resultKey) return
     resultKey = key
+    const base = run && run.only ? run.prev : run
     $('#result-file').textContent = run ? run.preset.file : preset(state.request).file
     const empty = (big, text, ...more) => el('div', { class: 'res-empty' }, el('p', { class: 'big', text: big }), el('p', { text }), ...more)
-    if (!run) { resultBody.replaceChildren(empty('Nothing to read yet.', "Run the team, and its answer lands here with a receipt.")); return }
-    if (run.phase === 'review') {
+    if (!base) { resultBody.replaceChildren(empty('Nothing to read yet.', 'Write to the team, and its answer lands in the chat with a receipt.')); return }
+    if (base.phase === 'review') {
       resultBody.replaceChildren(empty('The team is waiting for you.', 'Nothing gets written past the review step until you decide.',
-        el('a', { class: 'link', href: '#review', style: 'display:inline-block;margin-top:14px', text: 'Go to the review step ↑' })))
+        el('a', { class: 'link', href: '#review', style: 'display:inline-block;margin-top:14px', text: 'Go to the review ↑' })))
       return
     }
-    if (run.phase !== 'done') {
-      const who = run.stages.writer === 'running' ? 'Writer is writing' : 'Researcher is working'
-      resultBody.replaceChildren(empty('Not finished yet.', `${who}. The answer appears here when Writer replies.`))
+    if (base.phase !== 'done') {
+      const who = base.stages.writer === 'running' ? 'Writer is writing' : 'Researcher is working'
+      resultBody.replaceChildren(empty('Not finished yet.', `${who}. The answer appears here, in the chat, when Writer replies.`))
       return
     }
-    const r = run
-    const items = r.findings.filter((f) => !f.dropped).map((f) => el('li', { class: f.src ? '' : 'unchecked' }, f.text, el('span', { class: `src${f.src ? '' : ' missing'}`, text: f.src || (r.team.review ? 'no source · approved as it was' : 'no source · nobody checked') })))
-    const lastNote = r.notes.filter((n) => n.kind === 'approve').at(-1)
-    const reader = el('div', { class: 'reader' },
-      el('span', { class: 'micro', text: `Team response · from Writer on ${app(r.team.writer).name}` }),
-      el('h3', { text: r.preset.title2 }),
-      el('p', { class: 'intro', text: r.preset.intro(items.length, r.findings.every((f) => f.src || f.dropped), r.team.review) }),
-      el('ul', {}, items),
-      lastNote ? el('p', { class: 'written', text: `Written with your note: “${lastNote.text}”` }) : null,
-      el('div', { class: 'filecard' },
-        el('span', { class: 'ico', 'aria-hidden': 'true', text: r.preset.file.split('.').pop().toUpperCase() }),
-        el('span', {}, el('div', { class: 'fn', text: r.preset.file }), el('div', { class: 'fm', text: `${r.preset.kind} · changed just now · Research and write › Writer` })),
-        el('span', { class: 'acts', 'aria-hidden': 'true' }, el('span', { text: 'Open' }), el('span', { text: 'Show in folder' }))))
-    const { rows, worth } = receiptRows(r)
+    const thread = el('div', { class: 'res-chat' }, answerMsg(base, Boolean(run.only)))
+    if (run.only) {
+      thread.append(
+        msg({ from: 'you', meta: 'You', to: '→ Writer', body: [el('p', {}, ...withMention(run.asked))] }),
+        el('div', { class: 'piece-line' }, weft(run), run.phase === 'done' ? el('span', { text: worked(run) }) : el('span', {}, el('b', { text: 'Writer' }), ' is working', dots())))
+      if (run.phase === 'done') thread.append(answerMsg(run, false))
+    }
+    const shown = run.phase === 'done' ? run : base
+    const { rows, worth } = receiptRows(shown)
     const slip = el('div', { class: 'slip-wrap' }, el('div', { class: 'slip' },
-      el('div', { class: 'head' }, el('span', { text: `Run receipt · Run ${r.n}` }), el('span', { text: 'Finished' })),
+      el('div', { class: 'head' }, el('span', { text: `Run receipt · Run ${shown.n}` }), el('span', { text: 'Answered' })),
       el('dl', {}, rows.map(([k, v]) => [el('dt', { text: k }), el('dd', { text: v })]).flat()),
       el('div', { class: 'worth' }, el('b', { text: 'Worth a look: ' }), worth.length ? el('span', { class: 'bad', text: worth.join(' ') }) : 'nothing flagged.'),
-      el('div', { class: 'foot', text: 'Simulated in your browser · no model was called' })))
+      el('div', { class: 'slip-foot', text: 'Simulated in your browser · no model was called' })))
     const copied = el('span', { class: 'copied', 'aria-live': 'polite' })
     const acts = el('div', { class: 'res-acts' },
       el('button', { type: 'button', class: 'btn', text: 'Copy receipt', onclick: async () => {
-        try { await navigator.clipboard.writeText(receiptMarkdown(r)); copied.textContent = 'Copied' } catch { copied.textContent = 'Copy failed' }
+        try { await navigator.clipboard.writeText(receiptMarkdown(shown)); copied.textContent = 'Copied' } catch { copied.textContent = 'Copy failed' }
         window.setTimeout(() => { copied.textContent = '' }, 1800)
       } }),
       el('a', { class: 'link', href: '#watch', style: 'font-size:13px', text: 'Replay the timeline ↑' }),
       copied)
-    resultBody.replaceChildren(el('div', { class: 'result-grid' }, reader, slip, acts))
+    resultBody.replaceChildren(el('div', { class: 'result-grid' }, thread,
+      el('section', { class: 'res-details', 'aria-label': 'Details' }, el('span', { class: 'micro', text: 'Details · how it was made' }), slip, acts)))
   }
 
   /* ================================================================ 07 · Tomorrow */
@@ -1462,16 +1897,16 @@
   const ISSUES = [
     { items: 10, when: '10:00 → 10:06', tag: 'A schedule', story: 'The first scheduled issue. Collector, Editor and Writer were done by 10:06, and it was waiting in Notion.' },
     { items: 10, when: '10:00 → 10:05', story: 'An ordinary morning. The issue arrived, and nothing needed you.' },
-    { items: 7, when: '10:00 → 10:05 · 10:31', tag: 'Follow up', note: ['You, 10:24', 'Shorter, please.'], stamp: ['ok', 'Second pass 10:31'], story: 'You read it over coffee and followed up: <span class="q">“Shorter, please.”</span> Writer did one more pass on the same issue, back at 10:31. Nobody started over.' },
-    { items: 7, when: '10:00 → 10:02 · 10:40', stopped: true, tag: 'Redo from a step', stamp: ['bad', 'First run stopped 10:02', 'Redone 10:40'], story: "Collector couldn't open one of its sources, and the run stopped and said so. You chose Redo from step 1, and the reprint was ready at 10:40." },
+    { items: 7, when: '10:00 → 10:05 · 10:31', tag: '@Writer', note: ['You, 10:24', '@Writer Shorter, please.'], stamp: ['ok', 'Second pass 10:31'], story: 'You read it over coffee and wrote <span class="q">“@Writer Shorter, please.”</span> in the team’s chat. Writer alone did one more pass on the same issue, back at 10:31. Nobody started over.' },
+    { items: 7, when: '10:00 → 10:02 · 10:40', stopped: true, tag: 'Try again', stamp: ['bad', 'First run stopped 10:02', 'Redone 10:40'], story: "Collector couldn't open one of its sources, and the work stopped and said why, right in the chat. You pressed Try again, and the reprint was ready at 10:40." },
     { items: 5, when: '10:00 → 10:05', tag: 'Notebook', note: ['Notebook', 'Five items, not ten.'], story: 'You added a line to the team’s Notebook: <span class="q">“Five items, not ten.”</span> Every issue since has read it before starting.' },
     { items: 5, when: '10:00 → 10:04', story: 'Five items, not ten. It remembered without being told again.' },
     { items: 5, when: '10:00 → 10:05', tag: 'Swap a thread', foot: 'Edited on a newer app', story: 'A newer app was better at editing, so you moved Editor to it. One change in the sentence. The team, its Brief and its Notebook stayed as they were.' },
     { items: 5, when: '10:00 → 10:04', tag: 'Share a source', foot: 'Sources + market-reports', story: 'You dragged market-reports onto Editor too. One card, two threads: Collector and Editor read the same folder, and neither can change it.' },
-    { items: 5, when: '10:00 → 18:40', tag: 'A review step waits', stamp: ['wait', 'Held for your review', 'Approved 18:40'], story: "Editor flagged a claim it couldn't confirm, and the review step held the issue until you were back. You approved at 18:40, and it went out then, not before." },
+    { items: 5, when: '10:00 → 18:40', tag: 'A review step waits', stamp: ['wait', 'Held for your review', 'Approved 18:40'], story: "Editor flagged a claim it couldn't confirm, and the review waited in the chat until you were back. You approved at 18:40, and it went out then, not before." },
     { items: 5, when: '10:00 → 10:05', tag: 'Saved job', foot: 'Editor also edits a second team', story: 'You saved Editor as a job, with its instructions, app and skills, and added it to a second team.' },
     { items: 5, when: '10:00 → 10:04', story: 'Most mornings now need nothing from you. That was the point.' },
-    { items: 5, when: '10:00 → 10:05', tag: 'Replay any morning', story: 'Every issue is kept on your computer with the run that made it, so you can open any morning and drag back through its timeline.' },
+    { items: 5, when: '10:00 → 10:05', tag: 'Replay any morning', story: 'Every issue stays in the team’s chat with the work that made it, so you can open any morning’s Details and drag back through its timeline.' },
     { items: 5, when: '10:00 → 10:05', story: 'Ready at 10:05. Every issue so far is on the pile, the stopped one included.' },
     { items: 5, when: '10:00 → now', live: true, tag: 'Writing now', stamp: ['live', 'Writing now'], story: "Today's issue is being written. Collector is reading, and it will be on the pile before you sit down." },
   ]
@@ -1755,7 +2190,7 @@
   const SCREENS = {
     home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as a team, a New team button, a box to describe the job in plain words, three steps, and the teams as cards with their recent runs drawn as threads.', cap: 'Home: your teams, each with its recent runs drawn as threads, and the one gold button that starts a new one.' },
     build: { w: 2880, h: 1800, alt: 'LoomWatch Build: the team as one sentence across the top, a Hire by job palette on the left, and agent cards wired left to right on a dotted canvas, with a folder, a file and a shared skill wired in beneath the agents that use them.', cap: 'Build: the team as one sentence across the top, Hire by job on the left, and under each agent the folder, file and skill it was handed.' },
-    run: { w: 2880, h: 1800, alt: "LoomWatch Run: the request, a run receipt with each step and your decision, and the timeline on the left, and the team's market brief in a reader on the right, marked Nothing flagged.", cap: "Run: the request, the steps, the receipt and the timeline on the left; the team's answer on the right." },
+    chat: { w: 2880, h: 1800, alt: "LoomWatch Chat for a market brief team: on the left, Researcher's handover to you, your approval with a note for Writer, and the team's answer as a document card marked Nothing flagged, with Copy and Share and the message box below; on the right, the brief open in full under an Answer tab beside Details.", cap: 'Chat: the handover, your review and the answer, marked Nothing flagged, with the brief open beside the chat. Details is one tab away.' },
   }
   const realImg = $('#real-img')
   function showScreen(name, focus = false) {
@@ -1814,10 +2249,7 @@
   renderApps()
   renderWarpPreview()
   renderTeamViews()
-  renderRequests()
-  renderRunUI()
-  renderReview(true)
-  renderResult(true)
+  renderChatUI(true)
   renderPaper()
   renderSwatch()
   showScreen('home')

@@ -74,9 +74,11 @@ team back to you in **one plain sentence**, so you can check the plan before any
 
 ### 02 &nbsp;Ask, and watch
 
-Describe the job in plain words: _"Prepare today's AI and tech news digest, and link every claim."_
-Each stage starts when the one before it hands over, and every handover lands on a **live
-timeline** you can drag back to replay.
+Each team has one chat. Write **@team** and the job in plain words: _"@team Prepare today's AI and
+tech news digest, and link every claim."_ Each stage starts when the one before it hands over, and
+what the agents tell each other shows in the chat as they say it. A note you write while an agent
+works joins its next turn, and every handover lands on a **live timeline** in Details that you can
+drag back to replay.
 
 </td>
 <td valign="middle">
@@ -97,9 +99,9 @@ timeline** you can drag back to replay.
 
 ### 03 &nbsp;Review
 
-A **You** step pauses the team and shows what was handed over. Approve it, or type what should
-change and send it back. **Nothing moves on until you decide**, and the finished answer comes with
-the evidence to check before you use it.
+A **You** step pauses the team, and the handover waits in the chat with **Approve** and **Send
+back** on it. Approve it, or write what should change and send it back. **Nothing moves on until
+you decide**, and the finished answer comes with the evidence to check before you use it.
 
 </td>
 </tr>
@@ -308,10 +310,10 @@ Every team below is made from the jobs in Build's library, each on the AI app it
 <tr>
 <td align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/run-dark.png">
-  <img src="docs/assets/readme/run-light.png" alt="Run view of a finished run: the request, a run receipt listing each step and your decision, a replay timeline, and the market brief the team wrote, marked Nothing flagged, with Retry and Follow up controls.">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.png">
+  <img src="docs/assets/readme/chat-light.png" alt="The team's chat after a finished piece of work: Researcher's handover to you, your approval with a note for Writer, and the team's answer as a document card marked Nothing flagged, with Copy and Share. The brief is open in full beside the chat, under an Answer tab next to Details.">
 </picture>
-<br><sub><strong>Run.</strong> The receipt says who did what, the timeline replays it, and the answer sits beside it, ready for review.</sub>
+<br><sub><strong>Chat.</strong> The handover, your review and the answer in one conversation, with the brief open beside it and its record one tab away in Details.</sub>
 </td>
 </tr>
 <tr>
