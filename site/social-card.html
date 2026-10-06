@@ -10,7 +10,8 @@
 
   Chrome may keep running after it writes the file; quit it once the PNG exists. The card is
   1200x630 (the 1.91:1 shape every network crops to), rendered at 2x and scaled down, and has to
-  stay under 300 KB, or WhatsApp and Zalo show the link without it.
+  stay under 300 KB, or WhatsApp and Zalo show the link without it. Networks cache the picture by its
+  address, so bump the ?v= on og:image and twitter:image in index.html and usecases.html too.
 -->
 <html lang="en">
 <head>
@@ -71,15 +72,15 @@
       </svg>
       <span>LoomWatch</span>
     </div>
-    <h1>Put your AI apps to work <em>as a team.</em></h1>
-    <p class="lede">Connect <b>Claude Code</b>, <b>Codex</b> and <b>OpenCode</b> on one canvas, ask in plain
-      words, watch every step and approve the work before the next agent builds on it.</p>
+    <h1>Put your AI apps to work <em>as one team.</em></h1>
+    <p class="lede">Mix <b>Claude Code</b>, <b>Codex</b> and <b>OpenCode</b> on one team and work with it in
+      one chat. Ask in plain words, watch every step, and decide before the next agent builds on it.</p>
   </div>
   <div class="foot">
     <span class="pill">Free &amp; open source</span>
     <span class="pill">Runs on your Mac</span>
     <span class="url">loomwatch.github.io</span>
   </div>
-  <div class="shot"><img src="../docs/assets/readme/run-dark.png" alt=""></div>
+  <div class="shot"><img src="../docs/assets/readme/chat-dark.png" alt=""></div>
 </body>
 </html>
