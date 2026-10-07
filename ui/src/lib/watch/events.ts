@@ -938,10 +938,15 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
               call.detail = typeof output.error === 'string' ? firstLine(output.error, 96) : call.detail
               attention.push({ id: event.id, seq: event.seq, agentId: agent.id, evidenceId: key, message: typeof output.error === 'string' ? output.error : `Team Bus ${call.busName} failed.` })
             } else if (['dispatch', 'ask', 'handoff'].includes(call.busName) && typeof input.agent === 'string') {
-              const target = ensureAgent(input.agent, event)
+              // The bus accepts an agent's name as well as its id, and its result names the id it
+              // resolved; the input is only what the model typed, which may be the name.
+              const output = object(p.rawOutput) ? p.rawOutput : {}
+              const to = typeof output.agent === 'string' && output.agent ? output.agent : input.agent
+              call.target = to
+              const target = ensureAgent(to, event)
               if (target.status === 'idle') { target.status = 'waiting'; target.taskState = 'QUEUED'; target.task = 'Waiting for the delegation' }
-              delegations.set(key, { id: key, from: agent.id, to: input.agent, kind: call.busName as Delegation['kind'], status: 'accepted', seq: event.seq })
-              if (call.busName === 'handoff') { agent.handedOff = true; agent.status = 'stopped'; agent.task = `Handed off to ${input.agent}` }
+              delegations.set(key, { id: key, from: agent.id, to, kind: call.busName as Delegation['kind'], status: 'accepted', seq: event.seq })
+              if (call.busName === 'handoff') { agent.handedOff = true; agent.status = 'stopped'; agent.task = `Handed off to ${to}` }
             } else if (call.busName === 'escalate') {
               agent.status = 'waiting'
               agent.task = 'Waiting for you'

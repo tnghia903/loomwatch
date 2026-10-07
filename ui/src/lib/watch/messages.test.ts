@@ -60,6 +60,19 @@ describe('messages between agents', () => {
     expect(ask.reply).toMatchObject({ from: 'researcher', text: 'Version 0.4, the one on the site.', source: 'open', offsetMs: 61_000 })
   })
 
+  it('files a question asked by name under the agent the bus resolved it to', () => {
+    // The bus accepts the name a stage was shown ("Before you: Researcher") and answers with the
+    // id; the question must not open a second lane for the name.
+    const events = pipelineWithAskBack().map((item) => item.kind === 'tool_call'
+      ? { ...item, payload: { ...item.payload, rawInput: { agent: 'Researcher', question: 'Which spec version did you read?' } } }
+      : item)
+    const projection = projectRun(events)
+    expect(projection.messages.find((message) => message.kind === 'ask')).toMatchObject({ to: 'researcher', state: 'answered', reply: { from: 'researcher' } })
+    expect(projection.delegations).toEqual([expect.objectContaining({ from: 'writer', to: 'researcher', kind: 'ask' })])
+    expect(projection.evidence.find((item) => item.id === 'writer:q1')?.target).toBe('researcher')
+    expect(projection.agents.map((agent) => agent.id)).toEqual(['researcher', 'writer'])
+  })
+
   it('cuts at the replay cursor: before the answer arrives, the question is still waiting', () => {
     const events = pipelineWithAskBack()
     const asked = events.find((item) => item.kind === 'tool_call')!
