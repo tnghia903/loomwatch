@@ -13,6 +13,23 @@
   overflow: auto;
   padding: 28px clamp(22px, 3vw, 48px);
 }
+/* A finished run's receipt is a 470px slip. Centred above the record on a wide pane, it left two
+   empty margins and pushed the timeline a screen down. Once the pane holds the slip and ~600px
+   beside it, the slip becomes the sheet's left column and stays in view while the timeline,
+   stages and skills scroll past (DeliveryLane sets --receipt-top for a slip taller than the pane). */
+@container details (min-width: 1200px) {
+  .delivery-sheet.with-receipt {
+    display: grid;
+    grid-template-columns: 470px minmax(0, 1fr);
+    gap: 32px;
+    align-items: start;
+  }
+  .delivery-sheet.with-receipt > .run-receipt {
+    position: sticky;
+    top: var(--receipt-top, 16px);
+    margin: 0;
+  }
+}
 .delivery-heading {
   display: flex;
   align-items: center;
