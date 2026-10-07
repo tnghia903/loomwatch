@@ -79,7 +79,11 @@
 }
 .home-foot .link { color: var(--color-accent); }
 .home-foot .link:disabled { color: var(--color-ink-3); }
-.home-foot-problems { flex-basis: 100%; margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-1); color: var(--color-alert); }
+.home-foot-problems { flex-basis: 100%; margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-1); }
+.home-foot-problems .failed { color: var(--color-alert); }
+/* A step the app waits on you for reads as a note, in the footer's own quiet ink. */
+.home-foot-problems .setup { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px var(--sp-2); color: var(--color-ink-2); }
+.home-foot-problems .setup svg { flex: none; align-self: center; color: var(--color-ink-3); }
 
 /* ---- Set up an AI app (ADR 0045) ------------------------------------------ */
 .home-setup {

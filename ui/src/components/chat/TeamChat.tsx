@@ -3,7 +3,7 @@ import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useR
 
 import { continueWithTeam, fetchChatPage, itemAt, sendChatMessage, startFromNote, type ChatItem, type ChatMessage, type ChatTarget } from '../../lib/chat/client'
 import { clockTime, dayKey, dayLabel } from '../../lib/chat/format'
-import { destination, type ChatAgent } from '../../lib/chat/route'
+import { destination, withMention, type ChatAgent } from '../../lib/chat/route'
 import { markSeen } from '../../lib/chat/seen'
 import { AppearContext, useAppear } from '../../lib/chat/appear'
 import { FollowContext, type ChatFollow } from '../../lib/chat/follow'
@@ -12,6 +12,8 @@ import { DaemonUnreachableError } from '../../lib/daemonFetch'
 import { answerRun, newStartKey, RunApiError, STALE_TEAM_REVISION, TEAM_NEEDS_REVIEW, type TeamReview } from '../../lib/runs/client'
 import type { ReceiptLine } from '../../lib/story/receipt'
 import type { AllowSwitch } from '../../lib/team-file/types'
+import { AgentFacesContext, type AgentFaces } from '../../lib/chat/faces'
+import { AgentFace } from './AgentFace'
 import { Swap } from './Appearing'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
 import { WorkPiece, type TeamView } from './WorkPiece'
@@ -283,6 +285,39 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // you it waits on.
   const asking = new Set(live.flatMap((run) => (run.permissionRequests ?? []).map((request) => request.agent)))
   const presence = members.map((agent) => ({ agent, state: (unreachable ? 'away' : waitingFor === agent.id || asking.has(agent.id) ? 'waiting' : workingNow.has(agent.id) ? 'working' : 'idle') as Presence }))
+  // Each face can say who its agent is, and puts `@name` in the message box when clicked.
+  const [mentioned, setMentioned] = useState(0)
+  const states = new Map(presence.map(({ agent, state }) => [agent.id, state]))
+  const faces: AgentFaces = {
+    facts: (id) => {
+      const agent = members.find((member) => member.id === id)
+      if (!agent) return null
+      const config = team.configs?.get(id)
+      const state = states.get(id) ?? 'idle'
+      const capabilities = config?.capabilities ?? []
+      const step = team.order.indexOf(id)
+      return {
+        id,
+        name: agent.name || id,
+        hue: team.hues.get(id) ?? 1,
+        state,
+        stateWords: STATE_WORDS[state],
+        app: team.apps?.get(id) ?? null,
+        model: config?.model?.trim() || null,
+        role: config?.role?.trim() || null,
+        step: step >= 0 && team.order.length > 1 ? { at: step + 1, of: team.order.length } : null,
+        skills: capabilities.filter((capability) => capability.kind === 'skill').length,
+        tools: capabilities.filter((capability) => capability.kind === 'tool').length,
+        knowledge: capabilities.filter((capability) => capability.kind === 'knowledge').length,
+      }
+    },
+    mention: (id) => {
+      const agent = members.find((member) => member.id === id)
+      if (!agent) return
+      setDraft((text) => withMention(text, agent, agents))
+      setMentioned((count) => count + 1)
+    },
+  }
   const [rosterOpen, setRosterOpen] = useState(readRosterOpen)
   const rosterId = useId()
   const toggleRoster = () => {
@@ -298,8 +333,9 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   return (
     <AppearContext.Provider value={settled && search.results === null}>
     <FollowContext.Provider value={follow}>
+    <AgentFacesContext.Provider value={faces}>
     <section className="tc" aria-label={`${teamName} chat`} data-tour="chat" data-newest-run={newestRun ?? undefined}>
-      <header className="tc-head">
+      <header className={`tc-head${rosterOpen ? '' : ' folded'}`}>
         <div className={`tc-title${rosterOpen ? '' : ' folded'}`}>
           <h2>
             <button type="button" className="tc-roster-toggle" aria-expanded={rosterOpen} aria-controls={rosterId} onClick={toggleRoster} title={rosterOpen ? 'Fold the list of who is on the team' : 'Show who is on the team'}>
@@ -309,20 +345,26 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
           </h2>
           {/* Folded, the team reads as one line: its faces with their status, and what they are doing. */}
           {!rosterOpen && members.length > 0 && (
-            <button type="button" className="tc-roster-summary" onClick={toggleRoster} aria-label={`${rosterSummary(presence)}. Show who is on the team`}>
-              <span className="tc-faces" aria-hidden="true">
+            <div className="tc-roster-summary">
+              <span className="tc-faces">
                 {presence.map(({ agent, state }) => (
-                  <i key={agent.id} className={`tc-member ${state}`}><i className={`chat-avatar hue-${team.hues.get(agent.id) ?? 1}`} style={{ width: 20, height: 20, fontSize: 8 }}>{initialsOf(agent.name || agent.id)}</i></i>
+                  <span key={agent.id} className={`tc-member ${state}`}>
+                    <AgentFace id={agent.id}><i className={`chat-avatar hue-${team.hues.get(agent.id) ?? 1}`} style={{ width: 20, height: 20, fontSize: 8 }} aria-hidden="true">{initialsOf(agent.name || agent.id)}</i></AgentFace>
+                  </span>
                 ))}
               </span>
-              <Swap key={rosterSummary(presence)}><span className="tc-roster-words">{rosterSummary(presence)}</span></Swap>
-            </button>
+              <button type="button" className="tc-roster-more" onClick={toggleRoster} aria-label={`${rosterSummary(presence)}. Show who is on the team`}>
+                <Swap key={rosterSummary(presence)} className="tc-roster-words">{rosterSummary(presence)}</Swap>
+              </button>
+            </div>
           )}
           <ul id={rosterId} className="tc-members" aria-label="Who is on the team" hidden={!rosterOpen}>
             {presence.map(({ agent, state }) => (
-              <li key={agent.id} className={`tc-member ${state}`} title={`${agent.name} · ${STATE_WORDS[state]}`}>
-                <i className={`chat-avatar hue-${team.hues.get(agent.id) ?? 1}`} style={{ width: 24, height: 24, fontSize: 9 }} aria-hidden="true">{initialsOf(agent.name || agent.id)}</i>
-                <span>{agent.name || agent.id}</span>
+              <li key={agent.id} className={`tc-member ${state}`}>
+                <AgentFace id={agent.id} className="tc-face-row">
+                  <i className={`chat-avatar hue-${team.hues.get(agent.id) ?? 1}`} style={{ width: 24, height: 24, fontSize: 9 }} aria-hidden="true">{initialsOf(agent.name || agent.id)}</i>
+                  <span>{agent.name || agent.id}</span>
+                </AgentFace>
                 <Swap key={state}><em>{STATE_WORDS[state]}</em></Swap>
               </li>
             ))}
@@ -413,8 +455,10 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         onChange={setDraft}
         onSend={(text, to, now) => send(text, to, now)}
         onAnswer={answer}
+        mentioned={mentioned}
       />
     </section>
+    </AgentFacesContext.Provider>
     </FollowContext.Provider>
     </AppearContext.Provider>
   )

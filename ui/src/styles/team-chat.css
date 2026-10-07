@@ -12,6 +12,8 @@
   inset: 112px 0 0 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  /* One column exactly as wide as the chat: a long team name must not widen it past its edge. */
+  grid-template-columns: minmax(0, 1fr);
   background: var(--color-ground);
   container-type: inline-size;
 }
@@ -33,10 +35,13 @@
   border-bottom: 1px solid var(--color-hairline);
   background: var(--color-panel);
 }
-.tc-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; min-width: 0; }
+/* The title takes the row, so search stays beside it rather than dropping to a line of its own. */
+.tc-head:not(.folded) { align-items: flex-start; }
+.tc-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; flex: 1 1 0; min-width: min(240px, 100%); }
 .tc-title h2 { margin: 0; font: 600 16px/1.3 var(--font-sans); color: var(--color-ink); }
-.tc-title.folded h2, .tc-title.folded .tc-roster-toggle { min-width: 0; max-width: 100%; }
-.tc-title.folded .tc-roster-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-title.folded h2 { flex: 0 1 auto; min-width: 0; }
+.tc-title.folded .tc-roster-toggle { min-width: 0; max-width: 100%; }
+.tc-title.folded .tc-roster-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The team's name folds the list of who is on it to one line, and opens it again. */
 .tc-roster-toggle {
   display: inline-flex;
@@ -54,14 +59,20 @@
   cursor: pointer;
 }
 .tc-roster-toggle svg { flex: none; color: var(--color-ink-3); }
+/* Open, a long name wraps under itself rather than running under the search beside it. */
+.tc-title:not(.folded) h2 { min-width: 0; }
+.tc-title:not(.folded) .tc-roster-toggle { align-items: flex-start; white-space: normal; }
+.tc-title:not(.folded) .tc-roster-toggle svg { margin-top: 3px; }
 .tc-roster-toggle:hover svg { color: var(--color-ink); }
-.tc-roster-toggle:focus-visible, .tc-roster-summary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.tc-roster-toggle:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .tc-title.folded { flex-wrap: nowrap; gap: 12px; }
-.tc-roster-summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+/* Folded, the faces and what they are doing always show, and the team's name, which the bar above
+   also shows, gives way. Only very long words are cut short. Each face is the agent's own button;
+   the words open the list. */
+.tc-roster-summary { display: inline-flex; flex: none; align-items: center; gap: 6px; min-width: 0; }
+.tc-roster-more {
   min-width: 0;
+  max-width: 40cqi;
   padding: 2px 4px;
   border: 0;
   border-radius: var(--r-sm);
@@ -70,12 +81,15 @@
   font: 12.5px/1.3 var(--font-sans);
   cursor: pointer;
 }
-.tc-roster-summary:hover { color: var(--color-ink); }
+.tc-roster-more:hover { color: var(--color-ink); }
+.tc-roster-more:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .tc-faces { display: inline-flex; flex: none; }
 .tc-faces .tc-member { display: inline-flex; font-style: normal; }
 .tc-faces .tc-member + .tc-member { margin-left: -5px; }
+/* A face rests above the one beside it while the pointer is on it. */
+.tc-faces .tc-member:hover, .tc-faces .tc-member:focus-within { z-index: 1; }
 .tc-faces .chat-avatar { box-shadow: 0 0 0 2px var(--color-panel); }
-.tc-roster-words { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-roster-more .tc-roster-words { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .tc-members { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; list-style: none; }
 .tc-members[hidden] { display: none; }
 .tc-member { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--color-ink-2); }
@@ -89,14 +103,78 @@
   height: 9px;
   border-radius: 50%;
   border: 2px solid var(--color-panel-solid);
-  background: var(--color-ink-3);
+  /* Ready for work: green, like anyone available. */
+  background: var(--color-ok);
 }
-.tc-member.working .chat-avatar::after { background: var(--color-ok); }
+/* Working: green with a ring round the face, which breathes where motion is welcome. */
+.tc-member.working .chat-avatar::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid var(--color-ok);
+  pointer-events: none;
+}
 .tc-member.waiting .chat-avatar::after { background: var(--color-accent); }
 .tc-member.away .chat-avatar::after { background: transparent; border-color: var(--color-ink-3); }
 .tc-member em { font-style: normal; font-size: 11.5px; color: var(--color-ink-3); }
 .tc-member.working em { color: var(--color-ok); }
 .tc-member.waiting em { color: var(--color-accent); }
+
+/* ---------- an agent's face: its card on hover, an @mention on click ---------- */
+.tc-face {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-full);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tc-face > span { display: inline-flex; align-items: center; gap: 6px; }
+.tc-face:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.tc-face .chat-avatar { transition: box-shadow var(--t-quick) var(--ease-out); }
+.tc-face:hover .chat-avatar, .tc-face:focus-visible .chat-avatar { box-shadow: 0 0 0 2px var(--color-panel), 0 0 0 3px var(--color-accent-dim); }
+.tc-face-row { border-radius: var(--r-sm); padding: 1px 4px 1px 0; }
+.tc-face-row:hover > span > span { color: var(--color-ink); }
+
+.tc-agent-card {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-md);
+  background: var(--color-panel-solid);
+  color: var(--color-ink-2);
+  font: 12.5px/1.45 var(--font-sans);
+  pointer-events: none;
+}
+.tc-agent-card p { margin: 0; }
+.tc-agent-card-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tc-agent-card-head .tc-member { flex: none; }
+.tc-agent-card-who { display: grid; min-width: 0; }
+.tc-agent-card-who b { overflow-wrap: anywhere; font: 600 13.5px/1.3 var(--font-sans); }
+.tc-agent-card-state { font-size: 11.5px; color: var(--color-ink-3); }
+.tc-agent-card-state.idle, .tc-agent-card-state.working { color: var(--color-ok); }
+.tc-agent-card-state.waiting { color: var(--color-accent); }
+.tc-agent-card-app { color: var(--color-ink); }
+/* The job in a few lines; the whole of it is in Build. */
+.tc-agent-card-role { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
+.tc-agent-card-works { font-size: 11.5px; color: var(--color-ink-3); }
+.tc-agent-card-hint { display: inline-flex; align-items: center; gap: 4px; padding-top: 8px; border-top: 1px solid var(--color-hairline); font-size: 11.5px; color: var(--color-accent); }
+/* The message box, once a face put a name in it. */
+.tc-mention-glow { position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  .tc-agent-card.leaving { display: none; }
+}
 .tc-routine { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 12px; color: var(--color-ink-3); }
 
 /* ---------- the log ---------- */
@@ -399,6 +477,16 @@
   .tc-decision.tc-appear { animation: tc-rise var(--t-entrance) var(--ease-out) both, tc-attention var(--t-settle) var(--ease-out) var(--t-entrance) 1; }
   /* Words that change in place — who is working, where a message goes — slide in. */
   .tc-swap { animation: tc-swap var(--t-move) var(--ease-out) both; }
+  /* A face lifts under the pointer, and presses in once when clicked to @mention its agent. */
+  .tc-face .chat-avatar { transition: box-shadow var(--t-quick) var(--ease-out), translate var(--t-quick) var(--ease-out); }
+  .tc-face:hover .chat-avatar { translate: 0 -1px; }
+  .tc-face-press .chat-avatar { animation: tc-press var(--t-move) var(--ease-out) both; }
+  /* Its card rises into place below the face (or sinks into place above it), and fades as it goes. */
+  .tc-agent-card { animation: tc-card-in var(--t-move) var(--ease-out) both; transform-origin: top left; }
+  .tc-agent-card.above { animation-name: tc-card-in-above; transform-origin: bottom left; }
+  .tc-agent-card.leaving { animation: tc-fade-out var(--t-quick) var(--ease-out) both; }
+  /* The box the name went into calls once with a gold ring, as what waits on you does. */
+  .tc-mention-glow { animation: tc-attention var(--t-settle) var(--ease-out) both; }
   /* Whoever is working breathes a green ring, in the header and on the piece. */
   .tc-member.working .chat-avatar::before,
   .tc-weft .chat-avatar.working::before {
@@ -467,6 +555,10 @@
 @keyframes tc-fade { from { opacity: 0; } }
 @keyframes tc-swap { from { opacity: 0; translate: 0 5px; } }
 @keyframes tc-pop { from { opacity: 0; scale: .96; } }
+@keyframes tc-press { 40% { scale: .88; } }
+@keyframes tc-card-in { from { opacity: 0; translate: 0 -4px; } }
+@keyframes tc-card-in-above { from { opacity: 0; translate: 0 4px; } }
+@keyframes tc-fade-out { to { opacity: 0; } }
 @keyframes tc-slide { from { translate: 24px 0; } }
 @keyframes tc-ring { 0% { scale: .9; opacity: .8; } 100% { scale: 1.45; opacity: 0; } }
 @keyframes tc-bead { 50% { scale: .55; } }

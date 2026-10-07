@@ -201,6 +201,24 @@ describe('Home', () => {
     expect(problem).toHaveAttribute('title', brokenGemini.healthDetail)
   })
 
+  // An app that needs a key from you is waiting on a step, not broken: a note, and the way to do it.
+  it('reads an app that needs an API key as a setup note, not an error, with Set it up', async () => {
+    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
+    const keyReason = 'Gemini CLI needs a Gemini API key to work with other apps: set GEMINI_API_KEY, then restart LoomWatch.'
+    renderHome([claude, { ...brokenGemini, healthCause: 'needs_api_key', healthReason: keyReason }])
+    await screen.findByText(/No teams yet/)
+    const note = within(screen.getByRole('list', { name: 'Apps that need attention' })).getByText(keyReason).closest('li')
+    expect(note).toHaveClass('setup')
+    expect(note).not.toHaveClass('failed')
+    fireEvent.click(within(note as HTMLElement).getByRole('button', { name: 'Set it up' }))
+    expect(screen.getByRole('region', { name: 'Set up an AI app' })).toBeInTheDocument()
+    // A failure with no step to take stays an alert.
+    cleanup()
+    renderHome([claude, brokenGemini])
+    await screen.findByText(/No teams yet/)
+    expect(within(screen.getByRole('list', { name: 'Apps that need attention' })).getByText(geminiReason).closest('li')).toHaveClass('failed')
+  })
+
   it('re-checks a failing app on request, then reloads the list', async () => {
     fetchMock.mockImplementation((url: string) => {
       if (url === '/api/harnesses/gemini/models') return respond({ error: 'still signed out' }, 502)

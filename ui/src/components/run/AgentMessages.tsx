@@ -8,6 +8,8 @@ import { permissionAsks, permissionWhat } from '../../lib/runs/permissionRequest
 import { clock, describeEvidence } from '../../lib/story/weft'
 import type { Evidence } from '../../lib/watch/events'
 import type { PermissionOutcome, TeamMessage } from '../../lib/watch/messages'
+import { useAgentFaces } from '../../lib/chat/faces'
+import { AgentFace } from '../chat/AgentFace'
 import { Markdown } from '../ui/Markdown'
 
 interface AgentMessagesProps {
@@ -388,12 +390,15 @@ function Body({ text, long, more }: { text: string; long: boolean; more: boolean
 }
 
 function Avatar({ member, size, plain = false }: { member: Member; size: number; plain?: boolean }) {
-  return (
-    <span className={`chat-avatar hue-${member.hue}`} style={{ width: size, height: size }} title={member.you ? 'You' : member.name}>
+  // In a team's chat an agent's face has its own card, and @mentions it when clicked.
+  const faces = useAgentFaces()
+  const face = (
+    <span className={`chat-avatar hue-${member.hue}`} style={{ width: size, height: size }} title={faces && !member.you ? undefined : member.you ? 'You' : member.name}>
       {member.you ? 'You' : member.initials}
       {!plain && member.number !== null && !member.you && <span className="chat-avatar-number">{member.number}</span>}
     </span>
   )
+  return member.you ? face : <AgentFace id={member.id}>{face}</AgentFace>
 }
 
 /** Everyone who took part, in the stage cards' order, each with the colour it keeps all chat long. */

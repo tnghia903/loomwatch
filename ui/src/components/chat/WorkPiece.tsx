@@ -19,6 +19,7 @@ import type { AgentConfig, AllowSwitch } from '../../lib/team-file/types'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { Markdown } from '../ui/Markdown'
 import { AnswerTools } from './AnswerTools'
+import { AgentFace } from './AgentFace'
 import { Appearing, Swap } from './Appearing'
 
 const AgentMessages = lazy(() => import('../run/AgentMessages').then((module) => ({ default: module.AgentMessages })))
@@ -35,6 +36,8 @@ export interface TeamView {
   operators: ReadonlySet<string>
   /** Each agent's configuration from the team file: the skills its answer's review rests on. */
   configs?: ReadonlyMap<string, AgentConfig>
+  /** The AI app each agent runs in, in words ("Claude", "Codex (not installed)"), for its card. */
+  apps?: ReadonlyMap<string, string>
 }
 
 type Work = Extract<ChatItem, { kind: 'work' }>
@@ -455,7 +458,7 @@ function Answer({ tour, run, answer, streaming, name, hue, open, onOpen, childre
   const responder = run.responder
   return (
     <div className={`chat-msg tc-answer${appear ? ' tc-appear' : ''}`} data-tour={tour ? 'output' : undefined}>
-      <span className="chat-gutter"><i className={`chat-avatar hue-${hue(responder)}`} style={{ width: 28, height: 28 }}>{initials(name(responder))}</i></span>
+      <span className="chat-gutter"><AgentFace id={responder}><i className={`chat-avatar hue-${hue(responder)}`} style={{ width: 28, height: 28 }} aria-hidden="true">{initials(name(responder))}</i></AgentFace></span>
       <div className="chat-stack">
         <div className={`chat-meta hue-${hue(responder)}`}><span className="chat-name">{name(responder)}</span><span className="tc-to">{run.onlyAgent ? 'to you' : "the team's answer"}</span><time>{clockTime(run.finishedAt)}</time></div>
         {facts ? (

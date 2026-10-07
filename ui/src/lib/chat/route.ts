@@ -63,6 +63,18 @@ export function findMention(text: string, agents: readonly ChatAgent[]): Mention
   return null
 }
 
+/**
+ * The message addressed to `agent` instead, for clicking a face: its @mention takes the place of
+ * the one the message already has, which is the one that decides where it goes, or leads it.
+ */
+export function withMention(text: string, agent: ChatAgent, agents: readonly ChatAgent[]): string {
+  const word = `@${agent.name.trim() || agent.id}`
+  const found = findMention(text, agents)
+  if (found) return `${text.slice(0, found.start)}${word}${text.slice(found.end)}`
+  const rest = text.trimStart()
+  return rest ? `${word} ${rest}` : `${word} `
+}
+
 /** The @mention being typed at the caret, for the picker: the text after the `@` so far. */
 export function mentionQuery(text: string, caret: number): { start: number; query: string } | null {
   const before = text.slice(0, caret)
