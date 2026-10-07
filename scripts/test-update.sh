@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Tests `loomwatch update`, `rollback` and `version` on a ready-built copy (ADR 0052), end to end
-# through the real launcher and installer, with stand-ins for everything they reach outside:
+# Tests `loomwatch update`, `rollback` and `version` on a ready-built copy (ADR 0052), and Update
+# and restart from the app, end to end through the real launcher and installer, with stand-ins for
+# everything they reach outside:
 #
 #   docker    one PostgreSQL whose databases are files, so a test can read what was saved and
 #             restored, and whose database layout (newest migration) a test sets
 #   curl      GitHub: the newest release's tag, release archives built here, and the health check
 #   lsof      nothing is listening
-#   loomwatchd  writes down what it was started with, instead of serving
+#   loomwatchd  writes down what it was started with, instead of serving. When a test has left
+#             $FAKE/app-asks, it does what the app asked once: names that release for the launcher
+#             and exits with 75, as Update and restart does, or exits with exit=N's status
 #
 # Nothing touches Docker, the network, or any LoomWatch on this computer.
 #
@@ -125,7 +128,23 @@ release() {
   cat >"$stage/loomwatch/bin/loomwatchd" <<'EOF'
 #!/usr/bin/env bash
 here=$(cd "$(dirname "$0")/.." && pwd)
-printf 'started %s install=%s command=%s\n' "$(cut -d ' ' -f 1 "$here/VERSION")" "$LOOMWATCH_INSTALL" "$LOOMWATCH_UPDATE_COMMAND" >>"$FAKE_LOG"
+pid=other
+if [ "$(cat "$here/run/loomwatchd.pid" 2>/dev/null)" = "$$" ]; then pid=same; fi
+printf 'started %s install=%s command=%s supervised=%s request=%s pid=%s failed=%s\n' \
+  "$(cut -d ' ' -f 1 "$here/VERSION")" "$LOOMWATCH_INSTALL" "$LOOMWATCH_UPDATE_COMMAND" \
+  "${LOOMWATCH_SUPERVISED:-}" "${LOOMWATCH_UPDATE_REQUEST:-}" "$pid" "${LOOMWATCH_UPDATE_FAILED:-}" >>"$FAKE_LOG"
+if [ -f "$FAKE/app-asks" ]; then
+  asked=$(cat "$FAKE/app-asks")
+  rm -f "$FAKE/app-asks"
+  case $asked in
+    exit=*) exit "${asked#exit=}" ;;
+    '') exit 75 ;;
+    *)
+      printf '%s\n' "$asked" >"$LOOMWATCH_UPDATE_REQUEST"
+      exit 75
+      ;;
+  esac
+fi
 touch "$FAKE/daemon-up"
 EOF
   cp "$root/loomwatch" "$root/scripts/install.sh" "$root/docker-compose.yml" "$root/.env.example" "$stage/loomwatch/"
@@ -276,6 +295,44 @@ check "with no one to ask, update refuses and changes nothing" '[ $status != 0 ]
 echo "Installing a particular, older release"
 LOOMWATCH_VERSION=v0.1.4 launcher update
 check "a release asked for by name is installed even when older" '[ $status = 0 ] && [ "$(version_installed)" = 0.1.4 ] && [ "$(cut -d " " -f 1 "$app/.previous/VERSION")" = 0.1.6 ]'
+
+echo "Update and restart in the app"
+export FAKE_LATEST=v0.1.6
+set_database 20261001000000 runs-before-app-update
+# The release the app showed, which need not be the newest the launcher would find.
+echo v0.1.5 >"$FAKE/app-asks"
+launcher start
+export app_backup
+app_backup=$(find "$work/backups" -name 'loomwatch-*-0.1.4.dump' | sort | tail -n 1)
+check "LoomWatch is told a launcher stays beside it, and where to name a release" 'grep -q "^started 0.1.4 install=release command=$app/loomwatch update supervised=1 request=/.*/app/run/update-request " "$FAKE_LOG"'
+check "stop finds LoomWatch, not the script, in the process file" 'logged "started 0.1.4 " && ! logged "pid=other"'
+check "exit 75 installs the release LoomWatch named, then starts it" '[ $status = 0 ] && [ "$(version_installed)" = 0.1.5 ] && logged "started 0.1.5 "'
+check "the run history was copied first" '[ -n "$app_backup" ] && grep -q runs-before-app-update "$app_backup"'
+check "0.1.4 is kept for rollback" '[ "$(cut -d " " -f 1 "$app/.previous/VERSION")" = 0.1.4 ] && grep -qx "backup=$app_backup" "$app/.previous/ROLLBACK"'
+check "the window says what happened" 'said "Updating LoomWatch 0.1.4 to 0.1.5, as asked in the app" && said "Updated LoomWatch 0.1.4 to 0.1.5." && said "rollback goes back to 0.1.4"'
+check "the new version runs beside its own launcher, told of no failure" 'grep -q "^started 0.1.5 .* supervised=1 .* failed=$" "$FAKE_LOG"'
+check "the request is used up" '[ ! -e "$app/run/update-request" ]'
+
+echo "An update from the app that does not finish"
+echo v0.1.9 >"$FAKE/app-asks"
+launcher start
+check "the version that was running starts again" '[ $status = 0 ] && [ "$(version_installed)" = 0.1.5 ] && [ "$(grep -c "^started 0.1.5 " "$FAKE_LOG")" = 2 ]'
+check "only the start after the failure is told why" 'grep "^started 0.1.5 " "$FAKE_LOG" | head -n 1 | grep -q "failed=$" && logged "failed=the download did not finish, and LoomWatch 0.1.5 was left as it was. The window running LoomWatch says why."'
+check "the window says so" 'said "could not download" && said "Starting LoomWatch 0.1.5 again"'
+check "nothing was replaced" '[ "$(cut -d " " -f 1 "$app/.previous/VERSION")" = 0.1.4 ] && [ ! -e "$app/run/update-failed" ]'
+
+echo "Update and restart that names no release, or an older one"
+: >"$FAKE/app-asks"
+launcher start
+check "with none named, nothing is installed and LoomWatch is told why" '[ $status = 0 ] && [ "$(version_installed)" = 0.1.5 ] && logged "failed=LoomWatch did not say which version to install."'
+echo v0.1.4 >"$FAKE/app-asks"
+launcher start
+check "an older release is never installed from the app" '[ $status = 0 ] && [ "$(version_installed)" = 0.1.5 ] && logged "failed=0.1.4 is not newer than LoomWatch 0.1.5, so nothing was changed."'
+
+echo "LoomWatch stopping any other way"
+echo exit=3 >"$FAKE/app-asks"
+launcher start
+check "ends the launcher with LoomWatch's status, as before" '[ $status = 3 ] && [ "$(grep -c "^started" "$FAKE_LOG")" = 1 ] && [ ! -e "$app/run/launcher.pid" ]'
 
 echo "Three copies are kept"
 check "older copies are removed" '[ "$(find "$work/backups" -name "*.dump" | wc -l | tr -d " ")" = 3 ]'

@@ -8,25 +8,33 @@
 //! daily check off in the app, and `LOOMWATCH_UPDATE_CHECK=off` turns every check off on this
 //! computer.
 //!
-//! Installing stays the operator's own step, in the terminal: `loomwatch update` stops nothing
-//! without asking, backs the database up, and keeps the version it replaces for
-//! `loomwatch rollback`. The daemon only says that a new version exists and which command to run.
+//! Installing is the launcher's job. In the terminal, `loomwatch update` stops nothing without
+//! asking, backs the database up, and keeps the version it replaces for `loomwatch rollback`. A
+//! ready-built copy whose launcher stays beside it ([`SUPERVISED_ENV`]) can also be updated from
+//! the app: `POST /api/updates/install` names the release in a file the launcher reads, and the
+//! daemon exits with [`EXIT_TO_UPDATE`]. The launcher then runs that same update and starts
+//! `LoomWatch` again in its terminal, or starts this version again when the update did not finish.
 
 use std::cmp::Ordering;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
 use axum::extract::State;
 use axum::http::{StatusCode, header};
 use axum::middleware;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::json;
 
 use crate::api::ApiError;
+use crate::archive::EventArchive;
+use crate::runs::{RunRecord, RunRegistry, RunStatus};
 use crate::watch_api::local_evidence;
 
 /// Where `LoomWatch` is published.
@@ -42,6 +50,20 @@ pub const URL_ENV: &str = "LOOMWATCH_UPDATE_URL";
 pub const INSTALL_ENV: &str = "LOOMWATCH_INSTALL";
 /// The update command as the operator would type it, such as `loomwatch update`.
 pub const COMMAND_ENV: &str = "LOOMWATCH_UPDATE_COMMAND";
+/// `1` from a launcher that stays beside the daemon: when the daemon exits with
+/// [`EXIT_TO_UPDATE`], it installs the release named in [`REQUEST_ENV`]'s file and starts the
+/// daemon again. `./loomwatch` sets it for a ready-built copy.
+pub const SUPERVISED_ENV: &str = "LOOMWATCH_SUPERVISED";
+/// The file, an absolute path, where the daemon names the release for that launcher to install.
+pub const REQUEST_ENV: &str = "LOOMWATCH_UPDATE_REQUEST";
+/// Set by that launcher when an update did not finish and it started this version again: why.
+pub const FAILED_ENV: &str = "LOOMWATCH_UPDATE_FAILED";
+/// The exit status that asks the launcher to update: sysexits' `EX_TEMPFAIL`, which nothing else
+/// in `LoomWatch` exits with. Any other status ends the launcher, as it always has.
+pub const EXIT_TO_UPDATE: i32 = 75;
+/// How long a daemon stopping to update waits for requests still open, such as the app's live
+/// streams, before it exits anyway.
+pub const STOP_GRACE: Duration = Duration::from_secs(3);
 
 /// How often the daily check asks, and how soon it asks again after it could not.
 const CHECK_EVERY: Duration = Duration::from_hours(24);
@@ -57,6 +79,7 @@ const MAX_ANSWER_BYTES: usize = 1024 * 1024;
 const MAX_NOTES_CHARS: usize = 20_000;
 const MAX_NAME_CHARS: usize = 200;
 const MAX_COMMAND_CHARS: usize = 300;
+const MAX_FAILURE_CHARS: usize = 2_000;
 
 const UNREACHABLE: &str = "Couldn’t reach GitHub to check for a new version. Check your internet connection, then try again.";
 const UNREADABLE: &str = "GitHub’s answer about the newest version could not be read.";
@@ -312,6 +335,12 @@ pub struct Status {
     pub available: bool,
     pub skipped: Option<String>,
     pub releases_url: String,
+    /// The app can install the newest release itself: a ready-built copy whose launcher starts it
+    /// again afterwards.
+    pub can_install: bool,
+    /// Why the last update asked for in the app did not finish, when the launcher started this
+    /// version again instead.
+    pub install_error: Option<String>,
 }
 
 /// How [`Updates`] is set up. [`Updates::from_env`] reads it from the daemon's environment.
@@ -327,6 +356,11 @@ pub struct Options {
     pub turned_off_by: Option<&'static str>,
     pub install: Install,
     pub command: Option<String>,
+    /// Where to name the release the operator chose, when a launcher that installs it and starts
+    /// the daemon again is running this one ([`SUPERVISED_ENV`]).
+    pub handoff: Option<PathBuf>,
+    /// Why the update that launcher last tried did not finish ([`FAILED_ENV`]).
+    pub install_error: Option<String>,
 }
 
 /// The update check, shared by its background task and the API.
@@ -349,6 +383,12 @@ struct Inner {
     checking: tokio::sync::Mutex<()>,
     /// The version last announced in the terminal, so each is announced once.
     announced: Mutex<Option<String>>,
+    handoff: Option<PathBuf>,
+    install_error: Option<String>,
+    /// Claimed by the first "Update and restart", so a second click never stops runs again.
+    installing: AtomicBool,
+    /// The version being installed, once the daemon should stop serving and exit.
+    restart: tokio::sync::watch::Sender<Option<String>>,
 }
 
 enum Fetched {
@@ -395,6 +435,15 @@ impl Updates {
                     && command.chars().count() <= MAX_COMMAND_CHARS
                     && !command.chars().any(char::is_control)
             });
+        let handoff = std::env::var(SUPERVISED_ENV)
+            .is_ok_and(|value| value.trim() == "1")
+            .then(|| std::env::var_os(REQUEST_ENV).map(PathBuf::from))
+            .flatten()
+            .filter(|path| path.is_absolute());
+        let install_error = std::env::var(FAILED_ENV)
+            .ok()
+            .map(|text| failure_text(&text))
+            .filter(|text| !text.is_empty());
         Self::new(Options {
             current: env!("CARGO_PKG_VERSION").to_owned(),
             url,
@@ -402,6 +451,8 @@ impl Updates {
             turned_off_by,
             install,
             command,
+            handoff,
+            install_error,
         })
     }
 
@@ -440,6 +491,10 @@ impl Updates {
                 saved: Mutex::new(saved),
                 checking: tokio::sync::Mutex::new(()),
                 announced: Mutex::new(None),
+                handoff: options.handoff,
+                install_error: options.install_error,
+                installing: AtomicBool::new(false),
+                restart: tokio::sync::watch::Sender::new(None),
             }),
         }
     }
@@ -473,7 +528,30 @@ impl Updates {
             available,
             skipped: saved.skipped,
             releases_url: format!("https://github.com/{REPOSITORY}/releases"),
+            can_install: self.inner.install == Install::Release && self.inner.handoff.is_some(),
+            install_error: self.inner.install_error.clone(),
         }
+    }
+
+    /// Resolves once the app asked to install a release, with that release's version. The daemon
+    /// then stops serving and exits with [`EXIT_TO_UPDATE`].
+    pub async fn restart_requested(&self) -> String {
+        let mut requested = self.inner.restart.subscribe();
+        // The version is copied out at once: the borrow it comes in must not be held while waiting.
+        let version = requested
+            .wait_for(Option::is_some)
+            .await
+            .map(|version| version.clone().unwrap_or_default());
+        match version {
+            Ok(version) => version,
+            Err(_) => std::future::pending().await,
+        }
+    }
+
+    /// Whether the app asked to install a release, so the daemon is stopping for the launcher.
+    #[must_use]
+    pub fn restarting(&self) -> bool {
+        self.inner.restart.borrow().is_some()
     }
 
     /// Whether the daily check should ask now.
@@ -619,6 +697,9 @@ impl Updates {
             return;
         }
         let how = match &status.command {
+            Some(command) if status.can_install => format!(
+                "Update it in the app with Update and restart, or stop LoomWatch and run: {command}"
+            ),
             Some(command) => format!("Stop LoomWatch, then run: {command}"),
             None => format!("Get it from {}", latest.url),
         };
@@ -712,6 +793,33 @@ fn allowed_url(url: &str) -> bool {
     }
 }
 
+/// The launcher's account of an update that did not finish, made safe to show: one paragraph of
+/// plain text, cut short when long.
+fn failure_text(text: &str) -> String {
+    let plain: String = text
+        .chars()
+        .map(|character| {
+            if character.is_control() && character != '\n' {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect();
+    shorten(plain.trim(), MAX_FAILURE_CHARS)
+}
+
+/// When this daemon started, as RFC 3339 with milliseconds. It tells one start from the next: after
+/// "Update and restart", the app waits for a different start to answer (`GET /api/about`).
+static STARTED_AT: LazyLock<String> =
+    LazyLock::new(|| Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true));
+
+/// See [`STARTED_AT`]. `main` reads it first thing, so it is the daemon's start.
+#[must_use]
+pub fn started_at() -> &'static str {
+    &STARTED_AT
+}
+
 /// The state saved by an earlier start. A file that cannot be read starts over: it holds a cache
 /// and two choices, and losing it only means asking once more.
 fn load(file: &Path) -> Saved {
@@ -758,16 +866,58 @@ fn skipped<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Skipped, D::Err
     Ok(Option::<String>::deserialize(deserializer)?.map_or(Skipped::Forget, Skipped::Set))
 }
 
-/// `GET /api/updates`, `POST /api/updates/check` and `PUT /api/updates/settings`. Loopback and
-/// this origin only, like run control: a page elsewhere must not learn the version or turn the
-/// check off.
-pub fn router(updates: Updates) -> Router {
+/// `POST /api/updates/install`. `stopRuns` agrees to stop the teams at work.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+struct InstallRequest {
+    stop_runs: bool,
+}
+
+/// What "Update and restart" needs beside the check: the runs it would stop.
+#[derive(Clone)]
+struct InstallState {
+    updates: Updates,
+    runs: RunRegistry,
+    archive: Option<EventArchive>,
+}
+
+/// A run that updating would stop, as the confirmation names it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveRun {
+    run_id: String,
+    team_path: String,
+    status: RunStatus,
+}
+
+impl From<RunRecord> for LiveRun {
+    fn from(run: RunRecord) -> Self {
+        Self {
+            run_id: run.run_id,
+            team_path: run.team_path,
+            status: run.status,
+        }
+    }
+}
+
+/// `GET /api/updates`, `POST /api/updates/check`, `PUT /api/updates/settings` and
+/// `POST /api/updates/install`. Loopback and this origin only, like run control: a page elsewhere
+/// must not learn the version, turn the check off, or stop `LoomWatch`.
+pub fn router(updates: Updates, runs: RunRegistry, archive: Option<EventArchive>) -> Router {
+    let install = Router::new()
+        .route("/api/updates/install", post(post_install))
+        .with_state(InstallState {
+            updates: updates.clone(),
+            runs,
+            archive,
+        });
     Router::new()
         .route("/api/updates", get(get_status))
         .route("/api/updates/check", post(post_check))
         .route("/api/updates/settings", axum::routing::put(put_settings))
-        .route_layer(middleware::from_fn(local_evidence))
         .with_state(updates)
+        .merge(install)
+        .route_layer(middleware::from_fn(local_evidence))
 }
 
 async fn get_status(State(updates): State<Updates>) -> Json<Status> {
@@ -793,6 +943,118 @@ async fn put_settings(
 ) -> Result<Json<Status>, ApiError> {
     updates.change(change)?;
     Ok(Json(updates.status()))
+}
+
+/// A refusal the app explains: `code` says which, `error` says it in words.
+fn refusal(code: &str, error: &str) -> Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({ "error": error, "code": code })),
+    )
+        .into_response()
+}
+
+/// "Update and restart": name the newest release for the launcher, stop the runs the operator
+/// agreed to stop, and have the daemon exit with [`EXIT_TO_UPDATE`] once this answer is sent. The
+/// launcher saves the run history, installs the release and starts `LoomWatch` again.
+async fn post_install(
+    State(state): State<InstallState>,
+    Json(request): Json<InstallRequest>,
+) -> Response {
+    let InstallState {
+        updates,
+        runs,
+        archive,
+    } = state;
+    let status = updates.status();
+    if status.install != Install::Release {
+        return refusal(
+            "not_release",
+            "Only a ready-built LoomWatch can update itself from the app. Update this copy in its terminal.",
+        );
+    }
+    let Some(handoff) = updates.inner.handoff.clone() else {
+        let how = status.command.as_deref().map_or_else(
+            || "Stop LoomWatch, then update it the way you installed it.".to_owned(),
+            |command| format!("Stop LoomWatch, then run: {command}"),
+        );
+        return refusal(
+            "not_supervised",
+            &format!(
+                "This LoomWatch was started in a way that cannot start it again after updating. {how}"
+            ),
+        );
+    };
+    let Some(latest) = status.latest.filter(|_| status.available) else {
+        return refusal(
+            "nothing_newer",
+            &format!("LoomWatch {} is the newest version.", status.current),
+        );
+    };
+    let live: Vec<LiveRun> = runs
+        .list()
+        .into_iter()
+        .filter(|run| !run.status.is_terminal())
+        .map(LiveRun::from)
+        .collect();
+    if !live.is_empty() && !request.stop_runs {
+        let teams = if live.len() == 1 {
+            "A team is working".to_owned()
+        } else {
+            format!("{} teams are working", live.len())
+        };
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": format!("{teams}. Updating stops {}.", if live.len() == 1 { "it" } else { "them" }),
+                "code": "runs_live",
+                "liveRuns": live,
+            })),
+        )
+            .into_response();
+    }
+    if updates.inner.installing.swap(true, AtomicOrdering::SeqCst) {
+        return refusal("updating", "LoomWatch is already updating.");
+    }
+    // Named before anything stops, so a launcher that cannot be told leaves every run working.
+    if let Err(error) = std::fs::write(&handoff, format!("{}\n", latest.tag)) {
+        updates
+            .inner
+            .installing
+            .store(false, AtomicOrdering::SeqCst);
+        return ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "Could not tell the launcher which version to install ({}): {error}",
+                handoff.display()
+            ),
+        )
+        .into_response();
+    }
+    let stopped = crate::runs::cancel_live_runs(&runs, archive.as_ref()).await;
+    let and_runs = match stopped.len() {
+        0 => String::new(),
+        1 => " and the run in progress".to_owned(),
+        count => format!(" and the {count} runs in progress"),
+    };
+    println!(
+        "Stopping LoomWatch {}{and_runs} to install {}, as asked in the app. This window starts LoomWatch again when the update is done.",
+        status.current, latest.version
+    );
+    updates
+        .inner
+        .restart
+        .send_replace(Some(latest.version.clone()));
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "from": status.current,
+            "to": latest.version,
+            "startedAt": started_at(),
+            "stoppedRuns": stopped.len(),
+        })),
+    )
+        .into_response()
 }
 
 #[cfg(test)]
@@ -1012,11 +1274,18 @@ mod tests {
             turned_off_by: None,
             install: Install::Release,
             command: Some("loomwatch update".to_owned()),
+            handoff: None,
+            install_error: None,
         }
     }
 
     fn updates(url: &str, file: Option<PathBuf>) -> Updates {
         Updates::new(options(url, file))
+    }
+
+    /// The API around `updates`, with no runs.
+    fn api(updates: Updates) -> Router {
+        router(updates, RunRegistry::default(), None)
     }
 
     /// A check the gap would otherwise skip: as if the last one was long ago.
@@ -1285,7 +1554,7 @@ mod tests {
     async fn the_api_reports_checks_and_saves_choices() {
         let (github, url) = fake_github().await;
         github.answer(StatusCode::OK, None, &release_json("v0.1.6"));
-        let router = router(updates(&url, None));
+        let router = api(updates(&url, None));
 
         let (status, before) = call(&router, "GET", "/api/updates", None).await;
         assert_eq!(status, StatusCode::OK);
@@ -1334,9 +1603,11 @@ mod tests {
             turned_off_by: Some(CHECK_ENV),
             install: Install::Other,
             command: Some("loomwatch update".to_owned()),
+            handoff: None,
+            install_error: None,
         });
         assert!(!updates.due(Utc::now()));
-        let router = router(updates);
+        let router = api(updates);
         let (status, body) = call(&router, "POST", "/api/updates/check", None).await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert!(body["error"].as_str().unwrap().contains(CHECK_ENV));
@@ -1352,7 +1623,7 @@ mod tests {
 
     #[tokio::test]
     async fn another_site_cannot_read_or_change_it() {
-        let router = router(updates("http://127.0.0.1:9/latest", None));
+        let router = api(updates("http://127.0.0.1:9/latest", None));
         let request = Request::builder()
             .method("PUT")
             .uri("/api/updates/settings")
@@ -1365,5 +1636,304 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
         let (_, shown) = call(&router, "GET", "/api/updates", None).await;
         assert_eq!(shown["automatic"], true);
+    }
+
+    /// A copy as `./loomwatch` starts a ready-built one: it names the release in `handoff`.
+    async fn supervised(url: &str, handoff: &Path, install: Install) -> Updates {
+        let updates = Updates::new(Options {
+            install,
+            handoff: Some(handoff.to_path_buf()),
+            ..options(url, None)
+        });
+        updates.check().await;
+        updates
+    }
+
+    fn live_run(team: &str) -> RunRecord {
+        serde_json::from_value(json!({
+            "runId": uuid::Uuid::new_v4().to_string(),
+            "sessionId": "s",
+            "teamPath": team,
+            "prompt": "plan the trip",
+            "status": "running",
+            "mode": "team",
+            "entrypoint": "a",
+            "responder": "a",
+            "agentIds": ["a"],
+            "createdAt": "2026-10-07T07:30:00.000Z",
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn install_is_refused_unless_a_launcher_can_install_something_newer() {
+        let (github, url) = fake_github().await;
+        github.answer(StatusCode::OK, None, &release_json("v0.1.6"));
+        let folder = TempDirectory::new();
+        let handoff = folder.0.join("update-request");
+
+        // A copy of the source code is rebuilt in its terminal, never from the app.
+        let source = supervised(&url, &handoff, Install::Source).await;
+        assert!(!source.status().can_install);
+        let (status, body) = call(
+            &api(source.clone()),
+            "POST",
+            "/api/updates/install",
+            Some(json!({})),
+        )
+        .await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::CONFLICT, Some("not_release")),
+            "{body}"
+        );
+
+        // A ready-built copy started without the launcher that would start it again.
+        let alone = Updates::new(options(&url, None));
+        alone.check().await;
+        assert!(alone.status().available);
+        assert!(!alone.status().can_install);
+        let (status, body) = call(
+            &api(alone.clone()),
+            "POST",
+            "/api/updates/install",
+            Some(json!({})),
+        )
+        .await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::CONFLICT, Some("not_supervised")),
+            "{body}"
+        );
+        assert!(
+            body["error"].as_str().unwrap().contains("loomwatch update"),
+            "it says what to do instead: {body}"
+        );
+
+        // Nothing newer: the same release, or none known yet.
+        github.answer(StatusCode::OK, None, &release_json("v0.1.5"));
+        let newest = supervised(&url, &handoff, Install::Release).await;
+        assert!(newest.status().can_install);
+        let (status, body) = call(
+            &api(newest.clone()),
+            "POST",
+            "/api/updates/install",
+            Some(json!({})),
+        )
+        .await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::CONFLICT, Some("nothing_newer")),
+            "{body}"
+        );
+        let unchecked = Updates::new(Options {
+            handoff: Some(handoff.clone()),
+            ..options(&url, None)
+        });
+        let (status, body) = call(
+            &api(unchecked.clone()),
+            "POST",
+            "/api/updates/install",
+            Some(json!({})),
+        )
+        .await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::CONFLICT, Some("nothing_newer")),
+            "{body}"
+        );
+
+        for refused in [&source, &alone, &newest, &unchecked] {
+            assert!(!refused.restarting());
+        }
+        assert!(!handoff.exists(), "no release was named for the launcher");
+    }
+
+    #[tokio::test]
+    async fn install_asks_before_stopping_runs_then_hands_the_release_to_the_launcher() {
+        let (github, url) = fake_github().await;
+        github.answer(StatusCode::OK, None, &release_json("v0.1.6"));
+        let folder = TempDirectory::new();
+        let handoff = folder.0.join("update-request");
+        let updates = supervised(&url, &handoff, Install::Release).await;
+        let runs = RunRegistry::default();
+        let working = live_run("trips/japan.yaml");
+        runs.insert(working.clone());
+        let mut finished = live_run("digest.yaml");
+        finished.status = RunStatus::Succeeded;
+        runs.insert(finished);
+        let router = router(updates.clone(), runs.clone(), None);
+
+        let (status, body) = call(&router, "POST", "/api/updates/install", Some(json!({}))).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(body["code"], "runs_live");
+        assert_eq!(body["error"], "A team is working. Updating stops it.");
+        assert_eq!(
+            body["liveRuns"],
+            json!([{ "runId": working.run_id, "teamPath": "trips/japan.yaml", "status": "running" }]),
+            "only the run still working is named"
+        );
+        assert_eq!(
+            runs.get(&working.run_id).unwrap().status,
+            RunStatus::Running
+        );
+        assert!(!handoff.exists());
+        assert!(!updates.restarting());
+
+        for wrong in [json!({ "stopRuns": "yes" }), json!({ "other": true })] {
+            let (status, _) =
+                call(&router, "POST", "/api/updates/install", Some(wrong.clone())).await;
+            assert!(status.is_client_error(), "{wrong}");
+        }
+        assert!(!updates.restarting());
+
+        let (status, body) = call(
+            &router,
+            "POST",
+            "/api/updates/install",
+            Some(json!({ "stopRuns": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        assert_eq!(body["from"], "0.1.5");
+        assert_eq!(body["to"], "0.1.6");
+        assert_eq!(body["stoppedRuns"], 1);
+        assert_eq!(body["startedAt"], started_at());
+        assert_eq!(
+            std::fs::read_to_string(&handoff).unwrap(),
+            "v0.1.6\n",
+            "the launcher installs exactly the release whose notes were shown"
+        );
+        assert_eq!(
+            runs.get(&working.run_id).unwrap().status,
+            RunStatus::Cancelled
+        );
+        assert!(updates.restarting());
+        let version = tokio::time::timeout(Duration::from_secs(1), updates.restart_requested())
+            .await
+            .expect("the daemon is told to stop");
+        assert_eq!(version, "0.1.6");
+
+        // A second click never stops anything again.
+        let (status, body) = call(
+            &router,
+            "POST",
+            "/api/updates/install",
+            Some(json!({ "stopRuns": true })),
+        )
+        .await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::CONFLICT, Some("updating")),
+            "{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn install_stops_nothing_when_the_launcher_cannot_be_told() {
+        let (github, url) = fake_github().await;
+        github.answer(StatusCode::OK, None, &release_json("v0.1.6"));
+        let folder = TempDirectory::new();
+        let updates = supervised(
+            &url,
+            &folder.0.join("gone/update-request"),
+            Install::Release,
+        )
+        .await;
+        let runs = RunRegistry::default();
+        let working = live_run("trip.yaml");
+        runs.insert(working.clone());
+        let router = router(updates.clone(), runs.clone(), None);
+        let (status, body) = call(
+            &router,
+            "POST",
+            "/api/updates/install",
+            Some(json!({ "stopRuns": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("Could not tell the launcher")
+        );
+        assert_eq!(
+            runs.get(&working.run_id).unwrap().status,
+            RunStatus::Running
+        );
+        assert!(!updates.restarting());
+    }
+
+    #[tokio::test]
+    async fn another_site_cannot_stop_loomwatch_to_update_it() {
+        let (github, url) = fake_github().await;
+        github.answer(StatusCode::OK, None, &release_json("v0.1.6"));
+        let folder = TempDirectory::new();
+        let handoff = folder.0.join("update-request");
+        let updates = supervised(&url, &handoff, Install::Release).await;
+        let router = api(updates.clone());
+        for (name, value) in [
+            (header::ORIGIN, "https://evil.test"),
+            (
+                header::HeaderName::from_static("sec-fetch-site"),
+                "cross-site",
+            ),
+        ] {
+            let request = Request::builder()
+                .method("POST")
+                .uri("/api/updates/install")
+                .header(header::HOST, "127.0.0.1:3000")
+                .header(name.clone(), value)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"stopRuns":true}"#))
+                .unwrap();
+            let response = router.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{name}: {value}");
+        }
+        // Nor through a name that only resolves here.
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/updates/install")
+            .header(header::HOST, "attacker.example")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .unwrap();
+        assert_eq!(
+            router.oneshot(request).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+        assert!(!updates.restarting());
+        assert!(!handoff.exists());
+    }
+
+    #[tokio::test]
+    async fn the_launchers_account_of_a_failed_update_is_shown_as_plain_text() {
+        let updates = Updates::new(Options {
+            install_error: Some(failure_text(
+                "  the download did not finish,\u{1b}[1m and LoomWatch 0.1.5\twas left as it was.\nThe messages above say why.  ",
+            )),
+            ..options("http://127.0.0.1:9/latest", None)
+        });
+        assert_eq!(
+            updates.status().install_error.as_deref(),
+            Some(
+                "the download did not finish, [1m and LoomWatch 0.1.5 was left as it was.\nThe messages above say why."
+            )
+        );
+        let (_, shown) = call(&api(updates), "GET", "/api/updates", None).await;
+        assert!(
+            shown["installError"]
+                .as_str()
+                .unwrap()
+                .starts_with("the download")
+        );
+        assert_eq!(shown["canInstall"], false);
+        assert_eq!(
+            failure_text(&"x".repeat(MAX_FAILURE_CHARS + 9))
+                .chars()
+                .count(),
+            MAX_FAILURE_CHARS + 1
+        );
     }
 }

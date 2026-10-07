@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { offerUpdate, openUpdates, resetUpdateStatus, rollbackCommand, type UpdateStatus } from '../../lib/updates/client'
+import { offerUpdate, openUpdates, resetUpdateStatus, rollbackCommand, waitForRestart, type UpdateStatus } from '../../lib/updates/client'
 import { UpdateBadge, Updates } from './Updates'
 
 const upToDate: UpdateStatus = {
@@ -198,5 +198,153 @@ describe('Updates', () => {
     app()
     await waitFor(() => expect(calls('GET', '/api/updates').length).toBeGreaterThan(0))
     expect(screen.queryByRole('button', { name: /Update available/ })).toBeNull()
+  })
+})
+
+/** A ready-built copy whose launcher starts it again: `./loomwatch` from this version on. */
+const supervised: UpdateStatus = { ...newer, canInstall: true, installError: null }
+const OLD_START = '2026-10-07T08:00:00.000Z'
+const NEW_START = '2026-10-07T08:02:00.000Z'
+
+function about(version: string, startedAt: string) {
+  return json({ version, commit: null, os: 'macos', osVersion: '26.0', arch: 'aarch64', startedAt })
+}
+
+function run(runId: string, teamPath: string, status: string) {
+  return { runId, sessionId: runId, teamPath, prompt: 'plan', status, mode: 'team', entrypoint: 'a', responder: 'a', agentIds: ['a'], createdAt: OLD_START, startedAt: OLD_START, finishedAt: null, error: null, exitCode: null, eventCount: null, reply: null }
+}
+
+async function openOn(status: UpdateStatus) {
+  serve(status)
+  app()
+  fireEvent.click(await screen.findByRole('button', { name: /Update available/ }))
+  return screen.getByRole('dialog')
+}
+
+describe('Update and restart', () => {
+  it('is offered only when the launcher can start LoomWatch again', async () => {
+    let dialog = await openOn(supervised)
+    expect(within(dialog).getByRole('button', { name: 'Update and restart' })).toBeInTheDocument()
+    // The terminal's way stays beside it.
+    expect(within(dialog).getByText('~/LoomWatch/app/loomwatch update')).toBeInTheDocument()
+    cleanup()
+    resetUpdateStatus()
+
+    for (const status of [
+      newer,
+      { ...newer, canInstall: false },
+      { ...newer, install: 'source' as const, command: './loomwatch update', canInstall: false },
+      { ...newer, install: 'other' as const, command: null },
+    ]) {
+      dialog = await openOn(status)
+      expect(within(dialog).queryByRole('button', { name: 'Update and restart' })).toBeNull()
+      cleanup()
+      resetUpdateStatus()
+    }
+
+    // Nothing to install: no button, however the copy was started.
+    serve({ ...upToDate, canInstall: true })
+    app()
+    act(() => openUpdates())
+    expect(await screen.findByRole('dialog', { name: 'LoomWatch is up to date' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Update and restart' })).toBeNull()
+  })
+
+  it('asks first, naming the teams at work that updating stops', async () => {
+    const dialog = await openOn(supervised)
+    routes['GET /api/runs'] = () => json([run('r1', 'trips/japan.yaml', 'running'), run('r2', 'digest.yaml', 'succeeded')])
+    routes['POST /api/updates/install'] = () => json({ from: '0.1.5', to: '0.1.6', startedAt: OLD_START, stoppedRuns: 1 }, 202)
+    routes['GET /api/about'] = () => about('0.1.5', OLD_START)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update and restart' }))
+
+    const question = await within(dialog).findByRole('group', { name: 'Update to 0.1.6?' })
+    expect(await within(question).findByText('This team is working, and updating stops it:')).toBeInTheDocument()
+    expect(within(question).getByRole('listitem')).toHaveTextContent('japan')
+    expect(calls('POST', '/api/updates/install')).toHaveLength(0)
+
+    // Cancel stops nothing.
+    fireEvent.click(within(question).getByRole('button', { name: 'Cancel' }))
+    expect(within(dialog).queryByRole('group')).toBeNull()
+    expect(calls('POST', '/api/updates/install')).toHaveLength(0)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update and restart' }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Stop it and update' }))
+    expect(await screen.findByRole('dialog', { name: 'Updating to 0.1.6…' })).toBeInTheDocument()
+    expect(JSON.parse(String(calls('POST', '/api/updates/install')[0][1].body))).toEqual({ stopRuns: true })
+  })
+
+  it('names a team that started working after the question, and asks again', async () => {
+    const dialog = await openOn(supervised)
+    routes['GET /api/runs'] = () => json([])
+    routes['POST /api/updates/install'] = () => json({ error: 'A team is working. Updating stops it.', code: 'runs_live', liveRuns: [{ runId: 'r3', teamPath: 'news.yaml', status: 'starting' }] }, 409)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update and restart' }))
+    expect(await within(dialog).findByText(/No team is working/)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update and restart' }))
+    const question = within(dialog).getByRole('group', { name: 'Update to 0.1.6?' })
+    expect(await within(question).findByText(/A team started working since you asked/)).toBeInTheDocument()
+    expect(within(question).getByRole('listitem')).toHaveTextContent('news')
+    expect(JSON.parse(String(calls('POST', '/api/updates/install')[0][1].body))).toEqual({ stopRuns: false })
+    expect(within(dialog).getByRole('button', { name: 'Stop it and update' })).toBeEnabled()
+  })
+
+  it('waits for LoomWatch to start again and says which version it updated to', async () => {
+    const dialog = await openOn(supervised)
+    routes['GET /api/runs'] = () => json([])
+    routes['POST /api/updates/install'] = () => json({ from: '0.1.5', to: '0.1.6', startedAt: OLD_START, stoppedRuns: 0 }, 202)
+    routes['GET /api/about'] = () => about('0.1.6', NEW_START)
+    routes['GET /api/updates'] = () => json({ ...upToDate, current: '0.1.6', latest: newer.latest, canInstall: true })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update and restart' }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Update and restart' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Updated to 0.1.6' })).toBeInTheDocument()
+    expect(screen.getByText('LoomWatch 0.1.6 is running. Reload this page to use it.')).toHaveAttribute('role', 'status')
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument()
+    // The new version's news replaces the old: no pill for the version now running.
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Update available/ })).toBeNull())
+  })
+
+  it('says why when the launcher started the same version again', async () => {
+    const dialog = await openOn(supervised)
+    routes['GET /api/runs'] = () => json([])
+    routes['POST /api/updates/install'] = () => json({ from: '0.1.5', to: '0.1.6', startedAt: OLD_START, stoppedRuns: 0 }, 202)
+    routes['GET /api/about'] = () => about('0.1.5', NEW_START)
+    routes['GET /api/updates'] = () => json({ ...supervised, installError: 'the download did not finish, and LoomWatch 0.1.5 was left as it was.' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update and restart' }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Update and restart' }))
+
+    expect(await screen.findByRole('dialog', { name: 'The update didn’t finish' })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('LoomWatch 0.1.5 was started again instead of 0.1.6. the download did not finish')
+    // The way to try again, here or in the terminal, is still there.
+    expect(screen.getByRole('button', { name: 'Update and restart' })).toBeInTheDocument()
+  })
+
+  it('shows a refusal it cannot act on', async () => {
+    const dialog = await openOn(supervised)
+    routes['GET /api/runs'] = () => json([])
+    routes['POST /api/updates/install'] = () => json({ error: 'LoomWatch 0.1.5 is the newest version.', code: 'nothing_newer' }, 409)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update and restart' }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Update and restart' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('LoomWatch 0.1.5 is the newest version.')
+    expect(within(dialog).getByRole('button', { name: 'Update and restart' })).toBeEnabled()
+  })
+})
+
+describe('waitForRestart', () => {
+  const started = { from: '0.1.5', to: '0.1.6', startedAt: OLD_START, stoppedRuns: 0 }
+  let clock = 0
+  const options = { everyMs: 1000, giveUpMs: 10_000, now: () => clock, sleep: (ms: number) => { clock += ms; return Promise.resolve() } }
+
+  it('waits past the daemon that is stopping and the time nothing answers', async () => {
+    clock = 0
+    const answers = [() => about('0.1.5', OLD_START), () => Promise.reject(new TypeError('Failed to fetch')), () => about('0.1.6', NEW_START)]
+    routes['GET /api/about'] = () => (answers.shift() ?? answers[0])()
+    expect(await waitForRestart(started, options)).toEqual({ outcome: 'updated', version: '0.1.6' })
+    expect(calls('GET', '/api/about')).toHaveLength(3)
+  })
+
+  it('gives up when nothing answers, so the page can say where to look', async () => {
+    clock = 0
+    routes['GET /api/about'] = () => Promise.reject(new TypeError('Failed to fetch'))
+    expect(await waitForRestart(started, options)).toEqual({ outcome: 'lost' })
   })
 })

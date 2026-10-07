@@ -9,7 +9,9 @@
 #
 # The same script runs a copy of the source code, which it builds, and a ready-built copy put in
 # ~/LoomWatch/app by scripts/install.sh, which carries its program in bin/ and updates from the
-# newest release instead of from Git.
+# newest release instead of from Git. A ready-built copy can also be updated from the app, with
+# Update and restart: LoomWatch stops, this script updates it as `update` does, and starts it
+# again in the same window.
 #
 # Optional settings, read from the environment:
 #   LOOMWATCH_TEAMS_ROOT    where your teams live (default: ~/LoomWatch/teams)
@@ -50,7 +52,15 @@ if [ -t 1 ]; then bold=$(printf '\033[1m'); reset=$(printf '\033[0m'); else bold
 say() { printf '%s\n' "$*"; }
 step() { printf '\n%s==> %s%s\n' "$bold" "$*" "$reset"; }
 failure_heading='LoomWatch could not start'
-fail() { printf '\n%s%s:%s %s\n' "$bold" "$failure_heading" "$reset" "$*" >&2; exit 1; }
+fail() {
+  printf '\n%s%s:%s %s\n' "$bold" "$failure_heading" "$reset" "$*" >&2
+  # An update asked for in the app also tells the LoomWatch started again after it why it stopped.
+  if [ -n "${failure_note:-}" ]; then
+    local why=$*
+    printf '%s\n' "${why//The messages above say why./The window running LoomWatch says why.}" >"$failure_note" 2>/dev/null || true
+  fi
+  exit 1
+}
 
 # rustup and Homebrew install outside the PATH a fresh or non-interactive shell may have. Appended,
 # so the operator's own ordering still wins.
@@ -97,6 +107,8 @@ else
 fi
 build_stamp=target/release/.loomwatch-build
 pid_file=$state_dir/loomwatchd.pid
+# The script that stays beside a ready-built copy's LoomWatch, so `stop` can end both.
+launcher_pid_file=$state_dir/launcher.pid
 database_started=0
 
 # Someone running a copy of the source is in its folder; someone running a ready-built copy may be
@@ -466,8 +478,10 @@ start() {
 
   export DATABASE_URL
   # Compose-mode settings in the operator's own shell would point this native daemon at a
-  # container runner or a container-only capability folder.
-  unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN
+  # container runner or a container-only capability folder. The update hand-over is supervise's to
+  # set: a daemon told about one that nothing is running would stop and stay stopped.
+  unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN \
+    LOOMWATCH_SUPERVISED LOOMWATCH_UPDATE_REQUEST LOOMWATCH_UPDATE_FAILED
   # Which checkout is running, for the "Send feedback" report. `-dirty` marks local edits. A
   # ready-built copy names the commit its release was built from, in VERSION.
   if [ "$prebuilt" = 1 ]; then
@@ -484,8 +498,9 @@ start() {
   case $self in ./*) LOOMWATCH_UPDATE_COMMAND="cd $folder_display && $self update" ;; esac
   export LOOMWATCH_INSTALL LOOMWATCH_UPDATE_COMMAND
 
-  # Open the browser once the server answers. This runs beside the daemon, which replaces this
-  # script below so Ctrl-C reaches it exactly as if it had been started by hand.
+  # Open the browser once the server answers. This runs beside the daemon, which runs in the
+  # foreground below, or replaces this script, so Ctrl-C reaches it exactly as if it had been
+  # started by hand.
   (
     for _ in $(seq 1 120); do
       if loomwatch_is_running; then
@@ -500,15 +515,16 @@ start() {
   say "Your teams are in $(pretty_path "$teams_root")"
   say "Keep this window open while you use LoomWatch. Press Ctrl-C to stop it."
   mkdir -p "$state_dir"
+  if [ "$prebuilt" = 1 ]; then supervise; fi
   echo "$$" >"$pid_file"
   exec "./$binary" serve --teams-root "$teams_root" --listen "127.0.0.1:$port"
 }
 
-# Sends a signal to LoomWatch's whole process group, as Ctrl-C would, so running agents stop with
-# it, then waits up to ten seconds. True when it has stopped.
+# Sends a signal to LoomWatch's whole process group when it has one ($3), as Ctrl-C would, so
+# running agents stop with it, then waits up to ten seconds. True when it has stopped.
 signal_and_wait() {
-  local signal=$1 pid=$2 pgid=$3
-  if [ "$pgid" = "$pid" ]; then kill "-$signal" -- "-$pid" 2>/dev/null || true; else kill "-$signal" "$pid" 2>/dev/null || true; fi
+  local signal=$1 pid=$2 group=$3
+  if [ -n "$group" ]; then kill "-$signal" -- "-$group" 2>/dev/null || true; else kill "-$signal" "$pid" 2>/dev/null || true; fi
   for _ in $(seq 1 20); do
     kill -0 "$pid" 2>/dev/null || return 0
     sleep 0.5
@@ -518,14 +534,18 @@ signal_and_wait() {
 
 stop() {
   failure_heading='LoomWatch could not stop'
-  local pid pgid stopped=0
+  local pid pgid group stopped=0
   pid=$(cat "$pid_file" 2>/dev/null || true)
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
     case $(ps -p "$pid" -o comm= 2>/dev/null) in
       *loomwatchd*)
         pgid=$(ps -p "$pid" -o pgid= | tr -d ' ')
+        # Started from a terminal, LoomWatch leads its process group, or the script staying beside
+        # it does: the group is LoomWatch, the agents it runs, and that script.
+        group=
+        if [ "$pgid" = "$pid" ] || [ "$pgid" = "$(cat "$launcher_pid_file" 2>/dev/null || true)" ]; then group=$pgid; fi
         # One started in the background ignores Ctrl-C's signal, so it is then asked to end.
-        if ! signal_and_wait INT "$pid" "$pgid" && ! signal_and_wait TERM "$pid" "$pgid"; then
+        if ! signal_and_wait INT "$pid" "$group" && ! signal_and_wait TERM "$pid" "$group"; then
           fail "LoomWatch (process $pid) is still running. Stop it with: kill -9 $pid"
         fi
         stopped=1
@@ -533,7 +553,7 @@ stop() {
         ;;
     esac
   fi
-  rm -f "$pid_file"
+  rm -f "$pid_file" "$launcher_pid_file"
   if [ "$stopped" = 0 ] && loomwatch_is_running; then
     local other
     other=$(listener_pid "$port" || true)
@@ -722,6 +742,18 @@ start_again() {
   exec "$repo_root/loomwatch" start
 }
 
+# Installs a release in this ready-built copy: saves the run history, has the installer replace
+# the files, keeping this version in .previous, and notes what rollback needs. $1 is the
+# version installed now. Fails, changing nothing, when any step does.
+install_release() {
+  back_up_before_update
+  # The installer that put this copy here fetches the release and replaces it in place, keeping
+  # the version it replaces in .previous. This script keeps running from the copy it started as.
+  bash ./install.sh --update --dir "$repo_root" ||
+    fail "the download did not finish, and LoomWatch $1 was left as it was. The messages above say why."
+  remember_for_rollback "$1"
+}
+
 update() {
   failure_heading='LoomWatch could not update'
   if loomwatch_is_running; then stop_before_update; fi
@@ -734,13 +766,7 @@ update() {
       say "LoomWatch $installed is the newest version."
       start_again
     fi
-    back_up_before_update
-    # The installer that put this copy here fetches the release and replaces it in place, keeping
-    # the version it replaces in .previous. This script keeps running from the copy it started as,
-    # then hands over to the new one.
-    bash ./install.sh --update --dir "$repo_root" ||
-      fail "the download did not finish, and LoomWatch $installed was left as it was. The messages above say why."
-    remember_for_rollback "$installed"
+    install_release "$installed"
     if [ -d .previous ]; then say "If the new version gives you trouble, $self rollback goes back to $installed."; fi
     start_again
   fi
@@ -757,6 +783,81 @@ update() {
   fi
   failure_heading='LoomWatch could not start'
   start
+}
+
+# --- Updating from the app (ADR 0052, amended) -----------------------------------------------------
+# A ready-built copy's LoomWatch runs beside this script instead of in its place, so Update and
+# restart in the app can hand the update to it. LoomWatch names the release in update_request and
+# exits with update_exit_code; this script then installs that release as `update` does and starts
+# LoomWatch again in this window. When the update does not finish, it starts the version that was
+# running again, and tells it why.
+
+# The exit status LoomWatch asks for an update with (EX_TEMPFAIL). Any other one ends this script.
+update_exit_code=75
+update_request="$repo_root/$state_dir/update-request"
+update_failed="$repo_root/$state_dir/update-failed"
+
+supervise() {
+  local code
+  export LOOMWATCH_SUPERVISED=1 LOOMWATCH_UPDATE_REQUEST="$update_request"
+  echo "$$" >"$launcher_pid_file"
+  while :; do
+    rm -f "$update_request"
+    code=0
+    # In the foreground, so Ctrl-C reaches LoomWatch and the agents it runs as it always has. sh
+    # writes down its own process number, which exec hands on to LoomWatch, for stop to find.
+    sh -c 'echo "$$" >"$1" && shift && exec "$@"' sh "$pid_file" \
+      "./$binary" serve --teams-root "$teams_root" --listen "127.0.0.1:$port" || code=$?
+    unset LOOMWATCH_UPDATE_FAILED
+    if [ "$code" != "$update_exit_code" ]; then
+      rm -f "$launcher_pid_file"
+      exit "$code"
+    fi
+    update_from_app
+  done
+}
+
+# After LoomWatch stopped for Update and restart. Starts the new version in its place, or returns
+# with LOOMWATCH_UPDATE_FAILED set, for the version still here to be started again.
+update_from_app() {
+  local installed tag
+  installed=$(installed_version)
+  tag=$(sed -n 1p "$update_request" 2>/dev/null | tr -d '\r' || true)
+  rm -f "$update_request"
+  # In a subshell, so a step that fails ends only the update, not this window's LoomWatch.
+  rm -f "$update_failed"
+  (
+    failure_heading='LoomWatch could not update'
+    failure_note=$update_failed
+    install_from_app "$installed" "$tag"
+  ) || true
+  # Whatever the steps said, the files in place decide which version runs next.
+  if [ "$(installed_version)" != "$installed" ]; then
+    say "Updated LoomWatch $installed to $(installed_version)."
+    if [ -d .previous ]; then say "If the new version gives you trouble, $self rollback goes back to $installed."; fi
+    unset LOOMWATCH_SUPERVISED LOOMWATCH_UPDATE_REQUEST
+    rm -f "$launcher_pid_file"
+    # The app's tab is still open, and it waits for the new version: no second tab.
+    exec "$repo_root/loomwatch" start --no-open
+  fi
+  LOOMWATCH_UPDATE_FAILED=$(cat "$update_failed" 2>/dev/null || true)
+  rm -f "$update_failed"
+  export LOOMWATCH_UPDATE_FAILED="${LOOMWATCH_UPDATE_FAILED:-the update stopped before it finished. The window running LoomWatch says why.}"
+  step "Starting LoomWatch $installed again"
+}
+
+# The release the app named, installed. Fails, changing nothing, unless it is a version number
+# newer than this one.
+install_from_app() {
+  local installed=$1 tag=$2
+  case $tag in
+    v[0-9]*.[0-9]*.[0-9]*) ;;
+    *) fail "LoomWatch did not say which version to install." ;;
+  esac
+  case $tag in *[!0-9A-Za-z.+-]*) fail "LoomWatch asked for a version that is not a version number." ;; esac
+  newer_than "$tag" "$installed" || fail "${tag#v} is not newer than LoomWatch $installed, so nothing was changed."
+  step "Updating LoomWatch $installed to ${tag#v}, as asked in the app"
+  LOOMWATCH_VERSION=$tag install_release "$installed"
 }
 
 # Restores a copy into a database of its own, then swaps it in by renaming, so the run history in

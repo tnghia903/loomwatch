@@ -2316,7 +2316,9 @@ async fn get_config_schema() -> Result<Json<Value>, ApiError> {
 
 /// `GET /api/about`: which `LoomWatch` this is and what it runs on, the details a bug report
 /// needs. The commit is the checkout `./loomwatch` built and started (`LOOMWATCH_COMMIT`); a
-/// daemon started another way has none. Nothing here names the operator or their files.
+/// daemon started another way has none. `startedAt` tells one start from the next, which is how
+/// the app knows the launcher started `LoomWatch` again after an update. Nothing here names the
+/// operator or their files.
 async fn get_about() -> Json<Value> {
     let commit = std::env::var("LOOMWATCH_COMMIT")
         .ok()
@@ -2325,6 +2327,7 @@ async fn get_about() -> Json<Value> {
     Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "commit": commit,
+        "startedAt": crate::updates::started_at(),
         "os": std::env::consts::OS,
         "osVersion": os_version().await,
         "arch": std::env::consts::ARCH,
@@ -4147,6 +4150,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         // Present even when unknown, so the report says so rather than leaving a gap.
         assert!(about.get("commit").is_some());
         assert!(about.get("osVersion").is_some());
+        assert_eq!(about["startedAt"], crate::updates::started_at());
         if cfg!(target_os = "macos") {
             assert!(about["osVersion"].is_string(), "{about}");
         }

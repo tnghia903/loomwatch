@@ -33,6 +33,8 @@ export interface AboutLoomWatch {
   /** The macOS release, such as `26.0`. */
   osVersion: string | null
   arch: string
+  /** When this daemon started. Tells one start from the next; absent before Update and restart. */
+  startedAt?: string
 }
 
 export async function fetchAbout(signal?: AbortSignal): Promise<AboutLoomWatch> {

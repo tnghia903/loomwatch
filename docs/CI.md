@@ -52,10 +52,13 @@ scripts/test-update.sh
 ```
 
 `scripts/test-update.sh` touches nothing outside its scratch folder: Docker, GitHub and the program
-are stand-ins on its `PATH`. It cannot prove the database commands against a real PostgreSQL; for a
-change to how `update` saves or `rollback` restores the run history, also try it on a release
-trial (step 3 below): stop the trial, run its `loomwatch update`, add a row to `_sqlx_migrations`
-with a newer version, and run `loomwatch rollback`.
+are stand-ins on its `PATH`. The stand-in program also plays the app's **Update and restart**: it
+names a release and exits with 75, and the checks follow the launcher through the update and the
+restart. It cannot prove the database commands against a real PostgreSQL; for a change to how
+`update` saves or `rollback` restores the run history, also try it on a release trial (step 3
+below): stop the trial, run its `loomwatch update`, add a row to `_sqlx_migrations` with a newer
+version, and run `loomwatch rollback`. For a change to Update and restart, serve two releases and a
+stand-in for GitHub's answer (`LOOMWATCH_UPDATE_URL`) and click it in the trial's page.
 
 ## Making a release
 
