@@ -1,15 +1,17 @@
 name: Workflow lint
 
-# A broken workflow file fails silently or not at all until it runs; lint it when it reaches main.
+# A broken workflow file fails silently or not at all until it runs; lint it on the change instead.
 on:
+  pull_request:
+    paths: [".github/workflows/**"]
   push:
     branches: [main]
     paths: [".github/workflows/**"]
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
