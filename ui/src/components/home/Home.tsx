@@ -1,4 +1,4 @@
-import { ArrowRight, MessageSquareWarning, Moon, Plus, Search, Sun, Users } from 'lucide-react'
+import { ArrowRight, KeyRound, MessageSquareWarning, Moon, Plus, Search, Sun, Users } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { openFeedback } from '../../lib/feedback/report'
@@ -244,7 +244,19 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
         {status.action}
         {problems.length > 0 && (
           <ul className="home-foot-problems" aria-label="Apps that need attention">
-            {problems.map((harness) => <li key={harness.id} title={harness.healthDetail && harnessSaid(harness.healthDetail)}>{harnessProblem(harness)}</li>)}
+            {problems.map((harness) => (
+              // An app that only needs a step from you (a key, a sign-in) is not broken: it reads as a
+              // note with the way to do that step, and only an app that fails stays an alert.
+              isSetupStep(harness) ? (
+                <li key={harness.id} className="setup" title={harness.healthDetail && harnessSaid(harness.healthDetail)}>
+                  <KeyRound size={13} aria-hidden="true" />
+                  <span>{harnessProblem(harness)}</span>
+                  {!setupOpen && <button type="button" className="link" onClick={openSetup}>Set it up</button>}
+                </li>
+              ) : (
+                <li key={harness.id} className="failed" title={harness.healthDetail && harnessSaid(harness.healthDetail)}>{harnessProblem(harness)}</li>
+              )
+            ))}
           </ul>
         )}
       </footer>
@@ -269,4 +281,9 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
       {children}
     </div>
   )
+}
+
+/** A step the app is waiting on you for — an API key, a sign-in — rather than a failure. */
+function isSetupStep(harness: DetectedHarness): boolean {
+  return harness.health === 'error' && (harness.healthCause === 'needs_api_key' || harness.healthCause === 'signed_out')
 }

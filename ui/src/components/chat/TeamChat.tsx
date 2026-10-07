@@ -299,7 +299,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     <AppearContext.Provider value={settled && search.results === null}>
     <FollowContext.Provider value={follow}>
     <section className="tc" aria-label={`${teamName} chat`} data-tour="chat" data-newest-run={newestRun ?? undefined}>
-      <header className="tc-head">
+      <header className={`tc-head${rosterOpen ? '' : ' folded'}`}>
         <div className={`tc-title${rosterOpen ? '' : ' folded'}`}>
           <h2>
             <button type="button" className="tc-roster-toggle" aria-expanded={rosterOpen} aria-controls={rosterId} onClick={toggleRoster} title={rosterOpen ? 'Fold the list of who is on the team' : 'Show who is on the team'}>
@@ -315,7 +315,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                   <i key={agent.id} className={`tc-member ${state}`}><i className={`chat-avatar hue-${team.hues.get(agent.id) ?? 1}`} style={{ width: 20, height: 20, fontSize: 8 }}>{initialsOf(agent.name || agent.id)}</i></i>
                 ))}
               </span>
-              <Swap key={rosterSummary(presence)}><span className="tc-roster-words">{rosterSummary(presence)}</span></Swap>
+              <Swap key={rosterSummary(presence)} className="tc-roster-words">{rosterSummary(presence)}</Swap>
             </button>
           )}
           <ul id={rosterId} className="tc-members" aria-label="Who is on the team" hidden={!rosterOpen}>
