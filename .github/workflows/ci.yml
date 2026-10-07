@@ -1,16 +1,22 @@
 name: CI
 
-# Runs only for pushes to main, to save Actions minutes. Pull requests and other branches run
-# nothing; dispatch by hand to check a branch before merging it.
+# One run per change: pushes to main, and pull requests (which already cover their branch's
+# pushes). Pushing a feature branch alone runs nothing; open a pull request or dispatch by hand.
+#
+# A pull request from a fork runs with a read-only token and no secrets, and a first-time
+# contributor's run waits for a maintainer to approve it. Keep the trigger `pull_request`: never
+# `pull_request_target`, which would run the fork's code with this repository's token and secrets.
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
-# A newer push to main waits for the run in progress instead of cancelling it.
+# A newer push to the same pull request cancels the older run. Runs on main are never cancelled,
+# so every commit on main keeps a result.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -99,8 +105,8 @@ jobs:
         with:
           name: ui-dist
           path: ui/dist
-      # The toolchain comes from rust-toolchain.toml. Only main writes the cache, so a branch run by
-      # hand restores it without storing a near-duplicate copy.
+      # The toolchain comes from rust-toolchain.toml. Only main writes the cache, so pull requests
+      # restore it without each storing a near-duplicate copy.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -112,3 +118,35 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
+
+  # Pull requests only, since it compares the change with its base branch. Fails when the change
+  # adds a dependency, in Cargo.lock or ui/pnpm-lock.yaml, with a known vulnerability of moderate
+  # severity or worse. It reads GitHub's dependency graph, so it needs no checkout.
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+
+  # The one check for the branch rule on main to require, so adding or renaming a job never needs a
+  # settings change. It waits for every job above and fails unless each one passed; Dependency
+  # review may be skipped, because it runs only for pull requests. It runs even when a job fails
+  # (`always()`): skipped, it would count as passed.
+  result:
+    name: CI result
+    if: always()
+    needs: [frontend, launcher, rust, dependency-review]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check every job passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
+          jq -e 'to_entries | all(.value.result == "success"
+            or (.key == "dependency-review" and .value.result == "skipped"))' <<<"$NEEDS" >/dev/null

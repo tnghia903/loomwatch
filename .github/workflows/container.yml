@@ -2,8 +2,19 @@ name: Container image
 
 # Proves the Dockerfile still builds. A full release build is the most
 # expensive check in the repository, so it runs only when an input the Dockerfile depends on
-# changes on main, once a month against fresh base images, or by hand. It never pushes an image.
+# changes, once a month against fresh base images, or by hand. It never pushes an image. Being
+# path-filtered, it cannot be a required check: on a pull request that skips it, it never reports.
 on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - rust-toolchain.toml
+      - ui/package.json
+      - ui/pnpm-lock.yaml
+      - .github/workflows/container.yml
   push:
     branches: [main]
     paths:
@@ -20,8 +31,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -42,4 +53,5 @@ jobs:
           push: false
           tags: loomwatch:ci
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Only main writes the layer cache, so pull requests don't push its layers out.
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max' || '' }}
