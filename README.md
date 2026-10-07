@@ -441,8 +441,9 @@ opens the same window at any time. Nothing is installed until you ask for it, in
   `~/LoomWatch/app/loomwatch update` there.
 
 Both first save a copy of your run history in `~/LoomWatch/backups` (the three newest copies are
-kept). Then they download the release, check it against the release's checksum, and start it; if
-any step fails, the version you had starts again as it was, and the app or the terminal says why.
+kept). Then they download the release, check it against the release's checksum, and start it. If
+any step fails, the version you had stays as it was, and the terminal says why; after **Update and
+restart**, it also starts again and the app says why.
 Run `update` while LoomWatch is running and it asks before stopping it. Already on the newest
 release, it only starts LoomWatch.
 
