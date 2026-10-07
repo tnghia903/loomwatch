@@ -3457,19 +3457,7 @@ async fn cancel_run(
 ) -> Response {
     match state.registry.cancel(&run_id) {
         CancelOutcome::Cancelled(record) => {
-            persist_or_log(&state.registry, &run_id).await;
-            // A cancelled run used to leave nothing to continue from. `cancel` aborts the run
-            // task, so `execute` never reaches its abnormal-end sweep — the sweep has to be run
-            // from here instead. It is safe to run twice: `record_abandoned_checkpoints` skips
-            // every agent that already has a checkpoint, which is how a stage that reached its own
-            // boundary keeps its own, stronger row.
-            if let Some(archive) = state.archive.as_ref() {
-                let lineage = crate::RunLineage {
-                    team_revision: None,
-                    ..crate::RunLineage::default()
-                };
-                record_abandoned_checkpoints(archive, &run_id, &lineage).await;
-            }
+            settle_cancelled(&state.registry, state.archive.as_ref(), &run_id).await;
             (StatusCode::OK, Json(record)).into_response()
         }
         CancelOutcome::AlreadyFinished(record) => {
@@ -3481,6 +3469,41 @@ async fn cancel_run(
         )
         .into_response(),
     }
+}
+
+/// What follows a cancel: the record written through, and the run's checkpoints.
+async fn settle_cancelled(registry: &RunRegistry, archive: Option<&EventArchive>, run_id: &str) {
+    persist_or_log(registry, run_id).await;
+    // A cancelled run used to leave nothing to continue from. `cancel` aborts the run task, so
+    // `execute` never reaches its abnormal-end sweep — the sweep has to be run from here instead.
+    // It is safe to run twice: `record_abandoned_checkpoints` skips every agent that already has a
+    // checkpoint, which is how a stage that reached its own boundary keeps its own, stronger row.
+    if let Some(archive) = archive {
+        let lineage = crate::RunLineage {
+            team_revision: None,
+            ..crate::RunLineage::default()
+        };
+        record_abandoned_checkpoints(archive, run_id, &lineage).await;
+    }
+}
+
+/// Cancel every live run as `POST /api/runs/{id}/cancel` would, for a daemon about to stop to
+/// update itself (ADR 0052). Returns the runs it cancelled.
+pub async fn cancel_live_runs(
+    registry: &RunRegistry,
+    archive: Option<&EventArchive>,
+) -> Vec<RunRecord> {
+    let mut cancelled = Vec::new();
+    for run in registry.list() {
+        if run.status.is_terminal() {
+            continue;
+        }
+        if let CancelOutcome::Cancelled(record) = registry.cancel(&run.run_id) {
+            settle_cancelled(registry, archive, &record.run_id).await;
+            cancelled.push(record);
+        }
+    }
+    cancelled
 }
 
 #[cfg(test)]

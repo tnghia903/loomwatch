@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::future::IntoFuture;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -138,6 +139,8 @@ async fn main() -> Result<()> {
             allow_container_listener,
             state_dir,
         } => {
+            // Fixed now, so `/api/about` tells this start from the next one (ADR 0052).
+            let _ = loomwatch_backend::updates::started_at();
             if !listen.ip().is_loopback() {
                 eprintln!(
                     "warning: serving on non-loopback address {}; use --allow-host for each trusted hostname",
@@ -232,9 +235,15 @@ async fn main() -> Result<()> {
                 },
             );
             // ADR 0052: says when a newer LoomWatch is out and how to install it. The check runs
-            // once a day in the background; installing stays the operator's own step.
+            // once a day in the background. Installing is the launcher's: in its terminal, or when
+            // "Update and restart" has this daemon exit for it.
             let updates = loomwatch_backend::updates::Updates::from_env(&state_dir);
             updates.spawn_checks();
+            let updates_api = loomwatch_backend::updates::router(
+                updates.clone(),
+                registry.clone(),
+                archive.clone(),
+            );
             let mut app = loomwatch_backend::spa::router()
                 .merge(control.router())
                 .merge(api)
@@ -243,11 +252,29 @@ async fn main() -> Result<()> {
                 .merge(chat)
                 .merge(notebook)
                 .merge(routines)
-                .merge(loomwatch_backend::updates::router(updates));
+                .merge(updates_api);
             if listen.ip().is_loopback() || allow_container_listener {
                 app = app.merge(loomwatch_backend::notion::router(&state_dir)?);
             }
-            axum::serve(listener, app).await?;
+            // After "Update and restart": stop taking requests, give the open ones a moment (the
+            // app's live streams never end by themselves), then exit with the status that has the
+            // launcher install the release and start LoomWatch again.
+            let stopping = updates.clone();
+            let serving = axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    stopping.restart_requested().await;
+                })
+                .into_future();
+            tokio::select! {
+                outcome = serving => outcome?,
+                () = async {
+                    updates.restart_requested().await;
+                    tokio::time::sleep(loomwatch_backend::updates::STOP_GRACE).await;
+                } => {}
+            }
+            if updates.restarting() {
+                std::process::exit(loomwatch_backend::updates::EXIT_TO_UPDATE);
+            }
         }
         Commands::Run {
             team,

@@ -418,7 +418,7 @@ reads them only on your computer; nothing is uploaded.
 | Start LoomWatch, or open it if it is already running | `~/LoomWatch/app/loomwatch` |
 | Stop LoomWatch | Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in its window |
 | Also stop the database, for example before quitting Docker Desktop | `~/LoomWatch/app/loomwatch stop` |
-| Update to the newest release | `~/LoomWatch/app/loomwatch update` |
+| Update to the newest release | **Update and restart** in the app, or `~/LoomWatch/app/loomwatch update` |
 | Go back to the version the last update replaced | `~/LoomWatch/app/loomwatch rollback` |
 | See which version you have, and whether a newer one is out | `~/LoomWatch/app/loomwatch version` |
 | See every option | `~/LoomWatch/app/loomwatch help` |
@@ -432,15 +432,24 @@ until you run `loomwatch stop`.
 LoomWatch checks once a day, and again right after you update, whether a newer release is out.
 When one is, Home shows **Update available** and the terminal running LoomWatch says so too. Click
 it to read what changed and how to install it; <kbd>⌘</kbd><kbd>K</kbd> → **Check for updates…**
-opens the same window at any time. Nothing is installed until you run the update yourself:
+opens the same window at any time. Nothing is installed until you ask for it, in either of two ways:
 
-1. Wait until no team is working, then press <kbd>Ctrl</kbd>+<kbd>C</kbd> in LoomWatch's window.
-2. In that window, run `~/LoomWatch/app/loomwatch update`.
+- Click **Update and restart**. LoomWatch asks first, naming any team still working, since updating
+  stops it. Then it stops, updates, and starts again in the same terminal window, and the page says
+  when the new version is running. Keep that window open meanwhile.
+- Or, in the terminal: press <kbd>Ctrl</kbd>+<kbd>C</kbd> in LoomWatch's window, then run
+  `~/LoomWatch/app/loomwatch update` there.
 
-`update` first saves a copy of your run history in `~/LoomWatch/backups` (the three newest copies
-are kept). Then it downloads the release, checks it against the release's checksum, and starts it;
-if any step fails, the version you had stays as it was. Run `update` while LoomWatch is running and
-it asks before stopping it. Already on the newest release, it only starts LoomWatch.
+Both first save a copy of your run history in `~/LoomWatch/backups` (the three newest copies are
+kept). Then they download the release, check it against the release's checksum, and start it. If
+any step fails, the version you had stays as it was, and the terminal says why; after **Update and
+restart**, it also starts again and the app says why.
+Run `update` while LoomWatch is running and it asks before stopping it. Already on the newest
+release, it only starts LoomWatch.
+
+**Update and restart** is there when LoomWatch was started with `~/LoomWatch/app/loomwatch` (or
+`loomwatch`), which stays beside it to start it again. Versions 0.1.9 and older don't have it: update
+those once in the terminal.
 
 The version an update replaced is kept. If the new one gives you trouble,
 `~/LoomWatch/app/loomwatch rollback` puts it back. When the newer version changed how the run

@@ -42,3 +42,18 @@
   .home-update { padding: 0 9px; }
   .home-update-label { display: none; }
 }
+
+/* Update and restart (ADR 0052, amended): the button, then the question it asks before stopping. */
+.lw-updates .up-how > p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--color-ink-2); }
+.lw-updates .up-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.lw-updates .up-confirm {
+  display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3);
+  border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid);
+  font-size: 14px; line-height: 1.5; color: var(--color-ink-2);
+}
+.lw-updates .up-confirm p { margin: 0; }
+.lw-updates .up-confirm-q { font-weight: 600; color: var(--color-ink); }
+.lw-updates .up-runs { margin: 0; padding-left: 20px; list-style: disc; }
+.lw-updates .up-acts .btn { min-width: 0; }
+.lw-updates .up-progress { font-size: 14px; line-height: 1.5; color: var(--color-ink-2); }
+.lw-updates .fb-note .iconbtn { vertical-align: middle; margin-left: 2px; }
