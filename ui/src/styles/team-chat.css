@@ -166,13 +166,9 @@
 .tc-acts .btn { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 6px 12px; }
 .tc-tip { margin: 0; font-size: 12px; color: var(--color-ink-3); }
 .tc-piece .permission-prompt.inline {
-  display: grid;
-  gap: 10px;
   margin: 10px 0 2px 42px;
   padding: 12px 14px;
   border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
-  background: var(--color-panel-solid);
 }
 
 /* The answer leads: in full, beside who gave it. */

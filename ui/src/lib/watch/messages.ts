@@ -37,6 +37,8 @@ export type MessageKind =
   | 'escalate'
   /** Something you wrote that answered no recorded question, such as a reply to a kept-alive agent. */
   | 'note'
+  /** An agent's app asked to do something its switches do not cover, and LoomWatch asked you (ADR 0040). */
+  | 'permission'
 
 /**
  * `pending` — sent, and waiting for the reply its kind expects (an `ask`, a question for you, a
@@ -71,6 +73,23 @@ export interface HandedBy {
   via: string[]
 }
 
+/** How a permission request was settled, as the daemon recorded it (`permission_answered`). */
+export type PermissionOutcome = 'allow_once' | 'allow_run' | 'deny' | 'timed_out'
+
+/** What a `permission` message asked, from the daemon's `awaiting_permission` record. */
+export interface PermissionAsk {
+  /** The live request's id, which the run record's `permissionRequests` carries while it waits. */
+  requestId: string
+  /** The `allow:` switch that would have let it through: `web`, `commands` or `edits`. */
+  switch: string | null
+  /** The query, command, address or path, when the request named one. */
+  detail: string | null
+  /** How it was settled; `null` while it waits, or when the run ended first. */
+  outcome: PermissionOutcome | null
+  /** When it was settled. */
+  settled: { eventId: string; seq: number; ts: string; offsetMs: number } | null
+}
+
 export interface TeamMessage {
   id: string
   kind: MessageKind
@@ -101,6 +120,8 @@ export interface TeamMessage {
    * ADR 0051). The chat says the agent picked it up rather than drawing it as a new message.
    */
   carried: boolean
+  /** For a `permission` message: what was asked and how it was settled. */
+  permission?: PermissionAsk
 }
 
 /** Team Bus tools that carry a message from one agent to another. */
@@ -211,6 +232,38 @@ export class Correspondence {
     }
   }
 
+  /**
+   * `awaiting_permission`: the agent's app is paused on a request, waiting for you. Its text is the
+   * app's own name for the action, verbatim; `evidenceId` is the recorded request.
+   */
+  permissionAsked(event: RunEvent, evidenceId: string | null) {
+    const p = event.payload
+    const requestId = words(p.requestId)
+    if (!requestId) return
+    this.add(event, {
+      id: `permission:${requestId}`, kind: 'permission', from: event.agentId, to: OPERATOR_ID, text: words(p.title) ?? 'An action',
+      evidenceId, state: 'pending',
+      permission: { requestId, switch: words(p.switch), detail: words(p.detail), outcome: null, settled: null },
+    })
+  }
+
+  /**
+   * `permission_answered`. Your answer closes the request as answered by you; the clock running out
+   * closes it with nobody's answer. A request let through by an earlier "Allow for this run" was
+   * never asked (no `requestId`), so it has no message to close.
+   */
+  permissionAnswered(event: RunEvent) {
+    const requestId = words(event.payload.requestId)
+    const outcome = event.payload.outcome
+    const message = requestId ? this.messages.find((candidate) => candidate.permission?.requestId === requestId) : undefined
+    if (!message?.permission || (outcome !== 'allow_once' && outcome !== 'allow_run' && outcome !== 'deny' && outcome !== 'timed_out')) return
+    message.permission.outcome = outcome
+    message.permission.settled = this.at(event)
+    if (outcome === 'timed_out') { message.state = 'delivered'; return }
+    message.state = 'answered'
+    message.reply = { from: OPERATOR_ID, text: '', ...this.at(event), source: null, sentBackTo: null }
+  }
+
   /** `awaiting_operator`: an agent's question for you, or a review step starting to read its handover. */
   awaiting(event: RunEvent) {
     const p = event.payload
@@ -264,7 +317,11 @@ export class Correspondence {
   }
 
   list(): TeamMessage[] {
-    return this.messages.map((message) => ({ ...message, reply: message.reply ? { ...message.reply } : null }))
+    return this.messages.map((message) => ({
+      ...message,
+      reply: message.reply ? { ...message.reply } : null,
+      ...(message.permission ? { permission: { ...message.permission } } : {}),
+    }))
   }
 }
 

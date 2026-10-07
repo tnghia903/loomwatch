@@ -1,12 +1,13 @@
-import { FileSearch, FileText, Info } from 'lucide-react'
+import { FileSearch, FileText, Info, ShieldQuestionMark } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { bubbles as layOut, callsWhileWaiting, converse, fold, waited, type Bubble, type Party } from '../../lib/story/conversation'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
 import { clockTime } from '../../lib/chat/format'
+import { permissionAsks, permissionWhat } from '../../lib/runs/permissionRequests'
 import { clock, describeEvidence } from '../../lib/story/weft'
 import type { Evidence } from '../../lib/watch/events'
-import type { TeamMessage } from '../../lib/watch/messages'
+import type { PermissionOutcome, TeamMessage } from '../../lib/watch/messages'
 import { Markdown } from '../ui/Markdown'
 
 interface AgentMessagesProps {
@@ -33,6 +34,11 @@ interface AgentMessagesProps {
    * message that asks (ADR 0051). Absent, the dashed "waiting for your review" bubble shows.
    */
   yourTurn?: ReactNode
+  /**
+   * The answers to a permission request, drawn where you would reply to it (ADR 0040, 0051).
+   * `undefined` for a request that no longer waits — answered elsewhere, or about to be.
+   */
+  permissionTurn?: (message: TeamMessage) => ReactNode
 }
 
 /** A member of the chat, as its messages show it. */
@@ -57,7 +63,7 @@ const HUES = 6
  * document someone shared, and "… is typing" while an answer is on its way. Read only: this is the
  * record of the run, and reopening it never runs the agents again.
  */
-export function AgentMessages({ messages, order, predecessors, evidence, live, onInspectEvidence, onInspectHandover, reveal = null, bare = false, yourTurn }: AgentMessagesProps) {
+export function AgentMessages({ messages, order, predecessors, evidence, live, onInspectEvidence, onInspectHandover, reveal = null, bare = false, yourTurn, permissionTurn }: AgentMessagesProps) {
   // What an agent was handed again from the work this follows is said once, as picked up, rather
   // than drawn as a handover and a review sent just now (ADR 0051).
   const { carried, fresh } = useMemo(() => ({ carried: messages.filter((message) => message.carried), fresh: messages.filter((message) => !message.carried) }), [messages])
@@ -140,7 +146,7 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
               })}
               onInspectEvidence={onInspectEvidence}
               onInspectHandover={onInspectHandover}
-              yourTurn={yourTurn}
+              yourTurn={bubble.item.line.message.kind === 'permission' ? permissionTurn?.(bubble.item.line.message) : yourTurn}
               when={when}
             />
           )
@@ -197,11 +203,28 @@ function PickedUp({ messages, order, predecessors, open, flash, onToggle }: { me
 }
 
 function isNotice(bubble: Bubble): boolean {
-  return bubble.part === 'reply' && bubble.word === 'approved'
+  return bubble.part === 'reply' && (bubble.word === 'approved' || bubble.item.line.message.kind === 'permission')
+}
+
+/** How a permission request was settled, as a line in the chat. */
+const SETTLED: Record<PermissionOutcome, (agent: string) => string> = {
+  allow_once: () => 'You allowed it, this once',
+  allow_run: () => 'You allowed it for the rest of this run',
+  deny: (agent) => `You denied it. ${agent} carries on without it`,
+  timed_out: () => 'Nobody answered in time, so it was declined',
 }
 
 function Notice({ bubble, member, flash, when }: { bubble: Bubble; member: (id: string) => Member; flash: boolean; when: (bubble: Bubble) => string }) {
   const writer = bubble.item.line.senders[0]
+  const outcome = bubble.item.line.message.permission?.outcome
+  if (outcome) {
+    return (
+      <li className={`chat-notice ${flash ? 'flash' : ''}`} data-bubble={bubble.key} tabIndex={-1} aria-label={`${when(bubble)}, ${bubble.word}`}>
+        <span>{SETTLED[outcome](writer ? member(writer).name : 'The agent')}</span>
+        <time dateTime={bubble.ts}>{when(bubble)}</time>
+      </li>
+    )
+  }
   const onward = bubble.to.map((id) => member(id).name)
   return (
     <li className={`chat-notice ${flash ? 'flash' : ''}`} data-bubble={bubble.key} tabIndex={-1} aria-label={`${when(bubble)}, You: approved`}>
@@ -237,6 +260,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
   const mine = speaker?.you ?? false
   const failed = part === 'said' && message.state === 'failed'
   const handover = part === 'said' && (message.kind === 'handover' || message.kind === 'handoff')
+  const asking = part === 'said' && message.kind === 'permission'
   const long = text.length > LONG.chars || text.split('\n').length > LONG.lines
   const [more, setMore] = useState(false)
   const reply = message.reply
@@ -284,7 +308,12 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
                 <span>{quoted.text}</span>
               </blockquote>
             )}
-            {handover ? (
+            {asking ? (
+              <div className="chat-file chat-permission">
+                <p className="chat-file-head"><ShieldQuestionMark size={15} aria-hidden="true" /><span>{permissionAsks(message.permission?.switch)}</span></p>
+                <p className="permission-what" title={permissionWhat({ title: text, detail: message.permission?.detail })}>{permissionWhat({ title: text, detail: message.permission?.detail })}</p>
+              </div>
+            ) : handover ? (
               <div className="chat-file">
                 <p className="chat-file-head"><FileText size={15} aria-hidden="true" /><span>Handover{mentions.length > 0 && <> to <Mentions people={mentions} /></>}</span></p>
                 <Body text={text} long={long} more={more} />
