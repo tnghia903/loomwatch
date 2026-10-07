@@ -429,10 +429,10 @@ until you run `loomwatch stop`.
 
 ### Updating
 
-LoomWatch checks once a day whether a newer release is out. When one is, Home shows **Update
-available** and the terminal running LoomWatch says so too. Click it to read what changed and how
-to install it; <kbd>⌘</kbd><kbd>K</kbd> → **Check for updates…** opens the same window at any
-time. Nothing is installed until you run the update yourself:
+LoomWatch checks once a day, and again right after you update, whether a newer release is out.
+When one is, Home shows **Update available** and the terminal running LoomWatch says so too. Click
+it to read what changed and how to install it; <kbd>⌘</kbd><kbd>K</kbd> → **Check for updates…**
+opens the same window at any time. Nothing is installed until you run the update yourself:
 
 1. Wait until no team is working, then press <kbd>Ctrl</kbd>+<kbd>C</kbd> in LoomWatch's window.
 2. In that window, run `~/LoomWatch/app/loomwatch update`.

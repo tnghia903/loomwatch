@@ -1,11 +1,12 @@
 //! New versions of `LoomWatch` (ADR 0052): whether one was released, what changed in it, and how
 //! to install it.
 //!
-//! Once a day the daemon asks GitHub for the newest published release and compares its version
-//! with its own. The request carries nothing about the operator: one `GET` naming this version in
-//! its `User-Agent`, plus the `ETag` of the answer already held, so an unchanged answer costs
-//! nothing against GitHub's hourly limit. The operator can turn the daily check off in the app,
-//! and `LOOMWATCH_UPDATE_CHECK=off` turns every check off on this computer.
+//! Once a day, and again right after an update, the daemon asks GitHub for the newest published
+//! release and compares its version with its own. The request carries nothing about the operator:
+//! one `GET` naming this version in its `User-Agent`, plus the `ETag` of the answer already held,
+//! so an unchanged answer costs nothing against GitHub's hourly limit. The operator can turn the
+//! daily check off in the app, and `LOOMWATCH_UPDATE_CHECK=off` turns every check off on this
+//! computer.
 //!
 //! Installing stays the operator's own step, in the terminal: `loomwatch update` stops nothing
 //! without asking, backs the database up, and keeps the version it replaces for
@@ -267,6 +268,8 @@ struct Saved {
     /// The last time GitHub answered, and the last time it was asked.
     checked_at: Option<DateTime<Utc>>,
     attempted_at: Option<DateTime<Utc>>,
+    /// The version that made the last attempt. `None` in a file saved before this was recorded.
+    checked_by: Option<String>,
     /// Why the last attempt failed, until one succeeds.
     error: Option<String>,
     latest: Option<Release>,
@@ -281,6 +284,7 @@ impl Default for Saved {
             skipped: None,
             checked_at: None,
             attempted_at: None,
+            checked_by: None,
             error: None,
             latest: None,
             etag: None,
@@ -481,6 +485,12 @@ impl Updates {
         if !saved.automatic {
             return false;
         }
+        // Another version's answer, such as the one just updated from, can predate a release that
+        // came out since: ask at once rather than up to a day later.
+        let checked_by = saved.checked_by.as_deref().and_then(Version::parse);
+        if checked_by.as_ref() != Some(&self.inner.current) {
+            return true;
+        }
         let Some(attempted_at) = saved.attempted_at else {
             return true;
         };
@@ -520,6 +530,7 @@ impl Updates {
         {
             let mut saved = self.saved();
             saved.attempted_at = Some(now);
+            saved.checked_by = Some(self.inner.current.to_string());
             match outcome {
                 Ok(fetched) => {
                     if let Fetched::Release { release, etag } = fetched {
@@ -993,15 +1004,19 @@ mod tests {
         }
     }
 
-    fn updates(url: &str, file: Option<PathBuf>) -> Updates {
-        Updates::new(Options {
+    fn options(url: &str, file: Option<PathBuf>) -> Options {
+        Options {
             current: "0.1.5".to_owned(),
             url: url.to_owned(),
             file,
             turned_off_by: None,
             install: Install::Release,
             command: Some("loomwatch update".to_owned()),
-        })
+        }
+    }
+
+    fn updates(url: &str, file: Option<PathBuf>) -> Updates {
+        Updates::new(options(url, file))
     }
 
     /// A check the gap would otherwise skip: as if the last one was long ago.
@@ -1105,6 +1120,50 @@ mod tests {
         // A clock set back does not postpone the check.
         updates.saved().attempted_at = Some(now + chrono::Duration::days(3));
         assert!(updates.due(now));
+    }
+
+    #[tokio::test]
+    async fn an_update_asks_again_at_once_instead_of_trusting_the_old_versions_answer() {
+        let (github, url) = fake_github().await;
+        let folder = TempDirectory::new();
+        let file = folder.0.join("updates.json");
+
+        // 0.1.4 checked two hours ago and was the newest.
+        github.answer(StatusCode::OK, Some("\"old\""), &release_json("v0.1.4"));
+        let old = Updates::new(Options {
+            current: "0.1.4".to_owned(),
+            ..options(&url, Some(file.clone()))
+        });
+        old.check().await;
+        old.saved().attempted_at = Some(Utc::now() - chrono::Duration::hours(2));
+        old.persist();
+        assert!(!old.due(Utc::now()), "0.1.4 checked within the day");
+
+        // Since then 0.1.6 came out, and the operator updated to 0.1.5.
+        github.answer(StatusCode::OK, Some("\"new\""), &release_json("v0.1.6"));
+        let updated = updates(&url, Some(file.clone()));
+        assert!(!updated.status().available, "0.1.4's answer predates 0.1.6");
+        assert!(
+            updated.due(Utc::now()),
+            "another version's check is due at once"
+        );
+        updated.check().await;
+        assert!(updated.status().available);
+        assert_eq!(github.requests(), 2);
+
+        let restarted = updates(&url, Some(file.clone()));
+        assert!(
+            !restarted.due(Utc::now()),
+            "this version checked within the day"
+        );
+        assert!(restarted.due(Utc::now() + chrono::Duration::days(1)));
+
+        // A file saved before the version was recorded counts as another version's.
+        let mut saved: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(saved["checkedBy"], "0.1.5");
+        saved.as_object_mut().unwrap().remove("checkedBy");
+        std::fs::write(&file, saved.to_string()).unwrap();
+        assert!(updates(&url, Some(file)).due(Utc::now()));
     }
 
     #[tokio::test]
