@@ -224,6 +224,8 @@ export class Correspondence {
       message.error = words(output.error)
       return
     }
+    // The bus accepts a name where the id belongs and answers with the id it resolved.
+    if (message.kind !== 'escalate') message.to = words(output.agent) ?? message.to
     if (message.kind !== 'ask') { message.state = 'delivered'; return }
     message.state = 'answered'
     message.reply = {

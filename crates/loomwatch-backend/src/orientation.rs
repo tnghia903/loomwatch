@@ -62,7 +62,9 @@ pub fn for_lead(team: &TeamConfig, agent: &AgentConfig) -> Option<String> {
 ///
 /// Predecessors and successors come from the configured edges rather than from `order`'s
 /// neighbours, so a stage that joins two branches names both, and a stage after a review stop is
-/// told the operator was there.
+/// told the operator was there. A stage that has Team Bus tools is given each one's id as well:
+/// it can `ask` a predecessor that is still open, and a stage told only "Before you: Technical
+/// approach researcher" put that name in the call where the id belongs.
 #[must_use]
 pub fn for_stage(
     team: &TeamConfig,
@@ -81,6 +83,12 @@ pub fn for_stage(
         order.len(),
         team_label(team)
     );
+    let ids = skill_routing::bus_tools(
+        Harness::of(agent),
+        BusMode::Pipeline,
+        agent.allow_recruiting,
+    )
+    .reachable();
     let before = neighbours(team, |edge| (edge.to == agent.id).then_some(&edge.from));
     if before.is_empty() {
         text.push_str("\nThe operator's request comes to you first.");
@@ -88,7 +96,7 @@ pub fn for_stage(
         let _ = write!(
             text,
             "\nBefore you: {}. What came before you is in the sections above the task.",
-            names(&before)
+            names(&before, ids)
         );
     }
     let after = neighbours(team, |edge| (edge.from == agent.id).then_some(&edge.to));
@@ -97,7 +105,7 @@ pub fn for_stage(
             text,
             "\nAfter you: {}. When your work is done you will be asked for a handover, and that \
              handover is all they receive — they do not see this conversation.",
-            names(&after)
+            names(&after, ids)
         );
     }
     if responder == agent.id {
@@ -170,12 +178,15 @@ fn neighbours<'a>(
         .collect()
 }
 
-fn names(agents: &[&AgentConfig]) -> String {
+/// The agents as a sentence list, each followed by its Team Bus id when `with_ids`.
+fn names(agents: &[&AgentConfig], with_ids: bool) -> String {
     let named = agents
         .iter()
         .map(|agent| {
             if agent.is_operator() {
                 "the operator, at a review stop".to_owned()
+            } else if with_ids {
+                format!("{} (`{}`)", agent.name, agent.id)
             } else {
                 agent.name.clone()
             }
@@ -247,13 +258,23 @@ mod tests {
         let team = pipeline();
         let text = for_stage(&team, &team.agents[1], &order(), 1, "write").unwrap();
         assert!(text.starts_with("You are Fact-checker, step 2 of 3 in the News desk team."));
-        assert!(text.contains("Before you: Researcher."));
-        assert!(text.contains("After you: Writer."));
+        assert!(
+            text.contains("Before you: Researcher (`research`)."),
+            "{text}"
+        );
+        assert!(text.contains("After you: Writer (`write`)."), "{text}");
         assert!(text.contains("they do not see this conversation"));
         assert!(
             !text.contains("final answer"),
             "only the responder writes the answer: {text}"
         );
+
+        // A harness with no Team Bus tools has nothing to put an id into, so it hears names.
+        let mut without_bus = team.clone();
+        without_bus.agents[1].spawn.cmd = "some-unknown-acp".to_owned();
+        let text = for_stage(&without_bus, &without_bus.agents[1], &order(), 1, "write").unwrap();
+        assert!(text.contains("Before you: Researcher."), "{text}");
+        assert!(text.contains("After you: Writer."), "{text}");
     }
 
     #[test]
@@ -287,7 +308,7 @@ mod tests {
         let order = ["a", "b", "stop", "c"].map(str::to_owned).to_vec();
         let text = for_stage(&team, &team.agents[3], &order, 3, "c").unwrap();
         assert!(
-            text.contains("Before you: Beta and the operator, at a review stop."),
+            text.contains("Before you: Beta (`b`) and the operator, at a review stop."),
             "{text}"
         );
     }

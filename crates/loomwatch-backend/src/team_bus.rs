@@ -380,6 +380,11 @@ impl TeamBus {
             .with_context(|| format!("agent {agent_id:?} is not on this team"))
     }
 
+    /// The id of the agent a Team Bus call's `agent` argument names. See [`resolve_agent`].
+    fn resolve(&self, reference: &str) -> Result<String> {
+        resolve_agent(&self.state.team.agents, reference)
+    }
+
     async fn invoke(&self, token: &str, request: &Value) -> Value {
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         let method = request.get("method").and_then(Value::as_str);
@@ -509,16 +514,17 @@ impl TeamBus {
             // `allowRecruiting` governs spawning a *helper*. Asking a predecessor that is still
             // alive is conversation along an edge the operator already drew, so it is allowed
             // regardless — the live registry only ever holds configured predecessors.
+            // The target is resolved leniently here: one that names nobody is not live, and the
+            // refusal below is the right answer for it, as it was before names resolved.
             "ask"
-                if !self.agent(&session.agent_id)?.allow_recruiting
-                    && !self
-                        .is_live(
-                            arguments
-                                .get("agent")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default(),
-                        )
-                        .await =>
+                if !self.agent(&session.agent_id)?.allow_recruiting && {
+                    let target = arguments
+                        .get("agent")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let target = self.resolve(target).unwrap_or_else(|_| target.to_owned());
+                    !self.is_live(&target).await
+                } =>
             {
                 bail!(
                     "agent {:?} may not recruit helpers within its own pipeline step (allowRecruiting: false)",
@@ -560,7 +566,7 @@ impl TeamBus {
                 ))
             }
             "dispatch" => {
-                let target = required_string(arguments, "agent")?;
+                let target = self.resolve(&required_string(arguments, "agent")?)?;
                 let task = required_string(arguments, "task")?;
                 let context = self.guard_delegation(session, &target)?;
                 self.spawn_background(&target, &task, event_log.clone(), context)
@@ -568,8 +574,12 @@ impl TeamBus {
                 Ok(json!({"accepted": true, "agent": target, "mode": "dispatch"}))
             }
             "ask" => {
-                let target = required_string(arguments, "agent")?;
+                let target = self.resolve(&required_string(arguments, "agent")?)?;
                 let question = required_string(arguments, "question")?;
+                // Refused before the live path as well as in `guard_delegation`: a kept-alive agent
+                // asking itself, or a helper asking back the live agent waiting on it, would queue
+                // a turn behind the very turn that is waiting for the answer.
+                refuse_cycle(session, &target)?;
                 // A predecessor that is still alive answers from the context it already built.
                 // Spawning a fresh process for it would produce an agent that knows only its role
                 // and the question, which is what made pipeline `ask` useless before.
@@ -588,7 +598,7 @@ impl TeamBus {
                 }))
             }
             "handoff" => {
-                let target = required_string(arguments, "agent")?;
+                let target = self.resolve(&required_string(arguments, "agent")?)?;
                 let task = required_string(arguments, "task")?;
                 let context = self.guard_delegation(session, &target)?;
                 self.spawn_background(&target, &task, event_log.clone(), context)
@@ -1113,11 +1123,7 @@ impl TeamBus {
         if next_depth > max_depth {
             bail!("delegation depth {next_depth} exceeds guards.maxDispatchDepth {max_depth}");
         }
-        if session.delegation_path.iter().any(|agent| agent == target) {
-            let mut cycle = session.delegation_path.clone();
-            cycle.push(target.to_owned());
-            bail!("delegation cycle rejected: {}", cycle.join(" -> "));
-        }
+        refuse_cycle(session, target)?;
 
         let mut path = session.delegation_path.clone();
         path.push(target.to_owned());
@@ -1203,6 +1209,64 @@ fn required_string(arguments: &Value, name: &str) -> Result<String> {
         .filter(|value| !value.is_empty())
         .with_context(|| format!("argument {name:?} must be a non-empty string"))?;
     Ok(value.to_owned())
+}
+
+/// The id of the agent `reference` names: its id, or else its name.
+///
+/// The Team Bus addresses agents by id, but a model copies what it was shown, and the canvas, the
+/// run view and a stage's own orientation all show names. A stage told "Before you: Technical
+/// approach researcher" asked for exactly that and was refused as "not on this team", about an
+/// agent that was. So a reference that is no agent's id is matched against names, exactly and
+/// then ignoring case. A review stop is the operator, reached with `ask_user`, so only a harness
+/// agent answers to a name; and a name two agents share resolves to neither, because a guess would
+/// put the work to an agent nobody chose.
+fn resolve_agent(agents: &[AgentConfig], reference: &str) -> Result<String> {
+    let reference = reference.trim();
+    if agents.iter().any(|agent| agent.id == reference) {
+        return Ok(reference.to_owned());
+    }
+    let harness = || agents.iter().filter(|agent| !agent.is_operator());
+    let mut named = harness()
+        .filter(|agent| agent.name.trim() == reference)
+        .collect::<Vec<_>>();
+    if named.is_empty() {
+        let wanted = reference.to_lowercase();
+        named = harness()
+            .filter(|agent| {
+                agent.id.to_lowercase() == wanted || agent.name.trim().to_lowercase() == wanted
+            })
+            .collect();
+    }
+    match named.as_slice() {
+        [agent] => Ok(agent.id.clone()),
+        [] => bail!(
+            "agent {reference:?} is not on this team; address one by id: {}",
+            by_id(harness())
+        ),
+        many => bail!(
+            "{reference:?} names {} agents on this team; address one by id: {}",
+            many.len(),
+            by_id(many.iter().copied())
+        ),
+    }
+}
+
+/// `id (Name), …` — how a refusal lists the agents a call could have meant.
+fn by_id<'a>(agents: impl Iterator<Item = &'a AgentConfig>) -> String {
+    agents
+        .map(|agent| format!("{} ({})", agent.id, agent.name.trim()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Refuse a call that would bring in an agent already on the caller's delegation path.
+fn refuse_cycle(session: &AgentSession, target: &str) -> Result<()> {
+    if session.delegation_path.iter().any(|agent| agent == target) {
+        let mut cycle = session.delegation_path.clone();
+        cycle.push(target.to_owned());
+        bail!("delegation cycle rejected: {}", cycle.join(" -> "));
+    }
+    Ok(())
 }
 
 fn optional_string(arguments: &Value, name: &str) -> Option<String> {
@@ -2559,7 +2623,9 @@ mod tests {
         let live = bus.keep_alive("a", process, recorder, first).await;
 
         let connection = bus.connection("b").await?;
-        connection.register(event_log).await;
+        connection.register(event_log.clone()).await;
+        // Asked by the name the successor's orientation shows ("Before you: a name"), not by id:
+        // `b` may not recruit, so the call passes only if the name resolves to the live `a`.
         let answered = post_live_json(
             bus.state.address,
             &connection.token,
@@ -2569,7 +2635,7 @@ mod tests {
                 "method": "tools/call",
                 "params": {
                     "name": "ask",
-                    "arguments": {"agent": "a", "question": "which source backs that?"}
+                    "arguments": {"agent": "a name", "question": "which source backs that?"}
                 }
             }),
         )
@@ -2583,9 +2649,41 @@ mod tests {
             "the answer must come from the live session, not a fresh process: {payload}"
         );
         assert_eq!(
+            payload["agent"], "a",
+            "the reply names the agent by id: {payload}"
+        );
+        assert_eq!(
             payload["reply"], "answered from the context I already had",
             "the live session must answer: {payload}"
         );
+
+        // A helper `a` brought in, asking `a` back while `a` is live, is refused before the
+        // question reaches the session: queued, it would wait behind the very turn waiting on it.
+        let helper = bus
+            .connection_with_context(
+                "b",
+                DelegationContext {
+                    path: vec!["a".into(), "b".into()],
+                    depth: 1,
+                },
+            )
+            .await?;
+        helper.register(event_log.clone()).await;
+        let response = post_json(
+            &bus,
+            &helper.token,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 8,
+                "method": "tools/call",
+                "params": {
+                    "name": "ask",
+                    "arguments": {"agent": "a name", "question": "which source backs that?"}
+                }
+            }),
+        )
+        .await?;
+        assert_tool_error_contains(&response, "delegation cycle rejected: a -> b -> a");
 
         let outcome = bus.release("a", live).await?;
         assert_eq!(
@@ -2830,6 +2928,58 @@ mod tests {
         assert!(packets[0].text.contains("Never touch main."), "{packets:?}");
         let _ = std::fs::remove_dir_all(&scratch);
         Ok(())
+    }
+
+    #[test]
+    fn a_call_may_name_an_agent_by_id_or_by_the_name_it_was_shown() {
+        let mut agents = vec![
+            test_agent("technical-research", "true", Vec::new()),
+            test_agent("data-science", "true", Vec::new()),
+            test_agent("review", "true", Vec::new()),
+        ];
+        agents[0].name = "Technical approach researcher".into();
+        agents[1].name = "Data science researcher".into();
+        agents[2].kind = crate::config::AgentKind::Operator;
+        agents[2].name = "You".into();
+        let resolve = |reference: &str| resolve_agent(&agents, reference);
+
+        for reference in [
+            "technical-research",
+            "Technical approach researcher",
+            "  technical APPROACH researcher ",
+            "Technical-Research",
+        ] {
+            assert_eq!(
+                resolve(reference).unwrap(),
+                "technical-research",
+                "{reference:?}"
+            );
+        }
+        // A review stop keeps its id, but answers to no name: the operator is reached with
+        // `ask_user`, and a refusal lists only the agents a call can reach.
+        assert_eq!(resolve("review").unwrap(), "review");
+        assert_eq!(
+            resolve("You").unwrap_err().to_string(),
+            "agent \"You\" is not on this team; address one by id: technical-research \
+             (Technical approach researcher), data-science (Data science researcher)"
+        );
+
+        // An exact name wins over one that matches only ignoring case; two that match equally
+        // resolve to neither.
+        agents[1].name = "technical approach researcher".into();
+        let resolve = |reference: &str| resolve_agent(&agents, reference);
+        assert_eq!(
+            resolve("technical approach researcher").unwrap(),
+            "data-science"
+        );
+        assert_eq!(
+            resolve("TECHNICAL approach researcher")
+                .unwrap_err()
+                .to_string(),
+            "\"TECHNICAL approach researcher\" names 2 agents on this team; address one by id: \
+             technical-research (Technical approach researcher), data-science (technical \
+             approach researcher)"
+        );
     }
 
     fn test_agent(id: &str, command: &str, args: Vec<String>) -> AgentConfig {
