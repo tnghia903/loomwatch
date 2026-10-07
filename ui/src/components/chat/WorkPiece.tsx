@@ -2,6 +2,7 @@ import { ArrowRight, CalendarClock, ChevronDown, ChevronRight, FileText, PanelRi
 import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 import { AppearContext, useAppear } from '../../lib/chat/appear'
+import { useFollow } from '../../lib/chat/follow'
 import type { ChatItem, ChatMessage } from '../../lib/chat/client'
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
 import { clockTime, listNames, took } from '../../lib/chat/format'
@@ -145,6 +146,10 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
       ? message.kind === 'handover' && message.to === waiting.node
       : message.kind === 'question' && message.from === waiting?.node))
   const onTheMessage = open && asksYou
+  // Answering something is following the work: what it asks next should come into view.
+  const follow = useFollow()
+  const pin = () => follow?.pin()
+  const crew = team.parties.filter((party) => !party.operator).length > 1
   // A permission request is answered the same way: on the agent's message that asks, once the
   // talk shows it, and on a card of its own until then.
   const asking = live ? record.permissionRequests ?? [] : []
@@ -153,8 +158,8 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   const permissionTurn = (message: TeamMessage) => {
     const request = asking.find((candidate) => candidate.id === message.permission?.requestId)
     return request ? (
-      <Appearing key={`permission:${request.id}`} className="tc-turn permission" role="group" aria-label={`Answer ${request.name}'s permission request`}>
-        <PermissionActions runId={run.runId} request={request} onAlwaysAllow={onAlwaysAllow} />
+      <Appearing key={`permission:${request.id}`} reveal className="tc-turn permission" role="group" aria-label={`Answer ${request.name}'s permission request`}>
+        <PermissionActions runId={run.runId} request={request} team={crew} onAlwaysAllow={onAlwaysAllow} onDecide={pin} />
       </Appearing>
     ) : undefined
   }
@@ -172,11 +177,11 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
     }
   }
 
-  const approve = () => void act(async () => { const next = await answerRun(run.runId, waiting?.node ?? '', draft.trim() || APPROVAL_TEXT); onDecided(); return next })
-  const sendBack = () => void act(async () => { const next = await answerRun(run.runId, waiting?.node ?? '', draft.trim(), waiting?.handoverFrom ?? undefined); onDecided(); return next })
+  const approve = () => void act(async () => { pin(); const next = await answerRun(run.runId, waiting?.node ?? '', draft.trim() || APPROVAL_TEXT); onDecided(); return next })
+  const sendBack = () => void act(async () => { pin(); const next = await answerRun(run.runId, waiting?.node ?? '', draft.trim(), waiting?.handoverFrom ?? undefined); onDecided(); return next })
   // Your turn, drawn on the message that asks: the review's buttons, or where to answer.
   const yourTurn = waiting?.kind === 'review_stop' ? (
-    <Appearing key={`turn:${waiting.since}`} className="tc-turn" role="group" aria-label={`Review ${name(waiting.handoverFrom ?? '')}'s work`}>
+    <Appearing key={`turn:${waiting.since}`} reveal className="tc-turn" role="group" aria-label={`Review ${name(waiting.handoverFrom ?? '')}'s work`}>
       <div className="tc-acts">
         <button type="button" className="btn btn-primary" disabled={busy} onClick={approve}>{draft.trim() ? 'Approve with your note' : 'Approve'}</button>
         {waiting.sendBackAvailable && waiting.handoverFrom && (
@@ -186,7 +191,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
       {waiting.sendBackAvailable && !draft.trim() && <p className="tc-tip">To send it back, write what to change in the box below.</p>}
     </Appearing>
   ) : waiting?.kind === 'question' ? (
-    <Appearing key={`turn:${waiting.since}`} className="tc-turn question" role="group" aria-label={`${name(waiting.node)}'s question`}>
+    <Appearing key={`turn:${waiting.since}`} reveal className="tc-turn question" role="group" aria-label={`${name(waiting.node)}'s question`}>
       <p className="tc-tip">Answer in the box below. {waiting.parkNote}</p>
     </Appearing>
   ) : null
@@ -204,9 +209,9 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
         <Swap key={talkKey(live, waiting, asking.map((request) => request.id), working, run.status)} className="tc-talk-line">
           {live
             ? waiting
-              ? <><b>Waiting for you</b> · {waiting.kind === 'review_stop' ? `${name(waiting.handoverFrom ?? '')}'s work is ready for your review` : `${name(waiting.node)} asked you something`}</>
+              ? <><b className="tc-wait">Waiting for you</b> · {waiting.kind === 'review_stop' ? `${name(waiting.handoverFrom ?? '')}'s work is ready for your review` : `${name(waiting.node)} asked you something`}</>
               : asking.length > 0
-                ? <><b>Waiting for you</b> · {askers(asking.map((request) => name(request.agent)))} your permission</>
+                ? <><b className="tc-wait">Waiting for you</b> · {askers(asking.map((request) => name(request.agent)))} your permission</>
               : working.length > 0
                 ? <><b>{listNames(working)}</b> {working.length === 1 ? 'is' : 'are'} working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
                 : run.status === 'queued' || run.status === 'starting' ? 'Starting…' : 'Handing over…'
@@ -253,7 +258,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
       {live && !open && <Decisions messages={session.projection.messages} operators={team.operators} name={name} />}
 
       {waiting?.kind === 'review_stop' && !onTheMessage && (
-        <Appearing key={`review:${waiting.since}`} className="tc-decision" role="group" aria-label={`Review ${name(waiting.handoverFrom ?? '')}'s work`}>
+        <Appearing key={`review:${waiting.since}`} reveal className="tc-decision" role="group" aria-label={`Review ${name(waiting.handoverFrom ?? '')}'s work`}>
           <p><b>{name(waiting.handoverFrom ?? '')}</b> handed over its work for your review.</p>
           {waiting.context && (
             <details className="tc-handover" open>
@@ -275,13 +280,13 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
         </Appearing>
       )}
       {waiting?.kind === 'question' && !onTheMessage && (
-        <Appearing key={`question:${waiting.since}`} className="tc-decision question" role="group" aria-label={`${name(waiting.node)}'s question`}>
+        <Appearing key={`question:${waiting.since}`} reveal className="tc-decision question" role="group" aria-label={`${name(waiting.node)}'s question`}>
           <p><b>{name(waiting.node)}</b> asks you: {waiting.question}</p>
           {waiting.context && <div className="chat-text tc-context"><Markdown>{waiting.context}</Markdown></div>}
           <p className="tc-tip">Answer in the box below. {waiting.parkNote}</p>
         </Appearing>
       )}
-      {unasked.length > 0 && <PermissionPrompt inline run={{ runId: run.runId, permissionRequests: unasked }} onAlwaysAllow={onAlwaysAllow} />}
+      {unasked.length > 0 && <PermissionPrompt inline team={crew} run={{ runId: run.runId, permissionRequests: unasked }} onAlwaysAllow={onAlwaysAllow} onDecide={pin} />}
 
       <Outcome tour={newest} run={record} answer={answer} streaming={streaming} name={name} hue={hue} open={answerOpen} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
         <AnswerTools
@@ -316,6 +321,7 @@ function permitted(message: TeamMessage, agent: string): string {
   const outcome = message.permission?.outcome
   if (outcome === 'allow_once') return `You let ${agent} do this once: ${message.text}`
   if (outcome === 'allow_run') return `You let ${agent} do this for the rest of the run: ${message.text}`
+  if (outcome === 'allow_team') return `You let the whole team do this for the rest of the run: ${message.text}`
   return `You denied ${agent}: ${message.text}`
 }
 

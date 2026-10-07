@@ -764,7 +764,8 @@ team's own handovers and the tools, folders and files you connected to the agent
 
 Anything else waits for you. The agent pauses and asks in the team chat, as its own message, such
 as "Asks to use the web · Web search · …". You answer right below it: **Allow**, **Allow for this
-run**, **Always allow** (which switches it on for that agent) or **Deny**. The chat keeps how it
+run**, **Allow for the whole team** (every agent in this run may use that tool without asking),
+**Always allow** (which switches it on for that agent) or **Deny**. The chat keeps how it
 ended, such as "You allowed it, this once". The same question shows up in the Needs-you tray from
 any screen. If nobody answers within 10 minutes it is declined, and scheduled runs decline it
 straight away because nobody is watching.

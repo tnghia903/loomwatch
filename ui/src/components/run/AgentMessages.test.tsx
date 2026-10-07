@@ -206,16 +206,17 @@ describe('Team chat', () => {
   })
 
   it('remembers how a permission request was settled: by you, or by nobody answering in time', () => {
-    const settled = (id: string, outcome: 'allow_once' | 'allow_run' | 'deny' | 'timed_out', seconds: number) => message({
+    const settled = (id: string, outcome: 'allow_once' | 'allow_run' | 'allow_team' | 'deny' | 'timed_out', seconds: number) => message({
       id: `permission:${id}`, kind: 'permission', from: 'researcher', to: 'operator', text: 'Web search', seq: seconds, ts: at(seconds), offsetMs: seconds * 1000,
       state: outcome === 'timed_out' ? 'delivered' : 'answered', reply: outcome === 'timed_out' ? null : answer('operator', '', seconds + 5),
       permission: { requestId: id, switch: 'web', detail: null, outcome, settled: { eventId: `s${seconds}`, seq: seconds + 1, ts: at(seconds + 5), offsetMs: (seconds + 5) * 1000 } },
     })
-    setup([settled('a', 'allow_once', 10), settled('b', 'allow_run', 20), settled('c', 'deny', 30), settled('d', 'timed_out', 40)], { live: true, bare: true, permissionTurn: () => <button type="button">Allow</button> })
+    setup([settled('a', 'allow_once', 10), settled('b', 'allow_run', 20), settled('c', 'deny', 30), settled('d', 'timed_out', 40), settled('e', 'allow_team', 50)], { live: true, bare: true, permissionTurn: () => <button type="button">Allow</button> })
     expect(screen.getByText('You allowed it, this once')).toBeInTheDocument()
     expect(screen.getByText('You allowed it for the rest of this run')).toBeInTheDocument()
     expect(screen.getByText('You denied it. Researcher carries on without it')).toBeInTheDocument()
     expect(screen.getByText('Nobody answered in time, so it was declined')).toBeInTheDocument()
+    expect(screen.getByText('You allowed the whole team to do this for the rest of this run')).toBeInTheDocument()
     // Nothing settled is asked again.
     expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull()
   })

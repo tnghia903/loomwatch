@@ -210,6 +210,7 @@ function isNotice(bubble: Bubble): boolean {
 const SETTLED: Record<PermissionOutcome, (agent: string) => string> = {
   allow_once: () => 'You allowed it, this once',
   allow_run: () => 'You allowed it for the rest of this run',
+  allow_team: () => 'You allowed the whole team to do this for the rest of this run',
   deny: (agent) => `You denied it. ${agent} carries on without it`,
   timed_out: () => 'Nobody answered in time, so it was declined',
 }

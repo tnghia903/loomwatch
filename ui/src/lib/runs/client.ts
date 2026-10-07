@@ -58,7 +58,8 @@ export interface PermissionRequest {
   expiresAt: string
 }
 
-export type PermissionDecision = 'allow_once' | 'allow_run' | 'deny'
+/** `allow_team`: every agent in the run, for the same thing, until the run ends. */
+export type PermissionDecision = 'allow_once' | 'allow_run' | 'allow_team' | 'deny'
 
 export interface WaitingOn {
   node: string

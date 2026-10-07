@@ -74,7 +74,10 @@ export interface HandedBy {
 }
 
 /** How a permission request was settled, as the daemon recorded it (`permission_answered`). */
-export type PermissionOutcome = 'allow_once' | 'allow_run' | 'deny' | 'timed_out'
+export type PermissionOutcome = 'allow_once' | 'allow_run' | 'allow_team' | 'deny' | 'timed_out'
+
+const OUTCOMES: ReadonlySet<string> = new Set<PermissionOutcome>(['allow_once', 'allow_run', 'allow_team', 'deny', 'timed_out'])
+const isOutcome = (value: unknown): value is PermissionOutcome => typeof value === 'string' && OUTCOMES.has(value)
 
 /** What a `permission` message asked, from the daemon's `awaiting_permission` record. */
 export interface PermissionAsk {
@@ -256,7 +259,7 @@ export class Correspondence {
     const requestId = words(event.payload.requestId)
     const outcome = event.payload.outcome
     const message = requestId ? this.messages.find((candidate) => candidate.permission?.requestId === requestId) : undefined
-    if (!message?.permission || (outcome !== 'allow_once' && outcome !== 'allow_run' && outcome !== 'deny' && outcome !== 'timed_out')) return
+    if (!message?.permission || !isOutcome(outcome)) return
     message.permission.outcome = outcome
     message.permission.settled = this.at(event)
     if (outcome === 'timed_out') { message.state = 'delivered'; return }

@@ -213,19 +213,21 @@ Response (`202 Accepted`):
   succeeds, or by `POST /api/runs/{id}/deliver`, which sends any finished answer now: an optional
   `{ "title": "…" }`, `200` with the record (a refusal is recorded in `delivery`), 404 for an
   unknown run, 409 while it is live or already sending, 422 without an answer.
-- `permissionRequests` lists what an agent's app is blocked on until the operator answers:
-  `{id, agent, name, title, kind, switch, detail, since, expiresAt}`. It is live only,
-  emptied when the run ends and never stored. `POST /api/runs/{id}/permissions` with
-  `{ "requestId": "…", "decision": "allow_once" | "allow_run" | "deny" }` answers one and returns
-  `200` with the record. It returns 404 when that request is no longer waiting: it was answered,
-  timed out after 10 minutes, or its run ended. The archive records `session_meta` events with
-  `phase: "awaiting_permission"` (with the request's `requestId`, `title`, `kind`, `switch`,
-  `detail` and `expiresAt`) and `phase: "permission_answered"` (`outcome`: `allow_once`,
-  `allow_run`, `allowed_for_run`, `deny`, `timed_out`, or `not_asked` in a routine's run) between
-  the request and the reply sent to the app. The team chat shows each asked request as the agent's
-  message to you, answered there, and keeps how it was settled in the conversation. An app that ends its turn when a request is declined,
-  as Codex does, is asked to carry on in the same session: the archive records
-  `phase: "turn_resumed"` and the request to carry on, and the turn ends once.
+- `permissionRequests` lists what an agent's app is blocked on until the operator answers: `{id,
+  agent, name, title, kind, switch, detail, since, expiresAt}`. It is live only, emptied when the
+  run ends and never stored. `POST /api/runs/{id}/permissions` with `{ "requestId": "…", "decision":
+  "allow_once" | "allow_run" | "allow_team" | "deny" }` answers one and returns `200` with the
+  record. `allow_run` lets that agent do the same thing again until the run ends; `allow_team` lets
+  every agent in the run do it, and answers any agent already waiting on it. It returns 404 when
+  that request is no longer waiting: it was answered, timed out after 10 minutes, or its run ended.
+  The archive records `session_meta` events with `phase: "awaiting_permission"` (with the request's
+  `requestId`, `title`, `kind`, `switch`, `detail` and `expiresAt`) and `phase:
+  "permission_answered"` (`outcome`: `allow_once`, `allow_run`, `allow_team`, `allowed_for_run`,
+  `deny`, `timed_out`, or `not_asked` in a routine's run) between the request and the reply sent to
+  the app. The team chat shows each asked request as the agent's message to you, answered there, and
+  keeps how it was settled in the conversation. An app that ends its turn when a request is
+  declined, as Codex does, is asked to carry on in the same session: the archive records `phase:
+  "turn_resumed"` and the request to carry on, and the turn ends once.
 
 ## Routines
 

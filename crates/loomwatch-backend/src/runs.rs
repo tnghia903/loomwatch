@@ -55,6 +55,9 @@ const STALE_TEAM_REVISION: &str = "stale_team_revision";
 /// A run refused until the operator reviews what the team file starts (ADR 0048).
 const TEAM_NEEDS_REVIEW: &str = "team_needs_review";
 const IDEMPOTENCY_CONFLICT: &str = "idempotency_conflict";
+/// Who an "Allow for the whole team" grant is kept under: never an agent id, which must be an
+/// identifier.
+const WHOLE_TEAM: &str = "*";
 /// What a record left non-terminal by a previous process is failed with at boot. Operator-facing
 /// prose, not a code: the contract defines no code for a supervisor that went away, and the UI
 /// already renders a `failed` record with its error verbatim.
@@ -1007,9 +1010,11 @@ impl RunRegistry {
     /// Whether the operator already allowed `scope` for `agent` for the rest of this run.
     pub(crate) fn allowed_for_run(&self, run_id: &str, agent: &str, scope: &str) -> bool {
         let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
-        inner
-            .allowed_for_run
-            .contains(&format!("{run_id}\0{agent}\0{scope}"))
+        [agent, WHOLE_TEAM].iter().any(|who| {
+            inner
+                .allowed_for_run
+                .contains(&format!("{run_id}\0{who}\0{scope}"))
+        })
     }
 
     /// The operator's answer to one open permission request, handed to the agent waiting on it.
@@ -1043,14 +1048,33 @@ impl RunRegistry {
             ));
         };
         let request = entry.record.permission_requests.remove(position);
+        // "Allow for the whole team" also answers every other agent already waiting on the same
+        // thing, as the grant would have let it through had it asked a moment later.
+        let mut answered = vec![request_id.to_owned()];
+        if decision == crate::permissions::PermissionDecision::AllowTeam {
+            entry.record.permission_requests.retain(|other| {
+                let same = other.scope == request.scope;
+                if same {
+                    answered.push(other.id.clone());
+                }
+                !same
+            });
+        }
         let record = entry.record.clone();
-        if decision == crate::permissions::PermissionDecision::AllowRun {
+        let grantee = match decision {
+            crate::permissions::PermissionDecision::AllowRun => Some(request.agent.as_str()),
+            crate::permissions::PermissionDecision::AllowTeam => Some(WHOLE_TEAM),
+            _ => None,
+        };
+        if let Some(grantee) = grantee {
             inner
                 .allowed_for_run
-                .insert(format!("{run_id}\0{}\0{}", request.agent, request.scope));
+                .insert(format!("{run_id}\0{grantee}\0{}", request.scope));
         }
-        if let Some(sender) = inner.asking.remove(request_id) {
-            let _delivered = sender.send(decision);
+        for id in answered {
+            if let Some(sender) = inner.asking.remove(&id) {
+                let _delivered = sender.send(decision);
+            }
         }
         Ok(record)
     }
@@ -3725,6 +3749,61 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
                 .open_permission_request(&manual_id, permission_request("p3", "fetch"))
                 .is_none(),
             "a finished run asks nothing"
+        );
+    }
+
+    /// "Allow for the whole team": every agent in the run, for that one thing, and whoever is
+    /// already waiting on it; another tool still asks, and the grant ends with the run.
+    #[tokio::test]
+    async fn allowing_the_whole_team_covers_every_agent_for_that_one_thing() {
+        use crate::permissions::PermissionDecision;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .unwrap();
+        let registry = RunRegistry::default();
+        let manual =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let manual_id = manual.run_id.clone();
+        registry.insert(manual);
+        let ask = |id: &str, agent: &str, scope: &str| {
+            let mut request = permission_request(id, "fetch");
+            agent.clone_into(&mut request.agent);
+            scope.clone_into(&mut request.scope);
+            registry
+                .open_permission_request(&manual_id, request)
+                .expect("open")
+        };
+        let first = ask("t1", "b", "mcp:notion.fetch");
+        let waiting = ask("t2", "c", "mcp:notion.fetch");
+        let other = ask("t3", "c", "mcp:notion.search");
+        let record = registry
+            .answer_permission(&manual_id, "t1", PermissionDecision::AllowTeam)
+            .expect("open");
+        assert_eq!(first.await.unwrap(), PermissionDecision::AllowTeam);
+        assert_eq!(waiting.await.unwrap(), PermissionDecision::AllowTeam);
+        assert_eq!(
+            record
+                .permission_requests
+                .iter()
+                .map(|request| request.id.as_str())
+                .collect::<Vec<_>>(),
+            ["t3"],
+            "another tool still asks"
+        );
+        assert!(registry.allowed_for_run(&manual_id, "d", "mcp:notion.fetch"));
+        assert!(!registry.allowed_for_run(&manual_id, "d", "mcp:notion.search"));
+        registry
+            .answer_permission(&manual_id, "t3", PermissionDecision::Deny)
+            .expect("open");
+        assert_eq!(other.await.unwrap(), PermissionDecision::Deny);
+        assert!(matches!(
+            registry.cancel(&manual_id),
+            CancelOutcome::Cancelled(_)
+        ));
+        assert!(
+            !registry.allowed_for_run(&manual_id, "d", "mcp:notion.fetch"),
+            "the grant ends with the run"
         );
     }
 
