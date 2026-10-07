@@ -233,7 +233,7 @@ describe('the team’s chat', () => {
     const working = await within(screen.getByRole('log')).findByText(/is working/)
     expect(working).toHaveTextContent('Researcher is working')
     // The member list says so too, beside the name.
-    expect(screen.getByTitle('Researcher · working')).toBeInTheDocument()
+    expect(memberRow('Researcher')).toHaveTextContent('Researcherworking')
     expect(box()).toHaveValue('')
   })
 
@@ -305,6 +305,13 @@ describe('a chat that is alive', () => {
   })
 })
 
+/** One agent's row in the team list: its face, its name and what it is doing. */
+function memberRow(name: string, list: HTMLElement = screen.getByRole('list', { name: 'Who is on the team' })): HTMLElement {
+  const row = within(list).getByRole('button', { name: `${name}: mention in your message` }).closest('li')
+  if (!row) throw new Error(`no row for ${name}`)
+  return row
+}
+
 describe('who is on the team', () => {
   afterEach(() => { window.localStorage.clear() })
 
@@ -330,11 +337,77 @@ describe('who is on the team', () => {
     answer = () => new Response(JSON.stringify(run({ status: 'running' })), { status: 200 })
     renderChat()
     const list = await screen.findByRole('list', { name: 'Who is on the team' })
-    await waitFor(() => expect(within(list).getByTitle('Researcher · waiting for you')).toBeInTheDocument())
+    await waitFor(() => expect(memberRow('Researcher', list)).toHaveTextContent('Researcherwaiting for you'))
     expect(screen.getByText(/Researcher asks your permission/)).toBeInTheDocument()
     // A team of more than one agent can be let through at once, for that one tool.
     fireEvent.click(screen.getByRole('button', { name: 'Allow for the whole team' }))
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/permissions', body: { requestId: 'p1', decision: 'allow_team' } }))
+  })
+})
+
+describe("an agent's face", () => {
+  afterEach(() => { window.localStorage.clear() })
+
+  const described: TeamView = {
+    ...team,
+    configs: new Map([
+      ['researcher', { id: 'researcher', name: 'Researcher', role: 'Finds the three stories that matter today, with a source for each.', model: 'claude-opus-4-5', capabilities: [{ kind: 'skill', name: 'eli5' }, { kind: 'tool', name: 'notion' }, { kind: 'knowledge', name: 'Notes', path: 'notes' }, { kind: 'knowledge', name: 'Brief', path: 'brief.md' }] }],
+      ['writer', { id: 'writer', name: 'Writer', role: 'Writes the digest.' }],
+    ]),
+    apps: new Map([['researcher', 'Claude'], ['writer', 'Codex']]),
+  }
+
+  it('shows rough details on hover: what it is doing, its app and model, its job and what it works with', async () => {
+    renderChat({ team: described })
+    const face = within(screen.getByRole('list', { name: 'Who is on the team' })).getByRole('button', { name: 'Researcher: mention in your message' })
+    fireEvent.pointerEnter(face, { pointerType: 'mouse' })
+    const card = await screen.findByRole('tooltip')
+    expect(face).toHaveAttribute('aria-describedby', card.id)
+    expect(card).toHaveTextContent('Researcher')
+    expect(card).toHaveTextContent('ready · step 1 of 3')
+    expect(card).toHaveTextContent('Claude · claude-opus-4-5')
+    expect(card).toHaveTextContent('Finds the three stories that matter today')
+    expect(card).toHaveTextContent('1 skill · 1 tool · 2 sources')
+    expect(card).toHaveTextContent('Click to mention Researcher')
+    fireEvent.pointerLeave(face)
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
+    // Passing over a face on the way somewhere else opens nothing.
+    fireEvent.pointerEnter(face, { pointerType: 'mouse' })
+    fireEvent.pointerLeave(face)
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
+  it('puts @name in the message box when clicked, in place of whoever the message was for', async () => {
+    renderChat({ team: described })
+    const list = screen.getByRole('list', { name: 'Who is on the team' })
+    fireEvent.click(within(list).getByRole('button', { name: 'Writer: mention in your message' }))
+    expect(box()).toHaveValue('@Writer ')
+    await waitFor(() => expect(box()).toHaveFocus())
+    expect(screen.getByText('Starts Writer only')).toBeInTheDocument()
+
+    fireEvent.change(box(), { target: { value: '@Writer make the chip story the lead' } })
+    fireEvent.click(within(list).getByRole('button', { name: 'Researcher: mention in your message' }))
+    expect(box()).toHaveValue('@Researcher make the chip story the lead')
+    // A message for no one yet gets the name in front.
+    fireEvent.change(box(), { target: { value: 'check the sources' } })
+    fireEvent.click(within(list).getByRole('button', { name: 'Writer: mention in your message' }))
+    expect(box()).toHaveValue('@Writer check the sources')
+  })
+
+  it('does both from the folded team list, whose words still open it', async () => {
+    renderChat({ team: described })
+    fireEvent.click(screen.getByRole('button', { name: 'News desk' }))
+    const face = screen.getByRole('button', { name: 'Researcher: mention in your message' })
+    face.focus()
+    fireEvent.focus(face)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Claude · claude-opus-4-5')
+    fireEvent.keyDown(face, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
+    fireEvent.click(face)
+    expect(box()).toHaveValue('@Researcher ')
+    fireEvent.click(screen.getByRole('button', { name: '2 ready. Show who is on the team' }))
+    expect(screen.getByRole('list', { name: 'Who is on the team' })).toBeVisible()
   })
 })
 

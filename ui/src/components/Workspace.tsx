@@ -1510,8 +1510,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       order: doc.mode === 'pipeline' ? chatAgents.map((agent) => agent.id) : [],
       operators: new Set(chatAgents.filter((agent) => agent.operator).map((agent) => agent.id)),
       configs: new Map(doc.nodes.map((node) => [node.id, node.data.agent])),
+      apps: new Map(doc.nodes.map((node) => [node.id, appLabelForAgent(node.data.agent, harnesses)])),
     }
-  }, [chatAgents, handedBy, doc.mode, doc.nodes])
+  }, [chatAgents, handedBy, doc.mode, doc.nodes, harnesses])
   /** Work starts on an exact snapshot of the file, as Run always has: save first (TNG89 §1.4). */
   const prepareChat = useCallback(async (): Promise<Prepared> => {
     if (['dirty', 'new'].includes(doc.documentChipState)) {

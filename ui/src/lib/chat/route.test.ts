@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord } from '../runs/client'
-import { destination, findMention, mentionChoices, mentionQuery, type ChatAgent } from './route'
+import { destination, findMention, mentionChoices, mentionQuery, withMention, type ChatAgent } from './route'
 
 const agents: ChatAgent[] = [
   { id: 'researcher', name: 'Researcher' },
@@ -70,5 +70,15 @@ describe('destination', () => {
     expect(destination(null, busy, names, 3)).toMatchObject({ route: 'note', agent: 'writer', runId: 'new' })
     expect(destination(null, busy, names, 3, true).label).toBe('Note for News Writer now · stops its current step')
     expect(destination(null, idle, names, 3)).toMatchObject({ route: 'team_note', label: 'Team note · starts nothing' })
+  })
+})
+
+describe('withMention', () => {
+  const writer = agents.find((agent) => agent.id === 'writer') ?? agents[0]
+  it('leads a message for no one, and takes the place of the mention that decides where it goes', () => {
+    expect(withMention('', writer, agents)).toBe(`@${writer.name} `)
+    expect(withMention('  check the sources', writer, agents)).toBe(`@${writer.name} check the sources`)
+    expect(withMention('@team do Asia', writer, agents)).toBe(`@${writer.name} do Asia`)
+    expect(withMention(`please @${writer.name} do Asia`, writer, agents)).toBe(`please @${writer.name} do Asia`)
   })
 })

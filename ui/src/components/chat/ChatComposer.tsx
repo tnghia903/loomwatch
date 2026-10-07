@@ -30,6 +30,8 @@ interface ChatComposerProps {
   onSend: (text: string, to: ChatTarget, now: boolean) => Promise<boolean>
   /** Your answer to an agent's question; a review is answered by the buttons on its message. */
   onAnswer: (decision: OpenDecision, text: string) => Promise<boolean>
+  /** Counts the faces clicked to @mention them: each time, the box takes the caret and glows once. */
+  mentioned?: number
 }
 
 /**
@@ -38,7 +40,7 @@ interface ChatComposerProps {
  * after its current step", "Team note · starts nothing" — because only an @ starts work and
  * nothing is guessed from the words.
  */
-export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer }: ChatComposerProps) {
+export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0 }: ChatComposerProps) {
   const [caret, setCaret] = useState(0)
   const [picked, setPicked] = useState(0)
   const [pickerClosed, setPickerClosed] = useState(false)
@@ -62,6 +64,17 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
     window.addEventListener('loomwatch:compose', compose)
     return () => window.removeEventListener('loomwatch:compose', compose)
   }, [setText])
+
+  // A face clicked to @mention its agent: carry on writing after the name.
+  useEffect(() => {
+    if (mentioned === 0) return
+    const field = box.current
+    if (!field) return
+    field.focus()
+    const end = field.value.length
+    field.setSelectionRange(end, end)
+    setCaret(end)
+  }, [mentioned])
 
   // A new decision takes the box back from "write to the team instead".
   const decisionKey = decision ? `${decision.runId}:${decision.node}` : null
@@ -180,6 +193,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
       </div>
       <div className="tc-box">
         {sent > 0 && <span key={sent} className="tc-ripple" aria-hidden="true" />}
+        {mentioned > 0 && <span key={`mention-${mentioned}`} className="tc-mention-glow" aria-hidden="true" />}
         {pickerOpen && (
           <ul className="tc-picker e2" id={pickerId} role="listbox" aria-label="Who to write to">
             {choices.map((choice, index) => {
