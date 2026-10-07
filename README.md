@@ -762,10 +762,11 @@ without asking**: **Search the web**, **Edit files** (only in the agent's own fo
 commands**. They start off, except **Search the web** for researchers. LoomWatch always allows the
 team's own handovers and the tools, folders and files you connected to the agent.
 
-Anything else waits for you. The agent pauses, and the run shows what it wants to do, such as
-"Researcher wants to use the web". You can answer **Allow**, **Allow for this run**, **Always allow**
-(which switches it on for that agent) or **Deny**. The same question shows up in the Needs-you tray
-from any screen. If nobody answers within 10 minutes it is declined, and scheduled runs decline it
+Anything else waits for you. The agent pauses and asks in the team chat, as its own message, such
+as "Asks to use the web · Web search · …". You answer right below it: **Allow**, **Allow for this
+run**, **Always allow** (which switches it on for that agent) or **Deny**. The chat keeps how it
+ended, such as "You allowed it, this once". The same question shows up in the Needs-you tray from
+any screen. If nobody answers within 10 minutes it is declined, and scheduled runs decline it
 straight away because nobody is watching.
 
 The run records every request and who answered it. When something was declined, the run receipt says
