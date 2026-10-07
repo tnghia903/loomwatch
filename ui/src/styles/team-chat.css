@@ -419,11 +419,14 @@
   z-index: 30;
   width: 100%;
   display: grid;
+  /* minmax(0, …): an auto column took the header's one-line prompt as its minimum, so a long
+     question pushed the pane, and its close button, past the window's right edge. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   background: var(--color-ground);
   border-left: 1px solid var(--color-hairline);
   box-shadow: -18px 0 48px #0003;
-  container-type: inline-size;
+  container: details / inline-size;
 }
 @media (min-width: 768px) { .tc-details { top: 64px; } }
 @media (min-width: 1100px) { .tc-details { left: var(--tc-chat-w); width: auto; box-shadow: none; } }
