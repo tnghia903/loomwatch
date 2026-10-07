@@ -4,6 +4,7 @@ import { useEffect, useId, useState, type ReactNode } from 'react'
 import { relativeTime } from '../../lib/format'
 import { fetchRuns } from '../../lib/runs/client'
 import { teamLabel } from '../../lib/story/needsYou'
+import { fetchTeamsDiscovery, teamDisplayName, teamSummaries } from '../../lib/team-file/client'
 import {
   checkForUpdates,
   fetchUpdateStatus,
@@ -81,6 +82,11 @@ function published(at: string | null): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
+/** The launcher's reasons start lower-case, after its own "LoomWatch could not update:". */
+function sentence(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
 function headline(status: UpdateStatus | null, checking: boolean, progress: InstallProgress): string {
   if (progress.phase === 'updating') return `Updating to ${progress.to}…`
   if (progress.phase === 'updated') return `Updated to ${progress.version}`
@@ -106,7 +112,7 @@ function Progress({ progress }: { progress: Exclude<InstallProgress, { phase: 'i
     case 'failed':
       return (
         <p role="alert" className="up-error">
-          LoomWatch {progress.version} was started again instead of {progress.to}. {progress.error ?? 'The terminal window running LoomWatch says why.'}
+          LoomWatch {progress.version} was started again instead of {progress.to}. {progress.error ? sentence(progress.error) : 'The terminal window running LoomWatch says why.'}
         </p>
       )
     case 'lost':
@@ -124,12 +130,14 @@ function UpdateAndRestart({ latest, command, rollback, installError, copyButton 
   latest: Release
   command: string | null
   rollback: string | null
+  /** Why the last update did not finish, unless the dialog already says so. */
   installError: string | null
   copyButton: (command: string) => ReactNode
 }) {
   const [confirming, setConfirming] = useState(false)
   // Null while LoomWatch is asked which teams are at work.
   const [working, setWorking] = useState<LiveRun[] | null>(null)
+  const [names, setNames] = useState<ReadonlyMap<string, string>>(new Map())
   const [unchecked, setUnchecked] = useState(false)
   const [startedSince, setStartedSince] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -142,7 +150,9 @@ function UpdateAndRestart({ latest, command, rollback, installError, copyButton 
     setStartedSince(false)
     setProblem(null)
     try {
-      const runs = await fetchRuns()
+      // The teams' own names, as Home shows them; a file's name when they cannot be read.
+      const [runs, discovery] = await Promise.all([fetchRuns(), fetchTeamsDiscovery().catch(() => null)])
+      if (discovery) setNames(new Map(teamSummaries(discovery).map((team) => [team.path, teamDisplayName(team)])))
       setWorking(runs.filter((run) => !FINISHED.has(run.status)).map(({ runId, teamPath, status }) => ({ runId, teamPath, status })))
     } catch {
       // Not knowing is not agreeing: LoomWatch refuses, naming them, if a team turns out to be at work.
@@ -169,10 +179,9 @@ function UpdateAndRestart({ latest, command, rollback, installError, copyButton 
   }
 
   const teams = working ?? []
-  const names = new Map<string, string>()
   return (
     <>
-      {installError && <p role="status" className="up-error">The last update didn’t finish. {installError}</p>}
+      {installError && <p role="status" className="up-error">The last update didn’t finish. {sentence(installError)}</p>}
       {confirming ? (
         <div className="up-confirm" role="group" aria-label={`Update to ${latest.version}?`}>
           <p className="up-confirm-q">Update to {latest.version} now?</p>
@@ -312,7 +321,7 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
           <section className="up-how" aria-label="How to update">
             <span className="nt-label">How to update</span>
             {status?.canInstall ? (
-              <UpdateAndRestart latest={latest} command={command} rollback={rollback} installError={status.installError ?? null} copyButton={copyButton} />
+              <UpdateAndRestart latest={latest} command={command} rollback={rollback} installError={progress.phase === 'failed' ? null : status.installError ?? null} copyButton={copyButton} />
             ) : command ? (
               <>
                 <ol>

@@ -253,13 +253,15 @@ describe('Update and restart', () => {
   it('asks first, naming the teams at work that updating stops', async () => {
     const dialog = await openOn(supervised)
     routes['GET /api/runs'] = () => json([run('r1', 'trips/japan.yaml', 'running'), run('r2', 'digest.yaml', 'succeeded')])
+    routes['GET /api/teams'] = () => json({ root: '/teams', files: ['trips/japan.yaml', 'digest.yaml'], teams: [{ path: 'trips/japan.yaml', name: 'Japan trip', agentCount: 2 }] })
     routes['POST /api/updates/install'] = () => json({ from: '0.1.5', to: '0.1.6', startedAt: OLD_START, stoppedRuns: 1 }, 202)
     routes['GET /api/about'] = () => about('0.1.5', OLD_START)
     fireEvent.click(within(dialog).getByRole('button', { name: 'Update and restart' }))
 
     const question = await within(dialog).findByRole('group', { name: 'Update to 0.1.6?' })
     expect(await within(question).findByText('This team is working, and updating stops it:')).toBeInTheDocument()
-    expect(within(question).getByRole('listitem')).toHaveTextContent('japan')
+    // By the name Home shows it under.
+    expect(within(question).getByRole('listitem')).toHaveTextContent('Japan trip')
     expect(calls('POST', '/api/updates/install')).toHaveLength(0)
 
     // Cancel stops nothing.
@@ -313,9 +315,16 @@ describe('Update and restart', () => {
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Update and restart' }))
 
     expect(await screen.findByRole('dialog', { name: 'The update didn’t finish' })).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent('LoomWatch 0.1.5 was started again instead of 0.1.6. the download did not finish')
+    expect(screen.getByRole('alert')).toHaveTextContent('LoomWatch 0.1.5 was started again instead of 0.1.6. The download did not finish')
+    // Said once, not again as the last update's note.
+    expect(screen.queryByText(/The last update didn’t finish/)).toBeNull()
     // The way to try again, here or in the terminal, is still there.
     expect(screen.getByRole('button', { name: 'Update and restart' })).toBeInTheDocument()
+  })
+
+  it('says why the last update did not finish when the page opens after it', async () => {
+    const dialog = await openOn({ ...supervised, installError: 'the download did not finish.' })
+    expect(within(dialog).getByText('The last update didn’t finish. The download did not finish.')).toHaveAttribute('role', 'status')
   })
 
   it('shows a refusal it cannot act on', async () => {

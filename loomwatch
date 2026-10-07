@@ -833,7 +833,6 @@ update_from_app() {
   ) || true
   # Whatever the steps said, the files in place decide which version runs next.
   if [ "$(installed_version)" != "$installed" ]; then
-    say "Updated LoomWatch $installed to $(installed_version)."
     if [ -d .previous ]; then say "If the new version gives you trouble, $self rollback goes back to $installed."; fi
     unset LOOMWATCH_SUPERVISED LOOMWATCH_UPDATE_REQUEST
     rm -f "$launcher_pid_file"

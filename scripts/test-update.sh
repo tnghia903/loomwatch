@@ -309,7 +309,7 @@ check "stop finds LoomWatch, not the script, in the process file" 'logged "start
 check "exit 75 installs the release LoomWatch named, then starts it" '[ $status = 0 ] && [ "$(version_installed)" = 0.1.5 ] && logged "started 0.1.5 "'
 check "the run history was copied first" '[ -n "$app_backup" ] && grep -q runs-before-app-update "$app_backup"'
 check "0.1.4 is kept for rollback" '[ "$(cut -d " " -f 1 "$app/.previous/VERSION")" = 0.1.4 ] && grep -qx "backup=$app_backup" "$app/.previous/ROLLBACK"'
-check "the window says what happened" 'said "Updating LoomWatch 0.1.4 to 0.1.5, as asked in the app" && said "Updated LoomWatch 0.1.4 to 0.1.5." && said "rollback goes back to 0.1.4"'
+check "the window says what happened" 'said "Updating LoomWatch 0.1.4 to 0.1.5, as asked in the app" && said "Updated LoomWatch to 0.1.5." && said "rollback goes back to 0.1.4"'
 check "the new version runs beside its own launcher, told of no failure" 'grep -q "^started 0.1.5 .* supervised=1 .* failed=$" "$FAKE_LOG"'
 check "the request is used up" '[ ! -e "$app/run/update-request" ]'
 
