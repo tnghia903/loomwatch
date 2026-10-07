@@ -1,11 +1,12 @@
-import { ArrowDown, Play, RotateCcw, Search, X } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ArrowDown, ChevronDown, ChevronRight, Play, RotateCcw, Search, X } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { continueWithTeam, fetchChatPage, itemAt, sendChatMessage, startFromNote, type ChatItem, type ChatMessage, type ChatTarget } from '../../lib/chat/client'
 import { clockTime, dayKey, dayLabel } from '../../lib/chat/format'
 import { destination, type ChatAgent } from '../../lib/chat/route'
 import { markSeen } from '../../lib/chat/seen'
 import { AppearContext, useAppear } from '../../lib/chat/appear'
+import { FollowContext, type ChatFollow } from '../../lib/chat/follow'
 import { useTeamChat, type PendingMessage } from '../../lib/chat/useTeamChat'
 import { DaemonUnreachableError } from '../../lib/daemonFetch'
 import { answerRun, newStartKey, RunApiError, STALE_TEAM_REVISION, TEAM_NEEDS_REVIEW, type TeamReview } from '../../lib/runs/client'
@@ -56,6 +57,10 @@ interface TeamChatProps {
 
 /** Within this of the bottom, the chat follows new messages. */
 const FOLLOW_PX = 120
+/** Room left under something revealed, so it does not sit against the message box. */
+const REVEAL_MARGIN_PX = 16
+/** Whether the list of who is on the team is folded, kept for this browser. */
+const ROSTER_KEY = 'loomwatch.chatRoster'
 
 /**
  * A team's chat (ADR 0051): the one place you work with the team. You write to it as you would to
@@ -147,6 +152,20 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     atBottom.current = true
     setShowJump(false)
   }
+  // What waits on you comes into view as it arrives, even within a moment of your last click;
+  // answering is following the work again (lib/chat/follow.ts).
+  const follow = useMemo<ChatFollow>(() => ({
+    pin: () => {
+      atBottom.current = true
+      setShowJump(false)
+    },
+    reveal: (target) => {
+      const element = scroller.current
+      if (!element || !atBottom.current || restore.current !== null) return
+      const below = target.getBoundingClientRect().bottom + REVEAL_MARGIN_PX - element.getBoundingClientRect().bottom
+      if (below > 0) element.scrollTop += below
+    },
+  }), [])
 
   // You have seen this chat up to its newest item while it is on screen.
   const newestAt = newest ? (newest.kind === 'work' ? newest.run.finishedAt ?? newest.run.createdAt : newest.message.createdAt) : null
@@ -260,25 +279,53 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   const workingNow = new Set(live.flatMap((run) => run.working ?? []))
   const waitingFor = decision?.from
   const unreachable = chat.error && /reach the LoomWatch server/i.test(chat.error)
+  // An agent that asked you something, or asked your permission, is still in its turn, but it is
+  // you it waits on.
+  const asking = new Set(live.flatMap((run) => (run.permissionRequests ?? []).map((request) => request.agent)))
+  const presence = members.map((agent) => ({ agent, state: (unreachable ? 'away' : waitingFor === agent.id || asking.has(agent.id) ? 'waiting' : workingNow.has(agent.id) ? 'working' : 'idle') as Presence }))
+  const [rosterOpen, setRosterOpen] = useState(readRosterOpen)
+  const rosterId = useId()
+  const toggleRoster = () => {
+    const next = !rosterOpen
+    setRosterOpen(next)
+    try {
+      window.localStorage.setItem(ROSTER_KEY, next ? 'open' : 'folded')
+    } catch {
+      // Not kept; the list stays as it is until the page is closed.
+    }
+  }
 
   return (
     <AppearContext.Provider value={settled && search.results === null}>
+    <FollowContext.Provider value={follow}>
     <section className="tc" aria-label={`${teamName} chat`} data-tour="chat" data-newest-run={newestRun ?? undefined}>
       <header className="tc-head">
-        <div className="tc-title">
-          <h2>{teamName}</h2>
-          <ul className="tc-members" aria-label="Who is on the team">
-            {members.map((agent) => {
-              // An agent that asked you something is still in its turn, but it is you it waits on.
-              const state = unreachable ? 'away' : waitingFor === agent.id ? 'waiting' : workingNow.has(agent.id) ? 'working' : 'idle'
-              return (
-                <li key={agent.id} className={`tc-member ${state}`} title={`${agent.name} · ${STATE_WORDS[state]}`}>
-                  <i className={`chat-avatar hue-${team.hues.get(agent.id) ?? 1}`} style={{ width: 24, height: 24, fontSize: 9 }} aria-hidden="true">{initialsOf(agent.name || agent.id)}</i>
-                  <span>{agent.name || agent.id}</span>
-                  <Swap key={state}><em>{STATE_WORDS[state]}</em></Swap>
-                </li>
-              )
-            })}
+        <div className={`tc-title${rosterOpen ? '' : ' folded'}`}>
+          <h2>
+            <button type="button" className="tc-roster-toggle" aria-expanded={rosterOpen} aria-controls={rosterId} onClick={toggleRoster} title={rosterOpen ? 'Fold the list of who is on the team' : 'Show who is on the team'}>
+              {rosterOpen ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
+              <span className="tc-roster-name">{teamName}</span>
+            </button>
+          </h2>
+          {/* Folded, the team reads as one line: its faces with their status, and what they are doing. */}
+          {!rosterOpen && members.length > 0 && (
+            <button type="button" className="tc-roster-summary" onClick={toggleRoster} aria-label={`${rosterSummary(presence)}. Show who is on the team`}>
+              <span className="tc-faces" aria-hidden="true">
+                {presence.map(({ agent, state }) => (
+                  <i key={agent.id} className={`tc-member ${state}`}><i className={`chat-avatar hue-${team.hues.get(agent.id) ?? 1}`} style={{ width: 20, height: 20, fontSize: 8 }}>{initialsOf(agent.name || agent.id)}</i></i>
+                ))}
+              </span>
+              <Swap key={rosterSummary(presence)}><span className="tc-roster-words">{rosterSummary(presence)}</span></Swap>
+            </button>
+          )}
+          <ul id={rosterId} className="tc-members" aria-label="Who is on the team" hidden={!rosterOpen}>
+            {presence.map(({ agent, state }) => (
+              <li key={agent.id} className={`tc-member ${state}`} title={`${agent.name} · ${STATE_WORDS[state]}`}>
+                <i className={`chat-avatar hue-${team.hues.get(agent.id) ?? 1}`} style={{ width: 24, height: 24, fontSize: 9 }} aria-hidden="true">{initialsOf(agent.name || agent.id)}</i>
+                <span>{agent.name || agent.id}</span>
+                <Swap key={state}><em>{STATE_WORDS[state]}</em></Swap>
+              </li>
+            ))}
           </ul>
         </div>
         <div className="tc-head-acts">
@@ -368,6 +415,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         onAnswer={answer}
       />
     </section>
+    </FollowContext.Provider>
     </AppearContext.Provider>
   )
 }
@@ -384,6 +432,26 @@ function WeaveMark() {
 
 // The words the chat uses for work everywhere: ready to take it, at it, or waiting on you.
 const STATE_WORDS = { working: 'working', waiting: 'waiting for you', idle: 'ready', away: 'away' } as const
+type Presence = keyof typeof STATE_WORDS
+
+/** "1 working · 4 ready": the folded team, busiest first. */
+function rosterSummary(presence: readonly { state: Presence }[]): string {
+  const order: Presence[] = ['waiting', 'working', 'idle', 'away']
+  return order
+    .map((state) => [state, presence.filter((member) => member.state === state).length] as const)
+    .filter(([, count]) => count > 0)
+    .map(([state, count]) => `${count} ${STATE_WORDS[state]}`)
+    .join(' · ')
+}
+
+/** Open unless you folded it in this browser. */
+function readRosterOpen(): boolean {
+  try {
+    return window.localStorage.getItem(ROSTER_KEY) !== 'folded'
+  } catch {
+    return true
+  }
+}
 
 /**
  * Search within the team's chat: the daemon matches the words across every piece and note, not

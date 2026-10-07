@@ -35,7 +35,49 @@
 }
 .tc-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; min-width: 0; }
 .tc-title h2 { margin: 0; font: 600 16px/1.3 var(--font-sans); color: var(--color-ink); }
+.tc-title.folded h2, .tc-title.folded .tc-roster-toggle { min-width: 0; max-width: 100%; }
+.tc-title.folded .tc-roster-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The team's name folds the list of who is on it to one line, and opens it again. */
+.tc-roster-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 2px 4px 2px 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tc-roster-toggle svg { flex: none; color: var(--color-ink-3); }
+.tc-roster-toggle:hover svg { color: var(--color-ink); }
+.tc-roster-toggle:focus-visible, .tc-roster-summary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.tc-title.folded { flex-wrap: nowrap; gap: 12px; }
+.tc-roster-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--color-ink-2);
+  font: 12.5px/1.3 var(--font-sans);
+  cursor: pointer;
+}
+.tc-roster-summary:hover { color: var(--color-ink); }
+.tc-faces { display: inline-flex; flex: none; }
+.tc-faces .tc-member { display: inline-flex; font-style: normal; }
+.tc-faces .tc-member + .tc-member { margin-left: -5px; }
+.tc-faces .chat-avatar { box-shadow: 0 0 0 2px var(--color-panel); }
+.tc-roster-words { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-members { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; list-style: none; }
+.tc-members[hidden] { display: none; }
 .tc-member { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--color-ink-2); }
 .tc-member .chat-avatar { position: relative; }
 .tc-member .chat-avatar::after {
@@ -49,16 +91,17 @@
   border: 2px solid var(--color-panel-solid);
   background: var(--color-ink-3);
 }
-.tc-member.working .chat-avatar::after { background: var(--color-live); }
+.tc-member.working .chat-avatar::after { background: var(--color-ok); }
 .tc-member.waiting .chat-avatar::after { background: var(--color-accent); }
 .tc-member.away .chat-avatar::after { background: transparent; border-color: var(--color-ink-3); }
 .tc-member em { font-style: normal; font-size: 11.5px; color: var(--color-ink-3); }
-.tc-member.working em { color: var(--color-live); }
+.tc-member.working em { color: var(--color-ok); }
 .tc-member.waiting em { color: var(--color-accent); }
 .tc-routine { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 12px; color: var(--color-ink-3); }
 
 /* ---------- the log ---------- */
-.tc-scroll { position: relative; overflow-y: auto; overscroll-behavior: contain; scroll-padding-bottom: 24px; }
+/* The chat never scrolls sideways: what is in it wraps to its width (loom.css .chat-text). */
+.tc-scroll { position: relative; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scroll-padding-bottom: 24px; }
 .tc-log {
   display: grid;
   gap: 0;
@@ -119,14 +162,15 @@
   height: 6px;
   margin-top: -3px;
   border-radius: 50%;
-  background: var(--color-live);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-live) 22%, transparent);
+  background: var(--color-ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-ok) 22%, transparent);
   translate: calc(26px + var(--weft-at, 0) * 36px) 0;
 }
 .tc-weft.waiting .tc-weft-bead { background: var(--color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 25%, transparent); }
 .tc-talk-line { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--color-ink-2); }
 .tc-talk-line b { font-weight: 600; color: var(--color-ink); }
-.tc-piece.live .tc-talk-line b { color: var(--color-live); }
+.tc-piece.live .tc-talk-line b { color: var(--color-ok); }
+.tc-piece.live .tc-talk-line b.tc-wait { color: var(--color-accent); }
 .tc-talk-acts { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; margin-left: auto; }
 .tc-link {
   display: inline-flex;
@@ -355,14 +399,14 @@
   .tc-decision.tc-appear { animation: tc-rise var(--t-entrance) var(--ease-out) both, tc-attention var(--t-settle) var(--ease-out) var(--t-entrance) 1; }
   /* Words that change in place — who is working, where a message goes — slide in. */
   .tc-swap { animation: tc-swap var(--t-move) var(--ease-out) both; }
-  /* Whoever is working breathes a blue ring, in the header and on the piece. */
+  /* Whoever is working breathes a green ring, in the header and on the piece. */
   .tc-member.working .chat-avatar::before,
   .tc-weft .chat-avatar.working::before {
     content: '';
     position: absolute;
     inset: -3px;
     border-radius: 50%;
-    border: 2px solid var(--color-live);
+    border: 2px solid var(--color-ok);
     pointer-events: none;
     animation: tc-ring var(--t-flow) var(--ease-out) infinite;
   }

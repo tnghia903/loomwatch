@@ -305,6 +305,39 @@ describe('a chat that is alive', () => {
   })
 })
 
+describe('who is on the team', () => {
+  afterEach(() => { window.localStorage.clear() })
+
+  it('folds to one line of faces and what they are doing, and stays folded in this browser', async () => {
+    const first = renderChat()
+    const toggle = screen.getByRole('button', { name: 'News desk' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('list', { name: 'Who is on the team' })).toBeVisible()
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('list', { name: 'Who is on the team' })).toBeNull()
+    expect(screen.getByRole('button', { name: '2 ready. Show who is on the team' })).toBeInTheDocument()
+    first.unmount()
+    renderChat()
+    expect(screen.getByRole('button', { name: 'News desk' })).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(screen.getByRole('button', { name: '2 ready. Show who is on the team' }))
+    expect(screen.getByRole('list', { name: 'Who is on the team' })).toBeVisible()
+  })
+
+  it('says an agent that asked your permission is waiting for you, not working', async () => {
+    const asked = { id: 'p1', agent: 'researcher', name: 'Researcher', title: 'mcp__claude_ai_Notion__notion-fetch', kind: 'other', switch: null, since: '2026-10-06T02:01:00.000Z', expiresAt: new Date(Date.now() + 9 * 60000).toISOString() }
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'], permissionRequests: [asked] }), request: message({}), notes: [] }]
+    answer = () => new Response(JSON.stringify(run({ status: 'running' })), { status: 200 })
+    renderChat()
+    const list = await screen.findByRole('list', { name: 'Who is on the team' })
+    await waitFor(() => expect(within(list).getByTitle('Researcher · waiting for you')).toBeInTheDocument())
+    expect(screen.getByText(/Researcher asks your permission/)).toBeInTheDocument()
+    // A team of more than one agent can be let through at once, for that one tool.
+    fireEvent.click(screen.getByRole('button', { name: 'Allow for the whole team' }))
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/permissions', body: { requestId: 'p1', decision: 'allow_team' } }))
+  })
+})
+
 describe('a piece of work', () => {
   it('asks for your review with buttons: Approve needs no words, Send back needs them', async () => {
     page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn: { node: 'review', name: 'Your review', kind: 'review_stop', since: '2026-10-06T02:01:00.000Z', question: 'Check it', context: '## Summary\nThree stories', handoverFrom: 'researcher', park: 'kept_alive', parkNote: '', sendBackAvailable: true } }), request: message({}), notes: [] }]

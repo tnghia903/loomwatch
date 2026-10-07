@@ -51,3 +51,5 @@
 .chat-permission .chat-file-head { color: var(--color-accent); }
 .chat-permission .permission-what { color: var(--color-ink); }
 .tc-turn.permission { display: grid; gap: 6px; }
+/* In the chat, what is asked for wraps to the chat's width rather than being cut short. */
+.chat-permission .permission-what, .tc-piece .permission-prompt.inline .permission-what { white-space: normal; overflow-wrap: anywhere; }

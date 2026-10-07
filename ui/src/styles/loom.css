@@ -199,7 +199,7 @@ span.story-schedule { cursor: default; }
 .chat-meta { display: flex; align-items: baseline; gap: 8px; margin: 0 0 3px 2px; font-size: 12.5px; }
 .chat-name { font-weight: 650; color: var(--hue); }
 .chat-meta time, .chat-under time { font: 500 11px/1.4 var(--font-mono); color: var(--color-ink-3); font-variant-numeric: tabular-nums; }
-.chat-bubble { max-width: 100%; padding: 8px 12px 9px; border-radius: 16px; border-top-left-radius: 5px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid); color: var(--color-ink); font-size: 13.5px; line-height: 1.5; transition: box-shadow var(--t-move) var(--ease-out); }
+.chat-bubble { min-width: 0; max-width: 100%; padding: 8px 12px 9px; border-radius: 16px; border-top-left-radius: 5px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid); color: var(--color-ink); font-size: 13.5px; line-height: 1.5; transition: box-shadow var(--t-move) var(--ease-out); }
 .chat-msg.continued .chat-bubble { border-top-left-radius: 16px; }
 .chat-msg.mine .chat-bubble { border-top-left-radius: 16px; border-top-right-radius: 5px; background: var(--color-accent-tint); border-color: color-mix(in srgb, var(--color-accent) 30%, transparent); }
 .chat-msg.mine.continued .chat-bubble { border-top-right-radius: 16px; }
@@ -224,9 +224,14 @@ span.story-schedule { cursor: default; }
 .chat-text ul { list-style: disc; }
 .chat-text ol { list-style: decimal; }
 .chat-text code { padding: 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--color-ink) 8%, transparent); font: 400 12px/1.4 var(--font-mono); }
-.chat-text pre { overflow: auto; padding: 8px; border-radius: 8px; background: var(--color-ground); }
+/* A message fits the chat's width, however narrow: code wraps rather than scrolling sideways. */
+.chat-text pre { padding: 8px; border-radius: 8px; background: var(--color-ground); white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-text pre code { padding: 0; background: none; }
-.chat-text a { color: var(--color-accent); text-decoration: underline; }
+/* Tables fit as well: a link breaks anywhere, a word at its syllables first. */
+.chat-text table { border-collapse: collapse; font-size: 12px; line-height: 1.4; }
+.chat-text :is(th, td) { padding: 3px 6px; border: 1px solid var(--color-hairline); text-align: left; vertical-align: top; hyphens: auto; }
+.chat-text th { font-weight: 650; background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
+.chat-text a { color: var(--color-accent); text-decoration: underline; word-break: break-all; }
 .chat-text .markdown-fallback { white-space: pre-wrap; }
 .chat-more { margin-top: 4px; font-size: 12px; color: var(--color-accent); }
 .chat-more:hover, .chat-more:focus-visible { text-decoration: underline; }

@@ -29,6 +29,8 @@ export interface Ticket {
   since: string
   /** A permission ticket's request, which its answer names. */
   requestId?: string
+  /** A permission ticket's run has more than one agent, so "Allow for the whole team" means more. */
+  team?: boolean
 }
 
 /** Failures older than this are history, not something waiting on you. */
@@ -56,6 +58,7 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
         context: permissionWhat(request),
         since: request.since,
         requestId: request.id,
+        team: record.agentIds.length > 1,
       })
     }
     const waiting = record.waitingOn

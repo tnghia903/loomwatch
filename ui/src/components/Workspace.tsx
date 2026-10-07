@@ -2344,6 +2344,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         {runView && !deliveryShown && record && (record.permissionRequests?.length ?? 0) > 0 && (
           <PermissionPrompt
             run={record}
+            team={record.agentIds.length > 1}
             onAlwaysAllow={editable && sameTeamFile(doc.path, record.teamPath) ? (agentId, key) => {
               doc.updateAgentAllow(agentId, key, true)
               void doc.save()

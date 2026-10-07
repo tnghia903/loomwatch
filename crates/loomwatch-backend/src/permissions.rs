@@ -275,6 +275,9 @@ pub enum PermissionDecision {
     AllowOnce,
     /// This request and every later one of the same kind from this agent, until the run ends.
     AllowRun,
+    /// This request and every later one for the same thing from any agent in the run, until it
+    /// ends: one answer for a team whose agents all reach for the same tool.
+    AllowTeam,
     Deny,
 }
 
@@ -296,7 +299,11 @@ impl AskOutcome {
         matches!(
             self,
             Self::AllowedForRun
-                | Self::Answered(PermissionDecision::AllowOnce | PermissionDecision::AllowRun)
+                | Self::Answered(
+                    PermissionDecision::AllowOnce
+                        | PermissionDecision::AllowRun
+                        | PermissionDecision::AllowTeam
+                )
         )
     }
 
@@ -308,6 +315,7 @@ impl AskOutcome {
             Self::AllowedForRun => "allowed_for_run",
             Self::Answered(PermissionDecision::AllowOnce) => "allow_once",
             Self::Answered(PermissionDecision::AllowRun) => "allow_run",
+            Self::Answered(PermissionDecision::AllowTeam) => "allow_team",
             Self::Answered(PermissionDecision::Deny) => "deny",
             Self::TimedOut => "timed_out",
         }

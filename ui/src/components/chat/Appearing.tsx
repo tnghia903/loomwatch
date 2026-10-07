@@ -1,11 +1,16 @@
 import type { HTMLAttributes, ReactNode } from 'react'
 
 import { useAppear } from '../../lib/chat/appear'
+import { useRevealOnArrival } from '../../lib/chat/follow'
 
-/** A block that rises in when it is news (see `useAppear`), and is simply there otherwise. */
-export function Appearing({ className = '', children, ...props }: HTMLAttributes<HTMLDivElement> & { children?: ReactNode }) {
+/**
+ * A block that rises in when it is news (see `useAppear`), and is simply there otherwise. `reveal`:
+ * it waits on you, so the chat shows it as it arrives (lib/chat/follow.ts).
+ */
+export function Appearing({ className = '', children, reveal = false, ...props }: HTMLAttributes<HTMLDivElement> & { children?: ReactNode; reveal?: boolean }) {
   const appear = useAppear()
-  return <div {...props} className={`${className}${appear ? ' tc-appear' : ''}`}>{children}</div>
+  const element = useRevealOnArrival<HTMLDivElement>(reveal)
+  return <div ref={element} {...props} className={`${className}${appear ? ' tc-appear' : ''}`}>{children}</div>
 }
 
 /**

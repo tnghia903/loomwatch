@@ -20,7 +20,7 @@ interface NeedsYouTrayProps {
 
 const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', permission: 'Permission', failed: 'Stopped' }
 
-const PERMISSION_SAID: Record<PermissionDecision, string> = { allow_once: 'Allowed once.', allow_run: 'Allowed for the rest of the run.', deny: 'Denied. The agent carries on without it.' }
+const PERMISSION_SAID: Record<PermissionDecision, string> = { allow_once: 'Allowed once.', allow_run: 'Allowed for the rest of the run.', allow_team: 'Allowed for the whole team, for the rest of the run.', deny: 'Denied. The agent carries on without it.' }
 
 /**
  * Every place a team is waiting on the operator, across all teams, as one-question tickets.
@@ -157,6 +157,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onDismi
                     {ticket.kind === 'permission' && onPermission && <>
                       <button type="button" className="btn btn-primary" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_once')}><Check size={13} aria-hidden="true" />Allow<kbd>A</kbd></button>
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_run')}>Allow for this run</button>
+                      {ticket.team && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_team')}>Allow for the whole team</button>}
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'deny')}>Deny<kbd>D</kbd></button>
                     </>}
                     {ticket.runId !== onScreenRunId && <button type="button" className="btn ghost" onClick={() => openRun(ticket)}>Open run<ArrowUpRight size={13} aria-hidden="true" /></button>}

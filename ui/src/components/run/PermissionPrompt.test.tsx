@@ -53,4 +53,17 @@ describe('the permission card (ADR 0040)', () => {
     rerender(<PermissionPrompt run={{ runId: 'r1', permissionRequests: [] }} />)
     expect(screen.queryByRole('region')).toBeNull()
   })
+
+  it('offers "Allow for the whole team" only for a team, and sends it', async () => {
+    const fetch = vi.fn(() => Promise.resolve(json({ runId: 'r1' })))
+    vi.stubGlobal('fetch', fetch)
+    const { unmount } = render(<PermissionPrompt run={{ runId: 'r1', permissionRequests: [request()] }} />)
+    expect(screen.queryByRole('button', { name: 'Allow for the whole team' })).toBeNull()
+    unmount()
+    render(<PermissionPrompt team run={{ runId: 'r1', permissionRequests: [request()] }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Allow for the whole team' }))
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalled())
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ requestId: 'p1', decision: 'allow_team' })
+  })
 })

@@ -134,9 +134,12 @@ describe('messages between agents', () => {
       // Let through by an earlier "Allow for this run": never asked, so no message.
       answered(660, 'writer', null, 'allowed_for_run'),
       asked(700, 'writer', 'p3', { title: 'Bash: rm -rf build', kind: 'execute', switch: 'commands' }),
+      asked(710, 'data', 'p4'),
+      answered(720, 'data', 'p4', 'allow_team'),
     ]
     const { messages } = projectRun(events)
-    expect(messages).toHaveLength(3)
+    expect(messages).toHaveLength(4)
+    expect(messages[3]).toMatchObject({ from: 'data', state: 'answered', permission: { outcome: 'allow_team' } })
     expect(messages[0]).toMatchObject({
       kind: 'permission', from: 'scope', to: 'operator', text: 'mcp__claude_ai_Notion__notion-fetch', evidenceId: 'e0', state: 'answered',
       reply: { from: 'operator', text: '', offsetMs: 39_000 },
