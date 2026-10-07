@@ -1,18 +1,16 @@
 name: CI
 
-# One run per change: pushes to main, and pull requests (which already cover their branch's
-# pushes). Pushing a feature branch alone runs nothing; open a pull request or dispatch by hand.
+# Runs only for pushes to main, to save Actions minutes. Pull requests and other branches run
+# nothing; dispatch by hand to check a branch before merging it.
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
-# A newer push to the same pull request cancels the older run. Runs on main are never cancelled,
-# so every commit on main keeps a result.
+# A newer push to main waits for the run in progress instead of cancelling it.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -101,8 +99,8 @@ jobs:
         with:
           name: ui-dist
           path: ui/dist
-      # The toolchain comes from rust-toolchain.toml. Only main writes the cache, so pull requests
-      # restore it without each storing a near-duplicate copy.
+      # The toolchain comes from rust-toolchain.toml. Only main writes the cache, so a branch run by
+      # hand restores it without storing a near-duplicate copy.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}

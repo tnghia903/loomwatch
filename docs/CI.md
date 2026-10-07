@@ -9,15 +9,15 @@ version tag.
 
 | Workflow | Runs on | What it proves | Typical time |
 | --- | --- | --- | --- |
-| `ci.yml` — **Frontend**, then **Rust** | push to `main`, every pull request, by hand | UI lint (warnings fail), typecheck, build and tests; then `cargo fmt`, Clippy (`-D warnings`) and the full test suite against PostgreSQL 17.6, building on the exact `ui/dist` the Frontend job produced | 2 + 5–8 min |
+| `ci.yml` — **Frontend**, then **Rust** | push to `main`, by hand | UI lint (warnings fail), typecheck, build and tests; then `cargo fmt`, Clippy (`-D warnings`) and the full test suite against PostgreSQL 17.6, building on the exact `ui/dist` the Frontend job produced | 2 + 5–8 min |
 | `ci.yml` — **Launcher** | the same, beside Frontend | ShellCheck on the launcher and installer, and `scripts/test-update.sh`: `update`, `rollback` and `version` on an installed copy, with stand-ins for Docker, GitHub and the program | < 1 min |
-| `container.yml` — **Build image** | a change to the Dockerfile or a lockfile/toolchain/manifest it builds from, monthly, by hand | `docker build` still succeeds; the image is never pushed | ~10–15 min (estimate) |
-| `actionlint.yml` | a change under `.github/workflows/` | the workflow files themselves are valid | < 1 min |
+| `container.yml` — **Build image** | a change on `main` to the Dockerfile or a lockfile/toolchain/manifest it builds from, monthly, by hand | `docker build` still succeeds; the image is never pushed | ~10–15 min (estimate) |
+| `actionlint.yml` | a change on `main` under `.github/workflows/`, by hand | the workflow files themselves are valid | < 1 min |
 | `pages.yml` — **Publish** | a change to `site/`, `scripts/install.sh`, the README screenshots or fonts it borrows, by hand | builds the landing page with `site/build.sh` and pushes it to the `loomwatch/loomwatch.github.io` repository, which GitHub Pages serves | < 1 min |
 | `release.yml` | a `v*` tag, by hand | builds the browser app once, then `loomwatchd` for macOS (one universal program, on macOS) and Linux x86_64/arm64 (on Ubuntu 22.04), packs each with `scripts/package-release.sh`, and, for a tag, attaches them to a **draft** release. Run by hand, it only builds the files | ~15 min |
 
 ```
-pull request / push to main
+push to main
         │
         ▼
    Frontend ──ui/dist──▶ Rust (fmt → clippy → test, Postgres service)
@@ -26,9 +26,10 @@ pull request / push to main
 
 ## Conventions
 
-- **One run per change.** CI runs for pushes to `main` and for pull requests, not for every push to
-  every branch, so a commit is not built twice. A newer push to a pull request cancels the older run;
-  runs on `main` are never cancelled.
+- **Only `main`.** To save Actions minutes, CI runs for pushes to `main` and nothing else: pull
+  requests and other branches run no checks. Run the checks locally before merging (below), or
+  start CI on a branch by hand (Actions → CI → Run workflow). A newer push to `main` waits for the
+  run in progress instead of cancelling it.
 - **Pinned and least-privileged.** Actions are pinned to full commit SHAs (the version is in the
   trailing comment), the workflow token is read-only, and checkouts do not keep credentials.
   Dependabot (`.github/dependabot.yml`) proposes updates monthly, grouped.
@@ -100,6 +101,6 @@ These live in GitHub's settings and must be set by an admin:
 
 | Setting | Recommended value | Why |
 | --- | --- | --- |
-| Branch rule for `main` | Require status checks **Frontend** and **Rust** to pass; optionally require a pull request | Keeps `main` green. Requiring a pull request also means changes reach `main` only through a reviewed, tested PR, which is the point of CI, but it stops direct pushes. |
+| Branch rule for `main` | Do **not** require status checks | CI does not run on pull requests, so a required check would never report and no pull request could merge. |
 | Dependabot alerts and security updates | On | Vulnerability alerts and fix PRs for Cargo and pnpm dependencies. |
 | Actions budget (Billing) | Keep the $0 "stop usage" budget unless overage is intended | Private repositories have a monthly allowance of hosted-runner minutes; past it, jobs stop instead of billing. |

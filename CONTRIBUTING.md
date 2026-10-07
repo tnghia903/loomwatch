@@ -29,7 +29,8 @@ details and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit.
 
 ## Before you open a pull request
 
-Run the same checks CI runs ([docs/CI.md](docs/CI.md)):
+CI runs only after a change reaches `main`, so run its checks yourself first
+([docs/CI.md](docs/CI.md)):
 
 ```sh
 cd ui && pnpm install --frozen-lockfile && pnpm run lint --deny-warnings && pnpm run build && pnpm test && cd ..
