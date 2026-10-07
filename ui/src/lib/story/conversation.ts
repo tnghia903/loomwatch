@@ -1,5 +1,5 @@
 import type { Evidence } from '../watch/events'
-import { OPERATOR_ID, type MessageKind, type TeamMessage } from '../watch/messages'
+import { OPERATOR_ID, type MessageKind, type PermissionOutcome, type TeamMessage } from '../watch/messages'
 
 /**
  * The run's messages made ready to read (components/run/AgentMessages.tsx): who sent each one and
@@ -171,11 +171,14 @@ export interface Bubble {
 
 const WORD: Record<MessageKind, string> = {
   handover: 'handover', direction: 'direction', ask: 'question', question: 'question',
-  escalate: 'needs you', dispatch: 'task', handoff: 'handover', note: 'note',
+  escalate: 'needs you', dispatch: 'task', handoff: 'handover', note: 'note', permission: 'asks permission',
 }
 
 /** Kinds that expect an answer, so an answer not yet given shows as one owed. */
-const ANSWERED: ReadonlySet<MessageKind> = new Set(['ask', 'question', 'escalate', 'note'])
+const ANSWERED: ReadonlySet<MessageKind> = new Set(['ask', 'question', 'escalate', 'note', 'permission'])
+
+/** How a permission request was settled, in a word for the bubble that says so. */
+const SETTLED: Record<PermissionOutcome, string> = { allow_once: 'allowed once', allow_run: 'allowed for this run', deny: 'denied', timed_out: 'declined, no answer' }
 
 /**
  * The bubbles of a run, in order: each message, then its answer right after it — so a question and
@@ -195,7 +198,14 @@ export function bubbles(items: readonly Item[], lanes: readonly Lane[], live: bo
     out.push({ key: `${key}:said`, item, part: 'said', from: line.senders, to, word: WORD[message.kind], text: message.text, offsetMs: message.offsetMs, ts: message.ts })
     const reviewing = message.kind === 'handover' && line.receiver !== null && you.has(line.receiver)
     const reply = message.reply
-    if (reply && line.replier !== null) {
+    const permission = message.permission
+    if (permission?.outcome && permission.settled) {
+      // Your answer to a permission request, or the clock's when nobody gave one: a word, not words.
+      out.push({
+        key: `${key}:reply`, item, part: 'reply', from: line.replier === null ? [] : [line.replier], to: line.senders.slice(0, 1),
+        word: SETTLED[permission.outcome], text: '', offsetMs: permission.settled.offsetMs, ts: permission.settled.ts,
+      })
+    } else if (reply && line.replier !== null) {
       const back = reply.sentBackTo
       const plain = reviewing && !back && reply.text.trim() === approval
       out.push({

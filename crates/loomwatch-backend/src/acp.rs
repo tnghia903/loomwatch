@@ -1990,10 +1990,20 @@ async fn ask_operator(
     } else if let Some(open) = asker.open(request) {
         let request_id = open.request.id.clone();
         if let Some(recorder) = recorder.as_deref_mut() {
+            // What the card asks, recorded whole, so the team's chat can show the ask after the
+            // live request is gone (ADR 0051).
             recorder
                 .append(
                     EventKind::SessionMeta,
-                    json!({"phase": "awaiting_permission", "requestId": request_id, "title": title, "kind": kind}),
+                    json!({
+                        "phase": "awaiting_permission",
+                        "requestId": request_id,
+                        "title": title,
+                        "kind": kind,
+                        "switch": open.request.switch,
+                        "detail": open.request.detail,
+                        "expiresAt": open.request.expires_at,
+                    }),
                     Some(json!({"source": "loomwatch", "phase": "awaiting_permission"})),
                 )
                 .await?;
@@ -3988,14 +3998,21 @@ mod tests {
             })
             .collect();
         assert_eq!(outcomes, ["allow_run", "allowed_for_run", "deny"]);
+        let asked: Vec<_> = events
+            .iter()
+            .filter(|event| event.payload["phase"] == "awaiting_permission")
+            .collect();
         assert_eq!(
-            events
-                .iter()
-                .filter(|event| event.payload["phase"] == "awaiting_permission")
-                .count(),
+            asked.len(),
             2,
             "a request already allowed for the run did not wait"
         );
+        // The chat shows the ask from the record alone, after the live request is gone.
+        assert_eq!(asked[0].payload["switch"], "web");
+        assert_eq!(asked[0].payload["detail"], "model cards 2019");
+        assert!(asked[0].payload["expiresAt"].is_string());
+        assert_eq!(asked[1].payload["switch"], "commands");
+        assert_eq!(asked[1].payload["detail"], "rm -rf build");
     }
 
     /// An app with no ask-first mode still runs, and the record says it decides for itself.

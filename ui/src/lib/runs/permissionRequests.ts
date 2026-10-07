@@ -14,6 +14,12 @@ export function permissionSentence(request: Pick<PermissionRequest, 'name' | 'sw
   return `${request.name} wants to ${wants ?? `do this: ${request.title}`}`
 }
 
+/** "Asks to use the web" — the request as the asking agent's own message in the team's chat. */
+export function permissionAsks(switchKey: string | null | undefined): string {
+  const wants = switchKey ? WANTS[switchKey] : null
+  return wants ? `Asks to ${wants}` : 'Asks your permission for'
+}
+
 /** What exactly: the app's own title, plus the query, command or path when it named one. */
 export function permissionWhat(request: Pick<PermissionRequest, 'title' | 'detail'>): string {
   return request.detail ? `${request.title} · ${request.detail}` : request.title

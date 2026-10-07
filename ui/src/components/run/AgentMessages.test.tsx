@@ -188,6 +188,44 @@ describe('Team chat', () => {
     expect(screen.queryByText('ACP is JSON-RPC.')).not.toBeInTheDocument()
   })
 
+  // ADR 0040 + 0051: the request is the agent's message to you, answered where you would reply.
+  it('shows a permission request as the agent’s message to you, with its answers where you reply', () => {
+    const asking = message({
+      id: 'permission:p1', kind: 'permission', from: 'researcher', to: 'operator', text: 'Web search', evidenceId: 'e3', seq: 3, ts: at(3), offsetMs: 3000, state: 'pending',
+      permission: { requestId: 'p1', switch: 'web', detail: 'model cards 2019', outcome: null, settled: null },
+    })
+    const permissionTurn = vi.fn((asked: TeamMessage) => <button type="button">Allow {asked.permission?.requestId}</button>)
+    setup([asking], { live: true, bare: true, permissionTurn, yourTurn: <button type="button">Approve</button> })
+    const ask = msg(/Researcher to you: asks permission/)
+    expect(within(ask).getByText('Asks to use the web')).toBeInTheDocument()
+    expect(within(ask).getByText('Web search · model cards 2019')).toBeInTheDocument()
+    // The answers are the request's own, not a review's.
+    expect(screen.getByRole('button', { name: 'Allow p1' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
+    expect(permissionTurn).toHaveBeenCalledWith(asking)
+  })
+
+  it('remembers how a permission request was settled: by you, or by nobody answering in time', () => {
+    const settled = (id: string, outcome: 'allow_once' | 'allow_run' | 'deny' | 'timed_out', seconds: number) => message({
+      id: `permission:${id}`, kind: 'permission', from: 'researcher', to: 'operator', text: 'Web search', seq: seconds, ts: at(seconds), offsetMs: seconds * 1000,
+      state: outcome === 'timed_out' ? 'delivered' : 'answered', reply: outcome === 'timed_out' ? null : answer('operator', '', seconds + 5),
+      permission: { requestId: id, switch: 'web', detail: null, outcome, settled: { eventId: `s${seconds}`, seq: seconds + 1, ts: at(seconds + 5), offsetMs: (seconds + 5) * 1000 } },
+    })
+    setup([settled('a', 'allow_once', 10), settled('b', 'allow_run', 20), settled('c', 'deny', 30), settled('d', 'timed_out', 40)], { live: true, bare: true, permissionTurn: () => <button type="button">Allow</button> })
+    expect(screen.getByText('You allowed it, this once')).toBeInTheDocument()
+    expect(screen.getByText('You allowed it for the rest of this run')).toBeInTheDocument()
+    expect(screen.getByText('You denied it. Researcher carries on without it')).toBeInTheDocument()
+    expect(screen.getByText('Nobody answered in time, so it was declined')).toBeInTheDocument()
+    // Nothing settled is asked again.
+    expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull()
+  })
+
+  it('says a permission request got no answer once the run is over', () => {
+    setup([message({ id: 'permission:p9', kind: 'permission', from: 'researcher', to: 'operator', text: 'mcp__claude_ai_Notion__notion-fetch', state: 'pending', permission: { requestId: 'p9', switch: null, detail: null, outcome: null, settled: null } })], { bare: true })
+    expect(screen.getByText('Asks your permission for')).toBeInTheDocument()
+    expect(screen.getByText('No answer')).toBeInTheDocument()
+  })
+
   it('shows nothing for a finished run in which nothing passed between the agents', () => {
     const { container } = render(<AgentMessages messages={[]} order={order} evidence={[]} live={false} onInspectEvidence={vi.fn()} />)
     expect(container).toBeEmptyDOMElement()

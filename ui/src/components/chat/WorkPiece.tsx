@@ -15,7 +15,7 @@ import type { Party } from '../../lib/story/conversation'
 import type { ReceiptLine } from '../../lib/story/receipt'
 import type { TeamMessage } from '../../lib/watch/messages'
 import type { AgentConfig, AllowSwitch } from '../../lib/team-file/types'
-import { PermissionPrompt } from '../run/PermissionPrompt'
+import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { Markdown } from '../ui/Markdown'
 import { AnswerTools } from './AnswerTools'
 import { Appearing, Swap } from './Appearing'
@@ -145,6 +145,19 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
       ? message.kind === 'handover' && message.to === waiting.node
       : message.kind === 'question' && message.from === waiting?.node))
   const onTheMessage = open && asksYou
+  // A permission request is answered the same way: on the agent's message that asks, once the
+  // talk shows it, and on a card of its own until then.
+  const asking = live ? record.permissionRequests ?? [] : []
+  const askedOnMessage = new Set(open ? session.projection.messages.flatMap((message) => (message.kind === 'permission' && message.state === 'pending' && message.permission ? [message.permission.requestId] : [])) : [])
+  const unasked = asking.filter((request) => !askedOnMessage.has(request.id))
+  const permissionTurn = (message: TeamMessage) => {
+    const request = asking.find((candidate) => candidate.id === message.permission?.requestId)
+    return request ? (
+      <Appearing key={`permission:${request.id}`} className="tc-turn permission" role="group" aria-label={`Answer ${request.name}'s permission request`}>
+        <PermissionActions runId={run.runId} request={request} onAlwaysAllow={onAlwaysAllow} />
+      </Appearing>
+    ) : undefined
+  }
 
   const act = async (work: () => Promise<RunRecord | void>) => {
     setBusy(true)
@@ -185,13 +198,15 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
       {notes.map((note) => <Note key={note.id} note={note} live={live} name={name} />)}
 
       <div className="tc-talk" data-tour={newest ? 'stages' : undefined}>
-        <Weft workers={workers} at={weftAt(workers, record, live, waiting)} live={live} waiting={Boolean(waiting)} status={record.status}>
+        <Weft workers={workers} at={weftAt(workers, record, live, waiting)} live={live} waiting={Boolean(waiting) || asking.length > 0} status={record.status}>
           {workers.map((id) => <i key={id} className={`chat-avatar hue-${hue(id)}${live && record.working?.includes(id) ? ' working' : ''}`} style={{ width: 22, height: 22, fontSize: 9 }}>{initials(name(id))}</i>)}
         </Weft>
-        <Swap key={talkKey(live, waiting, working, run.status)} className="tc-talk-line">
+        <Swap key={talkKey(live, waiting, asking.map((request) => request.id), working, run.status)} className="tc-talk-line">
           {live
             ? waiting
               ? <><b>Waiting for you</b> · {waiting.kind === 'review_stop' ? `${name(waiting.handoverFrom ?? '')}'s work is ready for your review` : `${name(waiting.node)} asked you something`}</>
+              : asking.length > 0
+                ? <><b>Waiting for you</b> · {askers(asking.map((request) => name(request.agent)))} your permission</>
               : working.length > 0
                 ? <><b>{listNames(working)}</b> {working.length === 1 ? 'is' : 'are'} working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
                 : run.status === 'queued' || run.status === 'starting' ? 'Starting…' : 'Handing over…'
@@ -227,6 +242,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
                 onInspectEvidence={() => onDetails(run.runId)}
                 reveal={revealed}
                 yourTurn={onTheMessage ? yourTurn : undefined}
+                permissionTurn={permissionTurn}
               />
             </AppearContext.Provider>
           </Suspense>
@@ -265,7 +281,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
           <p className="tc-tip">Answer in the box below. {waiting.parkNote}</p>
         </Appearing>
       )}
-      {live && (record.permissionRequests?.length ?? 0) > 0 && <PermissionPrompt inline run={record} onAlwaysAllow={onAlwaysAllow} />}
+      {unasked.length > 0 && <PermissionPrompt inline run={{ runId: run.runId, permissionRequests: unasked }} onAlwaysAllow={onAlwaysAllow} />}
 
       <Outcome tour={newest} run={record} answer={answer} streaming={streaming} name={name} hue={hue} open={answerOpen} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
         <AnswerTools
@@ -295,12 +311,20 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   )
 }
 
+/** Your answer to a permission request, in the line that remembers it. */
+function permitted(message: TeamMessage, agent: string): string {
+  const outcome = message.permission?.outcome
+  if (outcome === 'allow_once') return `You let ${agent} do this once: ${message.text}`
+  if (outcome === 'allow_run') return `You let ${agent} do this for the rest of the run: ${message.text}`
+  return `You denied ${agent}: ${message.text}`
+}
+
 /**
  * What you decided while this piece worked — a review answered, a question answered — said where
  * you said it, so your own words do not vanish into the fold. Unfolded, the talk shows them.
  */
 function Decisions({ messages, operators, name }: { messages: readonly TeamMessage[]; operators: ReadonlySet<string>; name: (id: string) => string }) {
-  const yours = messages.filter((message) => message.reply && (operators.has(message.reply.from) || message.reply.from === 'operator') && (message.kind === 'handover' || message.kind === 'question'))
+  const yours = messages.filter((message) => message.reply && (operators.has(message.reply.from) || message.reply.from === 'operator') && (message.kind === 'handover' || message.kind === 'question' || message.kind === 'permission'))
   if (yours.length === 0) return null
   return (
     <>
@@ -308,10 +332,12 @@ function Decisions({ messages, operators, name }: { messages: readonly TeamMessa
         const reply = message.reply!
         // A handover is addressed to the review step; whose work it is, the record names.
         const whose = message.kind === 'question' ? message.from ?? '' : message.handedBy?.from[0] ?? message.from ?? ''
-        const label = message.kind === 'question'
+        const label = message.kind === 'permission'
+          ? permitted(message, name(message.from ?? ''))
+          : message.kind === 'question'
           ? `You → ${name(message.from ?? '')} · your answer to “${message.text.trim().slice(0, 80)}”`
           : reply.sentBackTo ? `You sent it back to ${name(reply.sentBackTo)}` : `You approved ${name(whose)}'s work`
-        const quiet = message.kind === 'handover' && !reply.sentBackTo && reply.text.trim() === APPROVAL_TEXT
+        const quiet = message.kind === 'permission' || (message.kind === 'handover' && !reply.sentBackTo && reply.text.trim() === APPROVAL_TEXT)
         return (
           <Appearing key={message.id} className="chat-msg mine tc-decided">
             <div className="chat-stack">
@@ -476,10 +502,17 @@ function weftAt(workers: readonly string[], run: RunRecord, live: boolean, waiti
 }
 
 /** What the talk line says, as a key: a change of who is working slides the new words in. */
-function talkKey(live: boolean, waiting: RunRecord['waitingOn'], working: readonly string[], status: string): string {
+function talkKey(live: boolean, waiting: RunRecord['waitingOn'], asking: readonly string[], working: readonly string[], status: string): string {
   if (!live) return 'done'
   if (waiting) return `waiting:${waiting.node}`
+  if (asking.length > 0) return `asking:${asking.join(',')}`
   return working.length > 0 ? `working:${working.join(',')}` : status
+}
+
+/** "Researcher asks", "Researcher and Writer ask": who is waiting on your permission. */
+function askers(names: readonly string[]): string {
+  const once = [...new Set(names)]
+  return `${listNames(once)} ${once.length === 1 ? 'asks' : 'ask'}`
 }
 
 /** Who worked on a piece, in the order they work. */

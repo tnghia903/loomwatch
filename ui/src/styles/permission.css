@@ -2,6 +2,16 @@
    One card per request, docked under the header in the middle of the run, above the lane and the
    canvas alike: the app is blocked until it is answered, so it must not be missed. */
 .permission-prompt {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
+  background: var(--color-panel-solid);
+}
+/* Only the floating card is placed over the screen. The chat's card (ADR 0051) sits in its piece of
+   work: fixed there, it was drawn under the Details pane, out of sight and out of reach. */
+.permission-prompt:not(.inline) {
   position: fixed;
   z-index: 40;
   top: 76px;
@@ -10,12 +20,6 @@
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100dvh - 120px);
   overflow-y: auto;
-  display: grid;
-  gap: 10px;
-  padding: 14px 16px;
-  border-radius: var(--r-md);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
-  background: var(--color-panel-solid);
   box-shadow: 0 18px 60px #0008;
   animation: pop-in var(--t-quick) var(--ease-out) both;
 }
@@ -41,3 +45,9 @@
 .ticket-tag.kind-permission { background: var(--color-accent-tint); color: var(--color-accent); }
 
 @media (prefers-reduced-motion: reduce) { .permission-prompt { animation: none; } }
+
+/* ADR 0051: the request as the asking agent's message in the team's chat, answered where you reply. */
+.chat-permission { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); }
+.chat-permission .chat-file-head { color: var(--color-accent); }
+.chat-permission .permission-what { color: var(--color-ink); }
+.tc-turn.permission { display: grid; gap: 6px; }

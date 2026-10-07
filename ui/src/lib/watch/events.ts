@@ -744,6 +744,9 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         const sections = promptSections(event)
         if (sections) { agent.promptSections ??= sections; letters.promptRecord(event, sections) }
         if (object(event.raw) && event.raw.source === 'loomwatch') {
+          // ADR 0040: LoomWatch put the app's request to you; in the team's chat it is a message.
+          if (p.phase === 'awaiting_permission') letters.permissionAsked(event, evidence.findLast((item) => item.kind === 'permission' && item.agentId === agent.id)?.id ?? null)
+          if (p.phase === 'permission_answered') letters.permissionAnswered(event)
           if (p.phase === 'prompt_sections' && agent.requiredSkills === undefined) agent.requiredSkills = skillReceipts(p.requiredSkills, 'prepared', event.id)
           const servers = p.phase === 'prompt_sections' && agent.connectedServers === undefined ? connectedServers(p.tools) : undefined
           if (servers) agent.connectedServers = servers

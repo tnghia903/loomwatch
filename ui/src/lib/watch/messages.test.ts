@@ -119,6 +119,37 @@ describe('messages between agents', () => {
     })
   })
 
+  it('turns a permission request LoomWatch put to you into a message, settled by your answer or the clock', () => {
+    seq = 0
+    const asked = (seconds: number, agentId: string, requestId: string, extra: Record<string, unknown> = {}) =>
+      event(seconds, agentId, 'session_meta', { phase: 'awaiting_permission', requestId, title: 'mcp__claude_ai_Notion__notion-fetch', kind: 'other', switch: null, detail: null, ...extra }, loomwatch('awaiting_permission'))
+    const answered = (seconds: number, agentId: string, requestId: string | null, outcome: string) =>
+      event(seconds, agentId, 'session_meta', { phase: 'permission_answered', requestId, title: 'Web search', kind: 'fetch', outcome, allowed: outcome.startsWith('allow') }, loomwatch('permission_answered'))
+    const events = [
+      event(1, 'scope', 'permission', { options: [{ kind: 'allow_once', name: 'Yes', optionId: 'allow-once' }], toolCall: { toolCallId: 't1', title: 'mcp__claude_ai_Notion__notion-fetch' } }),
+      asked(1, 'scope', 'p1'),
+      answered(40, 'scope', 'p1', 'allow_once'),
+      asked(50, 'writer', 'p2', { title: 'Web search', kind: 'fetch', switch: 'web', detail: 'model cards 2019' }),
+      answered(650, 'writer', 'p2', 'timed_out'),
+      // Let through by an earlier "Allow for this run": never asked, so no message.
+      answered(660, 'writer', null, 'allowed_for_run'),
+      asked(700, 'writer', 'p3', { title: 'Bash: rm -rf build', kind: 'execute', switch: 'commands' }),
+    ]
+    const { messages } = projectRun(events)
+    expect(messages).toHaveLength(3)
+    expect(messages[0]).toMatchObject({
+      kind: 'permission', from: 'scope', to: 'operator', text: 'mcp__claude_ai_Notion__notion-fetch', evidenceId: 'e0', state: 'answered',
+      reply: { from: 'operator', text: '', offsetMs: 39_000 },
+      permission: { requestId: 'p1', switch: null, detail: null, outcome: 'allow_once', settled: expect.objectContaining({ offsetMs: 39_000 }) },
+    })
+    // Nobody answered: declined by the clock, and not by you.
+    expect(messages[1]).toMatchObject({ kind: 'permission', from: 'writer', state: 'delivered', reply: null, permission: { requestId: 'p2', switch: 'web', detail: 'model cards 2019', outcome: 'timed_out' } })
+    // Still waiting, as it is when a run is stopped with the request open.
+    expect(messages[2]).toMatchObject({ kind: 'permission', text: 'Bash: rm -rf build', state: 'pending', reply: null, permission: { requestId: 'p3', outcome: null, settled: null } })
+    // Before the answer, the first one waits on you.
+    expect(projectRun(events, 1).messages[0]).toMatchObject({ state: 'pending', reply: null, permission: { outcome: null } })
+  })
+
   it('reads a review step as a handover you answer, and your answer reaching the next stage as direction', () => {
     seq = 0
     const { messages } = projectRun([
