@@ -1,6 +1,7 @@
 import type { AgentStatus } from '../team-file/types'
 import { Correspondence, OPERATOR_ID, type TeamMessage } from './messages'
 import { ACTIVITY_KINDS, ReplyText } from './replyText'
+import { summarizeUsage, turnUsage, type TokenSummary } from './usage'
 
 export const eventKinds = ['message', 'thought', 'tool_call', 'tool_update', 'plan', 'permission', 'session_meta', 'usage', 'turn_end', 'process'] as const
 export interface RunEvent {
@@ -181,6 +182,7 @@ export interface ProjectedAgent {
   /** Calls opened but not yet paired to a terminal update — the tools-coverage fact (CONTRACT §12). */
   openCalls: number
   turns: number
+  /** Every turn's tokens, counted the way its app needs (./usage); `null` while none are known. */
   tokens: number | null
   contextUsed: number | null
   contextSize: number | null
@@ -330,6 +332,12 @@ export interface RunProjection {
   lastSeq: number
   totals: { thoughts: number; toolCalls: number; messages: number; agents: number }
   coverage: Record<CoverageKey, CategoryCoverage>
+  /**
+   * The run's tokens (./usage), once its evidence is complete and the cut reaches its end: replays
+   * arrive a page at a time, and a total read from the first pages is not a smaller truth, it is
+   * wrong. `null` until then; absent on projections built by hand.
+   */
+  tokens?: TokenSummary | null
 }
 
 export interface RunContext {
@@ -731,7 +739,6 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           // One turn, cut by the app and carried on: its reply keeps going, and its cost counts.
           agent.resumedTurns = (agent.resumedTurns ?? 0) + 1
           agent.turnText.endMessage()
-          if (object(p.usage) && typeof p.usage.totalTokens === 'number') agent.tokens = (agent.tokens ?? 0) + p.usage.totalTokens
           agent.task = 'Carrying on without what was declined'
           resuming.add(agent.id)
         }
@@ -979,9 +986,6 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         agent.streaming = false
         agent.thinking = false
         agent.stopReason = typeof p.stopReason === 'string' ? p.stopReason : 'end_turn'
-        if (object(p.usage)) {
-          if (typeof p.usage.totalTokens === 'number') agent.tokens = (agent.tokens ?? 0) + p.usage.totalTokens
-        }
         if (agent.stopReason === 'cancelled' && interrupted.delete(agent.id)) {
           // You stopped it to hand it a note; nothing went wrong, and the note's turn follows.
           agent.task = 'Stopped for your note'
@@ -996,6 +1000,14 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
       default:
         break
     }
+  }
+
+  // Tokens are their own pass: an app's readings mean different things per app, and a turn's
+  // count is only known once its readings are all in (./usage).
+  const turns = turnUsage(events, throughSeq).filter((turn) => turn.agentId !== OPERATOR_ID)
+  for (const turn of turns) {
+    const agent = agents.get(turn.agentId)
+    if (agent && turn.total > 0) agent.tokens = (agent.tokens ?? 0) + turn.total
   }
 
   // An agent still mid-turn when the projection is cut off keeps its unfinished text as
@@ -1119,6 +1131,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           : { ...settled, observed: observed.commands }),
       sources: category('sources', observed.sources > 0 ? { ...settled, observed: observed.sources } : { ...empty }),
     },
+    tokens: atRest ? summarizeUsage(turns) : null,
   }
 }
 

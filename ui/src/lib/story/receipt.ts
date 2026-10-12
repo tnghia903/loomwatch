@@ -2,6 +2,7 @@ import { outwardCalls } from '../library/observed'
 import type { AgentRuntime } from '../runs/graph'
 import type { AgentAllow, AllowSwitch } from '../team-file/types'
 import type { Evidence, RunPhase, RunProjection } from '../watch/events'
+import { formatTokens, type TokenSummary, type TurnPurpose } from '../watch/usage'
 import { failuresOf, readPhrase, workCount } from './reads'
 import { describeEvidence } from './weft'
 
@@ -36,8 +37,28 @@ export interface Receipt {
   took: string
   team: string
   ranOn: string
+  /** `null` until the run's evidence is all in, and for a run whose apps reported no tokens. */
+  tokens: ReceiptTokens | null
   lines: ReceiptLine[]
   checks: ReceiptLine[]
+}
+
+export interface ReceiptTokenRow {
+  label: string
+  /** "~2.25M": three figures, `~` when part of it was worked out rather than reported. */
+  value: string
+  /** "2,245,301 tokens", for the hover. */
+  exact: string
+}
+
+/** What the run's model calls came to (lib/watch/usage.ts): one line, and its breakdown. */
+export interface ReceiptTokens extends ReceiptTokenRow {
+  /** Share of prompt tokens read back from a cache, "89% cached"; `null` when none were split. */
+  cached: string | null
+  agents: ReceiptTokenRow[]
+  purposes: ReceiptTokenRow[]
+  /** Why a count carries `~`, when one does. */
+  estimate: string | null
 }
 
 export interface ReceiptAgent {
@@ -114,6 +135,44 @@ function refusalLines(agent: ReceiptAgent, items: readonly Evidence[], carriedOn
     }
   }
   return lines
+}
+
+/** Why a turn happened, as the receipt says it. */
+const PURPOSE_WORDS: Record<TurnPurpose, string> = {
+  work: 'The work',
+  handover: 'Handovers',
+  checkpoint: 'Checkpoints',
+  ask: 'Answering teammates',
+  note: 'Your notes and answers',
+}
+
+const APP_WORDS: Record<string, string> = { codex: 'Codex', claude: 'Claude' }
+
+function tokenRow(label: string, group: { total: number; estimated: boolean }): ReceiptTokenRow {
+  return { label, value: `${group.estimated ? '~' : ''}${formatTokens(group.total)}`, exact: `${group.total.toLocaleString('en-US')} tokens` }
+}
+
+/**
+ * The run's tokens as the receipt prints them: one figure with its cache share, then who spent
+ * them and on what. Nothing is printed for a run whose apps reported none — a zero there would
+ * claim the run cost nothing, when it only means nobody said.
+ */
+export function receiptTokens(summary: TokenSummary | null | undefined, names: ReadonlyMap<string, string>): ReceiptTokens | null {
+  if (!summary || summary.total <= 0) return null
+  const why: string[] = []
+  for (const app of summary.estimatedApps) {
+    why.push(app === 'codex'
+      ? 'Codex reports only the last model call of each turn, so LoomWatch adds up every call it reported.'
+      : `${APP_WORDS[app] ?? 'An app'} left a turn's total out, so LoomWatch added it up from its readings.`)
+  }
+  if (summary.stoppedTurns > 0) why.push(`${summary.stoppedTurns === 1 ? 'A turn' : `${summary.stoppedTurns} turns`} stopped before ${summary.stoppedTurns === 1 ? 'it' : 'they'} ended, so ${summary.stoppedTurns === 1 ? 'it counts' : 'they count'} what was seen until then.`)
+  return {
+    ...tokenRow('Tokens', summary),
+    cached: summary.cacheShare === null ? null : `${Math.round(summary.cacheShare * 100)}% cached`,
+    agents: summary.agents.filter((agent) => agent.total > 0).map((agent) => tokenRow(names.get(agent.agentId) ?? agent.agentId, agent)),
+    purposes: summary.purposes.filter((purpose) => purpose.total > 0).map((purpose) => tokenRow(PURPOSE_WORDS[purpose.purpose], purpose)),
+    estimate: why.length > 0 ? `~ ${why.join(' ')}` : null,
+  }
 }
 
 const PHASE_HEADING: Partial<Record<RunPhase, string>> = {
@@ -202,6 +261,7 @@ export function buildReceipt(input: ReceiptInput): Receipt {
     took: input.elapsed,
     team: `${plural(helpers.length, 'helper')}${operator ? ' + your review' : ''}`,
     ranOn: apps.length ? apps.join(', ') : 'Not recorded',
+    tokens: receiptTokens(input.projection.tokens, new Map(input.agents.map((agent) => [agent.id, agent.name]))),
     lines,
     checks,
   }
@@ -218,6 +278,7 @@ export function receiptMarkdown(receipt: Receipt): string {
     `- **Team:** ${receipt.team}`,
     `- **Took:** ${receipt.took}`,
     `- **Ran on:** ${receipt.ranOn}`,
+    ...(receipt.tokens ? [`- **Tokens:** ${[receipt.tokens.value, receipt.tokens.cached].filter(Boolean).join(' · ')}`] : []),
     '',
     ...receipt.lines.map((line) => `- ${MARK[line.tone]} ${line.text}`),
   ]

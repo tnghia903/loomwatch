@@ -293,6 +293,18 @@ span.story-schedule { cursor: default; }
 .receipt-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 16px; margin: 0; }
 .receipt-facts dt { color: var(--color-ink-3); }
 .receipt-facts dd { margin: 0; text-align: right; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* Tokens: one quiet line that folds open. Plain ink like the facts around it; gold only on hover and focus. */
+.receipt-fold { display: inline-flex; align-items: center; gap: 4px; margin: 0; padding: 0 2px; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; }
+.receipt-fold svg { color: var(--color-ink-3); }
+.receipt-fold:hover, .receipt-fold:hover svg { color: var(--color-accent); }
+.receipt-fold:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.receipt-tokens { display: grid; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px dotted color-mix(in srgb, var(--color-ink) 16%, transparent); }
+.receipt-tokens h4 { margin: 0 0 2px; font: 600 11px/14px var(--font-sans); letter-spacing: .07em; text-transform: uppercase; color: var(--color-ink-3); }
+.receipt-tokens dl { display: grid; gap: 1px; margin: 0; }
+.receipt-tokens dl > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; }
+.receipt-tokens dt { color: var(--color-ink-2); overflow-wrap: anywhere; }
+.receipt-tokens dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.receipt-tokens-note { margin: 0; color: var(--color-ink-3); font-size: 11.5px; line-height: 1.5; }
 .receipt-lines, .receipt-checks ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .receipt-lines li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 6px; align-items: start; }
 .receipt-mark { font-weight: 600; }

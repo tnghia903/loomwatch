@@ -4,7 +4,7 @@ import type { Evidence, RunProjection } from '../watch/events'
 import { buildReceipt, type Receipt, type ReceiptLine } from './receipt'
 import { answerVerdict, findingsOf, type VerdictInput } from './verdict'
 
-const receipt = (lines: ReceiptLine[], checks: ReceiptLine[] = []): Receipt => ({ heading: 'Run 3 · Finished', asked: 'Brief', took: '2m', team: '2 helpers', ranOn: 'Claude Code', lines, checks })
+const receipt = (lines: ReceiptLine[], checks: ReceiptLine[] = []): Receipt => ({ heading: 'Run 3 · Finished', asked: 'Brief', took: '2m', team: '2 helpers', ranOn: 'Claude Code', tokens: null, lines, checks })
 const finished: VerdictInput = { phase: 'succeeded', text: '# Brief', streaming: false, terminal: true, settled: true, reviewed: false, receipt: receipt([{ tone: 'ok', text: 'Writer finished' }]), read: { files: 0, pages: 0, notes: 0 } }
 
 describe('answerVerdict', () => {

@@ -1,7 +1,7 @@
-import { ArrowRight, Check, ClipboardCopy } from 'lucide-react'
-import { useState } from 'react'
+import { ArrowRight, Check, ChevronDown, ChevronRight, ClipboardCopy } from 'lucide-react'
+import { useId, useState } from 'react'
 
-import { RECEIPT_MARK, receiptMarkdown, type Receipt } from '../../lib/story/receipt'
+import { RECEIPT_MARK, receiptMarkdown, type Receipt, type ReceiptTokens } from '../../lib/story/receipt'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { LoomMark } from '../ui/glyphs'
 
@@ -20,6 +20,8 @@ interface RunReceiptProps {
  */
 export function RunReceipt({ receipt, onInspectEvidence, onAllow }: RunReceiptProps) {
   const [copied, setCopied] = useState<string | null>(null)
+  const [tokensOpen, setTokensOpen] = useState(false)
+  const breakdown = useId()
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(receiptMarkdown(receipt))
@@ -44,7 +46,19 @@ export function RunReceipt({ receipt, onInspectEvidence, onAllow }: RunReceiptPr
           <dt>Team</dt><dd>{receipt.team}</dd>
           <dt>Took</dt><dd>{receipt.took}</dd>
           <dt>Ran on</dt><dd>{receipt.ranOn}</dd>
+          {receipt.tokens && (
+            <>
+              <dt>Tokens</dt>
+              <dd>
+                <button type="button" className="receipt-fold" aria-expanded={tokensOpen} aria-controls={breakdown} title={receipt.tokens.exact} onClick={() => setTokensOpen((open) => !open)}>
+                  {[receipt.tokens.value, receipt.tokens.cached].filter(Boolean).join(' · ')}
+                  {tokensOpen ? <ChevronDown size={12} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />}
+                </button>
+              </dd>
+            </>
+          )}
         </dl>
+        {receipt.tokens && tokensOpen && <TokenBreakdown id={breakdown} tokens={receipt.tokens} />}
         <hr />
         <ul className="receipt-lines">
           {receipt.lines.map((line, index) => (
@@ -84,5 +98,22 @@ export function RunReceipt({ receipt, onInspectEvidence, onAllow }: RunReceiptPr
         </footer>
       </div>
     </section>
+  )
+}
+
+/** Who spent the run's tokens, and on what kind of turn: the work, or what it took to pass it on. */
+function TokenBreakdown({ id, tokens }: { id: string; tokens: ReceiptTokens }) {
+  return (
+    <div id={id} className="receipt-tokens" role="group" aria-label="Tokens by agent and by kind of turn">
+      {[{ heading: 'By agent', rows: tokens.agents }, { heading: 'By kind of turn', rows: tokens.purposes }].map(({ heading, rows }) => (
+        <section key={heading}>
+          <h4>{heading}</h4>
+          <dl>
+            {rows.map((row, index) => <div key={index}><dt>{row.label}</dt><dd title={row.exact}>{row.value}</dd></div>)}
+          </dl>
+        </section>
+      ))}
+      {tokens.estimate && <p className="receipt-tokens-note">{tokens.estimate}</p>}
+    </div>
   )
 }

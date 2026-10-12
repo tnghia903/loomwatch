@@ -1,7 +1,10 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import { projectRun, recordedReplyText, type RunEvent } from '../watch/events'
-import { buildReceipt } from './receipt'
+import { buildReceipt, receiptMarkdown } from './receipt'
 import { findingsOf } from './verdict'
 
 const at = (seconds: number) => new Date(Date.UTC(2026, 9, 3, 0, 0, seconds)).toISOString()
@@ -167,5 +170,46 @@ describe('a request an app declined by its own option', () => {
     expect(aside).toEqual({ tone: 'warn', text: 'Codex ends Gatherer’s turn when a request is declined, so LoomWatch asked Gatherer to carry on without it', agentId: 'gatherer', aside: true })
     expect(findingsOf(receipt)).not.toContain(aside)
     expect(findingsOf(receipt).map((line) => line.text)).toEqual(['Gatherer wasn’t allowed to run commands, and carried on without it'])
+  })
+})
+
+/** The real digest run in lib/watch/usage.test.ts: Gatherer on Codex, Reader and Writer on Claude. */
+describe('the run’s tokens', () => {
+  const digest = JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../watch/fixtures/usage-digest-run.json'), 'utf8')) as RunEvent[]
+  const receiptOf = (evidenceComplete: boolean) => {
+    const projection = projectRun(digest, Infinity, { status: 'succeeded', evidenceComplete })
+    return buildReceipt({
+      attempt: 4,
+      prompt: 'Today’s tech news digest',
+      phase: 'succeeded',
+      elapsed: '12m',
+      agents: [
+        { id: 'gatherer', name: 'Gatherer', operator: false, runtime: { status: 'succeeded' } },
+        { id: 'reader', name: 'Reader', operator: false, runtime: { status: 'succeeded' } },
+        { id: 'writer', name: 'Writer', operator: false, runtime: { status: 'succeeded' } },
+      ],
+      projection,
+      evidenceByAgent: new Map(),
+      harnessLabels: new Map([['gatherer', 'Codex'], ['reader', 'Claude'], ['writer', 'Claude']]),
+      answered: true,
+    })
+  }
+
+  it('prints every call each app made, says which counts were added up, and copies the line', () => {
+    const { tokens } = receiptOf(true)
+    expect(tokens).toMatchObject({ value: '~2.63M', exact: '2,628,961 tokens', cached: '89% cached' })
+    expect(tokens?.agents).toEqual([
+      { label: 'Gatherer', value: '~2.25M', exact: '2,245,301 tokens' },
+      { label: 'Reader', value: '313k', exact: '313,161 tokens' },
+      { label: 'Writer', value: '70.5k', exact: '70,499 tokens' },
+    ])
+    expect(tokens?.purposes.map((row) => [row.label, row.value])).toEqual([['The work', '~2.16M'], ['Handovers', '219k'], ['Checkpoints', '254k']])
+    expect(tokens?.estimate).toBe('~ Codex reports only the last model call of each turn, so LoomWatch adds up every call it reported.')
+    expect(receiptMarkdown(receiptOf(true))).toContain('- **Tokens:** ~2.63M · 89% cached')
+  })
+
+  it('prints nothing while the replay is still paging in', () => {
+    expect(receiptOf(false).tokens).toBeNull()
+    expect(receiptMarkdown(receiptOf(false))).not.toContain('Tokens')
   })
 })
