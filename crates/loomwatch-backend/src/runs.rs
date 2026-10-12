@@ -3583,8 +3583,9 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
             path
         }
 
-        /// A two-stage pipeline whose stages answer the full ADR 0013 + memory-phase-3 turn
-        /// sequence: work, handover (first stage only), checkpoint, close.
+        /// A two-stage pipeline with a notebook, whose stages answer the full ADR 0013 +
+        /// memory-phase-3 turn sequence: work, handover (first stage only), checkpoint, close. A
+        /// team with no notebook is asked for no checkpoint (ADR 0016 amendment).
         pub(crate) fn write_pipeline_team(&self, name: &str) -> PathBuf {
             let stage = |session: &str, reply: &str, handover: bool| {
                 let (handover_turn, checkpoint_id, close_id) = if handover {
@@ -3606,7 +3607,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
             let first = stage("stage-a", "a done", true);
             let second = stage("stage-b", "b done", false);
             let yaml = format!(
-                "schemaVersion: 1\nid: chain\nname: Two-stage chain\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: first\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n  - id: b\n    name: B\n    role: second\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\nedges:\n  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
+                "schemaVersion: 1\nid: chain\nname: Two-stage chain\nentrypoint: a\nmemory:\n  notebook:\n    enabled: true\nagents:\n  - id: a\n    name: A\n    role: first\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n  - id: b\n    name: B\n    role: second\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\nedges:\n  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
                 first.display(),
                 second.display()
             );
@@ -4430,9 +4431,10 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         let finished = wait_for(&registry, &real.run_id, |r| r.status.is_terminal()).await;
         assert_eq!(finished.status, RunStatus::Succeeded, "{finished:?}");
 
-        // Memory phase 3: **every** stage boundary left a checkpoint, asked for in the stage's own
-        // warm session — including the last stage, which has no handover turn and would otherwise
-        // be the one stage "Start a new run from this checkpoint" could never offer.
+        // Memory phase 3: in a team with a notebook, **every** stage boundary left a checkpoint,
+        // asked for in the stage's own warm session — including the last stage, which has no
+        // handover turn and would otherwise be the one stage "Start a new run from this
+        // checkpoint" could never offer.
         let boundaries = archive
             .notebook()
             .checkpoints(&real.run_id, None)

@@ -662,6 +662,7 @@ async fn run_pipeline_nodes(
                 &mut parked,
                 exit_timeout,
                 team_path,
+                memory.notebook_enabled,
             )
             .await?;
             // The stop passes its predecessors' handover through unchanged — the stage after a
@@ -838,16 +839,22 @@ async fn run_pipeline_nodes(
             }
             handovers.insert(agent_id.clone(), handover);
         }
-        checkpoint_stage(
-            archive,
-            shared_log.as_ref(),
-            memory_root(team_path),
-            lineage,
-            &mut process,
-            &mut recorder,
-            agent_id,
-        )
-        .await?;
+        // Only a team with a notebook pays for the boundary turn, as in team mode. A memory-less
+        // team's failed or cancelled run still gets a `coordinator` checkpoint per stage from the
+        // archive (`runs::record_abandoned_checkpoints`), so "Start a new run from this
+        // checkpoint" is still offered where it is ever shown (ADR 0016 amendment).
+        if memory.notebook_enabled {
+            checkpoint_stage(
+                archive,
+                shared_log.as_ref(),
+                memory_root(team_path),
+                lineage,
+                &mut process,
+                &mut recorder,
+                agent_id,
+            )
+            .await?;
+        }
         if last {
             // Nothing can ask the final stage, so it closes immediately and its reply is the run's.
             let closed = process.finish_live(&mut recorder, reply, &context).await?;
@@ -1019,7 +1026,7 @@ async fn answer_a_parked_question(
             tokio::select! {
                 answered = &mut waiting => answered.map_err(|error| anyhow::anyhow!("{error}"))?,
                 () = tokio::time::sleep_until(deadline) => {
-                    park.expire(&boundary, asked.exit_timeout).await;
+                    park.expire(&boundary, asked.exit_timeout, "").await;
                     if let (Some(desk), Some(run_id)) = (asked.lineage.operator.as_ref(), run_id) {
                         note_park_tier(desk, run_id, park.tier, asked.agent, asked.team).await;
                     }
@@ -1219,8 +1226,8 @@ fn answer_turn(answer: &str) -> String {
 /// costs, not a cancelled turn.
 ///
 /// "Send back to <predecessor>" re-prompts the still-warm — or reloaded — stage before the stop
-/// with the note, takes its new reply, handover and checkpoint, and then runs the stop again with
-/// the new handover in front of the operator.
+/// with the note, takes its new reply, handover and — when the team has a notebook — checkpoint,
+/// and then runs the stop again with the new handover in front of the operator.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn run_review_stop(
     team: &TeamConfig,
@@ -1233,6 +1240,7 @@ async fn run_review_stop(
     parked: &mut Option<ParkedStage>,
     exit_timeout: Duration,
     team_path: &Path,
+    notebook: bool,
 ) -> Result<(String, String)> {
     let desk = lineage.operator.as_ref().with_context(|| {
         format!(
@@ -1333,7 +1341,7 @@ async fn run_review_stop(
                                 artifact_root: memory_root(team_path),
                                 team_revision: lineage.team_revision.as_deref(),
                             };
-                            stage.expire(&boundary, exit_timeout).await;
+                            stage.expire(&boundary, exit_timeout, &handover).await;
                             if let Some(mut open) = desk.waiting_for(&run_id, &node.id) {
                                 open.park = operator::ParkTier::Released;
                                 open.park_note = operator::ParkTier::Released.sentence(
@@ -1399,22 +1407,25 @@ async fn run_review_stop(
         } else {
             fresh
         };
-        let boundary = StageBoundary {
-            archive,
-            run_id: Some(run_id.as_str()),
-            seq_high_water: i64::try_from(log.events_appended().await).ok(),
-            artifact_root: memory_root(team_path),
-            team_revision: lineage.team_revision.as_deref(),
-        };
-        let session = stage
-            .session_mut()
-            .context("the stage lost its session between turns, which cannot happen")?;
-        let checkpoint = session
-            .process
-            .bookkeeping_turn(&mut session.recorder, CHECKPOINT_REQUEST, "checkpoint")
-            .await
-            .with_context(|| format!("{stage_id} failed to checkpoint after your note"))?;
-        boundary.record(&stage_id, &checkpoint).await;
+        // Like the stage boundary it redoes: asked only of a team with a notebook.
+        if notebook {
+            let boundary = StageBoundary {
+                archive,
+                run_id: Some(run_id.as_str()),
+                seq_high_water: i64::try_from(log.events_appended().await).ok(),
+                artifact_root: memory_root(team_path),
+                team_revision: lineage.team_revision.as_deref(),
+            };
+            let session = stage
+                .session_mut()
+                .context("the stage lost its session between turns, which cannot happen")?;
+            let checkpoint = session
+                .process
+                .bookkeeping_turn(&mut session.recorder, CHECKPOINT_REQUEST, "checkpoint")
+                .await
+                .with_context(|| format!("{stage_id} failed to checkpoint after your note"))?;
+            boundary.record(&stage_id, &checkpoint).await;
+        }
         stage.repark(exit_timeout, keep_alive_window(team)).await?;
     }
 }
@@ -1565,6 +1576,10 @@ async fn stage_handover(
 /// a turn on a context that is already loaded, and what it buys is that "Start a new run from this
 /// checkpoint" works for *every* stage rather than only for stages a model chose to call the
 /// `checkpoint` tool from.
+///
+/// Asked only of a team with a notebook (ADR 0016 amendment, 2026-10-12). Across the audited runs
+/// it was 9% of all run tokens and no run was ever continued from one, while a memory-less team's
+/// failed or cancelled run gets a `coordinator` checkpoint for every stage from the archive anyway.
 async fn checkpoint_stage(
     archive: &EventArchive,
     shared_log: Option<&EventLog>,
@@ -1815,7 +1830,16 @@ impl ParkedStage {
     /// No model turn is started by an idle timeout. A later answer starts a new run, which
     /// is what the strip already offers — so the cost of walking away from a stop is bounded and
     /// recoverable rather than a held process and a lost context.
-    async fn expire(&mut self, boundary: &StageBoundary<'_>, exit_timeout: Duration) {
+    ///
+    /// `done` is the stage's own last checkpoint when it wrote one, else `handed_over`: a team
+    /// with no notebook asks no stage-end checkpoint, and what the stage handed the stop is the
+    /// truest account of what it finished.
+    async fn expire(
+        &mut self,
+        boundary: &StageBoundary<'_>,
+        exit_timeout: Duration,
+        handed_over: &str,
+    ) {
         let ParkedState::KeptAlive { session, .. } =
             std::mem::replace(&mut self.state, ParkedState::Released)
         else {
@@ -1834,7 +1858,7 @@ impl ParkedStage {
                 agent_id: self.agent_id.clone(),
                 done: prior
                     .as_ref()
-                    .map_or_else(String::new, |point| point.done.clone()),
+                    .map_or_else(|| handed_over.trim().to_owned(), |point| point.done.clone()),
                 next: String::new(),
                 blockers: Some(
                     "The session was released while waiting for your answer.".to_owned(),
@@ -2731,9 +2755,10 @@ mod tests {
 
     /// What every fixture answers the stage-boundary checkpoint request with.
     ///
-    /// JSON-escaped `\n`, because it is embedded in a `session/update` frame's string. Every stage
-    /// — with a successor or not — takes this turn as its last, which is the contract memory phase
-    /// 3 adds on top of ADR 0013's handover turn.
+    /// JSON-escaped `\n`, because it is embedded in a `session/update` frame's string. A stage of a
+    /// team with a notebook — with a successor or not — takes this turn as its last, which is the
+    /// contract memory phase 3 adds on top of ADR 0013's handover turn. A stage of a team without
+    /// one takes it only before parking on an `ask_user` (ADR 0016 amendment).
     const CHECKPOINT_ANSWER: &str =
         "## Done\\nthe stage finished its turn\\n\\n## Next\\nnothing further from this stage";
 
@@ -2756,15 +2781,12 @@ mod tests {
             esac
             printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"pipeline-node-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"node a brief"}}}}'
             printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r checkpoint_request
-            case "$checkpoint_request" in
-              *'## Done'*'## Next'*) ;;
-              *) printf 'expected a checkpoint request: %s\n' "$checkpoint_request" >&2; exit 17 ;;
+            IFS= read -r after_handover
+            case "$after_handover" in
+              *'"method":"session/close"'*) ;;
+              *) printf 'a team with no notebook was asked for more than its handover: %s\n' "$after_handover" >&2; exit 17 ;;
             esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"pipeline-node-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"\n## Done\nnode a drafted the outline\n\n## Next\nnode b reviews it\n\n## Artifacts\noutline.md"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":6,"result":{}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
         "#;
         let second_script = r#"
             set -eu
@@ -2787,11 +2809,12 @@ mod tests {
             esac
             printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"pipeline-node-b","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"node b done"}}}}'
             printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"pipeline-node-b","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"\n## Done\nthe stage finished its turn\n\n## Next\nnothing further from this stage"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
+            IFS= read -r after_work
+            case "$after_work" in
+              *'"method":"session/close"'*) ;;
+              *) printf 'a team with no notebook was asked for a checkpoint: %s\n' "$after_work" >&2; exit 18 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         "#;
 
         let team = Arc::new(TeamConfig {
@@ -2864,6 +2887,118 @@ mod tests {
                     .and_then(Value::as_str)
                     == Some("node b done")
         }));
+        // A team with no `memory:` block pays for no boundary turn and stores no checkpoint
+        // (ADR 0016 amendment). The scripts exit 17/18 on a checkpoint request; this is the
+        // archive saying the same thing.
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.payload["phase"] == "turn_purpose"
+                    && event.payload["purpose"] == "checkpoint"),
+            "a team with no notebook took a checkpoint turn"
+        );
+        let checkpoints = archive
+            .notebook()
+            .checkpoints(&outcome.session_id, None)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        assert!(checkpoints.is_empty(), "{checkpoints:?}");
+        Ok(())
+    }
+
+    /// The counterpart: a team with a notebook still asks every stage where its work stands, as
+    /// its last turn, and stores what it says. The scripts exit 41/42 if the checkpoint request
+    /// does not come exactly where it should.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_team_with_a_notebook_still_checkpoints_every_stage(
+        pool: sqlx::PgPool,
+    ) -> Result<()> {
+        let stage = |session: &str, handover: bool| {
+            let handover_turn = if handover {
+                format!(
+                    "IFS= read -r _\n{}\n{}\n",
+                    says(session, "## Summary\\nhanded over"),
+                    answers(4, "{\"stopReason\":\"end_turn\"}")
+                )
+            } else {
+                String::new()
+            };
+            let next = if handover { 5 } else { 4 };
+            format!(
+                "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{work_done}\n\
+                 {handover_turn}IFS= read -r request\n\
+                 case \"$request\" in *'Record where this work stands'*) ;; \
+                 *) printf 'expected the checkpoint request: %s\\n' \"$request\" >&2; exit 4{exit} ;; esac\n\
+                 {checkpoint}\n{checkpoint_done}\nIFS= read -r _\n{closed}\n",
+                init = initialize(false),
+                new = answers(
+                    2,
+                    &format!("{{\"sessionId\":\"{session}\",\"configOptions\":[]}}")
+                ),
+                work = says(session, "worked"),
+                work_done = answers(3, "{\"stopReason\":\"end_turn\"}"),
+                exit = if handover { 1 } else { 2 },
+                checkpoint = says(session, CHECKPOINT_ANSWER),
+                checkpoint_done = answers(next, "{\"stopReason\":\"end_turn\"}"),
+                closed = answers(next + 1, "{}"),
+            )
+        };
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "notebook-checkpoints".into(),
+            name: "Notebook checkpoints".into(),
+            entrypoint: "a".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![
+                pipeline_agent("a", vec!["-c".into(), stage("nb-a", true)]),
+                pipeline_agent("b", vec!["-c".into(), stage("nb-b", false)]),
+            ],
+            edges: vec![EdgeConfig {
+                from: "a".into(),
+                to: "b".into(),
+                layer: "configured".into(),
+                kind: "sequence".into(),
+                ts: "2026-10-12T00:00:00Z".into(),
+            }],
+        });
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let run_id = "notebook-checkpoints-run";
+        run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "go",
+            Duration::from_secs(2),
+            Some(EventLog::new(archive.clone(), run_id.to_owned())),
+            &Arc::new(memory::TeamMemory {
+                notebook_enabled: true,
+                ..memory::TeamMemory::default()
+            }),
+            &RunLineage::default(),
+        )
+        .await?;
+        let checkpoints = archive
+            .notebook()
+            .checkpoints(run_id, None)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let stages: Vec<&str> = checkpoints
+            .iter()
+            .map(|point| point.agent_id.as_str())
+            .collect();
+        assert_eq!(stages, ["a", "b"], "{checkpoints:?}");
+        assert!(
+            checkpoints
+                .iter()
+                .all(|point| point.source == memory::CheckpointSource::Agent),
+            "{checkpoints:?}"
+        );
         Ok(())
     }
 
@@ -2872,8 +3007,8 @@ mod tests {
         // Every stage but the last is asked for a handover once its own turn ends, so it takes a
         // second prompt before `session/close`.
         let node_script = |session_id: &str, own_reply: &str, checks: &str, writes_brief: bool| {
-            // Every stage — with a successor or not — is asked for a checkpoint as its last
-            // turn, so both tails answer one before `session/close`.
+            // A team with no notebook asks no stage for a checkpoint, so a stage closes straight
+            // after its handover, and the last one straight after its work.
             let tail = if writes_brief {
                 format!(
                     r#"
@@ -2881,20 +3016,14 @@ mod tests {
             printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{own_reply} brief"}}}}}}}}'
             printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
             IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"\n## Done\nthe stage finished its turn\n\n## Next\nnothing further from this stage"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":6,"result":{{}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
         "#
                 )
             } else {
                 format!(
                     r#"
             IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"\n## Done\nthe stage finished its turn\n\n## Next\nnothing further from this stage"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
         "#
                 )
             };
@@ -3032,10 +3161,9 @@ mod tests {
 
     /// A harness that completes exactly one turn with the reply `{reply}` and exits cleanly.
     ///
-    /// **Team mode only.** A pipeline *stage* takes more turns than this — a handover when it has a
-    /// successor, and a checkpoint either way — so a pipeline node built on this would answer
-    /// `session/close` with a checkpoint frame. Those use
-    /// [`completing_stage_script`]/[`completing_script_with_handover`].
+    /// **Team mode only.** A pipeline *stage* with a successor takes a handover turn too, so a
+    /// pipeline node built on this would answer that request with `session/close`'s reply. Those
+    /// use [`completing_stage_script`]/[`completing_script_with_handover`].
     fn completing_script(session_id: &str, reply: &str) -> String {
         format!(
             r#"
@@ -3053,7 +3181,7 @@ mod tests {
         )
     }
 
-    /// The final stage of a pipeline: one work turn, then the checkpoint turn, then close.
+    /// The final stage of a pipeline with no notebook: one work turn, then close.
     fn completing_stage_script(session_id: &str, reply: &str) -> String {
         completing_script_with_handover(session_id, reply, false)
     }
@@ -3066,20 +3194,14 @@ mod tests {
             printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{reply} handover"}}}}}}}}'
             printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
             IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"\n## Done\nthe stage finished its turn\n\n## Next\nnothing further from this stage"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":6,"result":{{}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
         "#
             )
         } else {
             format!(
                 r#"
             IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"\n## Done\nthe stage finished its turn\n\n## Next\nnothing further from this stage"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
         "#
             )
         };
@@ -4094,10 +4216,7 @@ mod tests {
             printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"follow-b","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"node b answered the follow-up"}}}}}}}}'
             printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
             IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"follow-b","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{CHECKPOINT_ANSWER}"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
         "#
                         ),
                     ],
@@ -4271,10 +4390,7 @@ mod tests {
             printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"follow-failed-b","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"node b started from its checkpoint"}}}}}}}}'
             printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
             IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"follow-failed-b","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{CHECKPOINT_ANSWER}"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
         "#
                         ),
                     ],
@@ -4528,8 +4644,7 @@ mod tests {
     ) -> Result<()> {
         let researcher = format!(
             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{work_done}\n\
-             IFS= read -r _\n{handover}\n{handover_done}\nIFS= read -r _\n{checkpoint}\n\
-             {checkpoint_done}\nIFS= read -r _\n{closed}\n\
+             IFS= read -r _\n{handover}\n{handover_done}\nIFS= read -r _\n{closed}\n\
              if IFS= read -r extra; then printf 'the parked stage was prompted again: %s\\n' \"$extra\" >&2; exit 67; fi\n",
             init = initialize(true),
             new = answers(2, "{\"sessionId\":\"warm-1\",\"configOptions\":[]}"),
@@ -4537,20 +4652,16 @@ mod tests {
             work_done = answers(3, "{\"stopReason\":\"end_turn\"}"),
             handover = says("warm-1", "## Summary\\nthe findings, handed over"),
             handover_done = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint = says("warm-1", CHECKPOINT_ANSWER),
-            checkpoint_done = answers(5, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(6, "{}"),
+            closed = answers(5, "{}"),
         );
         let writer = format!(
             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{work_done}\n\
-             IFS= read -r _\n{checkpoint}\n{checkpoint_done}\nIFS= read -r _\n{closed}\n",
+             IFS= read -r _\n{closed}\n",
             init = initialize(false),
             new = answers(2, "{\"sessionId\":\"writer\",\"configOptions\":[]}"),
             work = says("writer", "wrote it"),
             work_done = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint = says("writer", CHECKPOINT_ANSWER),
-            checkpoint_done = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(5, "{}"),
+            closed = answers(4, "{}"),
         );
         let team = stop_team(
             "held",
@@ -4659,17 +4770,14 @@ mod tests {
         const HANDOVER: &str = "## Summary\\nthree harnesses auto-approve";
         let researcher = format!(
             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
-             IFS= read -r _\n{handover}\n{done4}\nIFS= read -r _\n{checkpoint}\n{done5}\n\
-             IFS= read -r _\n{closed}\n",
+             IFS= read -r _\n{handover}\n{done4}\nIFS= read -r _\n{closed}\n",
             init = initialize(false),
             new = answers(2, "{\"sessionId\":\"warm-a\",\"configOptions\":[]}"),
             work = says("warm-a", "researched"),
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
             handover = says("warm-a", HANDOVER),
             done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint = says("warm-a", CHECKPOINT_ANSWER),
-            done5 = answers(5, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(6, "{}"),
+            closed = answers(5, "{}"),
         );
         let writer = format!(
             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r prompt\n\
@@ -4677,14 +4785,12 @@ mod tests {
              case \"$prompt\" in\n  *'## Results from preceding stages'*'## Task'*'## Direction from you'*) ;;\n  *) printf 'direction must come last, after the material it overrules: %s\\n' \"$prompt\" >&2; exit 52 ;;\nesac\n\
              case \"$prompt\" in\n  *'three harnesses auto-approve'*) ;;\n  *) printf 'the stop did not pass the handover through: %s\\n' \"$prompt\" >&2; exit 53 ;;\nesac\n\
              case \"$prompt\" in\n  *'Asking the stage before you'*) printf 'a stop has no session to ask: %s\\n' \"$prompt\" >&2; exit 54 ;;\n  *) ;;\nesac\n\
-             {work}\n{done3}\nIFS= read -r _\n{checkpoint}\n{done4}\nIFS= read -r _\n{closed}\n",
+             {work}\n{done3}\nIFS= read -r _\n{closed}\n",
             init = initialize(false),
             new = answers(2, "{\"sessionId\":\"warm-b\",\"configOptions\":[]}"),
             work = says("warm-b", "wrote it"),
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint = says("warm-b", CHECKPOINT_ANSWER),
-            done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(5, "{}"),
+            closed = answers(4, "{}"),
         );
         let team = stop_team(
             "direction",
@@ -4860,7 +4966,11 @@ mod tests {
             "go",
             Duration::from_secs(5),
             Some(EventLog::new(archive.clone(), run_id.clone())),
-            &Arc::new(memory::TeamMemory::default()),
+            // A team with a notebook, so the send-back's own checkpoint is asked for and counted.
+            &Arc::new(memory::TeamMemory {
+                notebook_enabled: true,
+                ..memory::TeamMemory::default()
+            }),
             &RunLineage {
                 operator: Some(desk.clone()),
                 ..RunLineage::default()
@@ -4923,7 +5033,6 @@ mod tests {
                  {new}\n\
                  IFS= read -r _\n{work}\n{done3}\n\
                  IFS= read -r _\n{handover}\n{done4}\n\
-                 IFS= read -r _\n{checkpoint}\n{done5}\n\
                  IFS= read -r _\n{closed}\n\
                  ;;\n\
                *'session/load'*)\n\
@@ -4934,7 +5043,6 @@ mod tests {
                  case \"$note\" in\n  *'you already found'*) ;;\n  *) printf 'the note did not reach the reloaded session: %s\\n' \"$note\" >&2; exit 73 ;;\nesac\n\
                  {resumed}\n{done4b}\n\
                  IFS= read -r _\n{handover_b}\n{done5b}\n\
-                 IFS= read -r _\n{checkpoint_b}\n{done6b}\n\
                  IFS= read -r _\n{closed_b}\n\
                  ;;\n\
              esac\n",
@@ -4945,9 +5053,7 @@ mod tests {
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
             handover = says("warm-1", "HANDOVER ONE"),
             done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint = says("warm-1", CHECKPOINT_ANSWER),
-            done5 = answers(5, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(6, "{}"),
+            closed = answers(5, "{}"),
             replay1 = says("warm-1", "replayed: first pass"),
             replay2 = says("warm-1", "replayed: HANDOVER ONE"),
             loaded = answers(2, "{}"),
@@ -4955,21 +5061,17 @@ mod tests {
             done4b = answers(3, "{\"stopReason\":\"end_turn\"}"),
             handover_b = says("warm-1", "HANDOVER TWO"),
             done5b = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint_b = says("warm-1", CHECKPOINT_ANSWER),
-            done6b = answers(5, "{\"stopReason\":\"end_turn\"}"),
-            closed_b = answers(6, "{}"),
+            closed_b = answers(5, "{}"),
         );
         let writer = format!(
             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r prompt\n\
              case \"$prompt\" in\n  *'HANDOVER TWO'*) ;;\n  *) printf 'the reloaded pass never reached the writer: %s\\n' \"$prompt\" >&2; exit 74 ;;\nesac\n\
-             {work}\n{done3}\nIFS= read -r _\n{checkpoint}\n{done4}\nIFS= read -r _\n{closed}\n",
+             {work}\n{done3}\nIFS= read -r _\n{closed}\n",
             init = initialize(false),
             new = answers(2, "{\"sessionId\":\"warm-b\",\"configOptions\":[]}"),
             work = says("warm-b", "wrote it"),
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint = says("warm-b", CHECKPOINT_ANSWER),
-            done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(5, "{}"),
+            closed = answers(4, "{}"),
         );
         let team = stop_team(
             "reloaded",
@@ -5060,7 +5162,7 @@ mod tests {
     ) -> Result<()> {
         let researcher = format!(
             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
-             IFS= read -r _\n{handover}\n{done4}\nIFS= read -r _\n{checkpoint}\n{done5}\n\
+             IFS= read -r _\n{handover}\n{done4}\n\
              IFS= read -r closing\ncase \"$closing\" in *session/close*) ;; *) exit 92 ;; esac\n{closed}\n",
             init = initialize(false),
             new = answers(2, "{\"sessionId\":\"warm-a\",\"configOptions\":[]}"),
@@ -5068,20 +5170,16 @@ mod tests {
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
             handover = says("warm-a", "HANDOVER ONE"),
             done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint = says("warm-a", CHECKPOINT_ANSWER),
-            done5 = answers(5, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(6, "{}"),
+            closed = answers(5, "{}"),
         );
         let writer = format!(
             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
-             IFS= read -r _\n{checkpoint}\n{done4}\nIFS= read -r _\n{closed}\n",
+             IFS= read -r _\n{closed}\n",
             init = initialize(false),
             new = answers(2, "{\"sessionId\":\"warm-b\",\"configOptions\":[]}"),
             work = says("warm-b", "wrote it"),
             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint = says("warm-b", CHECKPOINT_ANSWER),
-            done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(5, "{}"),
+            closed = answers(4, "{}"),
         );
         let team = stop_team(
             "expired",
@@ -5136,12 +5234,14 @@ mod tests {
             .checkpoints(&run_id, Some("a"))
             .await
             .map_err(|error| anyhow::anyhow!("{error}"))?;
-        assert_eq!(checkpoints.len(), 2, "{checkpoints:?}");
+        // A team with no notebook asked no stage-end checkpoint, so the coordinator's row is the
+        // only one, and what the stage handed the stop is what it says was done.
+        assert_eq!(checkpoints.len(), 1, "{checkpoints:?}");
         assert!(
             checkpoints.last().is_some_and(|point| point.source
                 == memory::CheckpointSource::Coordinator
                 && point.next.is_empty()
-                && point.done == "the stage finished its turn"),
+                && point.done == "HANDOVER ONE"),
             "{checkpoints:?}"
         );
         Ok(())
@@ -5171,8 +5271,7 @@ mod tests {
              IFS= read -r resumed\n\
              case \"$resumed\" in\n  *'the second one'*) ;;\n  *) printf 'the answer never arrived as a turn: %s\\n' \"$resumed\" >&2; exit 82 ;;\nesac\n\
              {after}\n{done5}\n\
-             IFS= read -r _\n{handover}\n{handover_done}\n\
-             IFS= read -r _\n{checkpoint2}\n{done6}\nIFS= read -r _\n{closed}\n",
+             IFS= read -r _\n{handover}\n{handover_done}\nIFS= read -r _\n{closed}\n",
             init = format_args!(
                 "IFS= read -r _\n{}\n",
                 answers(
@@ -5189,9 +5288,7 @@ mod tests {
             done5 = answers(5, "{\"stopReason\":\"end_turn\"}"),
             handover = says("asker", "used the second budget"),
             handover_done = answers(6, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint2 = says("asker", CHECKPOINT_ANSWER),
-            done6 = answers(7, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(8, "{}"),
+            closed = answers(7, "{}"),
         );
         let team = Arc::new(TeamConfig {
             schema_version: 1,
@@ -5212,14 +5309,12 @@ mod tests {
                         "-c".into(),
                         format!(
                             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
-                             IFS= read -r _\n{checkpoint}\n{done4}\nIFS= read -r _\n{closed}\n",
+                             IFS= read -r _\n{closed}\n",
                             init = initialize(false),
                             new = answers(2, "{\"sessionId\":\"after\",\"configOptions\":[]}"),
                             work = says("after", "done"),
                             done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-                            checkpoint = says("after", CHECKPOINT_ANSWER),
-                            done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-                            closed = answers(5, "{}"),
+                            closed = answers(4, "{}"),
                         ),
                     ],
                 ),
@@ -5291,13 +5386,15 @@ mod tests {
         assert_eq!(archived.kind, EventKind::Message);
         assert_eq!(archived.payload["role"], "user");
         // A question parks the session: the stage checkpointed on the way in, so the work it had
-        // already done is recoverable even if the operator never came back.
+        // already done is recoverable even if the operator never came back. That one is asked of
+        // every team; the stage-end one only of a team with a notebook, which this is not.
         let checkpoints = archive
             .notebook()
             .checkpoints(&run_id, Some("a"))
             .await
             .map_err(|error| anyhow::anyhow!("{error}"))?;
-        assert_eq!(checkpoints.len(), 2, "{checkpoints:?}");
+        assert_eq!(checkpoints.len(), 1, "{checkpoints:?}");
+        assert_eq!(checkpoints[0].source, memory::CheckpointSource::Agent);
         Ok(())
     }
 
