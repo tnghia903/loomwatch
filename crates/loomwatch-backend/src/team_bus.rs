@@ -1076,7 +1076,9 @@ impl TeamBus {
                 spec: &spec,
             },
             process,
-            &agent.model,
+            // The selector, not the bare model: a helper is held to its `thinkingEffort` like
+            // the stage or lead that runs the same agent.
+            &agent.model_selector(),
             &composed.text,
             TeamSessionContext {
                 archive: &self.state.archive,
@@ -2927,6 +2929,97 @@ mod tests {
         assert_eq!(packets.len(), 1, "{packets:?}");
         assert!(packets[0].text.contains("Never touch main."), "{packets:?}");
         let _ = std::fs::remove_dir_all(&scratch);
+        Ok(())
+    }
+
+    /// A helper is started at its agent's `thinkingEffort`, as the same agent is when it runs as
+    /// a stage or as the lead. The helper's own script refuses its turn unless the effort it is
+    /// set to is the one the team file names, so the `ask` cannot succeed without it.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_delegated_helper_runs_at_its_thinking_effort(pool: sqlx::PgPool) -> Result<()> {
+        let helper_script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"effort-session","configOptions":[{"id":"model","currentValue":"test/model"},{"id":"reasoning_effort","currentValue":"medium"}]}}'
+            IFS= read -r model
+            case "$model" in
+              *'"configId":"model"'*'"value":"test/model"'*) ;;
+              *) printf 'expected the model first: %s\n' "$model" >&2; exit 31 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"configOptions":[{"id":"model","currentValue":"test/model"},{"id":"reasoning_effort","currentValue":"medium"}]}}'
+            IFS= read -r effort
+            case "$effort" in
+              *'"configId":"reasoning_effort"'*'"value":"high"'*) ;;
+              *) printf 'expected thinking effort high: %s\n' "$effort" >&2; exit 32 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"configOptions":[]}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"effort-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"thought hard"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":6,"result":{}}'
+        "#;
+        let mut helper = test_agent("helper", "/bin/sh", vec!["-c".into(), helper_script.into()]);
+        helper.thinking_effort = Some("high".into());
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "effort-team".into(),
+            name: "Effort team".into(),
+            entrypoint: "lead".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![test_agent("lead", "true", Vec::new()), helper],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            team,
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Team,
+            Arc::new(TeamMemory::default()),
+            None,
+        )
+        .await?;
+        let connection = bus.connection("lead").await?;
+        connection
+            .register(EventLog::new(archive.clone(), "effort-run".into()))
+            .await;
+
+        let response = post_json(
+            &bus,
+            &connection.token,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "ask", "arguments": {"agent": "helper", "question": "think"}}
+            }),
+        )
+        .await?;
+        assert_eq!(response["result"]["isError"], false, "{response}");
+        assert_eq!(
+            response["result"]["structuredContent"]["reply"],
+            "thought hard"
+        );
+        bus.shutdown().await?;
+        let events = archive.verify_session("effort-run").await?;
+        assert!(
+            events.iter().any(|event| {
+                event.agent_id == "helper"
+                    && event.payload["phase"] == "set_thinking_effort"
+                    && event.payload["value"] == "high"
+            }),
+            "the helper's effort was not recorded: {events:#?}"
+        );
         Ok(())
     }
 
