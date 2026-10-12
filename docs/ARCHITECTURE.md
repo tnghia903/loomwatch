@@ -96,6 +96,11 @@ There are no dollar budgets: each agent's usage counts toward its own app's acco
 for the active caller turn. The caller is expected to return after the successful tool call;
 the successor starts without waiting for that return.
 
+What a `dispatch` or `handoff` agent replies comes back to the agent that started it, as one more
+turn once all of its delegated work has finished, so that work reaches the answer. An agent
+answering an `ask` may not start another agent, and an `ask` is withdrawn when the agent that
+asked ends its turn first: an answer nobody waits for is never worth its tokens.
+
 ---
 
 ## 4. Two execution modes
