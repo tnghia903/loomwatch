@@ -258,13 +258,37 @@ pub struct QueuedNote {
 /// A flag and a wake-up rather than a channel: the turn being read is the only listener, a second
 /// request before it notices is the same request, and a request made between turns must not cut
 /// the *next* turn short — which is why the turn that delivers the note clears it first.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Interrupt {
     requested: AtomicBool,
     notify: tokio::sync::Notify,
+    /// Why the turn is stopped, as the archive's `turn_interrupted` event says it.
+    reason: &'static str,
+}
+
+impl Default for Interrupt {
+    fn default() -> Self {
+        Self::because("operator_note")
+    }
 }
 
 impl Interrupt {
+    /// An interrupt that records `reason` when it stops a turn. "Send now" is the default; an
+    /// `ask` withdrawn because its asker ended its turn is the other (`team_bus::ASK_WITHDRAWN`).
+    #[must_use]
+    pub fn because(reason: &'static str) -> Self {
+        Self {
+            requested: AtomicBool::new(false),
+            notify: tokio::sync::Notify::new(),
+            reason,
+        }
+    }
+
+    #[must_use]
+    pub fn reason(&self) -> &'static str {
+        self.reason
+    }
+
     pub fn request(&self) {
         self.requested.store(true, Ordering::SeqCst);
         self.notify.notify_one();

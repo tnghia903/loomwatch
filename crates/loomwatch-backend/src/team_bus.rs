@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -15,7 +16,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, RwLock, Semaphore, mpsc, oneshot};
+use tokio::sync::{Mutex, Notify, RwLock, Semaphore, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -30,6 +31,9 @@ use crate::operator::LiveTurn;
 use crate::{EventKind, SessionOutcome, resolve_cwd};
 
 const SERVER_NAME: &str = "loomwatch-team-bus";
+/// The `turn_interrupted` reason when a kept-alive agent's answer is stopped because the agent
+/// that asked ended its turn first.
+pub(crate) const ASK_WITHDRAWN: &str = "ask_withdrawn";
 const MCP_PROTOCOL_VERSION: &str = "2025-03-26";
 
 /// Which execution mode is driving this run — see ARCHITECTURE.md §4.
@@ -77,6 +81,38 @@ struct TeamBusState {
     /// collects one after the stage's turn returns and waits on it there — the bus records the
     /// question, the session's owner does the waiting.
     pending_questions: Mutex<BTreeMap<String, crate::operator::OperatorWait>>,
+    /// Kept-alive agents answering an `ask` right now, with how many. An agent answering a
+    /// question may not start another agent to help it (see [`TeamBus::refuse_new_agent`]).
+    answering: std::sync::Mutex<BTreeMap<String, usize>>,
+    /// Every `ask` still in flight, by the bearer token of the agent that asked, each with the
+    /// switch that withdraws it. The asker's turn ending flips them (see
+    /// [`TeamBusConnection::turn_ended`]).
+    asks: Mutex<OpenAsks>,
+    next_ask: AtomicU64,
+    /// What `dispatch` and `handoff` started, by the bearer token of the agent that started it:
+    /// how much is still working, and what finished but has not been handed back yet.
+    delegated: std::sync::Mutex<BTreeMap<String, DelegatedWork>>,
+    delegated_changed: Notify,
+}
+
+/// Each caller's `ask` calls in flight, by bearer token: an id, and the switch that withdraws it.
+type OpenAsks = BTreeMap<String, Vec<(u64, oneshot::Sender<()>)>>;
+
+/// One caller's `dispatch`/`handoff` work. See [`TeamBusConnection::collect_delegated`].
+#[derive(Default)]
+struct DelegatedWork {
+    running: usize,
+    finished: Vec<DelegatedResult>,
+}
+
+/// What one agent started with `dispatch` or `handoff` came back with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DelegatedResult {
+    pub(crate) agent: String,
+    pub(crate) mode: &'static str,
+    pub(crate) task: String,
+    /// The agent's reply, or why it failed.
+    pub(crate) outcome: std::result::Result<String, String>,
 }
 
 /// A stage kept answerable after its own turn. Held by the pipeline, returned to
@@ -94,11 +130,14 @@ struct AgentSession {
     event_log: Option<EventLog>,
     delegation_path: Vec<String>,
     dispatch_depth: u32,
+    /// A helper started by `ask`: its whole job is one answer, so it may not start agents.
+    answering: bool,
 }
 
 struct DelegationContext {
     path: Vec<String>,
     depth: u32,
+    answering: bool,
 }
 
 /// See [`TeamBus::abort_on_drop`].
@@ -171,6 +210,11 @@ impl TeamBus {
             live: Mutex::new(BTreeMap::new()),
             operator,
             pending_questions: Mutex::new(BTreeMap::new()),
+            answering: std::sync::Mutex::new(BTreeMap::new()),
+            asks: Mutex::new(BTreeMap::new()),
+            next_ask: AtomicU64::new(0),
+            delegated: std::sync::Mutex::new(BTreeMap::new()),
+            delegated_changed: Notify::new(),
         });
         let bus = Self { state };
         let app = mcp_router(bus.clone());
@@ -195,6 +239,7 @@ impl TeamBus {
                 event_log: None,
                 delegation_path: vec![agent_id.to_owned()],
                 dispatch_depth: 0,
+                answering: false,
             },
         );
         Ok(TeamBusConnection {
@@ -222,7 +267,7 @@ impl TeamBus {
         let run_id = process.event_log().map(|log| log.session_id().to_owned());
         let addressee = agent_id.to_owned();
         let task = tokio::spawn(async move {
-            while let Some(request) = requests.recv().await {
+            while let Some(mut request) = requests.recv().await {
                 let prompt = if request.from_operator {
                     if let Some(log) = process.event_log() {
                         // `to`: which agent the operator wrote to. The answer is archived under the
@@ -235,7 +280,29 @@ impl TeamBus {
                 } else {
                     request.prompt
                 };
-                let answer = process.prompt_turn(&mut recorder, &prompt).await;
+                let answer = if request.from_operator {
+                    process.prompt_turn(&mut recorder, &prompt).await
+                } else {
+                    // An agent's question is withdrawn when the agent that asked ends its turn
+                    // (`TeamBusConnection::turn_ended`), which drops the receiver. Nobody can take
+                    // the answer after that, so this turn is stopped rather than finished: the
+                    // session stays usable, and stops spending on a reply nobody reads.
+                    let withdrawn = Arc::new(crate::runs::Interrupt::because(ASK_WITHDRAWN));
+                    let listening = recorder.interrupt.replace(Arc::clone(&withdrawn));
+                    let answer = {
+                        let turn = process.prompt_turn(&mut recorder, &prompt);
+                        tokio::pin!(turn);
+                        tokio::select! {
+                            answer = &mut turn => answer,
+                            () = request.answer.closed() => {
+                                withdrawn.request();
+                                turn.await
+                            }
+                        }
+                    };
+                    recorder.interrupt = listening;
+                    answer
+                };
                 // A dropped receiver means the asker gave up; the session stays usable.
                 let _ = request.answer.send(answer);
             }
@@ -298,6 +365,9 @@ impl TeamBus {
             return Ok(None);
         };
         let (answer, answered) = oneshot::channel();
+        // Marked before the question goes in, so the agent is already answering when its turn
+        // can first reach the bus; unmarked when this returns or is dropped by a withdrawal.
+        let _answering = Answering::begin(self, agent_id);
         sender
             .send(LiveTurn {
                 prompt: question.to_owned(),
@@ -310,6 +380,69 @@ impl TeamBus {
             .await
             .context("kept-alive agent dropped the question")??;
         Ok(Some(reply))
+    }
+
+    /// Refuse to start `target` for a caller that is itself answering another agent's `ask`.
+    ///
+    /// An answer is one turn on what the agent already has. Starting a helper from inside one is
+    /// how run dabf40a3 spent 46% of its tokens: a stage asked its kept-alive predecessor, which
+    /// cold-started a third agent with a full prompt while both sides kept sampling. The refusal
+    /// says what to do instead, because a model that is only told "no" tends to try another way.
+    fn refuse_new_agent(&self, session: &AgentSession, target: &str, tool: &str) -> Result<()> {
+        let answering = session.answering
+            || self
+                .state
+                .answering
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .contains_key(&session.agent_id);
+        if answering {
+            bail!(
+                "{} is answering another agent's question, so it may not start {target} with \
+                 `{tool}`. Answer from what you already have, and say plainly what you could not \
+                 confirm.",
+                session.agent_id
+            );
+        }
+        Ok(())
+    }
+
+    /// Record an `ask` in flight for the caller behind `token`, and the switch that withdraws it.
+    async fn track_ask(&self, token: &str) -> (u64, oneshot::Receiver<()>) {
+        let id = self.state.next_ask.fetch_add(1, Ordering::Relaxed);
+        let (withdraw, withdrawn) = oneshot::channel();
+        self.state
+            .asks
+            .lock()
+            .await
+            .entry(token.to_owned())
+            .or_default()
+            .push((id, withdraw));
+        (id, withdrawn)
+    }
+
+    async fn untrack_ask(&self, token: &str, id: u64) {
+        let mut asks = self.state.asks.lock().await;
+        if let Some(open) = asks.get_mut(token) {
+            open.retain(|(ask, _)| *ask != id);
+            if open.is_empty() {
+                asks.remove(token);
+            }
+        }
+    }
+
+    /// Withdraw every `ask` the caller behind `token` still has in flight.
+    async fn withdraw_asks(&self, token: &str) {
+        let open = self
+            .state
+            .asks
+            .lock()
+            .await
+            .remove(token)
+            .unwrap_or_default();
+        for (_, withdraw) in open {
+            let _ = withdraw.send(());
+        }
     }
 
     pub(crate) async fn wait_for_tasks(&self) -> Result<()> {
@@ -456,7 +589,7 @@ impl TeamBus {
             .await?;
 
         let execution = self
-            .execute_tool(&session, &event_log, name, &arguments)
+            .execute_tool(&session, token, &event_log, name, &arguments)
             .await;
         let (status, raw_output, result) = match execution {
             Ok(output) => ("completed", output.clone(), tool_success(&output)),
@@ -535,9 +668,11 @@ impl TeamBus {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn execute_tool(
         &self,
         session: &AgentSession,
+        token: &str,
         event_log: &EventLog,
         name: &str,
         arguments: &Value,
@@ -568,9 +703,17 @@ impl TeamBus {
             "dispatch" => {
                 let target = self.resolve(&required_string(arguments, "agent")?)?;
                 let task = required_string(arguments, "task")?;
+                self.refuse_new_agent(session, &target, "dispatch")?;
                 let context = self.guard_delegation(session, &target)?;
-                self.spawn_background(&target, &task, event_log.clone(), context)
-                    .await?;
+                self.spawn_background(
+                    &target,
+                    &task,
+                    event_log.clone(),
+                    context,
+                    (session, token),
+                    "dispatch",
+                )
+                .await?;
                 Ok(json!({"accepted": true, "agent": target, "mode": "dispatch"}))
             }
             "ask" => {
@@ -580,29 +723,65 @@ impl TeamBus {
                 // asking itself, or a helper asking back the live agent waiting on it, would queue
                 // a turn behind the very turn that is waiting for the answer.
                 refuse_cycle(session, &target)?;
-                // A predecessor that is still alive answers from the context it already built.
-                // Spawning a fresh process for it would produce an agent that knows only its role
-                // and the question, which is what made pipeline `ask` useless before.
-                if let Some(reply) = self.ask_live(&target, &question).await? {
-                    return Ok(json!({ "agent": target, "reply": reply, "live": true }));
-                }
-                let context = self.guard_delegation(session, &target)?;
-                let outcome = self
-                    .run_agent(&target, &question, event_log.clone(), context)
-                    .await?;
-                let reply = outcome.reply;
-                Ok(json!({
-                    "agent": target,
-                    "reply": reply,
-                    "sessionId": outcome.session_id
-                }))
+                let (ask, withdrawn) = self.track_ask(token).await;
+                let started = AtomicBool::new(false);
+                let answer = async {
+                    // A predecessor that is still alive answers from the context it already
+                    // built. Spawning a fresh process for it would produce an agent that knows
+                    // only its role and the question, which is what made pipeline `ask` useless
+                    // before.
+                    if let Some(reply) = self.ask_live(&target, &question).await? {
+                        return Ok(json!({ "agent": target, "reply": reply, "live": true }));
+                    }
+                    self.refuse_new_agent(session, &target, "ask")?;
+                    let mut context = self.guard_delegation(session, &target)?;
+                    context.answering = true;
+                    started.store(true, Ordering::SeqCst);
+                    let outcome = self
+                        .run_agent(&target, &question, event_log.clone(), context)
+                        .await?;
+                    Ok(json!({
+                        "agent": target,
+                        "reply": outcome.reply,
+                        "sessionId": outcome.session_id
+                    }))
+                };
+                // Withdrawn when the asker's turn ends first: the answer could reach nobody, so
+                // a kept-alive agent's turn is stopped and a helper started for it is ended.
+                let result = tokio::select! {
+                    result = answer => result,
+                    _ = withdrawn => {
+                        if started.load(Ordering::SeqCst) {
+                            self.state
+                                .statuses
+                                .write()
+                                .await
+                                .insert(target.clone(), "cancelled".to_owned());
+                        }
+                        Err(anyhow::anyhow!(
+                            "{} ended its turn before {target} answered, so nobody was waiting \
+                             for the answer and the question was withdrawn",
+                            session.agent_id
+                        ))
+                    }
+                };
+                self.untrack_ask(token, ask).await;
+                result
             }
             "handoff" => {
                 let target = self.resolve(&required_string(arguments, "agent")?)?;
                 let task = required_string(arguments, "task")?;
+                self.refuse_new_agent(session, &target, "handoff")?;
                 let context = self.guard_delegation(session, &target)?;
-                self.spawn_background(&target, &task, event_log.clone(), context)
-                    .await?;
+                self.spawn_background(
+                    &target,
+                    &task,
+                    event_log.clone(),
+                    context,
+                    (session, token),
+                    "handoff",
+                )
+                .await?;
                 self.state
                     .statuses
                     .write()
@@ -916,12 +1095,20 @@ impl TeamBus {
         }))
     }
 
+    /// Start `agent_id` on `prompt` in the background for `caller`, and keep what it comes back
+    /// with for the caller to collect ([`TeamBusConnection::collect_delegated`]).
+    ///
+    /// The task still returns its own result, so a failed helper fails the run in
+    /// [`Self::wait_for_tasks`] exactly as before; the copy kept here is what lets the caller
+    /// read the work it started, which used to be dropped with the `SessionOutcome`.
     async fn spawn_background(
         &self,
         agent_id: &str,
         prompt: &str,
         event_log: EventLog,
         context: DelegationContext,
+        (caller, token): (&AgentSession, &str),
+        mode: &'static str,
     ) -> Result<()> {
         self.agent(agent_id)?;
         let Ok(permit) = Arc::clone(&self.state.dispatch_slots).try_acquire_owned() else {
@@ -930,17 +1117,68 @@ impl TeamBus {
                 self.state.team.guards.max_concurrent_dispatches
             );
         };
+        let mut delegating = Delegating::begin(self, token, agent_id, mode, prompt);
         let bus = self.clone();
         let agent_id = agent_id.to_owned();
         let prompt = prompt.to_owned();
+        let caller = caller.agent_id.clone();
         let task = tokio::spawn(async move {
             let _permit = permit;
-            bus.run_agent(&agent_id, &prompt, event_log, context)
-                .await
-                .map(|_| ())
+            let outcome = bus
+                .run_agent(&agent_id, &prompt, event_log.clone(), context)
+                .await;
+            let returned = match &outcome {
+                Ok(outcome) => Ok(outcome.reply.clone()),
+                Err(error) => Err(format!("{error:#}")),
+            };
+            bus.record_delegated(&event_log, &caller, &agent_id, mode, &prompt, &returned)
+                .await;
+            delegating.outcome = Some(returned);
+            drop(delegating);
+            outcome.map(|_| ())
         });
         self.state.tasks.lock().await.push(task);
         Ok(())
+    }
+
+    /// Put what a `dispatch`/`handoff` agent came back with on the run's record, whether or not
+    /// the agent that started it is still there to read it.
+    async fn record_delegated(
+        &self,
+        event_log: &EventLog,
+        caller: &str,
+        agent: &str,
+        mode: &str,
+        task: &str,
+        returned: &std::result::Result<String, String>,
+    ) {
+        let mut payload = json!({
+            "phase": "delegated_result",
+            "mode": mode,
+            "for": caller,
+            "task": task,
+        });
+        match returned {
+            Ok(reply) => {
+                payload["status"] = json!("succeeded");
+                payload["reply"] = json!(reply);
+            }
+            Err(error) => {
+                payload["status"] = json!("failed");
+                payload["error"] = json!(error);
+            }
+        }
+        if let Err(error) = event_log
+            .append(
+                agent,
+                EventKind::SessionMeta,
+                payload,
+                Some(json!({"source": "loomwatch", "phase": "delegated_result"})),
+            )
+            .await
+        {
+            eprintln!("warning: could not record what {agent} came back with: {error:#}");
+        }
     }
 
     async fn run_agent(
@@ -1107,6 +1345,7 @@ impl TeamBus {
                 event_log: None,
                 delegation_path: context.path,
                 dispatch_depth: context.depth,
+                answering: context.answering,
             },
         );
         Ok(TeamBusConnection {
@@ -1132,11 +1371,153 @@ impl TeamBus {
         Ok(DelegationContext {
             path,
             depth: next_depth,
+            answering: false,
         })
     }
 }
 
+/// One `dispatch`/`handoff` agent still working for the caller behind `token`.
+///
+/// Its count and its result are settled when this is dropped, however the task ends — finished,
+/// failed, panicked or aborted — so a caller waiting in
+/// [`TeamBusConnection::collect_delegated`] is never left counting an agent that is gone.
+struct Delegating {
+    bus: TeamBus,
+    token: String,
+    agent: String,
+    mode: &'static str,
+    task: String,
+    outcome: Option<std::result::Result<String, String>>,
+}
+
+impl Delegating {
+    fn begin(bus: &TeamBus, token: &str, agent: &str, mode: &'static str, task: &str) -> Self {
+        bus.state
+            .delegated
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(token.to_owned())
+            .or_default()
+            .running += 1;
+        Self {
+            bus: bus.clone(),
+            token: token.to_owned(),
+            agent: agent.to_owned(),
+            mode,
+            task: task.to_owned(),
+            outcome: None,
+        }
+    }
+}
+
+impl Drop for Delegating {
+    fn drop(&mut self) {
+        let result = DelegatedResult {
+            agent: std::mem::take(&mut self.agent),
+            mode: self.mode,
+            task: std::mem::take(&mut self.task),
+            outcome: self
+                .outcome
+                .take()
+                .unwrap_or_else(|| Err("it stopped before it finished".to_owned())),
+        };
+        {
+            let mut delegated = self
+                .bus
+                .state
+                .delegated
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let work = delegated
+                .entry(std::mem::take(&mut self.token))
+                .or_default();
+            work.running = work.running.saturating_sub(1);
+            work.finished.push(result);
+        }
+        self.bus.state.delegated_changed.notify_waiters();
+    }
+}
+
+/// A kept-alive agent answering an `ask`, for as long as this is held. See
+/// [`TeamBus::refuse_new_agent`].
+struct Answering {
+    bus: TeamBus,
+    agent: String,
+}
+
+impl Answering {
+    fn begin(bus: &TeamBus, agent: &str) -> Self {
+        *bus.state
+            .answering
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(agent.to_owned())
+            .or_default() += 1;
+        Self {
+            bus: bus.clone(),
+            agent: agent.to_owned(),
+        }
+    }
+}
+
+impl Drop for Answering {
+    fn drop(&mut self) {
+        let mut answering = self
+            .bus
+            .state
+            .answering
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(count) = answering.get_mut(&self.agent) {
+            *count -= 1;
+            if *count == 0 {
+                answering.remove(&self.agent);
+            }
+        }
+    }
+}
+
 impl TeamBusConnection {
+    /// The session behind this token ended a turn: withdraw every `ask` it still has in flight.
+    ///
+    /// An app that blocks on a tool call never ends a turn with one pending, so for it this finds
+    /// nothing. Codex can: it keeps sampling while a call is in flight and may end the turn before
+    /// the answer comes back. The asked agent would then answer for nobody.
+    pub(crate) async fn turn_ended(&self) {
+        self.bus.withdraw_asks(&self.token).await;
+    }
+
+    /// Wait until everything this agent started with `dispatch` or `handoff` has finished, and
+    /// take what it came back with. Empty when it started nothing, or nothing new since the last
+    /// call.
+    pub(crate) async fn collect_delegated(&self) -> Vec<DelegatedResult> {
+        loop {
+            let changed = self.bus.state.delegated_changed.notified();
+            tokio::pin!(changed);
+            // Registered before the check, so a helper finishing in between still wakes this.
+            changed.as_mut().enable();
+            {
+                let mut delegated = self
+                    .bus
+                    .state
+                    .delegated
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                match delegated.get(&self.token) {
+                    None => return Vec::new(),
+                    Some(work) if work.running == 0 => {
+                        return delegated
+                            .remove(&self.token)
+                            .map(|work| work.finished)
+                            .unwrap_or_default();
+                    }
+                    Some(_) => {}
+                }
+            }
+            changed.await;
+        }
+    }
+
     pub(crate) fn server_definition(&self) -> Value {
         json!({
             "type": "http",
@@ -1778,6 +2159,7 @@ mod tests {
                 DelegationContext {
                     path: vec!["a".into(), "b".into()],
                     depth: 1,
+                    answering: false,
                 },
             )
             .await?;
@@ -1791,6 +2173,7 @@ mod tests {
                 DelegationContext {
                     path: vec!["a".into(), "b".into(), "c".into()],
                     depth: 2,
+                    answering: false,
                 },
             )
             .await?;
@@ -2478,7 +2861,19 @@ mod tests {
                     DelegationContext {
                         path: vec!["a".into()],
                         depth: 1,
+                        answering: false,
                     },
+                    (
+                        &AgentSession {
+                            agent_id: "a".into(),
+                            event_log: None,
+                            delegation_path: vec!["a".into()],
+                            dispatch_depth: 0,
+                            answering: false,
+                        },
+                        "teardown-token",
+                    ),
+                    "dispatch",
                 )
                 .await
                 .expect("dispatch a helper");
@@ -2667,6 +3062,7 @@ mod tests {
                 DelegationContext {
                     path: vec!["a".into(), "b".into()],
                     depth: 1,
+                    answering: false,
                 },
             )
             .await?;
@@ -3020,6 +3416,521 @@ mod tests {
             }),
             "the helper's effort was not recorded: {events:#?}"
         );
+        Ok(())
+    }
+
+    /// The shell lines that pull the Team Bus endpoint and bearer token out of `session/new`.
+    const READ_BUS: &str = r#"url=$(printf '%s' "$new" | sed -n 's/.*"url":"\([^"]*\)".*/\1/p')
+token=$(printf '%s' "$new" | sed -n 's/.*"Authorization","value":"Bearer \([^"]*\)".*/\1/p')"#;
+
+    /// A Team Bus `tools/call` from inside a fake app, as `curl` with the app's own token.
+    fn bus_call(tool: &str, arguments: &str) -> String {
+        format!(
+            r#"curl -s -X POST "$url" -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d '{{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{{"name":"{tool}","arguments":{arguments}}}}}'"#
+        )
+    }
+
+    /// A temporary folder the fake apps of one test leave markers in.
+    fn markers(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("loomwatch-{name}-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("marker folder");
+        dir
+    }
+
+    /// The Team Bus events of one tool call, by the agent that made it.
+    async fn bus_tool_update(
+        archive: &EventArchive,
+        session: &str,
+        agent: &str,
+        tool: &str,
+    ) -> Result<Option<Value>> {
+        let events = archive.load_session(session).await?;
+        let Some(call) = events.iter().find(|event| {
+            event.agent_id == agent
+                && event.kind == EventKind::ToolCall
+                && event.payload["title"] == format!("Team Bus: {tool}")
+        }) else {
+            return Ok(None);
+        };
+        Ok(events
+            .iter()
+            .find(|event| {
+                event.kind == EventKind::ToolUpdate
+                    && event.payload["callId"] == call.payload["callId"]
+            })
+            .map(|event| event.payload.clone()))
+    }
+
+    /// **An agent answering a question answers from what it has: it may not start another one.**
+    ///
+    /// Run dabf40a3 spent 46% of its tokens on exactly that chain. Both shapes are driven through
+    /// the real bus by the answering agent's own `curl`, and each script exits non-zero unless the
+    /// bus refuses with the sentence that says what to do instead:
+    ///
+    /// * a **kept-alive** stage, asked by its successor, tries to `ask` an agent nobody is
+    ///   keeping alive (exit 31);
+    /// * a **helper started by `ask`** tries `ask` (exit 32) and `dispatch` (exit 33).
+    ///
+    /// The agent either would have started writes a marker first thing; neither marker exists.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn an_agent_answering_a_question_may_not_start_another_agent(
+        pool: sqlx::PgPool,
+    ) -> Result<()> {
+        let dir = markers("answering");
+        let never = |name: &str| {
+            format!(
+                ": > '{}'; exit 99",
+                dir.join(format!("{name}-started")).display()
+            )
+        };
+        let refused = "*'Answer from what you already have'*";
+        let live_script = format!(
+            r#"set -eu
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"mcpCapabilities":{{"http":true}}}}}}}}'
+IFS= read -r new
+{READ_BUS}
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"live-a","configOptions":[]}}}}'
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
+IFS= read -r _
+answer=$({ask_c})
+case "$answer" in {refused}) ;; *) printf 'a kept-alive answer started a helper: %s\n' "$answer" >&2; exit 31 ;; esac
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"live-a","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"answered from what I had"}}}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
+"#,
+            ask_c = bus_call("ask", r#"{"agent":"c","question":"can you check?"}"#),
+        );
+        let helper_script = format!(
+            r#"set -eu
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"mcpCapabilities":{{"http":true}}}}}}}}'
+IFS= read -r new
+{READ_BUS}
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"helper-h","configOptions":[]}}}}'
+IFS= read -r _
+answer=$({ask_c})
+case "$answer" in {refused}) ;; *) printf 'an ask helper started a helper: %s\n' "$answer" >&2; exit 32 ;; esac
+answer=$({dispatch_c})
+case "$answer" in {refused}) ;; *) printf 'an ask helper dispatched: %s\n' "$answer" >&2; exit 33 ;; esac
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"helper-h","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"answered from what I had"}}}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
+"#,
+            ask_c = bus_call("ask", r#"{"agent":"c","question":"can you check?"}"#),
+            dispatch_c = bus_call("dispatch", r#"{"agent":"c","task":"check it"}"#),
+        );
+        let team_with = |mode_edges: Vec<crate::config::EdgeConfig>| {
+            Arc::new(TeamConfig {
+                schema_version: 1,
+                id: "answering-team".into(),
+                name: "Answering team".into(),
+                entrypoint: "a".into(),
+                responder: None,
+                schedule: None,
+                deliver: None,
+                conversation: ConversationConfig::default(),
+                memory: None,
+                guards: GuardsConfig::default(),
+                agents: vec![
+                    test_agent("a", "/bin/sh", vec!["-c".into(), live_script.clone()]),
+                    test_agent("b", "true", Vec::new()),
+                    test_agent("c", "/bin/sh", vec!["-c".into(), never("c")]),
+                    test_agent("h", "/bin/sh", vec!["-c".into(), helper_script.clone()]),
+                ],
+                edges: mode_edges,
+            })
+        };
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+
+        // A kept-alive stage, asked by the stage after it.
+        let team = team_with(vec![crate::config::EdgeConfig {
+            from: "a".into(),
+            to: "b".into(),
+            layer: "configured".into(),
+            kind: "sequence".into(),
+            ts: "2026-10-12T00:00:00Z".into(),
+        }]);
+        let bus = TeamBus::start(
+            team.clone(),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Pipeline,
+            Arc::new(TeamMemory::default()),
+            None,
+        )
+        .await?;
+        let event_log = EventLog::new(archive.clone(), "answering-run".into());
+        let a_connection = bus.connection("a").await?;
+        let mut process = AcpProcess::spawn(&ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), live_script.clone()],
+            env: BTreeMap::new(),
+            cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        })?;
+        let mut context = TeamSessionContext {
+            archive: &archive,
+            exit_timeout: Duration::from_secs(5),
+            bus: Some(&a_connection),
+            event_log: Some(event_log.clone()),
+            packet: None,
+            composed: None,
+            boundary: None,
+        };
+        let mut recorder = process.open_live("a", "test/model", &mut context).await?;
+        let first = process.prompt_turn(&mut recorder, "do your work").await?;
+        let live = bus.keep_alive("a", process, recorder, first).await;
+        let b = bus.connection("b").await?;
+        b.register(event_log.clone()).await;
+        let answered = post_json(
+            &bus,
+            &b.token,
+            &json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                "params": {"name": "ask", "arguments": {"agent": "a", "question": "which source?"}}}),
+        )
+        .await?;
+        assert_eq!(answered["result"]["isError"], false, "{answered}");
+        assert_eq!(
+            answered["result"]["structuredContent"]["reply"],
+            "answered from what I had"
+        );
+        bus.release("a", live).await?;
+        bus.shutdown().await?;
+
+        // A helper `ask` started, in a team-mode run.
+        let bus = TeamBus::start(
+            team_with(Vec::new()),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Team,
+            Arc::new(TeamMemory::default()),
+            None,
+        )
+        .await?;
+        let lead = bus.connection("b").await?;
+        lead.register(event_log.clone()).await;
+        let answered = post_json(
+            &bus,
+            &lead.token,
+            &json!({"jsonrpc": "2.0", "id": 8, "method": "tools/call",
+                "params": {"name": "ask", "arguments": {"agent": "h", "question": "what happened?"}}}),
+        )
+        .await?;
+        assert_eq!(answered["result"]["isError"], false, "{answered}");
+        assert_eq!(
+            answered["result"]["structuredContent"]["reply"],
+            "answered from what I had"
+        );
+        bus.wait_for_tasks().await?;
+        bus.shutdown().await?;
+
+        assert!(
+            !dir.join("c-started").exists(),
+            "an agent answering a question started another"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    /// **A question is withdrawn when the agent that asked ends its turn first.**
+    ///
+    /// The shape of run dabf40a3: a Codex stage asked its kept-alive predecessor and ended its
+    /// turn with the `ask` still in flight, and the predecessor went on answering for nobody. The
+    /// asker here is a real ACP session that starts its `ask` in the background and ends its turn
+    /// once the predecessor has the question; nothing calls the bus to cancel anything. The
+    /// predecessor's script answers only a `session/cancel` (exit 41 otherwise), so the run can
+    /// finish only if the end of the asker's turn reached the kept-alive turn.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_question_is_withdrawn_when_the_agent_that_asked_ends_its_turn(
+        pool: sqlx::PgPool,
+    ) -> Result<()> {
+        let dir = markers("withdrawn");
+        let asked = dir.join("asked");
+        let predecessor = format!(
+            r#"set -eu
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"live-a","configOptions":[]}}}}'
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
+IFS= read -r _
+: > '{asked}'
+IFS= read -r cancel
+case "$cancel" in *'"method":"session/cancel"'*) ;; *) printf 'expected session/cancel, got: %s\n' "$cancel" >&2; exit 41 ;; esac
+printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"cancelled"}}}}'
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
+"#,
+            asked = asked.display(),
+        );
+        let asker = format!(
+            r#"set -eu
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"mcpCapabilities":{{"http":true}}}}}}}}'
+IFS= read -r new
+{READ_BUS}
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"asker-b","configOptions":[]}}}}'
+IFS= read -r _
+{ask_a} > /dev/null 2>&1 &
+i=0
+while [ ! -f '{asked}' ]; do i=$((i+1)); [ "$i" -lt 200 ] || exit 43; sleep 0.05; done
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"asker-b","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"moved on without it"}}}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
+"#,
+            ask_a = bus_call("ask", r#"{"agent":"a","question":"which source?"}"#),
+            asked = asked.display(),
+        );
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "withdrawn-team".into(),
+            name: "Withdrawn team".into(),
+            entrypoint: "a".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![
+                test_agent("a", "/bin/sh", vec!["-c".into(), predecessor.clone()]),
+                test_agent("b", "/bin/sh", vec!["-c".into(), asker.clone()]),
+            ],
+            edges: vec![crate::config::EdgeConfig {
+                from: "a".into(),
+                to: "b".into(),
+                layer: "configured".into(),
+                kind: "sequence".into(),
+                ts: "2026-10-12T00:00:00Z".into(),
+            }],
+        });
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            team,
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Pipeline,
+            Arc::new(TeamMemory::default()),
+            None,
+        )
+        .await?;
+        let event_log = EventLog::new(archive.clone(), "withdrawn-run".into());
+        let spec = |script: &str| ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.to_owned()],
+            env: BTreeMap::new(),
+            cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        };
+        let mut a = AcpProcess::spawn(&spec(&predecessor))?;
+        let mut a_context = TeamSessionContext {
+            archive: &archive,
+            exit_timeout: Duration::from_secs(5),
+            bus: None,
+            event_log: Some(event_log.clone()),
+            packet: None,
+            composed: None,
+            boundary: None,
+        };
+        let mut a_recorder = a.open_live("a", "test/model", &mut a_context).await?;
+        let first = a.prompt_turn(&mut a_recorder, "do your work").await?;
+        let live = bus.keep_alive("a", a, a_recorder, first).await;
+
+        let b_connection = bus.connection("b").await?;
+        let mut b = AcpProcess::spawn(&spec(&asker))?;
+        let mut b_context = TeamSessionContext {
+            archive: &archive,
+            exit_timeout: Duration::from_secs(5),
+            bus: Some(&b_connection),
+            event_log: Some(event_log.clone()),
+            packet: None,
+            composed: None,
+            boundary: None,
+        };
+        let mut b_recorder = b.open_live("b", "test/model", &mut b_context).await?;
+        let reply = b.prompt_turn(&mut b_recorder, "your stage").await?;
+        assert_eq!(reply, "moved on without it");
+        b.finish_live(&mut b_recorder, reply, &b_context).await?;
+
+        // The predecessor's turn was stopped, so releasing it is prompt; a turn left running
+        // would hold it until the ten-minute request timeout.
+        tokio::time::timeout(Duration::from_secs(10), bus.release("a", live))
+            .await
+            .context("the kept-alive turn was never stopped")??;
+        let update = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(update) = bus_tool_update(&archive, "withdrawn-run", "b", "ask").await?
+                {
+                    return Ok::<_, anyhow::Error>(update);
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .context("the withdrawn ask was never answered")??;
+        assert_eq!(update["status"], "failed", "{update}");
+        assert!(
+            update["rawOutput"]["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("the question was withdrawn")),
+            "{update}"
+        );
+        let events = archive.load_session("withdrawn-run").await?;
+        assert!(
+            events.iter().any(|event| event.agent_id == "a"
+                && event.payload["phase"] == "turn_interrupted"
+                && event.payload["reason"] == ASK_WITHDRAWN),
+            "the kept-alive turn was not stopped as withdrawn: {events:#?}"
+        );
+        bus.shutdown().await?;
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    /// The cold half of the same rule: a helper started for an `ask` is ended when the asker's
+    /// turn ends first, instead of finishing an answer nobody reads. The helper's script records
+    /// its pid and then blocks; it must be gone, and the roster must say it was cancelled.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_helper_started_for_a_question_is_ended_when_the_asker_moves_on(
+        pool: sqlx::PgPool,
+    ) -> Result<()> {
+        let dir = markers("withdrawn-helper");
+        let pid = dir.join("pid");
+        let helper = format!(
+            r#"set -eu
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"helper-h","configOptions":[]}}}}'
+IFS= read -r _
+echo $$ > '{pid}.tmp' && mv '{pid}.tmp' '{pid}'
+IFS= read -r never
+exit 0
+"#,
+            pid = pid.display(),
+        );
+        let lead = format!(
+            r#"set -eu
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"mcpCapabilities":{{"http":true}}}}}}}}'
+IFS= read -r new
+{READ_BUS}
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"lead-l","configOptions":[]}}}}'
+IFS= read -r _
+{ask_h} > /dev/null 2>&1 &
+i=0
+while [ ! -f '{pid}' ]; do i=$((i+1)); [ "$i" -lt 200 ] || exit 43; sleep 0.05; done
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"lead-l","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"answered without h"}}}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
+IFS= read -r _
+printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
+"#,
+            ask_h = bus_call("ask", r#"{"agent":"h","question":"what happened?"}"#),
+            pid = pid.display(),
+        );
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "withdrawn-helper-team".into(),
+            name: "Withdrawn helper team".into(),
+            entrypoint: "lead".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![
+                test_agent("lead", "/bin/sh", vec!["-c".into(), lead.clone()]),
+                test_agent("h", "/bin/sh", vec!["-c".into(), helper]),
+            ],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            team,
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Team,
+            Arc::new(TeamMemory::default()),
+            None,
+        )
+        .await?;
+        let connection = bus.connection("lead").await?;
+        let mut process = AcpProcess::spawn(&ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), lead],
+            env: BTreeMap::new(),
+            cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        })?;
+        let mut context = TeamSessionContext {
+            archive: &archive,
+            exit_timeout: Duration::from_secs(5),
+            bus: Some(&connection),
+            event_log: Some(EventLog::new(
+                archive.clone(),
+                "withdrawn-helper-run".into(),
+            )),
+            packet: None,
+            composed: None,
+            boundary: None,
+        };
+        let mut recorder = process
+            .open_live("lead", "test/model", &mut context)
+            .await?;
+        let reply = process.prompt_turn(&mut recorder, "the task").await?;
+        assert_eq!(reply, "answered without h");
+        process.finish_live(&mut recorder, reply, &context).await?;
+
+        let helper_pid: u32 = std::fs::read_to_string(&pid)?.trim().parse()?;
+        let gone = tokio::time::timeout(Duration::from_secs(5), async {
+            while crate::test_support::process_is_alive(helper_pid) {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await;
+        assert!(
+            gone.is_ok(),
+            "the helper outlived the question it was started for"
+        );
+        let update = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(update) =
+                    bus_tool_update(&archive, "withdrawn-helper-run", "lead", "ask").await?
+                {
+                    return Ok::<_, anyhow::Error>(update);
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .context("the withdrawn ask was never answered")??;
+        assert_eq!(update["status"], "failed", "{update}");
+        assert_eq!(
+            bus.state.statuses.read().await.get("h").map(String::as_str),
+            Some("cancelled")
+        );
+        bus.shutdown().await?;
+        let _ = std::fs::remove_dir_all(&dir);
         Ok(())
     }
 

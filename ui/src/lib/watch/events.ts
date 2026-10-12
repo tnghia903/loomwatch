@@ -683,8 +683,9 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
 
   const replaying = new Set<string>()
   const auxiliaryTurns = new Map<string, string>()
-  // Agents whose turn you stopped with "Send now" (ADR 0051): its `cancelled` is what you asked for.
-  const interrupted = new Set<string>()
+  // Agents whose turn LoomWatch stopped on purpose, with what to say about it: "Send now" (ADR 0051),
+  // or a question withdrawn because the agent that asked moved on. Its `cancelled` is not a fault.
+  const interrupted = new Map<string, string>()
   /** Agents whose next prompt is LoomWatch's request to carry on, not a new task. */
   const resuming = new Set<string>()
   for (const event of events) {
@@ -732,8 +733,9 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         if (p.phase === 'awaiting_operator') { agent.status = 'waiting'; agent.task = 'Waiting for you'; letters.awaiting(event) }
         if (p.phase === 'team_bus_unavailable') agent.busUnavailable = true
         if (p.phase === 'turn_interrupted' && object(event.raw) && event.raw.source === 'loomwatch') {
-          interrupted.add(agent.id)
-          agent.task = 'Stopped for your note'
+          const why = p.reason === 'ask_withdrawn' ? 'Stopped: the agent that asked moved on' : 'Stopped for your note'
+          interrupted.set(agent.id, why)
+          agent.task = why
         }
         if (isTurnResumed(event)) {
           // One turn, cut by the app and carried on: its reply keeps going, and its cost counts.
@@ -986,9 +988,11 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         agent.streaming = false
         agent.thinking = false
         agent.stopReason = typeof p.stopReason === 'string' ? p.stopReason : 'end_turn'
-        if (agent.stopReason === 'cancelled' && interrupted.delete(agent.id)) {
-          // You stopped it to hand it a note; nothing went wrong, and the note's turn follows.
-          agent.task = 'Stopped for your note'
+        if (agent.stopReason === 'cancelled' && interrupted.has(agent.id)) {
+          // Stopped on purpose — for your note, whose turn follows, or because nobody was waiting
+          // for its answer any more. Nothing went wrong.
+          agent.task = interrupted.get(agent.id) ?? 'Stopped for your note'
+          interrupted.delete(agent.id)
         } else if (agent.stopReason !== 'end_turn') {
           attention.push({ id: event.id, seq: event.seq, agentId: agent.id, message: `Turn ended: ${agent.stopReason}` })
           agent.task = `Turn ended: ${agent.stopReason}`
