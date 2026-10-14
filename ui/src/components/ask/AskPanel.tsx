@@ -1,9 +1,10 @@
-import { AlertCircle, ArrowUp, Check, Loader2, RotateCcw, X } from 'lucide-react'
+import { AlertCircle, ArrowUp, Check, RotateCcw, X } from 'lucide-react'
 import { useEffect, useId, useRef, type KeyboardEvent } from 'react'
 
 import type { AskContext, InboxItem } from '../../lib/ask/client'
 import type { AskStep, AssistantTurn } from '../../lib/ask/thread'
 import type { AskController } from '../../lib/ask/useAsk'
+import { StatusGlyph } from '../ui/glyphs'
 import { Markdown } from '../ui/Markdown'
 import { AskAppPicker } from './AskAppPicker'
 import { AskCardView, type CardActions } from './AskCards'
@@ -34,7 +35,8 @@ const PLACEHOLDER: Record<AskContext['view'], string> = {
 }
 
 function StepIcon({ status }: { status: AskStep['status'] }) {
-  if (status === 'running') return <Loader2 className="ask-step-spin" size={13} aria-hidden="true" />
+  // The app's own spinner: a still ring with an arc turning inside it, so the glyph never tumbles.
+  if (status === 'running') return <StatusGlyph status="starting" size={13} />
   if (status === 'failed') return <AlertCircle size={13} aria-hidden="true" />
   return <Check className="ask-step-check" size={13} aria-hidden="true" />
 }

@@ -299,8 +299,7 @@
   .ask-suggestions li { animation: rise-in var(--t-entrance) var(--ease-out) both; animation-delay: calc(var(--i, 0) * 50ms + 80ms); }
   .ask-empty-title, .ask-empty-text { animation: fade-in var(--t-entrance) var(--ease-out) both; }
 
-  /* Work in progress: the step spins, a finished step's check pops, the dots breathe in turn. */
-  .ask-step-spin { animation: ask-spin 900ms linear infinite; }
+  /* Work in progress: a finished step's check pops, the dots breathe in turn. */
   .ask-step.is-done .ask-step-check { animation: ask-check-pop var(--t-move) var(--ease-out) both; }
   .ask-dots i { animation: ask-dot 1200ms ease-in-out infinite; }
   .ask-dots i:nth-child(2) { animation-delay: 160ms; }
@@ -331,7 +330,6 @@
   .home-ask { animation: rise-in var(--t-entrance) var(--ease-out) both; animation-delay: 120ms; }
 }
 
-@keyframes ask-spin { to { rotate: 360deg; } }
 @keyframes ask-check-pop { from { opacity: 0; scale: .4; } }
 @keyframes ask-dot { 0%, 100% { opacity: .3; scale: .8; } 50% { opacity: 1; scale: 1; } }
 @keyframes ask-march { to { stroke-dashoffset: -44; } }

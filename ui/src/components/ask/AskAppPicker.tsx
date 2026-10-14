@@ -1,9 +1,10 @@
-import { Check, ChevronDown, Loader2 } from 'lucide-react'
+import { Check, ChevronDown } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
 import type { AskApp } from '../../lib/ask/client'
 import type { AskModel } from '../../lib/ask/useAsk'
 import { fetchHarnessModels, type HarnessModels } from '../../lib/harnesses'
+import { StatusGlyph } from '../ui/glyphs'
 
 type Catalog = { state: 'loading' } | { state: 'ready'; models: HarnessModels } | { state: 'failed' }
 
@@ -132,7 +133,7 @@ export function AskAppPicker({ apps, app, model, inConversation, disabled = fals
             </button>
             {catalog?.state === 'loading' && (
               <p className="pop-empty t-meta ask-app-finding" role="status">
-                <Loader2 className="ask-step-spin" size={13} aria-hidden="true" />
+                <StatusGlyph status="starting" size={13} style={{ color: 'inherit' }} />
                 Finding {app.name}’s models…
               </p>
             )}
