@@ -21,11 +21,13 @@ button { cursor: pointer; }
 code, kbd, pre { font-family: var(--font-mono); }
 
 /* TNG-127: the app is a direct-manipulation canvas, not a document. Selection
-   is re-enabled on genuine content below. */
+   is re-enabled on genuine content below. React Flow puts its own `selectable` class on every
+   clickable node and edge wrapper; that is its state, not our opt-in, and matching it turned
+   whole cards into text that a connection drag highlighted on its way across. */
 .lw-shell { user-select: none; -webkit-user-select: none; }
 .lw-shell .rr-body, .lw-shell .rr-body code, .lw-shell .ent-out, .lw-shell .story-prompt .rt-body,
 .lw-shell .code, .lw-shell input, .lw-shell textarea, .lw-shell [contenteditable],
-.lw-shell .selectable { user-select: text; -webkit-user-select: text; }
+.lw-shell .selectable:not(.react-flow__node, .react-flow__edge) { user-select: text; -webkit-user-select: text; }
 
 .visually-hidden {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
