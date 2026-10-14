@@ -13,8 +13,10 @@ import { answerRun, newStartKey, RunApiError, STALE_TEAM_REVISION, TEAM_NEEDS_RE
 import type { ReceiptLine } from '../../lib/story/receipt'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { AgentFacesContext, type AgentFaces } from '../../lib/chat/faces'
-import { batonOf, batonSettlesAt, batonWords, PASS_BEAT_MS, passesKey, type Pass } from '../../lib/chat/baton'
+import { batonWords, sameBaton, type Baton } from '../../lib/chat/baton'
+import { usePieceLine } from '../../lib/chat/pieceLine'
 import { AgentFace } from './AgentFace'
+import { BatonFlight } from './BatonFlight'
 import { BatonPill } from './BatonPill'
 import { Swap } from './Appearing'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
@@ -290,24 +292,22 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // Each face can say who its agent is, and puts `@name` in the message box when clicked.
   const [mentioned, setMentioned] = useState(0)
   const states = new Map(presence.map(({ agent, state }) => [agent.id, state]))
-  // Who has the work right now: their face grows into a pill that says how it reached them
-  // (lib/chat/baton.ts). Each live piece reports where its work has moved; the newest piece with
-  // someone at work is the one shown.
-  const [passes, setPasses] = useState<ReadonlyMap<string, readonly Pass[]>>(() => new Map())
-  const onPasses = useCallback((runId: string, next: readonly Pass[]) => {
-    setPasses((now) => (passesKey(now.get(runId) ?? []) === passesKey(next) ? now : new Map(now).set(runId, next)))
+  // Who has the work right now (lib/chat/baton.ts). Each live piece says it on its own line and
+  // reports it here; the header follows the newest piece with someone at work. While that piece's
+  // line is on screen the header shows the faces alone; once the line is scrolled out of view it
+  // flies up into the header and becomes a pill growing from the agent's face (lib/chat/pieceLine.ts).
+  const [batons, setBatons] = useState<ReadonlyMap<string, Baton | null>>(() => new Map())
+  const onBaton = useCallback((runId: string, next: Baton | null) => {
+    setBatons((now) => (sameBaton(now.get(runId) ?? null, next) ? now : new Map(now).set(runId, next)))
   }, [])
-  const [clock, setClock] = useState(() => Date.now())
-  const held = unreachable ? null : heldBy(live, passes, new Set(members.map((agent) => agent.id)), clock)
-  // A pass is named for a moment, then the pill settles to who is working.
-  const settles = held?.settles ?? null
-  useEffect(() => {
-    if (settles === null) return
-    const timer = window.setTimeout(() => setClock(Date.now()), Math.min(PASS_BEAT_MS, Math.max(0, settles - Date.now())) + 40)
-    return () => window.clearTimeout(timer)
-  }, [settles, clock])
+  const held = unreachable ? null : heldBy(live, batons, new Set(members.map((agent) => agent.id)))
   const baton = held?.baton ?? null
   const batonText = baton ? batonWords(baton, (id) => members.find((agent) => agent.id === id)?.name || id) : null
+  const holding = baton && batonText ? { agent: baton.agent, words: batonText.pill, hue: team.hues.get(baton.agent) ?? 1, waiting: baton.kind === 'you' } : null
+  const line = usePieceLine(scroller, held?.runId ?? null, holding)
+  const pill = line.inView === false ? baton : null
+  // The line is on its way up: whatever the header now shows waits hidden until it lands.
+  const landing = line.flight?.way === 'up'
   const faces: AgentFaces = {
     facts: (id) => {
       const agent = members.find((member) => member.id === id)
@@ -366,15 +366,15 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
           {/* Folded, the team reads as one line: its faces with their status, and what they are doing. */}
           {!rosterOpen && members.length > 0 && (
             <div className="tc-roster-summary">
-              <span className={`tc-faces${baton ? ' has-baton' : ''}`}>
+              <span className={`tc-faces${pill ? ' has-baton' : ''}`}>
                 {presence.map(({ agent, state }) => {
-                  const holds = baton?.agent === agent.id ? batonText : null
+                  const holds = pill?.agent === agent.id ? batonText : null
                   const hue = team.hues.get(agent.id) ?? 1
                   return (
                     <span key={agent.id} className={`tc-member ${state}${holds ? ' holds' : ''}`}>
                       <AgentFace id={agent.id} doing={holds?.sentence}>
                         <i className={`chat-avatar hue-${hue}`} style={{ width: 20, height: 20, fontSize: 8 }} aria-hidden="true">{initialsOf(agent.name || agent.id)}</i>
-                        <BatonPill words={holds?.pill ?? null} hue={hue} waiting={baton?.kind === 'you'} />
+                        <BatonPill words={holds?.pill ?? null} hue={hue} waiting={pill?.kind === 'you'} target={agent.id} landing={landing && holds !== null} />
                       </AgentFace>
                     </span>
                   )
@@ -391,7 +391,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
           )}
           <ul id={rosterId} className="tc-members" aria-label="Who is on the team" hidden={!rosterOpen}>
             {presence.map(({ agent, state }) => {
-              const holds = baton?.agent === agent.id ? batonText : null
+              const holds = pill?.agent === agent.id ? batonText : null
               const words = holds?.row ?? STATE_WORDS[state]
               return (
                 <li key={agent.id} className={`tc-member ${state}${holds ? ' holds' : ''}`}>
@@ -399,7 +399,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                     <i className={`chat-avatar hue-${team.hues.get(agent.id) ?? 1}`} style={{ width: 24, height: 24, fontSize: 9 }} aria-hidden="true">{initialsOf(agent.name || agent.id)}</i>
                     <span>{agent.name || agent.id}</span>
                   </AgentFace>
-                  <Swap key={words}><em>{words}</em></Swap>
+                  <Swap key={words}><em className={landing && holds ? 'landing' : undefined} data-baton-target={holds ? agent.id : undefined}>{words}</em></Swap>
                 </li>
               )
             })}
@@ -460,7 +460,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                 {newDay && <li className="tc-day" aria-hidden="true"><span>{dayLabel(at)}</span></li>}
                 {item.kind === 'work'
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} reveal={reveal?.runId === item.run.runId ? reveal : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
-                      detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onPasses={onPasses} onTryAgain={tryAgain} onContinue={keepGoing}
+                      detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} />
                   : <TeamNote message={item.message} onStart={() => void startNote(item.message)} />}
               </Fragment>
@@ -492,6 +492,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         onAnswer={answer}
         mentioned={mentioned}
       />
+      {line.flight && <BatonFlight key={line.flight.id} flight={line.flight} holding={holding} onDone={line.done} />}
     </section>
     </AgentFacesContext.Provider>
     </FollowContext.Provider>
@@ -513,14 +514,11 @@ function WeaveMark() {
 const STATE_WORDS = { working: 'working', waiting: 'waiting for you', idle: 'ready', away: 'away' } as const
 type Presence = keyof typeof STATE_WORDS
 
-/** Who has the work in the newest live piece that has someone at it, and when its words settle. */
-function heldBy(live: readonly RunRecord[], passes: ReadonlyMap<string, readonly Pass[]>, members: ReadonlySet<string>, now: number) {
+/** Who has the work in the newest live piece that has someone at it, as that piece said. */
+function heldBy(live: readonly RunRecord[], batons: ReadonlyMap<string, Baton | null>, members: ReadonlySet<string>) {
   for (const run of [...live].sort((left, right) => right.createdAt.localeCompare(left.createdAt))) {
-    const waiting = run.waitingOn
-    const waitingOn = waiting ? (waiting.kind === 'review_stop' ? waiting.handoverFrom ?? waiting.node : waiting.node) : run.permissionRequests?.[0]?.agent ?? null
-    const moved = passes.get(run.runId) ?? []
-    const baton = batonOf({ passes: moved, working: run.working ?? [], waitingOn, now })
-    if (baton && members.has(baton.agent)) return { baton, settles: batonSettlesAt(baton, moved) }
+    const baton = batons.get(run.runId)
+    if (baton && members.has(baton.agent)) return { runId: run.runId, baton }
   }
   return null
 }

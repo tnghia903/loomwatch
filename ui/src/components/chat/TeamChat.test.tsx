@@ -382,7 +382,8 @@ describe('who has the work', () => {
     renderChat()
     await waitFor(() => expect(pill()).toHaveTextContent('Passing to Writer…'))
     expect(screen.getByRole('button', { name: 'Writer: mention in your message' })).toHaveAccessibleDescription('Researcher passed the work to Writer')
-    await waitFor(() => expect(pill()).toHaveTextContent('Writer is working…'), { timeout: 2500 })
+    await waitFor(() => expect(pill()).toHaveTextContent('working…'), { timeout: 2500 })
+    expect(pill()).not.toHaveTextContent('Passing')
   })
 
   it('puts whoever waits on you first, in gold and without the typing dots', async () => {
@@ -390,7 +391,7 @@ describe('who has the work', () => {
     said.messages = [talk({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', state: 'pending' })]
     page = working({ waitingOn: { node: 'writer', name: 'Writer', kind: 'question', since: '2026-10-06T02:01:00.000Z', question: 'Which market?', context: null, handoverFrom: null, park: 'kept_alive', parkNote: '', sendBackAvailable: false } })
     renderChat()
-    await waitFor(() => expect(pill()).toHaveTextContent('Writer needs you'))
+    await waitFor(() => expect(pill()).toHaveTextContent('needs you'))
     expect(pill()).toHaveClass('waiting')
     expect(pill()?.querySelector('.chat-dots')).toBeNull()
   })
@@ -407,6 +408,114 @@ describe('who has the work', () => {
     renderChat()
     expect(await screen.findByRole('button', { name: '2 ready. Show who is on the team' })).toBeInTheDocument()
     expect(pill()).toBeNull()
+  })
+})
+
+describe('the piece’s line and the header’s pill', () => {
+  // The line is watched against the chat's scroller; here the test says when it is on screen.
+  const watchers: FakeObserver[] = []
+  class FakeObserver {
+    targets: Element[] = []
+    callback: IntersectionObserverCallback
+    constructor(callback: IntersectionObserverCallback) {
+      this.callback = callback
+      watchers.push(this)
+    }
+    observe(target: Element) { this.targets.push(target) }
+    unobserve() {}
+    disconnect() { watchers.splice(watchers.indexOf(this), 1) }
+    takeRecords() { return [] }
+  }
+  const scrollLine = (visible: boolean) => act(() => {
+    for (const watcher of [...watchers]) {
+      for (const target of watcher.targets.filter((element) => element.classList.contains('tc-talk'))) {
+        watcher.callback([{ isIntersecting: visible, target } as unknown as IntersectionObserverEntry], watcher as unknown as IntersectionObserver)
+      }
+    }
+  })
+  // Each flight's animation, finished when the test says so.
+  const flights: { keyframes: Keyframe[]; finish: () => void }[] = []
+  const motion = (welcome: boolean) => vi.stubGlobal('matchMedia', (query: string) => ({ matches: welcome === query.includes('no-preference'), media: query, addEventListener() {}, removeEventListener() {} }))
+  beforeEach(() => {
+    watchers.length = 0
+    flights.length = 0
+    vi.stubGlobal('IntersectionObserver', FakeObserver)
+    motion(true)
+    Element.prototype.animate = function animate(keyframes: Keyframe[] | PropertyIndexedKeyframes | null) {
+      const animation = { onfinish: null as null | (() => void), cancel: vi.fn() }
+      flights.push({ keyframes: keyframes as Keyframe[], finish: () => animation.onfinish?.() })
+      return animation as unknown as Animation
+    }
+  })
+  afterEach(() => {
+    window.localStorage.clear()
+    delete (Element.prototype as Partial<Element>).animate
+  })
+
+  const asking = () => {
+    said.messages = [{
+      id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', handedBy: null, text: 'Which outlet?', context: null, eventId: 'e1', evidenceId: null,
+      seq: 3, ts: new Date().toISOString(), offsetMs: 0, state: 'pending', error: null, reply: null, carried: false,
+    }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['writer'] }), request: message({}), notes: [] }]
+  }
+  const pill = () => document.querySelector('.tc-faces .tc-baton.on')
+  const ghost = () => document.querySelector('.tc-baton-ghost')
+  const line = () => document.querySelector('.tc-talk')
+
+  it('says who has the work on the piece while it is on screen, and flies it up into the pill once it is not', async () => {
+    window.localStorage.setItem('loomwatch.chatRoster', 'folded')
+    asking()
+    renderChat()
+    await waitFor(() => expect(line()?.querySelector('.tc-talk-line')).toHaveTextContent('Writer is asking Researcher'))
+    scrollLine(true)
+    expect(pill()).toBeNull()
+    // Scrolled away: the line sets off from the chat's edge, and the pill waits hidden until it lands.
+    scrollLine(false)
+    expect(ghost()).toHaveTextContent('Asking Researcher…')
+    expect(pill()).toHaveClass('landing')
+    expect(flights.at(-1)?.keyframes[0]).toMatchObject({ opacity: 0, backgroundColor: 'transparent' })
+    act(() => flights.at(-1)?.finish())
+    expect(ghost()).toBeNull()
+    expect(pill()).not.toHaveClass('landing')
+    expect(pill()).toHaveTextContent('Asking Researcher…')
+    // Back on screen: the pill flies down into the line, which waits hidden until it lands.
+    scrollLine(true)
+    expect(pill()).toBeNull()
+    expect(ghost()).toHaveTextContent('Asking Researcher…')
+    expect(line()).toHaveClass('tc-talk-landing')
+    expect(flights.at(-1)?.keyframes.at(-1)).toMatchObject({ opacity: 0 })
+    act(() => flights.at(-1)?.finish())
+    expect(line()).not.toHaveClass('tc-talk-landing')
+    expect(ghost()).toBeNull()
+  })
+
+  it('lands on the open list’s words too', async () => {
+    asking()
+    renderChat()
+    await waitFor(() => expect(line()?.querySelector('.tc-talk-line')).toHaveTextContent('Writer is asking Researcher'))
+    scrollLine(true)
+    // Answering from the session it kept open, Researcher is not counted as working.
+    expect(memberRow('Researcher')).toHaveTextContent('Researcherready')
+    scrollLine(false)
+    const words = within(memberRow('Researcher')).getByText('asked by Writer')
+    expect(words).toHaveClass('landing')
+    act(() => flights.at(-1)?.finish())
+    expect(words).not.toHaveClass('landing')
+  })
+
+  it('swaps without flying where motion is not welcome', async () => {
+    window.localStorage.setItem('loomwatch.chatRoster', 'folded')
+    motion(false)
+    asking()
+    renderChat()
+    await waitFor(() => expect(line()?.querySelector('.tc-talk-line')).toHaveTextContent('Writer is asking Researcher'))
+    scrollLine(true)
+    scrollLine(false)
+    expect(ghost()).toBeNull()
+    expect(pill()).toHaveTextContent('Asking Researcher…')
+    expect(pill()).not.toHaveClass('landing')
+    expect(flights).toHaveLength(0)
   })
 })
 

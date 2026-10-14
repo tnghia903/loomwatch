@@ -118,6 +118,17 @@
 .tc-baton .chat-dots { flex: none; gap: 3px; }
 .tc-baton .chat-dots i { width: 4px; height: 4px; background: var(--hue); }
 .tc-baton-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The piece's line on its way to the pill, or back (BatonFlight): a pill of its own above everything,
+   placed and sized by its animation. What it lands on stays hidden until it has. */
+.tc-baton.tc-baton-ghost {
+  position: fixed;
+  z-index: 70;
+  margin: 0;
+  max-width: none;
+  padding: 0 12px 0 5px;
+  pointer-events: none;
+}
+.tc-baton.landing, .tc-member em.landing, .tc-talk-landing .tc-talk-line { visibility: hidden; }
 /* While one face has the work, the others step back a little: muted, but still opaque, since the
    face after the pill overlaps its end. */
 .tc-faces.has-baton .tc-member:not(.holds) .tc-face:not(:hover, :focus-visible) .chat-avatar {
