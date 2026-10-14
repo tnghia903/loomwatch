@@ -13,20 +13,22 @@ const CARD_WIDTH = 264
 /**
  * An agent's avatar in the team's chat. Resting on it shows a card of who the agent is and what it
  * works with; clicking it puts `@name` in the message box. Outside a team's chat, or for someone
- * who is not one of the team's agents (you), it is the avatar alone.
+ * who is not one of the team's agents (you), it is the avatar alone. `doing`: what the face says
+ * it is doing, when the face has grown to say it ("Writer is asking Researcher").
  */
-export function AgentFace({ id, className = '', children }: { id: string; className?: string; children: ReactNode }) {
+export function AgentFace({ id, className = '', doing, children }: { id: string; className?: string; doing?: string; children: ReactNode }) {
   const faces = useAgentFaces()
   const facts = faces?.facts(id) ?? null
   if (!faces || !facts) return <>{children}</>
-  return <Face facts={facts} mention={faces.mention} className={className}>{children}</Face>
+  return <Face facts={facts} mention={faces.mention} className={className} doing={doing}>{children}</Face>
 }
 
 type Phase = 'closed' | 'open' | 'leaving'
 
-function Face({ facts, mention, className, children }: { facts: AgentFacts; mention: (id: string) => void; className: string; children: ReactNode }) {
+function Face({ facts, mention, className, doing, children }: { facts: AgentFacts; mention: (id: string) => void; className: string; doing?: string; children: ReactNode }) {
   const button = useRef<HTMLButtonElement>(null)
   const cardId = useId()
+  const doingId = useId()
   const [phase, setPhase] = useState<Phase>('closed')
   const [place, setPlace] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
   // Each click presses the face in once.
@@ -71,7 +73,7 @@ function Face({ facts, mention, className, children }: { facts: AgentFacts; ment
         type="button"
         className={`tc-face${className ? ` ${className}` : ''}`}
         aria-label={`${facts.name}: mention in your message`}
-        aria-describedby={shown ? cardId : undefined}
+        aria-describedby={[shown && cardId, doing && doingId].filter(Boolean).join(' ') || undefined}
         onClick={() => {
           clear()
           setPhase('closed')
@@ -94,6 +96,7 @@ function Face({ facts, mention, className, children }: { facts: AgentFacts; ment
       >
         <span key={pressed} className={pressed > 0 ? 'tc-face-press' : undefined}>{children}</span>
       </button>
+      {doing && <span id={doingId} hidden>{doing}</span>}
       {shown && createPortal(
         <div id={cardId} role="tooltip" className={`tc-agent-card e2${phase === 'leaving' ? ' leaving' : ''}${place.bottom !== undefined ? ' above' : ''}`} style={{ width: CARD_WIDTH, ...place }}>
           <AgentCard facts={facts} />

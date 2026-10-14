@@ -9,11 +9,13 @@ import { AppearContext, useAppear } from '../../lib/chat/appear'
 import { FollowContext, type ChatFollow } from '../../lib/chat/follow'
 import { useTeamChat, type PendingMessage } from '../../lib/chat/useTeamChat'
 import { DaemonUnreachableError } from '../../lib/daemonFetch'
-import { answerRun, newStartKey, RunApiError, STALE_TEAM_REVISION, TEAM_NEEDS_REVIEW, type TeamReview } from '../../lib/runs/client'
+import { answerRun, newStartKey, RunApiError, STALE_TEAM_REVISION, TEAM_NEEDS_REVIEW, type RunRecord, type TeamReview } from '../../lib/runs/client'
 import type { ReceiptLine } from '../../lib/story/receipt'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { AgentFacesContext, type AgentFaces } from '../../lib/chat/faces'
+import { batonOf, batonSettlesAt, batonWords, PASS_BEAT_MS, passesKey, type Pass } from '../../lib/chat/baton'
 import { AgentFace } from './AgentFace'
+import { BatonPill } from './BatonPill'
 import { Swap } from './Appearing'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
 import { WorkPiece, type TeamView } from './WorkPiece'
@@ -288,6 +290,24 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // Each face can say who its agent is, and puts `@name` in the message box when clicked.
   const [mentioned, setMentioned] = useState(0)
   const states = new Map(presence.map(({ agent, state }) => [agent.id, state]))
+  // Who has the work right now: their face grows into a pill that says how it reached them
+  // (lib/chat/baton.ts). Each live piece reports where its work has moved; the newest piece with
+  // someone at work is the one shown.
+  const [passes, setPasses] = useState<ReadonlyMap<string, readonly Pass[]>>(() => new Map())
+  const onPasses = useCallback((runId: string, next: readonly Pass[]) => {
+    setPasses((now) => (passesKey(now.get(runId) ?? []) === passesKey(next) ? now : new Map(now).set(runId, next)))
+  }, [])
+  const [clock, setClock] = useState(() => Date.now())
+  const held = unreachable ? null : heldBy(live, passes, new Set(members.map((agent) => agent.id)), clock)
+  // A pass is named for a moment, then the pill settles to who is working.
+  const settles = held?.settles ?? null
+  useEffect(() => {
+    if (settles === null) return
+    const timer = window.setTimeout(() => setClock(Date.now()), Math.min(PASS_BEAT_MS, Math.max(0, settles - Date.now())) + 40)
+    return () => window.clearTimeout(timer)
+  }, [settles, clock])
+  const baton = held?.baton ?? null
+  const batonText = baton ? batonWords(baton, (id) => members.find((agent) => agent.id === id)?.name || id) : null
   const faces: AgentFaces = {
     facts: (id) => {
       const agent = members.find((member) => member.id === id)
@@ -346,28 +366,43 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
           {/* Folded, the team reads as one line: its faces with their status, and what they are doing. */}
           {!rosterOpen && members.length > 0 && (
             <div className="tc-roster-summary">
-              <span className="tc-faces">
-                {presence.map(({ agent, state }) => (
-                  <span key={agent.id} className={`tc-member ${state}`}>
-                    <AgentFace id={agent.id}><i className={`chat-avatar hue-${team.hues.get(agent.id) ?? 1}`} style={{ width: 20, height: 20, fontSize: 8 }} aria-hidden="true">{initialsOf(agent.name || agent.id)}</i></AgentFace>
-                  </span>
-                ))}
+              <span className={`tc-faces${baton ? ' has-baton' : ''}`}>
+                {presence.map(({ agent, state }) => {
+                  const holds = baton?.agent === agent.id ? batonText : null
+                  const hue = team.hues.get(agent.id) ?? 1
+                  return (
+                    <span key={agent.id} className={`tc-member ${state}${holds ? ' holds' : ''}`}>
+                      <AgentFace id={agent.id} doing={holds?.sentence}>
+                        <i className={`chat-avatar hue-${hue}`} style={{ width: 20, height: 20, fontSize: 8 }} aria-hidden="true">{initialsOf(agent.name || agent.id)}</i>
+                        <BatonPill words={holds?.pill ?? null} hue={hue} waiting={baton?.kind === 'you'} />
+                      </AgentFace>
+                    </span>
+                  )
+                })}
               </span>
-              <button type="button" className="tc-roster-more" onClick={toggleRoster} aria-label={`${rosterSummary(presence)}. Show who is on the team`}>
-                <Swap key={rosterSummary(presence)} className="tc-roster-words">{rosterSummary(presence)}</Swap>
-              </button>
+              {/* While work is under way the pill says who has it — and between two agents, nothing
+                  flashes "ready" — so the count comes back only once the work is done. */}
+              {!baton && live.length === 0 && (
+                <button type="button" className="tc-roster-more" onClick={toggleRoster} aria-label={`${rosterSummary(presence)}. Show who is on the team`}>
+                  <Swap key={rosterSummary(presence)} className="tc-roster-words">{rosterSummary(presence)}</Swap>
+                </button>
+              )}
             </div>
           )}
           <ul id={rosterId} className="tc-members" aria-label="Who is on the team" hidden={!rosterOpen}>
-            {presence.map(({ agent, state }) => (
-              <li key={agent.id} className={`tc-member ${state}`}>
-                <AgentFace id={agent.id} className="tc-face-row">
-                  <i className={`chat-avatar hue-${team.hues.get(agent.id) ?? 1}`} style={{ width: 24, height: 24, fontSize: 9 }} aria-hidden="true">{initialsOf(agent.name || agent.id)}</i>
-                  <span>{agent.name || agent.id}</span>
-                </AgentFace>
-                <Swap key={state}><em>{STATE_WORDS[state]}</em></Swap>
-              </li>
-            ))}
+            {presence.map(({ agent, state }) => {
+              const holds = baton?.agent === agent.id ? batonText : null
+              const words = holds?.row ?? STATE_WORDS[state]
+              return (
+                <li key={agent.id} className={`tc-member ${state}${holds ? ' holds' : ''}`}>
+                  <AgentFace id={agent.id} className="tc-face-row">
+                    <i className={`chat-avatar hue-${team.hues.get(agent.id) ?? 1}`} style={{ width: 24, height: 24, fontSize: 9 }} aria-hidden="true">{initialsOf(agent.name || agent.id)}</i>
+                    <span>{agent.name || agent.id}</span>
+                  </AgentFace>
+                  <Swap key={words}><em>{words}</em></Swap>
+                </li>
+              )
+            })}
           </ul>
         </div>
         <div className="tc-head-acts">
@@ -425,7 +460,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                 {newDay && <li className="tc-day" aria-hidden="true"><span>{dayLabel(at)}</span></li>}
                 {item.kind === 'work'
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} reveal={reveal?.runId === item.run.runId ? reveal : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
-                      detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onTryAgain={tryAgain} onContinue={keepGoing}
+                      detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onPasses={onPasses} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} />
                   : <TeamNote message={item.message} onStart={() => void startNote(item.message)} />}
               </Fragment>
@@ -477,6 +512,18 @@ function WeaveMark() {
 // The words the chat uses for work everywhere: ready to take it, at it, or waiting on you.
 const STATE_WORDS = { working: 'working', waiting: 'waiting for you', idle: 'ready', away: 'away' } as const
 type Presence = keyof typeof STATE_WORDS
+
+/** Who has the work in the newest live piece that has someone at it, and when its words settle. */
+function heldBy(live: readonly RunRecord[], passes: ReadonlyMap<string, readonly Pass[]>, members: ReadonlySet<string>, now: number) {
+  for (const run of [...live].sort((left, right) => right.createdAt.localeCompare(left.createdAt))) {
+    const waiting = run.waitingOn
+    const waitingOn = waiting ? (waiting.kind === 'review_stop' ? waiting.handoverFrom ?? waiting.node : waiting.node) : run.permissionRequests?.[0]?.agent ?? null
+    const moved = passes.get(run.runId) ?? []
+    const baton = batonOf({ passes: moved, working: run.working ?? [], waitingOn, now })
+    if (baton && members.has(baton.agent)) return { baton, settles: batonSettlesAt(baton, moved) }
+  }
+  return null
+}
 
 /** "1 working · 4 ready": the folded team, busiest first. */
 function rosterSummary(presence: readonly { state: Presence }[]): string {

@@ -89,6 +89,41 @@
 /* A face rests above the one beside it while the pointer is on it. */
 .tc-faces .tc-member:hover, .tc-faces .tc-member:focus-within { z-index: 1; }
 .tc-faces .chat-avatar { box-shadow: 0 0 0 2px var(--color-panel); }
+/* Who has the work: its face grows into a pill in its colour that says how the work reached it —
+   "Asking Researcher…" (BatonPill, lib/chat/baton.ts). Every face carries one, folded to nothing
+   under its own avatar, so the pill starts from the face's middle and the faces after it make room.
+   An agent waiting on you is gold, like everything else that waits on you. */
+.tc-faces .tc-face > span { gap: 0; }
+.tc-baton {
+  display: inline-grid;
+  grid-template-columns: 0fr;
+  align-items: center;
+  height: 20px;
+  max-width: 46cqi;
+  margin-left: -12px;
+  padding: 0 0 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r-full);
+  background: transparent;
+}
+.tc-baton.on {
+  grid-template-columns: 1fr;
+  padding: 0 12px 0 15px;
+  border-color: color-mix(in srgb, var(--hue) 34%, transparent);
+  background: color-mix(in srgb, var(--hue) 14%, var(--color-panel-solid));
+}
+.tc-member:last-child .tc-baton.on { padding-right: 9px; }
+.tc-baton.waiting { --hue: var(--color-accent); }
+.tc-baton-in { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; font: 600 11.5px/1 var(--font-sans); color: var(--hue); }
+.tc-baton .chat-dots { flex: none; gap: 3px; }
+.tc-baton .chat-dots i { width: 4px; height: 4px; background: var(--hue); }
+.tc-baton-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* While one face has the work, the others step back a little: muted, but still opaque, since the
+   face after the pill overlaps its end. */
+.tc-faces.has-baton .tc-member:not(.holds) .tc-face:not(:hover, :focus-visible) .chat-avatar {
+  background: color-mix(in srgb, var(--hue) 7%, var(--color-panel-solid));
+  color: color-mix(in srgb, var(--hue) 45%, var(--color-ink-3));
+}
 .tc-roster-more .tc-roster-words { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .tc-members { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; list-style: none; }
 .tc-members[hidden] { display: none; }
@@ -484,6 +519,10 @@
   .tc-face .chat-avatar { transition: box-shadow var(--t-quick) var(--ease-out), translate var(--t-quick) var(--ease-out); }
   .tc-face:hover .chat-avatar { translate: 0 -1px; }
   .tc-face-press .chat-avatar { animation: tc-press var(--t-move) var(--ease-out) both; }
+  /* The pill grows out of the face that gets the work as the one that had it folds back into its
+     own; the faces around it step back and forward. */
+  .tc-baton { transition: grid-template-columns var(--t-entrance) var(--ease-out), padding var(--t-entrance) var(--ease-out), background-color var(--t-move) var(--ease-out), border-color var(--t-move) var(--ease-out); }
+  .tc-faces .tc-face .chat-avatar { transition: box-shadow var(--t-quick) var(--ease-out), translate var(--t-quick) var(--ease-out), background-color var(--t-move) var(--ease-out), color var(--t-move) var(--ease-out); }
   /* Its card rises into place below the face (or sinks into place above it), and fades as it goes. */
   .tc-agent-card { animation: tc-card-in var(--t-move) var(--ease-out) both; transform-origin: top left; }
   .tc-agent-card.above { animation-name: tc-card-in-above; transform-origin: bottom left; }
