@@ -52,7 +52,8 @@ export function lessonRun(record: Pick<RunRecord, 'runId' | 'status' | 'mode' | 
   const failed = new Map<string, string | null>()
   for (const agent of projection.agents) {
     if (agent.status !== 'failed') continue
-    failed.set(agent.id, agent.stopReason ?? (agent.exitCode !== null ? `its app exited with code ${agent.exitCode}` : null))
+    // What its app said beats its stop reason: a turn Codex refused still ended `end_turn`.
+    failed.set(agent.id, agent.error ?? agent.stopReason ?? (agent.exitCode !== null ? `its app exited with code ${agent.exitCode}` : null))
   }
   const opening = new Map<string, number>()
   for (const event of events) {

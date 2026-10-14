@@ -321,6 +321,14 @@ export class Correspondence {
     note.reply = { from: event.agentId, text: reply, ...this.at(event), source: null, sentBackTo: null }
   }
 
+  /** An agent's turn ended in an error its app reported, so the note that turn was for failed. */
+  turnFailed(event: RunEvent, error: string) {
+    const note = this.messages.find((message) => message.kind === 'note' && message.to === event.agentId && message.state === 'pending')
+    if (!note) return
+    note.state = 'failed'
+    note.error = error
+  }
+
   list(): TeamMessage[] {
     return this.messages.map((message) => ({
       ...message,

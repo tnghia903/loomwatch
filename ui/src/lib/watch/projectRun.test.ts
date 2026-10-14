@@ -203,3 +203,78 @@ describe('projectRun', () => {
     expect(formatOffset(64_000)).toBe('1m 04s')
   })
 })
+
+// 2026-10-14: Codex refused Gatherer's model on a ChatGPT sign-in. It set its thread status to
+// `systemError`, said why as agent text and ended the turn `end_turn`, and the refusal was read as
+// Gatherer's answer. These are the frames it sent, as the daemon archives them.
+describe('a turn its app reported as failed', () => {
+  const REFUSAL = 'The \'gpt-6.1-sol\' model is not supported when using Codex with a ChatGPT account.'
+  const status = (seq: number, type: string): RunEvent =>
+    event(seq, 'session_meta', { sessionUpdate: 'session_info_update', _meta: { codex: { threadStatus: { type } } } }, 'gatherer')
+  const says = (seq: number, text: string): RunEvent => event(seq, 'message', { role: 'agent', content: { type: 'text', text } }, 'gatherer')
+  const refusedTurn = (seq: number): RunEvent[] => [
+    says(seq, 'Warning: Model metadata for `gpt-6.1-sol` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.\n\n'),
+    status(seq + 1, 'active'),
+    status(seq + 2, 'systemError'),
+    says(seq + 3, `${REFUSAL}\n\n`),
+    event(seq + 4, 'session_meta', { sessionUpdate: 'session_info_update', title: 'Gather the stories' }, 'gatherer'),
+    event(seq + 5, 'turn_end', { stopReason: 'end_turn', usage: null }, 'gatherer'),
+  ]
+  const opening: RunEvent[] = [
+    event(0, 'process', { phase: 'spawned', pid: 1 }, 'gatherer'),
+    event(1, 'message', { role: 'user', content: { type: 'text', text: 'Gather the stories.' } }, 'gatherer'),
+  ]
+
+  it('fails the agent with what its app said, and never takes that as its reply', () => {
+    const projection = projectRun([...opening, ...refusedTurn(2)], Infinity, { responder: 'gatherer' })
+    const gatherer = projection.agents[0]
+    expect(gatherer).toMatchObject({ status: 'failed', taskState: 'ERROR', error: REFUSAL, reply: '', stopReason: 'end_turn' })
+    expect(gatherer.task).toBe(REFUSAL.slice(0, 79) + '…')
+    expect(projection.attention).toEqual([{ id: 'event-7', seq: 7, agentId: 'gatherer', message: `Codex reported an error instead of an answer: ${REFUSAL}` }])
+  })
+
+  // The run record of 2026-10-14 says `succeeded`: every later turn was refused too, and the
+  // session closed cleanly. One alert for one error, and a clean exit does not undo it.
+  it('stays failed through later refused turns and a clean exit, with one alert', () => {
+    const events = [
+      ...opening, ...refusedTurn(2),
+      event(8, 'session_meta', { phase: 'turn_purpose', purpose: 'handover' }, 'gatherer'),
+      event(9, 'message', { role: 'user', content: { type: 'text', text: 'Write your handover.' } }, 'gatherer'),
+      ...refusedTurn(10),
+      event(16, 'process', { phase: 'exited', exitCode: 0 }, 'gatherer'),
+    ]
+    const projection = projectRun(events, Infinity, { responder: 'gatherer', status: 'succeeded', evidenceComplete: true })
+    expect(projection.agents[0]).toMatchObject({ status: 'failed', error: REFUSAL, reply: '' })
+    expect(projection.attention).toHaveLength(1)
+    expect(projection.phase).toBe('partial')
+  })
+
+  // A one-shot session the daemon failed for it is also marked crashed, carrying the same words.
+  it('is not raised a second time by the crash marker that follows it', () => {
+    const crashed = event(8, 'process', { phase: 'crashed', exitCode: 0, message: `session execution failed: Codex reported an error instead of an answer: ${REFUSAL}` }, 'gatherer')
+    const projection = projectRun([...opening, ...refusedTurn(2), crashed], Infinity, { responder: 'gatherer', status: 'failed', evidenceComplete: true })
+    expect(projection.attention).toHaveLength(1)
+    expect(projection.agents[0].task).toBe(REFUSAL.slice(0, 79) + '…')
+    expect(projection.phase).toBe('failed')
+  })
+
+  it('counts only the latest status: a thread that works again answers as usual', () => {
+    const projection = projectRun([
+      ...opening, status(2, 'active'), status(3, 'systemError'), says(4, 'Reconnecting.'), status(5, 'active'),
+      event(6, 'message', { role: 'agent', messageId: 'm2', content: { type: 'text', text: 'Twelve stories.' } }, 'gatherer'),
+      status(7, 'idle'), event(8, 'turn_end', { stopReason: 'end_turn' }, 'gatherer'),
+    ], Infinity, { responder: 'gatherer' })
+    expect(projection.agents[0].error).toBeUndefined()
+    expect(projection.agents[0].reply).toContain('Twelve stories.')
+    expect(projection.attention).toEqual([])
+  })
+
+  it('fails the note the refused turn was answering, rather than answering it with the refusal', () => {
+    const note = event(8, 'message', { role: 'user', content: { type: 'text', text: 'Add one more source.' } }, 'operator')
+    note.raw = { source: 'loomwatch', phase: 'operator_answer', to: 'gatherer' }
+    const events = [...opening, says(2, 'Twelve stories.'), event(3, 'turn_end', { stopReason: 'end_turn' }, 'gatherer'), note,
+      event(9, 'message', { role: 'user', content: { type: 'text', text: '## A note from you\nAdd one more source.' } }, 'gatherer'), ...refusedTurn(10)]
+    const sent = projectRun(events, Infinity, { responder: 'gatherer' }).messages.find((message) => message.kind === 'note')
+    expect(sent).toMatchObject({ state: 'failed', error: `Codex reported an error instead of an answer: ${REFUSAL}`, reply: null })
+  })
+})
