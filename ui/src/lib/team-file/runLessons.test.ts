@@ -96,6 +96,16 @@ describe('lessonRun', () => {
     // The first reading is the opening cost; an agent that reported nothing has no entry.
     expect([...reduced.usage]).toEqual([['w', { tokens: 41_000, opening: 28_500 }]])
   })
+
+  // 2026-10-14: Codex refused the model and ended the turn `end_turn`; "Last time: end_turn" says nothing.
+  it('keeps what its app said went wrong over the stop reason', () => {
+    const refusal = 'The \'gpt-6.1-sol\' model is not supported when using Codex with a ChatGPT account.'
+    const reduced = lessonRun(
+      { runId: 'a', status: 'failed', mode: 'pipeline', entrypoint: 'g', agentIds: ['g'] },
+      { messages: [], agents: [{ id: 'g', status: 'failed', stopReason: 'end_turn', error: refusal, exitCode: null, tokens: null }] as never },
+    )
+    expect([...reduced.failed]).toEqual([['g', refusal]])
+  })
 })
 
 describe('teamUsage', () => {
