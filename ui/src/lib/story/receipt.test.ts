@@ -213,3 +213,34 @@ describe('the run’s tokens', () => {
     expect(receiptMarkdown(receiptOf(false))).not.toContain('Tokens')
   })
 })
+
+// 2026-10-14: Codex refused Gatherer's model and ended the turn `end_turn`. The receipt said
+// "Gatherer stopped (end turn)", which explains nothing.
+describe('a turn its app reported as failed', () => {
+  const REFUSAL = 'The \'gpt-6.1-sol\' model is not supported when using Codex with a ChatGPT account.'
+  const gather = (seq: number, kind: RunEvent['kind'], payload: RunEvent['payload']): RunEvent =>
+    ({ id: `gather-${seq}`, sessionId: 'run-4', agentId: 'gatherer', seq, ts: at(seq), kind, payload })
+
+  it('says who reported it on the agent’s line, and what it said under “Worth a look”', () => {
+    const projection = projectRun([
+      gather(0, 'process', { phase: 'spawned', pid: 7 }),
+      gather(1, 'message', { role: 'user', content: { type: 'text', text: 'Gather the stories.' } }),
+      gather(2, 'session_meta', { sessionUpdate: 'session_info_update', _meta: { codex: { threadStatus: { type: 'systemError' } } } }),
+      gather(3, 'message', { role: 'agent', content: { type: 'text', text: REFUSAL } }),
+      gather(4, 'turn_end', { stopReason: 'end_turn' }),
+    ])
+    const receipt = buildReceipt({
+      attempt: 1,
+      prompt: 'Gather the stories.',
+      phase: 'failed',
+      elapsed: '6s',
+      agents: [{ id: 'gatherer', name: 'Gatherer', operator: false, runtime: { status: 'failed' } }],
+      projection,
+      evidenceByAgent: new Map(),
+      harnessLabels: new Map([['gatherer', 'Codex']]),
+      answered: false,
+    })
+    expect(receipt.lines).toEqual([{ tone: 'bad', text: 'Gatherer stopped (Codex reported an error)', agentId: 'gatherer' }])
+    expect(receipt.checks).toContainEqual({ tone: 'warn', text: `Codex reported an error instead of an answer: ${REFUSAL}`, agentId: 'gatherer', evidenceId: undefined })
+  })
+})

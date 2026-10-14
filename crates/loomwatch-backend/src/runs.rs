@@ -49,6 +49,9 @@ const SPAWN_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const MISSING_CANONICAL_RESPONSE: &str = "missing_canonical_response";
 const PROCESS_CRASHED: &str = "process_crashed";
 const PROTOCOL_FAILURE: &str = "protocol_failure";
+/// The app ended a turn normally but reported it as failed (`acp::AppReportedError`), such as
+/// Codex refusing a model the signed-in account cannot use.
+const APP_ERROR: &str = "app_error";
 const SPAWN_FAILED: &str = "spawn_failed";
 /// Stable pre-acceptance codes from `RUN_PROVENANCE_CONTRACT` §11.
 const STALE_TEAM_REVISION: &str = "stale_team_revision";
@@ -3053,6 +3056,12 @@ fn classify_failure_code(
     if spawn_context {
         return SPAWN_FAILED;
     }
+    if error
+        .chain()
+        .any(<dyn std::error::Error>::is::<crate::acp::AppReportedError>)
+    {
+        return APP_ERROR;
+    }
     let protocol_marker =
         crash_message.is_some_and(|message| message.contains("session execution failed"));
     if process_crashed && !protocol_marker {
@@ -4960,6 +4969,22 @@ exit 7
                 Some("session execution failed: invalid JSON")
             ),
             PROTOCOL_FAILURE
+        );
+
+        // An app that reported its turn failed is neither: the process was fine, and so was the
+        // protocol. The crash marker a one-shot session writes for it changes nothing.
+        let refused = anyhow::Error::new(crate::acp::AppReportedError {
+            message: "The model is not supported.".to_owned(),
+        })
+        .context("pipeline node gatherer failed");
+        assert_eq!(classify_failure_code(&refused, false, None), APP_ERROR);
+        assert_eq!(
+            classify_failure_code(
+                &refused,
+                true,
+                Some("session execution failed: Codex reported an error")
+            ),
+            APP_ERROR
         );
     }
 

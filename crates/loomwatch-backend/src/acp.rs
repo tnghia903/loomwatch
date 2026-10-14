@@ -1191,6 +1191,9 @@ impl AcpProcess {
     /// the same session, to carry on without it (ADR 0046), at most [`RESUMES_PER_TURN`] times.
     /// The archive keeps that as one turn: the cut is a `turn_resumed` note holding the app's own
     /// `cancelled` response, then `LoomWatch`'s request to carry on, then the one `turn_end`.
+    ///
+    /// A turn the app reported as failed ([`AppReportedError`]) is an error, not a reply: its
+    /// `turn_end` is archived as the app sent it, followed by `LoomWatch`'s `turn_failed` note.
     pub(crate) async fn prompt_turn(
         &mut self,
         recorder: &mut Recorder,
@@ -1198,6 +1201,7 @@ impl AcpProcess {
     ) -> Result<String> {
         recorder.reply.clear();
         recorder.reply_phase_known = false;
+        recorder.app_error = None;
         let mut prompted = self.prompt_round(recorder, prompt).await?;
         for _ in 0..RESUMES_PER_TURN {
             if stop_reason(&prompted.result) != "cancelled" || self.declined.is_empty() {
@@ -1246,6 +1250,18 @@ impl AcpProcess {
                 Some(prompted.response),
             )
             .await?;
+        if let Some(after) = recorder.app_error.take() {
+            let message = app_error_message(&after, recorder.reply.as_str());
+            recorder.reply.clear();
+            recorder
+                .append(
+                    EventKind::SessionMeta,
+                    json!({"phase": "turn_failed", "reason": "app_error", "message": message}),
+                    Some(json!({"source": "loomwatch", "phase": "turn_failed"})),
+                )
+                .await?;
+            return Err(AppReportedError { message }.into());
+        }
         // Read from the reply before it is taken. A self-report is the agent's own account, so it
         // is archived under its own phase and never becomes provenance (CONTRACT §8.2).
         recorder.note_self_report().await?;
@@ -2134,6 +2150,51 @@ fn stop_reason(result: &Value) -> &str {
         .unwrap_or("end_turn")
 }
 
+/// The thread status Codex reports on a `session_info_update`, at
+/// `_meta.codex.threadStatus.type`: `active` while it works, `idle` when it is done, and
+/// `systemError` when the turn stopped on an error it reports only as text.
+fn codex_thread_status(update: &Value) -> Option<&str> {
+    update
+        .pointer("/_meta/codex/threadStatus/type")
+        .and_then(Value::as_str)
+}
+
+/// A turn its app reported as failed while still ending it like any other.
+///
+/// Codex (`codex-acp` 2.1.1) refuses a model the signed-in account cannot use this way: it sets
+/// its thread status to `systemError`, says why as agent text ("The 'gpt-6.1-sol' model is not
+/// supported when using Codex with a `ChatGPT` account."), and answers the prompt `end_turn`. Taken
+/// at its word, that sentence was the stage's answer: a pipeline handed it on as the handover and
+/// a Team Bus `ask` returned it as the answer. A typed error, so the run's failure code can say
+/// what happened rather than calling it a protocol fault.
+#[derive(Debug)]
+pub(crate) struct AppReportedError {
+    pub(crate) message: String,
+}
+
+impl std::fmt::Display for AppReportedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Codex reported an error instead of an answer: {}",
+            self.message
+        )
+    }
+}
+
+impl std::error::Error for AppReportedError {}
+
+/// What the app said went wrong, on one line: its words after it reported the failure, else
+/// everything it said this turn.
+fn app_error_message(after: &str, turn: &str) -> String {
+    let words = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let message = [after, turn]
+        .into_iter()
+        .map(words)
+        .find(|text| !text.is_empty());
+    message.unwrap_or_else(|| "it gave no reason".to_owned())
+}
+
 /// Build `LoomWatch`'s reply to an agent-initiated client request, once it is decided whether a
 /// permission request is `approved`: by its [`PermissionPolicy`](crate::permissions) (ADR 0037),
 /// or by the operator when the policy declined it (ADR 0040).
@@ -2528,6 +2589,9 @@ pub(crate) struct Recorder {
     delivered_skills: Vec<DeliveredSkill>,
     reply: ReplyText,
     reply_phase_known: bool,
+    /// Set when the app reports this turn failed (Codex's `threadStatus: systemError`), holding
+    /// what it has said since; cleared when it reports it is working again.
+    app_error: Option<String>,
     event_log: EventLog,
     acp_session_id: String,
     agent_id: String,
@@ -2577,6 +2641,7 @@ impl Recorder {
             agent_id: agent_id.to_owned(),
             reply: ReplyText::default(),
             reply_phase_known: false,
+            app_error: None,
             required_skills: Vec::new(),
             delivered_skills: Vec::new(),
             interrupt: None,
@@ -2674,6 +2739,17 @@ impl Recorder {
             .position(|skill| skill.name.eq_ignore_ascii_case(&named))
     }
 
+    /// Whether the app has reported this turn failed, by the latest thread status it sent: Codex
+    /// says `systemError`, then why as agent text, which [`Self::record_frame`] collects.
+    fn note_thread_status(&mut self, update_type: Option<&str>, update: &Value) {
+        if update_type == Some("session_info_update")
+            && let Some(status) = codex_thread_status(update)
+        {
+            self.app_error = (status == "systemError").then(String::new);
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
     async fn record_frame(&mut self, message: &Value) -> Result<()> {
         if let Some(payload) = permission_payload(message) {
             self.reply.note_activity();
@@ -2700,6 +2776,7 @@ impl Recorder {
                 .await;
         };
         let update_type = update.get("sessionUpdate").and_then(Value::as_str);
+        self.note_thread_status(update_type, update);
         let (kind, payload) = match update_type {
             Some("user_message_chunk" | "agent_message_chunk" | "agent_thought_chunk") => {
                 let role = match update_type {
@@ -2721,6 +2798,9 @@ impl Recorder {
                 if role == "agent"
                     && let Some(text) = content.get("text").and_then(Value::as_str)
                 {
+                    if let Some(error) = self.app_error.as_mut() {
+                        error.push_str(text);
+                    }
                     let message_id = update.get("messageId").and_then(Value::as_str);
                     let phase = update.pointer("/_meta/codex/phase").and_then(Value::as_str);
                     if matches!(phase, Some("commentary" | "final_answer")) {
@@ -5223,5 +5303,142 @@ mod tests {
             .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
             .await
             .expect("a cancel LoomWatch did not cause is left alone");
+    }
+
+    /// Codex refusing a model the `ChatGPT` sign-in cannot use, in the frames it sent on 2026-10-14:
+    /// `threadStatus: systemError`, the refusal as agent text, and an `end_turn` answer. The turn
+    /// fails with the refusal, and the archive keeps the app's `turn_end` as sent, then says why
+    /// `LoomWatch` failed it. The fake app exits 9 if it is prompted again, as a handover would.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_turn_codex_reports_as_a_system_error_fails_instead_of_answering(pool: PgPool) {
+        let script = format!(
+            r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"codex-refused","configOptions":[]}}}}'
+            IFS= read -r _
+            {}
+            if IFS= read -r request; then
+              case "$request" in *'"method":"session/prompt"'*) exit 9 ;; *) ;; esac
+            fi
+            "#,
+            crate::test_support::codex_refuses_the_model("codex-refused", 3)
+        );
+        let archive = EventArchive::from_pool(pool);
+        let error = declining_process(&script, None)
+            .run_session("gatherer", "", "gather", &archive, Duration::from_secs(2))
+            .await
+            .expect_err("a refused turn is not an answer");
+        assert!(
+            error
+                .chain()
+                .any(<dyn std::error::Error>::is::<AppReportedError>),
+            "{error:#}"
+        );
+        assert!(
+            format!("{error:#}").contains(&format!(
+                "Codex reported an error instead of an answer: {}",
+                crate::test_support::CODEX_REFUSAL
+            )),
+            "{error:#}"
+        );
+
+        let events = archive.load_session("codex-refused").await.expect("events");
+        let turn_end = events
+            .iter()
+            .position(|event| event.kind == EventKind::TurnEnd)
+            .expect("the app's turn_end is archived as sent");
+        assert_eq!(events[turn_end].payload["stopReason"], "end_turn");
+        let failed = &events[turn_end + 1];
+        assert_eq!(failed.kind, EventKind::SessionMeta);
+        assert_eq!(failed.payload["phase"], "turn_failed");
+        assert_eq!(failed.payload["reason"], "app_error");
+        assert_eq!(
+            failed.payload["message"],
+            crate::test_support::CODEX_REFUSAL,
+            "the words after the failure, not the warning before it"
+        );
+        assert_eq!(failed.raw.as_ref().unwrap()["source"], "loomwatch");
+        let last = events.last().expect("a terminal marker");
+        assert_eq!(last.payload["phase"], "crashed");
+        assert!(
+            last.payload["message"]
+                .as_str()
+                .unwrap()
+                .contains(crate::test_support::CODEX_REFUSAL),
+            "{}",
+            last.payload
+        );
+    }
+
+    /// Only the status Codex reports last counts: a thread that errors and then reports itself
+    /// working again recovered, and its turn answers as usual. A turn that ends `idle` is the
+    /// ordinary case.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_codex_thread_that_works_again_after_a_system_error_still_answers(pool: PgPool) {
+        let status = |status: &str| {
+            format!(
+                r#"printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"codex-recovered","update":{{"sessionUpdate":"session_info_update","_meta":{{"codex":{{"threadStatus":{{"type":"{status}"}}}}}}}}}}}}'"#
+            )
+        };
+        let script = format!(
+            r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"codex-recovered","configOptions":[]}}}}'
+            IFS= read -r _
+            {active}
+            {error}
+            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"codex-recovered","update":{{"sessionUpdate":"agent_message_chunk","messageId":"m1","content":{{"type":"text","text":"Reconnecting."}}}}}}}}'
+            {active}
+            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"codex-recovered","update":{{"sessionUpdate":"agent_message_chunk","messageId":"m2","content":{{"type":"text","text":"Twelve stories gathered."}}}}}}}}'
+            {idle}
+            printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
+            IFS= read -r request
+            case "$request" in *'"method":"session/close"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
+            "#,
+            active = status("active"),
+            error = status("systemError"),
+            idle = status("idle"),
+        );
+        let archive = EventArchive::from_pool(pool);
+        let outcome = declining_process(&script, None)
+            .run_session("gatherer", "", "gather", &archive, Duration::from_secs(2))
+            .await
+            .expect("a thread that recovered answers");
+        assert!(
+            outcome.reply.ends_with("Twelve stories gathered."),
+            "{:?}",
+            outcome.reply
+        );
+        let events = archive
+            .load_session("codex-recovered")
+            .await
+            .expect("events");
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.payload["phase"] == "turn_failed"),
+            "nothing failed"
+        );
+    }
+
+    #[test]
+    fn an_app_error_reads_as_one_line_of_the_apps_own_words() {
+        assert_eq!(
+            app_error_message("\n\nModel refused.\n\n", "Warning.\n\nModel refused."),
+            "Model refused."
+        );
+        assert_eq!(
+            app_error_message("  ", "Warning: no metadata.\n\nModel refused.\n"),
+            "Warning: no metadata. Model refused.",
+            "nothing after the failure: everything the turn said"
+        );
+        assert_eq!(app_error_message("", ""), "it gave no reason");
     }
 }

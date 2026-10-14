@@ -7,6 +7,11 @@ export interface ErrorAgent {
 
 // crates/loomwatch-backend/src/lib.rs wraps every harness spawn failure in this context.
 const SPAWN_FAILURE = /failed to spawn ACP harness for (?:agent|pipeline node) ([^:\s]+): ([\s\S]*)$/
+// crates/loomwatch-backend/src/acp.rs `AppReportedError`: the app ended a turn as usual but said it
+// failed (Codex refusing a model the account can't use). The app's words are the cause, whatever
+// context wraps them; a pipeline stage's context names who stopped.
+const APP_ERROR = /Codex reported an error instead of an answer: (.*)/
+const STAGE_FAILURE = /^pipeline node ([^:\s]+) failed/
 
 /**
  * A daemon error in the operator's words. Only failures with a known, fixable cause are rewritten;
@@ -14,6 +19,12 @@ const SPAWN_FAILURE = /failed to spawn ACP harness for (?:agent|pipeline node) (
  * than a technical sentence that is true.
  */
 export function plainRunError(message: string, agents: ReadonlyMap<string, ErrorAgent> = new Map()): string {
+  const reported = APP_ERROR.exec(message.trim())
+  if (reported) {
+    const id = STAGE_FAILURE.exec(message.trim())?.[1]
+    const who = id ? agents.get(id)?.name || id : null
+    return `${who ? `${who} stopped. ` : ''}Codex reported an error instead of an answer: ${reported[1].trim()}`
+  }
   const spawn = SPAWN_FAILURE.exec(message.trim())
   if (!spawn) return message
   const [, id, cause] = spawn

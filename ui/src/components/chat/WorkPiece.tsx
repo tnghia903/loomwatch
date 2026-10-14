@@ -429,7 +429,7 @@ function Stopped({ run, name, onTryAgain, onDetails }: { run: RunRecord; name: (
   if (run.status === 'failed') {
     return (
       <Appearing className="tc-stopped bad" role="status">
-        <p><b>The work stopped.</b> {run.error ? plainRunError(run.error.split('\n')[0]) : run.errorCode === 'missing_canonical_response' ? `${name(run.responder)} finished without an answer.` : 'Its record says why.'}</p>
+        <p><b>The work stopped.</b> {run.error ? plainRunError(run.error.split('\n')[0], new Map(run.agentIds.map((id) => [id, { name: name(id) }]))) : run.errorCode === 'missing_canonical_response' ? `${name(run.responder)} finished without an answer.` : 'Its record says why.'}</p>
         <div className="tc-acts">
           <button type="button" className="btn" onClick={onTryAgain}><RotateCcw size={13} aria-hidden="true" />Try again</button>
           <button type="button" className="btn" onClick={onDetails}>See what happened</button>

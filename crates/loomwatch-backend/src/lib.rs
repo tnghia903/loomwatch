@@ -2802,6 +2802,34 @@ pub(crate) mod test_support {
                 !state.is_empty() && !state.starts_with('Z')
             })
     }
+
+    /// What `codex-acp` 2.1.1 sent on 2026-10-14 when a `ChatGPT` sign-in was prompted on
+    /// `gpt-6.1-sol`, verbatim but for the session id: a warning, `threadStatus: systemError`,
+    /// the refusal as agent text, and an `end_turn` answer to prompt `response_id`. As `printf`
+    /// lines for a fake app's shell script.
+    pub(crate) fn codex_refuses_the_model(session_id: &str, response_id: u64) -> String {
+        let response = format!(
+            r#"{{"jsonrpc":"2.0","id":{response_id},"result":{{"stopReason":"end_turn","usage":null,"_meta":{{"quota":{{"token_count":null,"model_usage":[]}}}}}}}}"#
+        );
+        [
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Warning: Model metadata for `gpt-6.1-sol` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.\n\n"}}}}"#,
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"session_info_update","_meta":{"codex":{"threadStatus":{"type":"active","activeFlags":[]}}}}}}"#,
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"session_info_update","_meta":{"codex":{"threadStatus":{"type":"systemError"}}}}}}"#,
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.\n\n"}}}}"#,
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"session_info_update","title":"Reply with exactly one word: ok"}}}"#,
+            &response,
+        ]
+        .iter()
+        .map(|frame| {
+            let frame = frame.replace("SESSION", session_id).replace('\'', r"'\''");
+            ["printf '%s\\n' '", &frame, "'\n"].concat()
+        })
+        .collect()
+    }
+
+    /// The sentence Codex refused the model with in [`codex_refuses_the_model`].
+    pub(crate) const CODEX_REFUSAL: &str =
+        "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.";
 }
 
 #[cfg(test)]
@@ -3274,6 +3302,99 @@ mod tests {
             {tail}
         "#
         )
+    }
+
+    /// The 2026-10-14 run: Gatherer, on Codex, was refused its model, and the refusal became its
+    /// handover. A stage whose turn its app reported as failed stops the pipeline instead: no
+    /// handover is asked for, and the next stage never starts. Each fake app exits non-zero if it
+    /// is prompted when it should not be, so this cannot pass by the run merely failing.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_stage_codex_refused_stops_the_pipeline_instead_of_handing_on_the_refusal(
+        pool: sqlx::PgPool,
+    ) -> Result<()> {
+        let gatherer = format!(
+            r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"refused-gatherer","configOptions":[]}}}}'
+            IFS= read -r _
+            {}
+            if IFS= read -r request; then
+              printf 'prompted again after the refusal: %s\n' "$request" >&2
+              exit 9
+            fi
+            "#,
+            test_support::codex_refuses_the_model("refused-gatherer", 3)
+        );
+        let reader = "printf 'the reader must not start after a refused stage\\n' >&2; exit 13";
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "refused-pipeline".into(),
+            name: "Refused pipeline".into(),
+            entrypoint: "gatherer".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![
+                pipeline_agent("gatherer", vec!["-c".into(), gatherer]),
+                pipeline_agent("reader", vec!["-c".into(), reader.into()]),
+            ],
+            edges: vec![EdgeConfig {
+                from: "gatherer".into(),
+                to: "reader".into(),
+                layer: "configured".into(),
+                kind: "sequence".into(),
+                ts: "2026-10-14T00:00:00Z".into(),
+            }],
+        });
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let session_id = "run-refused-pipeline";
+        let error = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "gather today's stories",
+            Duration::from_secs(2),
+            Some(EventLog::new(archive.clone(), session_id.to_owned())),
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage::default(),
+        )
+        .await
+        .expect_err("a refused stage fails the run");
+        let message = format!("{error:#}");
+        assert!(
+            message.starts_with(&format!(
+                "pipeline node gatherer failed: Codex reported an error instead of an answer: {}",
+                test_support::CODEX_REFUSAL
+            )),
+            "{message}"
+        );
+
+        let events = archive.verify_session(session_id).await?;
+        assert!(
+            events.iter().all(|event| event.agent_id == "gatherer"),
+            "the reader never started"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.payload["phase"] == "turn_purpose"
+                    && event.payload["purpose"] == "handover"),
+            "no handover was asked for"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| event.payload["phase"] == "turn_failed"),
+            "the archive says why the stage failed"
+        );
+        Ok(())
     }
 
     #[sqlx::test(migrations = "../../migrations")]

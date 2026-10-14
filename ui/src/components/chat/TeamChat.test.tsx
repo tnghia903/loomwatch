@@ -460,4 +460,14 @@ describe('a piece of work', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { text: '@team today’s digest', to: { kind: 'team' } } }))
   })
+
+  // 2026-10-14: Codex refused a stage's model on a ChatGPT sign-in. The chat names the stage as the
+  // team does, and says what Codex said.
+  it('names the stage whose app refused the work, in that app’s words', async () => {
+    const error = 'pipeline node researcher failed: Codex reported an error instead of an answer: The \'gpt-6.1-sol\' model is not supported when using Codex with a ChatGPT account.'
+    page = [{ kind: 'work', run: run({ status: 'failed', reply: null, error, errorCode: 'app_error' }), request: message({}), notes: [] }]
+    renderChat()
+    const stopped = (await screen.findByText('The work stopped.')).closest('p')
+    expect(stopped).toHaveTextContent('The work stopped. Researcher stopped. Codex reported an error instead of an answer: The \'gpt-6.1-sol\' model is not supported when using Codex with a ChatGPT account.')
+  })
 })

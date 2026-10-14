@@ -486,6 +486,8 @@ function addOutput(graph: GraphAccumulator, input: CanvasGraphInput, frame: Grap
       : phase === 'failed' ? 'Run failed.'
       : 'Cancelled — partial answer kept.'
     const crash = projection.attention.find((alert) => /crash/i.test(alert.message))
+      // A turn its app reported as failed, in a run archived before the daemon failed the run for it.
+      ?? projection.attention.find((alert) => /reported an error instead of an answer/.test(alert.message))
     // §3.4 / CONTRACT §3: the strip carries the daemon's stable machine-readable code and
     // its verbatim message — never a token or a sentence manufactured here. The watermark
     // resolves the daemon's own code, then its stop reason, then the one code the contract

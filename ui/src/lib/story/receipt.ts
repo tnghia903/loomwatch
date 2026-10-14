@@ -207,7 +207,10 @@ export function buildReceipt(input: ReceiptInput): Receipt {
     const status = agent.runtime?.status ?? run.status
     if (status === 'succeeded') lines.push({ tone: 'ok', text: `${agent.name} finished${workSummary(items)}`, agentId: agent.id })
     else if (status === 'failed' || status === 'stopped' || status === 'unavailable') {
-      const why = run.stopReason ? ` (${run.stopReason.replace(/_/g, ' ')})` : run.exitCode !== null ? ` (exit code ${run.exitCode})` : ''
+      // A turn its app reported as failed still ends `end_turn`, so the stop reason says nothing:
+      // name who reported it here, and what it said is under "Worth a look".
+      const why = run.error ? ` (${input.harnessLabels.get(agent.id) || 'its app'} reported an error)`
+        : run.stopReason ? ` (${run.stopReason.replace(/_/g, ' ')})` : run.exitCode !== null ? ` (exit code ${run.exitCode})` : ''
       lines.push({ tone: 'bad', text: !why && stoppedByYou ? `${agent.name} was stopped before it finished` : `${agent.name} stopped${why}`, agentId: agent.id })
     } else if (terminal) lines.push({ tone: 'bad', text: stoppedByYou ? `${agent.name} was stopped before it finished` : `${agent.name} didn’t finish`, agentId: agent.id })
     else lines.push({ tone: 'wait', text: `${agent.name} is still working`, agentId: agent.id })

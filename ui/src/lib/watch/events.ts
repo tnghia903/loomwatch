@@ -34,6 +34,26 @@ function isTurnResumed(event: RunEvent): boolean {
   return event.kind === 'session_meta' && event.payload.phase === 'turn_resumed' && object(event.raw) && event.raw.source === 'loomwatch'
 }
 
+/**
+ * The thread status Codex reports on a `session_info_update` (`_meta.codex.threadStatus.type`):
+ * `active`, `idle`, or `systemError` when the turn stopped on an error it reports only as text.
+ * The daemon reads the same field (`acp.rs` `codex_thread_status`).
+ */
+function codexThreadStatus(event: RunEvent): string | null {
+  if (event.kind !== 'session_meta' || event.payload.sessionUpdate !== 'session_info_update') return null
+  const meta = object(event.payload._meta) ? event.payload._meta : {}
+  const codex = object(meta.codex) ? meta.codex : {}
+  const status = object(codex.threadStatus) ? codex.threadStatus : {}
+  return typeof status.type === 'string' ? status.type : null
+}
+
+/** What the app said went wrong, on one line, as the daemon words it (`acp.rs` `app_error_message`):
+ * its words after it reported the failure, else everything it said that turn. */
+function appErrorMessage(after: string, turn: string): string {
+  const words = (text: string) => text.split(/\s+/).filter(Boolean).join(' ')
+  return words(after) || words(turn) || 'it gave no reason'
+}
+
 /** Old run rows include progress in their canonical reply, and ran separate messages together.
  * Match the entire archived turn, then present it by its explicit phases and message boundaries;
  * never replace that reply with a later helper-question answer. */
@@ -176,6 +196,9 @@ export interface ProjectedAgent {
   reply: string
   /** Explicit harness phases distinguish final output from progress text. */
   replyPhaseKnown?: boolean
+  /** What its app reported instead of an answer when its latest turn failed (Codex's
+      `threadStatus: systemError`), in the app's own words. Absent when that turn did not fail. */
+  error?: string
   thoughtChars: number
   thoughts: number
   toolCalls: number
@@ -688,6 +711,9 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
   const interrupted = new Map<string, string>()
   /** Agents whose next prompt is LoomWatch's request to carry on, not a new task. */
   const resuming = new Set<string>()
+  /** Agents whose app reported this turn failed, with what it has said since (the daemon's rule:
+      the latest thread status counts, so one that says it is working again recovered). */
+  const appErrors = new Map<string, string>()
   for (const event of events) {
     if (event.seq > throughSeq) break
     lastSeq = event.seq
@@ -709,20 +735,27 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           agent.pid = typeof p.pid === 'number' ? p.pid : agent.pid
         } else if (p.phase === 'exited') {
           agent.exitCode = typeof p.exitCode === 'number' ? p.exitCode : null
-          agent.status = agent.exitCode === 0 ? (agent.handedOff ? 'stopped' : 'succeeded') : 'failed'
-          agent.task = agent.exitCode === 0 ? (agent.reply ? 'Reply delivered' : 'Finished') : `Exited with code ${String(agent.exitCode)}`
+          // Its app closing cleanly does not undo a turn it reported as failed.
+          agent.status = agent.exitCode === 0 ? (agent.error ? 'failed' : agent.handedOff ? 'stopped' : 'succeeded') : 'failed'
+          agent.task = agent.exitCode === 0 ? (agent.error ? firstLine(agent.error, 80) : agent.reply ? 'Reply delivered' : 'Finished') : `Exited with code ${String(agent.exitCode)}`
           agent.streaming = false
           agent.thinking = false
         } else if (p.phase === 'crashed') {
           agent.status = 'failed'
-          agent.task = typeof p.message === 'string' ? firstLine(p.message, 80) : 'Process crashed'
           agent.streaming = false
           agent.thinking = false
+          // A session the daemon failed for its app's reported error is marked crashed with that
+          // error: the turn already raised it, so it is not raised twice.
+          if (agent.error && typeof p.message === 'string' && p.message.includes(agent.error)) break
+          agent.task = typeof p.message === 'string' ? firstLine(p.message, 80) : 'Process crashed'
           attention.push({ id: event.id, seq: event.seq, agentId: agent.id, message: typeof p.message === 'string' ? p.message : 'Agent process crashed.' })
         }
         break
       }
       case 'session_meta': {
+        const threadStatus = codexThreadStatus(event)
+        if (threadStatus === 'systemError') appErrors.set(agent.id, '')
+        else if (threadStatus) appErrors.delete(agent.id)
         if (p.phase === 'turn_purpose') {
           if (p.purpose === 'checkpoint' || p.purpose === 'handover') auxiliaryTurns.set(agent.id, p.purpose)
           else auxiliaryTurns.delete(agent.id)
@@ -812,6 +845,8 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         } else if (p.role === 'agent') {
           messages += 1
           if (!agent.handedOff && agent.status !== 'failed') agent.status = 'running'
+          const failedSoFar = appErrors.get(agent.id)
+          if (failedSoFar !== undefined) appErrors.set(agent.id, failedSoFar + text)
           agent.allText.push(text, messageId(event))
           agent.text = agent.allText.text
           const phase = messagePhase(event)
@@ -978,17 +1013,34 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
       }
       case 'turn_end': {
         agent.turns += 1
-        if (!auxiliaryTurns.has(agent.id)) {
-          agent.reply = agent.turnPhaseKnown ? agent.turnText.text : agent.turnText.text || agent.reply
-          agent.replyPhaseKnown = agent.turnPhaseKnown
-          letters.turnEnded(event, agent.reply)
+        const failedWith = appErrors.get(agent.id)
+        appErrors.delete(agent.id)
+        if (failedWith !== undefined) {
+          // Its app ended the turn as usual but reported it failed (Codex refusing a model): what
+          // it said is the error, never its reply, so nothing downstream reads it as an answer.
+          const error = appErrorMessage(failedWith, agent.turnText.text)
+          const said = `Codex reported an error instead of an answer: ${error}`
+          if (error !== agent.error) attention.push({ id: event.id, seq: event.seq, agentId: agent.id, message: said })
+          agent.error = error
+          agent.status = 'failed'
+          agent.task = firstLine(error, 80)
+          letters.turnFailed(event, said)
+        } else {
+          agent.error = undefined
+          if (!auxiliaryTurns.has(agent.id)) {
+            agent.reply = agent.turnPhaseKnown ? agent.turnText.text : agent.turnText.text || agent.reply
+            agent.replyPhaseKnown = agent.turnPhaseKnown
+            letters.turnEnded(event, agent.reply)
+          }
         }
         agent.turnText = new ReplyText()
         agent.turnPhaseKnown = false
         agent.streaming = false
         agent.thinking = false
         agent.stopReason = typeof p.stopReason === 'string' ? p.stopReason : 'end_turn'
-        if (agent.stopReason === 'cancelled' && interrupted.has(agent.id)) {
+        if (failedWith !== undefined) {
+          // Said above, in its app's words.
+        } else if (agent.stopReason === 'cancelled' && interrupted.has(agent.id)) {
           // Stopped on purpose — for your note, whose turn follows, or because nobody was waiting
           // for its answer any more. Nothing went wrong.
           agent.task = interrupted.get(agent.id) ?? 'Stopped for your note'

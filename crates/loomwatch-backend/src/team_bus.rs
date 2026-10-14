@@ -3092,6 +3092,118 @@ mod tests {
         Ok(())
     }
 
+    /// The 2026-10-14 run's other half: Reader asked Gatherer for its full list, and the answer
+    /// it got was Codex's refusal of the model. An `ask` whose turn the app reported as failed is
+    /// a tool error naming the refusal, not a reply, and the session it went to still closes.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn an_ask_codex_refused_is_an_error_not_an_answer(pool: sqlx::PgPool) -> Result<()> {
+        let script = format!(
+            r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"refused-a","configOptions":[]}}}}'
+            IFS= read -r _
+            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"refused-a","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"main turn done"}}}}}}}}'
+            printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
+            IFS= read -r _
+            {}
+            IFS= read -r request
+            case "$request" in *'"method":"session/close"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
+            "#,
+            crate::test_support::codex_refuses_the_model("refused-a", 4)
+        );
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "refused-ask-team".into(),
+            name: "Refused ask team".into(),
+            entrypoint: "a".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![
+                test_agent("a", "/bin/sh", vec!["-c".into(), script.clone()]),
+                test_agent("b", "true", Vec::new()),
+            ],
+            edges: vec![crate::config::EdgeConfig {
+                from: "a".into(),
+                to: "b".into(),
+                layer: "configured".into(),
+                kind: "sequence".into(),
+                ts: "2026-10-14T00:00:00Z".into(),
+            }],
+        });
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            team.clone(),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Pipeline,
+            Arc::new(crate::memory::TeamMemory::default()),
+            None,
+        )
+        .await?;
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script],
+            env: BTreeMap::new(),
+            cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        };
+        let mut process = AcpProcess::spawn(&spec)?;
+        let event_log = EventLog::new(archive.clone(), "refused-ask-run".into());
+        let mut context = TeamSessionContext {
+            archive: &archive,
+            exit_timeout: Duration::from_secs(5),
+            bus: None,
+            event_log: Some(event_log.clone()),
+            packet: None,
+            composed: None,
+            boundary: None,
+        };
+        let mut recorder = process.open_live("a", "test/model", &mut context).await?;
+        let first = process.prompt_turn(&mut recorder, "do your work").await?;
+        let live = bus.keep_alive("a", process, recorder, first).await;
+
+        let connection = bus.connection("b").await?;
+        connection.register(event_log.clone()).await;
+        let response = post_live_json(
+            bus.state.address,
+            &connection.token,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {
+                    "name": "ask",
+                    "arguments": {"agent": "a", "question": "send me your full list"}
+                }
+            }),
+        )
+        .await?;
+        assert_tool_error_contains(
+            &response,
+            &format!(
+                "Codex reported an error instead of an answer: {}",
+                crate::test_support::CODEX_REFUSAL
+            ),
+        );
+
+        let outcome = bus.release("a", live).await?;
+        assert_eq!(outcome.exit_code, 0, "the session still closes cleanly");
+        bus.shutdown().await?;
+        Ok(())
+    }
+
     /// A follow-up the operator writes to a kept-alive agent is archived under the reserved
     /// operator id, so it must say which agent it went to: the run view has no other way to know.
     /// The agent's script refuses the turn unless the follow-up reaches it, so this cannot pass by
