@@ -551,6 +551,7 @@ impl AcpProcess {
             bus.register(event_log.clone()).await;
         }
         let mut recorder = Recorder::with_log(event_log, acp_session_id.to_owned(), agent_id);
+        recorder.bus = context.bus.cloned();
         recorder
             .append(
                 EventKind::Process,
@@ -918,6 +919,7 @@ impl AcpProcess {
             bus.register(event_log.clone()).await;
         }
         let mut recorder = Recorder::with_log(event_log, negotiated.session_id.clone(), agent_id);
+        recorder.bus = context.bus.cloned();
         recorder
             .append(
                 EventKind::Process,
@@ -1280,9 +1282,17 @@ impl AcpProcess {
                 "method": "session/prompt"
             }), Some(json!({"source": "loomwatch", "phase": "required_skills_supplied"}))).await?;
         }
-        self.read_response(prompt_id, "session/prompt", Some(recorder))
+        let answered = self
+            .read_response(prompt_id, "session/prompt", Some(recorder))
             .await
-            .context("ACP session/prompt failed")
+            .context("ACP session/prompt failed");
+        // However the turn ended, it can no longer take an answer to an `ask` it left in flight:
+        // an app that ends its turn while one is pending (Codex can) would otherwise leave the
+        // asked agent working, and spending, for nobody.
+        if let Some(bus) = recorder.bus.clone() {
+            bus.turn_ended().await;
+        }
+        answered
     }
 
     /// Record why a coordinator-requested turn exists. Its text and cost remain evidence, but
@@ -1381,7 +1391,12 @@ impl AcpProcess {
                     recorder
                         .append(
                             EventKind::SessionMeta,
-                            json!({"phase": "turn_interrupted", "reason": "operator_note"}),
+                            json!({
+                                "phase": "turn_interrupted",
+                                "reason": interrupt
+                                    .as_deref()
+                                    .map_or("operator_note", crate::runs::Interrupt::reason)
+                            }),
                             Some(json!({"source": "loomwatch", "phase": "turn_interrupted"})),
                         )
                         .await?;
@@ -2520,6 +2535,9 @@ pub(crate) struct Recorder {
     /// only during a work turn: a handover or checkpoint is the coordinator's turn, not the task,
     /// and cutting one short would lose what the next stage reads.
     pub(crate) interrupt: Option<Arc<crate::runs::Interrupt>>,
+    /// This session's Team Bus credentials, told when each turn ends so an `ask` the turn left in
+    /// flight is withdrawn rather than answered for nobody.
+    bus: Option<TeamBusConnection>,
 }
 
 /// One delivered skill, as the open-detector needs it.
@@ -2562,6 +2580,7 @@ impl Recorder {
             required_skills: Vec::new(),
             delivered_skills: Vec::new(),
             interrupt: None,
+            bus: None,
         }
     }
 

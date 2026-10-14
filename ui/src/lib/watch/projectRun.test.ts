@@ -50,6 +50,21 @@ describe('projectRun', () => {
     expect(unasked.attention.map((alert) => alert.message)).toEqual(['Turn ended: cancelled'])
   })
 
+  // A kept-alive agent's answer is stopped when the agent that asked has already ended its turn
+  // (ADR 0013 amendment, 2026-10-12). That cancel is LoomWatch's too: no alert, and it says why
+  // rather than claiming a note you never sent.
+  it('takes an answer stopped because the agent that asked moved on as expected, and says so', () => {
+    const events: RunEvent[] = [
+      event(0, 'process', { phase: 'spawned', pid: 1 }, 'researcher'),
+      event(1, 'message', { role: 'user', content: { type: 'text', text: 'Which source backs that?' } }, 'researcher'),
+      { ...event(2, 'session_meta', { phase: 'turn_interrupted', reason: 'ask_withdrawn' }, 'researcher'), raw: { source: 'loomwatch', phase: 'turn_interrupted' } },
+      event(3, 'turn_end', { stopReason: 'cancelled' }, 'researcher'),
+    ]
+    const projection = projectRun(events, Infinity, { responder: 'researcher' })
+    expect(projection.attention).toEqual([])
+    expect(projection.agents[0].task).toBe('Stopped: the agent that asked moved on')
+  })
+
   it('reads the prompt from the first user message and the reply from the responder', () => {
     const projection = projectRun(pipeline, Infinity, { responder: 'reviewer' })
     expect(projection.prompt).toBe('Compare the two strategies.')

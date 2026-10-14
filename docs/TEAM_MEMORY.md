@@ -1,7 +1,7 @@
 # Team memory
 
 How a LoomWatch team remembers: a **Brief** of shared instructions and files, a **Notebook** of
-notes that carry from one run to the next, and **checkpoints** at every stage boundary. This page
+notes that carry from one run to the next, and **checkpoints** at stage boundaries. This page
 says what each one is, how it reaches an agent, and how to configure it.
 
 ---
@@ -90,7 +90,9 @@ Works during a long turn and needs no new event kinds. Depends on the model choo
 ### Channel 4 — checkpoint, then continue (boundaries, long runs and recovery)
 
 At the end of each pipeline stage the coordinator already asks for a handover in the warm session.
-Ask for a structured checkpoint the same way, and also on demand. Continuation is a **new run**
+Ask for a structured checkpoint the same way, and also on demand. That stage-end turn is asked only
+of a team with a notebook; every team is still asked before a stage parks on a question, and a run
+that fails or is cancelled gets a checkpoint per stage from the archive either way. Continuation is a **new run**
 whose packet opens with the latest checkpoint, labelled "Start a new run from this checkpoint",
 never "Resume", until scheduler state and side-effect reconciliation exist.
 
@@ -172,7 +174,7 @@ Rules the loader enforces beyond the schema:
 |---|---|---|
 | `context_packets` | run id, agent id, invocation, rendered text, sections with rationale, Brief paths and hashes, budget used | Stored before `session/prompt`. Replay and follow-ups read this, never a fresh search against today's memory. |
 | `memory_notes` | team id, run id (null once kept), author agent, kind, title, body, sources, state, revision, supersedes | Immutable revisions; a correction inserts a new revision superseding the old. Optimistic concurrency on `revision`; idempotency key on tool writes. |
-| `checkpoints` | run id, agent id, invocation, done, next, blockers, artifact paths and hashes, archive `seq` high-water mark | Written at stage end, on park, and by the `checkpoint` tool. |
+| `checkpoints` | run id, agent id, invocation, done, next, blockers, artifact paths and hashes, archive `seq` high-water mark | Written at stage end (teams with a notebook), on park, by the `checkpoint` tool, and from the archive when a run fails or is cancelled. |
 | `runs` | everything `RunRecord` holds in memory, plus `followsRunId`, `startAt`, `waitingOn` | Its own ADR. Run lineage, follow-ups and parked questions must survive a restart. |
 | `operator_questions` | run id, node or agent id, question, asked at, answered at, answer event id | The queue behind "waiting for you". One open question per agent at a time. |
 

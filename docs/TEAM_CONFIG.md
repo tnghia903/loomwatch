@@ -88,6 +88,14 @@ depend on the document as a whole:
 - `handoff` starts the target as a background task and marks the caller's roster status as
   `stopped`, but it cannot cancel the caller's current ACP turn. The caller must return after
   a successful handoff; provider spend can continue until that turn exits.
+- What a `dispatch` or `handoff` agent replies comes back to the agent that started it: once all
+  of its delegated work has finished, that agent gets one more turn with each reply (or why it
+  failed), and its reply to that turn is its answer. Each result is also archived as a
+  `session_meta` event with `phase: "delegated_result"`.
+- An agent answering an `ask` answers from what it has: it may not `ask` an agent that is not
+  kept alive, `dispatch` or `handoff`. An `ask` is withdrawn when the agent that asked ends its
+  turn before the answer comes back; the answering agent's turn is stopped (archived as
+  `turn_interrupted` with reason `ask_withdrawn`), or a helper started for it is ended.
 - `status` is a runtime annotation. Team-file writers must not persist it, and team-file
   readers must ignore it if an older or external document contains it.
 - Run-event IDs are unique. `RunEvent.agentId` names an agent in the team document. `seq`
@@ -343,6 +351,9 @@ Notebook rules:
 - `notebook.enabled: false` withdraws `memory_search`, `memory_read`, `memory_write` and
   `checkpoint` from `tools/list` **and** refuses a call, so a harness holding a cached list cannot
   write. A team with no `memory:` block has no notebook and no memory tools at all.
+- Only a team with a notebook is asked, as each pipeline stage's last turn, where its work stands.
+  A team without one skips that turn; a stage that parks on a question still checkpoints first,
+  and a failed or cancelled run still gets a checkpoint per stage from the archive.
 - A note is written scoped to its run and to the writing agent, attributed from the bus token.
   Agents can never pin, never keep, and never write into an inherited scope.
 - `keep: review` means the operator promotes what is worth keeping after the run. There is no
