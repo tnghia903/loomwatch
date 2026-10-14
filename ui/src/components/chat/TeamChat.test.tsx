@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { PASS_BEAT_MS } from '../../lib/chat/baton'
 import type { ChatItem, ChatMessage } from '../../lib/chat/client'
 import type { RunRecord } from '../../lib/runs/client'
 import type { TeamMessage } from '../../lib/watch/messages'
@@ -342,6 +343,70 @@ describe('who is on the team', () => {
     // A team of more than one agent can be let through at once, for that one tool.
     fireEvent.click(screen.getByRole('button', { name: 'Allow for the whole team' }))
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/permissions', body: { requestId: 'p1', decision: 'allow_team' } }))
+  })
+})
+
+describe('who has the work', () => {
+  afterEach(() => { window.localStorage.clear() })
+
+  const talk = (extra: Partial<TeamMessage> & Pick<TeamMessage, 'id' | 'kind'>): TeamMessage => ({
+    from: null, handedBy: null, to: null, text: 'x', context: null, eventId: extra.id, evidenceId: null, seq: 1, ts: new Date().toISOString(),
+    offsetMs: 0, state: 'delivered', error: null, reply: null, carried: false, ...extra,
+  })
+  const working = (overrides: Partial<RunRecord> = {}): ChatItem[] => [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['writer'], ...overrides }), request: message({}), notes: [] }]
+  const pill = () => document.querySelector('.tc-baton.on')
+  const fold = () => window.localStorage.setItem('loomwatch.chatRoster', 'folded')
+
+  it('grows the face of the agent asked into a pill, for as long as the ask is open', async () => {
+    fold()
+    // The bus resolves the name only once the ask settles; while it is open the pill does.
+    said.messages = [talk({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', state: 'pending', seq: 3, ts: '2026-10-06T02:01:00.000Z' })]
+    said.messages[0].to = 'Researcher'
+    page = working()
+    renderChat()
+    await waitFor(() => expect(pill()).toHaveTextContent('Asking Researcher…'))
+    const face = screen.getByRole('button', { name: 'Researcher: mention in your message' })
+    expect(face).toContainElement(pill() as HTMLElement)
+    expect(face).toHaveAccessibleDescription('Writer is asking Researcher')
+    // The pill says what the count would, so the count gives way while someone has the work.
+    expect(screen.queryByRole('button', { name: /Show who is on the team/ })).toBeNull()
+    // Open, the list says it beside the agent's name.
+    fireEvent.click(screen.getByRole('button', { name: 'News desk' }))
+    expect(memberRow('Researcher')).toHaveTextContent('asked by Writer')
+  })
+
+  it('names a pass for a moment, then says who is working', async () => {
+    fold()
+    said.messages = [talk({ id: 'h1', kind: 'handover', to: 'writer', handedBy: { from: ['researcher'], via: ['review'] }, ts: new Date(Date.now() - PASS_BEAT_MS + 900).toISOString() })]
+    page = working()
+    renderChat()
+    await waitFor(() => expect(pill()).toHaveTextContent('Passing to Writer…'))
+    expect(screen.getByRole('button', { name: 'Writer: mention in your message' })).toHaveAccessibleDescription('Researcher passed the work to Writer')
+    await waitFor(() => expect(pill()).toHaveTextContent('Writer is working…'), { timeout: 2500 })
+  })
+
+  it('puts whoever waits on you first, in gold and without the typing dots', async () => {
+    fold()
+    said.messages = [talk({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', state: 'pending' })]
+    page = working({ waitingOn: { node: 'writer', name: 'Writer', kind: 'question', since: '2026-10-06T02:01:00.000Z', question: 'Which market?', context: null, handoverFrom: null, park: 'kept_alive', parkNote: '', sendBackAvailable: false } })
+    renderChat()
+    await waitFor(() => expect(pill()).toHaveTextContent('Writer needs you'))
+    expect(pill()).toHaveClass('waiting')
+    expect(pill()?.querySelector('.chat-dots')).toBeNull()
+  })
+
+  it('flashes nothing between two agents, and brings the count back once the work is done', async () => {
+    fold()
+    page = working({ working: [] })
+    const between = renderChat()
+    await screen.findByText(/Starting…|Handing over…/)
+    expect(pill()).toBeNull()
+    expect(screen.queryByRole('button', { name: /Show who is on the team/ })).toBeNull()
+    between.unmount()
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    renderChat()
+    expect(await screen.findByRole('button', { name: '2 ready. Show who is on the team' })).toBeInTheDocument()
+    expect(pill()).toBeNull()
   })
 })
 

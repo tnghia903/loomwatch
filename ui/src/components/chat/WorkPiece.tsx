@@ -2,6 +2,7 @@ import { ArrowRight, CalendarClock, ChevronDown, ChevronRight, FileText, PanelRi
 import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 import { AppearContext, useAppear } from '../../lib/chat/appear'
+import { agentResolver, passesOf, type Pass } from '../../lib/chat/baton'
 import { useFollow } from '../../lib/chat/follow'
 import type { ChatItem, ChatMessage } from '../../lib/chat/client'
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
@@ -63,6 +64,8 @@ interface WorkPieceProps {
   /** A document answer's card was opened: it is read in full in the pane beside the chat. */
   onOpenAnswer: (runId: string) => void
   onRun: (run: RunRecord) => void
+  /** Each time the work moves between agents while this piece runs: what the chat's header shows. */
+  onPasses?: (runId: string, passes: readonly Pass[]) => void
   onTryAgain: (item: Work) => void
   onContinue: (runId: string) => Promise<void>
   /** A decision was sent with the draft as its note: the box is cleared. */
@@ -78,7 +81,7 @@ interface WorkPieceProps {
  * shows who is working; past work keeps its answer in view and its talk a click away. Details opens
  * the full record — stages, timeline, receipt — beside the chat.
  */
-export function WorkPiece({ item, newest = false, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding }: WorkPieceProps) {
+export function WorkPiece({ item, newest = false, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onPasses, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding }: WorkPieceProps) {
   const { run, request, notes } = item
   const live = !isTerminalRun(run.status)
   // What the agents said is shown where the work is happening — the newest piece, and any piece
@@ -108,6 +111,10 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   // piece rather than trailing it by a page read.
   const fresh = session.record?.runId === run.runId ? session.record : null
   useEffect(() => { if (fresh) onRun(fresh) }, [fresh, onRun])
+  // And where the work is as it moves between the agents, for the header's pill; none once it ends.
+  const resolve = useMemo(() => agentResolver(team.names, team.operators), [team.names, team.operators])
+  const passes = useMemo(() => (live ? passesOf(session.projection.messages, resolve) : []), [live, session.projection.messages, resolve])
+  useEffect(() => { onPasses?.(run.runId, passes) }, [onPasses, run.runId, passes])
   // A new piece fades in as one; what arrives in it afterwards — the answer, a question, a note's
   // fate — rises in on its own once the piece has painted.
   const appear = useAppear()
