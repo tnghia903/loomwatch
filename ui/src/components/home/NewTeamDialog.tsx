@@ -91,6 +91,7 @@ export function NewTeamDialog({ harnesses, existingPaths, onCreateBlank, onClose
                         {option.steps.map((step, index) => <span key={step}>{index > 0 && <ArrowRight size={11} />}<i className={step === 'You' ? 'you' : ''}>{step}</i></span>)}
                       </span>
                     )}
+                    {option.perRun && <span className="nt-cost">{option.perRun}</span>}
                   </span>
                   {option.example && (
                     // Pick by outcome: what a finished run of this team hands back, marked as an example.

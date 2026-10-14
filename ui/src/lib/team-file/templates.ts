@@ -22,6 +22,9 @@ export interface TeamTemplate {
   description: string
   /** Steps shown as a small diagram, in order. */
   steps: readonly string[]
+  /** What each run of it starts, said where the choice is made: every agent that works is a
+      session of its own, so this is what decides most of what a run costs. */
+  perRun?: string
   /**
    * What a finished run of this template looks like, drawn as a thumbnail so the operator picks by
    * outcome rather than by wiring. Always labelled as an example: nothing has run yet.
@@ -35,6 +38,7 @@ export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
     title: 'One assistant',
     description: 'A single AI agent does the whole task. The easiest way to start.',
     steps: ['Assistant'],
+    perRun: 'One agent works on each run, so it uses the fewest tokens.',
     example: { title: 'Three ways to speed up the build', lines: ['1. Cache dependencies between runs', '2. Split the test suite in two', '3. Skip unchanged packages'] },
   },
   {
@@ -42,6 +46,7 @@ export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
     title: 'Researcher and writer',
     description: 'One agent gathers the facts, a second turns them into the finished result.',
     steps: ['Researcher', 'Writer'],
+    perRun: 'Two agents work on each run, with a handover between them.',
     example: { title: 'Market brief: AI note-taking', lines: ['Three tools lead; two launched this year', 'Prices cluster around $10–20 a month', 'Sources: 6 articles, 2 pricing pages'] },
   },
   {
@@ -49,6 +54,7 @@ export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
     title: 'Research, your approval, then writing',
     description: 'The team pauses after research so you can approve it or ask for changes.',
     steps: ['Researcher', 'You', 'Writer'],
+    perRun: 'Two agents work on each run. Your review in between uses no tokens.',
     example: { title: 'Competitor summary', lines: ['Acme shipped a team canvas', 'Northwind cut prices by 20%', 'Globex is hiring for agents'], note: 'You approved the research before writing' },
   },
   {

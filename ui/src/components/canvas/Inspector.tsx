@@ -1,16 +1,20 @@
 import { X } from 'lucide-react'
-import { createElement } from 'react'
+import { createElement, useRef } from 'react'
 
 import type { HarnessModel } from '../../lib/harnesses'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { splitModelSelector } from '../../lib/models'
+import type { AgentUsage } from '../../lib/team-file/runLessons'
 import type { AgentPlace } from '../../lib/team-file/agentPlace'
 import type { AllowSwitch, CapabilityRef } from '../../lib/team-file/types'
 import { holdsTeamFile } from '../../lib/team-file/workFolder'
 import type { AgentField, AgentFieldProblems } from '../../lib/team-file/validation'
 import { StatusGlyph } from '../ui/glyphs'
+import { AgentCheckup, type AgentCheckupProps } from './AgentCheckup'
 import { AgentContext } from './AgentContext'
 import { AgentPermissions } from './AgentPermissions'
+import { AgentUsageLine } from './AgentUsageLine'
+import { InstructionShape } from './InstructionShape'
 import { AgentWorkFolder } from './AgentWorkFolder'
 import { roleGlyph } from './roleGlyph'
 
@@ -53,6 +57,10 @@ export interface InspectorProps {
   fieldProblems?: AgentFieldProblems
   readOnly?: boolean
   pipeline?: boolean
+  /** The team checkup's findings about this agent, with what the panel may do about them. */
+  checkup?: Omit<AgentCheckupProps, 'readOnly' | 'headClassName'>
+  /** What this agent used in the team's recent runs; absent before any run reported it. */
+  usage?: { agent: AgentUsage; runs: number; alone: boolean }
 }
 
 // UX_REDESIGN §5.4: zones in the order the operator thinks — IDENTITY (what stands between a
@@ -60,7 +68,8 @@ export interface InspectorProps {
 // it), WORKS IN and ALLOWED WITHOUT ASKING (where it works and what it may do there; ADR 0039
 // replaced PROCESS, whose command, arguments and environment stay in Show YAML).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
-export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false }: InspectorProps) {
+export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage }: InspectorProps) {
+  const roleField = useRef<HTMLTextAreaElement>(null)
   const { agent, runtime } = node.data
   const status = runtime?.status ?? agent.status ?? 'idle'
   const parsedSelector = splitModelSelector(agent.model ?? '')
@@ -126,9 +135,11 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         <div className="zone-head t-micro">Identity</div>
         <div className={`field ${zoneClass('role')}`}>
           <label className="t-meta" htmlFor="insp-role">Role and instructions</label>
-          <textarea id="insp-role" className="input" data-agent-field="role" value={agent.role} readOnly={readOnly} placeholder="What this agent should do, which sources to use, what to pass on." onChange={(event) => onRename('role', event.target.value)} onBlur={() => onFieldBlur('role')} />
+          <textarea ref={roleField} id="insp-role" className="input" data-agent-field="role" value={agent.role} readOnly={readOnly} placeholder="What this agent should do, which sources to use, what to pass on." onChange={(event) => onRename('role', event.target.value)} onBlur={() => onFieldBlur('role')} />
+          <InstructionShape role={agent.role} readOnly={readOnly} field={roleField} onChange={(role) => onRename('role', role)} />
           <span className="hint t-meta">{hint('role', 'Included in every turn, including delegated work.')}</span>
         </div>
+        {checkup && <AgentCheckup {...checkup} readOnly={readOnly} headClassName="zone-head t-micro" />}
         <div className={`field ${zoneClass('model')}`}>
           <label className="t-meta" htmlFor="insp-model">Model</label>
           <select id="insp-model" className="input model-select" data-agent-field="model" value={parsedSelector.modelId} disabled={readOnly || modelOptionsLoading} onChange={(event) => {
@@ -161,6 +172,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
           {thinkingOptions.length > 1 && <span className="thinking-scale t-micro"><span>{thinkingOptions[0].name}</span><span>{thinkingOptions[thinkingOptions.length - 1].name}</span></span>}
           <span className="hint t-meta">{selectedEffort?.description ?? (modelOptionsLoading ? 'Loading effort choices…' : thinkingOptions.length === 0 ? 'This AI app does not offer a separate effort setting.' : 'Controls how much reasoning the model uses.')}</span>
         </div>
+        {usage && <AgentUsageLine usage={usage.agent} runs={usage.runs} alone={usage.alone} />}
       </div>
 
       <div className="zone">

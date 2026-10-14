@@ -346,6 +346,18 @@ function applySemanticRules(
         yamlPath: ['entrypoint'],
       })
     }
+    // The daemon orders a pipeline from the entrypoint alone (config.rs `pipeline_order`): an
+    // agent that hands work on but is handed none is a second start it never reaches, and the run
+    // fails before any agent starts. Drawing from a freshly added card is how teams get here.
+    const handedWork = new Set(configured.map((edge) => edge.to))
+    const secondStarts = [...new Set(configured.map((edge) => edge.from))].filter((id) => id !== doc.entrypoint && seenIds.has(id) && !handedWork.has(id))
+    for (const id of secondStarts) {
+      documentProblems.push({
+        message: `${named(id)} has no step before it, and only ${named(doc.entrypoint)} receives your request, so the team can't start. Connect a step to ${named(id)}, or remove its connections.`,
+        agentId: id,
+        yamlPath: ['edges'],
+      })
+    }
   }
 }
 

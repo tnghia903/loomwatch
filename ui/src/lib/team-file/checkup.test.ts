@@ -1,0 +1,177 @@
+import { parse } from 'yaml'
+import { describe, expect, it } from 'vitest'
+
+import type { DetectedHarness } from '../harnesses'
+import { ROLE_PRESETS } from '../library/roles'
+import { appendToRole, canUseTeamBus, checkup, jobFor, type CheckupFinding, type CheckupInput } from './checkup'
+import { templateTeamYaml } from './templates'
+import type { AgentConfig, TeamDocument } from './types'
+
+const CLAUDE = { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '.' }
+const preset = (id: string) => ROLE_PRESETS.find((candidate) => candidate.id === id)?.role ?? ''
+
+/** An agent as the palette places it: a built-in job's instructions come with its switches. */
+function agent(id: string, role: string, extra: Partial<AgentConfig> = {}): AgentConfig {
+  const allow = ROLE_PRESETS.find((candidate) => candidate.role === role)?.allow
+  return { id, name: id.charAt(0).toUpperCase() + id.slice(1), role, spawn: CLAUDE, model: 'm', ...(allow ? { allow } : {}), ...extra }
+}
+
+function run(input: Partial<CheckupInput> & Pick<CheckupInput, 'agents'>) {
+  const entrypoint = input.entrypoint ?? input.agents[0]?.id ?? null
+  const edges = input.edges ?? []
+  const responder = input.responder ?? (edges.length === 0 ? entrypoint : edges.find((edge) => !edges.some((other) => other.from === edge.to))?.to ?? null)
+  return checkup({ ...input, entrypoint, edges, responder })
+}
+
+const rules = (findings: ReturnType<typeof checkup>) => findings.map((finding) => `${finding.rule}:${finding.agentIds.join('+')}`)
+
+describe('checkup', () => {
+  it('finds nothing to improve in the starter teams', () => {
+    const harness = { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/x', spawn: { cmd: 'claude-agent-acp', args: [] } } as DetectedHarness
+    for (const template of ['single', 'research-write', 'research-review-write'] as const) {
+      const doc = parse(templateTeamYaml(template, 'Starter', harness, 'm')) as TeamDocument
+      const edges = doc.edges.map((edge) => ({ from: edge.from, to: edge.to }))
+      expect(rules(run({ agents: doc.agents, edges, entrypoint: doc.entrypoint })), template).toEqual([])
+    }
+  })
+
+  it('says when instructions are too short to go on, and offers a job that matches the name', () => {
+    const [finding] = run({ agents: [agent('writer', 'Write a blog post.')] })
+    expect(finding.rule).toBe('thin-instructions')
+    expect(finding.fix).toEqual({ label: 'Use the Writer job\'s instructions', change: { kind: 'replace-role', agentId: 'writer', text: preset('writer') } })
+    expect(run({ agents: [agent('helper', 'Do the thing.')] })[0].fix).toBeUndefined()
+  })
+
+  it('offers to allow what the instructions need, and calls it a stall on a schedule', () => {
+    const coder = agent('coder', preset('coder'))
+    expect(rules(run({ agents: [coder] }))).toEqual(['needs-edits:coder', 'needs-commands:coder'])
+    const [web] = run({ agents: [agent('scout', 'Search the web for this week’s AI news and reply with five bullet points, each with a link.')] })
+    expect(web).toMatchObject({ rule: 'needs-web', severity: 'improve', fix: { change: { kind: 'allow', agentId: 'scout', key: 'web' } } })
+    expect(run({ agents: [agent('scout', 'Search the web for this week’s AI news and reply with five bullet points, each with a link.')], scheduled: true })[0]).toMatchObject({ rule: 'needs-web', severity: 'fix', title: 'Scout can\'t search the web when the team runs on schedule' })
+    expect(run({ agents: [{ ...coder, allow: { edits: true, commands: true } }] })).toEqual([])
+    // OpenCode never asks, so there is nothing to allow.
+    expect(run({ agents: [{ ...coder, spawn: { ...CLAUDE, cmd: 'opencode', args: ['acp'] } }] })).toEqual([])
+  })
+
+  it('asks the team’s answer for a format, and a helper for what it sends back', () => {
+    const vague = 'You summarize customer emails for the support lead, highlighting churn risks and the urgent issues first.'
+    expect(rules(run({ agents: [agent('summarizer', vague)] }))).toEqual(['no-hand-back:summarizer'])
+    const team = run({ agents: [agent('lead', `${preset('writer')} Hand parts to your teammates.`), agent('helper', vague)] })
+    expect(team.find((finding) => finding.rule === 'no-hand-back')).toMatchObject({ agentId: 'helper', title: 'Say what Helper sends back to Lead' })
+  })
+
+  it('tells a lead when to use its teammates, naming each one’s job', () => {
+    const findings = run({ agents: [agent('researcher', preset('researcher')), agent('writer', preset('writer'))] })
+    expect(rules(findings)).toEqual(['lead-delegation:researcher'])
+    const fix = findings[0].fix?.change
+    expect(fix?.kind === 'append-role' && fix.text).toBe('When the request is bigger than one step, hand parts of it to your teammates, Writer, each the part that matches its job. Give each one the goal, what to send back and where to stop, then combine what they send into your answer.')
+    // Naming a teammate is telling it when to use them.
+    expect(run({ agents: [agent('lead', `${preset('researcher')} Pass the facts to Writer.`, { allow: { web: true } }), agent('writer', preset('writer'))] })).toEqual([])
+  })
+
+  it('says a lead on an app without Team Bus can never hand work on', () => {
+    const lead = agent('lead', preset('writer'), { spawn: { ...CLAUDE, cmd: 'openclaw', args: ['acp'] } })
+    expect(run({ agents: [lead, agent('helper', preset('researcher'))] })[0]).toMatchObject({ rule: 'lead-cannot-delegate', severity: 'fix' })
+  })
+
+  it('warns when the last step judges the work instead of delivering it', () => {
+    const findings = run({ agents: [agent('writer', preset('writer')), agent('reviewer', preset('reviewer'))], edges: [{ from: 'writer', to: 'reviewer' }] })
+    expect(rules(findings)).toEqual(['final-is-review:reviewer'])
+  })
+
+  it('asks a later step to build on the handover it receives', () => {
+    const findings = run({ agents: [agent('researcher', preset('researcher')), agent('coder', preset('coder'), { allow: { edits: true, commands: true } })], edges: [{ from: 'researcher', to: 'coder' }] })
+    expect(rules(findings)).toEqual(['handoff-unused:coder'])
+    // A review stop is you, not work to build on.
+    const afterReview = run({ agents: [agent('researcher', preset('researcher')), { id: 'review', name: 'You', role: 'Approve it.', kind: 'operator' }, agent('coder', preset('coder'), { allow: { edits: true, commands: true } })], edges: [{ from: 'researcher', to: 'review' }, { from: 'review', to: 'coder' }] })
+    expect(rules(afterReview)).toEqual([])
+  })
+
+  it('never calls two different built-in jobs the same job', () => {
+    const team = ROLE_PRESETS.map((job) => agent(job.id, job.role))
+    expect(run({ agents: team }).filter((finding) => finding.rule === 'same-job')).toEqual([])
+  })
+
+  it('finds two agents told the same thing', () => {
+    const findings = run({ agents: [agent('researcher', preset('researcher')), agent('scout', preset('researcher'), { allow: { web: true } }), agent('writer', `${preset('writer')}`)], edges: [{ from: 'researcher', to: 'writer' }, { from: 'scout', to: 'writer' }], entrypoint: 'researcher' })
+    expect(rules(findings)).toContain('same-job:researcher+scout')
+  })
+
+  it('puts what will go wrong before what could be better', () => {
+    const lead = agent('lead', 'Plan it.', { spawn: { ...CLAUDE, cmd: 'openclaw', args: ['acp'] } })
+    const findings = run({ agents: [lead, agent('writer', preset('writer'))] })
+    expect(findings.map((finding) => `${finding.severity}:${finding.rule}`)).toEqual(['fix:lead-cannot-delegate', 'improve:thin-instructions'])
+  })
+})
+
+/** What the canvas does with a fix (useTeamCheckup), on plain agents. */
+function applyFix(agents: readonly AgentConfig[], finding: CheckupFinding): AgentConfig[] {
+  const change = finding.fix?.change
+  return agents.map((one) => {
+    if (!change || one.id !== change.agentId) return one
+    if (change.kind === 'allow') return { ...one, allow: { ...one.allow, [change.key]: true } }
+    if (change.kind === 'append-role') return { ...one, role: appendToRole(one.role, change.text) }
+    return { ...one, role: change.text, ...(change.allow ? { allow: { ...one.allow, ...change.allow } } : {}) }
+  })
+}
+
+describe('checkup fixes', () => {
+  // A fix that leaves its own finding standing reads as a broken button.
+  it('clears the finding it was offered for', () => {
+    const vague = 'You summarize customer emails for the support lead, highlighting churn risks and the urgent issues first.'
+    const scenarios: Partial<CheckupInput>[] = [
+      { agents: [agent('writer', 'Write a blog post.')] },
+      { agents: [agent('researcher', 'Research the market.')] },
+      { agents: [agent('coder', preset('coder'))], scheduled: true },
+      { agents: [agent('summarizer', vague)] },
+      { agents: [agent('lead', `${preset('writer')} Hand parts to your teammates.`), agent('helper', vague)] },
+      { agents: [agent('researcher', preset('researcher')), agent('writer', preset('writer'))] },
+      // A teammate whose instructions name the web must not make the lead look like it needs it.
+      { agents: [agent('lead', 'You plan product launches. Reply with the plan as a checklist grouped by week.'), agent('scout', 'Look at competitors’ recent launches on the web and reply with what worked, with links.', { allow: { web: true } })] },
+      { agents: [agent('writer', preset('writer')), agent('reviewer', preset('reviewer'))], edges: [{ from: 'writer', to: 'reviewer' }] },
+      { agents: [agent('researcher', preset('researcher')), agent('coder', preset('coder'), { allow: { edits: true, commands: true } })], edges: [{ from: 'researcher', to: 'coder' }] },
+    ]
+    let fixed = 0
+    for (const scenario of scenarios) {
+      const before = run(scenario as CheckupInput)
+      for (const finding of before.filter((candidate) => candidate.fix)) {
+        const after = run({ ...scenario, agents: applyFix(scenario.agents ?? [], finding) } as CheckupInput)
+        expect(after.map((candidate) => candidate.id), finding.id).not.toContain(finding.id)
+        // …nor open a new one: a fix that leads straight to the next suggestion is half a fix.
+        const added = after.filter((candidate) => !before.some((earlier) => earlier.id === candidate.id))
+        expect(added.map((candidate) => candidate.id), finding.id).toEqual([])
+        fixed += 1
+      }
+    }
+    expect(fixed).toBeGreaterThanOrEqual(8)
+  })
+})
+
+describe('checkup helpers', () => {
+  it('reads Team Bus support off the spawn the way the daemon does', () => {
+    expect(canUseTeamBus({ spawn: { cmd: 'codex-acp', args: [], env: {}, cwd: '.' } })).toBe(true)
+    expect(canUseTeamBus({ spawn: { cmd: 'loomwatchd', args: ['harness-client', '--harness', 'opencode'], env: {}, cwd: '.' } })).toBe(true)
+    expect(canUseTeamBus({ spawn: { cmd: 'openclaw', args: ['acp'], env: {}, cwd: '.' } })).toBe(false)
+    expect(canUseTeamBus({ spawn: { cmd: 'my-agent', args: [], env: {}, cwd: '.' } })).toBe(false)
+  })
+
+  it('matches a job by name first, then by instructions', () => {
+    expect(jobFor({ name: 'Code reviewer', role: '' })?.id).toBe('reviewer')
+    expect(jobFor({ name: 'Ada', role: 'Analyse the sales data' })?.id).toBe('analyst')
+    expect(jobFor({ name: 'Ada', role: 'Be nice' })).toBeNull()
+  })
+
+  it('appends after a blank line', () => {
+    expect(appendToRole('Do it.  \n', 'Reply briefly.')).toBe('Do it.\n\nReply briefly.')
+    expect(appendToRole('', 'Reply briefly.')).toBe('Reply briefly.')
+  })
+})
+
+describe('large-team', () => {
+  it('asks whether five agents could be fewer, once, on the lead', () => {
+    const roles = ROLE_PRESETS.slice(0, 5).map((job) => agent(job.id, job.role))
+    const findings = checkup({ agents: roles, edges: [], entrypoint: roles[0].id, responder: roles[0].id })
+    expect(findings.filter((finding) => finding.rule === 'large-team')).toEqual([expect.objectContaining({ agentIds: [roles[0].id], title: '5 agents is a large team' })])
+    expect(checkup({ agents: roles.slice(0, 4), edges: [], entrypoint: roles[0].id, responder: roles[0].id }).some((finding) => finding.rule === 'large-team')).toBe(false)
+  })
+})

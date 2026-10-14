@@ -92,6 +92,23 @@ describe('compileTeamValidator', () => {
       '“Researcher” can\'t hand work to itself.',
     ]))
   })
+
+  // config.rs `pipeline_order` walks from the entrypoint only, so a second agent with nothing
+  // before it fails the run at start. Drawing from a freshly added card is how a team gets here.
+  it('refuses a second start the daemon would never reach', () => {
+    const validate = compileTeamValidator(daemonSchema)
+    const base = document().agents[0]
+    const agents = [base, { ...base, id: 'scout', name: 'Scout' }, { ...base, id: 'writer', name: 'Writer' }]
+    const edge = (from: string, to: string) => ({ from, to, layer: 'configured' as const, kind: 'sequence' as const, ts: '2026-09-08T00:00:00Z' })
+
+    const broken = validate(document({ agents, edges: [edge('researcher', 'writer'), edge('scout', 'writer')] }))
+    expect(broken.valid).toBe(false)
+    expect(broken.documentProblems).toContainEqual(expect.objectContaining({
+      agentId: 'scout',
+      message: '“Scout” has no step before it, and only “Researcher” receives your request, so the team can\'t start. Connect a step to “Scout”, or remove its connections.',
+    }))
+    expect(validate(document({ agents, edges: [edge('researcher', 'scout'), edge('scout', 'writer')] })).valid).toBe(true)
+  })
 })
 
 describe('schema problems in plain words', () => {

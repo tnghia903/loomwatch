@@ -88,6 +88,8 @@ import { ChipDot } from './ui/glyphs'
 import { SegmentThumb } from './ui/SegmentThumb'
 import { AttentionAlerts } from './workspace/AttentionAlerts'
 import { BuildHeading } from './workspace/BuildHeading'
+import { teamUsageFor, useTeamCheckup } from './workspace/useTeamCheckup'
+import { useRunLessons } from './workspace/useRunLessons'
 import { capabilityEdgeId } from './workspace/canvasGraph'
 import { OutputEditor } from './workspace/OutputEditor'
 import { ConflictSheetFooter, InlineConfirm, NewTeamSheet, OpenTeamSheet, SaveCopySheet } from './workspace/Sheets'
@@ -261,6 +263,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [problemsOpen, setProblemsOpen] = useState(false)
   const [yamlOpen, setYamlOpen] = useState(false)
+
   const [compareOpen, setCompareOpen] = useState(false)
   const [openPathOpen, setOpenPathOpen] = useState(false)
   const [newTeamSheet, setNewTeamSheet] = useState(false)
@@ -386,6 +389,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     ? pipelineTerminal(doc.nodes.map((node) => node.id), doc.edges.map((edge) => ({ from: edge.source, to: edge.target })), doc.entrypoint)
     : doc.entrypoint
   const responderFromDoc = doc.responder ?? inferredResponder
+  const runLessons = useRunLessons(doc.saveState === 'new' ? null : doc.path)
+  const teamCheckup = useTeamCheckup(doc, responderFromDoc, setStatusAnnouncement, runLessons)
   const session = useRunSession(activeRunId, responderFromDoc)
   const record = session.record
   const waiting = record?.status === 'running' ? record.waitingOn ?? null : null
@@ -2470,7 +2475,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
-        {!runView && !runSetup && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} appProblem={appProblemDetail} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); window.setTimeout(focusComposer, 0) }} onSchedule={editable && !visibleSchedule ? startSchedule : undefined} />}
+        {!runView && !runSetup && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} appProblem={appProblemDetail} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); window.setTimeout(focusComposer, 0) }} onSchedule={editable && !visibleSchedule ? startSchedule : undefined} checkup={{ findings: teamCheckup.findings, hiddenCount: teamCheckup.hiddenCount, onRestore: teamCheckup.restore, onOpenAgent: focusAgent, names: nodeNames }} usage={teamCheckup.usage} />}
 
         <div aria-live="polite" aria-atomic="true" className="visually-hidden">{politeAnnouncement}</div>
         <div aria-live="assertive" className="visually-hidden">{assertiveAnnouncement}</div>
@@ -2553,6 +2558,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             startAdvanced={forcedInspectorField?.agentId === inspectedNode.id} fixHint={forcedInspectorField?.agentId === inspectedNode.id ? forcedInspectorField.hint : undefined} onDismissFixHint={() => setForcedInspectorField(null)}
             harnesses={harnesses} harnessId={inspectedHarnessId ?? undefined} onHarnessChange={(id: string) => { const harness = harnesses.find(item => item.id === id); if (harness) doc.updateAgentSpawn(inspectedNode.id, { env: {}, cwd: '.', ...inspectedNode.data.agent.spawn, ...harness.spawn }) }}
             node={inspectedNode} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} pipeline={doc.mode === 'pipeline'}
+            checkup={{ findings: teamCheckup.forAgent(inspectedNode.id), onFix: teamCheckup.apply, onDismiss: teamCheckup.dismiss, onAsk: ask.unavailable ? undefined : askFor }}
+            usage={teamUsageFor(teamCheckup.usage, inspectedNode.id)}
             place={agentPlace({ agentId: inspectedNode.id, nodes: doc.nodes.map((node) => ({ id: node.id, name: node.data.agent.name, kind: node.data.agent.kind })), edges: doc.edges.map((edge) => ({ from: edge.source, to: edge.target })), steps: doc.pipelineSteps, entrypoint: doc.entrypoint, responder: responderFromDoc, pipeline: doc.mode === 'pipeline' })}
             inheritedMemory={doc.memoryInherits.filter((entry) => !entry.appliesTo || entry.appliesTo.includes(inspectedNode.id)).map((entry) => entry.team ? `${entry.team} · memory` : entry.pack ?? '')}
             onRemoveCapability={(removed) => {
