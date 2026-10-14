@@ -1,14 +1,18 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Puzzle, Trash2, X } from 'lucide-react'
+import { AgentCheckup } from './AgentCheckup'
 import { AgentContext } from './AgentContext'
 import { AgentPermissions } from './AgentPermissions'
 import { AgentWorkFolder } from './AgentWorkFolder'
+import { AgentUsageLine } from './AgentUsageLine'
+import { InstructionShape } from './InstructionShape'
 import { Inspector, type InspectorProps } from './Inspector'
 import { SaveAsJob } from './SaveAsJob'
 import { StatusGlyph } from '../ui/glyphs'
 import type { DetectedHarness } from '../../lib/harnesses'
 
 export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHarness[]; harnessId?: string; onHarnessChange?: (id: string) => void; startAdvanced?: boolean }) {
+  const roleField = useRef<HTMLTextAreaElement>(null)
   const [advanced, setAdvanced] = useState(Object.keys(props.fieldProblems ?? {}).length > 0 || props.startAdvanced === true)
   const { node, onRename, onClose, onDelete, readOnly, harnesses = [], harnessId, onHarnessChange } = props
   // Something sent the operator to a field — an alert's Fix, a problem in the list. The short panel
@@ -29,11 +33,14 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
     <div className="inspector-fields">
       <label>Name<input value={node.data.agent.name} disabled={readOnly} onChange={e => onRename('name', e.target.value)} /></label>
       {/* Instructions are prose; a one-line input hid all but the first few words of them. */}
-      <label>{reviewStep ? 'What to check' : 'Instructions'}<textarea rows={4} value={node.data.agent.role} disabled={readOnly} onChange={e => onRename('role', e.target.value)} placeholder={reviewStep ? 'What should you look at before the team continues?' : 'What should this agent do?'} /></label>
+      <label>{reviewStep ? 'What to check' : 'Instructions'}<textarea ref={roleField} rows={4} value={node.data.agent.role} disabled={readOnly} onChange={e => onRename('role', e.target.value)} placeholder={reviewStep ? 'What should you look at before the team continues?' : 'What should this agent do?'} /></label>
+      {!reviewStep && <InstructionShape role={node.data.agent.role} readOnly={readOnly} field={roleField} onChange={(role) => onRename('role', role)} />}
+      {!reviewStep && props.checkup && props.checkup.findings.length > 0 && <section className="build-context" aria-label="Make it work better"><AgentCheckup {...props.checkup} readOnly={readOnly} headClassName="build-context-head" /></section>}
       {reviewStep
         ? <p>The team pauses here and waits for you to approve the work or ask for changes.</p>
         : <>
           <label>AI app<select value={harnessId ?? ''} disabled={readOnly} onChange={e => onHarnessChange?.(e.target.value)}><option value="" disabled>Choose an app</option>{harnesses.map(h => <option key={h.id} value={h.id} disabled={h.acpAvailable === false}>{h.name}</option>)}</select></label>
+          {props.usage && <AgentUsageLine usage={props.usage.agent} runs={props.usage.runs} alone={props.usage.alone} />}
           <section className="build-context" aria-label="Context">
             <AgentContext
               agent={node.data.agent} place={props.place} briefCount={props.briefCount} inheritedMemory={props.inheritedMemory} readOnly={readOnly}

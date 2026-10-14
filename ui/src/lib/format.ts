@@ -30,3 +30,10 @@ export function relativeTime(at: Date, now: Date = new Date()): string {
   if (days < 7) return `${days} days ago`
   return at.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: at.getFullYear() === now.getFullYear() ? undefined : 'numeric' })
 }
+
+/** A token count the way people say it: 840, 12.5k, 230k, 1.4M. */
+export function formatTokens(count: number): string {
+  if (count < 1000) return String(Math.round(count))
+  if (count < 1_000_000) return `${(count / 1000).toFixed(count < 10_000 ? 1 : 0).replace(/\.0$/, '')}k`
+  return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+}
