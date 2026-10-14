@@ -1,4 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { readdirSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { NeedsYouTray } from './NeedsYouTray'
@@ -43,5 +45,30 @@ describe('a ticket for the run on screen', () => {
     expect(screen.getAllByRole('button', { name: /^Open run/ })).toHaveLength(1)
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'a' })
     expect(onPermission).not.toHaveBeenCalled()
+  })
+})
+
+// A bare class that turns the pointer off (the canvas's `.ghost` drop placeholder) silently kills
+// any button reusing the name: the tray's Open run and Dismiss once wore it, and could not be clicked.
+// Read from disk: vitest hands a `?raw` stylesheet import back empty.
+const styles = resolve(process.cwd(), 'src/styles')
+const sheets = readdirSync(styles).filter((name) => name.endsWith('.css')).map((name) => readFileSync(resolve(styles, name), 'utf8'))
+const pointerless = new Set(sheets.flatMap((css) => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+  .filter(([, , body]) => /pointer-events:\s*none/.test(body))
+  .flatMap(([, selectors]) => selectors.split(',').map((one) => one.trim()).filter((one) => /^\.[\w-]+$/.test(one)).map((one) => one.slice(1)))))
+
+describe('a stopped run’s ticket', () => {
+  it('opens its run and dismisses from buttons the pointer can reach', () => {
+    const onDismiss = vi.fn()
+    const stopped: Ticket = { ...ticket, id: 'r9:failed', kind: 'failed', runId: 'r9', text: 'approach-research stopped.', context: null, requestId: undefined }
+    render(<NeedsYouTray tickets={[stopped]} working={0} onAnswer={vi.fn()} onDismiss={onDismiss} />)
+    fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
+    expect(pointerless.size).toBeGreaterThan(0)
+    for (const button of screen.getByRole('dialog').querySelectorAll('button')) {
+      expect([...button.classList].filter((name) => pointerless.has(name)), button.textContent ?? '').toEqual([])
+    }
+    expect(screen.getByRole('button', { name: /^Open run/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(onDismiss).toHaveBeenCalledWith('r9')
   })
 })

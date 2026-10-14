@@ -160,8 +160,8 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onDismi
                       {ticket.team && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_team')}>Allow for the whole team</button>}
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'deny')}>Deny<kbd>D</kbd></button>
                     </>}
-                    {ticket.runId !== onScreenRunId && <button type="button" className="btn ghost" onClick={() => openRun(ticket)}>Open run<ArrowUpRight size={13} aria-hidden="true" /></button>}
-                    {ticket.kind === 'failed' && <button type="button" className="btn ghost" onClick={() => onDismiss(ticket.runId)}>Dismiss</button>}
+                    {ticket.runId !== onScreenRunId && <button type="button" className="btn" onClick={() => openRun(ticket)}>Open run<ArrowUpRight size={13} aria-hidden="true" /></button>}
+                    {ticket.kind === 'failed' && <button type="button" className="btn" onClick={() => onDismiss(ticket.runId)}>Dismiss</button>}
                   </div>
                 )}
               </li>
