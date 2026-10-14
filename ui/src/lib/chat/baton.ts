@@ -1,7 +1,10 @@
-// Who has the work right now, for the team's chat header: as work passes between agents, the face
-// of the agent it passed to grows into a pill that says so — "Asking Researcher…", "Passing to
-// Writer…" — and settles to "Writer is working…" once the pass is a moment old. Read only from
-// what a live run recorded: its messages (lib/watch/messages.ts) and who is mid-turn.
+// Who has the work right now. A live piece of work says it on its own line in the chat — "Writer is
+// asking Researcher" — and once that line is scrolled out of view, the face of the agent with the
+// work grows into a pill in the chat's header that says it — "Asking Researcher…". A pass is named
+// for a moment, then settles to who is working. Read only from what a live run recorded: its
+// messages (lib/watch/messages.ts) and who is mid-turn.
+import { useEffect, useState } from 'react'
+
 import { OPERATOR_ID, type TeamMessage } from '../watch/messages'
 
 /**
@@ -104,32 +107,62 @@ export function batonSettlesAt(baton: Baton | null, passes: readonly Pass[]): nu
   return Date.parse(newest.ts) + PASS_BEAT_MS
 }
 
+/**
+ * Who has the work in one live run, kept current: a pass that is named for a moment is looked at
+ * again when its moment is over.
+ */
+export function useBaton({ passes, working, waitingOn }: { passes: readonly Pass[]; working: readonly string[]; waitingOn: string | null }): Baton | null {
+  const [now, setNow] = useState(() => Date.now())
+  const baton = batonOf({ passes, working, waitingOn, now })
+  const settles = batonSettlesAt(baton, passes)
+  useEffect(() => {
+    if (settles === null) return
+    const timer = window.setTimeout(() => setNow(Date.now()), Math.min(PASS_BEAT_MS, Math.max(0, settles - Date.now())) + 40)
+    return () => window.clearTimeout(timer)
+  }, [settles, now])
+  return baton
+}
+
+/** Whether two holders would be said alike, so a report that changes nothing redraws nothing. */
+export function sameBaton(left: Baton | null, right: Baton | null): boolean {
+  return left === right || (left !== null && right !== null && left.agent === right.agent && left.kind === right.kind && left.from === right.from)
+}
+
+/** One run of the line's words: an agent's name, drawn as names are, or the words between them. */
+export type LinePart = { text: string; name?: true }
+
 export interface BatonWords {
-  /** On the pill, which grows from the agent's face: "Asking Researcher…". */
+  /**
+   * On the pill, which grows from the agent's face: "Asking Researcher…". The face says who it is,
+   * so the pill does not say the agent's own name again where it does not have to.
+   */
   pill: string
   /** Beside the agent's name in the open list, in place of "working": "asked by Writer". */
   row: string
-  /** The whole of it, for a screen reader: "Writer is asking Researcher". */
+  /** The piece's own line, with the names to draw as names: "Writer is asking Researcher". */
+  line: LinePart[]
+  /** The line as one sentence, for a screen reader. */
   sentence: string
 }
 
 export function batonWords(baton: Baton, name: (id: string) => string): BatonWords {
-  const to = name(baton.agent)
-  const from = baton.from ? name(baton.from) : null
+  const to: LinePart = { text: name(baton.agent), name: true }
+  const from: LinePart | null = baton.from ? { text: name(baton.from), name: true } : null
+  const say = (pill: string, row: string, line: LinePart[]): BatonWords => ({ pill, row, line, sentence: line.map((part) => part.text).join('') })
   switch (baton.kind) {
     case 'ask':
-      return { pill: `Asking ${to}…`, row: from ? `asked by ${from}` : 'asked a question', sentence: from ? `${from} is asking ${to}` : `${to} was asked a question` }
+      return say(`Asking ${to.text}…`, from ? `asked by ${from.text}` : 'asked a question', from ? [from, { text: ' is asking ' }, to] : [to, { text: ' was asked a question' }])
     case 'answer':
-      return { pill: `Back to ${to}…`, row: from ? `has ${from}'s answer` : 'has its answer', sentence: from ? `${from} answered ${to}` : `${to} has its answer` }
+      return say(`Back to ${to.text}…`, from ? `has ${from.text}'s answer` : 'has its answer', from ? [from, { text: ' answered ' }, to] : [to, { text: ' has its answer' }])
     case 'dispatch':
-      return { pill: `Giving ${to} a task…`, row: from ? `on a task from ${from}` : 'on a task', sentence: from ? `${from} gave ${to} part of the work` : `${to} was given part of the work` }
+      return say(`Giving ${to.text} a task…`, from ? `on a task from ${from.text}` : 'on a task', from ? [from, { text: ' gave ' }, to, { text: ' part of the work' }] : [to, { text: ' was given part of the work' }])
     case 'handoff':
-      return { pill: `Handing off to ${to}…`, row: from ? `took over from ${from}` : 'took over', sentence: from ? `${from} handed the work to ${to}` : `The work was handed to ${to}` }
+      return say(`Handing off to ${to.text}…`, from ? `took over from ${from.text}` : 'took over', from ? [from, { text: ' handed the work to ' }, to] : [{ text: 'The work was handed to ' }, to])
     case 'handover':
-      return { pill: `Passing to ${to}…`, row: from ? `picked up from ${from}` : 'picked up the work', sentence: from ? `${from} passed the work to ${to}` : `The work passed to ${to}` }
+      return say(`Passing to ${to.text}…`, from ? `picked up from ${from.text}` : 'picked up the work', from ? [from, { text: ' passed the work to ' }, to] : [{ text: 'The work passed to ' }, to])
     case 'you':
-      return { pill: `${to} needs you`, row: 'waiting for you', sentence: `${to} is waiting for you` }
+      return say('needs you', 'waiting for you', [to, { text: ' is waiting for you' }])
     case 'working':
-      return { pill: `${to} is working…`, row: 'working', sentence: `${to} is working` }
+      return say('working…', 'working', [to, { text: ' is working' }])
   }
 }

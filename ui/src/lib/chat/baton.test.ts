@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TeamMessage } from '../watch/messages'
-import { agentResolver, batonOf, batonSettlesAt, batonWords, PASS_BEAT_MS, passesKey, passesOf, type Pass } from './baton'
+import { agentResolver, batonOf, batonSettlesAt, batonWords, PASS_BEAT_MS, passesKey, passesOf, sameBaton, type Pass } from './baton'
 
 const names = new Map([['lead', 'Lead'], ['researcher', 'Researcher'], ['writer', 'News Writer'], ['review', 'Your review']])
 const operators = new Set(['review'])
@@ -119,14 +119,29 @@ describe('batonOf', () => {
   })
 })
 
+describe('sameBaton', () => {
+  it('tells apart only what the header would say differently', () => {
+    expect(sameBaton({ agent: 'writer', kind: 'ask', from: 'lead' }, { agent: 'writer', kind: 'ask', from: 'lead' })).toBe(true)
+    expect(sameBaton({ agent: 'writer', kind: 'ask', from: 'lead' }, { agent: 'writer', kind: 'working', from: null })).toBe(false)
+    expect(sameBaton(null, null)).toBe(true)
+    expect(sameBaton(null, { agent: 'writer', kind: 'working', from: null })).toBe(false)
+  })
+})
+
 describe('batonWords', () => {
-  it('says the pass on the pill, from the agent’s side in the list, and whole for a screen reader', () => {
-    expect(batonWords({ agent: 'researcher', kind: 'ask', from: 'writer' }, name)).toEqual({ pill: 'Asking Researcher…', row: 'asked by News Writer', sentence: 'News Writer is asking Researcher' })
+  it('says the pass on the pill, from the agent’s side in the list, and on the piece’s line with its names', () => {
+    expect(batonWords({ agent: 'researcher', kind: 'ask', from: 'writer' }, name)).toEqual({
+      pill: 'Asking Researcher…', row: 'asked by News Writer', sentence: 'News Writer is asking Researcher',
+      line: [{ text: 'News Writer', name: true }, { text: ' is asking ' }, { text: 'Researcher', name: true }],
+    })
     expect(batonWords({ agent: 'writer', kind: 'answer', from: 'researcher' }, name).pill).toBe('Back to News Writer…')
     expect(batonWords({ agent: 'lead', kind: 'dispatch', from: 'writer' }, name).row).toBe('on a task from News Writer')
     expect(batonWords({ agent: 'writer', kind: 'handoff', from: 'lead' }, name).sentence).toBe('Lead handed the work to News Writer')
-    expect(batonWords({ agent: 'writer', kind: 'handover', from: null }, name)).toEqual({ pill: 'Passing to News Writer…', row: 'picked up the work', sentence: 'The work passed to News Writer' })
-    expect(batonWords({ agent: 'lead', kind: 'you', from: null }, name)).toEqual({ pill: 'Lead needs you', row: 'waiting for you', sentence: 'Lead is waiting for you' })
-    expect(batonWords({ agent: 'lead', kind: 'working', from: null }, name).pill).toBe('Lead is working…')
+    expect(batonWords({ agent: 'writer', kind: 'handover', from: null }, name)).toMatchObject({ pill: 'Passing to News Writer…', row: 'picked up the work', sentence: 'The work passed to News Writer' })
+  })
+
+  it('leaves the agent’s own name off the pill where its face already says it', () => {
+    expect(batonWords({ agent: 'lead', kind: 'you', from: null }, name)).toMatchObject({ pill: 'needs you', row: 'waiting for you', sentence: 'Lead is waiting for you' })
+    expect(batonWords({ agent: 'writer', kind: 'working', from: null }, name)).toMatchObject({ pill: 'working…', row: 'working', sentence: 'News Writer is working' })
   })
 })

@@ -1,8 +1,8 @@
 import { ArrowRight, CalendarClock, ChevronDown, ChevronRight, FileText, PanelRight, RotateCcw, Square } from 'lucide-react'
-import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { Fragment, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 import { AppearContext, useAppear } from '../../lib/chat/appear'
-import { agentResolver, passesOf, type Pass } from '../../lib/chat/baton'
+import { agentResolver, batonWords, passesOf, useBaton, type Baton } from '../../lib/chat/baton'
 import { useFollow } from '../../lib/chat/follow'
 import type { ChatItem, ChatMessage } from '../../lib/chat/client'
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
@@ -64,8 +64,10 @@ interface WorkPieceProps {
   /** A document answer's card was opened: it is read in full in the pane beside the chat. */
   onOpenAnswer: (runId: string) => void
   onRun: (run: RunRecord) => void
-  /** Each time the work moves between agents while this piece runs: what the chat's header shows. */
-  onPasses?: (runId: string, passes: readonly Pass[]) => void
+  /** Who has the work while this piece runs, each time that changes: what the chat's header shows. */
+  onBaton?: (runId: string, baton: Baton | null) => void
+  /** This piece's line, which says who has the work: the header shows its pill while it is out of view. */
+  onLine?: (runId: string, element: HTMLElement | null) => void
   onTryAgain: (item: Work) => void
   onContinue: (runId: string) => Promise<void>
   /** A decision was sent with the draft as its note: the box is cleared. */
@@ -81,7 +83,7 @@ interface WorkPieceProps {
  * shows who is working; past work keeps its answer in view and its talk a click away. Details opens
  * the full record — stages, timeline, receipt — beside the chat.
  */
-export function WorkPiece({ item, newest = false, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onPasses, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding }: WorkPieceProps) {
+export function WorkPiece({ item, newest = false, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding }: WorkPieceProps) {
   const { run, request, notes } = item
   const live = !isTerminalRun(run.status)
   // What the agents said is shown where the work is happening — the newest piece, and any piece
@@ -111,10 +113,9 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   // piece rather than trailing it by a page read.
   const fresh = session.record?.runId === run.runId ? session.record : null
   useEffect(() => { if (fresh) onRun(fresh) }, [fresh, onRun])
-  // And where the work is as it moves between the agents, for the header's pill; none once it ends.
+  // And where the work is as it moves between the agents (lib/chat/baton.ts); none once it ends.
   const resolve = useMemo(() => agentResolver(team.names, team.operators), [team.names, team.operators])
   const passes = useMemo(() => (live ? passesOf(session.projection.messages, resolve) : []), [live, session.projection.messages, resolve])
-  useEffect(() => { onPasses?.(run.runId, passes) }, [onPasses, run.runId, passes])
   // A new piece fades in as one; what arrives in it afterwards — the answer, a question, a note's
   // fate — rises in on its own once the piece has painted.
   const appear = useAppear()
@@ -165,6 +166,16 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   const asking = live ? record.permissionRequests ?? [] : []
   const askedOnMessage = new Set(open ? session.projection.messages.flatMap((message) => (message.kind === 'permission' && message.state === 'pending' && message.permission ? [message.permission.requestId] : [])) : [])
   const unasked = asking.filter((request) => !askedOnMessage.has(request.id))
+  // Who has the work now: said on this piece's line, and on the header's pill while the line is out
+  // of view. An agent waiting on you has it first.
+  const waitingOn = waiting ? (waiting.kind === 'review_stop' ? waiting.handoverFrom ?? waiting.node : waiting.node) : asking[0]?.agent ?? null
+  const baton = useBaton({ passes, working: live ? record.working ?? [] : [], waitingOn })
+  useEffect(() => { onBaton?.(run.runId, live ? baton : null) }, [onBaton, run.runId, live, baton])
+  useEffect(() => () => onBaton?.(run.runId, null), [onBaton, run.runId])
+  const lineRef = useCallback((element: HTMLDivElement | null) => onLine?.(run.runId, element), [onLine, run.runId])
+  // A pass is named on the line; plain work keeps saying who is working.
+  const pass = live && baton && baton.kind !== 'working' && baton.kind !== 'you' ? baton : null
+  const passLine = pass ? batonWords(pass, name).line : null
   const permissionTurn = (message: TeamMessage) => {
     const request = asking.find((candidate) => candidate.id === message.permission?.requestId)
     return request ? (
@@ -212,16 +223,18 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
       <Request run={run} request={request} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} />
       {notes.map((note) => <Note key={note.id} note={note} live={live} name={name} />)}
 
-      <div className="tc-talk" data-tour={newest ? 'stages' : undefined}>
+      <div ref={lineRef} className="tc-talk" data-tour={newest ? 'stages' : undefined}>
         <Weft workers={workers} at={weftAt(workers, record, live, waiting)} live={live} waiting={Boolean(waiting) || asking.length > 0} status={record.status}>
           {workers.map((id) => <i key={id} className={`chat-avatar hue-${hue(id)}${live && record.working?.includes(id) ? ' working' : ''}`} style={{ width: 22, height: 22, fontSize: 9 }}>{initials(name(id))}</i>)}
         </Weft>
-        <Swap key={talkKey(live, waiting, asking.map((request) => request.id), working, run.status)} className="tc-talk-line">
+        <Swap key={talkKey(live, waiting, asking.map((request) => request.id), working, run.status, pass)} className="tc-talk-line">
           {live
             ? waiting
               ? <><b className="tc-wait">Waiting for you</b> · {waiting.kind === 'review_stop' ? `${name(waiting.handoverFrom ?? '')}'s work is ready for your review` : `${name(waiting.node)} asked you something`}</>
               : asking.length > 0
                 ? <><b className="tc-wait">Waiting for you</b> · {askers(asking.map((request) => name(request.agent)))} your permission</>
+              : passLine
+                ? <>{passLine.map((part, index) => (part.name ? <b key={index}>{part.text}</b> : <Fragment key={index}>{part.text}</Fragment>))}<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
               : working.length > 0
                 ? <><b>{listNames(working)}</b> {working.length === 1 ? 'is' : 'are'} working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
                 : run.status === 'queued' || run.status === 'starting' ? 'Starting…' : 'Handing over…'
@@ -517,11 +530,12 @@ function weftAt(workers: readonly string[], run: RunRecord, live: boolean, waiti
   return index >= 0 ? index : 0
 }
 
-/** What the talk line says, as a key: a change of who is working slides the new words in. */
-function talkKey(live: boolean, waiting: RunRecord['waitingOn'], asking: readonly string[], working: readonly string[], status: string): string {
+/** What the talk line says, as a key: a change of who is working, or of how the work moved, slides the new words in. */
+function talkKey(live: boolean, waiting: RunRecord['waitingOn'], asking: readonly string[], working: readonly string[], status: string, pass: Baton | null): string {
   if (!live) return 'done'
   if (waiting) return `waiting:${waiting.node}`
   if (asking.length > 0) return `asking:${asking.join(',')}`
+  if (pass) return `pass:${pass.kind}:${pass.agent}:${pass.from ?? ''}`
   return working.length > 0 ? `working:${working.join(',')}` : status
 }
 
