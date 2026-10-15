@@ -342,7 +342,6 @@
       pattern: benchPattern(agentName()),
       does: job.does,
       appName: app(agent.app).name,
-      jobParts: { job: true, method: true, reply: true },
       hasReply: replied,
       mood, events, asked, open: null, dropping: false,
     }
@@ -358,13 +357,32 @@
   const tagEls = new Map(TAGS.map((t) => [t.anchor, el('span', { class: `bench-tag at-${t.anchor}` })]))
   benchTags.append(...tagEls.values())
   function paintTags() { for (const t of TAGS) tagEls.get(t.anchor).textContent = t.text() }
+  // The words on its nameplate, job sheet and laptop lid: text laid over those faces (placeFace),
+  // since words painted into the picture blur once the bench is drawn small.
+  const faceEls = {
+    name: el('div', { class: 'bench-face bench-face-name' }),
+    job: el('div', { class: 'bench-face bench-face-job' }),
+    app: el('div', { class: 'bench-face bench-face-app' }),
+  }
+  benchTags.before(el('div', { class: 'bench-faces', 'aria-hidden': 'true' }, ...Object.values(faceEls)))
+  let facesSay = ''
+  function paintFaces() {
+    const job = jobOf()
+    const say = [agentName(), job.does, job.instructions, app(agent.app).name]
+    if (say.join('\n') === facesSay) return
+    facesSay = say.join('\n')
+    faceEls.name.replaceChildren(el('p', {}, el('b', { text: say[0] }), say[1] ? el('span', { text: say[1] }) : null))
+    faceEls.job.replaceChildren(el('p', { text: say[2] }))
+    faceEls.app.replaceChildren(el('p', { text: say[3] }))
+    faceEls.app.style.setProperty('--chars', say[3].length)
+  }
 
   const PART_BLOCK = {
     name: '#ag-name', app: '#ag-apps [aria-checked="true"]', job: '#ag-jobs [aria-checked="true"]', skills: '#ag-jobs [aria-checked="true"]',
     mind: '#ag-kinds [aria-checked="true"]', keys: '#ag-keys button', reply: '#ag-try',
   }
   async function mountBench() {
-    const { WorkbenchScene, markPattern } = await loadLive()
+    const { WorkbenchScene, markPattern, placeFace } = await loadLive()
     benchPattern = (name) => markPattern(name.toLowerCase()).over
     const scene = new WorkbenchScene(benchCanvas, {
       // Clicking a thing on the bench takes you to the block that changes it.
@@ -376,8 +394,9 @@
         edited()
       },
       onHover: (part, grab) => { benchCanvas.style.cursor = grab ? 'grab' : part ? 'pointer' : '' },
-      onFrame: (anchors) => {
+      onFrame: (anchors, faces) => {
         for (const [anchor, tag] of tagEls) placeTag(tag, anchors[anchor], benchCanvas)
+        for (const [face, element] of Object.entries(faceEls)) placeFace(element, faces[face])
       },
     }, reduced)
     benchScene = scene
@@ -397,6 +416,7 @@
   }
   function paintBench() {
     paintTags()
+    paintFaces()
     benchScene?.set(benchView())
   }
   // The bench loads when Act I is near, so the first screen only waits for the crew.

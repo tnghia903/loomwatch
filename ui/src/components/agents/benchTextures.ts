@@ -2,19 +2,17 @@ import { CanvasTexture, RepeatWrapping, SRGBColorSpace, type Texture } from 'thr
 
 /**
  * Pictures drawn on the workbench at run time: the agent's own swatch wound on the figure's spool,
- * the words on its plates and its laptop lid, the job sheet and the recipe cards. They are
- * canvases, so they always show the real setting. The scene keeps its own colours in both themes,
- * like a photograph of a real bench, and draws in the app's own fonts.
+ * the words on its key tags and the recipe cards. They are canvases, so they always show the real
+ * setting. The scene keeps its own colours in both themes, like a photograph of a real bench, and
+ * draws in the app's own fonts. The words meant to be read (the nameplate, the job sheet, the
+ * laptop's lid) are not painted: painted words blur once the bench is drawn small, so AgentFigure
+ * lays them over their faces as page text.
  */
 
 const BONE = '#EFEAE0'
-const PAPER = '#F4EFE4'
 const INK = '#17150F'
-const INK_2 = '#56524A'
 const STONE = '#A9A59C'
 const GOLD = '#D8A93C'
-const GOLD_DEEP = '#8A6A16'
-const GRAPHITE = '#2B2B33'
 
 function canvas(width: number, height: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const element = document.createElement('canvas')
@@ -142,36 +140,6 @@ export function pegboardTexture(): Texture {
   return texture(element)
 }
 
-/** The nameplate on the front of the bench: its name, and what it does underneath. */
-export function nameplateTexture(name: string, does: string): Texture {
-  const [element, context] = canvas(1024, 188)
-  const { sans, serif } = fonts()
-  context.fillStyle = BONE
-  context.fillRect(0, 0, element.width, element.height)
-  context.textAlign = 'center'
-  context.textBaseline = 'alphabetic'
-  context.fillStyle = INK
-  fitLine(context, name || 'New agent', 512, does ? 104 : 124, 940, 104, 40, (size) => `400 ${size}px ${serif}`)
-  if (does) {
-    context.fillStyle = INK_2
-    fitLine(context, does, 512, 160, 900, 34, 20, (size) => `500 ${size}px ${sans}`)
-  }
-  return texture(element)
-}
-
-/** The plaque that says which app the bench is. */
-export function appPlateTexture(app: string): Texture {
-  const [element, context] = canvas(512, 116)
-  const { sans } = fonts()
-  context.fillStyle = GRAPHITE
-  context.fillRect(0, 0, element.width, element.height)
-  context.textAlign = 'center'
-  context.textBaseline = 'middle'
-  context.fillStyle = app ? BONE : STONE
-  fitLine(context, app || 'No app yet', 276, 60, 400, 50, 22, (size) => `600 ${size}px ${sans}`)
-  return texture(element)
-}
-
 /** A key's word on its tag. */
 export function keyLabelTexture(word: string, dark: boolean): Texture {
   const [element, context] = canvas(256, 116)
@@ -182,46 +150,6 @@ export function keyLabelTexture(word: string, dark: boolean): Texture {
   context.textBaseline = 'middle'
   context.fillStyle = dark ? BONE : INK
   fitLine(context, word, 128, 60, 230, 54, 26, (size) => `700 ${size}px ${sans}`)
-  return texture(element)
-}
-
-/**
- * The job sheet on the clipboard: its instructions as written, with the three things good
- * instructions say (the job, how to work, what to reply with) ticked when they are there.
- */
-export function jobSheetTexture(instructions: string, parts: { job: boolean; method: boolean; reply: boolean }): Texture {
-  const [element, context] = canvas(512, 662)
-  const { sans } = fonts()
-  context.fillStyle = PAPER
-  context.fillRect(0, 0, element.width, element.height)
-  context.fillStyle = GOLD_DEEP
-  context.font = `700 22px ${sans}`
-  context.textBaseline = 'top'
-  context.fillText('THE JOB', 34, 60)
-  let x = 34
-  for (const [word, on] of [['Job', parts.job], ['How', parts.method], ['Reply', parts.reply]] as const) {
-    context.font = `600 20px ${sans}`
-    const width = context.measureText(word).width + 46
-    context.fillStyle = on ? '#E9C46A' : 'rgba(23, 21, 15, 0.06)'
-    context.beginPath()
-    context.roundRect(x, 98, width, 34, 17)
-    context.fill()
-    context.fillStyle = on ? INK : '#8B857C'
-    context.fillText(`${on ? '✓' : '○'} ${word}`, x + 14, 105)
-    x += width + 10
-  }
-  context.fillStyle = INK
-  context.font = `400 22px ${sans}`
-  const lines = instructions.trim() ? wrap(context, instructions.trim(), 444, 17) : []
-  if (lines.length === 0) {
-    context.fillStyle = '#8B857C'
-    context.fillText('Nothing written yet.', 34, 160)
-  }
-  lines.forEach((line, index) => {
-    context.globalAlpha = index > 13 ? Math.max(0.15, 1 - (index - 13) * 0.28) : 1
-    context.fillText(line, 34, 160 + index * 29)
-  })
-  context.globalAlpha = 1
   return texture(element)
 }
 

@@ -35,7 +35,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { CARD_SLOTS, FIGURE_KEYS, partOfNode, reactionsBetween, type FigureLook, type FigureMood, type FigurePart, type FigureReaction } from '../../lib/library/figure'
 import { COLOR_HEX, FIGURE_KINDS, type FigureChoice, type FigureKind } from '../../lib/library/figures'
 import type { AllowSwitch } from '../../lib/team-file/types'
-import { appPlateTexture, cardTexture, jobSheetTexture, keyLabelTexture, nameplateTexture, pegboardTexture, swatchTextures, woundTexture } from './benchTextures'
+import { cardTexture, keyLabelTexture, pegboardTexture, swatchTextures, woundTexture } from './benchTextures'
 
 /** Everything the bench shows, from the agent on screen and the test bench's run. */
 export interface BenchView {
@@ -46,7 +46,6 @@ export interface BenchView {
   pattern: readonly boolean[]
   does: string
   appName: string
-  jobParts: { job: boolean; method: boolean; reply: boolean }
   hasReply: boolean
   mood: FigureMood
   /** Recorded events in the run so far: each one flickers its screen. */
@@ -59,17 +58,45 @@ export interface BenchView {
 
 export type BenchAnchor = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'keys' | 'dish' | 'reply'
 export type BenchAnchors = Record<BenchAnchor, { x: number; y: number }>
+/** The faces that carry words: the nameplate, the job sheet and the laptop's lid. */
+export type BenchFace = 'name' | 'job' | 'app'
+/** Where a face is on screen: its top left corner, and its top and left edges from there. */
+export interface BenchQuad { x: number; y: number; ux: number; uy: number; vx: number; vy: number }
+export type BenchFaces = Record<BenchFace, BenchQuad>
+
+/**
+ * Lay page text over one of the worded faces, each frame: the scene leaves the face plain, because
+ * painted words blur once the bench is drawn small. The element is laid out at the size the face
+ * has on screen, so its words are drawn at their own size and stay sharp; a face seen square on
+ * only moves, it doesn't turn or lean. Used by the app's bench (AgentFigure) and the landing page's.
+ */
+export function placeFace(element: HTMLElement, { x, y, ux, uy, vx, vy }: BenchQuad) {
+  const across = Math.hypot(ux, uy)
+  const down = Math.hypot(vx, vy)
+  if (across < 1 || down < 1) return
+  const [a, b, c, d] = [ux / across, uy / across, vx / down, vy / down]
+  const transform = Math.abs(b) < 0.02 && Math.abs(c) < 0.02
+    ? `translate(${Math.round(x)}px, ${Math.round(y)}px)`
+    : `matrix(${a.toFixed(4)}, ${b.toFixed(4)}, ${c.toFixed(4)}, ${d.toFixed(4)}, ${x.toFixed(1)}, ${y.toFixed(1)})`
+  const at = `${across.toFixed(1)} ${down.toFixed(1)} ${transform}`
+  if (element.dataset.at === at) return
+  element.dataset.at = at
+  element.style.width = `${across.toFixed(1)}px`
+  element.style.height = `${down.toFixed(1)}px`
+  element.style.transform = transform
+}
 
 export interface BenchCallbacks {
   onPart: (part: FigurePart) => void
   onKey: (key: AllowSwitch, given: boolean) => void
   /** What the pointer is over, for the cursor: a part, or a key it can pick up. */
   onHover: (part: FigurePart | null, grab: boolean) => void
-  /** Each frame: where each label goes, in CSS pixels from the canvas's top left. */
-  onFrame: (anchors: BenchAnchors) => void
+  /** Each frame: where each label and each face goes, in CSS pixels from the canvas's top left. */
+  onFrame: (anchors: BenchAnchors, faces: BenchFaces) => void
 }
 
 const KEY_NODE: Record<AllowSwitch, string> = { web: 'web', edits: 'files', commands: 'cmd' }
+const FACE_MESH: Record<BenchFace, string> = { name: 'nameplate_face', job: 'job_sheet', app: 'laptop_face' }
 const DISH_KEY_SCALE = 0.72
 const HIGHLIGHT = new Color('#E9C46A')
 const LIVE = new Color('#6AB8FF')
@@ -91,6 +118,19 @@ const smooth = (edge0: number, edge1: number, x: number) => MathUtils.smoothstep
 const shown = (object: Object3D | null): boolean => { for (let at = object; at; at = at.parent) if (!at.visible) return false; return true }
 const envelope = (u: number) => smooth(0, 0.18, u) * (1 - smooth(0.72, 1, u))
 const bump = (u: number) => Math.sin(Math.PI * MathUtils.clamp(u, 0, 1))
+
+/** A flat face's top left, top right and bottom left corners, found by its UVs (glTF's start at the top). */
+function corners(mesh: Mesh): Vector3[] {
+  const uv = mesh.geometry.getAttribute('uv')
+  const position = mesh.geometry.getAttribute('position')
+  return [[0, 0], [1, 0], [0, 1]].map(([u, v]) => {
+    let best = 0
+    for (let index = 1; index < uv.count; index += 1) {
+      if (Math.hypot(uv.getX(index) - u, uv.getY(index) - v) < Math.hypot(uv.getX(best) - u, uv.getY(best) - v)) best = index
+    }
+    return new Vector3().fromBufferAttribute(position, best)
+  })
+}
 
 /**
  * BUILD BY HAND, live: the agent as a figure at a workbench, doing the work (AgentFigure renders
@@ -119,6 +159,8 @@ export class WorkbenchScene {
   private readonly keyDish = new Map<AllowSwitch, Vector3>()
   private readonly cards: { group: Group | null; skill: string | null }[] = Array.from({ length: CARD_SLOTS }, () => ({ group: null, skill: null }))
   private readonly faces = new Map<string, Mesh>()
+  /** Each worded face's top left, top right and bottom left corners, in its own space. */
+  private readonly faceCorners = new Map<BenchFace, Vector3[]>()
   private readonly parts = new Map<Mesh, FigurePart | null>()
   private flashes = new Map<FigurePart, number>()
   private view: BenchView | null = null
@@ -148,7 +190,7 @@ export class WorkbenchScene {
   /** Each head it can wear, and every eye (they blink together; only the worn head's show). */
   private readonly heads = new Map<FigureKind, Object3D>()
   private readonly eyes: Object3D[] = []
-  private drawn = { name: '', app: '', job: '', pattern: '', figure: '' }
+  private drawn = { pattern: '', figure: '' }
 
   constructor(canvas: HTMLCanvasElement, callbacks: BenchCallbacks, reduced: boolean) {
     this.callbacks = callbacks
@@ -217,6 +259,7 @@ export class WorkbenchScene {
       this.disposables.push(object.geometry)
     })
     for (const kind of FIGURE_KINDS) this.heads.set(kind, this.node(`head_${kind}`))
+    for (const [face, name] of Object.entries(FACE_MESH) as [BenchFace, string][]) this.faceCorners.set(face, corners(this.node(name) as Mesh))
     this.scene.add(model)
     model.updateMatrixWorld(true)
     for (const { key, node } of FIGURE_KEYS) {
@@ -360,11 +403,6 @@ export class WorkbenchScene {
       this.drawn.figure = figureKey
       this.wear(view.figure)
     }
-    const nameKey = `${look.name}\n${view.does}`
-    if (this.drawn.name !== nameKey) { this.drawn.name = nameKey; this.paint('nameplate_face', nameplateTexture(look.name.trim(), view.does.trim())) }
-    if (this.drawn.app !== view.appName) { this.drawn.app = view.appName; this.paint('laptop_face', appPlateTexture(view.appName)) }
-    const jobKey = `${look.instructions}\n${view.jobParts.job}${view.jobParts.method}${view.jobParts.reply}`
-    if (this.drawn.job !== jobKey) { this.drawn.job = jobKey; this.paint('job_sheet', jobSheetTexture(look.instructions, view.jobParts)) }
     for (const { node, word, key } of FIGURE_KEYS) {
       if (!this.faces.has(`key_${node}_label`)) this.paint(`key_${node}_label`, keyLabelTexture(word, key === 'commands'))
     }
@@ -525,7 +563,7 @@ export class WorkbenchScene {
 
   private frame() {
     this.renderer.render(this.scene, this.camera)
-    if (this.loaded) this.callbacks.onFrame(this.anchors())
+    if (this.loaded) this.callbacks.onFrame(this.anchors(), this.facesOnScreen())
   }
 
   private update(dt: number) {
@@ -806,6 +844,15 @@ export class WorkbenchScene {
     }
   }
 
+  private facesOnScreen(): BenchFaces {
+    const quad = (face: BenchFace): BenchQuad => {
+      const mesh = this.node(FACE_MESH[face])
+      const [a, b, c] = this.faceCorners.get(face)!.map((corner) => this.screen(mesh.localToWorld(corner.clone())))
+      return { x: a.x, y: a.y, ux: b.x - a.x, uy: b.y - a.y, vx: c.x - a.x, vy: c.y - a.y }
+    }
+    return { name: quad('name'), job: quad('job'), app: quad('app') }
+  }
+
   private partPoint(part: FigurePart): Vector3 | null {
     const name = { mind: null, app: 'laptop_lid', name: 'nameplate', job: 'job', skills: 'card_3', keys: 'hooks', reply: 'tray' }[part]
     return name ? this.node(name).getWorldPosition(new Vector3()) : null
@@ -916,7 +963,8 @@ export function benchMaterial(role: string, mesh: string, textures: { pegboard: 
     case 'gold': return standard('#E2B451', 0.3, 1)
     case 'appband': return new MeshStandardMaterial({ color: '#85817A', emissive: LIVE, emissiveIntensity: 0, roughness: 0.4 })
     case 'screen': return new MeshStandardMaterial({ color: '#141A24', emissive: LIVE, emissiveIntensity: 0.12, roughness: 0.3 })
-    case 'paper': return standard('#F4EFE4', 0.85)
+    // The worded faces are left plain: AgentFigure lays their words over them as page text.
+    case 'paper': return standard(mesh === 'laptop_face' ? '#2B2B33' : mesh === 'nameplate_face' ? '#EFEAE0' : '#F4EFE4', 0.85)
     case 'ink': return standard('#B9B1A2', 0.85)
     case 'tag_web': return standard('#E9C46A', 0.5)
     case 'tag_files': return standard('#EFEAE0', 0.55)
