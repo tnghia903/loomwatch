@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { fetchHarnessModels, type HarnessModels } from '../../lib/harnesses'
+import { jobEffort } from '../../lib/library/effort'
 
 type CatalogRead = Omit<HarnessModels, 'harnessId'> & { error: string | null }
 
@@ -11,8 +12,11 @@ interface ModelCatalogInput {
   agentId: string | null
   /** The inspected agent is not the operator and has no model yet. */
   agentNeedsModel: boolean
+  /** Its instructions, so a built-in job placed just now gets its job's effort with the model. */
+  agentRole?: string
   editable: boolean
-  updateAgentModel: (agentId: string, model: string) => void
+  /** Writes the model, and the effort when there is one, as one edit. */
+  updateAgentModel: (agentId: string, model: string, thinkingEffort?: string) => void
 }
 
 /**
@@ -20,7 +24,7 @@ interface ModelCatalogInput {
  * per session, and the one write it drives: an agent placed without a model adopts the model the
  * harness itself would use.
  */
-export function useModelCatalog({ harnessId, agentId, agentNeedsModel, editable, updateAgentModel }: ModelCatalogInput) {
+export function useModelCatalog({ harnessId, agentId, agentNeedsModel, agentRole = '', editable, updateAgentModel }: ModelCatalogInput) {
   const [catalog, setCatalog] = useState<HarnessModels & { error: string | null }>({ harnessId: '', models: [], error: null })
   const cache = useRef(new Map<string, CatalogRead>())
   const [retryCount, setRetryCount] = useState(0)
@@ -56,12 +60,13 @@ export function useModelCatalog({ harnessId, agentId, agentNeedsModel, editable,
   // A newly placed agent has no model, and an empty model blocks the run behind a "Required" field
   // the operator did not know to look for. Once this harness's catalog is in hand, adopt the model
   // the harness itself would use — its current model — so the agent can run as soon as it is placed.
+  // A built-in job also gets the effort its job needs, from what that model lists (ADR 0062).
   useEffect(() => {
     if (!editable || !agentId || !agentNeedsModel) return
     if (catalog.harnessId !== harnessId || catalog.error) return
     const model = catalog.currentModelId ?? catalog.models[0]?.id
-    if (model) updateAgentModel(agentId, model)
-  }, [editable, agentId, agentNeedsModel, harnessId, catalog, updateAgentModel])
+    if (model) updateAgentModel(agentId, model, jobEffort(agentRole, catalog.models.find((entry) => entry.id === model)))
+  }, [editable, agentId, agentNeedsModel, agentRole, harnessId, catalog, updateAgentModel])
 
   const retry = useCallback(() => {
     if (harnessId) cache.current.delete(harnessId)

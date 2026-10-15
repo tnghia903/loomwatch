@@ -11,6 +11,7 @@ import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
 import type { AgentAllow, AgentConfig, AllowSwitch, BriefEntryConfig, CapabilityRef, DeliverConfig, EdgeConfig, PermissionMode, ScheduleConfig, SpawnConfig, TeamDocument, TurnedOff } from './types'
 import { withTurnedOff, withoutWired } from './turnedOff'
+import { isCheckerRole } from '../library/checker'
 import {
   loadTeamValidator,
   displayFieldProblems,
@@ -120,6 +121,14 @@ export interface EntrypointProblem {
 
 function edgeId(from: string, to: string): string {
   return `${from}->${to}`
+}
+
+/** The agent without its check-step fields. */
+function withoutChecks(agent: AgentConfig): AgentConfig {
+  const next: AgentConfig = { ...agent }
+  delete next.checks
+  delete next.sendBackOnce
+  return next
 }
 
 export function slugifyTeamName(name: string): string {
@@ -717,6 +726,8 @@ export function useTeamDocument() {
 
       droppedEdges.forEach((edge) => modelRef.current?.removeEdge(edge.source, edge.target))
       idSet.forEach((id) => modelRef.current?.removeAgent(id))
+      const orphanedChecks = remainingNodes.filter((node) => node.data.agent.checks && idSet.has(node.data.agent.checks)).map((node) => node.id)
+      orphanedChecks.forEach((id) => { modelRef.current?.setAgentField(id, 'checks', undefined); modelRef.current?.setAgentField(id, 'sendBackOnce', undefined) })
 
       let nextEntrypoint = entrypoint
       if (entrypoint !== null && idSet.has(entrypoint)) {
@@ -736,7 +747,7 @@ export function useTeamDocument() {
         else if (idSet.has(configuredResponder)) modelRef.current?.clearResponder()
       }
 
-      setNodes(remainingNodes.map((node) => ({ ...node, data: { ...node.data, isEntrypoint: node.id === nextEntrypoint } })))
+      setNodes(remainingNodes.map((node) => ({ ...node, data: { ...node.data, isEntrypoint: node.id === nextEntrypoint, agent: orphanedChecks.includes(node.id) ? withoutChecks(node.data.agent) : node.data.agent } })))
       setEdges(remainingEdges)
       setEntrypointState(nextEntrypoint)
       markDirty()
@@ -762,6 +773,13 @@ export function useTeamDocument() {
 
   const removeAgent = useCallback((id: string) => removeAgents([id]), [removeAgents])
 
+  /** Stop these agents being check steps: what they checked no longer hands them its work. */
+  const clearChecks = useCallback((ids: readonly string[]) => {
+    if (ids.length === 0) return
+    ids.forEach((id) => { modelRef.current?.setAgentField(id, 'checks', undefined); modelRef.current?.setAgentField(id, 'sendBackOnce', undefined) })
+    setNodes((current) => current.map((node) => (ids.includes(node.id) ? { ...node, data: { ...node.data, agent: withoutChecks(node.data.agent) } } : node)))
+  }, [])
+
   const removeEdgesBetween = useCallback(
     (pairs: readonly { from: string; to: string }[]) => {
       if (pairs.length === 0) {
@@ -780,6 +798,9 @@ export function useTeamDocument() {
 
       pairs.forEach((pair) => modelRef.current?.removeEdge(pair.from, pair.to))
       if (remaining.length === 0 && documentSnapshot?.responder && entrypoint) modelRef.current?.setResponder(entrypoint)
+      // A check step whose work stopped reaching it checks nothing (ADR 0062).
+      const unchecked = nodes.filter((node) => pairs.some((pair) => pair.to === node.id && node.data.agent.checks === pair.from)).map((node) => node.id)
+      clearChecks(unchecked)
       setEdges(remaining)
       markDirty()
 
@@ -789,7 +810,7 @@ export function useTeamDocument() {
         setPendingEdgeRemoval({ edges: removed })
       }
     },
-    [edges, entrypoint, documentSnapshot?.responder, markDirty, captureHistory],
+    [edges, nodes, entrypoint, documentSnapshot?.responder, markDirty, captureHistory, clearChecks],
   )
 
   const removeEdgeBetween = useCallback(
@@ -1114,7 +1135,7 @@ export function useTeamDocument() {
    * removed from the file rather than written as null.
    */
   const applyAgentFields = useCallback(
-    (id: string, fields: Partial<Pick<AgentConfig, 'name' | 'role' | 'model' | 'thinkingEffort' | 'spawn' | 'capabilities' | 'allow' | 'from'>>) => {
+    (id: string, fields: Partial<Pick<AgentConfig, 'name' | 'role' | 'model' | 'thinkingEffort' | 'spawn' | 'capabilities' | 'allow' | 'from' | 'doneWhen' | 'checks' | 'sendBackOnce'>>) => {
       const target = nodes.find((node) => node.id === id)
       if (!target || target.data.agent.kind === 'operator') return
       captureHistory()
@@ -1332,12 +1353,19 @@ export function useTeamDocument() {
       captureHistory()
       modelRef.current?.addEdge(newEdge)
       setEdges((current) => [...current, edgeFromConfig(newEdge)])
+      // Work connected into a Checker that checks nothing yet is the work it checks (ADR 0062).
+      const target = nodes.find((node) => node.id === connection.target)?.data.agent
+      const source = nodes.find((node) => node.id === connection.source)?.data.agent
+      if (target && source && source.kind !== 'operator' && !target.checks && isCheckerRole(target.role)) {
+        modelRef.current?.setAgentField(target.id, 'checks', source.id)
+        setNodes((current) => current.map((node) => (node.id === target.id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, checks: source.id } } } : node)))
+      }
       if (edges.length === 0) {
         setModeSwitchBanner(true)
       }
       markDirty()
     },
-    [edges, entrypoint, markDirty, captureHistory],
+    [edges, nodes, entrypoint, markDirty, captureHistory],
   )
 
   // §8: a consequence of `edges`, not a setting — team when empty, pipeline otherwise.

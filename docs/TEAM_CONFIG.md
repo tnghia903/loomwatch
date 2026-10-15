@@ -70,6 +70,20 @@ depend on the document as a whole:
 - `Agent.model` stores the harness model id. Optional `Agent.thinkingEffort` stores the
   harness's reasoning-effort id separately; at session start LoomWatch applies both through
   ACP configuration. Older combined selectors such as `gpt-6-astra[high]` remain readable.
+  LoomWatch's built-in jobs and starter teams set it by job (`low` for tidying, `medium` for
+  most work, `high` for checking, analysis and code), and only to an effort the model lists.
+- Optional `Agent.doneWhen` is up to five short statements (each at most 160 characters) that
+  the finished result must satisfy. They are stated under the role as `## Done when`; the agent
+  checks its result against them before it replies, fixes what it can, and lists any it could not
+  meet under `## Not met`, which reaches the operator and any check step. No second turn is taken
+  on the agent's own say-so: a check step with `sendBackOnce` is what sends work back.
+- Optional `Agent.checks` makes a pipeline agent a check step: it names the agent whose work it
+  checks, which must hand its work straight to it. That agent writes no summary for it; the check
+  step is handed the work as written and its `doneWhen`, and ends its reply with a `## Check` block
+  (`- Met | Not met | Not sure — item — evidence`). When the pipeline ends on a check step and no
+  `responder` is set, the checked agent's reply is the team's answer, and the checks show beside it.
+  With `sendBackOnce: true`, missed checks go back to the checked agent's open session once and the
+  checks run once more on the revised work. Operator nodes may not set either field.
 - `budget` (team or agent level) is retired.
   Readers accept it in any shape and ignore it, so older team files still load; writers must not
   add it. LoomWatch neither tracks spend nor refuses a delegation because of it.
@@ -408,7 +422,7 @@ cannot be reconstructed safely from the normalized projection.
 ## Operator review stops and questions
 
 A pipeline agent may declare `kind: operator` with `role` as its question and optional `name`
-(default `You`). It must omit `spawn`, `model` and `thinkingEffort`. Operator nodes
+(default `You`). It must omit `spawn`, `model`, `thinkingEffort`, `doneWhen`, `checks` and `sendBackOnce`. Operator nodes
 cannot be the entrypoint or appear in team mode; consecutive stops are allowed. The app must
 start a pipeline containing stops, so answers have a loopback operator endpoint.
 

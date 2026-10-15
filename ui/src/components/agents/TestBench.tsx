@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ExternalLink, FlaskConical, Square } from 'lucide-react'
 
 import type { DetectedHarness } from '../../lib/harnesses'
@@ -8,6 +8,8 @@ import { answerPermission, answerRun, cancelRun, isTerminalRun, newStartKey, sta
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import { fetchTeamFile, saveTeamFile } from '../../lib/team-file/client'
 import type { AllowSwitch } from '../../lib/team-file/types'
+import { formatTokens, summarizeUsage, turnUsage } from '../../lib/watch/usage'
+import { useSessionEvents } from '../../lib/watch/useSessionEvents'
 import { Markdown } from '../ui/Markdown'
 
 export interface TestBenchProps {
@@ -47,7 +49,16 @@ export function TestBench({ draft, harness, model, benchId, onAllow, onRecord }:
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { record, apply } = useRunRecord(run?.id ?? null)
+  const { events } = useSessionEvents(run?.id ?? '')
   const live = Boolean(run) && !isTerminalRun(record?.status)
+  // What the try cost, from the run's own readings (usage.ts), once every event is in: the fact
+  // that tells a model or effort choice apart, where a guess would not (ADR 0062).
+  const tokens = useMemo(() => {
+    if (!record || !isTerminalRun(record.status)) return null
+    if (record.eventCount !== null && events.length < record.eventCount) return null
+    const summary = summarizeUsage(turnUsage(events))
+    return summary.total > 0 ? `${summary.stoppedTurns > 0 ? 'at least ' : ''}${formatTokens(summary.total)} tokens` : null
+  }, [record, events])
   const shown = run && record ? record : null
   useEffect(() => { onRecord?.(shown) }, [shown, onRecord])
   useEffect(() => () => onRecord?.(null), [onRecord])
@@ -106,7 +117,7 @@ export function TestBench({ draft, harness, model, benchId, onAllow, onRecord }:
           <div className="agent-bench-status">
             <span className={`agent-bench-dot st-${record.status}`} aria-hidden="true" />
             <b>{record.permissionRequests?.length ? 'Waiting for you' : record.waitingOn ? 'It has a question' : STATUS_WORD[record.status]}</b>
-            <span className="t-meta">{[seconds(record), record.eventCount ? `${record.eventCount} events` : null].filter(Boolean).join(' · ')}</span>
+            <span className="t-meta">{[seconds(record), record.eventCount ? `${record.eventCount} events` : null, tokens].filter(Boolean).join(' · ')}</span>
             <a className="link agent-bench-open" href={`/?path=${encodeURIComponent(run.path)}&run=${encodeURIComponent(run.id)}`}>See every step<ExternalLink size={12} aria-hidden="true" /></a>
           </div>
           {(record.permissionRequests ?? []).map((ask) => {

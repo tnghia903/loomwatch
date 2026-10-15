@@ -16,8 +16,14 @@ const writer: AgentConfig = {
 describe('a team’s own agent on the workbench', () => {
   it('reads the team agent as the workbench shows it', () => {
     expect(draftFromTeamAgent(writer, [claude, codex])).toEqual({
-      name: 'Writer', does: '', instructions: 'Write the digest.', appId: 'claude', model: 'sonnet', effort: 'high', skills: ['house-style'], allow: { web: true }, figure: null,
+      name: 'Writer', does: '', instructions: 'Write the digest.', appId: 'claude', model: 'sonnet', effort: 'high', skills: ['house-style'], doneWhen: [], allow: { web: true }, figure: null,
     })
+  })
+
+  it('writes done-when items to the team file, and none at all when every line is blank (ADR 0062)', () => {
+    expect(draftFromTeamAgent({ ...writer, doneWhen: ['Five stories'] }, [claude]).doneWhen).toEqual(['Five stories'])
+    expect(teamAgentEdit(writer, 'doneWhen', [' Five stories ', ' '], [claude])).toEqual({ kind: 'fields', fields: { doneWhen: ['Five stories'] } })
+    expect(teamAgentEdit(writer, 'doneWhen', ['  '], [claude])).toEqual({ kind: 'fields', fields: { doneWhen: undefined } })
   })
 
   it('writes names and instructions as renames, so typing stays one undo step at a time like the canvas', () => {

@@ -35,6 +35,15 @@ You help by reading their teams and runs and by proposing changes, using the `lo
 - Reply in plain words, in one to three short sentences. Don't paste team files into the chat: the proposal card shows the changes. Don't use tables.
 - Don't use any tool besides the `loomwatch` ones. Don't read, write or run anything on the computer.
 
+Set agents up the way that works best, every time, without being asked; the person won't know to ask:
+- Use the fewest agents that do the job. One agent is right for most requests. Add one only for work that needs a different job, a different AI app, or the person's review in between: each agent opens a session of its own, which costs time and tokens, and each handover loses detail. More than four is rarely worth it.
+- Write each `role` in three parts: what the agent does and what it leaves to others; how to work, as a few short bullets ending with how it checks its work before it replies; and exactly what it replies with. A later stage receives the earlier stage's reply, so say what to hand on. The last stage's reply is the team's answer, so it delivers the finished piece, not a review of it.
+- Make every line specific to this request (its audience, sources, length, format), and give the reason for a rule that isn't obvious. Leave out advice any AI app already follows, such as "be accurate", and don't use capitals for emphasis: AI apps over-apply a shouted rule.
+- An agent that must search the web gets `allow: {web: true}`; leave `edits` and `commands` off unless the work is changing files or running commands.
+- Give each agent a `doneWhen`: two or three short, checkable things its finished result must have, such as "Every story links to its source". It checks them before it replies and says which it could not meet. Never more than five.
+- When the result must be right (facts, figures, code), end with a check step: an agent that checks the work it is handed against the other agent's `doneWhen` without rewriting it, connected after that agent and set to `checks: <its id>`; its findings show on the answer. Add `sendBackOnce: true` only if the person wants missed checks fixed before they see the answer. A check step is a whole extra session, so leave it out of quick or low-stakes teams.
+- Set `thinkingEffort` by how hard the job is: `low` for tidying, formatting or simple lookups, `medium` for most work, `high` for checking, analysis and code. Use only an effort `list_apps` lists for that model, and never `xhigh` or `max`: thinking is paid for like writing, and the top settings mostly overthink.
+
 A team file is YAML. A complete pipeline with a review stop:
 
 schemaVersion: 1
@@ -44,18 +53,33 @@ entrypoint: researcher       # the first stage
 agents:
   - id: researcher
     name: Researcher
-    role: Find today's AI news from primary sources, with a link for every story.
+    role: |
+      You find today's AI news for the brief. Don't write the brief; the Writer does.
+      How to work:
+      - Use primary sources (company posts, papers, filings) from the last 24 hours.
+      - Before you reply, open each link again and check it says what you claim.
+      Reply with up to eight stories: a one-line headline, two sentences on why it matters, and its link.
     spawn: {"cmd": "claude-agent-acp", "args": [], "env": {}, "cwd": "."}   # copy the spawn block from list_apps
     model: claude-sonnet-5-5                          # a model list_apps lists for that app
+    thinkingEffort: medium                            # an effort list_apps lists for that model
+    doneWhen: ["Every story links to a source you opened", "No story is older than 24 hours"]
+    allow: {web: true}
   - id: review
     kind: operator           # a review stop: no spawn, no model
     name: You
     role: Researcher is done. Approve the findings, or say what to change.
   - id: writer
     name: Writer
-    role: Write a five-bullet brief from the approved findings.
+    role: |
+      You write the morning brief from the stories the person approved. Add no stories or facts of your own.
+      How to work:
+      - Keep the five that matter most to someone building AI products.
+      - Before you reply, check every claim and link against the approved stories.
+      Reply with the brief only: five bullets, each one sentence with its link, and no preamble.
     spawn: {"cmd": "codex-acp", "args": [], "env": {}, "cwd": "."}
     model: gpt-5.5
+    thinkingEffort: medium
+    doneWhen: ["Exactly five bullets, each with its link", "Uses only the approved stories"]
 edges:                       # the order work is handed along
   - {from: researcher, to: review, layer: configured, kind: sequence, ts: "2026-10-02T00:00:00Z"}
   - {from: review, to: writer, layer: configured, kind: sequence, ts: "2026-10-02T00:00:00Z"}
@@ -73,6 +97,10 @@ When you change an existing team, call `read_team` first and propose the whole e
 pub(super) struct AppModels {
     default_model: Option<String>,
     models: Vec<String>,
+    /// The thinking efforts the default model lists, so a proposed `thinkingEffort` is one the app
+    /// accepts (ADR 0062): an effort it does not list fails the run.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    default_model_efforts: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     problem: Option<String>,
 }
@@ -399,12 +427,26 @@ async fn models_for(control: &Control, app: &crate::api::DetectedHarness) -> App
                     .map(|model| model.id.clone())
                     .take(12)
                     .collect::<Vec<_>>();
+                let default_model = catalog
+                    .current_model_id
+                    .clone()
+                    .or_else(|| ids.first().cloned());
+                let default_model_efforts = catalog
+                    .models
+                    .iter()
+                    .find(|model| Some(&model.id) == default_model.as_ref())
+                    .map(|model| {
+                        model
+                            .thinking_efforts
+                            .iter()
+                            .map(|effort| effort.id.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 AppModels {
-                    default_model: catalog
-                        .current_model_id
-                        .clone()
-                        .or_else(|| ids.first().cloned()),
+                    default_model,
                     models: ids,
+                    default_model_efforts,
                     problem: None,
                 }
             }
@@ -766,4 +808,45 @@ async fn draft_review_note(
         "message": "The person sees your note in LoomWatch's Ask panel, with a button that puts it in \
                     the review box. Only they can send it, approve, or send the work back.",
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{INSTRUCTIONS, TeamConfig, schema_problems};
+
+    /// The example team is what the app copies when it writes one, so it has to be a team the
+    /// daemon runs: a role in the three parts the instructions ask for, and a file `propose_team`
+    /// accepts as it stands.
+    #[test]
+    fn the_example_team_in_the_instructions_is_one_propose_team_accepts() {
+        let start = INSTRUCTIONS
+            .find("schemaVersion: 1")
+            .expect("the instructions show a team file");
+        let end = INSTRUCTIONS[start..]
+            .find("\n\n")
+            .map_or(INSTRUCTIONS.len(), |offset| start + offset);
+        let yaml = &INSTRUCTIONS[start..end];
+        let team = TeamConfig::parse(yaml).expect("the example parses");
+        assert!(
+            schema_problems(yaml).is_empty(),
+            "{:?}",
+            schema_problems(yaml)
+        );
+        for agent in team.agents.iter().filter(|agent| !agent.is_operator()) {
+            assert!(
+                agent.role.contains("How to work:")
+                    && agent.role.contains("Before you reply")
+                    && agent.role.contains("Reply with"),
+                "{} shows the shape it asks for: {}",
+                agent.id,
+                agent.role
+            );
+            assert!(
+                (2..=3).contains(&agent.done_when.len())
+                    && agent.thinking_effort.as_deref() == Some("medium"),
+                "{} shows a done-when and a job's effort",
+                agent.id
+            );
+        }
+    }
 }

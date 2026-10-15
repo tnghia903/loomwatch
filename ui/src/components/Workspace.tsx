@@ -48,7 +48,7 @@ import { DeleteTeamDialog } from './home/DeleteTeamDialog'
 import { TeamReviewDialog } from './run/TeamReviewDialog'
 import { Home } from './home/Home'
 import { ALLOW_SWITCHES } from '../lib/team-file/allow'
-import type { AllowSwitch, PermissionMode } from '../lib/team-file/types'
+import type { AgentConfig, AllowSwitch, PermissionMode } from '../lib/team-file/types'
 import type { InspectedCapability } from './canvas/CapabilityInspector'
 import { LayerLegend, type LayerSolo } from './canvas/LayerLegend'
 import { ParseFailureModal } from './canvas/ParseFailureModal'
@@ -126,6 +126,7 @@ import type { AskContext } from '../lib/ask/client'
 import { AskButton } from './ask/AskButton'
 import type { CardActions } from './ask/AskCards'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './ask/useAskActions'
+import { answeringAgent, isCheckerRole } from '../lib/library/checker'
 
 // The Ask panel is code-split like the Markdown stack: most visits never open it.
 const AskPanel = lazy(() => import('./ask/AskPanel').then((module) => ({ default: module.AskPanel })))
@@ -418,8 +419,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const history = useRunHistory(false)
   const schedules = useSchedules()
   const [routineBusy, setRoutineBusy] = useState(false)
+  // A pipeline that ends on a check step answers with the work it checked (ADR 0062).
   const inferredResponder = doc.mode === 'pipeline'
-    ? pipelineTerminal(doc.nodes.map((node) => node.id), doc.edges.map((edge) => ({ from: edge.source, to: edge.target })), doc.entrypoint)
+    ? answeringAgent(pipelineTerminal(doc.nodes.map((node) => node.id), doc.edges.map((edge) => ({ from: edge.source, to: edge.target })), doc.entrypoint), doc.nodes.map((node) => node.data.agent))
     : doc.entrypoint
   const responderFromDoc = doc.responder ?? inferredResponder
   const runLessons = useRunLessons(doc.saveState === 'new' ? null : doc.path)
@@ -1381,12 +1383,29 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const inspectedHarnessId = inspectedNode ? harnessIdForAgent(inspectedNode.data.agent, harnesses) : null
   const inspectedUpdate = inspectedNode && !runView ? instructionUpdates.forAgent(inspectedNode.id) : null
   const inspectedAppHas = useMemo(() => inspectedNode && inspectedNode.data.agent.kind !== 'operator' ? ownedByApp(inspectedHarnessId, capabilityInventory) : null, [inspectedNode, inspectedHarnessId, capabilityInventory])
+  const { updateAgentModel, applyAgentFields } = doc
+  // A check step's panel says whose work it checks and holds its one switch (ADR 0062).
+  const checkStepFor = (agent: AgentConfig) => {
+    if (!agent.checks && !isCheckerRole(agent.role)) return undefined
+    const checked = agent.checks ? doc.nodes.find((node) => node.id === agent.checks)?.data.agent : undefined
+    return {
+      checkedName: checked?.name,
+      checkedHasDoneWhen: Boolean(checked?.doneWhen?.length),
+      sendBackOnce: Boolean(agent.sendBackOnce),
+      onSendBackOnce: (on: boolean) => applyAgentFields(agent.id, { sendBackOnce: on || undefined }),
+    }
+  }
+  const fillAgentModel = useCallback((agentId: string, model: string, thinkingEffort?: string) => {
+    if (thinkingEffort) applyAgentFields(agentId, { model, thinkingEffort })
+    else updateAgentModel(agentId, model)
+  }, [updateAgentModel, applyAgentFields])
   const modelCatalog = useModelCatalog({
     harnessId: inspectedHarnessId,
     agentId: inspectedNode?.id ?? null,
     agentNeedsModel: Boolean(inspectedNode && inspectedNode.data.agent.kind !== 'operator' && !inspectedNode.data.agent.model),
+    agentRole: inspectedNode?.data.agent.role ?? '',
     editable,
-    updateAgentModel: doc.updateAgentModel,
+    updateAgentModel: fillAgentModel,
   })
   const inspectedEvidence: Evidence | null = inspectedEvidenceId ? projection.evidence.find((item) => item.id === inspectedEvidenceId) ?? null : null
   // Who handed it over: the stage before this one in causal order, which is what the daemon
@@ -2761,7 +2780,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               setStatusAnnouncement(`${added.map((capability) => capability.name).join(', ')} ${added.length === 1 ? 'is' : 'are'} now supplied to ${inspectedNode.data.agent.name}. Save the team to keep this change.`)
             }}
             modelOptions={modelOptionsForAgent(inspectedNode.data.agent, doc.nodes.map((node) => node.data.agent), harnesses, modelCatalog.models)} defaultThinkingEffort={modelCatalog.defaultThinkingEffort} modelOptionsLoading={modelCatalog.loading} modelOptionsError={modelCatalog.error} onRetryModelOptions={modelCatalog.retry}
-            onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)}
+            onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)} onDoneWhenChange={(items) => doc.applyAgentFields(inspectedNode.id, { doneWhen: items.length ? items : undefined })} checkStep={checkStepFor(inspectedNode.data.agent)}
             onCwdChange={(value) => doc.updateAgentCwd(inspectedNode.id, value)}
             onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onAllowChange={(key, on) => doc.updateAgentAllow(inspectedNode.id, key, on)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onDelete={() => requestNodeDelete([inspectedNode.id])}
             briefCount={memory?.entries.length ?? 0} teamDeliverAs={memory?.deliverAs}

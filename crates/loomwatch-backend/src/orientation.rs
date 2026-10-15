@@ -26,7 +26,7 @@ pub const HEADING: &str = "## Your place in the team";
 const ROLE_SUMMARY_CHARS: usize = 140;
 
 /// What the agent whose reply is the team's answer is told about writing it.
-const FINAL_ANSWER: &str = "Your reply is the team's final answer: the operator reads it as you write it. Make it the finished result itself, not a report on how you produced it.";
+const FINAL_ANSWER: &str = "Your reply is the team's final answer: the operator reads it as you write it. Make it the finished result itself, as long as the request needs and no longer, not a report on how you produced it.";
 
 /// The team-mode lead: the entrypoint, which receives the request and answers it.
 #[must_use]
@@ -51,12 +51,27 @@ pub fn for_lead(team: &TeamConfig, agent: &AgentConfig) -> Option<String> {
         text.push_str(
             "\n\nYour teammates, whom you can hand parts of the work to with your Team Bus tools:",
         );
-        for teammate in teammates {
+        for teammate in &teammates {
             let _ = write!(text, "\n{}", teammate_line(teammate));
         }
+        for line in what_teammates_may_do_instead(agent, &teammates) {
+            text.push_str("\n\n");
+            text.push_str(&line);
+        }
+        text.push_str("\n\n");
+        text.push_str(DELEGATION);
     }
     Some(text)
 }
+
+/// How a lead uses its teammates, said once for every lead so an operator never has to write it.
+///
+/// Effort scaled to the request first, because a lead that brings in every teammate for a
+/// one-line question pays a session per teammate for nothing: Anthropic's research system had to
+/// write the same rule into its lead after it spawned many subagents for simple queries. Then the
+/// brief, because the teammate sees only what it is sent (`for_helper`), and a vague brief is the
+/// commonest way delegated work is duplicated or misread.
+const DELEGATION: &str = "Do what you can do well yourself, and bring in a teammate only for a part that needs its job: each one you start opens a session of its own, which costs time and tokens. A teammate sees only what you send it, so give it the goal, what you already know, what to send back and where to stop. Check what comes back before you use it.";
 
 /// A pipeline stage at `index` in the run's `order`.
 ///
@@ -100,7 +115,18 @@ pub fn for_stage(
         );
     }
     let after = neighbours(team, |edge| (edge.from == agent.id).then_some(&edge.to));
-    if !after.is_empty() {
+    if !after.is_empty()
+        && after
+            .iter()
+            .all(|next| next.checks.as_deref() == Some(agent.id.as_str()))
+    {
+        // ADR 0062: a check step is handed the work itself, so there is no handover to write.
+        let _ = write!(
+            text,
+            "\nAfter you: {}, which checks your reply as you write it against what it must satisfy.",
+            names(&after, ids)
+        );
+    } else if !after.is_empty() {
         let _ = write!(
             text,
             "\nAfter you: {}. When your work is done you will be asked for a handover, and that \
@@ -142,9 +168,15 @@ pub fn for_helper(team: &TeamConfig, agent: &AgentConfig, caller: Option<&str>) 
     let caller = caller
         .and_then(|id| team.agents.iter().find(|other| other.id == id))
         .map_or("Another agent", |other| other.name.as_str());
+    // The last two sentences are the return a caller can use (ADR 0062): a helper may read widely,
+    // but what it sends back lands in the caller's context, so it is the result, condensed, and a
+    // part it could not do is named rather than guessed at.
     Some(format!(
         "You are {}, on {}. {caller} brought you in for the task below. It is one part of a \
-         larger piece of work, so do what was asked, completely, and stay within it.",
+         larger piece of work, so do what was asked, completely, and stay within it.\n\
+         Reply with the result itself, condensed: what you found or made, and where (links, file \
+         paths), not how you worked. If you cannot do part of it, say what is missing rather than \
+         guessing.",
         agent.name,
         team_label(team)
     ))
@@ -201,10 +233,82 @@ fn names(agents: &[&AgentConfig], with_ids: bool) -> String {
 
 fn teammate_line(agent: &AgentConfig) -> String {
     let summary = role_summary(&agent.role);
-    if summary.is_empty() {
+    let mut line = if summary.is_empty() {
         format!("- {} (`{}`)", agent.name, agent.id)
     } else {
         format!("- {} (`{}`): {summary}", agent.name, agent.id)
+    };
+    let may = switched_on(agent);
+    if !may.is_empty() {
+        let _ = write!(line, " May {}.", sentence_list(&may));
+    }
+    line
+}
+
+/// What an agent's switches let it do without asking (ADR 0037), in words.
+fn switched_on(agent: &AgentConfig) -> Vec<&'static str> {
+    [
+        (agent.allow.web, "search the web"),
+        (agent.allow.edits, "change files"),
+        (agent.allow.commands, "run commands"),
+    ]
+    .into_iter()
+    .filter_map(|(on, words)| on.then_some(words))
+    .collect()
+}
+
+/// One `allow` switch: whether the lead has it, what it lets an agent do, and how to read it.
+type Switch = (bool, &'static str, fn(&AgentConfig) -> bool);
+
+/// The switches a lead lacks and a teammate has, said plainly (ADR 0062).
+///
+/// Measured on a Writer lead with a web-enabled Researcher: asked for a current fact, the lead
+/// tried the web itself, was declined, and answered that it could not find out, without asking
+/// the teammate that could. Told who may do what, it has somewhere to send that part. `OpenCode`
+/// asks for nothing, so its lead lacks nothing.
+fn what_teammates_may_do_instead(lead: &AgentConfig, teammates: &[&AgentConfig]) -> Vec<String> {
+    if Harness::of(lead) == Harness::OpenCode {
+        return Vec::new();
+    }
+    let switches: [Switch; 3] = [
+        (lead.allow.web, "search the web", |agent| agent.allow.web),
+        (lead.allow.edits, "change files", |agent| agent.allow.edits),
+        (lead.allow.commands, "run commands", |agent| {
+            agent.allow.commands
+        }),
+    ];
+    switches
+        .into_iter()
+        .filter(|(lead_may, _, _)| !lead_may)
+        .filter_map(|(_, words, may)| {
+            let able: Vec<String> = teammates
+                .iter()
+                .filter(|teammate| may(teammate))
+                .map(|teammate| teammate.name.clone())
+                .collect();
+            (!able.is_empty()).then(|| {
+                format!(
+                    "You can't {words} yourself, but {} can: hand {} the parts that need it.",
+                    sentence_list(&able),
+                    if able.len() == 1 { "it" } else { "them" }
+                )
+            })
+        })
+        .collect()
+}
+
+fn sentence_list<T: AsRef<str>>(items: &[T]) -> String {
+    match items {
+        [] => String::new(),
+        [only] => only.as_ref().to_owned(),
+        [rest @ .., last] => format!(
+            "{} and {}",
+            rest.iter()
+                .map(AsRef::as_ref)
+                .collect::<Vec<_>>()
+                .join(", "),
+            last.as_ref()
+        ),
     }
 }
 
@@ -330,6 +434,28 @@ mod tests {
             !text.contains("Second line"),
             "a teammate is summarised by its first line"
         );
+        assert!(
+            text.ends_with(DELEGATION),
+            "a lead that can reach its teammates is told when and how to use them: {text}"
+        );
+
+        // A teammate that may search the web is said to, and a lead that may not is told who can.
+        let mut researching = with_bus.clone();
+        researching.agents[1].allow.web = true;
+        let text = for_lead(&researching, &researching.agents[0]).unwrap();
+        assert!(
+            text.contains("- Helper (`help`): Look things up. May search the web."),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "You can't search the web yourself, but Helper can: hand it the parts that need it."
+            ),
+            "{text}"
+        );
+        researching.agents[0].allow.web = true;
+        let text = for_lead(&researching, &researching.agents[0]).unwrap();
+        assert!(!text.contains("You can't"), "{text}");
 
         // A harness with no HTTP MCP gets no Team Bus tools, so it is not told about teammates it
         // has no way to reach.
@@ -337,7 +463,7 @@ mod tests {
         without_bus.agents[0].spawn.cmd = "some-unknown-acp".to_owned();
         let text = for_lead(&without_bus, &without_bus.agents[0]).unwrap();
         assert!(text.contains(FINAL_ANSWER));
-        assert!(!text.contains("teammates"), "{text}");
+        assert!(!text.contains("teammate"), "{text}");
     }
 
     #[test]
@@ -359,6 +485,12 @@ mod tests {
         let text = for_helper(&team, &team.agents[2], Some("check")).unwrap();
         assert!(text.contains("Fact-checker brought you in"), "{text}");
         assert!(!text.contains("final answer"));
+        // What it sends back lands in the caller's context: the result, and what it could not do.
+        assert!(
+            text.contains("Reply with the result itself, condensed")
+                && text.contains("say what is missing rather than guessing"),
+            "{text}"
+        );
         let unknown = for_helper(&team, &team.agents[2], None).unwrap();
         assert!(unknown.contains("Another agent brought you in"));
     }

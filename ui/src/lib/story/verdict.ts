@@ -1,4 +1,5 @@
 import type { RunPhase } from '../watch/events'
+import type { CheckRound } from './checks'
 import { readPhrase, type ReadCount } from './reads'
 import type { Receipt, ReceiptLine } from './receipt'
 
@@ -38,6 +39,8 @@ export interface VerdictInput {
   receipt: Receipt | null
   /** What the team read successfully, across every agent, each thing once (lib/story/reads.ts). */
   read: ReadCount
+  /** What the team's check steps found (ADR 0062): a missed or unsure check is worth a look. */
+  checks?: readonly CheckRound[]
 }
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
@@ -50,8 +53,18 @@ export function findingsOf(receipt: Receipt | null): ReceiptLine[] {
     .filter((line) => !seen.has(line.text) && Boolean(seen.add(line.text)))
 }
 
+/** A check step's missed and unsure items, as findings: a missed check first, then an unsure one. */
+export function checkFindings(checks: readonly CheckRound[] = []): ReceiptLine[] {
+  const items = checks.flatMap((round) => round.items.map((item) => ({ ...item, checker: round.checker })))
+  return [
+    ...items.filter((item) => item.verdict === 'not_met').map((item) => ({ tone: 'warn' as const, text: `Check not met: ${item.item}${item.evidence ? ` (${item.evidence})` : ''}`, agentId: item.checker })),
+    ...items.filter((item) => item.verdict === 'not_sure').map((item) => ({ tone: 'warn' as const, text: `Check not sure: ${item.item}`, agentId: item.checker })),
+  ]
+}
+
 export function answerVerdict(input: VerdictInput): AnswerVerdict {
-  const findings = findingsOf(input.receipt)
+  const findings = [...checkFindings(input.checks), ...findingsOf(input.receipt)]
+  const allMet = Boolean(input.checks?.length) && input.checks!.every((round) => round.items.every((item) => item.verdict === 'met'))
   const first = findings[0] ? `${findings[0].text}.` : ''
   if (input.streaming) return { tone: 'live', label: 'Writing', detail: 'The team is still writing this answer.', findings, reviewable: false }
   if (!input.text) {
@@ -76,9 +89,9 @@ export function answerVerdict(input: VerdictInput): AnswerVerdict {
   return {
     tone: 'ok',
     label: 'Nothing flagged',
-    detail: read
+    detail: (read
       ? `Every step finished, reading ${read}, and nothing in the record was flagged.`
-      : 'Every step finished and nothing in the record was flagged.',
+      : 'Every step finished and nothing in the record was flagged.') + (allMet ? ' Every check was met.' : ''),
     findings,
     reviewable: true,
   }

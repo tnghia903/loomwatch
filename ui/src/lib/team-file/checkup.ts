@@ -10,6 +10,7 @@
 //
 // Pure and framework-free like agentPlace.ts, so every rule is testable without a canvas.
 
+import { OVERTHINKING_EFFORTS } from '../library/effort'
 import { ROLE_PRESETS, type RolePreset } from '../library/roles'
 import { actsWithoutAsking } from './allow'
 import type { AgentAllow, AgentConfig, AllowSwitch } from './types'
@@ -42,6 +43,8 @@ export type CheckupRule =
   | 'handoff-unused'
   | 'same-job'
   | 'large-team'
+  | 'shouting'
+  | 'overthinking'
   // Read from the team's recent runs (runLessons.ts).
   | 'idle-teammate'
   | 'asked-again'
@@ -53,6 +56,7 @@ export type CheckupFix =
   | { kind: 'append-role'; agentId: string; text: string }
   /** A built-in job's instructions, with the switches the job cannot work without (roles.ts). */
   | { kind: 'replace-role'; agentId: string; text: string; allow?: AgentAllow }
+  | { kind: 'effort'; agentId: string; value: string }
 
 export interface CheckupFinding {
   /** Stable across edits that do not change the finding, so a dismissal sticks. */
@@ -71,6 +75,25 @@ export interface CheckupFinding {
   askPrompt?: string
   /** Read from this many of the team's recent runs (runLessons.ts), not from the file alone. */
   learned?: number
+}
+
+/**
+ * Capitals used for emphasis. Recent models follow instructions closely, and a shouted rule gets
+ * applied even where it does not fit (Anthropic's prompting guide says to drop "CRITICAL: You
+ * MUST" for plain wording). Only these words count, so an acronym such as API or PDF never does.
+ */
+const SHOUTED = /(?<![A-Za-z’'])(MUST(?:N['’]T)?|NEVER|ALWAYS|CRITICAL|IMPORTANT|NOT|ONLY|DON['’]T|DO NOT|REQUIRED|MANDATORY|STRICTLY|ABSOLUTELY|EXACTLY|UNDER NO CIRCUMSTANCES)(?![A-Za-z])/g
+/** One shouted word can be a habit; two is a prompt written in capitals. */
+const SHOUTING = 2
+
+/** The same instructions in plain case: a shouted word starts a sentence with a capital, else lower case. */
+export function unshout(role: string): string {
+  return role.replace(SHOUTED, (word, _match: string, offset: number) => {
+    const before = role.slice(0, offset)
+    const startsSentence = /(^|[.!?:]\s+|\n\s*(?:[-*•]\s+|\d+[.)]\s+)?)$/.test(before)
+    const lower = word.toLowerCase()
+    return startsSentence ? lower.charAt(0).toUpperCase() + lower.slice(1) : lower
+  })
 }
 
 /** Fewer words than this and the AI app has to guess the scope, the method and the format. */
@@ -97,6 +120,18 @@ const ALLOW_RULES: { rule: CheckupRule; key: AllowSwitch; needs: RegExp; doing: 
 
 /** Says what to reply with: a reply, a format, or a shape drawn as headings. */
 const HAND_BACK = /\b(reply|replies|respond|response|return|hand (it |them |this )?(back|over|on)|output|deliver|produce|format|end with|give back|answer with|in this shape)\b|^\s*#{1,3}\s/im
+/** A self-check sentence ("Before you reply, check …") names the reply without saying what it is. */
+const BEFORE_REPLYING = /\bbefore (you|it) (reply|replies|respond|responds|answer|answers|hand|hands|send|sends|return|returns|deliver|delivers)\b[^.\n]*/gi
+
+/** Whether a line is a self-check ("Before you reply, check …") rather than a word on the reply itself. */
+export function checksBeforeReplying(line: string): boolean {
+  return new RegExp(BEFORE_REPLYING.source, 'i').test(line)
+}
+
+/** Whether these instructions say what the agent replies with, not counting a check before it. */
+function saysWhatItReplies(role: string): boolean {
+  return HAND_BACK.test(role.replace(BEFORE_REPLYING, ''))
+}
 /** Refers to the work an earlier step handed it. */
 const USES_HANDOFF = /\b(handed|given you|you are given|you were given|earlier (step|steps|stage|work)|previous (step|stage|work)|preceding|before you|you receive|received|drafts?|material|findings|research|brief|handover|what came before)\b/i
 /** Tells a lead to use its teammates. */
@@ -191,7 +226,9 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
             // Names only: the daemon already lists each teammate's job under "Your place in the
             // team" (orientation.rs), and copying their instructions here would make this agent's
             // own read as theirs.
-            text: `When the request is bigger than one step, hand parts of it to your teammates, ${list(teammates.map((agent) => agent.name))}, each the part that matches its job. Give each one the goal, what to send back and where to stop, then combine what they send into your answer.`,
+            // When, not how: the daemon tells every lead how to brief a teammate (orientation.rs
+            // DELEGATION, ADR 0062), so this says only which part of the work is whose.
+            text: `When the request is bigger than one step, hand parts of it to your teammates, ${list(teammates.map((agent) => agent.name))}, each the part that matches its job, then combine what they send into your answer.`,
           },
         },
       })
@@ -231,6 +268,16 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
       })
     }
 
+    // Before the instructions checks: an empty or short role does not make max effort cheaper.
+    if (agent.thinkingEffort && OVERTHINKING_EFFORTS.has(agent.thinkingEffort)) {
+      add({
+        rule: 'overthinking', severity: 'improve', agentId: agent.id,
+        title: `${agent.name} thinks at the highest effort on every run`,
+        why: 'The highest setting often overthinks, and thinking is paid for like writing. High is enough for almost any job.',
+        fix: { label: 'Use high effort', change: { kind: 'effort', agentId: agent.id, value: 'high' } },
+      })
+    }
+
     if (count === 0) continue
     if (count < THIN_WORDS) {
       const job = jobFor(agent)
@@ -244,8 +291,17 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
       continue
     }
 
+    if ((role.match(SHOUTED) ?? []).length >= SHOUTING) {
+      add({
+        rule: 'shouting', severity: 'improve', agentId: agent.id,
+        title: `${agent.name}'s instructions use capitals for emphasis`,
+        why: 'AI apps follow instructions closely, and a rule in capitals gets applied even where it doesn’t fit. Plain words, with the reason for the rule, work better.',
+        fix: { label: 'Write them in plain case', change: { kind: 'replace-role', agentId: agent.id, text: unshout(role) } },
+      })
+    }
+
     const helper = !pipeline && lead && agent.id !== lead.id
-    if ((final || helper) && !HAND_BACK.test(role)) {
+    if ((final || helper) && !saysWhatItReplies(role)) {
       add({
         rule: 'no-hand-back', severity: 'improve', agentId: agent.id,
         title: final ? `Say what ${agent.name}'s answer should look like` : `Say what ${agent.name} sends back to ${lead?.name}`,
@@ -264,7 +320,8 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
       })
     }
 
-    if (pipeline && final && predecessors.length > 0 && JUDGES.test(role) && !DELIVERS.test(role)) {
+    // A check step judges on purpose: the answer is the work it checks (ADR 0062).
+    if (pipeline && final && !agent.checks && predecessors.length > 0 && JUDGES.test(role) && !DELIVERS.test(role)) {
       add({
         rule: 'final-is-review', severity: 'improve', agentId: agent.id,
         title: `The team's answer will be ${agent.name}'s review, not the finished work`,
@@ -277,7 +334,7 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
     }
 
     const workPredecessors = predecessors.filter((id) => byId.get(id)?.kind !== 'operator')
-    if (pipeline && workPredecessors.length > 0 && !USES_HANDOFF.test(role)) {
+    if (pipeline && workPredecessors.length > 0 && !USES_HANDOFF.test(role.replace(BEFORE_REPLYING, ''))) {
       const from = list(workPredecessors.map(name))
       add({
         rule: 'handoff-unused', severity: 'improve', agentId: agent.id,
@@ -307,17 +364,30 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
   return findings.sort(bySeverity)
 }
 
-/** The three things an agent's instructions say, in the order the built-in jobs say them (ADR 0030). */
-export type InstructionPart = 'job' | 'method' | 'reply'
+/**
+ * The things an agent's instructions say, in the order the built-in jobs say them: its job, how to
+ * work, how it checks its work before replying, and what it replies with (ADR 0030, ADR 0062).
+ */
+export type InstructionPart = 'job' | 'method' | 'check' | 'reply'
+
+/** Every part, in that order. */
+export const INSTRUCTION_PARTS: readonly InstructionPart[] = ['job', 'method', 'check', 'reply']
 
 /** What the agent panel inserts to start a missing part; the operator writes the rest. */
 export const PART_STARTERS: Record<Exclude<InstructionPart, 'job'>, string> = {
   method: 'How to work:\n- ',
+  check: 'Before you reply, check ',
   reply: 'Reply with ',
 }
 
 /** Says how to work: a list of steps, or rules about the work. */
 const METHOD = /^\s*([-*•]|\d+[.)])\s+\S|\b(always|never|prefer|make sure|do not|don['’]t|avoid|only use|check|first|before you)\b/im
+/**
+ * Says how it checks its own work before it replies. A concrete check (re-open a source, run the
+ * tests, recount) is what makes an agent catch its own mistakes; the giveaway words are the moment
+ * ("before you reply") or the act ("verify", "run the tests").
+ */
+const CHECK = /\bbefore (you|it) (reply|replies|answer|answers|finish|finishes|respond|hand|send|return|deliver)\b|\b(verify|verifies|double-check|re-?check)\b|\bcheck (your|each|every|that|it|the (result|work|piece|answer|output|numbers|links|sources))\b|\brun (the |its |your )?(project['’]s )?(tests?|build)\b/i
 
 /**
  * Which of the three parts these instructions cover. A part the panel just started and the operator
@@ -329,7 +399,7 @@ export function instructionShape(role: string): Record<InstructionPart, boolean>
     if (text.endsWith(starter.trimEnd())) text = text.slice(0, -starter.trimEnd().length).trimEnd()
   }
   const firstSentence = text.trim().split(/(?<=[.!?])\s+|\n/)[0] ?? ''
-  return { job: words(firstSentence).length >= 5 || words(text).length >= THIN_WORDS, method: METHOD.test(text), reply: HAND_BACK.test(text) }
+  return { job: words(firstSentence).length >= 5 || words(text).length >= THIN_WORDS, method: METHOD.test(text.replace(BEFORE_REPLYING, '')), check: CHECK.test(text), reply: saysWhatItReplies(text) }
 }
 
 /** The text an `append-role` fix leaves: the role, a blank line, the addition. */

@@ -23,12 +23,14 @@ export interface AgentDraft {
   /** One of that model's thinking efforts; empty means the app's own default. */
   effort: string
   skills: string[]
+  /** What the finished result must satisfy (ADR 0062); empty when nothing is set. */
+  doneWhen: string[]
   allow: AgentAllow
   /** The figure it wears in Your agents; `null` wears the one its id picks. A team never copies it. */
   figure: FigureChoice | null
 }
 
-export const BLANK_DRAFT: AgentDraft = { name: '', does: '', instructions: DEFAULT_AGENT_ROLE, appId: null, model: '', effort: '', skills: [], allow: {}, figure: null }
+export const BLANK_DRAFT: AgentDraft = { name: '', does: '', instructions: DEFAULT_AGENT_ROLE, appId: null, model: '', effort: '', skills: [], doneWhen: [], allow: {}, figure: null }
 
 export function draftFromJob(job: JobSpec): AgentDraft {
   return {
@@ -39,6 +41,7 @@ export function draftFromJob(job: JobSpec): AgentDraft {
     model: job.apps?.length ? job.model ?? '' : '',
     effort: job.apps?.length && job.model ? job.thinkingEffort ?? '' : '',
     skills: [...(job.skills ?? [])],
+    doneWhen: [...(job.doneWhen ?? [])],
     allow: { ...(onlyOn(job.allow) ?? {}) },
     figure: isFigureChoice(job.figure) ? { ...job.figure } : null,
   }
@@ -54,6 +57,7 @@ export function draftFromPreset(preset: RolePreset, harnesses: readonly Detected
     model: '',
     effort: '',
     skills: [...(preset.skills ?? [])],
+    doneWhen: [...(preset.doneWhen ?? [])],
     allow: { ...(onlyOn(preset.allow) ?? {}) },
     figure: null,
   }
@@ -71,12 +75,18 @@ export function specFromDraft(draft: AgentDraft, note = ''): JobSpec {
     ...(draft.appId ? { apps: [draft.appId] } : {}),
     ...(draft.appId && draft.model ? { model: draft.model, ...(draft.effort ? { thinkingEffort: draft.effort } : {}) } : {}),
     ...(draft.skills.length ? { skills: [...draft.skills] } : {}),
+    ...(doneWhenOf(draft).length ? { doneWhen: doneWhenOf(draft) } : {}),
     ...(allow ? { allow } : {}),
     ...(note.trim() ? { note: note.trim() } : {}),
   }
 }
 
 const SWITCHES: readonly (keyof AgentAllow)[] = ['web', 'edits', 'commands']
+
+/** The draft's done-when items as they are saved: trimmed, blank lines dropped. */
+export function doneWhenOf(draft: Pick<AgentDraft, 'doneWhen'>): string[] {
+  return draft.doneWhen.map((item) => item.trim()).filter(Boolean)
+}
 
 /** Whether saving `draft` over `saved` would make a new version: something a team copies changed. */
 export function makesNewVersion(draft: AgentDraft, saved: AgentDraft): boolean {
@@ -86,6 +96,7 @@ export function makesNewVersion(draft: AgentDraft, saved: AgentDraft): boolean {
     || (draft.appId ? draft.model : '') !== (saved.appId ? saved.model : '')
     || (draft.appId && draft.model ? draft.effort : '') !== (saved.appId && saved.model ? saved.effort : '')
     || draft.skills.join('\n') !== saved.skills.join('\n')
+    || doneWhenOf(draft).join('\n') !== doneWhenOf(saved).join('\n')
     || SWITCHES.some((key) => Boolean(draft.allow[key]) !== Boolean(saved.allow[key]))
 }
 
@@ -111,6 +122,7 @@ export function agentFromDraft(draft: AgentDraft, harness: DetectedHarness | nul
     model,
     ...(effort ? { thinkingEffort: effort } : {}),
     ...(draft.skills.length ? { capabilities: draft.skills.map((name) => ({ kind: 'skill' as const, name })) } : {}),
+    ...(doneWhenOf(draft).length ? { doneWhen: doneWhenOf(draft) } : {}),
     ...(allow ? { allow } : {}),
     ...(link?.job ? { from: { agent: link.id, version: versionOf(link.job) } } : {}),
   }

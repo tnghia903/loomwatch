@@ -1,6 +1,7 @@
 import { stringify } from 'yaml'
 
-import { isHarnessRunnable, type DetectedHarness } from '../harnesses'
+import { isHarnessRunnable, type DetectedHarness, type HarnessModel } from '../harnesses'
+import { effortFor } from '../library/effort'
 import { ROLE_PRESETS } from '../library/roles'
 import type { AgentConfig, EdgeConfig } from './types'
 import { slugifyTeamName } from './useTeamDocument'
@@ -14,7 +15,7 @@ import { slugifyTeamName } from './useTeamDocument'
  * type a request and press Enter. `blank` is the one exception — it has no agents, so it cannot be
  * saved yet and opens as an unsaved document instead.
  */
-export type TeamTemplateId = 'single' | 'research-write' | 'research-review-write' | 'blank'
+export type TeamTemplateId = 'single' | 'research-write' | 'research-write-check' | 'research-review-write' | 'blank'
 
 export interface TeamTemplate {
   id: TeamTemplateId
@@ -48,6 +49,15 @@ export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
     steps: ['Researcher', 'Writer'],
     perRun: 'Two agents work on each run, with a handover between them.',
     example: { title: 'Market brief: AI note-taking', lines: ['Three tools lead; two launched this year', 'Prices cluster around $10–20 a month', 'Sources: 6 articles, 2 pricing pages'] },
+  },
+  {
+    id: 'research-write-check',
+    title: 'Research, write and check',
+    description: 'A third agent checks the finished piece against what it must have, and says what it missed.',
+    steps: ['Researcher', 'Writer', 'Checker'],
+    // Measured on a real run (ADR 0062): the checker re-opened every source, 188k of 393k tokens.
+    perRun: 'Three agents work on each run. The checker re-opens the writer’s sources, so it can cost as much as the research.',
+    example: { title: 'Market brief: AI note-taking', lines: ['Three tools lead; two launched this year', 'Prices cluster around $10–20 a month', 'Checks: every claim linked, 120 words'], note: 'Checked by the Checker before you read it' },
   },
   {
     id: 'research-review-write',
@@ -106,23 +116,26 @@ const ROLES = {
  * a team built by hand get the same instructions. Read at call time: `roles.ts` imports this module,
  * and reading its presets while this one is still loading would find them uninitialised.
  */
-function jobRole(id: 'researcher' | 'writer'): string {
+function jobRole(id: 'researcher' | 'writer' | 'checker'): string {
   const preset = ROLE_PRESETS.find((candidate) => candidate.id === id)
   if (!preset) throw new Error(`no built-in job ${id}`)
   return preset.role
 }
 
-function agent(id: string, name: string, role: string, harness: DetectedHarness, model: string): AgentConfig {
+function agent(id: string, name: string, role: string, harness: DetectedHarness, model: string, catalog?: HarnessModel): AgentConfig {
   // The Researcher job's own switches (ADR 0037), so a template's researcher can search the web
-  // like one hired from the palette.
-  const allow = ROLE_PRESETS.find((preset) => preset.id === id)?.allow
+  // like one hired from the palette; and each job's effort, as its model lists it (ADR 0062).
+  const preset = ROLE_PRESETS.find((candidate) => candidate.id === id)
+  const thinkingEffort = preset?.effort ? effortFor(preset.effort, catalog) : undefined
   return {
     id,
     name,
     role,
     spawn: { cmd: harness.spawn.cmd, args: [...harness.spawn.args], env: {}, cwd: '.' },
     model,
-    ...(allow ? { allow: { ...allow } } : {}),
+    ...(thinkingEffort ? { thinkingEffort } : {}),
+    ...(preset?.doneWhen?.length ? { doneWhen: [...preset.doneWhen] } : {}),
+    ...(preset?.allow ? { allow: { ...preset.allow } } : {}),
   }
 }
 
@@ -137,8 +150,10 @@ function sequence(from: string, to: string, ts: string): EdgeConfig {
  * that advertises models rejects an id it does not know, which would fail the first run.
  */
 /** `id` should come from the file the team is saved as (`teamIdForPath`), so a second team with
- * the same name does not share the first one's id, and with it the first one's Notebook. */
-export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, name: string, harness: DetectedHarness, model: string, now = new Date(), id = slugifyTeamName(name)): string {
+ * the same name does not share the first one's id, and with it the first one's Notebook.
+ * `catalog` is that model's catalog entry, which decides each job's effort; without it every agent
+ * keeps the app's default effort. */
+export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, name: string, harness: DetectedHarness, model: string, now = new Date(), id = slugifyTeamName(name), catalog?: HarnessModel): string {
   const ts = now.toISOString()
   let agents: AgentConfig[]
   let edges: EdgeConfig[]
@@ -146,13 +161,21 @@ export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, nam
     agents = [agent('assistant', 'Assistant', ROLES.assistant, harness, model)]
     edges = []
   } else if (template === 'research-write') {
-    agents = [agent('researcher', 'Researcher', jobRole('researcher'), harness, model), agent('writer', 'Writer', jobRole('writer'), harness, model)]
+    agents = [agent('researcher', 'Researcher', jobRole('researcher'), harness, model, catalog), agent('writer', 'Writer', jobRole('writer'), harness, model, catalog)]
     edges = [sequence('researcher', 'writer', ts)]
+  } else if (template === 'research-write-check') {
+    agents = [
+      agent('researcher', 'Researcher', jobRole('researcher'), harness, model, catalog),
+      agent('writer', 'Writer', jobRole('writer'), harness, model, catalog),
+      // The check step's answer is the writer's piece; its checks show beside it (ADR 0062).
+      { ...agent('checker', 'Checker', jobRole('checker'), harness, model, catalog), checks: 'writer' },
+    ]
+    edges = [sequence('researcher', 'writer', ts), sequence('writer', 'checker', ts)]
   } else {
     agents = [
-      agent('researcher', 'Researcher', jobRole('researcher'), harness, model),
+      agent('researcher', 'Researcher', jobRole('researcher'), harness, model, catalog),
       { id: 'review', kind: 'operator', name: 'You', role: ROLES.review },
-      agent('writer', 'Writer', jobRole('writer'), harness, model),
+      agent('writer', 'Writer', jobRole('writer'), harness, model, catalog),
     ]
     edges = [sequence('researcher', 'review', ts), sequence('review', 'writer', ts)]
   }

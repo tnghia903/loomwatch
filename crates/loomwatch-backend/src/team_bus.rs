@@ -357,6 +357,12 @@ impl TeamBus {
         self.state.live.lock().await.contains_key(agent_id)
     }
 
+    /// One more turn for a kept-alive agent, from the pipeline itself: a check step sending its
+    /// work back (ADR 0062). `None` when it is no longer live.
+    pub(crate) async fn turn_live(&self, agent_id: &str, prompt: &str) -> Result<Option<String>> {
+        self.ask_live(agent_id, prompt).await
+    }
+
     /// Put a question to a kept-alive agent. `None` means it is not live, so the caller falls back
     /// to spawning one.
     async fn ask_live(&self, agent_id: &str, question: &str) -> Result<Option<String>> {
@@ -1727,23 +1733,47 @@ fn tool_definitions(mode: TeamBusMode, notebook: bool, chat: bool) -> Vec<Value>
         "List the team, capabilities, and live status",
         &json!({"type": "object", "additionalProperties": false}),
     )];
+    // The descriptions carry the delegation brief because the agent reads them at the moment it
+    // writes one. The agent it starts sees nothing but that text (orientation.rs `for_helper`),
+    // and a vague brief is how two helpers end up doing the same search, or the wrong one.
     if mode == TeamBusMode::Team {
         tools.push(tool(
             "dispatch",
-            "Assign work without blocking for the result",
-            &two_strings("agent", "Target agent ID", "task", "Task to perform"),
+            "Hand part of the work to a teammate without waiting for it. Hand out parts that do \
+             not depend on each other together. What each one sends back reaches you in one more \
+             turn after this one ends.",
+            &two_strings(
+                "agent",
+                "Target agent ID",
+                "task",
+                "The whole brief: the goal, what you already know, what to send back and where \
+                 to stop. The teammate sees none of your conversation.",
+            ),
         ));
     }
     tools.push(tool(
         "ask",
-        "Ask another agent and block for its reply",
-        &two_strings("agent", "Target agent ID", "question", "Question to answer"),
+        "Ask another agent and wait for its reply. Use it when you need the answer before you \
+         can go on.",
+        &two_strings(
+            "agent",
+            "Target agent ID",
+            "question",
+            "A question it can answer from this text alone: it does not see your conversation.",
+        ),
     ));
     if mode == TeamBusMode::Team {
         tools.push(tool(
             "handoff",
-            "Start a successor, mark this agent stopped, then return from the current turn",
-            &two_strings("agent", "Target agent ID", "task", "Task being transferred"),
+            "Pass the rest of the task to a teammate and stop: it carries on, and you end this \
+             turn.",
+            &two_strings(
+                "agent",
+                "Target agent ID",
+                "task",
+                "Everything it needs to carry on: the goal, what is done, what is left and what \
+                 to send back. It sees none of your conversation.",
+            ),
         ));
     }
     tools.push(tool(
@@ -1754,7 +1784,9 @@ fn tool_definitions(mode: TeamBusMode, notebook: bool, chat: bool) -> Vec<Value>
     tools.push(tool(
         "ask_user",
         "Put a question to the person running this team. Returns immediately: end your turn after \
-         calling it, and their answer arrives as your next turn.",
+         calling it, and their answer arrives as your next turn. Ask only for a decision you \
+         cannot reasonably make yourself and that would change the result; otherwise make the \
+         most reasonable assumption, say which one you made, and carry on.",
         &object(
             &[
                 (
@@ -4133,6 +4165,9 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             allow_recruiting: true,
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
+            done_when: Vec::new(),
+            checks: None,
+            send_back_once: false,
         }
     }
 

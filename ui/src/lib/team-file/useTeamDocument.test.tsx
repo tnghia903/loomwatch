@@ -148,7 +148,9 @@ describe('useTeamDocument', () => {
     expect(after.role).toBe(before.role)
     expect(result.current.documentChipState).toBe('invalid')
     act(() => result.current.updateAgentModel('researcher', 'gpt-5.6'))
-    expect(result.current.documentChipState).toBe('dirty')
+    // Validation waits for the schema, which loads on its own; under a busy test run it can land
+    // after this edit, so wait for it rather than assume it is already there.
+    await waitFor(() => expect(result.current.documentChipState).toBe('dirty'))
   })
 
   it('turns skills off for several agents in one edit, and wiring one again turns it back on (ADR 0060)', async () => {

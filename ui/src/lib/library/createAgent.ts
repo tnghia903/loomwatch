@@ -58,6 +58,7 @@ export function buildAgentFromSource(
     },
     allowRecruiting: true,
     ...(source.capabilities?.length ? { capabilities: source.capabilities.map((capability) => ({ ...capability })) } : {}),
+    ...(source.doneWhen?.length ? { doneWhen: [...source.doneWhen] } : {}),
     ...(source.allow ? { allow: { ...source.allow } } : {}),
     ...(source.from ? { from: { ...source.from } } : {}),
   }

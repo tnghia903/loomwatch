@@ -46,6 +46,7 @@ export function fieldsForVersion(job: SavedJob, agent: AgentConfig, harnesses: r
     name: job.name,
     role: job.instructions,
     capabilities: capabilities.length > 0 ? capabilities : undefined,
+    doneWhen: job.doneWhen?.length ? [...job.doneWhen] : undefined,
     allow: onlyOn(job.allow),
     from: { agent: job.id, version: versionOf(job) },
   }
@@ -76,6 +77,7 @@ export function changedHere(agent: AgentConfig, pinned: JobSpec): string[] {
   const skills = (agent.capabilities ?? []).filter((capability) => capability.kind === 'skill').map((capability) => capability.name).sort()
   const pinnedSkills = [...(pinned.skills ?? [])].sort()
   if (skills.join('\n') !== pinnedSkills.join('\n')) changed.push('skills')
+  if ((agent.doneWhen ?? []).join('\n') !== (pinned.doneWhen ?? []).join('\n')) changed.push('done when')
   const mine = onlyOn(agent.allow) ?? {}
   const theirs = onlyOn(pinned.allow) ?? {}
   if (SWITCHES.some((key) => Boolean(mine[key]) !== Boolean(theirs[key]))) changed.push('what it may do without asking')

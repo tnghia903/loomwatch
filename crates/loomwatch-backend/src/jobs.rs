@@ -128,6 +128,9 @@ pub(crate) struct JobSpec {
     /// Skill names, delivered to whichever app the job runs on (ADR 0021 routes them).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) skills: Vec<String>,
+    /// What the finished result must satisfy (ADR 0062), copied into the team with the rest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) done_when: Vec<String>,
     /// What it may do without asking, copied into the team with the rest.
     #[serde(default, skip_serializing_if = "JobAllow::is_empty")]
     pub(crate) allow: JobAllow,
@@ -153,6 +156,7 @@ impl JobSpec {
             || self.model != other.model
             || self.thinking_effort != other.thinking_effort
             || self.skills != other.skills
+            || self.done_when != other.done_when
             || self.allow != other.allow
     }
 }
@@ -335,6 +339,7 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
             skills.push(skill);
         }
     }
+    let done_when = normalize_done_when(spec.done_when)?;
     if apps.len() > MAX_LIST || skills.len() > MAX_LIST {
         return Err(format!(
             "A job can name at most {MAX_LIST} apps and {MAX_LIST} skills."
@@ -356,11 +361,34 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
         model,
         thinking_effort,
         skills,
+        done_when,
         allow: spec.allow,
         version: spec.version.max(1),
         note,
         saved_at: spec.saved_at,
     })
+}
+
+/// A job's `doneWhen` as a team will copy it: trimmed, blank lines dropped, within the team file's
+/// own limits (ADR 0062), so a saved agent never carries a list its team would refuse.
+fn normalize_done_when(items: Vec<String>) -> Result<Vec<String>, String> {
+    let items: Vec<String> = items
+        .into_iter()
+        .map(|item| item.trim().to_owned())
+        .filter(|item| !item.is_empty())
+        .collect();
+    if items.len() > crate::config::DONE_WHEN_ITEMS
+        || items
+            .iter()
+            .any(|item| item.chars().count() > crate::config::DONE_WHEN_CHARS)
+    {
+        return Err(format!(
+            "Keep \"done when\" to {} short lines of at most {} characters.",
+            crate::config::DONE_WHEN_ITEMS,
+            crate::config::DONE_WHEN_CHARS
+        ));
+    }
+    Ok(items)
 }
 
 fn job_file(teams_root: &Path, id: &str) -> PathBuf {
@@ -703,6 +731,7 @@ mod tests {
             model: Some("gpt-5.6".into()),
             thinking_effort: None,
             skills: vec!["release-style".into()],
+            done_when: Vec::new(),
             allow: JobAllow::default(),
             version: 1,
             note: String::new(),
@@ -977,6 +1006,25 @@ mod tests {
             text.contains("version: 2") && text.contains("web: true"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn a_new_done_when_is_a_new_version_and_is_written_down_trimmed() {
+        let root = root();
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
+        let mut checked = spec("Notes");
+        checked.done_when = vec!["  Every change links its PR ".into(), "  ".into()];
+        let second = save_job(root.path(), "notes", checked, false, Some(1)).expect("second");
+        assert_eq!(
+            second.spec.version, 2,
+            "a team copies it, so it is a new version"
+        );
+        assert_eq!(second.spec.done_when, ["Every change links its PR"]);
+        let text = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
+        assert!(text.contains("doneWhen:"), "{text}");
+        let mut essay = spec("Notes");
+        essay.done_when = vec!["x".repeat(161)];
+        assert!(save_job(root.path(), "notes", essay, false, Some(2)).is_err());
     }
 
     #[test]

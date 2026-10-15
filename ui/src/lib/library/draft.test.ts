@@ -9,7 +9,7 @@ const claude: DetectedHarness = { id: 'claude', name: 'Claude Code', command: 'c
 
 describe('the agent builder’s draft', () => {
   it('saves what it shows and reads back the same', () => {
-    const draft = { name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', appId: 'claude', model: 'sonnet', effort: '', skills: ['source-check'], allow: { web: true, edits: false }, figure: { kind: 'button' as const, color: 'sage' as const } }
+    const draft = { name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', appId: 'claude', model: 'sonnet', effort: '', skills: ['source-check'], doneWhen: [], allow: { web: true, edits: false }, figure: { kind: 'button' as const, color: 'sage' as const } }
     const spec = specFromDraft(draft, 'First cut')
     expect(spec).toEqual({ name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', icon: 'review', figure: { kind: 'button', color: 'sage' }, apps: ['claude'], model: 'sonnet', skills: ['source-check'], allow: { web: true }, note: 'First cut' })
     expect(draftFromJob(spec)).toEqual({ ...draft, allow: { web: true } })
@@ -44,6 +44,21 @@ describe('the agent builder’s draft', () => {
     expect(draftFromJob({ name: 'Reader', instructions: 'Check.', apps: ['claude'], thinkingEffort: 'high' }).effort).toBe('')
   })
 
+  // ADR 0062: done-when travels with the agent: saved, a new version when it changes, copied
+  // into the bench team, and started from a built-in job's own items.
+  it('saves done-when trimmed, versions it, and runs the bench with it', () => {
+    const saved = draftFromJob({ name: 'Reader', instructions: 'Check.', apps: ['claude'], doneWhen: ['Every story has a link'] })
+    expect(saved.doneWhen).toEqual(['Every story has a link'])
+    expect(makesNewVersion({ ...saved, doneWhen: ['Every story has a link', 'Five stories'] }, saved)).toBe(true)
+    expect(makesNewVersion({ ...saved, doneWhen: ['Every story has a link', '  '] }, saved)).toBe(false)
+    expect(specFromDraft({ ...saved, doneWhen: ['  Five stories ', ''] })).toMatchObject({ doneWhen: ['Five stories'] })
+    expect(specFromDraft({ ...saved, doneWhen: [' '] })).not.toHaveProperty('doneWhen')
+    const team = parse(benchTeamYaml(saved, claude, 'sonnet', 'reader')) as { agents: Record<string, unknown>[] }
+    expect(team.agents[0]).toMatchObject({ doneWhen: ['Every story has a link'] })
+    const writer = ROLE_PRESETS.find((preset) => preset.id === 'writer')!
+    expect(draftFromPreset(writer, [claude]).doneWhen).toEqual([...(writer.doneWhen ?? [])])
+  })
+
   it('starts a new agent from a built-in job on the app that job prefers', () => {
     const researcher = ROLE_PRESETS.find((preset) => preset.id === 'researcher')!
     const draft = draftFromPreset(researcher, [claude])
@@ -52,13 +67,13 @@ describe('the agent builder’s draft', () => {
   })
 
   it('tries it with its thinking effort', () => {
-    const draft = { name: 'Reader', does: '', instructions: 'Check.', appId: 'claude', model: 'opus', effort: 'max', skills: [], allow: {}, figure: null }
+    const draft = { name: 'Reader', does: '', instructions: 'Check.', appId: 'claude', model: 'opus', effort: 'max', skills: [], doneWhen: [], allow: {}, figure: null }
     const team = parse(benchTeamYaml(draft, claude, 'opus', 'reader')) as { agents: Record<string, unknown>[] }
     expect(team.agents[0]).toMatchObject({ model: 'opus', thinkingEffort: 'max' })
   })
 
   it('tries it as a team of one, with the model the app advertises', () => {
-    const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', appId: 'claude', model: '', effort: '', skills: ['house-style'], allow: { web: true }, figure: null }
+    const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', appId: 'claude', model: '', effort: '', skills: ['house-style'], doneWhen: [], allow: { web: true }, figure: null }
     const team = parse(benchTeamYaml(draft, claude, 'sonnet', 'release-notes-writer')) as Record<string, unknown>
     expect(team).toEqual({
       schemaVersion: 1,

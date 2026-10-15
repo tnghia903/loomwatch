@@ -20,6 +20,7 @@ export function draftFromTeamAgent(agent: AgentConfig, harnesses: readonly Detec
     model: agent.model ?? '',
     effort: agent.thinkingEffort ?? '',
     skills: (agent.capabilities ?? []).filter((capability) => capability.kind === 'skill').map((capability) => capability.name),
+    doneWhen: [...(agent.doneWhen ?? [])],
     allow: { ...(agent.allow ?? {}) },
     // A team's own agent wears the figure its id picks: the figure belongs to Your agents.
     figure: null,
@@ -29,7 +30,7 @@ export function draftFromTeamAgent(agent: AgentConfig, harnesses: readonly Detec
 /** What one workbench change does to the team file. */
 export type TeamAgentEdit =
   | { kind: 'rename'; field: 'name' | 'role'; value: string }
-  | { kind: 'fields'; fields: Partial<Pick<AgentConfig, 'model' | 'thinkingEffort' | 'spawn' | 'capabilities' | 'allow'>> }
+  | { kind: 'fields'; fields: Partial<Pick<AgentConfig, 'model' | 'thinkingEffort' | 'spawn' | 'capabilities' | 'allow' | 'doneWhen'>> }
 
 /** The team-file change for setting `key` to `value` on the workbench, or `null` when there is none. */
 export function teamAgentEdit<K extends keyof AgentDraft>(agent: AgentConfig, key: K, value: AgentDraft[K], harnesses: readonly DetectedHarness[]): TeamAgentEdit | null {
@@ -51,6 +52,11 @@ export function teamAgentEdit<K extends keyof AgentDraft>(agent: AgentConfig, ke
       return { kind: 'fields', fields: { capabilities: capabilities.length ? capabilities : undefined } }
     }
     case 'allow': return { kind: 'fields', fields: { allow: onlyOn(value as AgentDraft['allow']) } }
+    case 'doneWhen': {
+      // Blank lines are kept while the operator types; only written items reach the file.
+      const items = (value as string[]).map((item) => item.trim()).filter(Boolean)
+      return { kind: 'fields', fields: { doneWhen: items.length ? items : undefined } }
+    }
     default: return null
   }
 }
