@@ -197,7 +197,6 @@ export class WorkbenchScene {
     this.reduced = reduced
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'low-power' })
     this.renderer.setClearColor(0x000000, 0)
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     // Neutral keeps the bench's bone, graphite and gold close to the app's own tokens.
     this.renderer.toneMapping = NeutralToneMapping
     this.renderer.toneMappingExposure = 1.0
@@ -289,9 +288,9 @@ export class WorkbenchScene {
   }
 
   resize(width: number, height: number) {
-    this.width = Math.max(1, width)
-    this.height = Math.max(1, height)
-    this.renderer.setSize(this.width, this.height, false)
+    const size = fitCanvas(this.renderer, width, height)
+    this.width = size.width
+    this.height = size.height
     this.camera.aspect = this.width / this.height
     this.fit()
   }
@@ -930,6 +929,24 @@ export class WorkbenchScene {
     this.disposables.push(item)
     return item
   }
+}
+
+/**
+ * Size a renderer's canvas to its box in whole device pixels, and say the size in CSS pixels it
+ * now draws at. A drawing buffer even part of a pixel smaller than the box it fills is stretched to
+ * fit, which resamples the whole picture and leaves it soft, worst on a 1x screen. So the canvas
+ * takes exactly the size of its buffer: at most a fraction of a pixel short of its box. Shared with
+ * the landing page's crew (src/site/crewScene.ts).
+ */
+export function fitCanvas(renderer: WebGLRenderer, width: number, height: number): { width: number; height: number } {
+  const ratio = Math.min(window.devicePixelRatio || 1, 2)
+  const across = Math.max(1, Math.floor(width * ratio))
+  const down = Math.max(1, Math.floor(height * ratio))
+  // In device pixels, at a ratio of 1: three floors width × ratio itself, which can land a pixel short.
+  renderer.setDrawingBufferSize(across, down, 1)
+  renderer.domElement.style.width = `${across / ratio}px`
+  renderer.domElement.style.height = `${down / ratio}px`
+  return { width: across / ratio, height: down / ratio }
 }
 
 /**

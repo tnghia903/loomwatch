@@ -25,7 +25,7 @@ import {
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
-import { benchMaterial } from '../components/agents/workbenchScene'
+import { benchMaterial, fitCanvas } from '../components/agents/workbenchScene'
 import { pegboardTexture, swatchTextures, woundTexture } from '../components/agents/benchTextures'
 import { COLOR_HEX, FIGURE_KINDS, type FigureChoice } from '../lib/library/figures'
 import { markPattern } from '../lib/story/mark'
@@ -111,7 +111,6 @@ export class CrewScene {
     this.reduced = reduced
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'low-power' })
     this.renderer.setClearColor(0x000000, 0)
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     this.renderer.toneMapping = NeutralToneMapping
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = PCFShadowMap
@@ -256,9 +255,9 @@ export class CrewScene {
   }
 
   resize(width: number, height: number) {
-    this.width = Math.max(1, width)
-    this.height = Math.max(1, height)
-    this.renderer.setSize(this.width, this.height, false)
+    const size = fitCanvas(this.renderer, width, height)
+    this.width = size.width
+    this.height = size.height
     this.camera.aspect = this.width / this.height
     if (this.loaded) this.layout()
     if (this.loaded && !this.running) this.frame()
