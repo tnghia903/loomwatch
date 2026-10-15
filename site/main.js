@@ -396,7 +396,8 @@
       onHover: (part, grab) => { benchCanvas.style.cursor = grab ? 'grab' : part ? 'pointer' : '' },
       onFrame: (anchors, faces) => {
         for (const [anchor, tag] of tagEls) placeTag(tag, anchors[anchor], benchCanvas)
-        for (const [face, element] of Object.entries(faceEls)) placeFace(element, faces[face])
+        // A live.js cached from before placeFace has none for ten minutes after a deploy.
+        if (placeFace) for (const [face, element] of Object.entries(faceEls)) placeFace(element, faces[face])
       },
     }, reduced)
     benchScene = scene
