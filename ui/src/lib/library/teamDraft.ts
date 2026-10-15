@@ -1,7 +1,9 @@
 import type { DetectedHarness } from '../harnesses'
+import { chosenIsFile, chosenName } from '../knowledge/chosen'
 import { harnessIdForAgent } from '../models'
 import type { AgentConfig } from '../team-file/types'
 import type { AgentDraft } from './draft'
+import type { ReadSource } from './figure'
 import { onlyOn } from './jobs'
 
 /**
@@ -24,6 +26,21 @@ export function draftFromTeamAgent(agent: AgentConfig, harnesses: readonly Detec
     // A team's own agent wears the figure its id picks: the figure belongs to Your agents.
     figure: null,
   }
+}
+
+/**
+ * What a team's agent reads, for the file holder on its bench: each folder, file and Notion page
+ * the team gives it with a line on the canvas (ADR 0042, 0050), in the team file's order. The same
+ * for a linked agent, since what it reads stays the team's own. Knowledge without a path or page
+ * names nothing it can read (ADR 0036), so it isn't shown as something it reads.
+ */
+export function readsOf(agent: Pick<AgentConfig, 'capabilities'>): ReadSource[] {
+  return (agent.capabilities ?? []).flatMap((capability): ReadSource[] => {
+    if (capability.kind !== 'knowledge') return []
+    if (capability.notion) return [{ kind: 'page', name: capability.name, where: 'Notion page · read when each run starts' }]
+    if (!capability.path) return []
+    return [{ kind: chosenIsFile(capability.path) ? 'file' : 'folder', name: capability.name || chosenName(capability.path), where: capability.path }]
+  })
 }
 
 /** What one workbench change does to the team file. */
