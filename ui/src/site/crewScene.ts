@@ -21,6 +21,7 @@ import {
   Vector3,
   WebGLRenderer,
   type Material,
+  type Texture,
 } from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
@@ -161,39 +162,17 @@ export class CrewScene {
     const box = new Box3().setFromObject(source, true)
     this.standY = -box.min.y
     const wound = this.own(woundTexture())
-    const pegboard = () => this.own(pegboardTexture())
     this.members.forEach((member, index) => {
       const root = source.clone(true)
-      const meshes: Mesh[] = []
-      const skin = new Color(COLOR_HEX[member.figure.color])
-      const swatch = swatchTextures(markPattern(member.id).over)
-      this.own(swatch.map)
-      this.own(swatch.bump)
-      root.traverse((object) => {
-        if (!(object instanceof Mesh)) return
-        const role = (object.material as Material).name
-        const material = benchMaterial(role, object.name, { pegboard, wound })
-        if (role === 'skin' || role === 'skin_wound') (material as MeshStandardMaterial).color.copy(skin)
-        if (role === 'skin_deep') (material as MeshStandardMaterial).color.copy(skin).multiplyScalar(0.86)
-        if (role === 'scarf') {
-          ;(material as MeshStandardMaterial).map = swatch.map
-          ;(material as MeshStandardMaterial).bumpMap = swatch.bump
-        }
-        object.material = material
-        object.castShadow = role !== 'glint' && !object.name.endsWith('_face')
-        object.receiveShadow = role !== 'glint'
-        object.userData.member = index
-        meshes.push(object)
-        this.own(material)
-      })
-      const named = (name: string) => {
-        const found = root.getObjectByName(name)
-        if (!found) throw new Error(`The figure has no “${name}”.`)
-        return found
+      const meshes = dressFigure(root, member, wound, (item) => this.own(item))
+      for (const mesh of meshes) {
+        const role = mesh.userData.role as string
+        mesh.castShadow = role !== 'glint' && !mesh.name.endsWith('_face')
+        mesh.receiveShadow = role !== 'glint'
+        mesh.userData.member = index
       }
-      for (const kind of FIGURE_KINDS) named(`head_${kind}`).visible = kind === member.figure.kind
-      const eyes: Object3D[] = []
-      root.traverse((object) => { if (/_eye_[lr]$/.test(object.name)) eyes.push(object) })
+      const named = figurePart(root)
+      const eyes = figureEyes(root)
       this.scene.add(root)
       this.figures.push({
         root, body: named('body'), neck: named('neck'), head: named('head'), armL: named('arm_l'), armR: named('arm_r'),
@@ -465,5 +444,52 @@ export class CrewScene {
     this.disposables.push(item)
     return item
   }
+}
+
+/**
+ * Dress a clone of the model's figure as one member: the bench's materials, its skin in its colour,
+ * its scarf woven from its id, and only its own head showing. Each mesh keeps the role Blender
+ * named its material in `userData.role`. Whatever it makes is handed to `own` to dispose of.
+ */
+export function dressFigure(root: Object3D, member: CrewMember, wound: Texture, own: <T extends { dispose: () => void }>(item: T) => T): Mesh[] {
+  const meshes: Mesh[] = []
+  const pegboard = () => own(pegboardTexture())
+  const skin = new Color(COLOR_HEX[member.figure.color])
+  const swatch = swatchTextures(markPattern(member.id).over)
+  own(swatch.map)
+  own(swatch.bump)
+  root.traverse((object) => {
+    if (!(object instanceof Mesh)) return
+    const role = (object.material as Material).name
+    const material = own(benchMaterial(role, object.name, { pegboard, wound }))
+    if (role === 'skin' || role === 'skin_wound') (material as MeshStandardMaterial).color.copy(skin)
+    if (role === 'skin_deep') (material as MeshStandardMaterial).color.copy(skin).multiplyScalar(0.86)
+    if (role === 'scarf') {
+      ;(material as MeshStandardMaterial).map = swatch.map
+      ;(material as MeshStandardMaterial).bumpMap = swatch.bump
+    }
+    object.material = material
+    object.userData.role = role
+    meshes.push(object)
+  })
+  const named = figurePart(root)
+  for (const kind of FIGURE_KINDS) named(`head_${kind}`).visible = kind === member.figure.kind
+  return meshes
+}
+
+/** A named part of a figure, which the model must have. */
+export function figurePart(root: Object3D): (name: string) => Object3D {
+  return (name) => {
+    const found = root.getObjectByName(name)
+    if (!found) throw new Error(`The figure has no “${name}”.`)
+    return found
+  }
+}
+
+/** Every eye on a figure, the hidden heads' too: a blink squashes them all. */
+export function figureEyes(root: Object3D): Object3D[] {
+  const eyes: Object3D[] = []
+  root.traverse((object) => { if (/_eye_[lr]$/.test(object.name)) eyes.push(object) })
+  return eyes
 }
 

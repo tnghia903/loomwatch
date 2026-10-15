@@ -155,14 +155,24 @@
   function applyTheme(theme) {
     root.dataset.theme = theme
     themeButton.setAttribute('aria-label', theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme')
+    $('#cord-tag').lastChild.textContent = theme === 'dark' ? ' to turn the light on' : ' to turn the light off'
     $('meta[name="theme-color"]').content = theme === 'dark' ? '#08080A' : '#FAF8F3'
     paintShots()
   }
-  themeButton.addEventListener('click', () => {
+  // The theme is a lamp (the button is its bulb, and it has a pull cord, below): switched, the new
+  // theme spreads out from the bulb across the page, as a room fills when a lamp comes on.
+  function switchTheme() {
     const next = root.dataset.theme === 'dark' ? 'light' : 'dark'
     store.set('loomwatch-site-theme', next)
-    applyTheme(next)
-  })
+    if (reduced || !document.startViewTransition) { applyTheme(next); return }
+    const bulb = themeButton.getBoundingClientRect()
+    const x = bulb.left + bulb.width / 2
+    const y = bulb.top + bulb.height / 2
+    const reach = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y))
+    document.startViewTransition(() => applyTheme(next)).ready.then(() => {
+      root.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${reach}px at ${x}px ${y}px)`] }, { duration: 640, easing: 'cubic-bezier(.3, 0, .2, 1)', pseudoElement: '::view-transition-new(root)' })
+    }, () => { /* skipped by the next switch */ })
+  }
 
   // The Build panel's Story · Team · Trace switch: the team as its sentence, its canvas, or its file.
   const teamViews = $('#team-views')
@@ -260,7 +270,284 @@
     await scene.load(MODEL)
     crewBox.classList.add('live')
   }
-  mountCrew().catch(() => crewBox.classList.add('still'))
+  const crewMounted = mountCrew().catch(() => crewBox.classList.add('still'))
+
+  /* ================================================================ The lamp's pull cord */
+
+  // A gold thread hangs from the theme button, with one more of the crew tied on the end. Pull it
+  // down past the click and the light switches, as a lamp's pull cord does; let go and the switch's
+  // spring draws the cord back in, and it bobs and swings. A tap is a short pull, and the button
+  // still works on its own (it tugs the cord). Scrolling reels the cord up into the header with the
+  // page, so it never hangs over what you read; point at the bulb and it comes back down.
+  const lamp = $('#lamp')
+  const cord = $('#cord')
+  const cordPath = $('.cord-thread path', cord)
+  const cordFigure = $('#cord-figure')
+  const cordTag = $('#cord-tag')
+  const LAMPLIGHTER = { id: 'lamplighter', figure: { kind: 'spool', color: 'butter' } }
+  const LINKS = 8
+  const STEP = 1 / 120
+  const BOX = 64 // the figure's box (styles.css)
+  const PULL = 34 // how far the cord comes out of the switch
+  const CLICK = 22 // and how far it comes out when the switch clicks
+  const GRAVITY = 2200
+  const restLength = () => (window.innerWidth <= 640 ? 30 : 44)
+  const hiddenAt = () => -(rest + BOX + 12)
+  let rest = restLength()
+  // The cord comes out of the header at hang: 0, or above it, out of sight, while reeled up. It
+  // starts there and drops in once the figure is ready.
+  let hang = hiddenAt()
+  let ready = false
+  let reveal = false
+  let revealTimer = 0
+  const links = Array.from({ length: LINKS + 1 }, (_, i) => { const y = hang + (i / LINKS) * rest; return { x: 0, y, px: 0, py: y } })
+  const end = links[LINKS]
+  let out = 0 // how far the cord is out of the switch, beyond its rest
+  let outSpeed = 0
+  let clicked = false // this pull has clicked; it clicks again once the cord has gone back in
+  let tilt = 0 // the figure's own lean on the thread, radians clockwise
+  let tiltSpeed = 0
+  let held = null
+  let tugAt = -1
+  let tie = { x: BOX / 2, y: BOX * 0.163 } // where the thread is tied: the spool's hole in the still
+  let near = false
+  let pointer = null
+  let figureScene = null
+  let running = false
+  let lastTime = 0
+  let simTime = 0
+  let pending = 0
+
+  const cordPoint = (event) => { const r = cord.getBoundingClientRect(); return { x: event.clientX - r.left, y: event.clientY - r.top } }
+  const reach = () => rest + PULL
+  const shown = () => hang > hiddenAt() + 0.5
+  function hangTarget() {
+    if (held || tugAt >= 0 || reveal) return 0
+    return ready ? Math.max(hiddenAt(), -window.scrollY) : hiddenAt()
+  }
+
+  function flip(fromTouch) {
+    switchTheme()
+    figureScene?.flinch()
+    if (fromTouch) navigator.vibrate?.(8)
+  }
+
+  // A short pull down and back, to show a switch that has just clicked (from the button, or a tap).
+  function tug() {
+    clicked = true
+    tugAt = simTime
+    wakeCord()
+  }
+
+  // Where the end of the cord is held, by a hand or by a tug, or null when it hangs free.
+  function grip() {
+    if (held) return held
+    if (tugAt < 0) return null
+    const t = (simTime - tugAt) / 0.16
+    if (t < 1) return { x: end.x * 0.9, y: hang + rest + (CLICK + 8) * Math.sin(t * Math.PI / 2) }
+    tugAt = -1
+    end.px = end.x
+    end.py = end.y
+    return null
+  }
+
+  function stepCord(h) {
+    simTime += h
+    links[0].x = 0
+    links[0].y = hang
+    const hand = grip()
+    if (hand) {
+      // Held, the cord comes out of the switch as far as it is pulled, and no further.
+      const dx = hand.x
+      const dy = hand.y - hang
+      const d = Math.hypot(dx, dy) || 1
+      const k = Math.min(1, reach() / d)
+      out = clamp(d * k - rest, 0, PULL)
+      outSpeed = 0
+      end.x = dx * k
+      end.y = hang + dy * k
+      end.px = end.x
+      end.py = end.y
+    } else {
+      // Let go, the switch's spring draws it back in, almost without overshoot.
+      outSpeed += (-out * 320 - outSpeed * (reduced ? 60 : 30)) * h
+      out = Math.max(0, out + outSpeed * h)
+    }
+    if (clicked && out < CLICK * 0.35 && !hand) clicked = false
+
+    // Each link falls and carries on as it was going, a little slowed; a breath of air sways the
+    // figure while it hangs.
+    const damp = reduced ? 0.9 : 0.996
+    const breeze = reduced || hand || !shown() ? 0 : 70 * Math.sin(simTime * 1.1) + 30 * Math.sin(simTime * 2.3 + 1)
+    for (let i = 1; i <= LINKS; i += 1) {
+      const p = links[i]
+      if (i === LINKS && hand) continue
+      const vx = (p.x - p.px) * damp
+      const vy = (p.y - p.py) * damp
+      p.px = p.x
+      p.py = p.y
+      p.x += vx + (i === LINKS ? breeze : 0) * h * h
+      p.y += vy + GRAVITY * h * h
+    }
+    // The thread doesn't stretch. The top is fixed, and the figure, far heavier than the thread,
+    // gives little; held, it gives none.
+    const length = (rest + out) / LINKS
+    for (let pass = 0; pass < 14; pass += 1) {
+      for (let i = 0; i < LINKS; i += 1) {
+        const a = links[i]
+        const b = links[i + 1]
+        const wa = i === 0 ? 0 : 1
+        const wb = i + 1 === LINKS ? (hand ? 0 : 0.08) : 1
+        if (wa + wb === 0) continue
+        const dx = b.x - a.x
+        const dy = b.y - a.y
+        const d = Math.hypot(dx, dy) || 1e-6
+        const shift = (d - length) / d / (wa + wb)
+        a.x += dx * shift * wa
+        a.y += dy * shift * wa
+        b.x -= dx * shift * wb
+        b.y -= dy * shift * wb
+      }
+    }
+    // The figure leans along the end of the thread, a beat behind it.
+    const before = links[LINKS - 2]
+    const lean = -Math.atan2(end.x - before.x, end.y - before.y)
+    tiltSpeed += (-(tilt - lean) * 170 - tiltSpeed * (reduced ? 40 : 9)) * h
+    tilt += tiltSpeed * h
+  }
+
+  // The pointer, in the figure's canvas as it hangs upright, for it to look at.
+  function pointerOnFigure() {
+    if (!pointer) return null
+    const r = cord.getBoundingClientRect()
+    const dx = pointer.x - r.left - end.x
+    const dy = pointer.y - r.top - end.y
+    if (Math.hypot(dx, dy) > 420) return null
+    const c = Math.cos(-tilt)
+    const s = Math.sin(-tilt)
+    return { x: tie.x + dx * c - dy * s, y: tie.y + dx * s + dy * c }
+  }
+
+  function paintCord(dt) {
+    let d = `M${links[0].x.toFixed(2)} ${links[0].y.toFixed(2)}`
+    for (let i = 1; i < LINKS; i += 1) {
+      const p = links[i]
+      const q = links[i + 1]
+      d += `Q${p.x.toFixed(2)} ${p.y.toFixed(2)} ${((p.x + q.x) / 2).toFixed(2)} ${((p.y + q.y) / 2).toFixed(2)}`
+    }
+    cordPath.setAttribute('d', `${d}L${end.x.toFixed(2)} ${end.y.toFixed(2)}`)
+    if (figureScene && shown()) tie = figureScene.draw(dt, { swing: tiltSpeed, pull: out / PULL, pointer: pointerOnFigure(), near: near || Boolean(held) })
+    cordFigure.style.transform = `translate(${end.x.toFixed(2)}px, ${end.y.toFixed(2)}px) rotate(${tilt.toFixed(4)}rad) translate(${(-tie.x).toFixed(2)}px, ${(-tie.y).toFixed(2)}px)`
+    cordTag.style.transform = `translate(${(end.x - BOX * 0.3).toFixed(1)}px, ${(end.y + BOX * 0.4).toFixed(1)}px)`
+    cord.classList.toggle('near', near && !held && out < 2 && shown())
+  }
+
+  // It lives while it can be seen; reeled up out of sight, it rests until it's wanted.
+  function cordSettled() {
+    if (held || tugAt >= 0 || out > 0.05 || Math.abs(hang - hangTarget()) > 0.3) return false
+    return !shown()
+  }
+
+  function cordFrame(time) {
+    if (!running) return
+    const dt = Math.min(0.05, Math.max(0, (time - lastTime) / 1000))
+    lastTime = time
+    // The top of the cord follows the page as it scrolls, and drops back when it is wanted.
+    const target = hangTarget()
+    hang += (target - hang) * (reduced ? 1 : 1 - Math.exp(-dt * (target > hang ? 9 : 16)))
+    pending += dt
+    while (pending >= STEP) { stepCord(STEP); pending -= STEP }
+    paintCord(dt)
+    if (cordSettled() || document.visibilityState !== 'visible') { running = false; return }
+    window.requestAnimationFrame(cordFrame)
+  }
+  function wakeCord() {
+    if (running) return
+    running = true
+    lastTime = performance.now()
+    window.requestAnimationFrame(cordFrame)
+  }
+
+  cordFigure.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || held) return
+    event.preventDefault()
+    cordFigure.setPointerCapture(event.pointerId)
+    const at = cordPoint(event)
+    held = { id: event.pointerId, touch: event.pointerType !== 'mouse', dx: at.x - end.x, dy: at.y - end.y, x: end.x, y: end.y, from: at, moved: 0, vx: 0, vy: 0, t: event.timeStamp }
+    cordFigure.classList.add('held')
+    wakeCord()
+  })
+  cordFigure.addEventListener('pointermove', (event) => {
+    if (!held || event.pointerId !== held.id) return
+    const at = cordPoint(event)
+    const x = at.x - held.dx
+    const y = at.y - held.dy
+    const dt = Math.max(4, event.timeStamp - held.t) / 1000
+    held.vx = lerp(held.vx, (x - held.x) / dt, 0.6)
+    held.vy = lerp(held.vy, (y - held.y) / dt, 0.6)
+    held.x = x
+    held.y = y
+    held.t = event.timeStamp
+    held.moved = Math.max(held.moved, Math.hypot(at.x - held.from.x, at.y - held.from.y))
+    // The switch clicks as the cord comes out past the click, here rather than in a frame, so a
+    // quick pull counts however few frames the page draws while it happens.
+    if (!clicked && Math.hypot(x, y - hang) - rest >= CLICK) { clicked = true; flip(held.touch) }
+  })
+  function letGo(event) {
+    if (!held || event.pointerId !== held.id) return
+    const { moved, vx, vy } = held
+    held = null
+    cordFigure.classList.remove('held')
+    if (moved < 4 && event.type === 'pointerup') {
+      // A tap is a short pull, and it switches as the button does.
+      flip(event.pointerType !== 'mouse')
+      tug()
+      return
+    }
+    // Thrown, it carries on the way your hand was going, and spins on the thread.
+    const speed = Math.hypot(vx, vy)
+    const k = speed > 2400 ? 2400 / speed : 1
+    end.px = end.x - vx * k * STEP
+    end.py = end.y - vy * k * STEP
+    figureScene?.spin(clamp(vx / 160, -9, 9) + (Math.random() - 0.5) * 3)
+  }
+  cordFigure.addEventListener('pointerup', letGo)
+  cordFigure.addEventListener('pointercancel', letGo)
+  cordFigure.addEventListener('pointerenter', () => { near = true; wakeCord() })
+  cordFigure.addEventListener('pointerleave', () => { near = false })
+  // Point at the bulb (or tab to it) while the cord is reeled up and it comes down to be pulled.
+  const showCord = (on) => {
+    window.clearTimeout(revealTimer)
+    if (on) { reveal = true; wakeCord(); return }
+    revealTimer = window.setTimeout(() => { reveal = false; wakeCord() }, 900)
+  }
+  lamp.addEventListener('pointerenter', () => showCord(true))
+  lamp.addEventListener('pointerleave', () => showCord(false))
+  themeButton.addEventListener('focus', () => { if (themeButton.matches(':focus-visible')) showCord(true) })
+  themeButton.addEventListener('blur', () => showCord(false))
+  themeButton.addEventListener('click', () => { flip(false); tug() })
+  window.addEventListener('pointermove', (event) => { pointer = { x: event.clientX, y: event.clientY } }, { passive: true })
+  document.documentElement.addEventListener('pointerleave', () => { pointer = null })
+  window.addEventListener('scroll', wakeCord, { passive: true })
+  window.addEventListener('resize', () => { rest = restLength(); wakeCord() })
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wakeCord() })
+
+  // The figure on the cord is the crew's own, alive; it loads after the crew, from the same model.
+  // Until then (and where WebGL is off) the cord carries its still picture.
+  async function mountCord() {
+    await crewMounted
+    const { CordScene } = await loadLive()
+    const scene = new CordScene($('.cord-canvas', cord), LAMPLIGHTER, reduced)
+    scene.resize(BOX, BOX)
+    await scene.load(MODEL)
+    figureScene = scene
+    cord.classList.add('live')
+  }
+  const dropIn = () => { ready = true; wakeCord() }
+  mountCord().then(dropIn, dropIn)
+  window.setTimeout(dropIn, 6000)
+  if (reduced) hang = hangTarget()
+  paintCord(0)
 
   window.addEventListener('resize', () => drawLanes())
 
