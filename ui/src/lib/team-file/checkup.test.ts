@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { DetectedHarness } from '../harnesses'
 import { ROLE_PRESETS } from '../library/roles'
-import { appendToRole, canUseTeamBus, checkup, jobFor, type CheckupFinding, type CheckupInput } from './checkup'
+import { appendToRole, canUseTeamBus, checkup, jobFor, LONG_WORDS, type CheckupFinding, type CheckupInput } from './checkup'
 import { templateTeamYaml } from './templates'
 import type { AgentConfig, TeamDocument } from './types'
 
@@ -196,5 +196,21 @@ describe('large-team', () => {
     const findings = checkup({ agents: roles, edges: [], entrypoint: roles[0].id, responder: roles[0].id })
     expect(findings.filter((finding) => finding.rule === 'large-team')).toEqual([expect.objectContaining({ agentIds: [roles[0].id], title: '5 agents is a large team' })])
     expect(checkup({ agents: roles.slice(0, 4), edges: [], entrypoint: roles[0].id, responder: roles[0].id }).some((finding) => finding.rule === 'large-team')).toBe(false)
+  })
+})
+
+describe('long-instructions', () => {
+  const ROLE = 'You summarize customer emails for the support lead. Reply with the three most urgent issues, one line each.'
+
+  it('says when instructions run long, and leaves the cutting to Ask LoomWatch', () => {
+    const long = `${ROLE} ${'Background the agent could look up itself. '.repeat(Math.ceil(LONG_WORDS / 7))}`
+    const finding = run({ agents: [agent('summarizer', long)] }).find((candidate) => candidate.rule === 'long-instructions')
+    expect(finding?.fix).toBeUndefined()
+    expect(finding?.askPrompt).toContain('under 300 words')
+    expect(run({ agents: [agent('summarizer', ROLE)] }).some((candidate) => candidate.rule === 'long-instructions')).toBe(false)
+  })
+
+  it('finds no built-in job long', () => {
+    for (const job of ROLE_PRESETS) expect(run({ agents: [agent(job.id, job.role)] }).some((candidate) => candidate.rule === 'long-instructions'), job.id).toBe(false)
   })
 })
