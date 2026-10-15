@@ -76,7 +76,7 @@ export const QUESTS: readonly Quest[] = [
     source: SOURCES.success,
   },
   {
-    item: 'band', reward: 'accessory', area: 'context', name: 'Tape-measure band', practice: 'Scoped context',
+    item: 'band', reward: 'accessory', area: 'context', name: 'Tailor’s tape', practice: 'Scoped context',
     hint: 'Give an agent only the folders its job needs, not a whole drive.',
     teach: 'A model’s attention is a budget: the more it holds, the worse it recalls. A small set of the right sources beats a big one.',
     earnedWhen: 'An agent is given at least one folder to read, and reads from every folder it was given, in a run that finished.',

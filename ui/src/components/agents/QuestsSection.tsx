@@ -14,7 +14,7 @@ function QuestArt({ quest, earned }: { quest: Quest; earned: boolean }) {
   return (
     <span className={`quest-art${earned ? '' : ' locked'}`}>
       {isAccessory(quest.item)
-        ? <AccessoryIcon item={quest.item} />
+        ? <AccessoryIcon item={quest.item} locked={!earned} />
         : <img src={figureStill({ kind: quest.item as FigureKind, color: 'lilac' })} alt="" width={48} height={48} loading="lazy" decoding="async" />}
     </span>
   )

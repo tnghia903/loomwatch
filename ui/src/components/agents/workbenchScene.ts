@@ -38,7 +38,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { CARD_SLOTS, FIGURE_KEYS, partOfNode, reactionsBetween, READ_SLOTS, TOOL_SLOTS, type FigureLook, type FigureMood, type FigurePart, type FigureReaction, type ReadSource } from '../../lib/library/figure'
 import { COLOR_HEX, FIGURE_KINDS, wornBy, type FigureChoice, type FigureKind } from '../../lib/library/figures'
 import type { AllowSwitch } from '../../lib/team-file/types'
-import { buildAccessory, landmarks, type Made } from './accessoryMeshes'
+import { dress, type Dressed } from './accessoryMeshes'
 import { cardTexture, keyLabelTexture, pegboardTexture, swatchTextures, woundTexture } from './benchTextures'
 
 /** Everything the bench shows, from the agent on screen and the test bench's run. */
@@ -229,8 +229,8 @@ export class WorkbenchScene {
   private readonly heads = new Map<FigureKind, Object3D>()
   private readonly eyes: Object3D[] = []
   private drawn = { pattern: '', figure: '' }
-  /** What it wears from the wardrobe (docs/QUESTS.md), built for the head it wears now. */
-  private worn: { object: Object3D; made: Made }[] = []
+  /** What it wears from the wardrobe (docs/QUESTS.md), fitted to the head it wears now. */
+  private dressed: Dressed | null = null
 
   constructor(canvas: HTMLCanvasElement, callbacks: BenchCallbacks, reduced: boolean) {
     this.callbacks = callbacks
@@ -352,7 +352,7 @@ export class WorkbenchScene {
   dispose() {
     this.stop()
     this.scene.traverse((object) => { if (object instanceof Mesh) (object.material as Material).dispose() })
-    for (const { made } of this.worn) for (const item of [...made.geometries, ...made.materials]) item.dispose()
+    this.dressed?.undress()
     for (const item of this.disposables) item.dispose()
     this.scene.environment?.dispose()
     this.renderer.dispose()
@@ -484,22 +484,12 @@ export class WorkbenchScene {
     this.dress(figure)
   }
 
-  /** Put on what it wears from the wardrobe, placed for the head it wears. */
+  /** Put on what it wears from the wardrobe, fitted to the head it wears (accessoryMeshes.ts). */
   private dress(figure: FigureChoice) {
-    for (const { object, made } of this.worn) {
-      object.removeFromParent()
-      for (const item of [...made.geometries, ...made.materials]) item.dispose()
-    }
-    this.worn = []
+    this.dressed?.undress()
+    this.dressed = null
     const wear = wornBy(figure)
-    if (wear.length === 0) return
-    const head = this.node('head')
-    const at = landmarks(head, this.node(`head_${figure.kind}`), this.node(`${figure.kind}_eye_r`))
-    for (const item of wear) {
-      const { parent, object, made } = buildAccessory(item, at)
-      this.node(parent).add(object)
-      this.worn.push({ object, made })
-    }
+    if (wear.length > 0) this.dressed = dress(this.node('figure'), figure.kind, wear)
   }
 
   private paint(name: string, made: Texture) {

@@ -264,8 +264,8 @@
 @media (prefers-reduced-motion: reduce) { .figure-wardrobe-head::before { transition: none; } }
 .figure-wardrobe-head b { font: 600 13px/1.3 var(--font-sans); color: var(--color-ink); }
 .figure-wardrobe-items { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: var(--sp-2); }
-.figure-wardrobe-item { width: 100%; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; align-items: center; text-align: left; padding: 8px 10px; border-radius: var(--r-md); border: 1px solid var(--color-hairline); background: var(--color-panel); font: inherit; color: inherit; cursor: pointer; min-width: 0; }
-.figure-wardrobe-item .accessory-icon { width: 36px; height: 36px; overflow: visible; }
+.figure-wardrobe-item { width: 100%; display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 10px; align-items: center; text-align: left; padding: 8px 10px; border-radius: var(--r-md); border: 1px solid var(--color-hairline); background: var(--color-panel); font: inherit; color: inherit; cursor: pointer; min-width: 0; }
+.figure-wardrobe-item .accessory-icon { width: 40px; height: 40px; border-radius: var(--r-sm, 6px); }
 .figure-wardrobe-item:hover:not(.locked) { border-color: color-mix(in srgb, var(--color-ink-3) 50%, transparent); }
 .figure-wardrobe-item[aria-pressed="true"] { border-color: color-mix(in srgb, var(--color-accent) 60%, transparent); background: var(--color-accent-tint); }
 .figure-wardrobe-item:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
@@ -357,7 +357,8 @@
 .agents-quests-list li { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: var(--sp-3); align-items: start; padding: var(--sp-3) 0; border-bottom: 1px solid var(--color-hairline); }
 .agents-quests-list p { margin: 0; }
 .quest-art { display: grid; place-items: center; width: 48px; height: 48px; border-radius: var(--r-md); border: 1px solid var(--color-hairline); background: var(--color-panel); overflow: hidden; }
-.quest-art .accessory-icon { width: 34px; height: 34px; overflow: visible; }
+.quest-art .accessory-icon { width: 48px; height: 48px; }
+.quest-art.locked .accessory-icon { width: 40px; height: 40px; }
 .quest-art img { width: 48px; height: 48px; }
 .quest-art.locked { border-style: dashed; background: transparent; }
 .quest-art.locked .accessory-icon, .quest-art.locked img { filter: brightness(0) opacity(.18); }
@@ -373,5 +374,5 @@
 
 /* A still wearing accessories (FigureStill): the class sizes the box, the still and its overlay fill it. */
 .figure-still { position: relative; display: inline-block; vertical-align: middle; }
-.figure-still > img, .figure-still > .worn-overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
-.figure-still > .worn-overlay { pointer-events: none; overflow: visible; }
+.figure-still > img, .figure-still > .worn-overlay, .figure-still > .worn-overlay > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.figure-still > .worn-overlay { pointer-events: none; }

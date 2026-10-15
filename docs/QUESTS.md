@@ -29,7 +29,7 @@ After    the receipt names the practice, says why it   (the run receipt, once, o
 | Item | Part | Practice | Earned when | Source |
 |---|---|---|---|---|
 | Tailor’s chalk | Prompt | Clear success criteria | An agent with a Done when replies with nothing under “Not met”, and no check step had to send its work back. | [Claude docs: Define your success criteria](https://platform.claude.com/docs/en/test-and-evaluate/define-success) |
-| Tape-measure band | Context | Scoped context | An agent is given at least one folder, and reads from every folder it was given. | [Anthropic: Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) |
+| Tailor’s tape | Context | Scoped context | An agent is given at least one folder, and reads from every folder it was given. | [Anthropic: Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) |
 | Safety-pin clip | Harness | Least privilege | A scheduled run never asks for a permission, and every key its agents hold (web, files, commands) was used. | [OWASP Top 10 for LLM apps: Excessive Agency](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/) |
 | Wrist pincushion | Harness | Test before you ship | A team runs an agent from Your agents that had a test bench run that finished before it. | [Anthropic: Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) |
 | Shuttle | Team shape | Orchestrator and workers | One agent asks another over the Team Bus and gets an answer. | [Anthropic: Building effective agents](https://www.anthropic.com/research/building-effective-agents) |
@@ -53,9 +53,16 @@ The summaries in the app are LoomWatch’s own words, not quotes from the source
   belongs to you on this computer, not to a team file you might share. Each item is earned once.
   The first run to earn it keeps it, so that run's receipt is the one that says so.
 - **Wearing** is part of a saved agent's figure (`figure.wear` in `.jobs/<agent>.yaml`). Like the
-  figure itself, it never makes a new version, and a team never copies it. Accessories are drawn
-  over the stills (`AccessoryArt.tsx`), cropped with the chat avatar, and built as meshes on the
-  3D bench (`accessoryMeshes.ts`). Items held in the hands are left out of the chat avatar.
+  figure itself, it never makes a new version, and a team never copies it.
+- **The accessories are worn, not stuck on.** Each is a 3D object fitted to the figure by casting
+  rays onto its body (`accessoryMeshes.ts`): the tailor's tape lies over the shoulders and down the
+  chest, the button monocle sits on the eye and is tied to the scarf with red thread, the chalk is
+  tucked behind an ear and has drawn a cut line on the tummy, the patch is sewn onto the tummy's
+  curve, a safety pin fastens the scarf, the pincushion is strapped round a wrist, and a shuttle is
+  pushed through the top of the head as needles are stuck in a ball of yarn. The 3D bench wears
+  them. The pictures stack one layer per accessory over the still (`ui/public/agent/wear`),
+  rendered from the same objects with the figure hiding what is behind it and catching its
+  shadow, so pictures and bench agree. Only the face-high ones show in the chat avatar.
 - **The earned figures** are heads in `ui/public/agent/workbench.glb` (`head_scissors`,
   `head_bobbin`) with stills in `ui/public/agent/figures/`. An agent nobody dressed is only ever
   given one of the six starter figures, so it keeps the figure it had.
@@ -72,5 +79,6 @@ Both answer only this computer and this app's own pages, like the run evidence t
 1. Add it to `QUESTS` in `ui/src/lib/quests/catalog.ts`: the practice, a hint, why it works, what a
    run has to show, and a source you have read.
 2. Write its rule in `rules.ts` from recorded facts only, with a test that fails without it.
-3. Add its item to `ACCESSORIES` or `FIGURE_ITEMS` in `crates/loomwatch-backend/src/wardrobe.rs`,
-   and draw it (`AccessoryArt.tsx`, `accessoryMeshes.ts`), or model its head for a figure.
+3. Add its item to `ACCESSORIES` or `FIGURE_ITEMS` in `crates/loomwatch-backend/src/wardrobe.rs`.
+   For an accessory, build it in `accessoryMeshes.ts` and render its layers and icons with
+   `scripts/figures` (its README); for a figure, model its head there.

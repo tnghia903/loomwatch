@@ -25,7 +25,7 @@ describe('the figure picker’s wardrobe', () => {
   it('shows what is not earned yet with its hint, and lets nobody wear it', () => {
     render(<FigurePicker figure={{ kind: 'spool', color: 'sky' }} onChange={vi.fn()} wardrobe={earned} />)
     const wardrobe = screen.getByRole('group', { name: 'Wardrobe' }).closest('details') as HTMLElement
-    expect(within(wardrobe).queryByRole('button', { name: /Tape-measure band/ })).toBeNull()
+    expect(within(wardrobe).queryByRole('button', { name: /Tailor’s tape/ })).toBeNull()
     expect(wardrobe).toHaveTextContent('Hint: Give an agent only the folders its job needs, not a whole drive.')
     expect(wardrobe).toHaveTextContent('1 of 7 earned, shared by all your agents')
   })

@@ -20,7 +20,7 @@ const gltf = await new GLTFLoader().loadAsync(params.get('glb') || './agent/work
 if (params.get('build')) { const { bobbin, scissors } = await import('./heads.js'); const head = gltf.scene.getObjectByName('head'); head.add(bobbin(gltf)); head.add(scissors(gltf)) }
 const fig = gltf.scene.getObjectByName('figure')
 fig.removeFromParent(); fig.position.set(0, 0, 0); fig.scale.setScalar(1)
-scene.add(fig); fig.rotation.y = cam.rot ?? 0; scene.environmentIntensity = cam.env ?? 1; key.intensity = cam.key ?? 1.2
+scene.add(fig); fig.rotation.y = cam.rot ?? 0; for (const side of ['arm_l', 'arm_r']) fig.getObjectByName(side).rotation.z = (side === 'arm_l' ? 1 : -1) * (cam.arm ?? 0); scene.environmentIntensity = cam.env ?? 1; key.intensity = cam.key ?? 1.2
 const skin = new THREE.Color(color)
 fig.traverse((o) => {
   if (o.name.startsWith('head_')) o.visible = o.name === 'head_' + kind
@@ -44,7 +44,7 @@ fig.traverse((o) => {
   o.material = m ? m() : new THREE.MeshStandardMaterial({ color: '#888' })
 })
 const camera = new THREE.PerspectiveCamera(cam.fov, 1, 0.01, 50)
-camera.position.set(0, cam.y, cam.z); camera.lookAt(0, cam.ty, 0)
+camera.position.set(cam.x ?? 0, cam.y, cam.z); camera.lookAt(cam.x ?? 0, cam.ty, 0)
 renderer.render(scene, camera)
 const px = (v) => { const p = v.clone().project(camera); return [Math.round((p.x + 1) * 160 * 10) / 10, Math.round((1 - p.y) * 160 * 10) / 10] }
 const at = (name) => { const o = fig.getObjectByName(name); return o ? px(o.getWorldPosition(new THREE.Vector3())) : null }

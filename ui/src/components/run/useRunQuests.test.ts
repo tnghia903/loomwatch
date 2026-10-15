@@ -62,7 +62,7 @@ describe('a finished run’s quests', () => {
     } as unknown as RunProjection
     const { result, rerender } = renderHook((props: { complete: boolean }) => useRunQuests({
       record: now, agents, phase: 'succeeded',
-      projection: props.complete ? projection : { ...projection, coverage: { ...projection.coverage, agents: { level: 'partial', reason: 'agents_awaiting_terminal_evidence' } } },
+      projection: props.complete ? projection : { ...projection, coverage: { ...projection.coverage, agents: { level: 'partial', reason: 'agents_awaiting_terminal_evidence' } } as unknown as RunProjection['coverage'] },
     }), { initialProps: { complete: false } })
     // Half a record is not judged.
     await new Promise((resolve) => setTimeout(resolve, 20))

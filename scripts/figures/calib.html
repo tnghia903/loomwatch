@@ -1,0 +1,70 @@
+<!doctype html><html><body style="margin:0;background:transparent">
+<script type="importmap">{"imports":{"three":"./three/build/three.module.js","three/addons/":"./three/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+const S = 160
+const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, preserveDrawingBuffer: true })
+renderer.setPixelRatio(1); renderer.setSize(S, S)
+document.body.appendChild(renderer.domElement)
+const scene = new THREE.Scene()
+const gltf = await new GLTFLoader().loadAsync('./agent/workbench.glb')
+const fig = gltf.scene.getObjectByName('figure')
+fig.removeFromParent(); fig.position.set(0, 0, 0); fig.scale.setScalar(1); scene.add(fig)
+const white = new THREE.MeshBasicMaterial({ color: '#fff' })
+fig.traverse((o) => { if (o.isMesh) o.material = white })
+const camera = new THREE.PerspectiveCamera(20, 1, 0.01, 50)
+// Reference masks, from the Blender stills.
+async function mask(url) {
+  const img = new Image(); img.src = url; await img.decode()
+  const c = document.createElement('canvas'); c.width = c.height = S
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0, S, S)
+  const d = g.getImageData(0, 0, S, S).data; const m = new Uint8Array(S * S)
+  for (let i = 0; i < S * S; i += 1) m[i] = d[i * 4 + 3] > 128 ? 1 : 0
+  return m
+}
+const kinds = ['yarn', 'button', 'cone', 'thimble', 'spool', 'pincushion']
+const refs = {}
+for (const k of kinds) refs[k] = await mask(`./agent/figures/${k}-sky.webp`)
+const gl = renderer.getContext(); const px = new Uint8Array(S * S * 4)
+function score(p, use = kinds, armDown = 0) {
+  fig.rotation.y = p[0]
+  camera.fov = p[3]; camera.updateProjectionMatrix()
+  camera.position.set(p[5], p[1], p[2]); camera.lookAt(p[5], p[4], 0)
+  for (const side of ['arm_l', 'arm_r']) { const a = fig.getObjectByName(side); a.rotation.z = (side === 'arm_l' ? 1 : -1) * (p[6] ?? 0) }
+  let total = 0
+  for (const k of use) {
+    fig.traverse((o) => { if (o.name.startsWith('head_')) o.visible = o.name === 'head_' + k })
+    renderer.render(scene, camera)
+    gl.readPixels(0, 0, S, S, gl.RGBA, gl.UNSIGNED_BYTE, px)
+    let inter = 0, uni = 0; const r = refs[k]
+    for (let y = 0; y < S; y += 1) for (let x = 0; x < S; x += 1) {
+      const mine = px[((S - 1 - y) * S + x) * 4 + 3] > 128 ? 1 : 0
+      // Leave out the ground shadow band at the bottom of the stills.
+      if (y > S * 0.9) continue
+      const ref = r[y * S + x]
+      if (mine && ref) inter += 1; if (mine || ref) uni += 1
+    }
+    total += inter / uni
+  }
+  return total / use.length
+}
+function nelder(f, x0, step, iters) {
+  const n = x0.length; let pts = [x0]
+  for (let i = 0; i < n; i += 1) { const p = x0.slice(); p[i] += step[i]; pts.push(p) }
+  let vals = pts.map((p) => -f(p))
+  for (let it = 0; it < iters; it += 1) {
+    const order = vals.map((v, i) => [v, i]).sort((a, b) => a[0] - b[0]).map((e) => e[1])
+    pts = order.map((i) => pts[i]); vals = order.map((i) => vals[i])
+    const c = Array(n).fill(0); for (let i = 0; i < n; i += 1) for (let j = 0; j < n; j += 1) c[j] += pts[i][j] / n
+    const w = pts[n]; const r = c.map((ci, j) => ci + (ci - w[j])); const fr = -f(r)
+    if (fr < vals[0]) { const e = c.map((ci, j) => ci + 2 * (ci - w[j])); const fe = -f(e); if (fe < fr) { pts[n] = e; vals[n] = fe } else { pts[n] = r; vals[n] = fr } }
+    else if (fr < vals[n - 1]) { pts[n] = r; vals[n] = fr }
+    else { const k = c.map((ci, j) => ci + 0.5 * (w[j] - ci)); const fk = -f(k); if (fk < vals[n]) { pts[n] = k; vals[n] = fk } else { for (let i = 1; i <= n; i += 1) { pts[i] = pts[i].map((v, j) => pts[0][j] + 0.5 * (v - pts[0][j])); vals[i] = -f(pts[i]) } } }
+  }
+  return { best: pts[0], score: -vals[0] }
+}
+window.run = (x0, step, iters) => nelder((p) => score(p), x0, step, iters)
+window.score = score
+window.ready = true
+</script></body></html>

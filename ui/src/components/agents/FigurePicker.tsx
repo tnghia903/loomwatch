@@ -4,7 +4,7 @@ import { Lock } from 'lucide-react'
 import { COLOR_HEX, COLOR_NAMES, FIGURE_COLORS, FIGURE_KINDS, FIGURE_NAMES, figureStill, STARTER_KINDS, wornBy, type FigureChoice, type FigureKind } from '../../lib/library/figures'
 import { ACCESSORIES, questFor, type Accessory } from '../../lib/quests/catalog'
 import { useWardrobe, type Wardrobe } from '../../lib/quests/wardrobe'
-import { ON_HEAD } from '../../lib/library/accessorySpots'
+import { IN_CHAT } from '../../lib/library/accessorySpots'
 import { AccessoryIcon } from './AccessoryArt'
 
 const starter = (kind: FigureKind) => (STARTER_KINDS as readonly string[]).includes(kind)
@@ -64,7 +64,7 @@ export function FigurePicker({ figure, onChange, wardrobe: given }: { figure: Fi
             if (!has(item) && !wearing.includes(item)) {
               return (
                 <li key={item} className="figure-wardrobe-item locked">
-                  <AccessoryIcon item={item} />
+                  <AccessoryIcon item={item} locked />
                   <span><span className="figure-wardrobe-name">{quest.name}<span className="visually-hidden">, locked</span></span><span className="figure-wardrobe-note">Hint: {quest.hint}</span></span>
                 </li>
               )
@@ -74,7 +74,7 @@ export function FigurePicker({ figure, onChange, wardrobe: given }: { figure: Fi
               <li key={item}>
                 <button type="button" className="figure-wardrobe-item" aria-pressed={on} onClick={() => toggle(item)} title={`${quest.practice}: ${quest.teach}`}>
                   <AccessoryIcon item={item} />
-                  <span><span className="figure-wardrobe-name">{quest.name}</span><span className="figure-wardrobe-note">{on ? 'Wearing' : 'Wear it'} · {quest.practice}{ON_HEAD.has(item) ? '' : ' · held, not in the chat'}</span></span>
+                  <span><span className="figure-wardrobe-name">{quest.name}</span><span className="figure-wardrobe-note">{on ? 'Wearing' : 'Wear it'} · {quest.practice}{IN_CHAT.has(item) ? '' : ' · not in the chat picture'}</span></span>
                 </button>
               </li>
             )
