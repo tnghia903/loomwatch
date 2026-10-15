@@ -13,9 +13,10 @@ answers in plain words. What it does depends on keywords in the person's message
 - "note": drafts a note for an open review stop.
 - anything else: lists the teams.
 
-An instructions rewrite (ADR 0059) is answered without tools: every sentence naming what was
-removed is dropped, and the instructions come back as JSON in a code fence, as a real app tends to
-send them. Something removed whose name says "unreadable" gets an answer with no JSON in it.
+An instructions rewrite (ADR 0059) is answered without tools and with edits only: a numbered
+sentence that says "from the <name> page" loses those words, every other sentence naming what was
+removed is dropped, and the edits come back as JSON in a code fence, as a real app tends to send
+them. Something removed whose name says "unreadable" gets an answer with no JSON in it.
 """
 import json
 import re
@@ -167,13 +168,19 @@ def rewrite(prompt):
     if "unreadable" in removed:
         say("I removed it from their instructions.")
         return
-    agents = json.loads(prompt.split("## The agents' instructions", 1)[1])
     lead = removed.split(" — ")[0]
-    rewritten = []
-    for agent in agents:
-        sentences = re.split(r"(?<=[.!?])\s+", agent["role"].strip())
-        rewritten.append({"id": agent["id"], "role": " ".join(s for s in sentences if lead not in s)})
-    say("Here they are:\n```json\n" + json.dumps({"agents": rewritten}) + "\n```")
+    edits, agent = [], None
+    for line in prompt.split("## The agents' instructions", 1)[1].splitlines():
+        heading = re.match(r"### (\S+)", line)
+        numbered = re.match(r"\[(\d+)\] (.*)", line)
+        if heading:
+            agent = heading.group(1)
+        elif numbered and lead in numbered.group(2):
+            n, sentence = int(numbered.group(1)), numbered.group(2)
+            kept = sentence.replace(f" from the {lead} page", "")
+            edit = {"replace": kept} if kept != sentence else {"drop": True}
+            edits.append({"agent": agent, "n": n, **edit})
+    say("Here they are:\n```json\n" + json.dumps({"edits": edits}) + "\n```")
 
 
 def note():

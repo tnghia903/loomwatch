@@ -262,6 +262,9 @@ pub struct AcpProcess {
     permissions: Option<crate::permissions::PermissionPolicy>,
     /// From [`ProcessSpec::asker`].
     asker: Option<crate::permissions::PermissionAsker>,
+    /// The `_meta` a session with no [`Self::permissions`] policy opens with, from
+    /// [`Self::with_session_meta`].
+    session_meta: Option<Value>,
     /// What the app said about each tool call still in flight, so a prompt that names only the
     /// call can be judged by what it is.
     tool_calls: OpenToolCalls,
@@ -332,6 +335,7 @@ impl AcpProcess {
             approved_tool_server: None,
             permissions: spec.permissions.clone(),
             asker: spec.asker.clone(),
+            session_meta: None,
             tool_calls: OpenToolCalls::default(),
             declined: Vec::new(),
         })
@@ -341,6 +345,14 @@ impl AcpProcess {
     #[must_use]
     pub(crate) fn approving_tools_of(mut self, server: &str) -> Self {
         self.approved_tool_server = Some(server.to_owned());
+        self
+    }
+
+    /// Open the session with `meta` as its `_meta`: how a one-turn helper starts the app with only
+    /// what that turn needs (ADR 0059). A run agent's policy sets its own `_meta`, which wins.
+    #[must_use]
+    pub(crate) fn with_session_meta(mut self, meta: Value) -> Self {
+        self.session_meta = Some(meta);
         self
     }
 
@@ -834,9 +846,12 @@ impl AcpProcess {
     /// `session/new` or `session/load` params, plus the `_meta` that starts a run agent without
     /// the app tools that reach past the run (ADR 0044). Only for a session with a
     /// [`ProcessSpec::permissions`] policy: the Ask assistant and model discovery keep every tool.
+    /// A session without one carries the `_meta` it was given, if any ([`Self::with_session_meta`]).
     fn session_params(&self, mut params: Value) -> Value {
         if let Some(policy) = &self.permissions {
             params["_meta"] = policy.agent_meta();
+        } else if let Some(meta) = &self.session_meta {
+            params["_meta"] = meta.clone();
         }
         params
     }
@@ -3834,6 +3849,23 @@ mod tests {
             .run_session("ask", "", "hello", &archive, Duration::from_secs(2))
             .await
             .expect("a session with no policy keeps every tool");
+
+        // ADR 0059: a one-turn helper opens with the `_meta` it was given, and only that.
+        let lean = json!({"systemPrompt": "Reply with JSON only.", "claudeCode": {"options": {"tools": []}}});
+        let given = serde_json::to_string(&lean).expect("meta");
+        let helper = run(
+            script(
+                "lean",
+                &format!(r#"case "$request" in *'"_meta":{given}'*) ;; *) exit 9 ;; esac"#),
+            ),
+            None,
+        );
+        AcpProcess::spawn(&helper)
+            .expect("spawn")
+            .with_session_meta(lean)
+            .run_session("ask", "", "hello", &archive, Duration::from_secs(2))
+            .await
+            .expect("the helper's session/new carried its _meta");
     }
 
     /// ADR 0048: the daemon's own variables stay with the daemon; the operator's reach the app.

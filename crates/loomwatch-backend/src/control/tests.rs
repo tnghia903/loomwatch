@@ -443,15 +443,18 @@ async fn the_person_chooses_the_app_and_model_a_conversation_uses(pool: PgPool) 
     }
 }
 
-/// ADR 0059: one turn of the Ask app, with no tools, returns each agent's instructions without the
-/// removed source; nothing is written and no conversation is left open.
+/// ADR 0059: one turn of the Ask app, with no tools, answers with edits to numbered sentences, and
+/// the daemon returns each changed agent's instructions with them made: every sentence the app didn't
+/// name, and the spacing between, stays as it was. Nothing is written and no conversation is left
+/// open.
 #[sqlx::test(migrations = "../../migrations")]
 async fn removing_a_source_rewrites_the_instructions_that_named_it(pool: PgPool) {
     let fixture = Fixture::start(Some(EventArchive::from_pool(pool)), None).await;
     let removed = |name: &str| json!({"name": name, "kind": "Notion page"});
     let agents = json!([
-        {"id": "scope", "name": "Project scope", "role": "Establish the project's problem. Locate the EKIS page through the connected Notion tools. Reply with a brief."},
+        {"id": "scope", "name": "Project scope", "role": "Establish the project's problem from the EKIS page. Locate the EKIS page through the connected Notion tools.\n\nReply with a brief.  Keep it short.\n"},
         {"id": "plan", "name": "Plan writer", "role": "Maintain the plan on the canonical EKIS page."},
+        {"id": "writer", "name": "Writer", "role": "Write the report. Cite sources."},
     ]);
 
     let (status, answer) = fixture
@@ -464,8 +467,9 @@ async fn removing_a_source_rewrites_the_instructions_that_named_it(pool: PgPool)
     assert_eq!(answer["appName"], "Offline assistant");
     assert_eq!(
         answer["agents"],
-        json!([{"id": "scope", "role": "Establish the project's problem. Reply with a brief."}]),
-        "an agent left with no instructions is not rewritten to nothing"
+        json!([{"id": "scope", "role": "Establish the project's problem.\n\nReply with a brief.  Keep it short.\n"}]),
+        "an agent left with no instructions is not rewritten to nothing, one with no edits is not \
+         returned, and the rest of scope's instructions are byte for byte what they were"
     );
     assert!(
         fixture.control.inner.conversations.read().await.is_empty(),
