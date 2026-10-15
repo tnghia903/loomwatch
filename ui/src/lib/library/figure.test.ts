@@ -15,6 +15,9 @@ describe('what each part of the workbench stands for', () => {
     expect(partOfNode(['card_2_face', 'card_2', 'pegboard', 'scene'])).toBe('skills')
     expect(partOfNode(['key_web_tag', 'key_web', 'hook_web', 'hooks', 'pegboard'])).toBe('keys')
     expect(partOfNode(['hooks_bar', 'hooks', 'pegboard'])).toBe('keys')
+    // The file holder is made on the page, not in the model: its steps, sides and what stands in it.
+    expect(partOfNode(['reads_1_folder', 'reads_1', 'reads'])).toBe('reads')
+    expect(partOfNode(['reads_step_3', 'reads'])).toBe('reads')
     expect(partOfNode(['dish_bowl', 'dish', 'bench'])).toBe('keys')
     expect(partOfNode(['envelope_seal', 'envelope', 'tray', 'bench'])).toBe('reply')
   })
