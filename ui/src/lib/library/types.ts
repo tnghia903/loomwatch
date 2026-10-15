@@ -21,6 +21,8 @@ export interface LibrarySource {
   /** Only presets pre-fill these — §4.5: "From a preset, both are already filled". */
   role?: string
   model?: string
+  /** How hard that model thinks; it goes with the model. */
+  thinkingEffort?: string
   /** Skills a job brings with it (ADR 0030/0031); delivered on whatever app the agent runs. */
   capabilities?: CapabilityRef[]
   /** What the agent it places may do without asking (ADR 0037). */

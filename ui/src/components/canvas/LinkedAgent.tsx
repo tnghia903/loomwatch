@@ -16,6 +16,8 @@ export interface LinkedAgentProps {
   /** The open team, so Your agents can offer the way back to it. */
   teamPath?: string | null
   headClassName?: string
+  /** Offer "Edit in Your agents"; off where that agent is already open below. */
+  showEdit?: boolean
 }
 
 const list = (items: readonly string[]) => items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
@@ -26,7 +28,7 @@ const list = (items: readonly string[]) => items.length <= 1 ? items.join('') : 
  * The panel keeps the copied fields read-only while the link stands; editing happens in Your
  * agents, or here after "Make it this team's own".
  */
-export function LinkedAgent({ agent, link, readOnly = false, onApply, onUnlink, teamPath, headClassName }: LinkedAgentProps) {
+export function LinkedAgent({ agent, link, readOnly = false, onApply, onUnlink, teamPath, headClassName, showEdit = true }: LinkedAgentProps) {
   const id = agent.from?.agent ?? ''
   const [versions, setVersions] = useState<JobVersion[] | null>(null)
   useEffect(() => {
@@ -60,7 +62,7 @@ export function LinkedAgent({ agent, link, readOnly = false, onApply, onUnlink, 
         </div>
       )}
       <div className="linked-agent-acts">
-        {link.job && <a className="btn" href={`/agents/${encodeURIComponent(id)}${teamPath ? `?team=${encodeURIComponent(teamPath)}` : ''}`}><ExternalLink size={13} aria-hidden="true" />Edit in Your agents</a>}
+        {link.job && showEdit && <a className="btn" href={`/agents/${encodeURIComponent(id)}${teamPath ? `?team=${encodeURIComponent(teamPath)}` : ''}`}><ExternalLink size={13} aria-hidden="true" />Edit in Your agents</a>}
         <button type="button" className="btn" disabled={readOnly} onClick={onUnlink} title="Keep it exactly as it is now, with no link to Your agents"><Unlink size={13} aria-hidden="true" />Make it this team’s own</button>
       </div>
       <p className="t-meta linked-agent-note">Its name, instructions, app and model, skills and what it may do without asking come from Your agents. Where it works, its knowledge and its place in this team stay this team’s own.</p>

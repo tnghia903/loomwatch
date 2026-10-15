@@ -9,9 +9,9 @@ const claude: DetectedHarness = { id: 'claude', name: 'Claude Code', command: 'c
 
 describe('the agent builder’s draft', () => {
   it('saves what it shows and reads back the same', () => {
-    const draft = { name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', appId: 'claude', model: 'sonnet', skills: ['source-check'], allow: { web: true, edits: false } }
+    const draft = { name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', appId: 'claude', model: 'sonnet', effort: '', skills: ['source-check'], allow: { web: true, edits: false }, figure: { kind: 'button' as const, color: 'sage' as const } }
     const spec = specFromDraft(draft, 'First cut')
-    expect(spec).toEqual({ name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', icon: 'review', apps: ['claude'], model: 'sonnet', skills: ['source-check'], allow: { web: true }, note: 'First cut' })
+    expect(spec).toEqual({ name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', icon: 'review', figure: { kind: 'button', color: 'sage' }, apps: ['claude'], model: 'sonnet', skills: ['source-check'], allow: { web: true }, note: 'First cut' })
     expect(draftFromJob(spec)).toEqual({ ...draft, allow: { web: true } })
   })
 
@@ -21,6 +21,27 @@ describe('the agent builder’s draft', () => {
     expect(draftChanged({ ...saved, does: 'Checks stories' }, saved)).toBe(true)
     expect(makesNewVersion({ ...saved, allow: { commands: true } }, saved)).toBe(true)
     expect(makesNewVersion({ ...saved, skills: ['a'] }, saved)).toBe(true)
+    // Its figure is only how it looks in Your agents: worth saving, never a new version.
+    const dressed = { ...saved, figure: { kind: 'spool' as const, color: 'sky' as const } }
+    expect(makesNewVersion(dressed, saved)).toBe(false)
+    expect(draftChanged(dressed, saved)).toBe(true)
+    expect(draftChanged({ ...dressed, figure: { kind: 'spool' as const, color: 'rose' as const } }, dressed)).toBe(true)
+    expect(draftChanged({ ...dressed }, dressed)).toBe(false)
+  })
+
+  it('reads a figure it does not know as none, so it wears the one its id picks', () => {
+    expect(draftFromJob({ name: 'Reader', instructions: 'Check.', figure: { kind: 'robot', color: 'sage' } as never }).figure).toBeNull()
+    expect(specFromDraft(draftFromJob({ name: 'Reader', instructions: 'Check.' }))).not.toHaveProperty('figure')
+  })
+
+  it('keeps a thinking effort with its model, and a new one is a new version', () => {
+    const saved = draftFromJob({ name: 'Reader', instructions: 'Check.', apps: ['claude'], model: 'sonnet', thinkingEffort: 'high' })
+    expect(saved.effort).toBe('high')
+    expect(specFromDraft(saved)).toMatchObject({ model: 'sonnet', thinkingEffort: 'high' })
+    expect(makesNewVersion({ ...saved, effort: 'low' }, saved)).toBe(true)
+    // With no model of its own, there is no effort to keep: efforts belong to one model.
+    expect(specFromDraft({ ...saved, model: '' })).not.toHaveProperty('thinkingEffort')
+    expect(draftFromJob({ name: 'Reader', instructions: 'Check.', apps: ['claude'], thinkingEffort: 'high' }).effort).toBe('')
   })
 
   it('starts a new agent from a built-in job on the app that job prefers', () => {
@@ -30,8 +51,14 @@ describe('the agent builder’s draft', () => {
     expect(draft.allow.web).toBe(true)
   })
 
+  it('tries it with its thinking effort', () => {
+    const draft = { name: 'Reader', does: '', instructions: 'Check.', appId: 'claude', model: 'opus', effort: 'max', skills: [], allow: {}, figure: null }
+    const team = parse(benchTeamYaml(draft, claude, 'opus', 'reader')) as { agents: Record<string, unknown>[] }
+    expect(team.agents[0]).toMatchObject({ model: 'opus', thinkingEffort: 'max' })
+  })
+
   it('tries it as a team of one, with the model the app advertises', () => {
-    const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', appId: 'claude', model: '', skills: ['house-style'], allow: { web: true } }
+    const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', appId: 'claude', model: '', effort: '', skills: ['house-style'], allow: { web: true }, figure: null }
     const team = parse(benchTeamYaml(draft, claude, 'sonnet', 'release-notes-writer')) as Record<string, unknown>
     expect(team).toEqual({
       schemaVersion: 1,

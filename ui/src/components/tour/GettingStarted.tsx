@@ -2,7 +2,7 @@ import { ArrowLeft, ArrowRight, X } from 'lucide-react'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 import { placeCard, type Box } from '../../lib/tour/place'
-import { FIRST_WORKSPACE_STEP, stepIndex, TOUR_STEPS, type TourContext, type TourStepId, type TourStepView } from '../../lib/tour/steps'
+import { stepIndex, TOUR_STEPS, type TourContext, type TourScreen, type TourStepId, type TourStepView } from '../../lib/tour/steps'
 import { endTour, goToStep, useTourState } from '../../lib/tour/store'
 
 /** How often the guide re-reads the page: where its target is, and whether an action happened. */
@@ -13,7 +13,7 @@ const CARD_WIDTH = 320
 /** Numbered steps: everything between the welcome card and the closing one. */
 const NUMBERED = TOUR_STEPS.filter((step) => step.id !== 'welcome' && step.id !== 'done')
 
-type Screen = 'home' | 'workspace'
+type Screen = Exclude<TourScreen, 'any'>
 type Viewport = { width: number; height: number }
 
 interface Snapshot {
@@ -24,15 +24,30 @@ interface Snapshot {
   /** The highlighted element, in viewport pixels; null for a centred card. */
   target: Box | null
   viewport: Viewport
-  /** A team step while Home is showing: the guide waits for the operator to open a team. */
+  /** A step for a screen the operator has left, with no step ahead for this one: the guide waits. */
   resume: boolean
 }
 
 function readScreen(): Screen | null {
   if (document.querySelector('[data-tour="workspace"]')) return 'workspace'
+  if (document.querySelector('[data-tour="agents"]')) return 'agents'
   if (document.querySelector('[data-tour="home"]')) return 'home'
   return null
 }
+
+/** The next step after `index` that is shown on `screen`, or -1 when none is left for it. */
+function aheadOn(screen: Screen, index: number): number {
+  return TOUR_STEPS.findIndex((candidate, at) => at > index && candidate.screen === screen)
+}
+
+/**
+ * What the guide says while it waits for the operator to come back to a step's screen. Only Home and
+ * a team can be left behind like that: Your agents comes before both, so leaving it moves the guide on.
+ */
+const RESUME = {
+  home: { title: 'Go to Your teams to carry on', body: 'The next step is on Home, where your teams are. Go to Your teams to carry on.', advance: 'next' },
+  workspace: { title: 'Open a team to carry on', body: 'The rest of the guide happens inside a team. Open one of your teams to carry on, or start again by creating a new team.', advance: 'next' },
+} satisfies Partial<Record<Screen, TourStepView>>
 
 function shown(element: Element): boolean {
   const rect = element.getBoundingClientRect()
@@ -64,9 +79,9 @@ function advanceFrom(index: number, to = index + 1) {
 /**
  * "Skip this step" goes to the next step this screen can show. A step whose target is not on screen
  * is passed over too: it would point at nothing and, with a `whenMissing`, send the operator straight
- * back to the step they skipped. Skipping New team would otherwise land on the dialog New team opens,
- * and skipping Run team on the request box that Build does not have. A step for the other screen
- * stops the search; the guide already knows how to wait there for a team to open.
+ * back to the step they skipped. Skipping Run team would otherwise land on the request box that
+ * Workflow does not have. A step for another screen stops the search; the guide already knows how to
+ * carry on there, or wait for that screen to open.
  */
 function skipFrom(index: number, context: TourContext) {
   const screen = readScreen()
@@ -89,7 +104,7 @@ export interface GettingStartedProps {
  * The getting-started guide: one card at a time, pointing at the part of the screen it explains.
  *
  * It never blocks the page. The dim and the ring let every click through, because most steps ask
- * the operator to do the real thing (create a team, press Run team, type a request), and the guide
+ * the operator to do the real thing (build an agent, create a team, type a request), and the guide
  * moves on when it sees that happen. It reads the page rather than being told, so the screens it
  * explains need nothing but `data-tour` names.
  */
@@ -105,20 +120,25 @@ export function GettingStarted({ readyApps, appsLoading }: GettingStartedProps) 
   useEffect(() => {
     if (!step) return
     let missingSince: number | null = null
-    // Bring the target into view once per step (the run view, for one, grows as a run starts and
-    // pushes its stages below the fold); after that, scrolling is the operator's.
-    let scrolled = false
+    // Bring the target into view once per card (the run view, for one, grows as a run starts and
+    // pushes its stages below the fold, and a try's answer grows below the test bench); after that,
+    // scrolling is the operator's. A step that changes what it says is a new card.
+    let scrolledFor: string | null = null
     const tick = () => {
       const screen = readScreen()
       const viewport = { width: window.innerWidth, height: window.innerHeight }
       let next: Snapshot = { stepId: step.id, screen, view: null, target: null, viewport, resume: false }
       if (screen === null) {
         // Between pages ("Opening team…"): say nothing rather than point at what is leaving.
-      } else if (step.screen === 'home' && screen === 'workspace') {
-        // A team is open, whether just created or picked from the list: carry on inside it.
-        goToStep(FIRST_WORKSPACE_STEP)
-        return
-      } else if (step.screen === 'workspace' && screen === 'home') {
+      } else if (step.screen !== 'any' && step.screen !== screen) {
+        // The operator moved on: the builder opened, or a team, whether just created or picked from
+        // the list. Carry on at the next step for this screen. With none ahead (they went back to a
+        // screen the guide is done with), wait for them to return.
+        const ahead = aheadOn(screen, index)
+        if (ahead >= 0) {
+          goToStep(TOUR_STEPS[ahead].id)
+          return
+        }
         next = { ...next, resume: true }
       } else {
         const view = step.view(context.current)
@@ -136,11 +156,12 @@ export function GettingStarted({ readyApps, appsLoading }: GettingStartedProps) 
         } else {
           missingSince = null
         }
-        if (found && !scrolled && outOfView(found.box, viewport)) {
-          scrolled = true
+        if (found && scrolledFor !== view.title && outOfView(found.box, viewport)) {
+          scrolledFor = view.title
           // Instant, not smooth: a smooth scroll only advances while the page paints, so a tab in the
-          // background would be left with its card pointing below the fold.
-          found.element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' })
+          // background would be left with its card pointing below the fold. A target taller than the
+          // screen shows its top, where reading it starts, rather than its middle.
+          found.element.scrollIntoView({ block: found.box.height > viewport.height ? 'start' : 'center', inline: 'nearest', behavior: 'auto' })
           return
         }
         next = { ...next, view, target: found?.box ?? null }
@@ -158,15 +179,18 @@ export function GettingStarted({ readyApps, appsLoading }: GettingStartedProps) 
 
   if (!step || !snapshot || snapshot.stepId !== step.id || snapshot.screen === null) return null
   if (snapshot.resume) {
+    const home = step.screen === 'home'
     return (
       <TourCard
         key="resume"
         corner
         eyebrow="Getting started"
-        view={{ title: 'Open a team to carry on', body: 'The rest of the guide happens inside a team. Open one of your teams to carry on, or start again by creating a new team.', advance: 'next' }}
+        view={home ? RESUME.home : RESUME.workspace}
         target={null}
         viewport={snapshot.viewport}
-        actions={<button type="button" className="btn" onClick={() => goToStep('new-team')}>Start again</button>}
+        actions={home
+          ? <a className="btn" href="/">Your teams</a>
+          : <button type="button" className="btn" onClick={() => goToStep('new-team')}>Start again</button>}
       />
     )
   }

@@ -36,7 +36,12 @@ function read(): TourState | null {
   let state: TourState | null = null
   try {
     const parsed = raw ? JSON.parse(raw) as Partial<TourState> : null
-    if (parsed && ['active', 'finished', 'dismissed'].includes(parsed.status ?? '') && STEP_IDS.has(parsed.step ?? '')) state = parsed as TourState
+    if (parsed && ['active', 'finished', 'dismissed'].includes(parsed.status ?? '')) {
+      if (STEP_IDS.has(parsed.step ?? '')) state = parsed as TourState
+      // A guide closed or finished on a step since removed stays closed: the step only matters
+      // while it is open, and the guide must not be offered again because its steps changed.
+      else if (parsed.status !== 'active') state = { status: parsed.status!, step: TOUR_STEPS[0].id }
+    }
   } catch { /* an unreadable value is the same as none */ }
   cached = { raw, state }
   return state

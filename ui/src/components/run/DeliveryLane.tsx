@@ -24,7 +24,7 @@ import { RunReceipt } from './RunReceipt'
 import { WeftBar } from './WeftBar'
 import type { WeftKnot } from '../../lib/story/weft'
 import { markState } from '../../lib/story/mark'
-import { AgentMark } from '../ui/AgentMark'
+import { AgentPortrait } from '../agents/AvatarFace'
 
 export interface DeliveryLaneProps extends RunColumnProps {
   harnessLabels?: ReadonlyMap<string, string>
@@ -307,7 +307,7 @@ export function DeliveryLane({
                         onClick={() => select(node.id)}
                       >
                         <span className="delivery-stage-number">{index + 1}</span>
-                        <AgentMark id={node.id} name={agent.name} size={22} operator={agent.kind === 'operator'} state={planned ? 'still' : markState(runtime)} events={runtime?.eventCount ?? 0} animate={mode === 'live'} />
+                        <AgentPortrait id={node.id} name={agent.name} size={30} operator={agent.kind === 'operator'} state={planned ? 'still' : markState(runtime)} events={runtime?.eventCount ?? 0} animate={mode === 'live'} />
                         <span className="delivery-stage-name">
                           <strong>{agent.name}</strong>
                           <small>{agent.role || 'Team agent'}</small>

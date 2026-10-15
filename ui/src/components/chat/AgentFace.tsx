@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { createPortal } from 'react-dom'
 
 import { useAgentFaces, type AgentFacts } from '../../lib/chat/faces'
+import { AvatarFace } from '../agents/AvatarFace'
 
 /** How long the pointer rests on a face before its card opens, so passing over the team opens nothing. */
 const HOVER_DELAY_MS = 280
@@ -127,7 +128,7 @@ export function AgentCard({ facts }: { facts: AgentFacts }) {
   return (
     <>
       <div className="tc-agent-card-head">
-        <span className={`tc-member ${facts.state}`}><i className={`chat-avatar hue-${facts.hue}`} style={{ width: 32, height: 32, fontSize: 11 }} aria-hidden="true">{initials(facts.name)}</i></span>
+        <span className={`tc-member ${facts.state}`}><AvatarFace id={facts.id} hue={facts.hue} size={32} fontSize={11} text={initials(facts.name)} /></span>
         <span className="tc-agent-card-who">
           <b className={`hue-${facts.hue}`}>{facts.name}</b>
           <span className={`tc-agent-card-state ${facts.state}`}>{facts.stateWords}{facts.step && ` · step ${facts.step.at} of ${facts.step.of}`}</span>

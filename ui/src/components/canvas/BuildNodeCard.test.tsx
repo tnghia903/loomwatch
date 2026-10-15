@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { figureFor, figureStill } from '../../lib/library/figures'
+import type { SavedJob } from '../../lib/library/jobs'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
+import { SavedAgentsContext } from '../agents/figureContext'
 import { CanvasActionsContext, type CanvasActions } from './CanvasActionsContext'
 import { BuildAgentCard, BuildCapabilityCard } from './BuildNodeCard'
 
@@ -94,6 +97,24 @@ describe('BuildAgentCard on the Build canvas', () => {
 
 // The Run canvas ("Full trace") draws the same card, so these assert that what a run adds lands
 // on it — and that the card is still recognisably the one the operator composed.
+describe('BuildAgentCard wears the agent’s figure', () => {
+  it('is the one it wears in Your agents when it came from there, and the one its id picks when it is the team’s own', () => {
+    const editor: SavedJob = { id: 'editor', file: '.jobs/editor.yaml', name: 'Editor', instructions: 'Edit.', figure: { kind: 'button', color: 'butter' } }
+    // Placed from Your agents as "editor-2": it still wears Editor's figure, found by its link.
+    const { container, unmount } = render(
+      <SavedAgentsContext.Provider value={[editor]}>
+        <CanvasActionsContext.Provider value={actions}>
+          <BuildAgentCard id="editor-2" data={{ ...nodeData, agent: { ...nodeData.agent, id: 'editor-2', from: { agent: 'editor', version: 1 } } }} type="agent" dragging={false} zIndex={0} selectable deletable selected={false} draggable isConnectable positionAbsoluteX={0} positionAbsoluteY={0} />
+        </CanvasActionsContext.Provider>
+      </SavedAgentsContext.Provider>,
+    )
+    expect(container.querySelector('.build-node-figure')).toHaveAttribute('src', figureStill({ kind: 'button', color: 'butter' }))
+    unmount()
+    const own = renderCard(nodeData)
+    expect(own.container.querySelector('.build-node-figure')).toHaveAttribute('src', figureStill(figureFor('ada')))
+  })
+})
+
 describe('BuildAgentCard while a run is shown', () => {
   it('keeps the Build identity row and adds the task row, model and pipeline ordinal', () => {
     const { container } = renderCard({ ...nodeData, harnessLabel: 'Claude Code', runtime })

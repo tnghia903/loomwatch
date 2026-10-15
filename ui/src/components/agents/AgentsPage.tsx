@@ -4,6 +4,7 @@ import { Moon, Plus, Sun, UserRound } from 'lucide-react'
 import type { DetectedHarness } from '../../lib/harnesses'
 import type { DetectedCapability } from '../../lib/library/client'
 import { draftFromJob } from '../../lib/library/draft'
+import { figureFor } from '../../lib/library/figures'
 import { useSavedJobs, versionOf } from '../../lib/library/jobs'
 import { ROLE_PRESETS } from '../../lib/library/roles'
 import { useAgentUses } from '../../lib/library/uses'
@@ -29,19 +30,19 @@ export function AgentsPage(props: AgentsPageProps) {
   const route = useAgentsRoute()
   const { resolved, toggle } = useTheme()
   return (
-    <div className="lw-home lw-agents">
+    <div className="lw-home lw-agents" data-tour="agents">
       <div className="ground" aria-hidden="true" />
       <header className="home-top">
         <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark width={46} height={20} /><span>LoomWatch</span></a>
         <span className="home-top-acts">
-          <a className="btn" href="/">Your teams</a>
+          <a className="btn" href="/" data-tour="your-teams">Your teams</a>
           <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
         </span>
       </header>
       <main className="home-main agents-main">
         {route.kind === 'list'
           ? <AgentsList harnesses={props.harnesses} />
-          : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.kind === 'agent' ? route.team : null} {...props} />}
+          : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} {...props} />}
       </main>
     </div>
   )
@@ -71,12 +72,12 @@ function AgentsList({ harnesses }: { harnesses: DetectedHarness[] }) {
         <h1 className="t-display">Your agents</h1>
         <p>Build an agent once and try it on its own. Then add it to any team: each team keeps the version it was given until you update it there.</p>
         <div className="home-hero-acts">
-          <button type="button" className="btn btn-primary btn-lg" onClick={() => setChoosing((value) => !value)} aria-expanded={choosing}><Plus size={16} aria-hidden="true" />New agent</button>
+          <button type="button" className="btn btn-primary btn-lg" onClick={() => setChoosing((value) => !value)} aria-expanded={choosing} data-tour="new-agent"><Plus size={16} aria-hidden="true" />New agent</button>
         </div>
       </section>
 
       {choosing && (
-        <section className="agents-start" aria-label="Start a new agent">
+        <section className="agents-start" aria-label="Start a new agent" data-tour="agent-start">
           <h2>Start from a job</h2>
           <p className="t-meta">Each job comes with working instructions you can change. Or start blank and write your own.</p>
           <ul className="agents-start-grid">
@@ -101,7 +102,7 @@ function AgentsList({ harnesses }: { harnesses: DetectedHarness[] }) {
             {jobs.map((job) => (
               <li key={job.id}>
                 <button type="button" className="home-card agent-card" onClick={() => open(`/agents/${encodeURIComponent(job.id)}`)}>
-                  <AgentBadge compact markId={job.id} draft={draftFromJob(job)} harness={harnesses.find((harness) => harness.id === job.apps?.[0]) ?? null} version={versionOf(job)} usedIn={usage.get(job.id)} />
+                  <AgentBadge compact markId={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} harness={harnesses.find((harness) => harness.id === job.apps?.[0]) ?? null} version={versionOf(job)} usedIn={usage.get(job.id)} />
                 </button>
               </li>
             ))}

@@ -4,6 +4,7 @@ import { harnessProblem, KNOWN_HARNESSES, knownHarness } from '../../lib/harness
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
 import { removeJob, savedJobPreset, useSavedJobs, versionOf } from '../../lib/library/jobs'
 import { usedInRun, type UsedInRun } from '../../lib/library/observed'
+import { figureFor, figureStill, type FigureChoice } from '../../lib/library/figures'
 import { harnessForRole, ROLE_PRESETS, roleSource, type RoleIcon, type RolePreset } from '../../lib/library/roles'
 import type { CapabilityInventory, DetectedCapability } from '../../lib/library/client'
 import type { CapabilityDragPayload, CapabilityKind } from '../../lib/composer-layout/types'
@@ -110,6 +111,8 @@ interface PaletteItem {
   payload: object
   /** A saved job's id: the row offers to remove it. */
   jobId?: string
+  /** One of Your agents wears its figure here, as it does on Home and on the canvas. */
+  figure?: FigureChoice
   /** A skill, tool or knowledge source: the row offers its details. */
   capability?: { item: DetectedCapability; kind: CapabilityKind }
   /** What a click does instead of adding: a folder or file already has a card, so it is found. */
@@ -282,7 +285,7 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
   ] }
   // The operator's own jobs, saved from agents that worked (ADR 0030). Once there are any they lead
   // the list: someone who saved a job comes back for it more than for a built-in one.
-  const yours = { name: YOURS, items: saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), harnesses, job.id); return { ...item, engine: `v${versionOf(job)} · ${item.engine}` } }) }
+  const yours = { name: YOURS, items: saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), harnesses, job.id); return { ...item, engine: `v${versionOf(job)} · ${item.engine}`, figure: figureFor(job.id, job.figure) } }) }
   const groups: { name: string; items: PaletteItem[] }[] = [
     ...(yours.items.length || saved.problems.length ? [yours, builtIn] : [builtIn]),
     // The same agents without a job: an app and an empty brief, for operators who write their own.
@@ -314,7 +317,7 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
     removeJob(item.jobId).catch((error: unknown) => setRemoveError(error instanceof Error ? error.message : String(error)))
   }
   const row = (item: PaletteItem, i: number) => {
-    const add = <button key={`${item.name}-${i}`} className={item.nested ? 'palette-item nested' : 'palette-item'} disabled={item.disabled} title={item.engine ? `${item.detail} · ${item.engine}` : item.detail} draggable={!item.disabled && item.draggable !== false} onDragStart={e => { e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData(item.mime, JSON.stringify(item.payload)); e.dataTransfer.setData('text/plain', item.name); onDragStateChange?.(true) }} onDragEnd={() => onDragStateChange?.(false)} onClick={() => { if (item.onActivate) item.onActivate(); else window.dispatchEvent(new CustomEvent(item.event, { detail: JSON.stringify(item.payload) })); if (narrow()) setCollapsed(true) }}><GripVertical size={13} /><span className="palette-icon"><item.Icon size={15} /></span><span><strong>{item.name}</strong><small>{item.detail}</small>{item.engine && <em className={item.quiet ? 'palette-engine quiet' : 'palette-engine'}>{item.engine}</em>}</span>{item.Trailing ? <item.Trailing size={13} aria-hidden="true" /> : <Plus size={13} />}</button>
+    const add = <button key={`${item.name}-${i}`} className={item.nested ? 'palette-item nested' : 'palette-item'} disabled={item.disabled} title={item.engine ? `${item.detail} · ${item.engine}` : item.detail} draggable={!item.disabled && item.draggable !== false} onDragStart={e => { e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData(item.mime, JSON.stringify(item.payload)); e.dataTransfer.setData('text/plain', item.name); onDragStateChange?.(true) }} onDragEnd={() => onDragStateChange?.(false)} onClick={() => { if (item.onActivate) item.onActivate(); else window.dispatchEvent(new CustomEvent(item.event, { detail: JSON.stringify(item.payload) })); if (narrow()) setCollapsed(true) }}><GripVertical size={13} />{item.figure ? <img className="palette-figure" src={figureStill(item.figure)} alt="" width={38} height={38} loading="lazy" decoding="async" /> : <span className="palette-icon"><item.Icon size={15} /></span>}<span><strong>{item.name}</strong><small>{item.detail}</small>{item.engine && <em className={item.quiet ? 'palette-engine quiet' : 'palette-engine'}>{item.engine}</em>}</span>{item.Trailing ? <item.Trailing size={13} aria-hidden="true" /> : <Plus size={13} />}</button>
     if (item.capability && onInspectCapability) {
       const { item: capability, kind } = item.capability
       return <div key={`${item.name}-${i}`} className="palette-job">

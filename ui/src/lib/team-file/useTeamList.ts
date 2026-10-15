@@ -2,10 +2,24 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { fetchTeamsDiscovery, teamDisplayName, teamSummaries, type TeamSummary } from './client'
 
-/** Open a team by its path. A full navigation, so every per-team state starts clean. */
-/** Open a team: in Build, or — for a team with history — in its chat (ADR 0051). */
-export function openTeam(path: string, view: 'build' | 'chat' = 'build') {
-  window.location.assign(`/?path=${encodeURIComponent(path)}${view === 'chat' ? '&view=chat' : ''}`)
+/** A team's three views, in the order you work through them: its agents, its workflow, its chat. */
+export type TeamView = 'agents' | 'workflow' | 'chat'
+
+/**
+ * Open a team by its path, on one of its views. A full navigation, so every per-team state starts
+ * clean. Workflow is the address with no `view`.
+ */
+export function openTeam(path: string, view: TeamView = 'workflow') {
+  window.location.assign(`/?path=${encodeURIComponent(path)}${view === 'workflow' ? '' : `&view=${view}`}`)
+}
+
+/**
+ * Where a team picks up: in its chat once it has one (ADR 0051); with no agents yet, on its agents,
+ * the first thing to set up; otherwise on its workflow.
+ */
+export function teamViewFor(team: Pick<TeamSummary, 'agentCount' | 'problem'>, hasChat: boolean): TeamView {
+  if (hasChat) return 'chat'
+  return team.agentCount === 0 && !team.problem ? 'agents' : 'workflow'
 }
 
 /** How often a failed list asks again: the usual cause is a daemon that is being restarted. */

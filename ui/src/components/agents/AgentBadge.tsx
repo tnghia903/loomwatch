@@ -3,6 +3,7 @@ import { Check, FilePen, Globe, SquareTerminal } from 'lucide-react'
 import type { DetectedHarness } from '../../lib/harnesses'
 import type { AgentDraft } from '../../lib/library/draft'
 import { agentFromDraft } from '../../lib/library/draft'
+import { figureStill, figureWords, type FigureChoice } from '../../lib/library/figures'
 import { actsWithoutAsking, ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { AgentMark } from '../ui/AgentMark'
@@ -12,10 +13,14 @@ const ICONS: Record<AllowSwitch, typeof Globe> = { web: Globe, edits: FilePen, c
 export interface AgentBadgeProps {
   /** Stable id for the woven mark: the saved agent's id, else its name. */
   markId: string
+  /** The figure it wears in Your agents: its portrait leads the card. Without one, its woven mark does. */
+  figure?: FigureChoice
   draft: AgentDraft
   harness: DetectedHarness | null
   /** The model's name to show; the id when no name is known. */
   modelName?: string
+  /** Its thinking effort's name, when it has one other than the app's default. */
+  effortName?: string
   version?: number | null
   /** Teams that use it, and how many of those run on a schedule. */
   usedIn?: { teams: number; scheduled: number; behind: number }
@@ -27,7 +32,7 @@ export interface AgentBadgeProps {
  * right now — what it carries, and where it is used. It is the staff badge of the design notes:
  * an access card with an "after hours" rule, because a scheduled team has nobody to answer.
  */
-export function AgentBadge({ markId, draft, harness, modelName, version, usedIn, compact = false }: AgentBadgeProps) {
+export function AgentBadge({ markId, figure, draft, harness, modelName, effortName, version, usedIn, compact = false }: AgentBadgeProps) {
   const agent = agentFromDraft(draft, harness)
   const wild = actsWithoutAsking(agent)
   const scheduled = (usedIn?.scheduled ?? 0) > 0
@@ -36,11 +41,13 @@ export function AgentBadge({ markId, draft, harness, modelName, version, usedIn,
   return (
     <div className={`agent-badge${compact ? ' compact' : ''}`}>
       <div className="agent-badge-head">
-        <AgentMark id={markId} name={name} size={compact ? 26 : 34} animate={false} />
+        {figure
+          ? <img className="agent-badge-figure" src={figureStill(figure)} alt={`${name}, a ${figureWords(figure)}`} width={compact ? 84 : 92} height={compact ? 84 : 92} loading="lazy" decoding="async" />
+          : <AgentMark id={markId} name={name} size={compact ? 26 : 34} animate={false} />}
         <div className="agent-badge-who">
           <strong>{name}</strong>
           {draft.does.trim() && <span className="agent-badge-does">{draft.does.trim()}</span>}
-          <span className="agent-badge-app t-mono-sm">{harness ? harness.name : 'No app chosen'}{harness ? ` · ${modelName || draft.model || 'its current model'}` : ''}</span>
+          <span className="agent-badge-app t-mono-sm">{harness ? harness.name : 'No app chosen'}{harness ? ` · ${modelName || draft.model || 'its current model'}${effortName ? ` · ${effortName.toLowerCase()} effort` : ''}` : ''}</span>
         </div>
         {version != null && <span className="agent-badge-version" title={`Version ${version}`}>v{version}</span>}
       </div>

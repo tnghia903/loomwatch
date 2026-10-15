@@ -2,18 +2,24 @@ import { listNames } from '../format'
 import { currentRun } from './currentRun'
 
 /**
- * The getting-started guide, one card per step.
+ * The getting-started guide, one card per step, in the order the work is done: build an agent in
+ * Your agents, put it in a team and see its workflow, then give the team work in its chat.
  *
  * Steps point at the screen through `data-tour` attributes, never through styling class names,
  * so restyling a panel cannot silently detach the guide from it. An `action` step waits for the
- * operator to do the real thing (create the team, run it), and its `done` check reads the page
- * to see that they did; a `next` step only explains what is on screen.
+ * operator to do the real thing (build an agent, create the team, run it), and its `done` check reads
+ * the page to see that they did; a `next` step only explains what is on screen. A step can also
+ * change what it says as the page changes, e.g. from "click New team" to "fill in the dialog".
  */
 export type TourStepId =
-  | 'welcome' | 'apps' | 'new-team' | 'create' | 'team' | 'run-team' | 'ask' | 'watch' | 'review' | 'needs-you' | 'build' | 'done'
+  | 'welcome' | 'build-agent' | 'agent' | 'try' | 'save' | 'new-team' | 'team-agents' | 'workflow' | 'run-team' | 'ask' | 'watch' | 'review' | 'done'
 
-/** Where a step can be shown. A `home` step shown in a team skips ahead; see `GettingStarted`. */
-export type TourScreen = 'home' | 'workspace' | 'any'
+/**
+ * Where a step can be shown: Home, Your agents, or inside a team. When another screen is showing,
+ * the guide carries on at the next step for it, or waits for the operator to come back; see
+ * `GettingStarted`.
+ */
+export type TourScreen = 'home' | 'agents' | 'workspace' | 'any'
 
 export type TourSide = 'top' | 'bottom' | 'left' | 'right'
 
@@ -50,9 +56,8 @@ export interface TourStep {
   whenMissing?: TourStepId
 }
 
-/** An agent's card on Build's canvas (React Flow names the node type), or its stage in the Run view. */
+/** An agent's card on the Workflow canvas (React Flow names the node type). */
 const AGENT_CARD = '[data-tour="workspace"] .react-flow__node-agent'
-const STAGE_CARD = '[data-tour="stage"]'
 
 function present(selector: string): boolean {
   return document.querySelector(selector) !== null
@@ -63,6 +68,11 @@ function agentCount(): number {
   return Number(document.querySelector('[data-tour="workspace"]')?.getAttribute('data-tour-agents') ?? 0)
 }
 
+/** Which of the open team's views is showing: `agents`, `workflow` or `chat`. */
+function teamView(): string | null {
+  return document.querySelector('[data-tour="workspace"]')?.getAttribute('data-tour-view') ?? null
+}
+
 export const EXAMPLE_REQUEST = 'Give me three ideas for a weekend project, one sentence each.'
 
 export const TOUR_STEPS: readonly TourStep[] = [
@@ -71,73 +81,153 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'any',
     view: () => ({
       title: 'Welcome to LoomWatch',
-      body: 'LoomWatch runs a team of AI agents on your computer, using the AI apps you already have, and each team has its own chat where you work with it. This guide walks you through your first team and its first answer. You do each step yourself, and it takes about three minutes.',
+      body: 'LoomWatch puts AI agents to work as a team, on your computer, using the AI apps you already have. This guide takes you the whole way once: build an agent, put it in a team, then give the team work in its chat. You do each step yourself, and it takes about three minutes.',
       advance: 'start',
     }),
   },
   {
-    id: 'apps',
+    id: 'build-agent',
     screen: 'home',
-    view: ({ readyApps, appsLoading }) => ({
-      title: 'Your AI apps',
-      body: appsLoading
-        ? 'LoomWatch is looking for the AI apps on this computer. Your agents run inside them, signed in as you.'
-        : readyApps.length > 0
-          ? `LoomWatch found ${listNames(readyApps)}. Your agents run inside these apps, signed in as you, so there is nothing new to set up.`
-          : 'No AI app is ready yet. Set up an AI app shows how to install one and sign in. It notices on its own when the app is ready. You can keep going with the guide meanwhile.',
-      // The setup panel when it is open; the footer's app status otherwise.
-      target: ['[data-tour="app-setup"]', '[data-tour="apps"]'],
-      sides: ['top'],
-      advance: 'next',
-      dim: true,
-    }),
+    // Opening the builder is a new page, Your agents, where the guide carries on by itself.
+    view: ({ readyApps, appsLoading }) => !appsLoading && readyApps.length === 0
+      ? {
+          title: 'Set up an AI app first',
+          body: 'An agent works inside an AI app on this computer, and none is ready yet. Set up an AI app shows how to install one and sign in, and notices on its own when it is ready. Then click Build an agent.',
+          // The setup panel when it is open; the footer's app status otherwise.
+          target: ['[data-tour="app-setup"]', '[data-tour="apps"]'],
+          sides: ['top'],
+          advance: 'action',
+        }
+      : {
+          title: 'Build your first agent',
+          body: `An agent is an AI helper with one job. It works inside an AI app you already have, signed in as you${readyApps.length > 0 ? `: LoomWatch found ${listNames(readyApps)}` : ''}. Click Build an agent.`,
+          target: ['[data-tour="build-agent"]'],
+          sides: ['bottom', 'right', 'top'],
+          advance: 'action',
+        },
+  },
+  {
+    id: 'agent',
+    screen: 'agents',
+    // The list of Your agents has no builder yet: the step first asks for a new agent.
+    view: () => present('[data-tour="agent-blocks"]')
+      ? {
+          title: 'Give it a name and a job',
+          body: 'Each block is one of its settings, in plain words: its name, its instructions, the AI app it works in, its model, its skills, and what it may do without asking. The figure at the bench shows the same things. Type a name, and in Instructions say what it does and what it replies with.',
+          target: ['[data-tour="agent-blocks"]'],
+          sides: ['left', 'right', 'top', 'bottom'],
+          advance: 'next',
+          dim: true,
+        }
+      : {
+          title: 'Start a new agent',
+          body: 'Press New agent, then pick a job to start from, or Blank to write its instructions yourself.',
+          target: ['[data-tour="agent-start"]', '[data-tour="new-agent"]'],
+          sides: ['bottom', 'right', 'top'],
+          advance: 'action',
+        },
+  },
+  {
+    id: 'try',
+    screen: 'agents',
+    // Once its try has finished, the step points at the answer and waits for Next, so the guide
+    // never scrolls away from an answer the operator is still reading.
+    view: () => present('[data-tour="bench-result"][data-tour-done]')
+      ? {
+          title: 'Read its answer',
+          body: 'This is what it did and what it replied. Not what you wanted? Change a block above, then Try again.',
+          target: ['[data-tour="bench-result"]'],
+          sides: ['right', 'top', 'left', 'bottom'],
+          advance: 'next',
+          dim: true,
+        }
+      : {
+          title: 'Try it on its own',
+          body: 'Give it a request, the kind a team would hand it, and press Try it. It runs exactly as it is on screen, saved or not, and no team changes.',
+          target: ['[data-tour="bench"]'],
+          sides: ['right', 'top', 'left', 'bottom'],
+          advance: 'action',
+        },
+  },
+  {
+    id: 'save',
+    screen: 'agents',
+    // Going to Your teams is a new page, Home, where the guide carries on by itself.
+    view: () => present('[data-tour="agent-builder"][data-tour-saved]')
+      ? {
+          title: 'Now put it in a team',
+          body: 'It is in Your agents now, ready for any team. Go to Your teams to make one.',
+          target: ['[data-tour="your-teams"]'],
+          sides: ['bottom', 'left'],
+          advance: 'action',
+        }
+      : {
+          title: 'Save it to Your agents',
+          body: 'Press Save to Your agents. Every team you add it to keeps the version it was given, until you update it there.',
+          target: ['[data-tour="save-agent"]'],
+          sides: ['bottom', 'left'],
+          advance: 'action',
+        },
   },
   {
     id: 'new-team',
     screen: 'home',
-    view: () => ({
-      title: 'Create your first team',
-      body: 'A team is one or more AI agents that work on your request together. Click New team to make one.',
-      target: ['[data-tour="new-team"]'],
-      sides: ['bottom', 'right', 'top'],
-      advance: 'action',
-    }),
-    done: () => present('[data-tour="new-team-dialog"]'),
-  },
-  {
-    id: 'create',
-    screen: 'home',
-    view: () => ({
-      title: 'Name it and pick a start',
-      body: 'Type any name, keep One assistant selected, and press Create team. You can add more agents later.',
-      target: ['[data-tour="new-team-dialog"]'],
-      sides: ['right', 'left'],
-      advance: 'action',
-      dim: false,
-      keepClear: true,
-    }),
-    whenMissing: 'new-team',
-  },
-  {
-    id: 'team',
-    screen: 'workspace',
-    // An empty team (the "Empty team" start) has no card to explain yet, so the step first asks for
-    // one; the explanation takes its place as soon as a card is on the canvas. The guide can also be
-    // reopened from the Run view, where the agents are stages instead of canvas cards.
-    view: () => agentCount() > 0
+    // Creating the team opens it, where the guide carries on by itself.
+    view: () => present('[data-tour="new-team-dialog"]')
       ? {
-          title: 'This is your team',
-          body: 'Each card is an agent: an AI helper with one job. It works in the AI app named on the card. To change its instructions or model, click its card in Build.',
-          target: [AGENT_CARD, STAGE_CARD],
+          title: 'Start it empty',
+          body: 'Type any name, choose Empty team, and press Create team. You choose its agents next.',
+          target: ['[data-tour="new-team-dialog"]'],
+          sides: ['right', 'left'],
+          advance: 'action',
+          dim: false,
+          keepClear: true,
+        }
+      : {
+          title: 'Put it in a team',
+          body: 'A team is the agents that work on your request together, and the order they hand work along. Click New team.',
+          target: ['[data-tour="new-team"]'],
+          sides: ['bottom', 'right', 'top'],
+          advance: 'action',
+        },
+  },
+  {
+    id: 'team-agents',
+    screen: 'workspace',
+    view: () => present('[data-tour="agent-picker"]')
+      ? {
+          title: 'Add your agent',
+          body: 'A team starts on Agents. Press Add beside the agent you built, and it joins the team as the version you saved. More agents join the same way.',
+          target: ['[data-tour="agent-picker"]'],
+          sides: ['bottom', 'right', 'left'],
+          advance: 'action',
+        }
+      : {
+          title: 'Add your agent',
+          body: 'This team has no agents yet. Click Agents at the top to add the one you built.',
+          target: ['[data-tour="tab-agents"]', '[data-tour="view-tabs"]'],
+          sides: ['bottom'],
+          advance: 'action',
+        },
+    done: () => agentCount() > 0,
+  },
+  {
+    id: 'workflow',
+    screen: 'workspace',
+    view: () => teamView() === 'workflow' && agentCount() > 0
+      ? {
+          title: 'Connect them in Workflow',
+          body: 'Each card is one of the team’s agents, working in the AI app named on it. With more than one, connect the cards so work passes from one to the next, or add a review step that waits for you. One agent needs nothing more.',
+          target: [AGENT_CARD],
           sides: ['right', 'bottom', 'left', 'top'],
           advance: 'next',
           dim: true,
         }
       : {
-          title: 'Add your first agent',
-          body: 'Your team is empty. In Build, pick a job from the list on the left, like Researcher, to add an agent to it.',
-          target: ['[data-tour="palette"]', '[data-tour="view-tabs"]'],
-          sides: ['right', 'bottom'],
+          title: 'Open Workflow',
+          body: 'Workflow shows how the team’s agents hand work along. Click Workflow at the top.',
+          target: ['[data-tour="tab-workflow"]', '[data-tour="view-tabs"]'],
+          sides: ['bottom'],
           advance: 'action',
         },
   },
@@ -146,12 +236,13 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'workspace',
     view: () => ({
       title: 'Open the team’s chat',
-      body: 'Press Run team. The team’s chat is where you tell it what to do, watch it work and read its answers.',
-      target: ['[data-tour="run-team"]', '[data-tour="view-tabs"]'],
+      body: 'Press Run team, or Chat at the top. The team’s chat is where you give it work, watch it work and read its answers.',
+      target: ['[data-tour="run-team"]', '[data-tour="tab-chat"]'],
       sides: ['bottom', 'left'],
       advance: 'action',
     }),
-    done: () => present('[data-tour="composer"]'),
+    // The view, not the request box: Workflow keeps a box of its own in the page, out of sight.
+    done: () => teamView() === 'chat',
   },
   {
     id: 'ask',
@@ -196,35 +287,11 @@ export const TOUR_STEPS: readonly TourStep[] = [
     }),
   },
   {
-    id: 'needs-you',
-    screen: 'workspace',
-    view: () => ({
-      title: 'When a team needs you',
-      body: 'Some teams stop to ask you a question or to wait for your approval. You answer on the message that asks, in the chat. It also shows up here, from any team and on every screen.',
-      target: ['[data-tour="workspace"] [data-tour="needs-you"]'],
-      sides: ['bottom', 'left'],
-      advance: 'next',
-      dim: true,
-    }),
-  },
-  {
-    id: 'build',
-    screen: 'workspace',
-    view: () => ({
-      title: 'Change the team any time',
-      body: 'Switch to Build to add agents from the list on the left, connect cards so work passes from one to the next, or add a review step that waits for you. Save, then come back to Chat.',
-      target: ['[data-tour="view-tabs"]'],
-      sides: ['bottom'],
-      advance: 'next',
-      dim: true,
-    }),
-  },
-  {
     id: 'done',
     screen: 'any',
     view: () => ({
       title: 'You’re all set',
-      body: 'That is the whole loop: build a team, talk to it in its chat, and review what comes back. The chat keeps it all, so later work picks up from there. To see this guide again, press ⌘K and choose Getting started guide, or use the menu in any team.',
+      body: 'That is the whole loop: build an agent, put it in a team’s workflow, and give the team work in its chat. When a team needs you, for an answer or an approval, it asks in its chat and says so at the top of every screen. To see this guide again, press ⌘K and choose Getting started guide, or use the menu in any team.',
       advance: 'finish',
     }),
   },
@@ -233,6 +300,3 @@ export const TOUR_STEPS: readonly TourStep[] = [
 export function stepIndex(id: TourStepId): number {
   return TOUR_STEPS.findIndex((step) => step.id === id)
 }
-
-/** The first step shown inside a team: where a guide begun on Home continues once a team opens. */
-export const FIRST_WORKSPACE_STEP: TourStepId = 'team'

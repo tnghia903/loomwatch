@@ -49,6 +49,7 @@ export function buildAgentFromSource(
     name: source.label,
     role: source.role ?? DEFAULT_AGENT_ROLE,
     model: source.model ?? '',
+    ...(source.thinkingEffort ? { thinkingEffort: source.thinkingEffort } : {}),
     spawn: {
       cmd: source.spawn.cmd,
       args: [...source.spawn.args],

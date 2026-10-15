@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Puzzle, Trash2, X } from 'lucide-react'
+import { Puzzle, Trash2, Wrench, X } from 'lucide-react'
 import { AgentCheckup } from './AgentCheckup'
 import { AgentContext } from './AgentContext'
 import { AgentPermissions } from './AgentPermissions'
@@ -26,7 +26,7 @@ export interface BuildInspectorLink {
   onLink: (link: AgentLink) => void
 }
 
-export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHarness[]; harnessId?: string; onHarnessChange?: (id: string) => void; startAdvanced?: boolean; link?: BuildInspectorLink }) {
+export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHarness[]; harnessId?: string; onHarnessChange?: (id: string) => void; startAdvanced?: boolean; link?: BuildInspectorLink; /** Open this agent on its workbench, in the team's Agents tab. */ onOpenWorkbench?: () => void }) {
   const roleField = useRef<HTMLTextAreaElement>(null)
   const [advanced, setAdvanced] = useState(Object.keys(props.fieldProblems ?? {}).length > 0 || props.startAdvanced === true)
   const { node, onRename, onClose, onDelete, readOnly, harnesses = [], harnessId, onHarnessChange } = props
@@ -50,6 +50,7 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
   return <aside className="node-inspector" aria-label="Selected node settings" onKeyDown={e => { if (e.key === 'Escape') onClose() }}>
     <div className="inspector-head"><div><span className="eyebrow">{reviewStep ? 'Your review step' : 'Agent'}</span><strong>{node.data.agent.name}</strong>{runtime && <span className="inspector-run-status"><StatusGlyph status={runtime.status} /> {runtime.taskState.toLowerCase()} · {runtime.task}</span>}</div><button className="icon-button" onClick={onClose} aria-label="Close inspector"><X size={15} /></button><button className="icon-button" onClick={onDelete} disabled={readOnly} aria-label={`Remove ${node.data.agent.name}`}><Trash2 size={15} /></button></div>
     <div className="inspector-fields">
+      {!reviewStep && props.onOpenWorkbench && <button type="button" className="btn btn-primary inspector-workbench" onClick={props.onOpenWorkbench}><Wrench size={14} aria-hidden="true" />Open its workbench</button>}
       {!reviewStep && linkPanel('build-context-head')}
       <label>Name<input value={node.data.agent.name} disabled={reviewStep ? readOnly : locked} onChange={e => onRename('name', e.target.value)} /></label>
       {/* Instructions are prose; a one-line input hid all but the first few words of them. */}

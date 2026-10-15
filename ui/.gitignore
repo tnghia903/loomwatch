@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Blender sources for the 3D assets in public/ (Build by hand): kept on this machine, not in git.
+blender/

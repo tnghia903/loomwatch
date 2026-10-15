@@ -78,6 +78,16 @@
   --color-alert:          var(--lw-red-600);
   --color-ok:             var(--lw-jade-700);
   --color-halt:           var(--lw-slate-600);
+  /* Each figure's colour as text and as an avatar's disc (lib/library/figures.ts FIGURE_COLORS),
+     so an agent has one colour everywhere. Deep enough to read on paper (4.8:1 or more); butter
+     leans olive so it never reads as your gold. */
+  --color-fig-clay:       #A4512C;
+  --color-fig-butter:     #766D0C;
+  --color-fig-sage:       #477A4B;
+  --color-fig-sky:        #2D69A6;
+  --color-fig-lilac:      #6851B8;
+  --color-fig-rose:       #AC3B61;
+  --color-fig-oat:        #76664C;
   /* hairline is a channel-alpha token, not a colour */
   --color-hairline:       color-mix(in srgb, var(--lw-ink-950) 10%, transparent);
   /* A produced document drawn as a sheet of paper (FileCard): paper in both themes. */
@@ -98,6 +108,8 @@
   --e1-shadow: inset 0 1px 0 rgb(255 255 255 / .65), inset 0 -1px 0 rgb(23 21 15 / .05),
                0 1px 2px rgb(0 0 0 / .04), 0 8px 24px rgb(0 0 0 / .08);
   --e2-shadow: 0 2px 4px rgb(0 0 0 / .06), 0 16px 40px rgb(0 0 0 / .14);
+  /* A select's chevron, drawn in ink-3 (stone-600): browsers pin their own arrow to the edge. */
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%236E6862' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --bloom: none;
   color-scheme: light;
 }
@@ -127,12 +139,22 @@
   --color-alert:          var(--lw-red-400);
   --color-ok:             var(--lw-jade-400);
   --color-halt:           var(--lw-slate-400);
+  /* Light enough to read on obsidian (9:1 or more); butter leans lemon, away from your gold. */
+  --color-fig-clay:       #EBA68A;
+  --color-fig-butter:     #E3DA7C;
+  --color-fig-sage:       #A5CBA3;
+  --color-fig-sky:        #A3C8EC;
+  --color-fig-lilac:      #C4B6F2;
+  --color-fig-rose:       #F1ABC0;
+  --color-fig-oat:        #E2D6C0;
   --color-hairline: color-mix(in srgb, #FFFFFF 9%, transparent);
   --color-paper:      var(--lw-bone-100);
   --color-paper-rule: var(--lw-graphite-400);
 
   --e1-fill:   color-mix(in srgb, var(--color-panel) 66%, transparent);
   --e1-sheen:  linear-gradient(135deg, rgb(255 255 255 / .12) 0%, rgb(255 255 255 / .03) 32%, rgb(255 255 255 / 0) 60%);
+  /* The select chevron, a step brighter than ink-3 (graphite-400) so it reads on the dark field. */
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23A9A59C' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --e1-shadow: inset 0 1px 0 rgb(255 255 255 / .16), inset 0 -1px 0 rgb(0 0 0 / .3),
                0 8px 32px rgb(0 0 0 / .55);
   --e2-shadow: inset 0 1px 0 rgb(255 255 255 / .07),

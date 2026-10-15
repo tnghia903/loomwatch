@@ -48,6 +48,14 @@ describe('the versioned link to Your agents', () => {
     expect(fieldsForVersion(onCodex, placed, [claude]).spawn).toBeUndefined()
   })
 
+  it('brings the thinking effort along with the model it belongs to', () => {
+    const harder = { ...job, thinkingEffort: 'high', version: 4 }
+    expect(fieldsForVersion(harder, placed, [claude])).toMatchObject({ model: 'sonnet', thinkingEffort: 'high' })
+    // Moved to another app, the model and its effort go together, or not at all.
+    const fields = fieldsForVersion({ ...harder, apps: ['codex'], model: 'gpt-5.6' }, placed, [claude, codex])
+    expect(fields).toMatchObject({ model: 'gpt-5.6', thinkingEffort: 'high' })
+  })
+
   it('names what the team changed since its version, ignoring the order of skills', () => {
     const pinned = { ...job, version: 2 }
     expect(changedHere(placed, pinned)).toEqual([])

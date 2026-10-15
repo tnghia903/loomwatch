@@ -22,6 +22,7 @@ import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { Markdown } from '../ui/Markdown'
 import { AnswerTools } from './AnswerTools'
 import { AgentFace } from './AgentFace'
+import { AvatarFace } from '../agents/AvatarFace'
 import { Appearing, Swap } from './Appearing'
 
 const AgentMessages = lazy(() => import('../run/AgentMessages').then((module) => ({ default: module.AgentMessages })))
@@ -226,7 +227,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
 
       <div ref={lineRef} className="tc-talk" data-tour={newest ? 'stages' : undefined}>
         <Weft workers={workers} at={weftAt(workers, record, live, waiting)} live={live} waiting={Boolean(waiting) || asking.length > 0} status={record.status}>
-          {workers.map((id) => <i key={id} className={`chat-avatar hue-${hue(id)}${live && record.working?.includes(id) ? ' working' : ''}`} style={{ width: 22, height: 22, fontSize: 9 }}>{initials(name(id))}</i>)}
+          {workers.map((id) => <AvatarFace key={id} id={id} hue={hue(id)} size={22} fontSize={9} text={initials(name(id))} className={live && record.working?.includes(id) ? 'working' : ''} />)}
         </Weft>
         <Swap key={talkKey(live, waiting, asking.map((request) => request.id), working, run.status, pass)} className="tc-talk-line">
           {live
@@ -405,9 +406,9 @@ function Request({ run, request, continuedFrom, name }: { run: RunRecord; reques
   if (run.trigger === 'schedule') {
     return (
       <div className="chat-msg">
-        <span className="chat-gutter"><i className="chat-avatar hue-5 tc-schedule" style={{ width: 28, height: 28 }}><CalendarClock size={14} aria-hidden="true" /></i></span>
+        <span className="chat-gutter"><i className="chat-avatar hue-quiet tc-schedule" style={{ width: 28, height: 28 }}><CalendarClock size={14} aria-hidden="true" /></i></span>
         <div className="chat-stack">
-          <div className="chat-meta"><span className="chat-name hue-5">The schedule</span><span className="tc-to">to the team</span><time>{clockTime(run.createdAt)}</time></div>
+          <div className="chat-meta"><span className="chat-name hue-quiet">The schedule</span><span className="tc-to">to the team</span><time>{clockTime(run.createdAt)}</time></div>
           <div className="chat-bubble"><div className="chat-text"><Markdown>{text}</Markdown></div></div>
         </div>
       </div>
@@ -493,7 +494,7 @@ function Answer({ tour, run, answer, streaming, name, hue, open, onOpen, childre
   const responder = run.responder
   return (
     <div className={`chat-msg tc-answer${appear ? ' tc-appear' : ''}`} data-tour={tour ? 'output' : undefined}>
-      <span className="chat-gutter"><AgentFace id={responder}><i className={`chat-avatar hue-${hue(responder)}`} style={{ width: 28, height: 28 }} aria-hidden="true">{initials(name(responder))}</i></AgentFace></span>
+      <span className="chat-gutter"><AgentFace id={responder}><AvatarFace id={responder} hue={hue(responder)} size={28} text={initials(name(responder))} /></AgentFace></span>
       <div className="chat-stack">
         <div className={`chat-meta hue-${hue(responder)}`}><span className="chat-name">{name(responder)}</span><span className="tc-to">{run.onlyAgent ? 'to you' : "the team's answer"}</span><time>{clockTime(run.finishedAt)}</time></div>
         {facts ? (

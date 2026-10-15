@@ -18,6 +18,8 @@ import type { CapabilityNode } from './capabilityNode'
 import { roleGlyph } from './roleGlyph'
 import { depthForZoom, storyLine } from '../../lib/story/depth'
 import { markState } from '../../lib/story/mark'
+import { figureStill } from '../../lib/library/figures'
+import { useAgentFigure } from '../agents/figureContext'
 import { AgentMark } from '../ui/AgentMark'
 
 /** The model and its thinking effort, for the trace depth's facts: "sonnet · high effort". */
@@ -50,6 +52,8 @@ const HARNESS_BY_MONOGRAM: Record<string, string> = { Cx: 'Codex', C: 'Claude Co
 export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
   const { editable = true, stepById, inspectHandover, toggleEvidenceFan, dropTargetId } = useCanvasActions()
   const { agent, runtime } = data
+  // It wears the figure it wears in Your agents, so the same agent looks the same everywhere.
+  const figure = useAgentFigure(agent)
   const step = stepById.get(id)
   // Semantic zoom: the extra Story and Trace content exists only at that depth, so nothing hidden
   // is ever announced twice (lib/story/depth.ts).
@@ -106,7 +110,7 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
       {step && <span className="step" aria-hidden="true">{step.step}</span>}
       <div className="build-node-body">
         <div className="build-node-row">
-          <span className="build-node-icon mark-holder"><AgentMark id={agent.id} name={agent.name} state={markState(runtime)} events={eventCount} animate={runtime?.watching === true} /><span className="mark-badge" aria-hidden="true">{createElement(named === Circle ? Bot : named, { size: 9 })}</span></span>
+          <span className="build-node-icon figure-holder"><img className="build-node-figure" src={figureStill(figure)} alt="" draggable={false} /><span className="mark-badge" aria-hidden="true">{createElement(named === Circle ? Bot : named, { size: 9 })}</span></span>
           <div><span className="node-kind">{harness}</span><strong className="node-name">{agent.name}</strong><small title={agent.role}>{agent.role || 'Select to set a role'}</small>{depth === 'story' && <p className="depth-story-line">{storyLine(agent, runtime)}</p>}</div>
           {runtime && <StatusGlyph status={status} />}
         </div>

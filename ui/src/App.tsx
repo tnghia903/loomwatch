@@ -97,8 +97,11 @@ function Editor({ initialRunId }: { initialRunId: string | null }) {
 function Agents() {
   const { harnesses, loading } = useHarnesses()
   const capabilities = useCapabilities()
+  const readyApps = useMemo(() => harnesses.filter(isHarnessRunnable).map((harness) => harness.name), [harnesses])
   return (
     <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading your agents…</p>}>
+      {/* The guide starts with building an agent, here, then carries on at Home and in a team. */}
+      <GettingStarted readyApps={readyApps} appsLoading={loading} />
       <Feedback harnesses={harnesses} />
       <AgentsPage harnesses={harnesses} harnessesLoading={loading} skills={capabilities.inventory.skills} skillsLoading={capabilities.loading} />
     </Suspense>

@@ -60,7 +60,7 @@ export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
   {
     id: 'blank',
     title: 'Empty team',
-    description: 'Start from a blank canvas and add agents yourself.',
+    description: 'Start with no agents, and choose its agents yourself.',
     steps: [],
   },
 ]
