@@ -2128,7 +2128,7 @@ fn agent_process_spec(
     delivery: &delivery::Delivery,
     asker: Option<permissions::PermissionAsker>,
 ) -> ProcessSpec {
-    let permissions = permissions::PermissionPolicy::for_agent(agent.allow, &cwd, delivery);
+    let permissions = permissions::PermissionPolicy::for_run_agent(agent, &cwd, delivery);
     ProcessSpec {
         cmd: agent.spawn.cmd.clone(),
         args: agent.spawn.args.clone(),
@@ -2182,7 +2182,7 @@ fn node_process_spec(
     let (skills, delivery) = workspace.map_or_else(Default::default, |workspace| {
         (workspace.required_skills, workspace.delivery)
     });
-    let permissions = permissions::PermissionPolicy::for_agent(agent.allow, &cwd, &delivery);
+    let permissions = permissions::PermissionPolicy::for_run_agent(agent, &cwd, &delivery);
     Ok((
         ProcessSpec {
             cmd: agent.spawn.cmd.clone(),
@@ -4774,6 +4774,7 @@ IFS= read -r _
             memory: None,
             allow_recruiting: true,
             allow: crate::config::AgentAllow::default(),
+            turned_off: Vec::new(),
         }
     }
 
@@ -4819,6 +4820,7 @@ IFS= read -r _
             memory: None,
             allow_recruiting: false,
             allow: crate::config::AgentAllow::default(),
+            turned_off: Vec::new(),
         }
     }
 

@@ -80,6 +80,7 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
           ) : (
             <span className="build-node-task"><span className="task-text">{status === 'succeeded' ? 'Decision received' : 'Pauses for your decision'}</span></span>
           )}
+          {data.instructionNote && !runtime && !data.waiting && <p className="build-node-instruction-note">{data.instructionNote}</p>}
         </div>
         <CardPorts connectIn={editable} connectOut={editable} />
       </article>
@@ -100,7 +101,7 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
       className={cx('build-node kind-harness', runtime && 'has-run', runtime && `st-${status}`, selected && 'selected', dropTargetId === id && 'drop-target')}
       // While a run is shown the node wrapper already carries the run's own accessible name,
       // so labelling the card too would announce the same agent twice.
-      aria-label={runtime ? undefined : [agent.name, harness, agent.role, data.appProblem].filter(Boolean).join(', ')}
+      aria-label={runtime ? undefined : [agent.name, harness, agent.role, data.appProblem, data.instructionNote].filter(Boolean).join(', ')}
     >
       {step && <span className="step" aria-hidden="true">{step.step}</span>}
       <div className="build-node-body">
@@ -111,6 +112,8 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
         </div>
         {/* Before a run, not during one: a run that could not start says so in its own error. */}
         {data.appProblem && !runtime && <p className="build-node-app-problem">{data.appProblem}</p>}
+        {/* LoomWatch changed these instructions, or could not, after a removal (ADR 0059). */}
+        {data.instructionNote && !runtime && <p className="build-node-instruction-note">{data.instructionNote}</p>}
         {runtime && (
           <>
             <span className="build-node-task"><b>{runtime.ownerLabel} · {runtime.taskState}</b><span className="task-text">{runtime.task}</span></span>

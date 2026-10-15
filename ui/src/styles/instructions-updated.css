@@ -1,0 +1,73 @@
+/* ---------------------------------------------------------------------------
+   INSTRUCTIONS LOOMWATCH CHANGED (ADR 0059) — after the operator removes a card, the instructions
+   that named it are rewritten and marked: a note over the canvas, a line on each agent's card, and
+   the change word by word in the agent's panel, until the operator keeps it or puts it back.
+   Gold like the checkup's "incomplete", never the alert red: nothing here is wrong, it is unread.
+   No animation: running animations inside the canvas blur Safari's text (see one-canvas.css).
+   --------------------------------------------------------------------------- */
+/* Bottom centre of the canvas, between the legend and the view controls, where they cover no card
+   a removal just changed and no header control. The notes stack rather than overlap. */
+.canvas-notes {
+  position: absolute; bottom: 82px; left: 50%; transform: translateX(-50%); z-index: 30;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  width: max-content; max-width: min(520px, calc(100% - 32px)); pointer-events: none;
+}
+.instruction-update-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; max-width: 100%; box-sizing: border-box;
+  margin: 0; padding: 6px 8px 6px 12px; pointer-events: auto;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 45%, var(--color-hairline)); border-radius: var(--r-md);
+  background: var(--color-panel-solid); color: var(--color-ink); font: 400 12.5px/1.45 var(--font-sans);
+  box-shadow: 0 8px 24px rgb(0 0 0 / .18);
+}
+.instruction-update-bar > span { flex: 1 1 260px; min-width: 0; }
+.instruction-update-bar .btn { height: 26px; padding: 0 10px; font-size: 12px; }
+.instructions-source { font-weight: 550; }
+
+.build-node-instruction-note {
+  margin: 9px 0 0; padding-top: 8px; border-top: 1px solid var(--color-hairline);
+  color: var(--color-accent); font: 500 11px/15px var(--font-sans); overflow-wrap: anywhere;
+}
+
+/* The field itself, while what LoomWatch put in it is unread. */
+textarea.instructions-marked {
+  border-color: color-mix(in srgb, var(--color-accent) 70%, transparent);
+  box-shadow: 0 0 0 3px var(--color-accent-tint);
+}
+
+.instructions-updated {
+  margin: 8px 0 0; padding: 10px 12px; border-radius: var(--r-sm);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 40%, var(--color-hairline)); background: var(--color-accent-tint);
+  color: var(--color-ink-2); font: 400 12px/1.5 var(--font-sans);
+}
+/* Inside the agent panel, `.inspector-fields p` would make each paragraph a gold flex row and set
+   every word apart: these read as prose. */
+.instructions-updated p, p.instructions-updated { display: block; margin: 0; color: var(--color-ink-2); font-size: 12px; line-height: 1.5; }
+.instructions-updated ul { margin: 6px 0 0; padding-left: 18px; color: var(--color-ink); }
+.instructions-updated li + li { margin-top: 3px; }
+.instructions-diff {
+  margin-top: 8px !important; max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: var(--r-sm);
+  background: var(--color-panel-solid); color: var(--color-ink); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.instructions-updated del {
+  color: var(--color-alert); text-decoration: line-through; text-decoration-thickness: 1px;
+  background: color-mix(in srgb, var(--color-alert) 10%, transparent);
+}
+.instructions-updated ins {
+  color: var(--color-ink); text-decoration: none; background: color-mix(in srgb, var(--color-ok) 18%, transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--color-ok) 60%, transparent);
+}
+.instructions-updated-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.instructions-updated-actions .btn { height: 26px; padding: 0 10px; font-size: 12px; }
+
+/* ---------------------------------------------------------------------------
+   TURNED OFF (ADR 0060) — skills and tools taken off the canvas, even the agent's app's own copy.
+   Struck through in the agent's Context, like a chip that is there but not supplied.
+   --------------------------------------------------------------------------- */
+.given-chip.off { border-style: dashed; color: var(--color-ink-3); }
+.given-chip.off .given-name { text-decoration: line-through; text-decoration-thickness: 1px; }
+/* What the agent's app has of its own: folded, because it can run to a hundred skills. */
+.context-app-has { margin-top: 8px; }
+.context-app-has > summary { cursor: pointer; color: var(--color-ink-3); }
+.context-app-has[open] > summary { margin-bottom: 6px; }
+.context-app-has .given-chips { max-height: 180px; overflow: auto; }
+.given-chip.app { border-style: dotted; color: var(--color-ink-2); }

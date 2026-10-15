@@ -90,6 +90,11 @@ import { AttentionAlerts } from './workspace/AttentionAlerts'
 import { BuildHeading } from './workspace/BuildHeading'
 import { teamUsageFor, useTeamCheckup } from './workspace/useTeamCheckup'
 import { useRunLessons } from './workspace/useRunLessons'
+import { useInstructionUpdates } from './workspace/useInstructionUpdates'
+import { InstructionUpdateBar } from './workspace/InstructionUpdateBar'
+import { removedSource, type RemovedSource } from '../lib/team-file/mentions'
+import { ownedByApp, turnedOffFor, withheldByApp } from '../lib/team-file/turnedOff'
+import { NotionOffer, TurnedOffNote, type TurnedOffNoteState } from './workspace/TurnedOffNote'
 import { capabilityEdgeId } from './workspace/canvasGraph'
 import { OutputEditor } from './workspace/OutputEditor'
 import { ConflictSheetFooter, InlineConfirm, NewTeamSheet, OpenTeamSheet, SaveCopySheet } from './workspace/Sheets'
@@ -665,6 +670,36 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     return cards
   }, [capabilityInventory.skills, capabilityInventory.tools, composerLayout.nodes, doc.nodes, memoryCards])
   const capabilityCards = useMemo(() => [...composerLayout.nodes, ...memoryCards, ...teamFileCards], [composerLayout.nodes, memoryCards, teamFileCards])
+  /** What the last removal turned off, said over the canvas until dismissed (ADR 0060). */
+  const [turnedOffNote, setTurnedOffNote] = useState<TurnedOffNoteState | null>(null)
+  /** Claude agents that can still reach Notion through the claude.ai connector once the team's
+      last Notion page card is gone (ADR 0060). */
+  const [notionOffer, setNotionOffer] = useState<string[] | null>(null)
+  /** The apps whose agents keep their own copy of what the last removal turned off (ADR 0060). */
+  const stillOwnApps = useMemo(() => {
+    if (!turnedOffNote) return []
+    const apps = new Set<string>()
+    for (const id of turnedOffNote.agents) {
+      const agent = docAgents.find((candidate) => candidate.id === id)
+      if (!agent) continue
+      const harness = harnessIdForAgent(agent, harnesses)
+      if (!withheldByApp(harness, turnedOffNote.tools ? 'tool' : 'skill') || !withheldByApp(harness, 'skill')) apps.add(appLabelForAgent(agent, harnesses))
+    }
+    return [...apps]
+  }, [turnedOffNote, docAgents, harnesses])
+  // ADR 0059: instructions that name a card the operator takes away are rewritten by their Ask app
+  // and marked until the operator keeps the change or puts the old ones back.
+  const instructionUpdates = useInstructionUpdates({
+    agents: docAgents, teamPath: doc.path, app: ask.selectedApp?.id ?? null, model: ask.selectedModel?.id ?? null, unavailable: ask.unavailable,
+    isBack: (source: RemovedSource) => {
+      const card = capabilityCards.find((candidate) => candidate.id === source.cardId)
+      if (!source.from) return Boolean(card)
+      const agent = docAgents.find((candidate) => candidate.id === source.from)
+      return Boolean(card && agent?.capabilities?.some((capability) => capabilityIsCard(capability, card)))
+    },
+    setRoles: doc.setAgentRoles,
+    setRole: (agentId, role) => doc.renameAgent(agentId, 'role', role),
+  })
   // Skills, tools, folders and files are wired in the team file, so the lines are read from it.
   const wiringEdges = useMemo(() => {
     const cards = [...composerLayout.nodes, ...teamFileCards]
@@ -737,7 +772,22 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       else if (node.memory?.pack) doc.removeMemoryInherit({ pack: node.memory.pack })
     }
     composerLayout.remove(ids)
-  }, [capabilityCards, composerLayout, doc])
+    for (const card of going) if (teamFileKind(card) && !card.memory) instructionUpdates.removed(removedSource(card), docAgents)
+    // ADR 0060: taking a skill or tool off the canvas turns it off for the team, including the
+    // copy each agent's app has of its own. Wiring it to an agent again turns it back on.
+    const off = going.flatMap((card) => turnedOffFor(card) ?? [])
+    const working = docAgents.filter((agent) => agent.kind !== 'operator')
+    const notion = (capabilityInventory.connectors ?? []).find((connector) => connector.name === 'claude.ai Notion')
+    const pagesLeft = capabilityCards.some((card) => card.notion && !ids.includes(card.id))
+    if (notion && going.some((card) => card.notion) && !pagesLeft) {
+      const reach = working.filter((agent) => harnessIdForAgent(agent, harnesses) === 'claude' && !(agent.turnedOff ?? []).some((entry) => entry.kind === 'tool' && entry.name === notion.name))
+      setNotionOffer(reach.length > 0 ? reach.map((agent) => agent.id) : null)
+    }
+    if (off.length > 0 && working.length > 0) {
+      doc.turnOff(new Map(working.map((agent) => [agent.id, off])))
+      setTurnedOffNote({ names: off.map((entry) => entry.name), agents: working.map((agent) => agent.id), tools: off.some((entry) => entry.kind === 'tool'), everyone: true })
+    }
+  }, [capabilityCards, composerLayout, doc, docAgents, instructionUpdates, capabilityInventory.connectors, harnesses])
 
   /**
    * Edges into a memory card, read from `memory.inherits` — the team file, not the sidecar.
@@ -825,6 +875,12 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       if (agent && kept.length !== current.length) {
         keepUnusedCard(capability, source)
         doc.setAgentCapabilities(source, kept)
+        instructionUpdates.removed({ ...removedSource(capability), from: source }, [agent])
+        const off = turnedOffFor(capability)
+        if (off && agent.kind !== 'operator') {
+          doc.turnOff(new Map([[source, [off]]]))
+          setTurnedOffNote({ names: [off.name], agents: [source], tools: off.kind === 'tool', everyone: false })
+        }
       }
       // Layouts from before the kind was executable may still hold the same edge in the sidecar.
       if (composerLayout.edges.some((edge) => edge.from === source && edge.to === target)) composerLayout.disconnect(source, target)
@@ -839,7 +895,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     })
     const owner = source === '__prompt' ? 'The whole team' : nodeNames.get(source) ?? source
     setStatusAnnouncement(`${owner} no longer ${RELATION[capability.kind]} ${capability.name}.`)
-  }, [capabilityCards, composerLayout, doc, keepUnusedCard, nodeNames])
+  }, [capabilityCards, composerLayout, doc, keepUnusedCard, nodeNames, instructionUpdates])
 
   const problems = useMemo(() => reviewProblems(doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames, appProblems), [doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames, appProblems])
   const scheduleProblems = useMemo(() => problems.filter((problem) => problem.yamlPath?.[0] === 'schedule'), [problems])
@@ -1017,7 +1073,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     fannedAgentId, inspectedEvidenceId, packetAgentIds, givenNotes, responderAgent, responderId, responderFromDoc, responseText,
     provenanceOpen, composerText, visibleSchedule, scheduleInvalid: scheduleProblems.length > 0, scheduleEditorOpen, onOpenSchedule: openScheduleEditor,
     capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityEdge,
-    harnesses, outputPlan: composerLayout.output, appProblems: appProblemByAgent,
+    harnesses, outputPlan: composerLayout.output, appProblems: appProblemByAgent, instructionNotes: instructionUpdates.notes,
     sendsTo: doc.teamDeliver?.notion ? 'Notion' : null,
   })
 
@@ -1295,6 +1351,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     ? ((runView ? graph.nodes.find((node) => node.id === selectedDocNode.id && node.type === 'agent') : undefined) as AgentNode | undefined) ?? selectedDocNode
     : null
   const inspectedHarnessId = inspectedNode ? harnessIdForAgent(inspectedNode.data.agent, harnesses) : null
+  const inspectedUpdate = inspectedNode && !runView ? instructionUpdates.forAgent(inspectedNode.id) : null
+  const inspectedAppHas = useMemo(() => inspectedNode && inspectedNode.data.agent.kind !== 'operator' ? ownedByApp(inspectedHarnessId, capabilityInventory) : null, [inspectedNode, inspectedHarnessId, capabilityInventory])
   const modelCatalog = useModelCatalog({
     harnessId: inspectedHarnessId,
     agentId: inspectedNode?.id ?? null,
@@ -2485,7 +2543,12 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               </div>
             )}
           </ReactFlow>
-          {!runView && <>{storyParts.length > 0 ? <TeamStory parts={storyParts} onAgent={focusAgent} onSchedule={doc.teamSchedule ? openScheduleEditor : undefined} onConnect={editable ? (edges) => { for (const edge of edges) doc.onConnect({ source: edge.from, target: edge.to, sourceHandle: null, targetHandle: null }) } : undefined} /> : <div className="build-canvas-help"><strong>Connect your agents</strong><span>Drag from the dot on the right of a card to the next card to hand work along.</span></div>}<div className="build-canvas-legend"><span><i />Workflow</span><span><i className="resource" />Resources</span><span>Select a node to edit</span></div></>}
+          {!runView && <>{storyParts.length > 0 ? <TeamStory parts={storyParts} onAgent={focusAgent} onSchedule={doc.teamSchedule ? openScheduleEditor : undefined} onConnect={editable ? (edges) => { for (const edge of edges) doc.onConnect({ source: edge.from, target: edge.to, sourceHandle: null, targetHandle: null }) } : undefined} /> : <div className="build-canvas-help"><strong>Connect your agents</strong><span>Drag from the dot on the right of a card to the next card to hand work along.</span></div>}<div className="build-canvas-legend"><span><i />Workflow</span><span><i className="resource" />Resources</span><span>Select a node to edit</span></div>{!runSetup && <div className="canvas-notes"><InstructionUpdateBar entries={instructionUpdates.entries} names={nodeNames} readOnly={!editable} onReview={focusAgent} onKeepAll={instructionUpdates.keepAll} onRewrite={ask.unavailable ? undefined : instructionUpdates.rewrite} rewriteWith={ask.selectedApp?.name ?? null} />{turnedOffNote && <TurnedOffNote note={turnedOffNote} names={nodeNames} stillOwn={stillOwnApps} onDismiss={() => setTurnedOffNote(null)} />}{notionOffer && <NotionOffer agents={notionOffer} readOnly={!editable} onKeep={() => setNotionOffer(null)} onTurnOff={() => {
+            const connector = { kind: 'tool' as const, name: 'claude.ai Notion' }
+            doc.turnOff(new Map(notionOffer.map((id) => [id, [connector]])))
+            setTurnedOffNote({ names: [connector.name], agents: notionOffer, tools: true, everyone: notionOffer.length === docAgents.filter((agent) => agent.kind !== 'operator').length })
+            setNotionOffer(null)
+          }} />}</div>}</>}
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
@@ -2575,6 +2638,10 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             teamAutoMode={doc.teamPermissionMode === 'auto'}
             checkup={{ findings: teamCheckup.forAgent(inspectedNode.id), onFix: teamCheckup.apply, onDismiss: teamCheckup.dismiss, onAsk: ask.unavailable ? undefined : askFor }}
             usage={teamUsageFor(teamCheckup.usage, inspectedNode.id)}
+            onTurnBackOn={editable ? (entry) => doc.turnBackOn(inspectedNode.id, entry) : undefined}
+            appHas={inspectedAppHas}
+            onTurnOff={editable && inspectedNode.data.agent.kind !== 'operator' ? (entry) => doc.turnOff(new Map([[inspectedNode.id, [entry]]])) : undefined}
+            instructionUpdate={inspectedUpdate ? { update: inspectedUpdate, onKeep: () => instructionUpdates.keep(inspectedUpdate.agentId), onPutBack: () => instructionUpdates.putBack(inspectedUpdate.agentId) } : undefined}
             place={agentPlace({ agentId: inspectedNode.id, nodes: doc.nodes.map((node) => ({ id: node.id, name: node.data.agent.name, kind: node.data.agent.kind })), edges: doc.edges.map((edge) => ({ from: edge.source, to: edge.target })), steps: doc.pipelineSteps, entrypoint: doc.entrypoint, responder: responderFromDoc, pipeline: doc.mode === 'pipeline' })}
             inheritedMemory={doc.memoryInherits.filter((entry) => !entry.appliesTo || entry.appliesTo.includes(inspectedNode.id)).map((entry) => entry.team ? `${entry.team} · memory` : entry.pack ?? '')}
             onRemoveCapability={(removed) => {

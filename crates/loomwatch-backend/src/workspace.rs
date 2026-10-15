@@ -841,6 +841,7 @@ mod tests {
             capabilities,
             memory: None,
             allow: crate::config::AgentAllow::default(),
+            turned_off: Vec::new(),
         }
     }
 

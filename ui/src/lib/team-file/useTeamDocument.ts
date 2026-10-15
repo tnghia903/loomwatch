@@ -9,7 +9,8 @@ import { TeamFileModel, TeamFileParseError } from './document'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
 import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
-import type { AgentAllow, AgentConfig, AllowSwitch, BriefEntryConfig, CapabilityRef, DeliverConfig, EdgeConfig, PermissionMode, ScheduleConfig, SpawnConfig, TeamDocument } from './types'
+import type { AgentAllow, AgentConfig, AllowSwitch, BriefEntryConfig, CapabilityRef, DeliverConfig, EdgeConfig, PermissionMode, ScheduleConfig, SpawnConfig, TeamDocument, TurnedOff } from './types'
+import { withTurnedOff, withoutWired } from './turnedOff'
 import {
   loadTeamValidator,
   displayFieldProblems,
@@ -909,6 +910,17 @@ export function useTeamDocument() {
     [markDirty, captureHistory],
   )
 
+  /** Several agents' instructions in one edit, so one undo puts them all back (ADR 0059). */
+  const setAgentRoles = useCallback((roles: ReadonlyMap<string, string>) => {
+    if (roles.size === 0) return
+    captureHistory()
+    for (const [id, role] of roles) modelRef.current?.setAgentField(id, 'role', role)
+    setNodes((current) => current.map((node) => roles.has(node.id)
+      ? { ...node, data: { ...node.data, agent: { ...node.data.agent, role: roles.get(node.id) as string } } }
+      : node))
+    markDirty()
+  }, [markDirty, captureHistory])
+
   /** The team's display name. Its file and id stay as they are: runs and notes are filed under them. */
   const renameTeam = useCallback((name: string) => {
     const trimmed = name.trim()
@@ -1050,15 +1062,51 @@ export function useTeamDocument() {
       captureHistory()
       const next = capabilities.length > 0 ? capabilities : undefined
       modelRef.current?.setAgentField(id, 'capabilities', next)
+      // Wiring a skill or tool to the agent turns it back on (ADR 0060), in the same edit.
+      const before = modelRef.current?.snapshot().agents.find((agent) => agent.id === id)?.turnedOff
+      const kept = withoutWired(before, capabilities)
+      const turnedOff = kept.length > 0 ? kept : undefined
+      if (kept.length !== (before?.length ?? 0)) modelRef.current?.setAgentField(id, 'turnedOff', turnedOff)
       setNodes((current) =>
         current.map((node) =>
-          node.id === id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, capabilities: next } } } : node,
+          node.id === id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, capabilities: next, turnedOff } } } : node,
         ),
       )
       markDirty()
     },
     [markDirty, captureHistory],
   )
+
+  /** Turn skills and tools off for several agents in one edit (ADR 0060): one undo turns them
+      back on. */
+  const turnOff = useCallback((byAgent: ReadonlyMap<string, readonly TurnedOff[]>) => {
+    if (byAgent.size === 0) return
+    captureHistory()
+    const lists = new Map<string, TurnedOff[]>()
+    for (const [id, added] of byAgent) {
+      const before = modelRef.current?.snapshot().agents.find((agent) => agent.id === id)?.turnedOff
+      const next = withTurnedOff(before, added)
+      lists.set(id, next)
+      modelRef.current?.setAgentField(id, 'turnedOff', next)
+    }
+    setNodes((current) => current.map((node) => lists.has(node.id)
+      ? { ...node, data: { ...node.data, agent: { ...node.data.agent, turnedOff: lists.get(node.id) } } }
+      : node))
+    markDirty()
+  }, [markDirty, captureHistory])
+
+  const turnBackOn = useCallback((id: string, entry: TurnedOff) => {
+    const before = modelRef.current?.snapshot().agents.find((agent) => agent.id === id)?.turnedOff ?? []
+    const kept = before.filter((existing) => existing.kind !== entry.kind || existing.name !== entry.name)
+    if (kept.length === before.length) return
+    captureHistory()
+    const turnedOff = kept.length > 0 ? kept : undefined
+    modelRef.current?.setAgentField(id, 'turnedOff', turnedOff)
+    setNodes((current) => current.map((node) => node.id === id
+      ? { ...node, data: { ...node.data, agent: { ...node.data.agent, turnedOff } } }
+      : node))
+    markDirty()
+  }, [markDirty, captureHistory])
 
   const promoteEntrypoint = useCallback(
     (id: string) => {
@@ -1521,6 +1569,7 @@ export function useTeamDocument() {
     removeAgent,
     removeEdgeBetween,
     renameAgent,
+    setAgentRoles,
     updateAgentModel,
     updateAgentSpawn,
     updateAgentThinkingEffort,
@@ -1530,6 +1579,8 @@ export function useTeamDocument() {
     updateTeamPermissionMode,
     updateAgentMemory,
     setAgentCapabilities,
+    turnOff,
+    turnBackOn,
     promoteEntrypoint,
     promoteResponder,
     updateTeamSchedule,

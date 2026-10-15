@@ -43,6 +43,9 @@ export interface CapabilityInventory {
   skills: DetectedCapability[]
   tools: DetectedCapability[]
   sources: DetectedCapability[]
+  /** claude.ai connectors Claude Code has connected (ADR 0060): every Claude agent has them, and
+      LoomWatch can only turn one off, never give it. Absent from older daemons. */
+  connectors?: DetectedCapability[]
 }
 
 export interface CapabilityDefinition {

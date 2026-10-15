@@ -12,7 +12,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::config::AgentAllow;
+use crate::config::{AgentAllow, AgentConfig, CapabilityKind, CapabilityRef, TurnedOff};
 use crate::delivery::{Delivery, RESERVED_SERVER};
 
 /// App settings folders an agent may never edit, even inside its own folder: a change there could
@@ -55,6 +55,22 @@ pub(crate) const WITHHELD_CLAUDE_TOOLS: [&str; 13] = [
     "ListAgents",
 ];
 
+/// How Claude Code names an MCP server inside its tool names (`mcp__<server>__<tool>`): every
+/// character other than a letter, a digit, `_` or `-` becomes `_`, so `claude.ai Notion` is
+/// `claude_ai_Notion`.
+fn claude_server_name(server: &str) -> String {
+    server
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 /// Codex features a run agent is started without (ADR 0047). `plugins` brings every enabled
 /// plugin's MCP servers, skills and hooks, among them the `ChatGPT` app's `cua_repl`, which drives
 /// the operator's browser and apps. `apps` is `codex_apps`, the connectors on the operator's
@@ -74,6 +90,11 @@ pub struct PermissionPolicy {
     readable: Vec<PathBuf>,
     /// MCP servers `LoomWatch` handed this session: the Team Bus and every connected tool.
     servers: Vec<String>,
+    /// What the operator turned off for this agent that `LoomWatch` does not also give it
+    /// (ADR 0060): withheld from the app's own skills and tools at session start.
+    turned_off: Vec<TurnedOff>,
+    /// The same, as Claude Code's `disallowedTools` entries.
+    claude_off: Vec<String>,
 }
 
 impl PermissionPolicy {
@@ -89,6 +110,8 @@ impl PermissionPolicy {
             folder: resolve(folder),
             readable: readable.into_iter().map(|path| resolve(&path)).collect(),
             servers: servers.into_iter().collect(),
+            turned_off: Vec::new(),
+            claude_off: Vec::new(),
         }
     }
 
@@ -105,6 +128,85 @@ impl PermissionPolicy {
         let servers = std::iter::once(RESERVED_SERVER.to_owned())
             .chain(delivery.tools.iter().map(|tool| tool.server.clone()));
         Self::new(allow, folder, readable, servers)
+    }
+
+    /// The policy for one of a run's agents: [`Self::for_agent`] with what the operator turned off
+    /// for it (ADR 0060), each tool found under the server names the operator's apps give it.
+    #[must_use]
+    pub fn for_run_agent(agent: &AgentConfig, folder: &Path, delivery: &Delivery) -> Self {
+        let home = crate::capabilities::configured_home();
+        Self::for_agent(agent.allow, folder, delivery).turning_off(
+            &agent.turned_off,
+            &agent.capabilities,
+            |name| crate::capabilities::tool_servers_named(home.as_deref(), name),
+        )
+    }
+
+    /// This policy with what the operator turned off for the agent (ADR 0060), less anything the
+    /// canvas gives it: a skill wired to the agent is how skills are shared across apps, so the
+    /// copy `LoomWatch` delivers is never caught by a turned-off entry of the same name.
+    ///
+    /// `servers_of` names the MCP servers behind a turned-off tool in the app's own config: the
+    /// canvas shows "Agent Memory", Claude Code lists `agentmemory`.
+    #[must_use]
+    pub fn turning_off(
+        mut self,
+        turned_off: &[TurnedOff],
+        given: &[CapabilityRef],
+        servers_of: impl Fn(&str) -> Vec<String>,
+    ) -> Self {
+        self.turned_off = turned_off
+            .iter()
+            .filter(|entry| {
+                let wired = given.iter().any(|capability| {
+                    capability.kind == entry.kind && capability.name == entry.name
+                });
+                let served =
+                    entry.kind == CapabilityKind::Tool && self.servers.contains(&entry.name);
+                !wired && !served
+            })
+            .cloned()
+            .collect();
+        self.claude_off = self
+            .turned_off
+            .iter()
+            .flat_map(|entry| match entry.kind {
+                CapabilityKind::Skill => vec![format!("Skill({})", entry.name)],
+                CapabilityKind::Tool => servers_of(&entry.name)
+                    .iter()
+                    .filter(|server| !self.servers.contains(server))
+                    .map(|server| format!("mcp__{}", claude_server_name(server)))
+                    .collect(),
+                CapabilityKind::Knowledge => Vec::new(),
+            })
+            .collect();
+        self.claude_off.dedup();
+        self
+    }
+
+    /// The `_meta` this agent's sessions carry: [`Self::session_meta`] with its turned-off skills
+    /// and tools added to `disallowedTools` (ADR 0060). Claude Code blocks a skill by
+    /// `Skill(<name>)` and every tool of a server by `mcp__<server>`, its tool-name prefix.
+    #[must_use]
+    pub fn agent_meta(&self) -> Value {
+        let mut meta = Self::session_meta();
+        if let Some(tools) = meta
+            .pointer_mut("/claudeCode/options/disallowedTools")
+            .and_then(Value::as_array_mut)
+        {
+            tools.extend(self.claude_off.iter().cloned().map(Value::String));
+        }
+        meta
+    }
+
+    /// The skills turned off for this agent, by name, for Codex's `skills.config` (ADR 0060).
+    #[must_use]
+    pub fn turned_off_skills(&self) -> Vec<String> {
+        self.turned_off
+            .iter()
+            .filter(|entry| entry.kind == CapabilityKind::Skill)
+            .map(|entry| entry.name.clone())
+            .collect()
     }
 
     /// The `_meta` a run agent's `session/new` and `session/load` carry (ADR 0044). Claude Code's
@@ -124,8 +226,15 @@ impl PermissionPolicy {
     ///
     /// # Errors
     ///
+    /// Each of `skills_off` is added to `skills.config` switched off by name (ADR 0060), the way
+    /// Codex itself records a skill turned off. `codex-acp` leaves `skills` alone, unlike
+    /// `mcp_servers`, which it replaces with the servers `LoomWatch` hands over: so a Codex agent's
+    /// own MCP servers cannot be turned off this way.
+    ///
+    /// # Errors
+    ///
     /// Returns an error when `current` is not a JSON object, which `codex-acp` would refuse too.
-    pub fn codex_config(current: Option<&str>) -> anyhow::Result<String> {
+    pub fn codex_config(current: Option<&str>, skills_off: &[String]) -> anyhow::Result<String> {
         let mut config = match current {
             Some(text) => serde_json::from_str::<Value>(text)
                 .ok()
@@ -140,6 +249,21 @@ impl PermissionPolicy {
         }
         for feature in WITHHELD_CODEX_FEATURES {
             config["features"][feature] = Value::Bool(false);
+        }
+        if !skills_off.is_empty() {
+            if !config["skills"].is_object() {
+                config["skills"] = Value::Object(serde_json::Map::new());
+            }
+            if !config["skills"]["config"].is_array() {
+                config["skills"]["config"] = Value::Array(Vec::new());
+            }
+            if let Some(entries) = config["skills"]["config"].as_array_mut() {
+                entries.extend(
+                    skills_off
+                        .iter()
+                        .map(|name| serde_json::json!({"name": name, "enabled": false})),
+                );
+            }
         }
         Ok(config.to_string())
     }
@@ -721,12 +845,105 @@ mod tests {
         }
     }
 
+    /// ADR 0060: what the operator turned off is withheld from the agent's app, by the names
+    /// Claude Code blocks (live-checked on 2.1.286: `mcp__claude_ai_Notion` left no Notion tool
+    /// and Gmail's in place; `Skill(notebooklm)` was "blocked by permission rules"). A skill wired
+    /// to the agent, or a tool `LoomWatch` serves it, is never caught: wiring is how a skill is
+    /// shared across apps.
+    #[test]
+    fn a_turned_off_skill_or_tool_is_withheld_but_never_one_the_canvas_gives() {
+        let off = |kind, name: &str| TurnedOff {
+            kind,
+            name: name.to_owned(),
+        };
+        let wired = CapabilityRef {
+            kind: CapabilityKind::Skill,
+            name: "canvas-design".to_owned(),
+            path: None,
+            notion: None,
+        };
+        let policy = PermissionPolicy::new(
+            AgentAllow::default(),
+            Path::new("/work"),
+            [],
+            ["loomwatch-team-bus".to_owned(), "notion-local".to_owned()],
+        )
+        .turning_off(
+            &[
+                off(CapabilityKind::Skill, "notebooklm"),
+                off(CapabilityKind::Skill, "canvas-design"),
+                off(CapabilityKind::Tool, "claude.ai Notion"),
+                off(CapabilityKind::Tool, "notion-local"),
+                off(CapabilityKind::Tool, "Agent Memory"),
+            ],
+            &[wired],
+            |name| match name {
+                "Agent Memory" => vec!["agentmemory".to_owned()],
+                other => vec![other.to_owned()],
+            },
+        );
+        let meta = policy.agent_meta();
+        let withheld: Vec<&str> = meta
+            .pointer("/claudeCode/options/disallowedTools")
+            .and_then(Value::as_array)
+            .expect("disallowedTools")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert!(withheld.contains(&"Skill(notebooklm)"));
+        assert!(withheld.contains(&"mcp__claude_ai_Notion"));
+        assert!(
+            withheld.contains(&"mcp__agentmemory"),
+            "a tool is withheld by its server name"
+        );
+        assert!(withheld.contains(&"Artifact"), "ADR 0044's list stays");
+        assert!(
+            !withheld.contains(&"Skill(canvas-design)"),
+            "a wired skill is delivered"
+        );
+        assert!(
+            !withheld
+                .iter()
+                .any(|tool| tool.starts_with("mcp__notion-local")),
+            "a served tool is delivered"
+        );
+        assert_eq!(policy.turned_off_skills(), vec!["notebooklm".to_owned()]);
+        assert_eq!(
+            PermissionPolicy::new(AgentAllow::default(), Path::new("/work"), [], []).agent_meta(),
+            PermissionPolicy::session_meta(),
+            "nothing turned off, nothing added"
+        );
+    }
+
+    /// ADR 0060: a Codex agent's turned-off skills go into `skills.config` by name, beside any the
+    /// team file already set. Probed on Codex 0.154.0: `{name = "herdr", enabled = false}` turned
+    /// off `herdr` and nothing else.
+    #[test]
+    fn a_codex_agent_turns_off_skills_by_name_beside_its_own_skill_config() {
+        let config: Value = serde_json::from_str(
+            &PermissionPolicy::codex_config(
+                Some(r#"{"skills":{"config":[{"path":"/x/SKILL.md","enabled":false}]}}"#),
+                &["herdr".to_owned()],
+            )
+            .expect("config"),
+        )
+        .expect("json");
+        assert_eq!(
+            config["skills"]["config"],
+            json!([{"path": "/x/SKILL.md", "enabled": false}, {"name": "herdr", "enabled": false}])
+        );
+        let untouched: Value =
+            serde_json::from_str(&PermissionPolicy::codex_config(None, &[]).expect("config"))
+                .expect("json");
+        assert!(untouched.get("skills").is_none());
+    }
+
     /// ADR 0047: a Codex run agent starts with its plugins and apps off, and whatever config the
     /// team file already gives Codex survives beside them.
     #[test]
     fn a_codex_run_agent_starts_without_plugins_or_apps_and_keeps_its_own_config() {
         let fresh: Value =
-            serde_json::from_str(&PermissionPolicy::codex_config(None).expect("config"))
+            serde_json::from_str(&PermissionPolicy::codex_config(None, &[]).expect("config"))
                 .expect("json");
         assert_eq!(
             fresh,
@@ -734,9 +951,10 @@ mod tests {
         );
 
         let kept: Value = serde_json::from_str(
-            &PermissionPolicy::codex_config(Some(
-                r#"{"model_provider":"gateway","features":{"js_repl":true,"plugins":true}}"#,
-            ))
+            &PermissionPolicy::codex_config(
+                Some(r#"{"model_provider":"gateway","features":{"js_repl":true,"plugins":true}}"#),
+                &[],
+            )
             .expect("config"),
         )
         .expect("json");
@@ -747,7 +965,7 @@ mod tests {
 
         for broken in ["", "[]", "not json", r#""features""#] {
             assert!(
-                PermissionPolicy::codex_config(Some(broken)).is_err(),
+                PermissionPolicy::codex_config(Some(broken), &[]).is_err(),
                 "{broken:?} is refused"
             );
         }

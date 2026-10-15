@@ -12,8 +12,13 @@ answers in plain words. What it does depends on keywords in the person's message
 - "run": asks to start a run of the proposed team.
 - "note": drafts a note for an open review stop.
 - anything else: lists the teams.
+
+An instructions rewrite (ADR 0059) is answered without tools: every sentence naming what was
+removed is dropped, and the instructions come back as JSON in a code fence, as a real app tends to
+send them. Something removed whose name says "unreadable" gets an answer with no JSON in it.
 """
 import json
+import re
 import sys
 import urllib.request
 
@@ -157,6 +162,20 @@ def start():
         say("Press Start run in the card when you're ready. Nothing runs until you do.")
 
 
+def rewrite(prompt):
+    removed = re.search(r'removed the [^"]+ "([^"]+)"', prompt).group(1)
+    if "unreadable" in removed:
+        say("I removed it from their instructions.")
+        return
+    agents = json.loads(prompt.split("## The agents' instructions", 1)[1])
+    lead = removed.split(" — ")[0]
+    rewritten = []
+    for agent in agents:
+        sentences = re.split(r"(?<=[.!?])\s+", agent["role"].strip())
+        rewritten.append({"id": agent["id"], "role": " ".join(s for s in sentences if lead not in s)})
+    say("Here they are:\n```json\n" + json.dumps({"agents": rewritten}) + "\n```")
+
+
 def note():
     _, run, _ = call("get_run", {})
     question = (run.get("waitingOn") or {}).get("question") or "the open question"
@@ -177,9 +196,12 @@ for line in sys.stdin:
                 mcp["headers"] = {h["name"]: h["value"] for h in server.get("headers", [])}
         result = {"sessionId": SESSION, "configOptions": []}
     elif method == "session/prompt":
-        text = "\n".join(part.get("text", "") for part in request["params"]["prompt"]).lower()
+        original = "\n".join(part.get("text", "") for part in request["params"]["prompt"])
+        text = original.lower()
         message = text.rsplit("## the person's message", 1)[-1]
-        if not mcp["url"]:
+        if "## the agents' instructions" in text:
+            rewrite(original)
+        elif not mcp["url"]:
             say("LoomWatch didn't give me its tools, so I can't help with this.")
         else:
           try:

@@ -20,6 +20,8 @@ export type AgentNode = Node<{
   fieldProblems?: AgentFieldProblems
   /** Build only: why this agent's app cannot start on this computer (`lib/team-file/appChecks`). */
   appProblem?: string
+  /** Build only: what LoomWatch did to this agent's instructions after a removal (ADR 0059). */
+  instructionNote?: string
   /** TNG-113: runtime task state while a run is shown. View state only. */
   runtime?: AgentRuntime
 }>

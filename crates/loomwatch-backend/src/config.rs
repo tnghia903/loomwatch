@@ -479,6 +479,22 @@ pub struct AgentConfig {
     pub memory: Option<AgentMemoryConfig>,
     /// What this agent may do without asking. All off for an operator node, which runs no app.
     pub allow: AgentAllow,
+    /// Skills and tools the operator turned off for this agent (ADR 0060): its app would otherwise
+    /// load them itself. Empty for an operator node.
+    pub turned_off: Vec<TurnedOff>,
+}
+
+/// A skill or tool an agent's app has of its own that the operator turned off for the agent by
+/// taking it off the canvas (ADR 0060). Everything else the app has stays the agent's to choose.
+/// Something `LoomWatch` gives the agent is never turned off by this: the canvas wins.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TurnedOff {
+    /// `skill` or `tool`. Knowledge is only ever what `LoomWatch` gives, so it has nothing to turn
+    /// off.
+    pub kind: CapabilityKind,
+    /// A skill's name, or a tool's MCP server name as the app lists it (`claude.ai Notion`).
+    pub name: String,
 }
 
 /// The wire shape of one `agents[]` entry, before the per-kind rules are applied.
@@ -513,6 +529,8 @@ struct RawAgent {
     memory: Option<AgentMemoryConfig>,
     #[serde(default)]
     allow: Option<AgentAllow>,
+    #[serde(default)]
+    turned_off: Vec<TurnedOff>,
     /// Runtime annotation. Accepted and discarded: writers must not persist it and readers must
     /// ignore it (`docs/TEAM_CONFIG.md`).
     #[serde(default, rename = "status")]
@@ -532,6 +550,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     ("spawn", raw.spawn.is_some()),
                     ("model", raw.model.is_some()),
                     ("allow", raw.allow.is_some()),
+                    ("turnedOff", !raw.turned_off.is_empty()),
                 ] {
                     if present {
                         return Err(format!(
@@ -565,6 +584,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     capabilities: raw.capabilities,
                     memory: raw.memory,
                     allow: AgentAllow::default(),
+                    turned_off: Vec::new(),
                 })
             }
             AgentKind::Harness => {
@@ -574,6 +594,9 @@ impl TryFrom<RawAgent> for AgentConfig {
                 let model = raw.model.ok_or_else(|| {
                     format!("agent {id:?} is missing `model`, the harness's model selector.")
                 })?;
+                for entry in &raw.turned_off {
+                    check_turned_off(&id, entry)?;
+                }
                 Ok(Self {
                     id,
                     name: raw.name.unwrap_or_default(),
@@ -586,10 +609,36 @@ impl TryFrom<RawAgent> for AgentConfig {
                     capabilities: raw.capabilities,
                     memory: raw.memory,
                     allow: raw.allow.unwrap_or_default(),
+                    turned_off: raw.turned_off,
                 })
             }
         }
     }
+}
+
+/// A turned-off entry names a skill or a tool, and never the Team Bus, which is how a team hands
+/// work on.
+fn check_turned_off(id: &str, entry: &TurnedOff) -> Result<(), String> {
+    if entry.kind == CapabilityKind::Knowledge {
+        return Err(format!(
+            "agent {id:?} turns off knowledge {:?}: only skills and tools can be turned off. Take \
+             the folder, file or page off the canvas instead.",
+            entry.name
+        ));
+    }
+    if entry.name.trim().is_empty() {
+        return Err(format!(
+            "agent {id:?} turns off a {} with no name.",
+            entry.kind.as_str()
+        ));
+    }
+    if entry.name == crate::delivery::RESERVED_SERVER {
+        return Err(format!(
+            "agent {id:?} turns off {:?}, the Team Bus, which is how a team hands work on.",
+            entry.name
+        ));
+    }
+    Ok(())
 }
 
 /// A capability the operator wired to an agent on the canvas. Naming one grants nothing on its
@@ -1440,6 +1489,54 @@ mod tests {
         )
         .expect("valid config");
         assert_eq!(team.entrypoint_agent().expect("entrypoint").id, "a");
+    }
+
+    /// ADR 0060: an agent's turned-off list names skills and tools of its app's own, never
+    /// knowledge (only ever what `LoomWatch` gives) and never the Team Bus.
+    #[test]
+    fn reads_an_agents_turned_off_skills_and_tools_and_refuses_the_rest() {
+        let team = |entries: &str| {
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    turnedOff:\n{entries}",
+            ))
+        };
+        let parsed = team("      - {kind: skill, name: notebooklm}\n      - {kind: tool, name: claude.ai Notion}\n")
+            .expect("skills and tools can be turned off");
+        assert_eq!(
+            parsed.agents[0].turned_off,
+            vec![
+                TurnedOff {
+                    kind: CapabilityKind::Skill,
+                    name: "notebooklm".to_owned()
+                },
+                TurnedOff {
+                    kind: CapabilityKind::Tool,
+                    name: "claude.ai Notion".to_owned()
+                },
+            ]
+        );
+        for (entries, says) in [
+            (
+                "      - {kind: knowledge, name: notes}\n",
+                "only skills and tools",
+            ),
+            (
+                "      - {kind: tool, name: loomwatch-team-bus}\n",
+                "the Team Bus",
+            ),
+            ("      - {kind: skill, name: ' '}\n", "with no name"),
+        ] {
+            let error = format!("{:#}", team(entries).expect_err(says));
+            assert!(error.contains(says), "{error}");
+        }
+        let operator = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n  - id: you\n    kind: operator\n    role: Check it.\n    turnedOff:\n      - {kind: skill, name: x}\nedges:\n  - {from: a, to: you, layer: configured, kind: sequence, ts: \"2026-09-10T00:00:00Z\"}\n",
+        )
+        .expect_err("an operator node runs no app");
+        assert!(
+            format!("{operator:#}").contains("no turnedOff"),
+            "{operator:#}"
+        );
     }
 
     #[test]
