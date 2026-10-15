@@ -6,9 +6,15 @@
 //! folder is hidden, so the team list never mistakes a job for a team, and it sits beside the
 //! teams, so jobs travel with a teams folder that is copied or kept in version control.
 //!
-//! A job is a starting point, never a link: placing one copies its fields into the team file, and
-//! editing or removing the job later changes no team. Removing moves the file into
-//! `.jobs/.removed/`, where it can be moved back by hand.
+//! A saved job is one of "Your agents", and it has versions. Placing one copies the fields of its
+//! current version into the team file together with a `from: {agent, version}` link, so the team
+//! runs exactly what it was approved with. Saving a change that a team would copy makes a new
+//! version and keeps the previous one in `.jobs/.versions/<id>/`; a team reaches the new version
+//! only when the operator updates it. Removing moves the file into `.jobs/.removed/`, where it can
+//! be moved back by hand, and changes no team.
+//!
+//! `.jobs/.bench/` holds the one-agent teams the agent builder's test bench runs. It is hidden, so
+//! neither the team list nor the scheduler ever sees them.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -20,9 +26,14 @@ use serde::{Deserialize, Serialize};
 pub(crate) const JOBS_DIR: &str = ".jobs";
 /// Where a removed job's file goes, below [`JOBS_DIR`].
 const REMOVED_DIR: &str = ".removed";
+/// Earlier versions of each job, below [`JOBS_DIR`]: `.versions/<id>/v<n>.yaml`.
+const VERSIONS_DIR: &str = ".versions";
+/// The test bench's one-agent teams, below [`JOBS_DIR`].
+pub(crate) const BENCH_DIR: &str = ".bench";
 
 const MAX_NAME: usize = 80;
 const MAX_DOES: usize = 120;
+const MAX_NOTE: usize = 200;
 const MAX_INSTRUCTIONS: usize = 20_000;
 const MAX_MODEL: usize = 200;
 const MAX_LIST: usize = 32;
@@ -32,8 +43,44 @@ const ICONS: &[&str] = &[
     "research", "write", "edit", "review", "code", "design", "analyse",
 ];
 
-const FILE_HEADER: &str = "# A LoomWatch job: add it to a team from \"Your jobs\" in the Build palette.\n\
-# Placing it copies these fields into the team; editing this file later changes no team.\n";
+const FILE_HEADER: &str = "# One of your LoomWatch agents: add it to a team from \"Your agents\" in the Build palette.\n\
+# A team keeps the version it was placed with until you choose Update in that team.\n";
+
+/// What the agent may do without asking (ADR 0037), as a team file's `allow:` block writes it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct JobAllow {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) web: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) edits: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) commands: bool,
+}
+
+impl JobAllow {
+    // serde's `skip_serializing_if` passes a reference.
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    fn is_empty(&self) -> bool {
+        !self.web && !self.edits && !self.commands
+    }
+}
+
+// serde's `skip_serializing_if` passes a reference.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn first_version() -> u32 {
+    1
+}
+
+// serde's `skip_serializing_if` passes a reference.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_first_version(version: &u32) -> bool {
+    *version <= 1
+}
 
 /// One job as written on disk and sent over the API (without `id` and `file`, which come from the
 /// file name).
@@ -61,6 +108,45 @@ pub(crate) struct JobSpec {
     /// Skill names, delivered to whichever app the job runs on (ADR 0021 routes them).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) skills: Vec<String>,
+    /// What it may do without asking, copied into the team with the rest.
+    #[serde(default, skip_serializing_if = "JobAllow::is_empty")]
+    pub(crate) allow: JobAllow,
+    /// Which version this is. The daemon owns it: a save that changes anything a team copies makes
+    /// the next one, and whatever a client sends here is ignored.
+    #[serde(default = "first_version", skip_serializing_if = "is_first_version")]
+    pub(crate) version: u32,
+    /// What changed in this version, in the operator's words.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) note: String,
+    /// When this version was saved (RFC 3339). Set by the daemon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) saved_at: Option<String>,
+}
+
+impl JobSpec {
+    /// Whether a team placed from `self` would copy anything different from `other`: the fields
+    /// that reach the team file. What it is called in the palette and its note are not among them.
+    fn copies_differently(&self, other: &JobSpec) -> bool {
+        self.name != other.name
+            || self.instructions != other.instructions
+            || self.apps != other.apps
+            || self.model != other.model
+            || self.skills != other.skills
+            || self.allow != other.allow
+    }
+}
+
+/// One version of a job, as the version list shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct JobVersion {
+    pub(crate) version: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) saved_at: Option<String>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub(crate) note: String,
+    /// That version's fields, so a team can see what an update would change.
+    pub(crate) spec: JobSpec,
 }
 
 /// A saved job as `GET /api/jobs` lists it.
@@ -98,6 +184,9 @@ pub(crate) enum JobError {
     Invalid(String),
     /// `create_only` was asked for and a job with this id exists.
     Exists(String),
+    /// The save named the version it was edited from, and the job has moved on since: this is
+    /// the version it is at now.
+    Stale(u32),
     NotFound(String),
     Io(String),
 }
@@ -193,6 +282,12 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
             "A job can name at most {MAX_LIST} apps and {MAX_LIST} skills."
         ));
     }
+    let note = spec.note.trim().to_owned();
+    if note.chars().count() > MAX_NOTE {
+        return Err(format!(
+            "Keep \"what changed\" under {MAX_NOTE} characters."
+        ));
+    }
     Ok(JobSpec {
         name,
         does,
@@ -201,6 +296,10 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
         apps,
         model,
         skills,
+        allow: spec.allow,
+        version: spec.version.max(1),
+        note,
+        saved_at: spec.saved_at,
     })
 }
 
@@ -293,7 +392,21 @@ pub(crate) fn list_jobs(teams_root: &Path) -> Result<JobList, JobError> {
     Ok(list)
 }
 
+/// A job file's fields and its text, or why it could not be read as a job.
+fn read_spec(path: &Path) -> Result<(JobSpec, String), String> {
+    let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let spec = serde_yaml::from_str::<JobSpec>(&text)
+        .map_err(|error| error.to_string())
+        .and_then(normalize)?;
+    Ok((spec, text))
+}
+
 /// Write `spec` as job `id`, replacing an existing one unless `create_only`.
+///
+/// When the saved job differs from the one on disk in anything a team copies, the one on disk is
+/// kept as an earlier version and the new one gets the next number. `expected_version` is the
+/// version the operator edited: a save made from a version the job has moved on from is refused,
+/// so two windows never overwrite each other without a word.
 ///
 /// The caller holds the API's write lock, so the existence check and the write cannot interleave
 /// with another save through this daemon.
@@ -302,19 +415,20 @@ pub(crate) fn save_job(
     id: &str,
     spec: JobSpec,
     create_only: bool,
+    expected_version: Option<u32>,
 ) -> Result<SavedJob, JobError> {
     if !is_job_id(id) {
         return Err(JobError::Invalid(
             "A job id uses lowercase letters, digits and single hyphens only.".into(),
         ));
     }
-    let spec = normalize(spec).map_err(JobError::Invalid)?;
+    let mut spec = normalize(spec).map_err(JobError::Invalid)?;
     let folder = teams_root.join(JOBS_DIR);
     if jobs_folder(teams_root)?.is_none() {
         fs::create_dir(&folder).map_err(|error| JobError::Io(error.to_string()))?;
     }
     let path = folder.join(format!("{id}.yaml"));
-    match fs::symlink_metadata(&path) {
+    let existing = match fs::symlink_metadata(&path) {
         Ok(metadata) if !metadata.is_file() => {
             return Err(JobError::Io(format!(
                 "{} is not a plain file",
@@ -322,7 +436,43 @@ pub(crate) fn save_job(
             )));
         }
         Ok(_) if create_only => return Err(JobError::Exists(spec.name)),
-        _ => {}
+        // A file that no longer reads as a job is replaced, as it always was; there is no version
+        // of it worth keeping.
+        Ok(_) => read_spec(&path).ok(),
+        Err(_) => None,
+    };
+    if let (Some(expected), Some((current, _))) = (expected_version, &existing)
+        && current.version != expected
+    {
+        return Err(JobError::Stale(current.version));
+    }
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    match &existing {
+        Some((current, _)) if !spec.copies_differently(current) => {
+            // Nothing a team copies changed: the same version, saved when it was. Only the
+            // palette's line, the icon or the note can differ.
+            spec.version = current.version;
+            spec.saved_at.clone_from(&current.saved_at);
+            if spec.note.is_empty() {
+                spec.note.clone_from(&current.note);
+            }
+            if spec == *current {
+                return Ok(SavedJob {
+                    id: id.to_owned(),
+                    spec,
+                    file: relative(id),
+                });
+            }
+        }
+        Some((current, text)) => {
+            keep_version(teams_root, id, current.version, text)?;
+            spec.version = current.version + 1;
+            spec.saved_at = Some(now);
+        }
+        None => {
+            spec.version = 1;
+            spec.saved_at = Some(now);
+        }
     }
     let yaml = serde_yaml::to_string(&spec).map_err(|error| JobError::Io(error.to_string()))?;
     write_replacing(&path, format!("{FILE_HEADER}{yaml}").as_bytes())
@@ -332,6 +482,80 @@ pub(crate) fn save_job(
         spec,
         file: relative(id),
     })
+}
+
+/// A plain folder at `path`, made when missing. A link is refused: following it could write
+/// outside the teams root.
+fn plain_folder(path: &Path, shown: &str) -> Result<(), JobError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(JobError::Io(format!("{shown} is not a plain folder"))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            fs::create_dir(path).map_err(|error| JobError::Io(error.to_string()))
+        }
+        Err(error) => Err(JobError::Io(error.to_string())),
+    }
+}
+
+/// Keep `text`, version `version` of job `id`, as `.jobs/.versions/<id>/v<version>.yaml`.
+fn keep_version(teams_root: &Path, id: &str, version: u32, text: &str) -> Result<(), JobError> {
+    let versions = teams_root.join(JOBS_DIR).join(VERSIONS_DIR);
+    plain_folder(&versions, &format!("{JOBS_DIR}/{VERSIONS_DIR}"))?;
+    let own = versions.join(id);
+    plain_folder(&own, &format!("{JOBS_DIR}/{VERSIONS_DIR}/{id}"))?;
+    write_replacing(&own.join(format!("v{version}.yaml")), text.as_bytes())
+        .map_err(|error| JobError::Io(error.to_string()))
+}
+
+/// Every version of job `id`, newest first: the current one, then those kept in
+/// `.jobs/.versions/<id>/`. A kept file that no longer reads is left out.
+pub(crate) fn list_versions(teams_root: &Path, id: &str) -> Result<Vec<JobVersion>, JobError> {
+    if !is_job_id(id) || jobs_folder(teams_root)?.is_none() {
+        return Err(JobError::NotFound(id.to_owned()));
+    }
+    let path = job_file(teams_root, id);
+    if !fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
+        return Err(JobError::NotFound(id.to_owned()));
+    }
+    let (current, _) = read_spec(&path).map_err(JobError::Invalid)?;
+    let mut versions = vec![current];
+    let own = teams_root.join(JOBS_DIR).join(VERSIONS_DIR).join(id);
+    if fs::symlink_metadata(&own).is_ok_and(|metadata| metadata.is_dir())
+        && let Ok(entries) = fs::read_dir(&own)
+    {
+        for entry in entries.flatten() {
+            if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+                continue;
+            }
+            if let Ok((spec, _)) = read_spec(&entry.path())
+                && spec.version < versions[0].version
+                && versions.iter().all(|kept| kept.version != spec.version)
+            {
+                versions.push(spec);
+            }
+        }
+    }
+    versions.sort_by_key(|spec| std::cmp::Reverse(spec.version));
+    Ok(versions
+        .into_iter()
+        .map(|spec| JobVersion {
+            version: spec.version,
+            saved_at: spec.saved_at.clone(),
+            note: spec.note.clone(),
+            spec,
+        })
+        .collect())
+}
+
+/// The folder the test bench writes its one-agent teams to, made when missing, relative to the
+/// teams root.
+pub(crate) fn bench_folder(teams_root: &Path) -> Result<String, JobError> {
+    plain_folder(&teams_root.join(JOBS_DIR), JOBS_DIR)?;
+    plain_folder(
+        &teams_root.join(JOBS_DIR).join(BENCH_DIR),
+        &format!("{JOBS_DIR}/{BENCH_DIR}"),
+    )?;
+    Ok(format!("{JOBS_DIR}/{BENCH_DIR}"))
 }
 
 /// Move job `id` into `.jobs/.removed/`, keeping every earlier removal of the same id.
@@ -368,6 +592,13 @@ pub(crate) fn remove_job(teams_root: &Path, id: &str) -> Result<String, JobError
         suffix += 1;
     }
     fs::rename(&path, &target).map_err(|error| JobError::Io(error.to_string()))?;
+    // Its earlier versions go with it, so a new job saved under the same name starts its own
+    // history instead of inheriting this one's.
+    let versions = teams_root.join(JOBS_DIR).join(VERSIONS_DIR).join(id);
+    if fs::symlink_metadata(&versions).is_ok_and(|metadata| metadata.is_dir()) {
+        let kept = target.with_extension("versions");
+        fs::rename(&versions, &kept).map_err(|error| JobError::Io(error.to_string()))?;
+    }
     Ok(format!(
         "{JOBS_DIR}/{REMOVED_DIR}/{}",
         target
@@ -410,6 +641,10 @@ mod tests {
             apps: vec!["codex".into(), "claude".into()],
             model: Some("gpt-5.6".into()),
             skills: vec!["release-style".into()],
+            allow: JobAllow::default(),
+            version: 1,
+            note: String::new(),
+            saved_at: None,
         }
     }
 
@@ -448,14 +683,20 @@ mod tests {
     #[test]
     fn a_saved_job_lists_back_with_every_field() {
         let root = root();
-        let saved =
-            save_job(root.path(), "release-notes", spec(" Release notes "), true).expect("save");
+        let saved = save_job(
+            root.path(),
+            "release-notes",
+            spec(" Release notes "),
+            true,
+            None,
+        )
+        .expect("save");
         assert_eq!(saved.spec.name, "Release notes");
         assert_eq!(saved.file, ".jobs/release-notes.yaml");
         let list = list_jobs(root.path()).expect("list");
         assert_eq!(list.jobs, vec![saved]);
         let text = fs::read_to_string(root.path().join(".jobs/release-notes.yaml")).expect("file");
-        assert!(text.starts_with("# A LoomWatch job"), "{text}");
+        assert!(text.starts_with("# One of your LoomWatch agents"), "{text}");
         assert!(
             text.contains("instructions: Write the release notes."),
             "{text}"
@@ -465,14 +706,14 @@ mod tests {
     #[test]
     fn create_only_refuses_an_existing_job_and_a_plain_save_replaces_it() {
         let root = root();
-        save_job(root.path(), "notes", spec("Notes"), true).expect("first");
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
         assert_eq!(
-            save_job(root.path(), "notes", spec("Notes"), true),
+            save_job(root.path(), "notes", spec("Notes"), true, None),
             Err(JobError::Exists("Notes".into()))
         );
         let mut changed = spec("Notes");
         changed.instructions = "Shorter notes.".into();
-        save_job(root.path(), "notes", changed, false).expect("replace");
+        save_job(root.path(), "notes", changed, false, None).expect("replace");
         let list = list_jobs(root.path()).expect("list");
         assert_eq!(list.jobs.len(), 1);
         assert_eq!(list.jobs[0].spec.instructions, "Shorter notes.");
@@ -484,19 +725,19 @@ mod tests {
         let mut nameless = spec("x");
         nameless.name = "  ".into();
         assert!(matches!(
-            save_job(root.path(), "x", nameless, false),
+            save_job(root.path(), "x", nameless, false, None),
             Err(JobError::Invalid(_))
         ));
         let mut empty = spec("x");
         empty.instructions = "\n".into();
         assert!(matches!(
-            save_job(root.path(), "x", empty, false),
+            save_job(root.path(), "x", empty, false, None),
             Err(JobError::Invalid(_))
         ));
         let mut icon = spec("x");
         icon.icon = Some("rocket".into());
         assert!(matches!(
-            save_job(root.path(), "x", icon, false),
+            save_job(root.path(), "x", icon, false, None),
             Err(JobError::Invalid(_))
         ));
     }
@@ -507,7 +748,7 @@ mod tests {
         for id in ["../escape", "a/b", ".hidden", "UPPER", "", "-x", "a--b"] {
             assert!(
                 matches!(
-                    save_job(root.path(), id, spec("x"), false),
+                    save_job(root.path(), id, spec("x"), false, None),
                     Err(JobError::Invalid(_))
                 ),
                 "{id:?} was accepted"
@@ -585,7 +826,7 @@ mod tests {
     #[test]
     fn removing_moves_the_file_aside_and_keeps_earlier_removals() {
         let root = root();
-        save_job(root.path(), "notes", spec("Notes"), true).expect("save");
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("save");
         let first = remove_job(root.path(), "notes").expect("remove");
         assert!(
             first.starts_with(".jobs/.removed/") && first.ends_with("-notes.yaml"),
@@ -593,13 +834,121 @@ mod tests {
         );
         assert!(root.path().join(&first).is_file());
         assert!(list_jobs(root.path()).expect("list").jobs.is_empty());
-        save_job(root.path(), "notes", spec("Notes"), true).expect("save again");
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("save again");
         let second = remove_job(root.path(), "notes").expect("remove again");
         assert_ne!(first, second);
         assert!(root.path().join(&first).is_file() && root.path().join(&second).is_file());
         assert_eq!(
             remove_job(root.path(), "notes"),
             Err(JobError::NotFound("notes".into()))
+        );
+    }
+
+    #[test]
+    fn a_change_a_team_would_copy_makes_the_next_version_and_keeps_the_last() {
+        let root = root();
+        let first = save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
+        assert_eq!(first.spec.version, 1);
+        assert!(first.spec.saved_at.is_some());
+
+        // The palette's line is not something a team copies: same version.
+        let mut described = spec("Notes");
+        described.does = "Short release notes".into();
+        let same = save_job(root.path(), "notes", described, false, Some(1)).expect("does");
+        assert_eq!(same.spec.version, 1);
+        assert_eq!(same.spec.saved_at, first.spec.saved_at);
+
+        let mut changed = spec("Notes");
+        changed.instructions = "Write shorter release notes.".into();
+        changed.allow.web = true;
+        changed.note = "Shorter, and it may search the web".into();
+        let second = save_job(root.path(), "notes", changed, false, Some(1)).expect("second");
+        assert_eq!(second.spec.version, 2);
+        assert!(root.path().join(".jobs/.versions/notes/v1.yaml").is_file());
+
+        let versions = list_versions(root.path(), "notes").expect("versions");
+        let numbers: Vec<u32> = versions.iter().map(|version| version.version).collect();
+        assert_eq!(numbers, vec![2, 1]);
+        assert_eq!(versions[0].note, "Shorter, and it may search the web");
+        assert!(versions[0].spec.allow.web);
+        assert_eq!(versions[1].spec.instructions, "Write the release notes.");
+        assert!(!versions[1].spec.allow.web);
+        let text = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
+        assert!(
+            text.contains("version: 2") && text.contains("web: true"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_save_made_from_an_older_version_is_refused() {
+        let root = root();
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
+        let mut changed = spec("Notes");
+        changed.instructions = "Version two.".into();
+        save_job(root.path(), "notes", changed.clone(), false, Some(1)).expect("second");
+        changed.instructions = "Written in a window still showing version one.".into();
+        assert_eq!(
+            save_job(root.path(), "notes", changed, false, Some(1)),
+            Err(JobError::Stale(2))
+        );
+    }
+
+    #[test]
+    fn whatever_version_a_client_sends_is_ignored() {
+        let root = root();
+        let mut claimed = spec("Notes");
+        claimed.version = 9;
+        claimed.saved_at = Some("2001-01-01T00:00:00Z".into());
+        let saved = save_job(root.path(), "notes", claimed, true, None).expect("save");
+        assert_eq!(saved.spec.version, 1);
+        assert_ne!(saved.spec.saved_at.as_deref(), Some("2001-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn removing_takes_the_earlier_versions_along() {
+        let root = root();
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
+        let mut changed = spec("Notes");
+        changed.instructions = "Version two.".into();
+        save_job(root.path(), "notes", changed, false, None).expect("second");
+        let moved = remove_job(root.path(), "notes").expect("remove");
+        assert!(!root.path().join(".jobs/.versions/notes").exists());
+        let kept = root.path().join(moved).with_extension("versions");
+        assert!(kept.join("v1.yaml").is_file(), "{}", kept.display());
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("again");
+        let versions = list_versions(root.path(), "notes").expect("versions");
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].version, 1);
+    }
+
+    #[test]
+    fn the_bench_folder_is_made_on_request_and_never_listed_as_a_job() {
+        let root = root();
+        assert_eq!(bench_folder(root.path()).expect("bench"), ".jobs/.bench");
+        assert!(root.path().join(".jobs/.bench").is_dir());
+        fs::write(
+            root.path().join(".jobs/.bench/notes.yaml"),
+            "schemaVersion: 1\nname: test\n",
+        )
+        .expect("write");
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("save");
+        let list = list_jobs(root.path()).expect("list");
+        assert_eq!(list.jobs.len(), 1);
+        assert!(list.problems.is_empty(), "{:?}", list.problems);
+        assert_eq!(bench_folder(root.path()).expect("again"), ".jobs/.bench");
+    }
+
+    #[test]
+    fn versions_of_a_missing_job_are_not_found() {
+        let root = root();
+        assert_eq!(
+            list_versions(root.path(), "nobody"),
+            Err(JobError::NotFound("nobody".into()))
+        );
+        assert_eq!(
+            list_versions(root.path(), "../x"),
+            Err(JobError::NotFound("../x".into()))
         );
     }
 
@@ -611,7 +960,7 @@ mod tests {
         std::os::unix::fs::symlink(outside.path(), root.path().join(JOBS_DIR)).expect("link");
         assert!(matches!(list_jobs(root.path()), Err(JobError::Io(_))));
         assert!(matches!(
-            save_job(root.path(), "x", spec("x"), false),
+            save_job(root.path(), "x", spec("x"), false, None),
             Err(JobError::Io(_))
         ));
         assert!(

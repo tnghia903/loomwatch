@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
-import type { AgentConfig } from '../team-file/types'
+import type { AgentAllow, AgentConfig } from '../team-file/types'
 import { ROLE_ICON_IDS, type RoleIcon, type RolePreset } from './roles'
 
 /**
- * Jobs the operator saved for reuse (ADR 0030).
+ * Your agents: agents the operator built or saved for reuse (ADR 0030 began them as saved jobs).
  *
- * A saved job is an agent that worked, kept: its instructions, the app and model it ran on, and its
- * skills. The daemon stores each one as `<teams root>/.jobs/<id>.yaml`; the palette lists them under
- * "Your jobs" and places them exactly like the built-in jobs. Placing copies the fields into the
- * team, so editing or removing a job later changes no team.
+ * Each is its instructions, the app and model it runs on, its skills and what it may do without
+ * asking. The daemon stores each one as `<teams root>/.jobs/<id>.yaml` and numbers its versions;
+ * the palette lists them under "Your agents". Placing one copies its current version's fields into
+ * the team with a `from: {agent, version}` link (lib/library/link.ts), so the team runs exactly
+ * what it was approved with until the operator chooses Update there.
  */
 
 /** What is saved, as `PUT /api/jobs/{id}` takes it (backend `jobs::JobSpec`). */
@@ -22,6 +23,25 @@ export interface JobSpec {
   apps?: string[]
   model?: string
   skills?: string[]
+  /** What it may do without asking (ADR 0037); only switches that are on are written. */
+  allow?: AgentAllow
+  /** Set by the daemon: which version this is. Absent means 1. */
+  version?: number
+  /** What changed in this version, in the operator's words. */
+  note?: string
+  /** Set by the daemon: when this version was saved. */
+  savedAt?: string
+}
+
+/** A job's version number; a file written before versions existed is version 1. */
+export const versionOf = (job: Pick<JobSpec, 'version'>): number => job.version ?? 1
+
+/** One version of a saved job, newest first in `fetchJobVersions`. */
+export interface JobVersion {
+  version: number
+  savedAt?: string
+  note?: string
+  spec: JobSpec
 }
 
 /** A saved job as `GET /api/jobs` lists it. `file` is relative to the teams folder. */
@@ -68,17 +88,34 @@ export async function fetchJobs(): Promise<JobList | null> {
 
 /**
  * Save `spec` as job `id`. Without `replace`, an existing job is never overwritten: the daemon
- * answers 412 and this throws a `JobApiError` with that status, so the caller can ask first.
+ * answers 412 and this throws a `JobApiError` with that status, so the caller can ask first. With
+ * `expectedVersion`, a job saved elsewhere since that version also answers 412, instead of being
+ * overwritten.
  */
-export async function saveJob(id: string, spec: JobSpec, { replace = false } = {}): Promise<SavedJob> {
+export async function saveJob(id: string, spec: JobSpec, { replace = false, expectedVersion }: { replace?: boolean; expectedVersion?: number } = {}): Promise<SavedJob> {
+  const precondition: Record<string, string> = !replace ? { 'If-None-Match': '*' } : expectedVersion ? { 'If-Match': `"${expectedVersion}"` } : {}
   const response = await daemonFetch(`/api/jobs/${encodeURIComponent(id)}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...(replace ? {} : { 'If-None-Match': '*' }) },
+    headers: { 'Content-Type': 'application/json', ...precondition },
     body: JSON.stringify(spec),
   })
   if (!response.ok) throw await failure(response)
   window.dispatchEvent(new Event(JOBS_CHANGED_EVENT))
   return (await response.json()) as SavedJob
+}
+
+/** Every version of job `id`, newest first, each with its fields. */
+export async function fetchJobVersions(id: string): Promise<JobVersion[]> {
+  const response = await daemonFetch(`/api/jobs/${encodeURIComponent(id)}/versions`, { cache: 'no-store' })
+  if (!response.ok) throw await failure(response)
+  return ((await response.json()) as { versions: JobVersion[] }).versions
+}
+
+/** The folder the test bench writes its one-agent teams to (`.jobs/.bench`), made when missing. */
+export async function benchFolder(): Promise<string> {
+  const response = await daemonFetch('/api/bench', { method: 'POST', cache: 'no-store' })
+  if (!response.ok) throw await failure(response)
+  return ((await response.json()) as { folder: string }).folder
 }
 
 /** Remove a saved job. Its file is moved to `.jobs/.removed/`, so it can be put back by hand. */
@@ -121,11 +158,18 @@ export function guessIcon(name: string, instructions = ''): RoleIcon | undefined
   return undefined
 }
 
-/** What "Save as job" keeps of an agent: its instructions, app, model and skills. */
+/** Only the switches that are on, or nothing: how a team file and a job file both write `allow`. */
+export function onlyOn(allow: AgentAllow | undefined): AgentAllow | undefined {
+  const kept = Object.fromEntries(Object.entries(allow ?? {}).filter(([, on]) => on === true)) as AgentAllow
+  return Object.keys(kept).length > 0 ? kept : undefined
+}
+
+/** What "Add to Your agents" keeps of an agent: its instructions, app, model, skills and switches. */
 export function jobFromAgent(agent: AgentConfig, options: { name: string; does?: string; appId?: string }): JobSpec {
   const name = options.name.trim()
   const icon = guessIcon(name, agent.role)
   const skills = (agent.capabilities ?? []).filter((capability) => capability.kind === 'skill').map((capability) => capability.name)
+  const allow = onlyOn(agent.allow)
   return {
     name,
     ...(options.does?.trim() ? { does: options.does.trim() } : {}),
@@ -134,6 +178,7 @@ export function jobFromAgent(agent: AgentConfig, options: { name: string; does?:
     ...(options.appId ? { apps: [options.appId] } : {}),
     ...(options.appId && agent.model ? { model: agent.model } : {}),
     ...(skills.length ? { skills } : {}),
+    ...(allow ? { allow } : {}),
   }
 }
 
@@ -143,18 +188,21 @@ function summary(instructions: string): string {
   return first.length > 60 ? `${first.slice(0, 57).trimEnd()}…` : first
 }
 
-/** A saved job as a palette preset, placed exactly like a built-in one. */
+/** A saved job as a palette preset, placed like a built-in one, plus a link to this version. */
 export function savedJobPreset(job: SavedJob): RolePreset {
   const icon = job.icon && ROLE_ICON_IDS.includes(job.icon) ? job.icon : undefined
+  const allow = onlyOn(job.allow)
   return {
     id: `saved-${job.id}`,
     label: job.name,
-    does: job.does?.trim() || summary(job.instructions) || 'Your job',
+    does: job.does?.trim() || summary(job.instructions) || 'Your agent',
     role: job.instructions,
     ...(icon ? { icon } : {}),
     prefers: job.apps ?? [],
     ...(job.model ? { model: job.model } : {}),
     ...(job.skills?.length ? { skills: job.skills } : {}),
+    ...(allow ? { allow } : {}),
+    from: { agent: job.id, version: versionOf(job) },
   }
 }
 
@@ -163,6 +211,8 @@ export interface SavedJobsState {
   problems: JobProblem[]
   /** False when the daemon predates saved jobs: it must be restarted before they can be used. */
   available: boolean
+  /** The first answer has come back (or failed). */
+  loaded: boolean
   error: string | null
   reload: () => void
 }
@@ -197,5 +247,5 @@ export function useSavedJobs(): SavedJobsState {
     window.addEventListener(JOBS_CHANGED_EVENT, reload)
     return () => window.removeEventListener(JOBS_CHANGED_EVENT, reload)
   }, [reload])
-  return { jobs: list?.jobs ?? NO_JOBS, problems: list?.problems ?? NO_PROBLEMS, available, error, reload }
+  return { jobs: list?.jobs ?? NO_JOBS, problems: list?.problems ?? NO_PROBLEMS, available, loaded: list !== null || !available || error !== null, error, reload }
 }

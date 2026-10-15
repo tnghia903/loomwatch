@@ -10,6 +10,7 @@ import { fetchCapabilities, type CapabilityInventory } from './lib/library/clien
 import { useTheme } from './lib/theme'
 
 const Connections = lazy(() => import('./components/Connections'))
+const AgentsPage = lazy(() => import('./components/agents/AgentsPage').then((module) => ({ default: module.AgentsPage })))
 
 function useHarnesses() {
   const [harnesses, setHarnesses] = useState<DetectedHarness[]>([])
@@ -92,9 +93,22 @@ function Editor({ initialRunId }: { initialRunId: string | null }) {
   )
 }
 
+/** Your agents (`/agents`): build and try one agent at a time, then use it in any team. */
+function Agents() {
+  const { harnesses, loading } = useHarnesses()
+  const capabilities = useCapabilities()
+  return (
+    <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading your agents…</p>}>
+      <Feedback harnesses={harnesses} />
+      <AgentsPage harnesses={harnesses} harnessesLoading={loading} skills={capabilities.inventory.skills} skillsLoading={capabilities.loading} />
+    </Suspense>
+  )
+}
+
 export default function App() {
   useTheme()
   const { pathname, search } = window.location
+  if (pathname === '/agents' || pathname.startsWith('/agents/')) return <Agents />
   if (pathname === '/connections') {
     return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading connections…</p>}><Connections /></Suspense>
   }

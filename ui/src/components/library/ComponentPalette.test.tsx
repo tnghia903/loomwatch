@@ -40,7 +40,7 @@ describe('ComponentPalette jobs', () => {
     expect(within(section('Hire by job')).getByText('Researcher')).toBeInTheDocument()
     fireEvent.click(within(section('Hire by job')).getByRole('button', { name: 'About Hire by job' }))
     expect(await screen.findByText(/select it and choose/)).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Your jobs' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Your agents' })).toBeNull()
   })
 
   it('lists saved jobs first and places one with its skills, as the built-in jobs are placed', async () => {
@@ -48,24 +48,24 @@ describe('ComponentPalette jobs', () => {
     const added = vi.fn()
     window.addEventListener('loomwatch:add-agent', added)
     palette()
-    const yours = await waitFor(() => section('Your jobs'))
+    const yours = await waitFor(() => section('Your agents'))
     const headings = screen.getAllByRole('heading').map((heading) => heading.textContent)
-    expect(headings.indexOf('Your jobs')).toBeLessThan(headings.indexOf('Hire by job'))
+    expect(headings.indexOf('Your agents')).toBeLessThan(headings.indexOf('Hire by job'))
     fireEvent.click(within(yours).getByRole('button', { name: /^Release notes/ }))
     const payload = JSON.parse((added.mock.calls[0][0] as CustomEvent<string>).detail)
-    expect(payload).toMatchObject({ label: 'Release notes', role: 'Write the notes.', spawn: { cmd: 'codex' }, capabilities: [{ kind: 'skill', name: 'release-style' }] })
+    expect(payload).toMatchObject({ label: 'Release notes', role: 'Write the notes.', spawn: { cmd: 'codex' }, capabilities: [{ kind: 'skill', name: 'release-style' }], from: { agent: 'release-notes', version: 1 } })
     window.removeEventListener('loomwatch:add-agent', added)
   })
 
   it('removes a saved job only on a second click', async () => {
     jobs = [{ id: 'release-notes', name: 'Release notes', instructions: 'Write the notes.', file: '.jobs/release-notes.yaml' }]
     palette()
-    const remove = await screen.findByRole('button', { name: 'Remove the job Release notes' })
+    const remove = await screen.findByRole('button', { name: 'Remove the agent Release notes' })
     fireEvent.click(remove)
     expect(removed).toEqual([])
     fireEvent.click(screen.getByRole('button', { name: 'Confirm removing Release notes' }))
     await waitFor(() => expect(removed).toEqual(['release-notes']))
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Your jobs' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Your agents' })).toBeNull())
   })
 
   it('says which job file it could not read instead of hiding it', async () => {

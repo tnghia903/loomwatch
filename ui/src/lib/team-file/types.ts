@@ -42,6 +42,16 @@ export type AgentStatus =
  * contents are supplied in its prompt and a tool is handed to its harness as an MCP server (ADR
  * 0029). Team memory is never a capability: it is wired through `memory.inherits`.
  */
+/**
+ * A versioned link to one of Your agents (`<teams root>/.jobs/<agent>.yaml`). The team keeps a
+ * copy of that version's fields, so it runs exactly what it was approved with; a newer version
+ * reaches the team only when the operator chooses Update.
+ */
+export interface AgentLink {
+  agent: string
+  version: number
+}
+
 export interface CapabilityRef {
   kind: 'skill' | 'knowledge' | 'tool'
   name: string
@@ -111,6 +121,9 @@ export interface AgentConfig {
   /** Skills and tools of its app's own the operator turned off for it by taking them off the
       canvas (ADR 0060). Absent means none: the agent chooses from everything its app has. */
   turnedOff?: TurnedOff[]
+  /** The agent in Your agents this one was placed from, and the version its fields copy. Absent
+      means the agent is this team's own. */
+  from?: AgentLink
   // Runtime-only annotation. Team-file writers must never set this field;
   // it is exposed here only because readers must tolerate it on load.
   status?: AgentStatus

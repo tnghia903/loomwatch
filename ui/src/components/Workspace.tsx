@@ -109,7 +109,8 @@ import { matchTeam, parseIntent } from '../lib/story/intent'
 import { APPROVAL_TEXT } from '../lib/story/needsYou'
 import { DEPTH_LABEL, DEPTH_ZOOM, STORY_MAX_ZOOM } from '../lib/story/depth'
 import { harnessForRole, ROLE_PRESETS, roleSource } from '../lib/library/roles'
-import { savedJobPreset, useSavedJobs } from '../lib/library/jobs'
+import { savedJobPreset, useSavedJobs, versionOf } from '../lib/library/jobs'
+import { fieldsForVersion, linkState } from '../lib/library/link'
 import type { LibrarySource } from '../lib/library/types'
 import { OPERATOR_SOURCE } from '../lib/library/fixtures'
 import { teamSentence } from '../lib/story/teamSentence'
@@ -2635,6 +2636,20 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             startAdvanced={forcedInspectorField?.agentId === inspectedNode.id} fixHint={forcedInspectorField?.agentId === inspectedNode.id ? forcedInspectorField.hint : undefined} onDismissFixHint={() => setForcedInspectorField(null)}
             harnesses={harnesses} harnessId={inspectedHarnessId ?? undefined} onHarnessChange={(id: string) => { const harness = harnesses.find(item => item.id === id); if (harness) doc.updateAgentSpawn(inspectedNode.id, { env: {}, cwd: '.', ...inspectedNode.data.agent.spawn, ...harness.spawn }) }}
             node={inspectedNode} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} pipeline={doc.mode === 'pipeline'}
+            link={{
+              state: linkState(inspectedNode.data.agent, savedJobs),
+              onApply: (job) => {
+                if (!editable) return
+                doc.applyAgentFields(inspectedNode.id, fieldsForVersion(job, inspectedNode.data.agent, harnesses))
+                setStatusAnnouncement(`${job.name} is now v${versionOf(job)} in this team. Save the team to keep it.`)
+              },
+              onUnlink: () => {
+                if (!editable) return
+                doc.applyAgentFields(inspectedNode.id, { from: undefined })
+                setStatusAnnouncement(`${inspectedNode.data.agent.name} is now this team’s own. Save the team to keep it.`)
+              },
+              onLink: (link) => { if (editable) doc.applyAgentFields(inspectedNode.id, { from: link }) },
+            }}
             teamAutoMode={doc.teamPermissionMode === 'auto'}
             checkup={{ findings: teamCheckup.forAgent(inspectedNode.id), onFix: teamCheckup.apply, onDismiss: teamCheckup.dismiss, onAsk: ask.unavailable ? undefined : askFor }}
             usage={teamUsageFor(teamCheckup.usage, inspectedNode.id)}

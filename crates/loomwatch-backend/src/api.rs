@@ -651,6 +651,9 @@ fn router_with(
             "/api/jobs/{id}",
             axum::routing::put(put_job).delete(delete_job),
         )
+        .route("/api/jobs/{id}/versions", get(get_job_versions))
+        // The agent builder's test bench: where its one-agent teams are written.
+        .route("/api/bench", axum::routing::post(post_bench))
         // ADR 0035: the folder picker, and adding a file to a team as knowledge.
         .route("/api/folders", get(get_folders))
         .route(
@@ -1210,7 +1213,8 @@ async fn get_jobs(State(state): State<ApiState>) -> Result<Json<crate::jobs::Job
 }
 
 /// Save a job. `If-None-Match: *` saves only when no job has this id, so the UI can ask before
-/// replacing one; without it an existing job is replaced.
+/// replacing one; without it an existing job is replaced. `If-Match: "<version>"` names the
+/// version the operator edited, and a job that has moved on since answers 412.
 async fn put_job(
     State(state): State<ApiState>,
     AxumPath(id): AxumPath<String>,
@@ -1220,15 +1224,58 @@ async fn put_job(
     let create_only = headers
         .get(header::IF_NONE_MATCH)
         .is_some_and(|value| value.as_bytes() == b"*");
+    let expected_version = match headers.get(header::IF_MATCH) {
+        None => None,
+        Some(value) => Some(
+            value
+                .to_str()
+                .ok()
+                .map(|text| text.trim().trim_matches('"'))
+                .and_then(|text| text.parse::<u32>().ok())
+                .ok_or_else(|| {
+                    ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        "If-Match must name a version number, such as \"3\".".into(),
+                    )
+                })?,
+        ),
+    };
     let _write = state.writes.lock().map_err(|_| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "job write lock unavailable".into(),
         )
     })?;
-    crate::jobs::save_job(&state.teams_root, &id, spec, create_only)
+    crate::jobs::save_job(&state.teams_root, &id, spec, create_only, expected_version)
         .map(Json)
         .map_err(job_error)
+}
+
+/// Every version of one saved job, newest first, each with its fields.
+async fn get_job_versions(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let teams_root = state.teams_root.clone();
+    let versions =
+        tokio::task::spawn_blocking(move || crate::jobs::list_versions(&teams_root, &id))
+            .await
+            .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+            .map_err(job_error)?;
+    Ok(Json(json!({ "versions": versions })))
+}
+
+/// The folder the agent builder writes its test teams to, made when missing. It is hidden, so the
+/// team list and the scheduler never pick its teams up.
+async fn post_bench(State(state): State<ApiState>) -> Result<Json<Value>, ApiError> {
+    let _write = state.writes.lock().map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "job write lock unavailable".into(),
+        )
+    })?;
+    let folder = crate::jobs::bench_folder(&state.teams_root).map_err(job_error)?;
+    Ok(Json(json!({ "folder": folder })))
 }
 
 /// Remove a saved job: its file moves to `.jobs/.removed/`. No team changes.
@@ -1252,7 +1299,13 @@ fn job_error(error: crate::jobs::JobError) -> ApiError {
         JobError::Invalid(message) => ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, message),
         JobError::Exists(name) => ApiError::new(
             StatusCode::PRECONDITION_FAILED,
-            format!("You already have a job called “{name}”."),
+            format!("You already have an agent called “{name}”."),
+        ),
+        JobError::Stale(version) => ApiError::new(
+            StatusCode::PRECONDITION_FAILED,
+            format!(
+                "This agent was saved somewhere else since you opened it; it is at version {version} now. Reload to see that version before you save."
+            ),
         ),
         JobError::NotFound(id) => ApiError::new(
             StatusCode::NOT_FOUND,
