@@ -40,6 +40,8 @@ const documentState = vi.hoisted(() => ({
   briefPaths: [] as string[], renameTeam: vi.fn(),
   applyPositions: vi.fn(), addMemoryInherit: vi.fn(), removeMemoryInherit: vi.fn(), excludeInheritedBrief: vi.fn(),
   setAgentCapabilities: vi.fn(), updateAgentThinkingEffort: vi.fn(),
+  // ADR 0060 (taking a skill or tool off the canvas turns it off) and Your agents' links.
+  turnOff: vi.fn(), turnBackOn: vi.fn(), applyAgentFields: vi.fn(),
   checkDiskRevision: vi.fn(async () => {}), currentRevision: () => 'rev-7',
 }))
 
