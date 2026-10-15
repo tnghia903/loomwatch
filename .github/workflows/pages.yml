@@ -4,7 +4,8 @@ name: Pages
 # (scripts/install.sh, served as /install.sh). The built page is pushed to the
 # loomwatch/loomwatch.github.io repository, and GitHub Pages serves that repository's main branch.
 # It runs when the page, the installer, the screenshots it borrows from docs/assets/readme, the
-# design-system fonts or this workflow change on main, and by hand.
+# agent figures it borrows from ui/public/agent/figures, the design-system fonts or this workflow
+# change on main, and by hand.
 #
 # The push uses PAGES_DEPLOY_KEY, the private half of an SSH deploy key that has write access to
 # loomwatch/loomwatch.github.io and nothing else.
@@ -17,6 +18,7 @@ on:
       - docs/assets/readme/**
       - docs/assets/usecases/**
       - docs/design-system/fonts/**
+      - ui/public/agent/figures/**
       - examples/usecases/**
       - examples/skills/**
       - .github/workflows/pages.yml

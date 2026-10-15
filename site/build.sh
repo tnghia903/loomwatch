@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Assemble the landing page for GitHub Pages: the page in site/, plus the README's screenshots and
-# the design system's fonts, which are read from where they already live rather than copied into
-# site/ a second time. The Pages workflow runs this; run it yourself to preview the page.
+# Assemble the landing page for GitHub Pages: the page in site/, plus the README's screenshots, the
+# agent figures and the design system's fonts, which are read from where they already live rather
+# than copied into site/ a second time. The Pages workflow runs this; run it yourself to preview the page.
 #
 #   site/build.sh            # writes ./_site
 #   site/build.sh /tmp/page  # writes there
@@ -31,6 +31,12 @@ cp "$root"/site/favicon.svg "$root"/site/favicon.ico "$root"/site/apple-touch-ic
 # The link preview picture (og:image); site/social-card.html says how it is made.
 cp "$root"/site/social-card.jpg "$out/"
 cp "$root"/docs/assets/readme/*.png "$out/assets/readme/"
+# The app's own screenshots for the page, the crew in the cold open, and the agent figures, read
+# from the app so the page shows the same faces the app does.
+mkdir -p "$out/assets/app" "$out/assets/crew" "$out/assets/figures"
+cp "$root"/site/assets/app/*.webp "$out/assets/app/"
+cp "$root"/site/assets/crew/*.webp "$out/assets/crew/"
+cp "$root"/ui/public/agent/figures/*.webp "$out/assets/figures/"
 # The fonts' license (SIL OFL) has to travel with every copy of them.
 cp "$root"/docs/design-system/fonts/fonts.css "$root"/docs/design-system/fonts/*.woff2 "$root"/docs/design-system/fonts/OFL.txt "$out/assets/fonts/"
 echo "Built the landing page in $out"
