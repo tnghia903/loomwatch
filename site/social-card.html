@@ -35,16 +35,16 @@
     position: absolute; inset: auto -120px -260px auto; width: 760px; height: 620px;
     background: radial-gradient(closest-side, rgb(233 196 106 / 0.16), transparent);
   }
-  .copy { position: absolute; left: 72px; top: 64px; width: 560px; }
+  .copy { position: absolute; left: 72px; top: 64px; width: 540px; }
   .brand { display: flex; align-items: center; gap: 16px; }
   .brand svg { width: 70px; height: 30px; }
   .brand span { font-family: var(--serif); font-size: 40px; letter-spacing: 0.2px; }
   h1 {
-    margin-top: 54px; font-family: var(--serif); font-weight: 400; font-size: 70px; line-height: 1.02;
+    margin-top: 44px; font-family: var(--serif); font-weight: 400; font-size: 62px; line-height: 1.02;
     letter-spacing: -0.5px;
   }
   h1 em { font-style: normal; color: var(--accent); }
-  p.lede { margin-top: 26px; font-size: 23px; line-height: 1.42; color: var(--ink-2); }
+  p.lede { margin-top: 24px; font-size: 22px; line-height: 1.42; color: var(--ink-2); }
   p.lede b { color: var(--ink); font-weight: 600; }
   .foot {
     position: absolute; left: 72px; bottom: 56px; display: flex; gap: 14px; align-items: center;
@@ -54,12 +54,14 @@
     border: 1px solid var(--hairline); border-radius: 999px; padding: 7px 16px; color: var(--ink);
   }
   .foot .url { color: var(--accent); font-weight: 600; margin-left: 6px; }
-  .shot {
-    position: absolute; left: 672px; top: 70px; width: 700px; border-radius: 16px; overflow: hidden;
-    border: 1px solid var(--hairline);
-    box-shadow: 0 30px 80px rgb(0 0 0 / 0.65), 0 0 0 1px rgb(0 0 0 / 0.6);
+  .loom { position: absolute; left: 640px; top: 58px; width: 520px; height: 470px; }
+  .loom line { stroke: rgb(255 255 255 / 0.13); stroke-width: 2; }
+  .loom path { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; opacity: 0.32; }
+  .loom .you { stroke: var(--accent); stroke-dasharray: 5 5; opacity: 0.55; }
+  .crew {
+    position: absolute; left: 590px; top: 196px; width: 620px;
+    filter: drop-shadow(0 18px 30px rgb(0 0 0 / 0.5));
   }
-  .shot img { display: block; width: 100%; }
 </style>
 </head>
 <body>
@@ -72,15 +74,20 @@
       </svg>
       <span>LoomWatch</span>
     </div>
-    <h1>Put your AI apps to work <em>as one team.</em></h1>
-    <p class="lede">Mix <b>Claude Code</b>, <b>Codex</b> and <b>OpenCode</b> on one team and work with it in
-      one chat. Ask in plain words, watch every step, and decide before the next agent builds on it.</p>
+    <h1>Build AI agents you can see. <em>Put them to work as one team.</em></h1>
+    <p class="lede">Give each agent a job and a face, connect them in a workflow, and talk to the team
+      in one chat, on <b>Claude Code</b>, <b>Codex</b> and <b>OpenCode</b>.</p>
   </div>
   <div class="foot">
     <span class="pill">Free &amp; open source</span>
     <span class="pill">Runs on your Mac</span>
     <span class="url">loomwatch.github.io</span>
   </div>
-  <div class="shot"><img src="../docs/assets/readme/chat-dark.png" alt=""></div>
+  <svg class="loom" viewBox="0 0 520 470" aria-hidden="true">
+    <line x1="30" y1="0" x2="30" y2="470"/><line x1="145" y1="0" x2="145" y2="470"/><line x1="260" y1="0" x2="260" y2="470"/>
+    <line x1="375" y1="0" x2="375" y2="470"/><line class="you" x1="490" y1="0" x2="490" y2="470"/>
+    <path d="M10 46H510"/><path d="M10 102H510"/><path d="M10 404H510"/>
+  </svg>
+  <img class="crew" src="assets/crew/crew.webp" alt="">
 </body>
 </html>

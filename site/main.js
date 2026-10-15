@@ -1,6 +1,6 @@
-// LoomWatch landing page. The page is one team's chat, and the visitor is in it: choose apps, build
-// a team, @ it with a job, write to it while it works, review, read the answer, @ one agent for
-// another pass. No dependencies, no network calls, and the static page stays readable without it.
+// LoomWatch landing page, in the app's three acts. The visitor builds an agent and tries it on its
+// own, puts agents in a team, then works with the team in its chat: @ it with a job, write to it
+// while it works, review, read the answer, @ one agent for another pass. No dependencies, no network calls, and the static page stays readable without it.
 (() => {
   'use strict'
 
@@ -150,7 +150,7 @@
   const themeButton = $('#theme')
   function paintShots() {
     const mode = root.dataset.theme === 'light' ? 'light' : 'dark'
-    $$('img[data-shot]').forEach((img) => { img.src = `assets/readme/${img.dataset.shot}-${mode}.png` })
+    $$('img[data-shot]').forEach((img) => { img.src = `assets/app/${img.dataset.shot}-${mode}.webp` })
   }
   function applyTheme(theme) {
     root.dataset.theme = theme
@@ -204,6 +204,7 @@
   // Where each window sits on the messy desk, as a fraction of the free space, and its tilt.
   const DESK = { claude: [0.04, 0.05, -3], codex: [0.96, 0, 2.4], hermes: [0, 0.9, 1.8], opencode: [0.92, 1, -2.2] }
   const tags = terms.map((term) => { const tag = el('span', { class: 'term-tag', text: term.dataset.app }); field.append(tag); return tag })
+  const crew = $('.open-crew')
   let openReady = false
   let openP = reduced ? 1 : 0
   let fieldBox = { w: 0, h: 0 }
@@ -230,6 +231,9 @@
     }
     const p = openP
     const t = smooth(0.16, 0.52, p)
+    // Once the cloth is woven, the crew steps out in front of it: the agents you will build.
+    const crewIn = smooth(0.8, 0.97, p)
+    const labels = 1 - crewIn
     const thin = smooth(0.14, 0.36, p) // windows narrow first, then stretch into threads
     const { w: W, h: H } = fieldBox
     const top = H * 0.08
@@ -253,11 +257,11 @@
       centres.push([sx + deskSize.w / 2, sy + deskSize.h / 2])
       tags[i].style.left = `${threadX(i)}px`
       tags[i].style.top = `${top - 20}px`
-      tags[i].style.opacity = String(smooth(0.75, 1, t))
+      tags[i].style.opacity = String(smooth(0.75, 1, t) * labels)
     })
     youTag.style.left = `${threadX(4)}px`
     youTag.style.top = `${top - 20}px`
-    youTag.style.opacity = String(smooth(0.8, 1, t))
+    youTag.style.opacity = String(smooth(0.8, 1, t) * labels)
 
     // The copy-and-paste loop between the windows, gone once they are threads.
     const order = [0, 1, 3, 2, 0].map((i) => centres[i])
@@ -285,6 +289,10 @@
         weftSvg.append(el('svg:line', { class: i === 4 ? 'w-you' : 'w-warp', x1: x, x2: x, y1: y - 7, y2: y + 7 }))
       }
     }
+
+    open.style.setProperty('--crew', String(crewIn))
+    open.style.setProperty('--cloth', String(1 - crewIn * 0.7))
+    crew.classList.toggle('wave', crewIn > 0.99 && !reduced)
 
     open.style.setProperty('--before', String(1 - smooth(0.08, 0.26, p)))
     const after = smooth(0.3, 0.5, p)
@@ -353,6 +361,7 @@
     if (!on && state.apps.length === 2 && state.team.researcher === state.team.writer) state.team.writer = id
     renderTeamViews(['researcher', 'writer'])
     renderApps()
+    renderAgent()
     renderWarpPreview()
     renderSwatch()
   }
@@ -379,7 +388,202 @@
     svg.setAttribute('aria-label', `The threads on your loom: ${listText(names)}.`)
   }
 
-  /* ================================================================ 02 · Build */
+  /* ================================================================ 02 · Agent */
+
+  // The same crew as the app: six figures in seven colours (ui/src/lib/library/figures.ts).
+  const KINDS = [
+    { id: 'yarn', name: 'yarn ball' }, { id: 'spool', name: 'spool' }, { id: 'button', name: 'button' },
+    { id: 'thimble', name: 'thimble' }, { id: 'pincushion', name: 'pincushion' }, { id: 'cone', name: 'thread cone' },
+  ]
+  const COLORS = { clay: '#E3A386', butter: '#F1D488', sage: '#9FBF9E', sky: '#9EC3E6', lilac: '#BDB0E6', rose: '#EBB3C0', oat: '#E8DFCF' }
+  const figureSrc = (kind, color) => `assets/figures/${kind}-${color}.webp`
+  // The keys an agent may be handed, and what each one means, said beside it as the app says it.
+  const KEYS = [
+    { key: 'web', label: 'Search the web', may: 'search the web', asks: 'searches the web', off: 'Asks you before it searches the web.', on: 'Searches the web without asking.' },
+    { key: 'edits', label: 'Change files', may: 'change files in its folder', asks: 'changes a file', off: 'Asks you before it changes a file.', on: 'Changes files in its folder without asking.' },
+    { key: 'commands', label: 'Run commands', may: 'run commands', asks: 'runs a command', off: 'Asks you before it runs a command.', on: 'Runs commands without asking.' },
+  ]
+  const agent = { name: 'Scout', kind: 'pincushion', color: 'rose', app: 'claude', keys: { web: false, edits: false, commands: false } }
+  const shelf = [] // { name, version, job, kind, color }
+  let trial = 0 // the test run in flight, or 0; a newer one or an edit ends it
+  let trials = 0
+  const ENDED = Symbol('ended')
+  const orText = (items) => items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} or ${items.at(-1)}`
+
+  const agentName = () => agent.name.trim() || 'Your agent'
+  const agentJob = () => `${agent.app}|${KEYS.filter((k) => agent.keys[k.key]).map((k) => k.key).join(',')}`
+  const shelved = () => shelf.find((s) => s.name.toLowerCase() === agentName().toLowerCase())
+  const looksLike = () => {
+    const kind = KINDS.find((k) => k.id === agent.kind).name
+    return `${/^[aeiou]/.test(agent.color) ? 'an' : 'a'} ${agent.color} ${kind}`
+  }
+
+  // A radio group of buttons: one tab stop, arrow keys move the choice, as the app's pickers do.
+  function radios(container, items, current, pick) {
+    const buttons = items.map((item) => el('button', {
+      type: 'button', role: 'radio', 'aria-checked': String(item.id === current), 'aria-label': item.label, title: item.label,
+      tabindex: item.id === current ? '0' : '-1', style: item.style, onclick: () => pick(item.id),
+    }, ...(item.kids || [])))
+    buttons.forEach((button, i) => button.addEventListener('keydown', (event) => {
+      const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key]
+      if (!step) return
+      event.preventDefault()
+      pick(items[(i + step + items.length) % items.length].id)
+      container.querySelector('[aria-checked="true"]')?.focus()
+    }))
+    container.replaceChildren(...buttons)
+  }
+
+  const agFigure = $('#ag-figure')
+  const agImg = $('#ag-img')
+  function paintFigure() {
+    const src = figureSrc(agent.kind, agent.color)
+    agFigure.style.setProperty('--fig', COLORS[agent.color])
+    if (agImg.getAttribute('src') === src) return
+    agFigure.classList.add('swap')
+    const next = new Image()
+    next.src = src
+    const show = () => { agImg.src = src; agFigure.classList.remove('swap') }
+    if (next.decode) next.decode().then(show, show)
+    else show()
+  }
+
+  function renderAgent() {
+    if (!state.apps.includes(agent.app)) agent.app = state.apps[0]
+    paintFigure()
+    $('#ag-plate-name').textContent = agentName()
+    $('#ag-plate-what').textContent = looksLike()
+    radios($('#ag-kinds'), KINDS.map((k) => ({
+      id: k.id, label: k.name[0].toUpperCase() + k.name.slice(1),
+      kids: [el('img', { src: figureSrc(k.id, agent.color), width: '96', height: '96', alt: '', loading: 'lazy' }), el('span', { text: k.name.replace('thread ', '') })],
+    })), agent.kind, (id) => { agent.kind = id; edited() })
+    radios($('#ag-colors'), Object.keys(COLORS).map((c) => ({ id: c, label: c[0].toUpperCase() + c.slice(1), style: `--c:${COLORS[c]}` })), agent.color, (id) => { agent.color = id; edited() })
+    radios($('#ag-apps'), state.apps.map((id) => ({ id, label: app(id).name, kids: [app(id).name] })), agent.app, (id) => { agent.app = id; edited() })
+    $('#ag-keys').replaceChildren(...KEYS.map((k) => {
+      const on = agent.keys[k.key]
+      return el('li', { class: on ? 'on' : '' },
+        el('b', { text: k.label }),
+        el('em', { text: on ? k.on : k.off }),
+        el('button', { type: 'button', 'aria-pressed': String(on), 'aria-label': `${on ? 'Take back' : 'Hand over'}: ${k.label}`, onclick: () => { agent.keys[k.key] = !on; edited(); $(`#ag-keys li:nth-child(${KEYS.indexOf(k) + 1}) button`).focus() } }, on ? 'Take it back' : 'Hand it over'))
+    }))
+    // The blocks add up to one sentence, so the visitor reads what the agent will do, not settings.
+    const free = KEYS.filter((k) => agent.keys[k.key]).map((k) => k.may)
+    const asks = KEYS.filter((k) => !agent.keys[k.key]).map((k) => k.asks)
+    $('#ag-says').replaceChildren(el('b', { text: agentName() }), ` is ${looksLike()} on ${app(agent.app).name}. `,
+      free.length ? `It may ${listText(free)} on its own` : 'It only reads and replies on its own',
+      asks.length ? `, and asks you before it ${orText(asks)}.` : ', and never stops to ask you.')
+    paintSaved()
+  }
+
+  function paintSaved() {
+    const saved = shelved()
+    const badge = $('#ag-badge')
+    const changed = saved && (saved.job !== agentJob())
+    $('#ag-version').textContent = saved ? `${saved.name} · v${saved.version}` : 'New agent'
+    badge.textContent = !saved ? 'Not saved yet' : changed ? `Changed since v${saved.version}` : `Saved · v${saved.version}`
+    if (trial) return
+    badge.dataset.state = changed ? 'waiting' : ''
+    $('#ag-save').textContent = !saved ? 'Save to Your agents' : changed ? `Save as v${saved.version + 1}` : 'Saved'
+  }
+
+  // Any edit ends a test run: what was being tried is no longer this agent.
+  function edited() {
+    if (trial) endTrial()
+    renderAgent()
+  }
+
+  const MOOD = { starting: 'thinking', thinking: 'thinking', working: 'working', writing: 'writing', waiting: 'asking', done: 'done', still: 'still' }
+  const TONE = { starting: 'live', thinking: 'live', working: 'live', writing: 'live', waiting: 'you', done: 'done', still: '' }
+  const WORDS = { still: 'Ready', starting: 'Starting', thinking: 'Thinking', working: 'Using a tool', writing: 'Writing its reply', waiting: 'Waiting for you', done: 'Done' }
+  function mark(stateName, detail = '') {
+    agFigure.dataset.mood = MOOD[stateName]
+    const status = $('#ag-status')
+    status.dataset.tone = TONE[stateName]
+    status.lastElementChild.textContent = detail ? `${WORDS[stateName]} · ${detail}` : WORDS[stateName]
+  }
+  function endTrial() {
+    trial = 0
+    mark('still')
+    $('#ag-reply').hidden = true
+    $('#ag-try').textContent = 'Try it'
+    paintSaved()
+  }
+  const pause = (ms, mine) => new Promise((resolve, reject) => window.setTimeout(() => (trial === mine ? resolve() : reject(ENDED)), reduced ? Math.min(ms, 200) : ms))
+
+  // A test run on its own, before any team depends on it: the real app's status words, and the
+  // stop it makes for any key it was not handed.
+  async function tryAgent() {
+    if (trial) { endTrial(); return }
+    const mine = ++trials
+    trial = mine
+    const reply = $('#ag-reply')
+    const badge = $('#ag-badge')
+    $('#ag-try').textContent = 'Stop'
+    badge.textContent = 'Testing'
+    badge.dataset.state = 'running'
+    reply.hidden = true
+    const query = 'open-weight models this week'
+    try {
+      mark('starting'); await pause(700, mine)
+      mark('thinking'); await pause(1300, mine)
+      let searched = agent.keys.web
+      if (!searched) {
+        mark('waiting')
+        searched = await new Promise((resolve) => {
+          reply.replaceChildren(el('div', { class: 'ag-ask' },
+            el('span', {}, el('b', { text: agentName() }), ` wants to search the web for “${query}”.`),
+            el('div', {},
+              el('button', { type: 'button', class: 'btn btn-primary', onclick: () => resolve(true) }, 'Allow once'),
+              el('button', { type: 'button', class: 'btn', onclick: () => resolve(false) }, 'Decline'))))
+          reply.hidden = false
+          reply.querySelector('button').focus({ preventScroll: true })
+        })
+        if (trial !== mine) return
+        reply.hidden = true
+      }
+      if (searched) { mark('working', 'web search'); await pause(1600, mine) }
+      mark('writing'); await pause(1300, mine)
+      reply.replaceChildren(searched
+        ? el('span', {}, 'Three stories this week, each with its link: a new open coding model, a faster small model for phones, and a licence change. ', el('b', { text: 'Want them as a digest?' }))
+        : el('span', {}, 'Without the web I can only give you what I already know, which may be out of date. Hand me ', el('b', { text: 'Search the web' }), ' and I will look it up.'))
+      reply.hidden = false
+      mark('done')
+      $('#ag-try').textContent = 'Try it again'
+      trial = 0
+      paintSaved()
+    } catch (error) {
+      if (error !== ENDED) throw error
+    }
+  }
+
+  function saveAgent() {
+    if (trial) endTrial()
+    const saved = shelved()
+    const note = $('#ag-shelf-note')
+    if (!saved) {
+      shelf.push({ name: agentName(), version: 1, job: agentJob(), kind: agent.kind, color: agent.color })
+      note.replaceChildren(`${agentName()} is in Your agents as v1. `, el('a', { href: '#act-workflow', text: 'Put it in a team ↓' }))
+    } else if (saved.job !== agentJob()) {
+      saved.version += 1
+      Object.assign(saved, { job: agentJob(), kind: agent.kind, color: agent.color })
+      note.textContent = `${saved.name} is now v${saved.version}. A team using v${saved.version - 1} keeps it until you choose Update in that team.`
+    } else if (saved.kind !== agent.kind || saved.color !== agent.color) {
+      Object.assign(saved, { kind: agent.kind, color: agent.color })
+      note.textContent = `A new face keeps the version: ${saved.name} is still v${saved.version}, and every team shows it at once.`
+    } else {
+      note.textContent = `Nothing changed since v${saved.version}.`
+    }
+    $('#ag-shelf').hidden = false
+    $('#ag-shelf-list').replaceChildren(...shelf.map((s) => el('li', {},
+      el('img', { src: figureSrc(s.kind, s.color), width: '60', height: '60', alt: '' }), s.name, el('span', { text: `v${s.version}` }))))
+    paintSaved()
+  }
+
+  $('#ag-name').addEventListener('input', (event) => { agent.name = event.target.value; edited() })
+  $('#ag-try').addEventListener('click', tryAgent)
+  $('#ag-save').addEventListener('click', saveAgent)
+
+  /* ================================================================ 03 · Team */
 
   const sentence = $('#sentence')
   function appSelect(who) {
@@ -2188,9 +2392,10 @@
   }
 
   const SCREENS = {
-    home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as a team, a New team button, a box to describe the job in plain words, three steps, and the teams as cards with their recent runs drawn as threads.', cap: 'Home: your teams, each with its recent runs drawn as threads, and the one gold button that starts a new one.' },
-    build: { w: 2880, h: 1800, alt: 'LoomWatch Build: the team as one sentence across the top, a Hire by job palette on the left, and agent cards wired left to right on a dotted canvas, with a folder, a file and a shared skill wired in beneath the agents that use them.', cap: 'Build: the team as one sentence across the top, Hire by job on the left, and under each agent the folder, file and skill it was handed.' },
-    chat: { w: 2880, h: 1800, alt: "LoomWatch Chat for a market brief team: on the left, Researcher's handover to you, your approval with a note for Writer, and the team's answer as a document card marked Nothing flagged, with Copy and Share and the message box below; on the right, the brief open in full under an Answer tab beside Details.", cap: 'Chat: the handover, your review and the answer, marked Nothing flagged, with the brief open beside the chat. Details is one tab away.' },
+    home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as a team, a gold Build an agent button beside New team, a box to describe the job in plain words, the three steps Agents, Workflow and Chat, a row of your saved agents each with its little figure and version, and your teams as cards below.', cap: 'Home: start with an agent, then a team. Your agents sit in a row, each with its figure and its version.' },
+    agents: { w: 2880, h: 1600, alt: "LoomWatch's agent workbench for Writer, version 1: a sentence saying what Writer thinks with, works in and may do, a mint-green figure at its desk with labels for its keys, its skills, the model it thinks with, its job and its tray, and on the right the blocks that make it: Name, Instructions with a check of what good instructions say, and App.", cap: 'An agent on its workbench: the figure shows what it has, the blocks beside it change it, and the sentence on top says what it all adds up to.' },
+    workflow: { w: 2880, h: 1600, alt: 'LoomWatch Workflow for a daily tech digest: the team as one sentence, When you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer, each with its figure; on the left your saved agents ready to add; on the canvas a schedule trigger at 9 AM wired to Gatherer, Reader and Writer, and the team response.', cap: 'Workflow: your agents wired in order, read back as one sentence, with your saved agents one click away on the left.' },
+    chat: { w: 2880, h: 1600, alt: "LoomWatch Chat: Researcher answers Writer's question with two sources, Writer hands a draft to you, and you approve it; each agent's name and avatar wear its figure's colour. On the right, Details shows the run live on a timeline you can drag back to replay, and the team's handovers step by step.", cap: "Chat: who said what, in each agent's own colour, and Details beside it with every step on a timeline you can replay." },
   }
   const realImg = $('#real-img')
   function showScreen(name, focus = false) {
@@ -2247,6 +2452,7 @@
 
   applyTheme(root.dataset.theme === 'light' ? 'light' : 'dark')
   renderApps()
+  renderAgent()
   renderWarpPreview()
   renderTeamViews()
   renderChatUI(true)
