@@ -136,8 +136,8 @@ span.story-schedule { cursor: default; }
 .weft-head .delivery-link { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; }
 .weft-cloth { display: grid; grid-template-columns: minmax(64px, 120px) minmax(0, 1fr); gap: 12px; }
 .weft-names { display: grid; grid-auto-rows: 30px; }
-.weft-names span { align-self: center; font-size: 12.5px; color: var(--color-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.weft-names span.you { font-style: italic; color: var(--color-accent); }
+.weft-names > span { align-self: center; font-size: 12.5px; color: var(--color-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.weft-names > span.you { font-style: italic; color: var(--color-accent); }
 .weft-tracks { position: relative; height: calc(var(--weft-rows, 1) * 30px); cursor: ew-resize; touch-action: pan-y; user-select: none; }
 .weft-lane { position: absolute; left: 0; right: 0; height: 30px; }
 .weft-warp { position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--color-warp); opacity: .55; }
@@ -543,8 +543,15 @@ span.story-schedule { cursor: default; }
 .lw-canvas[data-depth="story"] .mark-badge { width: 20px; height: 20px; }
 .story-name .agent-mark { --mark-ground: var(--color-accent-tint); margin-left: -3px; }
 .story-name.you .agent-mark { --mark-ground: var(--color-ground); }
-.weft-names span { display: inline-flex; align-items: center; gap: 6px; }
+.weft-names > span { display: inline-flex; align-items: center; gap: 6px; }
 .weft-names .agent-mark { --mark-ground: var(--color-panel); }
+/* Its name, and under it what it is doing, in words (markLabel). */
+.weft-names .weft-who { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.weft-who b { font-weight: inherit; overflow: hidden; text-overflow: ellipsis; }
+.weft-state { font-style: normal; font-size: 10.5px; color: var(--color-ink-3); overflow: hidden; text-overflow: ellipsis; }
+.weft-state.st-starting, .weft-state.st-thinking, .weft-state.st-working, .weft-state.st-writing { color: var(--color-live); }
+.weft-state.st-waiting { color: var(--color-accent); }
+.weft-state.st-failed { color: var(--color-alert); }
 .delivery-stage-select .agent-mark { --mark-ground: var(--color-panel-solid); }
 /* The record's exact call under its plain heading: wrapped, at most three lines, full text on hover. */
 .insp-raw { margin-top: 4px; color: var(--color-ink-3); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }

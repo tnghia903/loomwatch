@@ -17,7 +17,7 @@ import { CardPorts } from './CardPorts'
 import type { CapabilityNode } from './capabilityNode'
 import { roleGlyph } from './roleGlyph'
 import { depthForZoom, storyLine } from '../../lib/story/depth'
-import { markState } from '../../lib/story/mark'
+import { markLabel, markState } from '../../lib/story/mark'
 import { figureStill } from '../../lib/library/figures'
 import { useAgentFigure } from '../agents/figureContext'
 import { AgentMark } from '../ui/AgentMark'
@@ -120,7 +120,7 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
         {data.instructionNote && !runtime && <p className="build-node-instruction-note">{data.instructionNote}</p>}
         {runtime && (
           <>
-            <span className="build-node-task"><b>{runtime.ownerLabel} · {runtime.taskState}</b><span className="task-text">{runtime.task}</span></span>
+            <span className="build-node-task"><b>{runtime.ownerLabel} · {markLabel(markState(runtime), runtime.openCalls)}</b><span className="task-text">{runtime.task}</span></span>
             {(eventCount > 0 || givenNotes > 0 || runtime.received || runtime.hasPacket) && (
               <span className="build-node-chips">
                 {/* Supplied, counted from this agent's own stored packet. Never "knows" or "has read". */}

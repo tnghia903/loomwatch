@@ -121,7 +121,8 @@ describe('BuildAgentCard while a run is shown', () => {
     const card = container.firstElementChild!
     expect(card).toHaveClass('build-node', 'kind-harness', 'has-run', 'st-running')
     expect(screen.getByText('Claude Code')).toHaveClass('node-kind')
-    expect(screen.getByText('Agent A · lead · STREAMING')).toBeInTheDocument()
+    // The state in words, not the record's code (STREAMING).
+    expect(screen.getByText('Agent A · lead · Writing its reply')).toBeInTheDocument()
     expect(screen.getByText('Writing the reply')).toHaveClass('task-text')
     expect(screen.getByText('openai/gpt-5.4')).toHaveClass('model')
     // Spend is not tracked: the meta row is the model alone, with no dollar figure or meter.
