@@ -16,6 +16,9 @@ esac
 
 rm -rf "$out"
 mkdir -p "$out/assets/readme" "$out/assets/fonts"
+# Absolute from here on: the live figures are built from inside ui/, and the Pages workflow passes
+# a relative folder (_site).
+out=$(cd "$out" && pwd -P)
 cp "$root"/site/index.html "$root"/site/styles.css "$root"/site/main.js "$out/"
 # The use cases page, the one run it tells, and the team files it offers for download,
 # read from examples/ so the page always serves the files that are in the repository.
