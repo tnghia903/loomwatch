@@ -77,7 +77,7 @@ export function checkAnswer({ record, projection, parties, answer, streaming, se
         answered: Boolean(answer),
       })
     : null
-  const verdict = answerVerdict({ phase, text: answer, streaming, terminal, settled, reviewed, receipt, read: readCount(projection.evidence) })
+  const verdict = answerVerdict({ phase, text: answer, streaming, terminal, settled, reviewed, receipt, read: readCount(projection.evidence), checks: projection.checks })
   const required = members.flatMap((party) => (party.config
     ? capabilityEvidence(party.config, evidenceByAgent.get(party.id) ?? [], projected.get(party.id)?.requiredSkills).filter((item) => item.required)
     : []))

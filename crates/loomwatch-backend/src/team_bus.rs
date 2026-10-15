@@ -357,6 +357,12 @@ impl TeamBus {
         self.state.live.lock().await.contains_key(agent_id)
     }
 
+    /// One more turn for a kept-alive agent, from the pipeline itself: a check step sending its
+    /// work back (ADR 0062). `None` when it is no longer live.
+    pub(crate) async fn turn_live(&self, agent_id: &str, prompt: &str) -> Result<Option<String>> {
+        self.ask_live(agent_id, prompt).await
+    }
+
     /// Put a question to a kept-alive agent. `None` means it is not live, so the caller falls back
     /// to spawning one.
     async fn ask_live(&self, agent_id: &str, question: &str) -> Result<Option<String>> {
@@ -4160,6 +4166,8 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),
+            checks: None,
+            send_back_once: false,
         }
     }
 

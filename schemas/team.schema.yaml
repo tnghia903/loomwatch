@@ -487,6 +487,8 @@ $defs:
             - required: [model]
             - required: [thinkingEffort]
             - required: [doneWhen]
+            - required: [checks]
+            - required: [sendBackOnce]
             - required: [allow]
             - required: [turnedOff]
             - required: [from]
@@ -535,6 +537,20 @@ $defs:
           type: string
           minLength: 1
           maxLength: 160
+      checks:
+        description: >-
+          Makes this agent a check step (ADR 0062): the id of the agent whose work it checks, which
+          must hand its work straight to this one. It is handed that work as written and its
+          `doneWhen`, and replies with a `## Check` block (Met, Not met or Not sure per item, with
+          evidence). When it is the last stage and no `responder` is set, the checked agent's reply
+          stays the team's answer.
+        $ref: "#/$defs/Identifier"
+      sendBackOnce:
+        description: >-
+          With `checks`: when a check is not met, send the findings back to the checked agent once
+          and check its revised work once more. Off unless set.
+        type: boolean
+        default: false
       budget:
         $ref: "#/$defs/RetiredBudget"
       allowRecruiting:

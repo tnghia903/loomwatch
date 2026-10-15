@@ -51,8 +51,12 @@ pub fn for_lead(team: &TeamConfig, agent: &AgentConfig) -> Option<String> {
         text.push_str(
             "\n\nYour teammates, whom you can hand parts of the work to with your Team Bus tools:",
         );
-        for teammate in teammates {
+        for teammate in &teammates {
             let _ = write!(text, "\n{}", teammate_line(teammate));
+        }
+        for line in what_teammates_may_do_instead(agent, &teammates) {
+            text.push_str("\n\n");
+            text.push_str(&line);
         }
         text.push_str("\n\n");
         text.push_str(DELEGATION);
@@ -111,7 +115,18 @@ pub fn for_stage(
         );
     }
     let after = neighbours(team, |edge| (edge.from == agent.id).then_some(&edge.to));
-    if !after.is_empty() {
+    if !after.is_empty()
+        && after
+            .iter()
+            .all(|next| next.checks.as_deref() == Some(agent.id.as_str()))
+    {
+        // ADR 0062: a check step is handed the work itself, so there is no handover to write.
+        let _ = write!(
+            text,
+            "\nAfter you: {}, which checks your reply as you write it against what it must satisfy.",
+            names(&after, ids)
+        );
+    } else if !after.is_empty() {
         let _ = write!(
             text,
             "\nAfter you: {}. When your work is done you will be asked for a handover, and that \
@@ -218,10 +233,82 @@ fn names(agents: &[&AgentConfig], with_ids: bool) -> String {
 
 fn teammate_line(agent: &AgentConfig) -> String {
     let summary = role_summary(&agent.role);
-    if summary.is_empty() {
+    let mut line = if summary.is_empty() {
         format!("- {} (`{}`)", agent.name, agent.id)
     } else {
         format!("- {} (`{}`): {summary}", agent.name, agent.id)
+    };
+    let may = switched_on(agent);
+    if !may.is_empty() {
+        let _ = write!(line, " May {}.", sentence_list(&may));
+    }
+    line
+}
+
+/// What an agent's switches let it do without asking (ADR 0037), in words.
+fn switched_on(agent: &AgentConfig) -> Vec<&'static str> {
+    [
+        (agent.allow.web, "search the web"),
+        (agent.allow.edits, "change files"),
+        (agent.allow.commands, "run commands"),
+    ]
+    .into_iter()
+    .filter_map(|(on, words)| on.then_some(words))
+    .collect()
+}
+
+/// One `allow` switch: whether the lead has it, what it lets an agent do, and how to read it.
+type Switch = (bool, &'static str, fn(&AgentConfig) -> bool);
+
+/// The switches a lead lacks and a teammate has, said plainly (ADR 0062).
+///
+/// Measured on a Writer lead with a web-enabled Researcher: asked for a current fact, the lead
+/// tried the web itself, was declined, and answered that it could not find out, without asking
+/// the teammate that could. Told who may do what, it has somewhere to send that part. `OpenCode`
+/// asks for nothing, so its lead lacks nothing.
+fn what_teammates_may_do_instead(lead: &AgentConfig, teammates: &[&AgentConfig]) -> Vec<String> {
+    if Harness::of(lead) == Harness::OpenCode {
+        return Vec::new();
+    }
+    let switches: [Switch; 3] = [
+        (lead.allow.web, "search the web", |agent| agent.allow.web),
+        (lead.allow.edits, "change files", |agent| agent.allow.edits),
+        (lead.allow.commands, "run commands", |agent| {
+            agent.allow.commands
+        }),
+    ];
+    switches
+        .into_iter()
+        .filter(|(lead_may, _, _)| !lead_may)
+        .filter_map(|(_, words, may)| {
+            let able: Vec<String> = teammates
+                .iter()
+                .filter(|teammate| may(teammate))
+                .map(|teammate| teammate.name.clone())
+                .collect();
+            (!able.is_empty()).then(|| {
+                format!(
+                    "You can't {words} yourself, but {} can: hand {} the parts that need it.",
+                    sentence_list(&able),
+                    if able.len() == 1 { "it" } else { "them" }
+                )
+            })
+        })
+        .collect()
+}
+
+fn sentence_list<T: AsRef<str>>(items: &[T]) -> String {
+    match items {
+        [] => String::new(),
+        [only] => only.as_ref().to_owned(),
+        [rest @ .., last] => format!(
+            "{} and {}",
+            rest.iter()
+                .map(AsRef::as_ref)
+                .collect::<Vec<_>>()
+                .join(", "),
+            last.as_ref()
+        ),
     }
 }
 
@@ -351,6 +438,24 @@ mod tests {
             text.ends_with(DELEGATION),
             "a lead that can reach its teammates is told when and how to use them: {text}"
         );
+
+        // A teammate that may search the web is said to, and a lead that may not is told who can.
+        let mut researching = with_bus.clone();
+        researching.agents[1].allow.web = true;
+        let text = for_lead(&researching, &researching.agents[0]).unwrap();
+        assert!(
+            text.contains("- Helper (`help`): Look things up. May search the web."),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "You can't search the web yourself, but Helper can: hand it the parts that need it."
+            ),
+            "{text}"
+        );
+        researching.agents[0].allow.web = true;
+        let text = for_lead(&researching, &researching.agents[0]).unwrap();
+        assert!(!text.contains("You can't"), "{text}");
 
         // A harness with no HTTP MCP gets no Team Bus tools, so it is not told about teammates it
         // has no way to reach.

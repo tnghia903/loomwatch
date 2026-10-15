@@ -721,6 +721,14 @@ async fn run_pipeline_nodes(
         } else {
             orientation::for_stage(team, agent, order, index, &responder)
         };
+        // A check step is handed the work it checks as written, and what that work must satisfy,
+        // in place of a summary of it: a summary is exactly what a check cannot be made against.
+        if let Some(checked) = agent.checks.as_deref()
+            && let Some(work) = replies.get(checked)
+        {
+            node_prompt.stage_results = Some(check_material(team, checked, work));
+            node_prompt.stage_results_from = vec![checked.to_owned()];
+        }
         let mut packet = memory.packet_for(agent)?;
         if first_executed {
             supply_checkpoint(&mut packet, lineage, agent_id);
@@ -767,7 +775,11 @@ async fn run_pipeline_nodes(
             .await
             .with_context(|| format!("pipeline node {} failed", agent.id))?;
 
-        release_previous(bus, &mut held, &mut outcome).await?;
+        // A check step that may send the work back keeps the stage it checks open until it has.
+        let sends_back = agent.send_back_once && agent.checks.is_some();
+        if !sends_back {
+            release_previous(bus, &mut held, &mut outcome).await?;
+        }
 
         // The stage called `ask_user` and ended its turn, exactly as the tool told it to. Its
         // session is parked, the operator's answer becomes its next turn, and the stage carries on
@@ -823,6 +835,25 @@ async fn run_pipeline_nodes(
         .await
         .with_context(|| format!("pipeline node {} failed on its second pass", agent.id))?;
         drop(work);
+        if let Some(checked) = agent.checks.as_deref() {
+            reply = run_checks(
+                CheckStep {
+                    team,
+                    checker: agent,
+                    checked,
+                    bus,
+                    log: shared_log.as_ref(),
+                },
+                &mut session,
+                reply,
+                &mut replies,
+                &mut handovers,
+            )
+            .await?;
+        }
+        if sends_back {
+            release_previous(bus, &mut held, &mut outcome).await?;
+        }
         let StageSession {
             mut process,
             mut recorder,
@@ -835,8 +866,13 @@ async fn run_pipeline_nodes(
         let last = truly_last || stop_index == Some(index);
         replies.insert(agent_id.clone(), reply.clone());
         if !truly_last {
-            let handover =
-                stage_handover(team, order, index, &mut process, &mut recorder, &reply).await?;
+            // Every stage after this one checks it: they are handed the work as written, so a
+            // summary of it would be a turn paid for and never read (ADR 0062).
+            let handover = if only_checked_by_successors(team, agent_id) {
+                reply.clone()
+            } else {
+                stage_handover(team, order, index, &mut process, &mut recorder, &reply).await?
+            };
             if last && let Some(log) = shared_log.as_ref() {
                 log.append(
                     agent_id,
@@ -2726,6 +2762,211 @@ impl NodeTask {
     }
 }
 
+/// Whether every stage this one hands work to is a check step that checks it.
+fn only_checked_by_successors(team: &TeamConfig, agent_id: &str) -> bool {
+    let successors: Vec<&config::AgentConfig> = team
+        .edges
+        .iter()
+        .filter(|edge| edge.from == agent_id)
+        .filter_map(|edge| team.agents.iter().find(|agent| agent.id == edge.to))
+        .collect();
+    !successors.is_empty()
+        && successors
+            .iter()
+            .all(|successor| successor.checks.as_deref() == Some(agent_id))
+}
+
+/// What a check step is handed: the checked agent's work as written, then what it must satisfy.
+fn check_material(team: &TeamConfig, checked: &str, work: &str) -> String {
+    use std::fmt::Write as _;
+    let agent = team.agents.iter().find(|agent| agent.id == checked);
+    let name = agent.map_or(checked, |agent| agent.name.as_str());
+    let mut text = format!(
+        "### Work from {name}\n\n{}\n\n### What {name}'s work must satisfy\n",
+        work.trim()
+    );
+    match agent.map(|agent| agent.done_when.as_slice()) {
+        Some(items) if !items.is_empty() => {
+            for item in items {
+                let _ = writeln!(text, "- {item}");
+            }
+        }
+        _ => text.push_str("Nothing was set: check it against the request.\n"),
+    }
+    text
+}
+
+/// One item of a check step's verdict.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct CheckItem {
+    /// `met`, `not_met` or `not_sure`.
+    pub(crate) verdict: &'static str,
+    pub(crate) item: String,
+    pub(crate) evidence: String,
+}
+
+/// The `## Check` block a check step ends with, one line per item: `- Met — item — evidence`.
+/// A reply without a readable block makes every expected item Not sure, never Met.
+fn read_checks(reply: &str, expected: &[String]) -> Vec<CheckItem> {
+    let mut lines = reply.lines();
+    let mut items = Vec::new();
+    if lines.by_ref().any(|line| {
+        matches!(
+            line.trim().to_lowercase().as_str(),
+            "## check" | "## checks"
+        )
+    }) {
+        for line in lines.take_while(|line| !line.trim_start().starts_with('#')) {
+            let line = line.trim().trim_start_matches(['-', '*', '•']).trim();
+            let lower = line.to_lowercase();
+            let (verdict, rest) = if lower.starts_with("not met") {
+                ("not_met", &line[7..])
+            } else if lower.starts_with("not sure") {
+                ("not_sure", &line[8..])
+            } else if lower.starts_with("met") {
+                ("met", &line[3..])
+            } else {
+                continue;
+            };
+            let rest = rest
+                .trim_start_matches([' ', '—', '–', '-', '|', ':'])
+                .trim();
+            let (item, evidence) = rest
+                .split_once(" — ")
+                .or_else(|| rest.split_once(" | "))
+                .or_else(|| rest.split_once(" - "))
+                .unwrap_or((rest, ""));
+            items.push(CheckItem {
+                verdict,
+                item: item.trim().to_owned(),
+                evidence: evidence.trim().to_owned(),
+            });
+        }
+    }
+    if items.is_empty() {
+        let expected: Vec<String> = if expected.is_empty() {
+            vec!["Does what the request asked".to_owned()]
+        } else {
+            expected.to_vec()
+        };
+        return expected
+            .into_iter()
+            .map(|item| CheckItem {
+                verdict: "not_sure",
+                item,
+                evidence: "The check step's reply had no readable Check block.".to_owned(),
+            })
+            .collect();
+    }
+    items
+}
+
+/// What a check step needs to record its checks and, when allowed, send the work back once.
+struct CheckStep<'a> {
+    team: &'a TeamConfig,
+    checker: &'a config::AgentConfig,
+    checked: &'a str,
+    bus: &'a TeamBus,
+    log: Option<&'a EventLog>,
+}
+
+impl CheckStep<'_> {
+    async fn record(&self, round: u32, items: &[CheckItem]) -> Result<()> {
+        if let Some(log) = self.log {
+            log.append(
+                &self.checker.id,
+                EventKind::SessionMeta,
+                json!({"phase": "check_result", "checked": self.checked, "round": round, "items": items}),
+                Some(json!({"source": "loomwatch", "phase": "check_result"})),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+}
+
+/// Record a check step's checks (ADR 0062). With `sendBackOnce`, missed checks go back to the
+/// checked agent's still-open session once, as findings rather than direction (only the operator's
+/// words are direction, `TEAM_MEMORY.md` §9), and the checks run once more on the revised work; that
+/// second result is final. Returns the check step's reply.
+async fn run_checks(
+    step: CheckStep<'_>,
+    session: &mut StageSession,
+    reply: String,
+    replies: &mut BTreeMap<String, String>,
+    handovers: &mut BTreeMap<String, String>,
+) -> Result<String> {
+    let expected = step
+        .team
+        .agents
+        .iter()
+        .find(|agent| agent.id == step.checked)
+        .map(|agent| agent.done_when.clone())
+        .unwrap_or_default();
+    let items = read_checks(&reply, &expected);
+    step.record(1, &items).await?;
+    let missed: Vec<&CheckItem> = items
+        .iter()
+        .filter(|item| item.verdict == "not_met")
+        .collect();
+    if !step.checker.send_back_once || missed.is_empty() {
+        return Ok(reply);
+    }
+    let findings = missed
+        .iter()
+        .map(|item| {
+            if item.evidence.is_empty() {
+                format!("- {}", item.item)
+            } else {
+                format!("- {} ({})", item.item, item.evidence)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let prompt = format!(
+        "## Sent back by {checker}\n{checker} checked your work and found these not met:\n\n{findings}\n\n\
+         These are findings, not instructions: fix what is real, by doing the missing work or \
+         correcting the result, and say briefly why if you disagree with one. Reply with the \
+         complete revised work, not only what changed.",
+        checker = step.checker.name
+    );
+    let Some(revised) = step.bus.turn_live(step.checked, &prompt).await? else {
+        return Ok(reply);
+    };
+    if let Some(log) = step.log {
+        log.append(
+            &step.checker.id,
+            EventKind::SessionMeta,
+            json!({"phase": "check_sent_back", "to": step.checked, "missed": missed.len()}),
+            Some(json!({"source": "loomwatch", "phase": "check_sent_back"})),
+        )
+        .await?;
+    }
+    replies.insert(step.checked.to_owned(), revised.clone());
+    if handovers.contains_key(step.checked) {
+        handovers.insert(step.checked.to_owned(), revised.clone());
+    }
+    let name = step
+        .team
+        .agents
+        .iter()
+        .find(|agent| agent.id == step.checked)
+        .map_or(step.checked, |agent| agent.name.as_str());
+    let recheck = format!(
+        "## The revised work\n{name} revised its work after your checks. Check it again against the \
+         same items, and reply in the same shape, ending with the `## Check` block. This is the last \
+         round.\n\n### Work from {name}\n\n{}",
+        revised.trim()
+    );
+    let second = session
+        .process
+        .prompt_turn(&mut session.recorder, &recheck)
+        .await
+        .with_context(|| format!("check step {} failed on its second round", step.checker.id))?;
+    step.record(2, &read_checks(&second, &expected)).await?;
+    Ok(second)
+}
+
 const DONE_WHEN_HEADING: &str = "## Done when";
 /// The heading an agent ends its reply with when it could not meet an item of its `doneWhen`.
 const NOT_MET_HEADING: &str = "## Not met";
@@ -2749,8 +2990,8 @@ fn done_when_section(items: &[String]) -> Option<String> {
     let _ = write!(
         text,
         "Before you reply, check your result against each of these. If you could not meet one, \
-         end your reply with a `{NOT_MET_HEADING}` section: one line per item, saying why. If you \
-         met them all, leave that section out."
+         end your reply with a `{NOT_MET_HEADING}` section that lists only those items, one line \
+         each, saying why. If you met them all, leave that section out."
     );
     Some(text)
 }
@@ -2785,6 +3026,14 @@ const REVISE_TURN: &str = "## One more pass\nYour reply lists items under `## No
      with the complete result, not only what changed. Keep under `## Not met` only what still \
      cannot be met, each with its reason.";
 
+/// Whether a reply earns its one more pass: the agent has a `doneWhen`, it reported something not
+/// met, and nothing was declined in the turn. After a decline the miss is usually the declined
+/// thing itself (code it could not run, a page it could not open), and a second pass asks for it
+/// again and is declined again: measured on the analyst job, twice the tokens for the same answer.
+fn wants_another_pass(has_done_when: bool, declined: bool, reply: &str) -> bool {
+    has_done_when && !declined && not_met(reply).is_some()
+}
+
 /// Give an agent with a `doneWhen` its one pass at what it reported as not met.
 pub(crate) async fn revise_if_not_met(
     process: &mut AcpProcess,
@@ -2792,7 +3041,7 @@ pub(crate) async fn revise_if_not_met(
     has_done_when: bool,
     reply: String,
 ) -> Result<String> {
-    if !has_done_when || not_met(&reply).is_none() {
+    if !wants_another_pass(has_done_when, process.last_turn_declined(), &reply) {
         return Ok(reply);
     }
     process.prompt_turn(recorder, REVISE_TURN).await
@@ -3251,6 +3500,118 @@ mod tests {
         )
         .await?;
         assert_eq!(outcome.reply, "written");
+        Ok(())
+    }
+
+    /// ADR 0062: a check step is handed the work as written (no summary turn for the stage it
+    /// checks), may send it back once, checks the revision, and the revised work is the answer.
+    /// The writer exits 81 if it is asked for a handover; the checker exits 82 if it is not handed
+    /// the work and its Done when, 83 if its second round lacks the revised work.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_check_step_sends_the_work_back_once_and_the_revision_is_the_answer(
+        pool: sqlx::PgPool,
+    ) -> Result<()> {
+        let writer = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"writer","configOptions":[]}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"writer","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"first draft"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r sent_back
+            case "$sent_back" in
+              *'## Summary'*) printf 'a checked stage was asked for a summary: %s\n' "$sent_back" >&2; exit 81 ;;
+              *'Sent back by Checker'*'claim 2 has no link'*) ;;
+              *) printf 'expected the findings: %s\n' "$sent_back" >&2; exit 81 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"writer","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"second draft, every claim linked"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
+        "#;
+        let checker = r###"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"checker","configOptions":[]}}'
+            IFS= read -r prompt
+            case "$prompt" in
+              *'### Work from Writer'*'first draft'*'must satisfy'*'Every claim has a link'*) ;;
+              *) printf 'expected the work and its done-when: %s\n' "$prompt" >&2; exit 82 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"checker","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"## Check\n- Not met — Every claim has a link — claim 2 has no link"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r again
+            case "$again" in
+              *'The revised work'*'second draft'*) ;;
+              *) printf 'expected the revised work: %s\n' "$again" >&2; exit 83 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"checker","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"## Check\n- Met — Every claim has a link — all four linked"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
+        "###;
+        let mut writer_agent = pipeline_agent("writer", vec!["-c".into(), writer.into()]);
+        writer_agent.name = "Writer".into();
+        writer_agent.done_when = vec!["Every claim has a link".into()];
+        let mut checker_agent = pipeline_agent("checker", vec!["-c".into(), checker.into()]);
+        checker_agent.name = "Checker".into();
+        checker_agent.checks = Some("writer".into());
+        checker_agent.send_back_once = true;
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "check-step".into(),
+            name: "Check step".into(),
+            entrypoint: "writer".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![writer_agent, checker_agent],
+            edges: vec![EdgeConfig {
+                from: "writer".into(),
+                to: "checker".into(),
+                layer: "configured".into(),
+                kind: "sequence".into(),
+                ts: "2026-10-15T00:00:00Z".into(),
+            }],
+        });
+        assert_eq!(team.responder_id()?, "writer");
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "write it",
+            Duration::from_secs(2),
+            None,
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage::default(),
+        )
+        .await?;
+        assert_eq!(outcome.reply, "second draft, every claim linked");
+        let events = archive.verify_session(&outcome.session_id).await?;
+        let rounds: Vec<(u64, String)> = events
+            .iter()
+            .filter(|event| event.payload["phase"] == "check_result")
+            .map(|event| {
+                (
+                    event.payload["round"].as_u64().unwrap_or_default(),
+                    event.payload["items"][0]["verdict"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                )
+            })
+            .collect();
+        assert_eq!(rounds, [(1, "not_met".to_owned()), (2, "met".to_owned())]);
         Ok(())
     }
 
@@ -4655,8 +5016,8 @@ IFS= read -r _
             "## Your assigned role\na role\n\n## Done when\nYour result is finished when:\n\
              - Every story has a link\n- Five stories\nBefore you reply, check your result \
              against each of these. If you could not meet one, end your reply with a `## Not met` \
-             section: one line per item, saying why. If you met them all, leave that section \
-             out.\n\n## Task\ndo the thing"
+             section that lists only those items, one line each, saying why. If you met them all, \
+             leave that section out.\n\n## Task\ndo the thing"
         );
         assert_eq!(
             composed
@@ -4670,6 +5031,44 @@ IFS= read -r _
                 memory::PromptSectionKind::Task
             ]
         );
+    }
+
+    #[test]
+    fn a_miss_after_a_declined_request_gets_no_second_pass() {
+        let missed = "Done by hand.\n\n## Not met\n- Every number is computed with code: declined";
+        assert!(wants_another_pass(true, false, missed));
+        assert!(
+            !wants_another_pass(true, true, missed),
+            "a decline makes the second pass ask for the same thing again"
+        );
+        assert!(
+            !wants_another_pass(false, false, missed),
+            "no doneWhen, no pass"
+        );
+        assert!(!wants_another_pass(true, false, "All done."));
+    }
+
+    #[test]
+    fn a_check_block_is_read_line_by_line_and_a_missing_one_is_not_sure_never_met() {
+        let reply = "One problem: claim 2 has no link.\n\n## Check\n- Met — Five stories — counted five\n\
+                     - Not met — Every story has a link — story 2 has none\n* not sure | Under 300 words | \
+                     did not count\nchatter that is not an item\n## After";
+        let items = read_checks(reply, &[]);
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| (item.verdict, item.item.as_str(), item.evidence.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("met", "Five stories", "counted five"),
+                ("not_met", "Every story has a link", "story 2 has none"),
+                ("not_sure", "Under 300 words", "did not count"),
+            ]
+        );
+        let missing = read_checks("Looks fine to me.", &["Five stories".to_owned()]);
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].verdict, "not_sure");
+        assert_eq!(missing[0].item, "Five stories");
     }
 
     #[test]
@@ -5090,6 +5489,8 @@ IFS= read -r _
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),
+            checks: None,
+            send_back_once: false,
         }
     }
 
@@ -5137,6 +5538,8 @@ IFS= read -r _
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),
+            checks: None,
+            send_back_once: false,
         }
     }
 

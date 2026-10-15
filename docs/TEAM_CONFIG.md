@@ -76,7 +76,15 @@ depend on the document as a whole:
   the finished result must satisfy. They are stated under the role as `## Done when`; the agent
   checks its result against them before it replies and lists any it could not meet under
   `## Not met`. A reply with a `## Not met` section gets exactly one more turn in the same
-  session to fix what it can, and the reply to that turn is the agent's answer.
+  session to fix what it can, and the reply to that turn is the agent's answer. A turn in which a
+  permission request was declined gets no extra pass: the miss is usually what was declined.
+- Optional `Agent.checks` makes a pipeline agent a check step: it names the agent whose work it
+  checks, which must hand its work straight to it. That agent writes no summary for it; the check
+  step is handed the work as written and its `doneWhen`, and ends its reply with a `## Check` block
+  (`- Met | Not met | Not sure — item — evidence`). When the pipeline ends on a check step and no
+  `responder` is set, the checked agent's reply is the team's answer, and the checks show beside it.
+  With `sendBackOnce: true`, missed checks go back to the checked agent's open session once and the
+  checks run once more on the revised work. Operator nodes may not set either field.
 - `budget` (team or agent level) is retired.
   Readers accept it in any shape and ignore it, so older team files still load; writers must not
   add it. LoomWatch neither tracks spend nor refuses a delegation because of it.
@@ -415,7 +423,7 @@ cannot be reconstructed safely from the normalized projection.
 ## Operator review stops and questions
 
 A pipeline agent may declare `kind: operator` with `role` as its question and optional `name`
-(default `You`). It must omit `spawn`, `model`, `thinkingEffort` and `doneWhen`. Operator nodes
+(default `You`). It must omit `spawn`, `model`, `thinkingEffort`, `doneWhen`, `checks` and `sendBackOnce`. Operator nodes
 cannot be the entrypoint or appear in team mode; consecutive stops are allowed. The app must
 start a pipeline containing stops, so answers have a loopback operator endpoint.
 

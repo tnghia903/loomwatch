@@ -28,10 +28,13 @@ const rules = (findings: ReturnType<typeof checkup>) => findings.map((finding) =
 describe('checkup', () => {
   it('finds nothing to improve in the starter teams', () => {
     const harness = { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/x', spawn: { cmd: 'claude-agent-acp', args: [] } } as DetectedHarness
-    for (const template of ['single', 'research-write', 'research-review-write'] as const) {
+    for (const template of ['single', 'research-write', 'research-write-check', 'research-review-write'] as const) {
       const doc = parse(templateTeamYaml(template, 'Starter', harness, 'm')) as TeamDocument
       const edges = doc.edges.map((edge) => ({ from: edge.from, to: edge.to }))
-      expect(rules(run({ agents: doc.agents, edges, entrypoint: doc.entrypoint })), template).toEqual([])
+      // A pipeline that ends on a check step answers with the work it checks (answeringAgent).
+      const terminal = edges.length ? edges.find((edge) => !edges.some((other) => other.from === edge.to))?.to ?? null : doc.entrypoint
+      const responder = doc.agents.find((agent) => agent.id === terminal)?.checks ?? terminal
+      expect(rules(run({ agents: doc.agents, edges, entrypoint: doc.entrypoint, responder })), template).toEqual([])
     }
   })
 

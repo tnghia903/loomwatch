@@ -320,7 +320,8 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
       })
     }
 
-    if (pipeline && final && predecessors.length > 0 && JUDGES.test(role) && !DELIVERS.test(role)) {
+    // A check step judges on purpose: the answer is the work it checks (ADR 0062).
+    if (pipeline && final && !agent.checks && predecessors.length > 0 && JUDGES.test(role) && !DELIVERS.test(role)) {
       add({
         rule: 'final-is-review', severity: 'improve', agentId: agent.id,
         title: `The team's answer will be ${agent.name}'s review, not the finished work`,

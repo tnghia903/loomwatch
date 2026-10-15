@@ -15,7 +15,7 @@ import { slugifyTeamName } from './useTeamDocument'
  * type a request and press Enter. `blank` is the one exception — it has no agents, so it cannot be
  * saved yet and opens as an unsaved document instead.
  */
-export type TeamTemplateId = 'single' | 'research-write' | 'research-review-write' | 'blank'
+export type TeamTemplateId = 'single' | 'research-write' | 'research-write-check' | 'research-review-write' | 'blank'
 
 export interface TeamTemplate {
   id: TeamTemplateId
@@ -49,6 +49,15 @@ export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
     steps: ['Researcher', 'Writer'],
     perRun: 'Two agents work on each run, with a handover between them.',
     example: { title: 'Market brief: AI note-taking', lines: ['Three tools lead; two launched this year', 'Prices cluster around $10–20 a month', 'Sources: 6 articles, 2 pricing pages'] },
+  },
+  {
+    id: 'research-write-check',
+    title: 'Research, write and check',
+    description: 'A third agent checks the finished piece against what it must have, and says what it missed.',
+    steps: ['Researcher', 'Writer', 'Checker'],
+    // Measured on a real run (ADR 0062): the checker re-opened every source, 188k of 393k tokens.
+    perRun: 'Three agents work on each run. The checker re-opens the writer’s sources, so it can cost as much as the research.',
+    example: { title: 'Market brief: AI note-taking', lines: ['Three tools lead; two launched this year', 'Prices cluster around $10–20 a month', 'Checks: every claim linked, 120 words'], note: 'Checked by the Checker before you read it' },
   },
   {
     id: 'research-review-write',
@@ -107,7 +116,7 @@ const ROLES = {
  * a team built by hand get the same instructions. Read at call time: `roles.ts` imports this module,
  * and reading its presets while this one is still loading would find them uninitialised.
  */
-function jobRole(id: 'researcher' | 'writer'): string {
+function jobRole(id: 'researcher' | 'writer' | 'checker'): string {
   const preset = ROLE_PRESETS.find((candidate) => candidate.id === id)
   if (!preset) throw new Error(`no built-in job ${id}`)
   return preset.role
@@ -154,6 +163,14 @@ export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, nam
   } else if (template === 'research-write') {
     agents = [agent('researcher', 'Researcher', jobRole('researcher'), harness, model, catalog), agent('writer', 'Writer', jobRole('writer'), harness, model, catalog)]
     edges = [sequence('researcher', 'writer', ts)]
+  } else if (template === 'research-write-check') {
+    agents = [
+      agent('researcher', 'Researcher', jobRole('researcher'), harness, model, catalog),
+      agent('writer', 'Writer', jobRole('writer'), harness, model, catalog),
+      // The check step's answer is the writer's piece; its checks show beside it (ADR 0062).
+      { ...agent('checker', 'Checker', jobRole('checker'), harness, model, catalog), checks: 'writer' },
+    ]
+    edges = [sequence('researcher', 'writer', ts), sequence('writer', 'checker', ts)]
   } else {
     agents = [
       agent('researcher', 'Researcher', jobRole('researcher'), harness, model, catalog),

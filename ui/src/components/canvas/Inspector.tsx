@@ -14,6 +14,7 @@ import { AgentCheckup, type AgentCheckupProps } from './AgentCheckup'
 import { AgentContext } from './AgentContext'
 import { AgentPermissions } from './AgentPermissions'
 import { AgentUsageLine } from './AgentUsageLine'
+import { CheckStep, type CheckStepProps } from './CheckStep'
 import { DoneWhen } from './DoneWhen'
 import { InstructionShape } from './InstructionShape'
 import { AgentWorkFolder } from './AgentWorkFolder'
@@ -35,6 +36,8 @@ export interface InspectorProps {
   onThinkingEffortChange?: (value: string) => void
   /** Write the agent's Done when list (ADR 0062); absent hides the list. */
   onDoneWhenChange?: (items: string[]) => void
+  /** Set on a check step (ADR 0062): whose work it checks, and its send-back switch. */
+  checkStep?: Omit<CheckStepProps, 'readOnly'>
   onCwdChange: (value: string) => void
   onAllowRecruitingChange: (allow: boolean) => void
   /** ADR 0037: one "Allowed without asking" switch. */
@@ -84,7 +87,7 @@ export interface InspectorProps {
 // it), WORKS IN and ALLOWED WITHOUT ASKING (where it works and what it may do there; ADR 0039
 // replaced PROCESS, whose command, arguments and environment stay in Show YAML).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
-export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onDoneWhenChange, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff, linked }: InspectorProps) {
+export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onDoneWhenChange, checkStep, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff, linked }: InspectorProps) {
   // The fields a link to Your agents copies are changed there, or after unlinking.
   const locked = readOnly || Boolean(linked)
   const roleField = useRef<HTMLTextAreaElement>(null)
@@ -159,6 +162,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
           {instructionUpdate && <InstructionsUpdated {...instructionUpdate} agent={agent} readOnly={readOnly} />}
           <InstructionShape role={agent.role} checksDoneWhen={Boolean(agent.doneWhen?.length)} readOnly={locked} field={roleField} onChange={(role) => onRename('role', role)} />
           {onDoneWhenChange && <DoneWhen items={agent.doneWhen ?? []} readOnly={locked} onChange={onDoneWhenChange} />}
+          {checkStep && <CheckStep {...checkStep} readOnly={readOnly} />}
           <span className="hint t-meta">{hint('role', 'Included in every turn, including delegated work.')}</span>
         </div>
         {checkup && <AgentCheckup {...checkup} readOnly={readOnly} headClassName="zone-head t-micro" />}

@@ -61,3 +61,6 @@
 .done-when li textarea.input { resize: none; padding-block: 5px; line-height: 1.35; }
 .done-when li { align-items: flex-start; }
 .done-when-add .shape-part:disabled { cursor: default; opacity: 0.5; }
+/* Beats the panels' stacked label/input styling: the box sits beside its words. */
+.node-inspector .check-step-switch, .inspector .check-step-switch, .check-step-switch { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; color: var(--color-ink-2); font: 400 12.5px/1.4 var(--font-sans); cursor: pointer; }
+.check-step-switch input[type='checkbox'] { flex: none; width: auto; height: auto; margin: 2px 0 0; }

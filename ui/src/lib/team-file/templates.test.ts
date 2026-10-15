@@ -52,6 +52,16 @@ describe('team templates', () => {
     expect(unknown.agents.every((agent) => agent.thinkingEffort === undefined)).toBe(true)
   })
 
+  // ADR 0062: the checked starter team ends on a check step that checks the writer, so the writer's
+  // piece stays the answer and the daemon accepts the file as it stands.
+  it('ends the checked team on a Checker that checks the writer', () => {
+    const doc = parse(templateTeamYaml('research-write-check', 'Brief', harness('claude'), 'sonnet')) as TeamDocument
+    expect(doc.agents.map((agent) => agent.id)).toEqual(['researcher', 'writer', 'checker'])
+    expect(doc.agents[2]).toMatchObject({ checks: 'writer', allow: { web: true } })
+    expect(doc.agents[2].sendBackOnce).toBeUndefined()
+    expect(doc.edges.map((edge) => `${edge.from}->${edge.to}`)).toEqual(['researcher->writer', 'writer->checker'])
+  })
+
   it('wires the review template as researcher → you → writer', () => {
     const doc = parse(templateTeamYaml('research-review-write', 'Report', harness('codex'), 'gpt')) as TeamDocument
     expect(doc.agents.map((agent) => agent.kind ?? 'harness')).toEqual(['harness', 'operator', 'harness'])

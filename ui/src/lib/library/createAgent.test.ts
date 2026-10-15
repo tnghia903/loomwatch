@@ -53,7 +53,8 @@ describe('buildAgentFromSource', () => {
     const source = researcher && roleSource(researcher, [harness])
     expect(source && buildAgentFromSource(source, []).allow).toEqual({ web: true })
     expect(buildAgentFromSource(harnessSource, []).allow).toBeUndefined()
-    expect(ROLE_PRESETS.filter((preset) => preset.allow).map((preset) => preset.id)).toEqual(['researcher'])
+    // The Checker opens the sources the work cites (ADR 0062); no other job starts with a switch on.
+    expect(ROLE_PRESETS.filter((preset) => preset.allow).map((preset) => preset.id)).toEqual(['researcher', 'checker'])
   })
 
   it('copies spawn verbatim plus env and cwd defaults', () => {

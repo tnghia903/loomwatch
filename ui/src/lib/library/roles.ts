@@ -1,6 +1,7 @@
 import { rankHarnesses } from '../team-file/templates'
 import type { DetectedHarness } from '../harnesses'
 import type { AgentAllow, AgentLink } from '../team-file/types'
+import { CHECKER_ROLE } from './checker'
 import type { LibrarySource } from './types'
 
 /**
@@ -143,6 +144,15 @@ export const ROLE_PRESETS: readonly RolePreset[] = [
       '## Checked',
       'What you verified and how, so the next reader knows what to trust.',
     ),
+  },
+  {
+    // A check step (ADR 0062): connected after the agent it checks, it is handed that agent's work
+    // and its Done when, and its result shows on the answer. On a different app by preference, so
+    // another model family reads the work.
+    id: 'checker', label: 'Checker', does: 'Checks work against its Done when', icon: 'review', prefers: CODING, effort: 'deep',
+    allow: { web: true },
+    doneWhen: ['Every item has a verdict and the evidence for it', 'Nothing in the work is rewritten'],
+    role: CHECKER_ROLE,
   },
   {
     id: 'coder', label: 'Coder', does: 'Changes code in a folder', icon: 'code', prefers: CODING, effort: 'deep',

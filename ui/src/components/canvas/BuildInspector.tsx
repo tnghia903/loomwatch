@@ -5,6 +5,7 @@ import { AgentContext } from './AgentContext'
 import { AgentPermissions } from './AgentPermissions'
 import { AgentWorkFolder } from './AgentWorkFolder'
 import { AgentUsageLine } from './AgentUsageLine'
+import { CheckStep } from './CheckStep'
 import { DoneWhen } from './DoneWhen'
 import { InstructionShape } from './InstructionShape'
 import { InstructionsUpdated } from './InstructionsUpdated'
@@ -59,6 +60,7 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
       {props.instructionUpdate && <InstructionsUpdated {...props.instructionUpdate} agent={node.data.agent} readOnly={readOnly} />}
       {!reviewStep && <InstructionShape role={node.data.agent.role} checksDoneWhen={Boolean(node.data.agent.doneWhen?.length)} readOnly={locked} field={roleField} onChange={(role) => onRename('role', role)} />}
       {!reviewStep && props.onDoneWhenChange && <DoneWhen items={node.data.agent.doneWhen ?? []} readOnly={locked} onChange={props.onDoneWhenChange} />}
+      {!reviewStep && props.checkStep && <CheckStep {...props.checkStep} readOnly={readOnly} />}
       {!reviewStep && props.checkup && props.checkup.findings.length > 0 && <section className="build-context" aria-label="Make it work better"><AgentCheckup {...props.checkup} readOnly={readOnly} headClassName="build-context-head" /></section>}
       {reviewStep
         ? <p>The team pauses here and waits for you to approve the work or ask for changes.</p>
