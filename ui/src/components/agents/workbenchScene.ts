@@ -3,6 +3,7 @@ import {
   BoxGeometry,
   Color,
   DirectionalLight,
+  ExtrudeGeometry,
   Group,
   HemisphereLight,
   MathUtils,
@@ -22,6 +23,7 @@ import {
   Raycaster,
   Scene,
   ShadowMaterial,
+  Shape,
   SphereGeometry,
   Vector2,
   Vector3,
@@ -32,7 +34,7 @@ import {
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
-import { CARD_SLOTS, FIGURE_KEYS, partOfNode, reactionsBetween, type FigureLook, type FigureMood, type FigurePart, type FigureReaction } from '../../lib/library/figure'
+import { CARD_SLOTS, FIGURE_KEYS, partOfNode, reactionsBetween, READ_SLOTS, type FigureLook, type FigureMood, type FigurePart, type FigureReaction, type ReadSource } from '../../lib/library/figure'
 import { COLOR_HEX, FIGURE_KINDS, type FigureChoice, type FigureKind } from '../../lib/library/figures'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { cardTexture, keyLabelTexture, pegboardTexture, swatchTextures, woundTexture } from './benchTextures'
@@ -54,9 +56,15 @@ export interface BenchView {
   open: FigurePart | null
   /** A skill card is being dragged over the bench. */
   dropping: boolean
+  /**
+   * What it reads, standing in the file holder. Only a team's agent has one: what an agent reads
+   * is the team's to give, so without a team (Your agents, the landing page) there is no holder.
+   */
+  reads?: readonly ReadSource[] | null
 }
 
-export type BenchAnchor = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'keys' | 'dish' | 'reply'
+/** `reply` is above the tray, `tray` below it: the file holder stands behind the tray. */
+export type BenchAnchor = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'keys' | 'dish' | 'reply' | 'tray'
 export type BenchAnchors = Record<BenchAnchor, { x: number; y: number }>
 /** The faces that carry words: the nameplate, the job sheet and the laptop's lid. */
 export type BenchFace = 'name' | 'job' | 'app'
@@ -98,6 +106,18 @@ export interface BenchCallbacks {
 const KEY_NODE: Record<AllowSwitch, string> = { web: 'web', edits: 'files', commands: 'cmd' }
 const FACE_MESH: Record<BenchFace, string> = { name: 'nameplate_face', job: 'job_sheet', app: 'laptop_face' }
 const DISH_KEY_SCALE = 0.72
+/**
+ * The file holder: a step sorter at the back right of the bench, behind the tray and clear of the
+ * figure's arm. Its first slot is the lowest, at the front; each one behind is a step higher, so
+ * every folder in it shows. It stands on a plinth, so the tray in front hides less of it.
+ */
+const HOLDER = { at: new Vector3(0.7, 0.62, -0.255), width: 0.36, depth: 0.18, step: 0.045, floor: 0.06 }
+/**
+ * Where the holder's label goes: just over the front slot's folder and its tab, where the first
+ * thing it reads stands. Any higher and it runs into the label beside the figure's head.
+ */
+const HOLDER_LABEL = new Vector3(0, HOLDER.floor + 0.23, HOLDER.depth / 2 - HOLDER.depth / READ_SLOTS / 2)
+const FOLDER_TINTS = ['#E6CD97', '#DCC08A', '#E9D5AA', '#D9BC80']
 const HIGHLIGHT = new Color('#E9C46A')
 const LIVE = new Color('#6AB8FF')
 /** It looks with its head; its body turns only a little, so both hands stay on the laptop. */
@@ -158,6 +178,8 @@ export class WorkbenchScene {
   /** Where each key lies in your dish: flat, a little smaller, its middle on its spot. */
   private readonly keyDish = new Map<AllowSwitch, Vector3>()
   private readonly cards: { group: Group | null; skill: string | null }[] = Array.from({ length: CARD_SLOTS }, () => ({ group: null, skill: null }))
+  /** What stands in each slot of the file holder, by what it is and where. */
+  private readonly files: { group: Group | null; source: string | null }[] = Array.from({ length: READ_SLOTS }, () => ({ group: null, source: null }))
   private readonly faces = new Map<string, Mesh>()
   /** Each worded face's top left, top right and bottom left corners, in its own space. */
   private readonly faceCorners = new Map<BenchFace, Vector3[]>()
@@ -260,6 +282,7 @@ export class WorkbenchScene {
     for (const kind of FIGURE_KINDS) this.heads.set(kind, this.node(`head_${kind}`))
     for (const [face, name] of Object.entries(FACE_MESH) as [BenchFace, string][]) this.faceCorners.set(face, corners(this.node(name) as Mesh))
     this.scene.add(model)
+    this.buildHolder()
     model.updateMatrixWorld(true)
     for (const { key, node } of FIGURE_KEYS) {
       const found = this.node(`key_${node}`)
@@ -407,6 +430,8 @@ export class WorkbenchScene {
     }
     this.node('envelope').visible = view.hasReply || view.mood === 'done'
     this.pinCards(look.skills, before !== null)
+    this.node('reads').visible = Boolean(view.reads)
+    this.fileSources(view.reads ?? [], before !== null)
 
     for (const { key } of FIGURE_KEYS) {
       const node = this.node(`key_${KEY_NODE[key]}`)
@@ -420,6 +445,7 @@ export class WorkbenchScene {
     if (before) {
       for (const reaction of reactionsBetween(before.look, look)) this.react(reaction)
       if (before.figure.kind !== view.figure.kind || before.figure.color !== view.figure.color) this.react({ kind: 'redressed' })
+      if (before.reads && view.reads && sourceKeys(before.reads) !== sourceKeys(view.reads)) this.react({ kind: 'filed' })
       if (before.mood !== view.mood) this.moodChanged(before.mood, view.mood)
     }
   }
@@ -502,6 +528,106 @@ export class WorkbenchScene {
     this.tween(group, new Vector3(0, -0.4, 0.2), group.quaternion.clone(), 0.4, 0, remove, true)
   }
 
+  /**
+   * The file holder, made here rather than in Blender, like the recipe cards: a graphite step
+   * sorter, with a slot node on each step (`reads_1` at the front, lowest) for a folder to stand in.
+   */
+  private buildHolder() {
+    const holder = new Group()
+    holder.name = 'reads'
+    holder.position.copy(HOLDER.at)
+    const graphite = () => this.material('graphite', 'reads')
+    const add = (mesh: Mesh, name: string) => {
+      mesh.name = name
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+      holder.add(mesh)
+      this.pickables.push(mesh)
+      this.roles.set(mesh, 'graphite')
+      this.disposables.push(mesh.geometry)
+    }
+    const tier = HOLDER.depth / READ_SLOTS
+    for (let slot = 0; slot < READ_SLOTS; slot += 1) {
+      const floor = HOLDER.floor + slot * HOLDER.step
+      const z = HOLDER.depth / 2 - tier * (slot + 0.5)
+      const step = new Mesh(new BoxGeometry(HOLDER.width - 0.012, floor, tier), graphite())
+      step.position.set(0, floor / 2, z)
+      add(step, `reads_step_${slot + 1}`)
+      const at = new Group()
+      at.name = `reads_${slot + 1}`
+      at.position.set(0, floor, z)
+      holder.add(at)
+      this.nodes.set(at.name, at)
+    }
+    // Its sides: low at the front, tall at the back, so the folders lean on something.
+    const side = new Shape()
+    side.moveTo(HOLDER.depth / 2, 0)
+    side.lineTo(HOLDER.depth / 2, HOLDER.floor + 0.06)
+    side.lineTo(-HOLDER.depth / 2, HOLDER.floor + (READ_SLOTS - 1) * HOLDER.step + 0.14)
+    side.lineTo(-HOLDER.depth / 2, 0)
+    side.closePath()
+    for (const [name, sign] of [['l', -1], ['r', 1]] as const) {
+      const panel = new Mesh(new ExtrudeGeometry(side, { depth: 0.018, bevelEnabled: true, bevelThickness: 0.003, bevelSize: 0.003, bevelSegments: 2, curveSegments: 1 }), graphite())
+      panel.rotation.y = -Math.PI / 2
+      panel.position.x = sign * HOLDER.width / 2 + 0.009
+      add(panel, `reads_side_${name}`)
+    }
+    this.scene.add(holder)
+    holder.updateMatrixWorld(true)
+    this.nodes.set(holder.name, holder)
+  }
+
+  /** What it reads, standing in the holder, front first, in the order the team file lists them. */
+  private fileSources(sources: readonly ReadSource[], animate: boolean) {
+    for (let slot = 0; slot < READ_SLOTS; slot += 1) {
+      const source = sources[slot] ?? null
+      const key = source ? sourceKey(source) : null
+      const file = this.files[slot]
+      if (file.source === key) continue
+      if (file.group) this.unpin(file.group, animate)
+      file.group = source ? this.file(slot, source, animate) : null
+      file.source = key
+    }
+  }
+
+  /** A folder (with its tab, staggered so each one's shows), or a sheet for a file or a page. */
+  private file(slot: number, source: ReadSource, animate: boolean): Group {
+    const group = new Group()
+    group.name = `reads_${slot + 1}_${source.kind}`
+    const parts: Mesh[] = []
+    const piece = (width: number, height: number, color: Color | string, x: number, y: number, z: number, roughness = 0.8) => {
+      const mesh = new Mesh(new BoxGeometry(width, height, 0.004), new MeshStandardMaterial({ color, roughness }))
+      mesh.position.set(x, y, z)
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+      group.add(mesh)
+      parts.push(mesh)
+      return mesh
+    }
+    if (source.kind === 'folder') {
+      const tint = FOLDER_TINTS[slot % FOLDER_TINTS.length]
+      piece(0.3, 0.19, tint, 0, 0.095, -0.004)
+      piece(0.085, 0.028, tint, [-0.09, -0.03, 0.03, 0.09][slot % 4], 0.2, -0.004)
+      piece(0.3, 0.172, new Color(tint).multiplyScalar(1.04), 0, 0.086, 0.001)
+    } else {
+      piece(0.26, 0.2, '#F7F4EE', 0, 0.1, 0, 0.9)
+      // A few lines of text, and a page's dark mark in its corner, so a file and a page read apart.
+      for (let line = 0; line < 4; line += 1) piece(line === 3 ? 0.11 : 0.18, 0.008, '#B9B1A2', line === 3 ? -0.045 : 0, 0.15 - line * 0.03, 0.003)
+      if (source.kind === 'page') piece(0.03, 0.03, '#24242B', -0.1, 0.17, 0.004, 0.5)
+    }
+    const lean = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), -0.12)
+    group.quaternion.copy(lean)
+    this.node(`reads_${slot + 1}`).add(group)
+    for (const mesh of parts) { this.pickables.push(mesh); this.roles.set(mesh, 'file'); this.disposables.push(mesh.geometry) }
+    if (animate && !this.reduced) {
+      // It drops in from above, the way a folder goes into a holder.
+      group.scale.setScalar(0.01)
+      group.position.y = 0.35
+      this.tween(group, new Vector3(0, 0, 0), lean, 0.5, 0.04)
+    }
+    return group
+  }
+
   /** Hang a key on its hook (it may) or put it in your dish (it asks you first). */
   private homeKey(key: AllowSwitch, given: boolean, animate = true) {
     const node = this.node(`key_${KEY_NODE[key]}`)
@@ -520,7 +646,7 @@ export class WorkbenchScene {
 
   // ------------------------------------------------------------------ reacting
 
-  private react(reaction: FigureReaction | { kind: 'redressed' }) {
+  private react(reaction: FigureReaction | { kind: 'redressed' } | { kind: 'filed' }) {
     if (this.reduced) return
     const at = (kind: string, duration: number, side?: number) => this.actions.push({ kind, start: this.now, duration, side })
     switch (reaction.kind) {
@@ -532,6 +658,7 @@ export class WorkbenchScene {
       case 'unpinned': at('unpin', 1.0); break
       case 'key': at(reaction.given ? 'keyGive' : 'keyTake', 1.1); break
       case 'redressed': at('redressed', 0.9); break
+      case 'filed': at('file', 1.4); break
     }
   }
 
@@ -704,6 +831,12 @@ export class WorkbenchScene {
           towards(this.node('card_3').getWorldPosition(new Vector3()))
           target.bodyY += 0.025 * bump(u * 2)
           break
+        case 'file':
+          // Something to read went into the holder, or came out: it looks over.
+          towards(this.node('reads').getWorldPosition(new Vector3()).add(new Vector3(0, 0.15, 0)))
+          target.bodyY += 0.025 * bump(u * 2)
+          this.flashes.set('reads', 0.5 * (1 - u))
+          break
         case 'keyGive':
           towards(this.node('hooks').getWorldPosition(new Vector3()))
           target.bodyY += 0.025 * bump(u * 2)
@@ -837,9 +970,11 @@ export class WorkbenchScene {
       name: this.screen(world('nameplate', [0, 0, 0])),
       job: this.screen(world('job', [0, 0.3, -0.12])),
       skills: this.screen(cards),
+      reads: this.screen(world('reads', HOLDER_LABEL.toArray())),
       keys: this.screen(world('hooks', [0, 0.06, 0])),
       dish: this.screen(world('dish', [0, -0.01, 0.2])),
       reply: this.screen(world('tray', [0, 0.1, -0.05])),
+      tray: this.screen(world('tray', [0, -0.01, 0.2])),
     }
   }
 
@@ -853,7 +988,7 @@ export class WorkbenchScene {
   }
 
   private partPoint(part: FigurePart): Vector3 | null {
-    const name = { mind: null, app: 'laptop_lid', name: 'nameplate', job: 'job', skills: 'card_3', keys: 'hooks', reply: 'tray' }[part]
+    const name = { mind: null, app: 'laptop_lid', name: 'nameplate', job: 'job', skills: 'card_3', reads: 'reads', keys: 'hooks', reply: 'tray' }[part]
     return name ? this.node(name).getWorldPosition(new Vector3()) : null
   }
 
@@ -930,6 +1065,10 @@ export class WorkbenchScene {
     return item
   }
 }
+
+/** What a source is, and where, so a slot keeps its folder until a different one goes there. */
+const sourceKey = (source: ReadSource) => `${source.kind}\n${source.name}\n${source.where}`
+const sourceKeys = (sources: readonly ReadSource[]) => sources.map(sourceKey).join('\n\n')
 
 /**
  * Size a renderer's canvas to its box in whole device pixels, and say the size in CSS pixels it
