@@ -61,6 +61,13 @@ describe('getting-started guide progress', () => {
     expect(readTourState()).toBeNull()
   })
 
+  it('keeps a closed guide closed after its steps change', async () => {
+    localStorage.setItem('loomwatch:tour', JSON.stringify({ status: 'dismissed', step: 'a-step-that-was-removed' }))
+    expect(readTourState()).toEqual({ status: 'dismissed', step: 'welcome' })
+    await offerTourIfFirstRun(0, async () => [])
+    expect(readTourState()).toMatchObject({ status: 'dismissed' })
+  })
+
   it('still works for the page when storage refuses writes', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('QuotaExceededError') })
     startTour()

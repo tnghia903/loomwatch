@@ -1,5 +1,6 @@
 import { CalendarClock, Wand2 } from 'lucide-react'
 
+import { figureStill, type FigureChoice } from '../../lib/library/figures'
 import { sentenceText, type SentencePart } from '../../lib/story/teamSentence'
 import { AgentMark } from '../ui/AgentMark'
 
@@ -10,6 +11,8 @@ interface TeamStoryProps {
   onSchedule?: () => void
   /** Apply a repair the sentence offers: add these configured edges. Absent when read-only. */
   onConnect?: (edges: readonly { from: string; to: string }[]) => void
+  /** Each agent's figure, so it looks as it does on its card and in Your agents. */
+  figures?: ReadonlyMap<string, FigureChoice>
 }
 
 /**
@@ -18,7 +21,7 @@ interface TeamStoryProps {
  * Every name is a button into that agent's settings, so the sentence is a way to navigate as well
  * as a summary; hovering a name shows the id and model an expert would look for.
  */
-export function TeamStory({ parts, onAgent, onSchedule, onConnect }: TeamStoryProps) {
+export function TeamStory({ parts, onAgent, onSchedule, onConnect, figures }: TeamStoryProps) {
   if (parts.length === 0) return null
   return (
     <section className="team-story" aria-label="Your team in one sentence">
@@ -26,9 +29,10 @@ export function TeamStory({ parts, onAgent, onSchedule, onConnect }: TeamStoryPr
       <p aria-description={sentenceText(parts)}>
         {parts.map((part, index) => {
           if (part.kind === 'agent') {
+            const figure = part.operator ? undefined : figures?.get(part.id)
             return (
               <button key={index} type="button" className={`story-name ${part.operator ? 'you' : ''}`} aria-label={part.operator ? 'You, the review step' : part.name} title={part.title} onClick={() => onAgent(part.id)}>
-                <AgentMark id={part.id} size={14} operator={part.operator} />
+                {figure ? <img className="story-figure" src={figureStill(figure)} alt="" /> : <AgentMark id={part.id} size={14} operator={part.operator} />}
                 {part.name}
               </button>
             )

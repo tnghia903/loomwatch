@@ -165,6 +165,7 @@ code, kbd, pre { font-family: var(--font-mono); }
   transition: background-color var(--t-instant) var(--ease-out), color var(--t-instant) var(--ease-out);
 }
 .btn:hover { background: var(--color-accent-tint); color: var(--color-ink); }
+a.btn { text-decoration: none; }
 .btn-primary { background: var(--color-accent-fill); border-color: transparent; color: var(--color-accent-on-fill); font-weight: 600; }
 .btn-primary:hover { background: var(--color-accent-fill); filter: brightness(1.06); color: var(--color-accent-on-fill); }
 .btn-primary:disabled, .btn:disabled { background: var(--color-hairline); color: var(--color-ink-3); border-color: transparent; cursor: not-allowed; filter: none; }
@@ -528,6 +529,9 @@ kbd.key {
 }
 textarea.input { padding: 6px var(--sp-3); resize: vertical; min-height: 84px; }
 .input.mono { font: 400 12px/17px var(--font-mono); }
+/* Selects draw their own chevron, inset as far from the edge as their text: browsers pin theirs to
+   the very edge. The builder's selects get the same in agents.css. */
+select.input, .inspector-fields label > select { appearance: none; -webkit-appearance: none; padding-right: 34px; background-image: var(--select-chevron); background-repeat: no-repeat; background-position: right 11px center; background-size: 12px 12px; }
 .model-select { cursor: pointer; }
 .model-select:disabled { cursor: default; }
 .model-retry { display: inline; padding: 0; font: inherit; }

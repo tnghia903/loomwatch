@@ -51,10 +51,13 @@ export function fieldsForVersion(job: SavedJob, agent: AgentConfig, harnesses: r
   }
   if (harness && harness.id !== currentApp) {
     fields.spawn = { env: {}, cwd: '.', ...agent.spawn, cmd: harness.spawn.cmd, args: [...harness.spawn.args] }
-    fields.model = harness.id === preset.prefers[0] && job.model ? job.model : ''
-    fields.thinkingEffort = undefined
+    const ownModel = harness.id === preset.prefers[0] && Boolean(job.model)
+    fields.model = ownModel ? job.model : ''
+    fields.thinkingEffort = ownModel ? job.thinkingEffort : undefined
   } else if (job.model && currentApp !== null && currentApp === preset.prefers[0]) {
+    // The effort goes with the model it belongs to.
     fields.model = job.model
+    fields.thinkingEffort = job.thinkingEffort
   }
   return fields
 }

@@ -1,5 +1,5 @@
 import { FileSearch, FileText, Info, ShieldQuestionMark } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { bubbles as layOut, callsWhileWaiting, converse, fold, waited, type Bubble, type Party } from '../../lib/story/conversation'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
@@ -10,6 +10,9 @@ import type { Evidence } from '../../lib/watch/events'
 import type { PermissionOutcome, TeamMessage } from '../../lib/watch/messages'
 import { useAgentFaces } from '../../lib/chat/faces'
 import { AgentFace } from '../chat/AgentFace'
+import { AvatarFace } from '../agents/AvatarFace'
+import { TeamFiguresContext } from '../agents/figureContext'
+import { FIGURE_HUES, figureHue, type FigureChoice } from '../../lib/library/figures'
 import { Markdown } from '../ui/Markdown'
 
 interface AgentMessagesProps {
@@ -57,7 +60,6 @@ interface Member {
 
 /** Past this a message shows its first lines, with the rest a click away. */
 const LONG = { lines: 7, chars: 520 }
-const HUES = 6
 
 /**
  * What the agents said to each other, as a group chat: each agent a member with its own avatar and
@@ -74,7 +76,8 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
     const conversation = converse(fresh, order, predecessors)
     return { lanes: conversation.lanes, said: layOut(fold(conversation.lines, conversation.lanes), conversation.lanes, live, APPROVAL_TEXT) }
   }, [fresh, order, predecessors, live])
-  const members = useMemo(() => membersOf(lanes, order), [lanes, order])
+  const figures = useContext(TeamFiguresContext)
+  const members = useMemo(() => membersOf(lanes, order, figures), [lanes, order, figures])
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set())
   const [flash, setFlash] = useState<string | null>(null)
 
@@ -394,21 +397,25 @@ function Avatar({ member, size, plain = false }: { member: Member; size: number;
   // In a team's chat an agent's face has its own card, and @mentions it when clicked.
   const faces = useAgentFaces()
   const face = (
-    <span className={`chat-avatar hue-${member.hue}`} style={{ width: size, height: size }} title={faces && !member.you ? undefined : member.you ? 'You' : member.name}>
-      {member.you ? 'You' : member.initials}
+    <AvatarFace id={member.id} hue={member.hue} size={size} hidden={false} text={member.you ? 'You' : member.initials} title={faces && !member.you ? undefined : member.you ? 'You' : member.name}>
       {!plain && member.number !== null && !member.you && <span className="chat-avatar-number">{member.number}</span>}
-    </span>
+    </AvatarFace>
   )
   return member.you ? face : <AgentFace id={member.id}>{face}</AgentFace>
 }
 
-/** Everyone who took part, in the stage cards' order, each with the colour it keeps all chat long. */
-function membersOf(lanes: readonly Party[], order: readonly Party[]): Map<string, Member> {
+/**
+ * Everyone who took part, in the stage cards' order, each with the colour it keeps all chat long:
+ * its figure's colour (lib/library/figures.ts figureHue), the same as everywhere else in the chat.
+ * A helper the team file doesn't list has no figure and takes the next colour in turn.
+ */
+function membersOf(lanes: readonly Party[], order: readonly Party[], figures: ReadonlyMap<string, FigureChoice>): Map<string, Member> {
   const number = new Map(order.map((party, index) => [party.id, index + 1]))
   const members = new Map<string, Member>()
   let hue = 0
   for (const lane of lanes) {
-    members.set(lane.id, { id: lane.id, name: lane.operator ? 'You' : lane.name, you: lane.operator, number: number.get(lane.id) ?? null, initials: initialsOf(lane.name), hue: lane.operator ? 0 : (hue++ % HUES) + 1 })
+    const figure = figures.get(lane.id)
+    members.set(lane.id, { id: lane.id, name: lane.operator ? 'You' : lane.name, you: lane.operator, number: number.get(lane.id) ?? null, initials: initialsOf(lane.name), hue: lane.operator ? 0 : figure ? figureHue(figure) : (hue++ % FIGURE_HUES) + 1 })
   }
   return members
 }

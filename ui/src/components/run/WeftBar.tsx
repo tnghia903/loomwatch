@@ -5,7 +5,7 @@ import { clock, momentAt, narrate, weave, type WeftAgent, type WeftKnot } from '
 import { markState } from '../../lib/story/mark'
 import type { AgentStatus } from '../../lib/team-file/types'
 import type { TaskState } from '../../lib/watch/events'
-import { AgentMark } from '../ui/AgentMark'
+import { AgentPortrait } from '../agents/AvatarFace'
 import type { RunProjection } from '../../lib/watch/events'
 
 interface WeftBarProps {
@@ -83,7 +83,7 @@ export function WeftBar({ projection, order, relay, onInspectEvidence, messageFo
       )}
       <div className="weft-cloth" style={{ ['--weft-rows' as string]: weft.lanes.length }}>
         <div className="weft-names" aria-hidden="true">
-          {weft.lanes.map((lane) => <span key={lane.id} className={lane.operator ? 'you' : ''}><AgentMark id={lane.id} size={14} operator={lane.operator} state={lane.start === null ? 'turn' : markState({ status: lane.status as AgentStatus, taskState: lane.taskState as TaskState | undefined })} animate={weft.live} />{lane.operator ? 'You' : lane.name}</span>)}
+          {weft.lanes.map((lane) => <span key={lane.id} className={lane.operator ? 'you' : ''}><AgentPortrait id={lane.id} size={20} operator={lane.operator} state={lane.start === null ? 'turn' : markState({ status: lane.status as AgentStatus, taskState: lane.taskState as TaskState | undefined })} animate={weft.live} />{lane.operator ? 'You' : lane.name}</span>)}
         </div>
         <div
           ref={tracks}

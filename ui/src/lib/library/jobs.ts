@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
 import type { AgentAllow, AgentConfig } from '../team-file/types'
+import type { FigureChoice } from './figures'
 import { ROLE_ICON_IDS, type RoleIcon, type RolePreset } from './roles'
 
 /**
@@ -20,8 +21,12 @@ export interface JobSpec {
   does?: string
   instructions: string
   icon?: RoleIcon
+  /** The figure it wears in Your agents (lib/library/figures.ts). Absent, it wears one picked from its id. */
+  figure?: FigureChoice
   apps?: string[]
   model?: string
+  /** How hard that model thinks: one of the efforts its app lists. Absent, the app's own default. */
+  thinkingEffort?: string
   skills?: string[]
   /** What it may do without asking (ADR 0037); only switches that are on are written. */
   allow?: AgentAllow
@@ -164,7 +169,7 @@ export function onlyOn(allow: AgentAllow | undefined): AgentAllow | undefined {
   return Object.keys(kept).length > 0 ? kept : undefined
 }
 
-/** What "Add to Your agents" keeps of an agent: its instructions, app, model, skills and switches. */
+/** What "Add to Your agents" keeps of an agent: its instructions, app, model and effort, skills and switches. */
 export function jobFromAgent(agent: AgentConfig, options: { name: string; does?: string; appId?: string }): JobSpec {
   const name = options.name.trim()
   const icon = guessIcon(name, agent.role)
@@ -176,7 +181,7 @@ export function jobFromAgent(agent: AgentConfig, options: { name: string; does?:
     instructions: agent.role,
     ...(icon ? { icon } : {}),
     ...(options.appId ? { apps: [options.appId] } : {}),
-    ...(options.appId && agent.model ? { model: agent.model } : {}),
+    ...(options.appId && agent.model ? { model: agent.model, ...(agent.thinkingEffort ? { thinkingEffort: agent.thinkingEffort } : {}) } : {}),
     ...(skills.length ? { skills } : {}),
     ...(allow ? { allow } : {}),
   }
@@ -199,7 +204,7 @@ export function savedJobPreset(job: SavedJob): RolePreset {
     role: job.instructions,
     ...(icon ? { icon } : {}),
     prefers: job.apps ?? [],
-    ...(job.model ? { model: job.model } : {}),
+    ...(job.model ? { model: job.model, ...(job.thinkingEffort ? { thinkingEffort: job.thinkingEffort } : {}) } : {}),
     ...(job.skills?.length ? { skills: job.skills } : {}),
     ...(allow ? { allow } : {}),
     from: { agent: job.id, version: versionOf(job) },

@@ -179,15 +179,22 @@ span.story-schedule { cursor: default; }
 .chat-log { display: grid; margin: 0; padding: 6px 16px 18px; list-style: none; }
 
 /* Each member keeps one colour for its avatar, name and mentions; you are gold. */
+/* You are gold. Each agent wears its figure's colour (lib/library/figures.ts figureHue): 1 clay,
+   2 butter, 3 sage, 4 sky, 5 lilac, 6 rose, 7 oat. */
 .hue-0 { --hue: var(--color-accent); }
-.hue-1 { --hue: var(--color-live); }
-.hue-2 { --hue: var(--color-ok); }
-.hue-3 { --hue: color-mix(in srgb, var(--color-live) 55%, var(--color-alert)); }
-.hue-4 { --hue: color-mix(in srgb, var(--color-ok) 50%, var(--color-live)); }
-.hue-5 { --hue: var(--color-halt); }
-.hue-6 { --hue: color-mix(in srgb, var(--color-ok) 55%, var(--color-accent)); }
+.hue-1 { --hue: var(--color-fig-clay); }
+.hue-2 { --hue: var(--color-fig-butter); }
+.hue-3 { --hue: var(--color-fig-sage); }
+.hue-4 { --hue: var(--color-fig-sky); }
+.hue-5 { --hue: var(--color-fig-lilac); }
+.hue-6 { --hue: var(--color-fig-rose); }
+.hue-7 { --hue: var(--color-fig-oat); }
+/* Something that is nobody, like the schedule: no colour of its own. */
+.hue-quiet { --hue: var(--color-ink-3); }
 .chat-avatar { position: relative; display: inline-grid; place-items: center; flex: none; border-radius: 50%; border: 2px solid var(--color-panel); background: color-mix(in srgb, var(--hue) 18%, var(--color-panel-solid)); color: var(--hue); font: 650 11px/1 var(--font-sans); letter-spacing: .01em; }
 .chat-avatar.hue-0 { font-size: 9px; }
+/* An agent's figure (AvatarFace): its head and shoulders, on the disc of its chat colour. */
+.chat-avatar.has-figure { background-repeat: no-repeat; background-size: 170%; background-position: 50% 20%; background-color: color-mix(in srgb, var(--hue) 20%, var(--color-panel-solid)); }
 .chat-avatar-number { position: absolute; right: -4px; bottom: -4px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid); color: var(--color-ink-2); font: 600 9px/13px var(--font-sans); text-align: center; }
 
 .chat-msg { display: grid; grid-template-columns: 42px minmax(0, 1fr); margin-top: 14px; outline: none; }

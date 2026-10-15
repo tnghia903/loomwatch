@@ -50,6 +50,31 @@ describe('Home', () => {
     expect(assign).toHaveBeenCalledWith('/?path=new.yaml')
   })
 
+  // The work in the order it is done: build agents, put them in a team's workflow, then chat with it.
+  it('starts with building an agent, lists your agents before your teams, and opens each team where it left off', async () => {
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/jobs'
+      ? { folder: '/teams/.jobs', jobs: [], problems: [] }
+      : { root: '/teams', files: ['empty.yaml', 'ready.yaml'], teams: [
+        { path: 'empty.yaml', name: 'Empty desk', agentCount: 0, modifiedAt: '2026-09-30T00:00:00Z' },
+        { path: 'ready.yaml', name: 'Ready desk', agentCount: 2, modifiedAt: '2026-09-29T00:00:00Z' },
+      ] }))
+    renderHome()
+    const build = screen.getByRole('link', { name: 'Build an agent' })
+    expect(build).toHaveAttribute('href', '/agents/new')
+    expect(build).toHaveClass('btn-primary')
+    expect(screen.getByRole('button', { name: 'New team' })).not.toHaveClass('btn-primary')
+    const steps = within(screen.getByRole('list', { name: 'How it works' })).getAllByRole('listitem')
+    expect(steps.map((step) => step.querySelector('strong')?.textContent)).toEqual(['Agents.', 'Workflow.', 'Chat.'])
+    const agents = await screen.findByRole('heading', { name: /Your agents/ })
+    const teams = screen.getByRole('heading', { name: /Your teams/ })
+    expect(agents.compareDocumentPosition(teams) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // A team with no agents opens on its agents, the first thing to set up; one with agents, on its workflow.
+    fireEvent.click(await screen.findByRole('button', { name: /Empty desk/ }))
+    expect(assign).toHaveBeenLastCalledWith('/?path=empty.yaml&view=agents')
+    fireEvent.click(screen.getByRole('button', { name: /Ready desk/ }))
+    expect(assign).toHaveBeenLastCalledWith('/?path=ready.yaml')
+  })
+
   // ADR 0051: teams are listed as chats — the newest work first, a line of it, and a mark for
   // what came in since you last looked; a team with history opens in its chat.
   it('lists teams as chats: newest work first, its last line, an unread mark, and opens the chat', async () => {
@@ -298,7 +323,7 @@ describe('Home and the getting-started guide', () => {
     fireEvent.keyDown(box, { key: 'Enter' })
     expect(onAsk).toHaveBeenCalledWith('Brief me on chip news every weekday')
     expect(box).toHaveValue('')
-    // New team stays the one gold button.
+    // Build an agent stays the one gold button.
     expect(screen.getByRole('button', { name: 'Ask' })).not.toHaveClass('btn-primary')
     unmount()
 

@@ -3,6 +3,7 @@ import { stringify } from 'yaml'
 import type { DetectedHarness } from '../harnesses'
 import type { AgentAllow, AgentConfig } from '../team-file/types'
 import { DEFAULT_AGENT_ROLE } from './createAgent'
+import { isFigureChoice, type FigureChoice } from './figures'
 import { guessIcon, onlyOn, versionOf, type JobSpec, type SavedJob } from './jobs'
 import { harnessForRole, type RolePreset } from './roles'
 
@@ -19,11 +20,15 @@ export interface AgentDraft {
   appId: string | null
   /** A model id of `appId`; empty means the app's own current model. */
   model: string
+  /** One of that model's thinking efforts; empty means the app's own default. */
+  effort: string
   skills: string[]
   allow: AgentAllow
+  /** The figure it wears in Your agents; `null` wears the one its id picks. A team never copies it. */
+  figure: FigureChoice | null
 }
 
-export const BLANK_DRAFT: AgentDraft = { name: '', does: '', instructions: DEFAULT_AGENT_ROLE, appId: null, model: '', skills: [], allow: {} }
+export const BLANK_DRAFT: AgentDraft = { name: '', does: '', instructions: DEFAULT_AGENT_ROLE, appId: null, model: '', effort: '', skills: [], allow: {}, figure: null }
 
 export function draftFromJob(job: JobSpec): AgentDraft {
   return {
@@ -32,8 +37,10 @@ export function draftFromJob(job: JobSpec): AgentDraft {
     instructions: job.instructions,
     appId: job.apps?.[0] ?? null,
     model: job.apps?.length ? job.model ?? '' : '',
+    effort: job.apps?.length && job.model ? job.thinkingEffort ?? '' : '',
     skills: [...(job.skills ?? [])],
     allow: { ...(onlyOn(job.allow) ?? {}) },
+    figure: isFigureChoice(job.figure) ? { ...job.figure } : null,
   }
 }
 
@@ -45,8 +52,10 @@ export function draftFromPreset(preset: RolePreset, harnesses: readonly Detected
     instructions: preset.role,
     appId: harnessForRole(preset, harnesses)?.id ?? null,
     model: '',
+    effort: '',
     skills: [...(preset.skills ?? [])],
     allow: { ...(onlyOn(preset.allow) ?? {}) },
+    figure: null,
   }
 }
 
@@ -58,8 +67,9 @@ export function specFromDraft(draft: AgentDraft, note = ''): JobSpec {
     ...(draft.does.trim() ? { does: draft.does.trim() } : {}),
     instructions: draft.instructions.trim(),
     ...(icon ? { icon } : {}),
+    ...(draft.figure ? { figure: { ...draft.figure } } : {}),
     ...(draft.appId ? { apps: [draft.appId] } : {}),
-    ...(draft.appId && draft.model ? { model: draft.model } : {}),
+    ...(draft.appId && draft.model ? { model: draft.model, ...(draft.effort ? { thinkingEffort: draft.effort } : {}) } : {}),
     ...(draft.skills.length ? { skills: [...draft.skills] } : {}),
     ...(allow ? { allow } : {}),
     ...(note.trim() ? { note: note.trim() } : {}),
@@ -74,13 +84,15 @@ export function makesNewVersion(draft: AgentDraft, saved: AgentDraft): boolean {
     || draft.instructions.trim() !== saved.instructions.trim()
     || draft.appId !== saved.appId
     || (draft.appId ? draft.model : '') !== (saved.appId ? saved.model : '')
+    || (draft.appId && draft.model ? draft.effort : '') !== (saved.appId && saved.model ? saved.effort : '')
     || draft.skills.join('\n') !== saved.skills.join('\n')
     || SWITCHES.some((key) => Boolean(draft.allow[key]) !== Boolean(saved.allow[key]))
 }
 
-/** Whether there is anything to save at all, including the palette's line. */
+/** Whether there is anything to save at all, including the palette's line and the figure it wears. */
 export function draftChanged(draft: AgentDraft, saved: AgentDraft): boolean {
   return makesNewVersion(draft, saved) || draft.does.trim() !== saved.does.trim()
+    || draft.figure?.kind !== saved.figure?.kind || draft.figure?.color !== saved.figure?.color
 }
 
 // $defs.Identifier (schemas/team.schema.yaml): ^[A-Za-z0-9][A-Za-z0-9._-]*$
@@ -89,7 +101,7 @@ function agentId(name: string): string {
 }
 
 /** The draft as one team agent on `harness`: what the test bench runs and the badge describes. */
-export function agentFromDraft(draft: AgentDraft, harness: DetectedHarness | null, model = draft.model, link?: { id: string; job?: SavedJob | null }): AgentConfig {
+export function agentFromDraft(draft: AgentDraft, harness: DetectedHarness | null, model = draft.model, link?: { id: string; job?: SavedJob | null }, effort = draft.effort): AgentConfig {
   const allow = onlyOn(draft.allow)
   return {
     id: agentId(draft.name),
@@ -97,6 +109,7 @@ export function agentFromDraft(draft: AgentDraft, harness: DetectedHarness | nul
     role: draft.instructions.trim() || DEFAULT_AGENT_ROLE,
     ...(harness ? { spawn: { cmd: harness.spawn.cmd, args: [...harness.spawn.args], env: {}, cwd: '.' } } : {}),
     model,
+    ...(effort ? { thinkingEffort: effort } : {}),
     ...(draft.skills.length ? { capabilities: draft.skills.map((name) => ({ kind: 'skill' as const, name })) } : {}),
     ...(allow ? { allow } : {}),
     ...(link?.job ? { from: { agent: link.id, version: versionOf(link.job) } } : {}),

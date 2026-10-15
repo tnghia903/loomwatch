@@ -16,6 +16,7 @@ import { AgentFacesContext, type AgentFaces } from '../../lib/chat/faces'
 import { batonWords, sameBaton, type Baton } from '../../lib/chat/baton'
 import { usePieceLine } from '../../lib/chat/pieceLine'
 import { AgentFace } from './AgentFace'
+import { AvatarFace } from '../agents/AvatarFace'
 import { BatonFlight } from './BatonFlight'
 import { BatonPill } from './BatonPill'
 import { Swap } from './Appearing'
@@ -376,7 +377,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                   return (
                     <span key={agent.id} className={`tc-member ${state}${holds ? ' holds' : ''}`}>
                       <AgentFace id={agent.id} doing={holds?.sentence}>
-                        <i className={`chat-avatar hue-${hue}`} style={{ width: 20, height: 20, fontSize: 8 }} aria-hidden="true">{initialsOf(agent.name || agent.id)}</i>
+                        <AvatarFace id={agent.id} hue={hue} size={20} fontSize={8} text={initialsOf(agent.name || agent.id)} />
                         <BatonPill words={holds?.pill ?? null} hue={hue} waiting={pill?.kind === 'you'} target={agent.id} landing={landing && holds !== null} />
                       </AgentFace>
                     </span>
@@ -399,7 +400,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
               return (
                 <li key={agent.id} className={`tc-member ${state}${holds ? ' holds' : ''}`}>
                   <AgentFace id={agent.id} className="tc-face-row">
-                    <i className={`chat-avatar hue-${team.hues.get(agent.id) ?? 1}`} style={{ width: 24, height: 24, fontSize: 9 }} aria-hidden="true">{initialsOf(agent.name || agent.id)}</i>
+                    <AvatarFace id={agent.id} hue={team.hues.get(agent.id) ?? 1} size={24} fontSize={9} text={initialsOf(agent.name || agent.id)} />
                     <span>{agent.name || agent.id}</span>
                   </AgentFace>
                   <Swap key={words}><em className={landing && holds ? 'landing' : undefined} data-baton-target={holds ? agent.id : undefined}>{words}</em></Swap>

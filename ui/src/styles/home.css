@@ -45,6 +45,8 @@
 .home-teams { display: flex; flex-direction: column; gap: var(--sp-4); }
 .home-teams-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
 .home-teams h2 { margin: 0; font: 600 13px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
+/* What the section is for, beside its name: the steps on Home, in the order they are done. */
+.home-section-says { margin-left: var(--sp-3); font: 400 13px/1 var(--font-sans); letter-spacing: 0; text-transform: none; color: var(--color-ink-3); }
 .home-filter {
   display: inline-flex; align-items: center; gap: var(--sp-2); height: 34px; padding: 0 var(--sp-3);
   border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel); color: var(--color-ink-3);

@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { figureHue } from '../../lib/library/figures'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
+import { TeamFiguresContext } from '../agents/figureContext'
 import type { Evidence } from '../../lib/watch/events'
 import type { MessageReply, TeamMessage } from '../../lib/watch/messages'
 import { AgentMessages } from './AgentMessages'
@@ -43,6 +45,18 @@ const said = () => screen.queryAllByRole('listitem').filter((item) => item.hasAt
 const msg = (name: RegExp) => screen.getByRole('listitem', { name })
 
 describe('Team chat', () => {
+  it('colours each agent with its figure’s colour, the same as its avatar and its figure', () => {
+    const figures = new Map([['editor', { kind: 'pincushion' as const, color: 'rose' as const }], ['writer', { kind: 'spool' as const, color: 'sky' as const }]])
+    render(
+      <TeamFiguresContext.Provider value={figures}>
+        <AgentMessages messages={[message({ id: 'editor:q9', kind: 'ask', from: 'editor', to: 'writer', text: 'Is the headline too long?', evidenceId: 'editor:q9', seq: 3 })]} order={order} evidence={[]} live={false} onInspectEvidence={vi.fn()} />
+      </TeamFiguresContext.Provider>,
+    )
+    const bubble = screen.getByText('Is the headline too long?').closest('.chat-msg')
+    expect(bubble).toHaveClass(`hue-${figureHue({ kind: 'pincushion', color: 'rose' })}`)
+    expect(bubble?.querySelector('.chat-avatar')).toHaveClass('has-figure')
+  })
+
   it('lists who said what to whom, in order, under a header naming everyone in it', () => {
     setup([handover, askBack])
     expect(said().map((item) => item.getAttribute('aria-label'))).toEqual([

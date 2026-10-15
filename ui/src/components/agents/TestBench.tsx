@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ExternalLink, FlaskConical, Square } from 'lucide-react'
 
 import type { DetectedHarness } from '../../lib/harnesses'
@@ -19,6 +19,8 @@ export interface TestBenchProps {
   benchId: string
   /** "Allow from now on": switch this on in the draft, for the next try and for every team. */
   onAllow: (key: AllowSwitch) => void
+  /** The run on the bench as it changes, so Build by hand can show the figure at work. */
+  onRecord?: (record: RunRecord | null) => void
 }
 
 const STATUS_WORD: Record<RunRecord['status'], string> = { queued: 'Starting…', starting: 'Starting…', running: 'Working…', succeeded: 'Done', failed: 'It failed', cancelled: 'Stopped' }
@@ -39,13 +41,16 @@ const seconds = (record: RunRecord) => {
  * would cover can be allowed for this run, or switched on from now on, which is the setting a
  * test is best placed to show you need.
  */
-export function TestBench({ draft, harness, model, benchId, onAllow }: TestBenchProps) {
+export function TestBench({ draft, harness, model, benchId, onAllow, onRecord }: TestBenchProps) {
   const [request, setRequest] = useState('')
   const [run, setRun] = useState<{ id: string; path: string } | null>(null)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { record, apply } = useRunRecord(run?.id ?? null)
   const live = Boolean(run) && !isTerminalRun(record?.status)
+  const shown = run && record ? record : null
+  useEffect(() => { onRecord?.(shown) }, [shown, onRecord])
+  useEffect(() => () => onRecord?.(null), [onRecord])
   const blocked = !harness ? 'Choose an app first.' : !model ? 'Waiting for the app’s models…' : !draft.instructions.trim() ? 'Write its instructions first.' : null
 
   async function start() {
@@ -75,7 +80,7 @@ export function TestBench({ draft, harness, model, benchId, onAllow }: TestBench
   }
 
   return (
-    <section className="agent-bench" aria-label="Try it">
+    <section className="agent-bench" aria-label="Try it" data-tour="bench">
       <div className="agent-section-head"><FlaskConical size={14} aria-hidden="true" />Try it</div>
       <p className="t-meta">Runs this agent on its own, exactly as it is on screen, saved or not. Nothing here changes a team.</p>
       <form className="agent-bench-ask" onSubmit={(event) => { event.preventDefault(); void start() }}>
@@ -97,7 +102,7 @@ export function TestBench({ draft, harness, model, benchId, onAllow }: TestBench
       </form>
       {error && <p role="alert" className="agent-bench-error">{error}</p>}
       {run && record && (
-        <div className={`agent-bench-result st-${record.status}`} aria-live="polite">
+        <div className={`agent-bench-result st-${record.status}`} aria-live="polite" data-tour="bench-result" data-tour-done={isTerminalRun(record.status) || undefined}>
           <div className="agent-bench-status">
             <span className={`agent-bench-dot st-${record.status}`} aria-hidden="true" />
             <b>{record.permissionRequests?.length ? 'Waiting for you' : record.waitingOn ? 'It has a question' : STATUS_WORD[record.status]}</b>

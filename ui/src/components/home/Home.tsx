@@ -1,11 +1,11 @@
-import { ArrowRight, KeyRound, MessageSquareWarning, Moon, Plus, Search, Sun, Users } from 'lucide-react'
+import { ArrowRight, KeyRound, MessageSquareWarning, Moon, Plus, Search, Sun, UserRoundPlus, Users } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { openFeedback } from '../../lib/feedback/report'
 import { relativeTime } from '../../lib/format'
 import { fetchHarnessModels, harnessProblem, harnessSaid, isHarnessRunnable, type DetectedHarness } from '../../lib/harnesses'
 import { teamDisplayName, type DeletedTeam, type TeamSummary } from '../../lib/team-file/client'
-import { openTeam, useTeamList } from '../../lib/team-file/useTeamList'
+import { openTeam, teamViewFor, useTeamList } from '../../lib/team-file/useTeamList'
 import { useTheme } from '../../lib/theme'
 import { offerTourIfFirstRun, startTour } from '../../lib/tour/store'
 import { ChipDot, LoomMark } from '../ui/glyphs'
@@ -82,9 +82,9 @@ function describeTeam(team: TeamSummary): string {
 }
 
 /**
- * What the operator sees before any team is open: what LoomWatch is for, their teams by name, and
- * one obvious way to start. It replaces a screen whose only paths were "New team" and a dialog
- * that asked for a YAML path relative to the daemon's teams directory.
+ * What the operator sees before any team is open: what LoomWatch is for, and the work in the order
+ * it is done. First your agents (build each one and try it on its own), then your teams (put agents
+ * in a workflow, then give the team work in its chat). One obvious way to start: build an agent.
  */
 export function Home({ notice = null, harnesses, harnessesLoading, harnessesError, onRetryHarnesses, onCreateBlank, onPalette, topActions, runs = [], ask, children }: HomeProps) {
   const { resolved, toggle } = useTheme()
@@ -173,16 +173,17 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
         {notice && <p role="alert" className="home-empty alert">{notice}</p>}
         <section className="home-hero">
           <h1 className="t-display">Put AI agents to work as a team.</h1>
-          <p>Give your team a task, watch each step as it happens, and review the result before you use it.</p>
+          <p>Build each agent and try it on its own, connect your agents in a workflow, then give the team work in its chat and review what it hands back.</p>
           <div className="home-hero-acts">
-            <button type="button" className="btn btn-primary btn-lg" data-tour="new-team" onClick={() => setCreating(true)}><Plus size={16} aria-hidden="true" />New team</button>
+            <a className="btn btn-primary btn-lg" href="/agents/new" data-tour="build-agent"><UserRoundPlus size={16} aria-hidden="true" />Build an agent</a>
+            <button type="button" className="btn btn-lg" data-tour="new-team" onClick={() => setCreating(true)}><Plus size={16} aria-hidden="true" />New team</button>
             <button type="button" className="link home-tour" onClick={startTour}>New here? Take the 3-minute guide</button>
           </div>
           {ask && <DescribeTheJob unavailable={ask.unavailable} onAsk={ask.onAsk} />}
           <ol className="home-steps" aria-label="How it works">
-            <li><b>1</b><span><strong>Build</strong> a team from the AI apps on this computer.</span></li>
-            <li><b>2</b><span><strong>Ask</strong> it to do something, in plain words.</span></li>
-            <li><b>3</b><span><strong>Review</strong> each step and the final result.</span></li>
+            <li><b>1</b><span><strong>Agents.</strong> Build each agent and try it on its own.</span></li>
+            <li><b>2</b><span><strong>Workflow.</strong> Put agents in a team and connect who hands work to whom.</span></li>
+            <li><b>3</b><span><strong>Chat.</strong> Give the team work, and review each step and the result.</span></li>
           </ol>
         </section>
 
@@ -195,9 +196,12 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
           />
         )}
 
+        {/* In the order the work is done: agents first, then the teams they work in. */}
+        <YourAgentsShelf />
+
         <section className="home-teams" aria-labelledby="home-teams-title">
           <div className="home-teams-head">
-            <h2 id="home-teams-title">Your teams</h2>
+            <h2 id="home-teams-title">Your teams<span className="home-section-says">Workflows and chats</span></h2>
             {teams && teams.length > 6 && (
               <label className="home-filter"><Search size={14} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a team" aria-label="Find a team" /></label>
             )}
@@ -208,7 +212,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
           {!error && teams?.length === 0 && (
             <div className="home-empty">
               <Users size={20} aria-hidden="true" />
-              <span>No teams yet. Create one to get started — it takes a few seconds.</span>
+              <span>No teams yet. When your agents are ready, put them in a team: <button type="button" className="link" onClick={() => setCreating(true)}>Create one</button></span>
             </div>
           )}
           {shown.length > 0 && (
@@ -219,7 +223,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
                 const unread = preview ? isUnread(team.path, preview.at) : false
                 return (
                 <li key={team.path} style={{ ['--card-i' as string]: index }}>
-                  <button type="button" className={`home-card ${fabric.waiting ? 'waiting' : ''}${unread ? ' unread' : ''}`} onClick={() => openTeam(team.path, preview ? 'chat' : 'build')}>
+                  <button type="button" className={`home-card ${fabric.waiting ? 'waiting' : ''}${unread ? ' unread' : ''}`} onClick={() => openTeam(team.path, teamViewFor(team, Boolean(preview)))}>
                     <span className="home-card-name"><span className="home-card-title" title={teamDisplayName(team)}>{teamDisplayName(team)}</span>{fabric.waiting && <em className="home-card-waiting">Waiting for you</em>}{unread && <i className="home-card-unread" aria-label="New since you looked" />}</span>
                     {preview && (
                       <span className="home-card-chat"><span className="home-card-line">{preview.line}</span><time dateTime={preview.at}>{listTime(preview.at)}</time></span>
@@ -237,8 +241,6 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
           )}
           {teams && teams.length > 0 && query && shown.length === 0 && <p className="home-empty">No team matches “{query}”.</p>}
         </section>
-
-        <YourAgentsShelf />
       </main>
 
       <footer className="home-foot t-meta" role="status">

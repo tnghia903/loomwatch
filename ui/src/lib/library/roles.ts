@@ -35,6 +35,8 @@ export interface RolePreset {
   prefers: readonly string[]
   /** A saved job's model, applied only on `prefers[0]`: a model id belongs to one app. */
   model?: string
+  /** That model's thinking effort, applied with it. */
+  thinkingEffort?: string
   /** Skill names the agent is given, on whichever app it runs (ADR 0031). */
   skills?: readonly string[]
   /** What the agent may do without asking from the start (ADR 0037). Only what the job cannot be
@@ -196,7 +198,7 @@ export function roleSource(preset: RolePreset, harnesses: readonly DetectedHarne
     label: preset.label,
     role: preset.role,
     spawn: { cmd: harness.spawn.cmd, args: [...harness.spawn.args] },
-    ...(preset.model && harness.id === preset.prefers[0] ? { model: preset.model } : {}),
+    ...(preset.model && harness.id === preset.prefers[0] ? { model: preset.model, ...(preset.thinkingEffort ? { thinkingEffort: preset.thinkingEffort } : {}) } : {}),
     ...(preset.skills?.length ? { capabilities: preset.skills.map((name) => ({ kind: 'skill' as const, name })) } : {}),
     ...(preset.allow ? { allow: { ...preset.allow } } : {}),
     ...(preset.from ? { from: { ...preset.from } } : {}),

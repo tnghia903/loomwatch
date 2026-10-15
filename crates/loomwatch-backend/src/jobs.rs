@@ -43,6 +43,11 @@ const ICONS: &[&str] = &[
     "research", "write", "edit", "review", "code", "design", "analyse",
 ];
 
+/// The figures an agent may wear in Your agents, and their colours (ui/src/lib/library/figures.ts
+/// draws them). Only the builder and the agent lists show it: a team never copies it.
+const FIGURES: &[&str] = &["yarn", "spool", "button", "thimble", "pincushion", "cone"];
+const FIGURE_COLORS: &[&str] = &["clay", "butter", "sage", "sky", "lilac", "rose", "oat"];
+
 const FILE_HEADER: &str = "# One of your LoomWatch agents: add it to a team from \"Your agents\" in the Build palette.\n\
 # A team keeps the version it was placed with until you choose Update in that team.\n";
 
@@ -72,6 +77,14 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+/// Which figure an agent wears in Your agents, and in what colour.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct JobFigure {
+    pub(crate) kind: String,
+    pub(crate) color: String,
+}
+
 fn first_version() -> u32 {
     1
 }
@@ -97,6 +110,9 @@ pub(crate) struct JobSpec {
     pub(crate) instructions: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) icon: Option<String>,
+    /// The figure it wears in Your agents. Absent, it wears one picked from its id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) figure: Option<JobFigure>,
     /// App ids in the order the job prefers them. Any installed app beats none, so a job whose
     /// apps are all missing still runs, on the best app the computer has.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -105,6 +121,10 @@ pub(crate) struct JobSpec {
     /// the job runs there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) model: Option<String>,
+    /// How hard that model thinks (one of the efforts the app lists for it). Like the model, it
+    /// belongs to the first of `apps`; absent means the app's own default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) thinking_effort: Option<String>,
     /// Skill names, delivered to whichever app the job runs on (ADR 0021 routes them).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) skills: Vec<String>,
@@ -131,6 +151,7 @@ impl JobSpec {
             || self.instructions != other.instructions
             || self.apps != other.apps
             || self.model != other.model
+            || self.thinking_effort != other.thinking_effort
             || self.skills != other.skills
             || self.allow != other.allow
     }
@@ -211,6 +232,43 @@ fn is_app_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
+/// An icon is one the UI draws; a blank one is none.
+fn normalize_icon(icon: Option<String>) -> Result<Option<String>, String> {
+    let icon = icon
+        .map(|icon| icon.trim().to_owned())
+        .filter(|icon| !icon.is_empty());
+    if let Some(icon) = &icon
+        && !ICONS.contains(&icon.as_str())
+    {
+        return Err(format!(
+            "Unknown icon {icon:?}. Use one of: {}.",
+            ICONS.join(", ")
+        ));
+    }
+    Ok(icon)
+}
+
+/// A figure is one the UI draws, in one of its colours.
+fn normalize_figure(figure: Option<JobFigure>) -> Result<Option<JobFigure>, String> {
+    let Some(JobFigure { kind, color }) = figure else {
+        return Ok(None);
+    };
+    let (kind, color) = (kind.trim().to_owned(), color.trim().to_owned());
+    if !FIGURES.contains(&kind.as_str()) {
+        return Err(format!(
+            "Unknown figure {kind:?}. Use one of: {}.",
+            FIGURES.join(", ")
+        ));
+    }
+    if !FIGURE_COLORS.contains(&color.as_str()) {
+        return Err(format!(
+            "Unknown figure colour {color:?}. Use one of: {}.",
+            FIGURE_COLORS.join(", ")
+        ));
+    }
+    Ok(Some(JobFigure { kind, color }))
+}
+
 /// Trim every field and refuse what the palette could not show or the team file could not hold.
 pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
     let name = spec.name.trim().to_owned();
@@ -235,18 +293,8 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
             "Keep the instructions under {MAX_INSTRUCTIONS} characters."
         ));
     }
-    let icon = spec
-        .icon
-        .map(|icon| icon.trim().to_owned())
-        .filter(|icon| !icon.is_empty());
-    if let Some(icon) = &icon
-        && !ICONS.contains(&icon.as_str())
-    {
-        return Err(format!(
-            "Unknown icon {icon:?}. Use one of: {}.",
-            ICONS.join(", ")
-        ));
-    }
+    let icon = normalize_icon(spec.icon)?;
+    let figure = normalize_figure(spec.figure)?;
     let mut apps = Vec::new();
     for app in spec.apps {
         let app = app.trim().to_owned();
@@ -266,6 +314,16 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
         .is_some_and(|model| model.chars().count() > MAX_MODEL)
     {
         return Err("That model id is too long.".into());
+    }
+    let thinking_effort = spec
+        .thinking_effort
+        .map(|effort| effort.trim().to_owned())
+        .filter(|effort| !effort.is_empty());
+    if thinking_effort
+        .as_ref()
+        .is_some_and(|effort| effort.chars().count() > MAX_MODEL)
+    {
+        return Err("That thinking effort is too long.".into());
     }
     let mut skills = Vec::new();
     for skill in spec.skills {
@@ -293,8 +351,10 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
         does,
         instructions,
         icon,
+        figure,
         apps,
         model,
+        thinking_effort,
         skills,
         allow: spec.allow,
         version: spec.version.max(1),
@@ -450,7 +510,7 @@ pub(crate) fn save_job(
     match &existing {
         Some((current, _)) if !spec.copies_differently(current) => {
             // Nothing a team copies changed: the same version, saved when it was. Only the
-            // palette's line, the icon or the note can differ.
+            // palette's line, the icon, the figure or the note can differ.
             spec.version = current.version;
             spec.saved_at.clone_from(&current.saved_at);
             if spec.note.is_empty() {
@@ -638,8 +698,10 @@ mod tests {
             does: "Drafts release notes".into(),
             instructions: "Write the release notes.".into(),
             icon: Some("write".into()),
+            figure: None,
             apps: vec!["codex".into(), "claude".into()],
             model: Some("gpt-5.6".into()),
+            thinking_effort: None,
             skills: vec!["release-style".into()],
             allow: JobAllow::default(),
             version: 1,
@@ -740,6 +802,43 @@ mod tests {
             save_job(root.path(), "x", icon, false, None),
             Err(JobError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn a_figure_is_one_we_draw_and_choosing_it_keeps_the_version() {
+        let root = root();
+        let first = save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
+        let mut dressed = spec("Notes");
+        dressed.figure = Some(JobFigure {
+            kind: " button ".into(),
+            color: "sage".into(),
+        });
+        let same = save_job(root.path(), "notes", dressed, false, Some(1)).expect("figure");
+        assert_eq!(same.spec.version, 1);
+        assert_eq!(same.spec.saved_at, first.spec.saved_at);
+        assert_eq!(
+            same.spec.figure,
+            Some(JobFigure {
+                kind: "button".into(),
+                color: "sage".into()
+            })
+        );
+        let written = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
+        assert!(
+            written.contains("figure:\n  kind: button\n  color: sage\n"),
+            "{written}"
+        );
+        for (kind, color) in [("robot", "sage"), ("button", "red")] {
+            let mut odd = spec("Notes");
+            odd.figure = Some(JobFigure {
+                kind: kind.into(),
+                color: color.into(),
+            });
+            assert!(matches!(
+                save_job(root.path(), "notes", odd, false, None),
+                Err(JobError::Invalid(_))
+            ));
+        }
     }
 
     #[test]
@@ -878,6 +977,26 @@ mod tests {
             text.contains("version: 2") && text.contains("web: true"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn a_new_thinking_effort_is_a_new_version_and_is_written_down() {
+        let root = root();
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
+        let mut harder = spec("Notes");
+        harder.thinking_effort = Some("  high ".into());
+        let second = save_job(root.path(), "notes", harder, false, Some(1)).expect("second");
+        assert_eq!(second.spec.version, 2);
+        assert_eq!(second.spec.thinking_effort.as_deref(), Some("high"));
+        let text = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
+        assert!(text.contains("thinkingEffort: high"), "{text}");
+
+        // Blank means the app's own default, and is not written at all.
+        let mut blank = spec("Notes");
+        blank.thinking_effort = Some("   ".into());
+        let third = save_job(root.path(), "notes", blank, false, Some(2)).expect("third");
+        assert_eq!(third.spec.thinking_effort, None);
+        assert_eq!(third.spec.version, 3);
     }
 
     #[test]
