@@ -26,7 +26,7 @@ pub const HEADING: &str = "## Your place in the team";
 const ROLE_SUMMARY_CHARS: usize = 140;
 
 /// What the agent whose reply is the team's answer is told about writing it.
-const FINAL_ANSWER: &str = "Your reply is the team's final answer: the operator reads it as you write it. Make it the finished result itself, not a report on how you produced it.";
+const FINAL_ANSWER: &str = "Your reply is the team's final answer: the operator reads it as you write it. Make it the finished result itself, as long as the request needs and no longer, not a report on how you produced it.";
 
 /// The team-mode lead: the entrypoint, which receives the request and answers it.
 #[must_use]
@@ -54,9 +54,20 @@ pub fn for_lead(team: &TeamConfig, agent: &AgentConfig) -> Option<String> {
         for teammate in teammates {
             let _ = write!(text, "\n{}", teammate_line(teammate));
         }
+        text.push_str("\n\n");
+        text.push_str(DELEGATION);
     }
     Some(text)
 }
+
+/// How a lead uses its teammates, said once for every lead so an operator never has to write it.
+///
+/// Effort scaled to the request first, because a lead that brings in every teammate for a
+/// one-line question pays a session per teammate for nothing: Anthropic's research system had to
+/// write the same rule into its lead after it spawned many subagents for simple queries. Then the
+/// brief, because the teammate sees only what it is sent (`for_helper`), and a vague brief is the
+/// commonest way delegated work is duplicated or misread.
+const DELEGATION: &str = "Do what you can do well yourself, and bring in a teammate only for a part that needs its job: each one you start opens a session of its own, which costs time and tokens. A teammate sees only what you send it, so give it the goal, what you already know, what to send back and where to stop. Check what comes back before you use it.";
 
 /// A pipeline stage at `index` in the run's `order`.
 ///
@@ -142,9 +153,15 @@ pub fn for_helper(team: &TeamConfig, agent: &AgentConfig, caller: Option<&str>) 
     let caller = caller
         .and_then(|id| team.agents.iter().find(|other| other.id == id))
         .map_or("Another agent", |other| other.name.as_str());
+    // The last two sentences are the return a caller can use (ADR 0062): a helper may read widely,
+    // but what it sends back lands in the caller's context, so it is the result, condensed, and a
+    // part it could not do is named rather than guessed at.
     Some(format!(
         "You are {}, on {}. {caller} brought you in for the task below. It is one part of a \
-         larger piece of work, so do what was asked, completely, and stay within it.",
+         larger piece of work, so do what was asked, completely, and stay within it.\n\
+         Reply with the result itself, condensed: what you found or made, and where (links, file \
+         paths), not how you worked. If you cannot do part of it, say what is missing rather than \
+         guessing.",
         agent.name,
         team_label(team)
     ))
@@ -330,6 +347,10 @@ mod tests {
             !text.contains("Second line"),
             "a teammate is summarised by its first line"
         );
+        assert!(
+            text.ends_with(DELEGATION),
+            "a lead that can reach its teammates is told when and how to use them: {text}"
+        );
 
         // A harness with no HTTP MCP gets no Team Bus tools, so it is not told about teammates it
         // has no way to reach.
@@ -337,7 +358,7 @@ mod tests {
         without_bus.agents[0].spawn.cmd = "some-unknown-acp".to_owned();
         let text = for_lead(&without_bus, &without_bus.agents[0]).unwrap();
         assert!(text.contains(FINAL_ANSWER));
-        assert!(!text.contains("teammates"), "{text}");
+        assert!(!text.contains("teammate"), "{text}");
     }
 
     #[test]
@@ -359,6 +380,12 @@ mod tests {
         let text = for_helper(&team, &team.agents[2], Some("check")).unwrap();
         assert!(text.contains("Fact-checker brought you in"), "{text}");
         assert!(!text.contains("final answer"));
+        // What it sends back lands in the caller's context: the result, and what it could not do.
+        assert!(
+            text.contains("Reply with the result itself, condensed")
+                && text.contains("say what is missing rather than guessing"),
+            "{text}"
+        );
         let unknown = for_helper(&team, &team.agents[2], None).unwrap();
         assert!(unknown.contains("Another agent brought you in"));
     }

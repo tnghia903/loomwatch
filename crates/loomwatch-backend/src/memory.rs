@@ -404,6 +404,11 @@ pub struct PromptSection {
 pub enum PromptSectionKind {
     /// `## Your assigned role`.
     Role,
+    /// `## Done when` — what the finished result must satisfy, and to check it before replying
+    /// (ADR 0062). Directly under the role: it is configuration, the same on every run, so it stays
+    /// in the cached prefix. Absent when the agent has none. Added here and in
+    /// `ui/src/lib/watch/events.ts` in one change.
+    DoneWhen,
     /// `## Your place in the team` — who comes before this agent, who reads its work after it, and
     /// whether its reply is the team's answer (ADR 0034). Absent for a team of one. Added here and
     /// in `ui/src/lib/watch/events.ts` in one change.
@@ -3393,6 +3398,7 @@ mod tests {
             memory: None,
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
+            done_when: Vec::new(),
         }
     }
 

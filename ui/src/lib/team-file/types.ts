@@ -110,6 +110,9 @@ export interface AgentConfig {
   spawn?: SpawnConfig
   model?: string
   thinkingEffort?: string
+  /** What the finished result must satisfy (ADR 0062): checked before it replies, and anything
+      not met gets one more pass. At most five short lines. */
+  doneWhen?: string[]
   allowRecruiting?: boolean
   /** Capabilities the daemon delivers into this agent's workspace before the run. Executable, so
       it lives in the team file and saves explicitly — unlike the card positions in the sidecar. */

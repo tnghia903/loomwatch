@@ -5,6 +5,7 @@ import { AgentContext } from './AgentContext'
 import { AgentPermissions } from './AgentPermissions'
 import { AgentWorkFolder } from './AgentWorkFolder'
 import { AgentUsageLine } from './AgentUsageLine'
+import { DoneWhen } from './DoneWhen'
 import { InstructionShape } from './InstructionShape'
 import { InstructionsUpdated } from './InstructionsUpdated'
 import { Inspector, type InspectorProps } from './Inspector'
@@ -56,7 +57,8 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
       {/* Instructions are prose; a one-line input hid all but the first few words of them. */}
       <label>{reviewStep ? 'What to check' : 'Instructions'}<textarea ref={roleField} rows={4} className={props.instructionUpdate?.update.state === 'updated' ? 'instructions-marked' : undefined} value={node.data.agent.role} disabled={reviewStep ? readOnly : locked} onChange={e => onRename('role', e.target.value)} placeholder={reviewStep ? 'What should you look at before the team continues?' : 'What should this agent do?'} /></label>
       {props.instructionUpdate && <InstructionsUpdated {...props.instructionUpdate} agent={node.data.agent} readOnly={readOnly} />}
-      {!reviewStep && <InstructionShape role={node.data.agent.role} readOnly={locked} field={roleField} onChange={(role) => onRename('role', role)} />}
+      {!reviewStep && <InstructionShape role={node.data.agent.role} checksDoneWhen={Boolean(node.data.agent.doneWhen?.length)} readOnly={locked} field={roleField} onChange={(role) => onRename('role', role)} />}
+      {!reviewStep && props.onDoneWhenChange && <DoneWhen items={node.data.agent.doneWhen ?? []} readOnly={locked} onChange={props.onDoneWhenChange} />}
       {!reviewStep && props.checkup && props.checkup.findings.length > 0 && <section className="build-context" aria-label="Make it work better"><AgentCheckup {...props.checkup} readOnly={readOnly} headClassName="build-context-head" /></section>}
       {reviewStep
         ? <p>The team pauses here and waits for you to approve the work or ask for changes.</p>

@@ -11,8 +11,9 @@ import type { RunRecord } from '../../lib/runs/client'
 import { markPattern } from '../../lib/story/mark'
 import { useNow } from '../../lib/useNow'
 import { actsWithoutAsking, ALLOW_SWITCHES } from '../../lib/team-file/allow'
-import { appendToRole, instructionShape, PART_STARTERS } from '../../lib/team-file/checkup'
+import { appendToRole, INSTRUCTION_PARTS, instructionShape, PART_STARTERS } from '../../lib/team-file/checkup'
 import type { AllowSwitch } from '../../lib/team-file/types'
+import { DoneWhen } from '../canvas/DoneWhen'
 import { InstructionShape } from '../canvas/InstructionShape'
 import type { BenchLabel } from './AgentFigure'
 import type { BenchView } from './workbenchScene'
@@ -82,7 +83,7 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   const blocks = useRef(new Map<FigurePart, HTMLElement>())
   const ids = useId()
   const wild = harness ? actsWithoutAsking({ spawn: { cmd: harness.spawn.cmd, args: harness.spawn.args, env: {}, cwd: '.' } }) : null
-  const shape = instructionShape(draft.instructions)
+  const shape = { ...instructionShape(draft.instructions), ...(draft.doneWhen.length ? { check: true } : {}) }
   const reply = replyLine(draft.instructions)
   const mood = useFigureMood(record)
   const pattern = useMemo(() => markPattern(markId).over, [markId])
@@ -130,11 +131,11 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   const keysText = wild ? 'Every door is open' : given.length ? `Keys it has · ${given.map((item) => item.word).join(', ')}` : 'Keys it has · none'
   const asking = asked && !draft.allow[asked] ? FIGURE_KEYS.find(({ key }) => key === asked)?.word : null
   const dishText = asking ? `It’s asking you for the ${asking} key` : wild ? `${wild} doesn’t ask before it acts` : kept.length ? `You keep: ${kept.map((item) => item.word).join(', ')} · it asks you first` : 'You keep no keys'
-  const parts = (['job', 'method', 'reply'] as const).filter((part) => shape[part]).length
+  const parts = INSTRUCTION_PARTS.filter((part) => shape[part]).length
   // What each setting adds up to, in words: the line under each block's title.
   const says: Record<FigurePart, string> = {
     name: hideDoes || !draft.does.trim() ? name : `${name} · ${draft.does.trim()}`,
-    job: draft.instructions.trim() ? `Says ${parts} of the 3 things good instructions say: its job, how to work, and what it replies with` : 'Nothing written yet',
+    job: draft.instructions.trim() ? `Says ${parts} of the ${INSTRUCTION_PARTS.length} things good instructions say: its job, how to work, how it checks its work, and what it replies with` : 'Nothing written yet',
     app: harness ? `Works in ${harness.name}, on this computer, signed in as you` : 'No app chosen yet',
     mind: `Thinks with ${thinks}`,
     skills: draft.skills.length ? `${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'} it opens when the work calls for one` : 'No skills yet',
@@ -143,7 +144,7 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   }
   const labels: BenchLabel[] = [
     { anchor: 'mind', part: 'mind', place: 'right', text: <>Thinks with <b>{model}</b>{effort && <> · {effort.name.toLowerCase()}</>}</>, short: <b>{model}</b>, label: `The figure, the model it thinks with: ${thinks}` },
-    { anchor: 'job', part: 'job', place: 'above', text: <>The job <span className="byhand-parts">{(['job', 'method', 'reply'] as const).map((part) => <i key={part} className={shape[part] ? 'on' : ''} />)}</span></>, short: 'Job', label: 'The job on the clipboard: its instructions' },
+    { anchor: 'job', part: 'job', place: 'above', text: <>The job <span className="byhand-parts">{INSTRUCTION_PARTS.map((part) => <i key={part} className={shape[part] ? 'on' : ''} />)}</span></>, short: 'Job', label: 'The job on the clipboard: its instructions' },
     { anchor: 'skills', part: 'skills', place: 'above', text: `Skills · ${draft.skills.length || 'none yet'}${more}`, short: `Skills · ${draft.skills.length}`, label: `The recipe cards: ${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'}` },
     { anchor: 'keys', part: 'keys', place: 'above', text: keysText, short: `Keys · ${wild ? 'all' : given.length}`, label: `The key hooks: ${keysText}` },
     { anchor: 'dish', part: 'keys', place: 'below', text: dishText, short: asking ? `Asking for ${asking}` : `You keep ${wild ? 0 : kept.length}`, label: `Your dish: ${dishText}` },
@@ -208,7 +209,8 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
 
           {block('job', <>
             <textarea ref={roleField} className="agent-instructions" rows={8} value={draft.instructions} onChange={(event) => set('instructions', event.target.value)} placeholder="What this agent does, how it works, and what it replies with." aria-label="Instructions" />
-            <InstructionShape role={draft.instructions} field={roleField} onChange={(role) => set('instructions', role)} />
+            <InstructionShape role={draft.instructions} checksDoneWhen={draft.doneWhen.length > 0} field={roleField} onChange={(role) => set('instructions', role)} />
+            <DoneWhen items={draft.doneWhen} readOnly={readOnly} onChange={(items) => set('doneWhen', items)} />
           </>)}
 
           {block('app', <>

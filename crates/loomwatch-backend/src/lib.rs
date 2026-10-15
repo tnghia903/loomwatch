@@ -814,6 +814,14 @@ async fn run_pipeline_nodes(
         reply = work
             .deliver_notes(&mut session, shared_log.as_ref(), reply)
             .await?;
+        reply = revise_if_not_met(
+            &mut session.process,
+            &mut session.recorder,
+            !agent.done_when.is_empty(),
+            reply,
+        )
+        .await
+        .with_context(|| format!("pipeline node {} failed on its second pass", agent.id))?;
         drop(work);
         let StageSession {
             mut process,
@@ -973,6 +981,13 @@ pub(crate) async fn run_answerable_session(
                 .await?;
         }
     }
+    reply = revise_if_not_met(
+        &mut session.process,
+        &mut session.recorder,
+        !asked.agent.done_when.is_empty(),
+        reply,
+    )
+    .await?;
     if let Some(boundary) = context.boundary {
         let answer = session
             .process
@@ -2516,6 +2531,19 @@ pub(crate) fn compose_prompt(
         text: agent.role.clone(),
     }];
     let mut text = format!("## Your assigned role\n{}", agent.role);
+    // What finished means belongs with who the agent is: standing configuration, before anything
+    // this run hands it, so it is byte-identical between runs and stays cached (ADR 0062).
+    if let Some(done) = done_when_section(&agent.done_when) {
+        text.push_str("\n\n");
+        text.push_str(DONE_WHEN_HEADING);
+        text.push('\n');
+        text.push_str(&done);
+        sections.push(PromptSection {
+            kind: PromptSectionKind::DoneWhen,
+            heading: DONE_WHEN_HEADING.to_owned(),
+            text: done,
+        });
+    }
     // Directly under the role: who the agent is, then where it sits, before anything it is handed.
     if let Some(place) = &task.place {
         text.push_str("\n\n");
@@ -2696,6 +2724,78 @@ impl NodeTask {
             ..Self::default()
         }
     }
+}
+
+const DONE_WHEN_HEADING: &str = "## Done when";
+/// The heading an agent ends its reply with when it could not meet an item of its `doneWhen`.
+const NOT_MET_HEADING: &str = "## Not met";
+
+/// `## Done when`: the items, then the check. `None` for an agent with none, which keeps its
+/// prompt byte-for-byte what it was before ADR 0062.
+///
+/// The check is against named, observable items rather than "review your answer": a model asked
+/// to critique itself with nothing to check against tends to approve, or to change what was right.
+fn done_when_section(items: &[String]) -> Option<String> {
+    use std::fmt::Write as _;
+    if items.is_empty() {
+        return None;
+    }
+    let mut text = String::from("Your result is finished when:\n");
+    for item in items {
+        text.push_str("- ");
+        text.push_str(item);
+        text.push('\n');
+    }
+    let _ = write!(
+        text,
+        "Before you reply, check your result against each of these. If you could not meet one, \
+         end your reply with a `{NOT_MET_HEADING}` section: one line per item, saying why. If you \
+         met them all, leave that section out."
+    );
+    Some(text)
+}
+
+/// What a reply lists under `## Not met`, when it lists anything. A section that only says
+/// "none" is not a miss.
+fn not_met(reply: &str) -> Option<String> {
+    let mut lines = reply.lines();
+    lines
+        .by_ref()
+        .find(|line| line.trim().eq_ignore_ascii_case(NOT_MET_HEADING))?;
+    let listed = lines
+        .take_while(|line| {
+            !line.trim_start().starts_with("# ") && !line.trim_start().starts_with("## ")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let listed = listed.trim();
+    let nothing = listed.is_empty()
+        || [
+            "none", "none.", "nothing", "nothing.", "n/a", "-", "all met", "all met.",
+        ]
+        .contains(&listed.to_lowercase().as_str());
+    (!nothing).then(|| listed.to_owned())
+}
+
+/// The one extra turn an agent gets when it reports an item of its `doneWhen` as not met (ADR
+/// 0062): the same session, so everything it read is still there and cached, and the reply to this
+/// turn replaces the one before. One, because a second pass at the same gap mostly re-reports it.
+const REVISE_TURN: &str = "## One more pass\nYour reply lists items under `## Not met`. Fix what \
+     you can now, within the task: do the missing work, or correct the result. Then reply again \
+     with the complete result, not only what changed. Keep under `## Not met` only what still \
+     cannot be met, each with its reason.";
+
+/// Give an agent with a `doneWhen` its one pass at what it reported as not met.
+pub(crate) async fn revise_if_not_met(
+    process: &mut AcpProcess,
+    recorder: &mut acp::Recorder,
+    has_done_when: bool,
+    reply: String,
+) -> Result<String> {
+    if !has_done_when || not_met(&reply).is_none() {
+        return Ok(reply);
+    }
+    process.prompt_turn(recorder, REVISE_TURN).await
 }
 
 const STAGE_RESULTS_HEADING: &str = "## Results from preceding stages";
@@ -2991,6 +3091,166 @@ mod tests {
             .await
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         assert!(checkpoints.is_empty(), "{checkpoints:?}");
+        Ok(())
+    }
+
+    /// ADR 0062: an agent that reports an item of its `doneWhen` as not met gets exactly one more
+    /// turn in the same session, and the reply to it is the answer. The script exits 61 if the
+    /// prompt does not state the items, 62 if the second turn is not the one-more-pass request,
+    /// and 63 if it is asked for anything after that but the close.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_reported_miss_gets_one_more_pass_and_its_reply_is_the_answer(
+        pool: sqlx::PgPool,
+    ) -> Result<()> {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"done-when","configOptions":[]}}'
+            IFS= read -r prompt
+            case "$prompt" in
+              *'## Done when'*'Every story has a link'*'## Not met'*'## Task'*) ;;
+              *) printf 'no done-when in the prompt: %s\n' "$prompt" >&2; exit 61 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"done-when","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"draft\n\n## Not met\n- story two has no link"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r again
+            case "$again" in
+              *'One more pass'*'complete result'*) ;;
+              *) printf 'expected one more pass: %s\n' "$again" >&2; exit 62 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"done-when","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"final, every story linked"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r after
+            case "$after" in
+              *'"method":"session/close"'*) ;;
+              *) printf 'a second pass is the only extra turn: %s\n' "$after" >&2; exit 63 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
+        "#;
+        let mut agent = pipeline_agent("a", vec!["-c".into(), script.into()]);
+        agent.done_when = vec!["Every story has a link".into()];
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "done-when-team".into(),
+            name: "Done when".into(),
+            entrypoint: "a".into(),
+            responder: Some("a".into()),
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![agent],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let outcome = run_team_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "write the brief",
+            Duration::from_secs(2),
+            None,
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage::default(),
+        )
+        .await?;
+        assert_eq!(outcome.reply, "final, every story linked");
+        Ok(())
+    }
+
+    /// The same pass on a pipeline stage: it comes after the stage's work and before its
+    /// handover, so the next stage is handed the fixed result. Exits 71 if the pass does not come
+    /// second, 72 if the handover is not asked for after it, 73 if the next stage was not handed
+    /// the result of the pass.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_pipeline_stage_takes_its_pass_before_its_handover(pool: sqlx::PgPool) -> Result<()> {
+        let first = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"stage-a","configOptions":[]}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"stage-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"three sources\n\n## Not met\n- only three of five sources"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r again
+            case "$again" in
+              *'One more pass'*) ;;
+              *) printf 'expected one more pass: %s\n' "$again" >&2; exit 71 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"stage-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"five sources"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r handover
+            case "$handover" in
+              *'## Summary'*'## Findings'*) ;;
+              *) printf 'expected the handover after the pass: %s\n' "$handover" >&2; exit 72 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"stage-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"handed: five sources"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":6,"result":{}}'
+        "#;
+        let second = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"stage-b","configOptions":[]}}'
+            IFS= read -r prompt
+            case "$prompt" in
+              *'handed: five sources'*) ;;
+              *) printf 'expected the fixed handover: %s\n' "$prompt" >&2; exit 73 ;;
+            esac
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"stage-b","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"written"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
+        "#;
+        let mut researcher = pipeline_agent("a", vec!["-c".into(), first.into()]);
+        researcher.done_when = vec!["Five sources, each opened".into()];
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "done-when-pipeline".into(),
+            name: "Done when pipeline".into(),
+            entrypoint: "a".into(),
+            responder: Some("b".into()),
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![
+                researcher,
+                pipeline_agent("b", vec!["-c".into(), second.into()]),
+            ],
+            edges: vec![EdgeConfig {
+                from: "a".into(),
+                to: "b".into(),
+                layer: "configured".into(),
+                kind: "sequence".into(),
+                ts: "2026-10-15T00:00:00Z".into(),
+            }],
+        });
+        let archive = EventArchive::from_pool(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "research it",
+            Duration::from_secs(2),
+            None,
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage::default(),
+        )
+        .await?;
+        assert_eq!(outcome.reply, "written");
         Ok(())
     }
 
@@ -4379,6 +4639,60 @@ IFS= read -r _
         );
     }
 
+    /// ADR 0062: `## Done when` sits directly under the role, as standing configuration, and an
+    /// agent with none gets no section at all (the test above pins that prompt byte for byte).
+    #[test]
+    fn done_when_is_stated_under_the_role_with_the_check_and_the_not_met_section() {
+        let mut agent = pipeline_agent("a", Vec::new());
+        agent.done_when = vec!["Every story has a link".into(), "Five stories".into()];
+        let composed = compose_prompt(
+            &agent,
+            &memory::ContextPacket::default(),
+            &NodeTask::goal("do the thing"),
+        );
+        assert_eq!(
+            composed.text,
+            "## Your assigned role\na role\n\n## Done when\nYour result is finished when:\n\
+             - Every story has a link\n- Five stories\nBefore you reply, check your result \
+             against each of these. If you could not meet one, end your reply with a `## Not met` \
+             section: one line per item, saying why. If you met them all, leave that section \
+             out.\n\n## Task\ndo the thing"
+        );
+        assert_eq!(
+            composed
+                .sections
+                .iter()
+                .map(|section| section.kind)
+                .collect::<Vec<_>>(),
+            [
+                memory::PromptSectionKind::Role,
+                memory::PromptSectionKind::DoneWhen,
+                memory::PromptSectionKind::Task
+            ]
+        );
+    }
+
+    #[test]
+    fn not_met_reads_only_a_section_that_lists_something() {
+        assert_eq!(
+            not_met("The brief.\n\n## Not met\n- Story 4 has no link: none found\n").as_deref(),
+            Some("- Story 4 has no link: none found")
+        );
+        assert_eq!(
+            not_met("## Not met\n- one\n\n## Sources\n- a").as_deref(),
+            Some("- one"),
+            "the section ends at the next heading"
+        );
+        for met in [
+            "The brief.",
+            "The brief.\n## Not met\n",
+            "The brief.\n## Not met\nNone.",
+            "Talks about what was not met, with no heading.",
+        ] {
+            assert_eq!(not_met(met), None, "{met:?}");
+        }
+    }
+
     #[test]
     fn required_skill_instructions_preserve_the_prompt_and_memory_boundary() {
         let agent = pipeline_agent("a", Vec::new());
@@ -4775,6 +5089,7 @@ IFS= read -r _
             allow_recruiting: true,
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
+            done_when: Vec::new(),
         }
     }
 
@@ -4821,6 +5136,7 @@ IFS= read -r _
             allow_recruiting: false,
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
+            done_when: Vec::new(),
         }
     }
 

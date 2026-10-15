@@ -67,19 +67,20 @@ export function useTeamCheckup(doc: TeamDocumentController, responder: string | 
 
   const forAgent = useCallback((agentId: string) => findings.filter((finding) => finding.agentIds.includes(agentId)), [findings])
 
-  const { nodes, updateAgentAllow, renameAgent } = doc
+  const { nodes, updateAgentAllow, renameAgent, updateAgentThinkingEffort } = doc
   const apply = useCallback((finding: CheckupFinding) => {
     const change = finding.fix?.change
     if (!change) return
     const agent = nodes.find((node) => node.id === change.agentId)?.data.agent
     if (change.kind === 'allow') updateAgentAllow(change.agentId, change.key, true)
+    else if (change.kind === 'effort') updateAgentThinkingEffort(change.agentId, change.value)
     else if (change.kind === 'append-role') renameAgent(change.agentId, 'role', appendToRole(agent?.role ?? '', change.text))
     else {
       renameAgent(change.agentId, 'role', change.text)
       for (const [key, on] of Object.entries(change.allow ?? {})) if (on && !agent?.allow?.[key as AllowSwitch]) updateAgentAllow(change.agentId, key as AllowSwitch, true)
     }
     announce(`${finding.fix?.label}: done for ${agent?.name ?? change.agentId}. Save the team to keep this change.`)
-  }, [nodes, updateAgentAllow, renameAgent, announce])
+  }, [nodes, updateAgentAllow, renameAgent, updateAgentThinkingEffort, announce])
 
   const dismiss = useCallback((finding: CheckupFinding) => {
     setHidden((current) => {

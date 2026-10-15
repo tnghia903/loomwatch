@@ -6,11 +6,14 @@ import { appendToRole, instructionShape, PART_STARTERS, type InstructionPart } f
 const PARTS: readonly { part: InstructionPart; label: string; missing: string }[] = [
   { part: 'job', label: 'Its job', missing: 'Say what this agent does, and what it leaves to others.' },
   { part: 'method', label: 'How to work', missing: 'Start a list of how it should work' },
+  { part: 'check', label: 'How it checks', missing: 'Start saying how it checks its work before it replies' },
   { part: 'reply', label: 'What it replies with', missing: 'Start saying what it replies with' },
 ]
 
 export interface InstructionShapeProps {
   role: string
+  /** The agent has a Done when list, which the daemon tells it to check before replying (ADR 0062). */
+  checksDoneWhen?: boolean
   readOnly?: boolean
   /** The instructions field, so a started part leaves the caret after it to write on. */
   field: RefObject<HTMLTextAreaElement | null>
@@ -18,13 +21,14 @@ export interface InstructionShapeProps {
 }
 
 /**
- * What these instructions cover, as state under the field: its job, how to work, what it replies
- * with — the three things every built-in job says (ADR 0030), so a hand-written agent is set up
- * the same way without anyone being told to. A missing part is one click from started.
+ * What these instructions cover, as state under the field: its job, how to work, how it checks its
+ * work, what it replies with — the things every built-in job says (ADR 0030, ADR 0062), so a
+ * hand-written agent is set up the same way without anyone being told to. A missing part is one
+ * click from started.
  */
-export function InstructionShape({ role, readOnly = false, field, onChange }: InstructionShapeProps) {
+export function InstructionShape({ role, checksDoneWhen = false, readOnly = false, field, onChange }: InstructionShapeProps) {
   if (!role.trim()) return null
-  const shape = instructionShape(role)
+  const shape = { ...instructionShape(role), ...(checksDoneWhen ? { check: true } : {}) }
   const start = (text: string) => {
     const next = appendToRole(role, text)
     onChange(next)

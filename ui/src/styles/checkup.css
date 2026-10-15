@@ -49,3 +49,15 @@
 .agent-usage > span:first-child { color: var(--color-ink-2); }
 .build-workspace-heading .build-usage { margin-left: 12px; }
 .build-workspace-heading .build-usage::before { content: '·'; margin-right: 12px; }
+
+/* DONE WHEN (ADR 0062): what the finished result must have, under the instructions. Quiet rows,
+   like the instruction shape: the field's state, not a lesson. */
+.done-when { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.done-when-head { display: flex; flex-direction: column; gap: 2px; }
+.done-when-head .t-micro { color: var(--color-ink-2); }
+.done-when ul { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.done-when li, .done-when-add { display: flex; align-items: center; gap: 6px; }
+.done-when li .input, .done-when-add .input { flex: 1; min-width: 0; min-height: 28px; font-size: 12.5px; }
+.done-when li textarea.input { resize: none; padding-block: 5px; line-height: 1.35; }
+.done-when li { align-items: flex-start; }
+.done-when-add .shape-part:disabled { cursor: default; opacity: 0.5; }

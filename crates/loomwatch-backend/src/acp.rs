@@ -1185,6 +1185,15 @@ impl AcpProcess {
             .await?;
         let archive_session_id = recorder.event_log.session_id().to_owned();
         let reply = self.prompt_turn(&mut recorder, prompt).await?;
+        // ADR 0062: an agent whose prompt carried `## Done when` gets one pass at what it reported
+        // as not met, here as on the pipeline and team paths.
+        let has_done_when = context.composed.is_some_and(|composed| {
+            composed
+                .sections
+                .iter()
+                .any(|section| section.kind == crate::memory::PromptSectionKind::DoneWhen)
+        });
+        let reply = crate::revise_if_not_met(self, &mut recorder, has_done_when, reply).await?;
         // The boundary turn, before the close and after the work: a session that has already been
         // closed cannot say where it stopped, and a session that is asked before it works has
         // nothing to say.

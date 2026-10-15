@@ -6,6 +6,7 @@ import type { DetectedCapability } from '../../lib/library/client'
 import { BLANK_DRAFT, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft, type AgentDraft } from '../../lib/library/draft'
 import { figureFor, freshFigure } from '../../lib/library/figures'
 import { fetchJobVersions, JobApiError, jobIdFor, removeJob, saveJob, useSavedJobs, versionOf, type JobVersion, type SavedJob } from '../../lib/library/jobs'
+import { effortFor } from '../../lib/library/effort'
 import { ROLE_PRESETS } from '../../lib/library/roles'
 import { useAgentUses } from '../../lib/library/uses'
 import { relativeTime } from '../../lib/format'
@@ -87,6 +88,17 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
     return () => { cancelled = true }
   }, [draft.appId])
   const appModels = models?.app === draft.appId ? models : null
+  // A built-in job starts at the effort its job needs, once its app's models are known, with the
+  // model it belongs to pinned as the effort slider pins it (ADR 0062). Once per start, so moving
+  // the slider back to the app's default sticks.
+  const [tieredFor, setTieredFor] = useState<string | null>(null)
+  const startTier = !id ? ROLE_PRESETS.find((candidate) => candidate.id === startFrom)?.effort : undefined
+  if (startTier && startedFor === startKey && tieredFor !== startKey && appModels?.list && !draft.effort) {
+    setTieredFor(startKey)
+    const model = draft.model || appModels.list.currentModelId || ''
+    const effort = effortFor(startTier, appModels.list.models.find((entry) => entry.id === model))
+    if (model && effort) setDraft((current) => ({ ...current, model: current.model || model, effort }))
+  }
   const resolvedModel = draft.model || appModels?.list?.currentModelId || ''
   const modelName = appModels?.list?.models.find((model) => model.id === resolvedModel)?.name
   const effortName = draft.effort ? appModels?.list?.models.find((model) => model.id === resolvedModel)?.thinkingEfforts.find((effort) => effort.id === draft.effort)?.name : undefined

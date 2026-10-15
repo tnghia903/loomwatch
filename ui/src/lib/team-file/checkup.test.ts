@@ -64,7 +64,7 @@ describe('checkup', () => {
     const findings = run({ agents: [agent('researcher', preset('researcher')), agent('writer', preset('writer'))] })
     expect(rules(findings)).toEqual(['lead-delegation:researcher'])
     const fix = findings[0].fix?.change
-    expect(fix?.kind === 'append-role' && fix.text).toBe('When the request is bigger than one step, hand parts of it to your teammates, Writer, each the part that matches its job. Give each one the goal, what to send back and where to stop, then combine what they send into your answer.')
+    expect(fix?.kind === 'append-role' && fix.text).toBe('When the request is bigger than one step, hand parts of it to your teammates, Writer, each the part that matches its job, then combine what they send into your answer.')
     // Naming a teammate is telling it when to use them.
     expect(run({ agents: [agent('lead', `${preset('researcher')} Pass the facts to Writer.`, { allow: { web: true } }), agent('writer', preset('writer'))] })).toEqual([])
   })
@@ -85,6 +85,24 @@ describe('checkup', () => {
     // A review stop is you, not work to build on.
     const afterReview = run({ agents: [agent('researcher', preset('researcher')), { id: 'review', name: 'You', role: 'Approve it.', kind: 'operator' }, agent('coder', preset('coder'), { allow: { edits: true, commands: true } })], edges: [{ from: 'researcher', to: 'review' }, { from: 'review', to: 'coder' }] })
     expect(rules(afterReview)).toEqual([])
+  })
+
+  it('asks for plain case when instructions shout, and the fix clears it without opening another', () => {
+    const shouting = `${preset('writer')}\n\nIMPORTANT: you MUST cite the API docs. NEVER guess a version number.\n- ALWAYS keep the PDF link.`
+    const [finding] = run({ agents: [agent('writer', shouting)] })
+    expect(finding).toMatchObject({ rule: 'shouting', severity: 'improve', fix: { label: 'Write them in plain case' } })
+    const fixed = finding.fix?.change.kind === 'replace-role' ? finding.fix.change.text : ''
+    expect(fixed).toContain('Important: you must cite the API docs. Never guess a version number.\n- Always keep the PDF link.')
+    expect(run({ agents: [agent('writer', fixed)] })).toEqual([])
+    // One capital word is a habit, and an acronym is not shouting.
+    expect(run({ agents: [agent('writer', `${preset('writer')}\nCite the API and PDF docs, NOT blog posts.`)] })).toEqual([])
+  })
+
+  it('suggests high effort for an agent that thinks at max on every run, and the fix clears it', () => {
+    const [finding] = run({ agents: [agent('writer', preset('writer'), { thinkingEffort: 'max' })] })
+    expect(finding).toMatchObject({ rule: 'overthinking', fix: { label: 'Use high effort', change: { kind: 'effort', agentId: 'writer', value: 'high' } } })
+    expect(run({ agents: [agent('writer', preset('writer'), { thinkingEffort: 'high' })] })).toEqual([])
+    expect(run({ agents: [agent('writer', preset('writer'))] })).toEqual([])
   })
 
   it('never calls two different built-in jobs the same job', () => {
@@ -111,6 +129,7 @@ function applyFix(agents: readonly AgentConfig[], finding: CheckupFinding): Agen
     if (!change || one.id !== change.agentId) return one
     if (change.kind === 'allow') return { ...one, allow: { ...one.allow, [change.key]: true } }
     if (change.kind === 'append-role') return { ...one, role: appendToRole(one.role, change.text) }
+    if (change.kind === 'effort') return { ...one, thinkingEffort: change.value }
     return { ...one, role: change.text, ...(change.allow ? { allow: { ...one.allow, ...change.allow } } : {}) }
   })
 }
@@ -130,6 +149,7 @@ describe('checkup fixes', () => {
       { agents: [agent('lead', 'You plan product launches. Reply with the plan as a checklist grouped by week.'), agent('scout', 'Look at competitors’ recent launches on the web and reply with what worked, with links.', { allow: { web: true } })] },
       { agents: [agent('writer', preset('writer')), agent('reviewer', preset('reviewer'))], edges: [{ from: 'writer', to: 'reviewer' }] },
       { agents: [agent('researcher', preset('researcher')), agent('coder', preset('coder'), { allow: { edits: true, commands: true } })], edges: [{ from: 'researcher', to: 'coder' }] },
+      { agents: [agent('writer', `${preset('writer')}\nIMPORTANT: NEVER skip a source.`, { thinkingEffort: 'max' })] },
     ]
     let fixed = 0
     for (const scenario of scenarios) {

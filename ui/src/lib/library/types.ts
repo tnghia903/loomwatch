@@ -23,6 +23,8 @@ export interface LibrarySource {
   model?: string
   /** How hard that model thinks; it goes with the model. */
   thinkingEffort?: string
+  /** What the finished result must satisfy (ADR 0062); a job brings its own. */
+  doneWhen?: string[]
   /** Skills a job brings with it (ADR 0030/0031); delivered on whatever app the agent runs. */
   capabilities?: CapabilityRef[]
   /** What the agent it places may do without asking (ADR 0037). */

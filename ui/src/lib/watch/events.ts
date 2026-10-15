@@ -531,6 +531,12 @@ export function toolDisplayName(name: string | null, title: string): string {
 export type PromptSectionKind =
   | 'role'
   /**
+   * `## Done when` — what the finished result must satisfy, and to check it before replying (ADR
+   * 0062). Directly under the role. Added here and in `memory::PromptSectionKind` in the same
+   * change, which is the rule.
+   */
+  | 'done_when'
+  /**
    * `## Your place in the team` — who comes before the agent, who reads its work after it, and
    * whether its reply is the team's answer (ADR 0034). Added here and in `memory::PromptSectionKind`
    * in the same change, which is the rule.

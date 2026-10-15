@@ -486,6 +486,7 @@ $defs:
             - required: [spawn]
             - required: [model]
             - required: [thinkingEffort]
+            - required: [doneWhen]
             - required: [allow]
             - required: [turnedOff]
             - required: [from]
@@ -522,6 +523,18 @@ $defs:
         description: Optional harness-specific reasoning effort selected independently of the model.
         type: string
         minLength: 1
+      doneWhen:
+        description: >-
+          What the finished result must satisfy (ADR 0062): a few short statements the agent checks
+          its result against before it replies, each checkable from the result alone. The agent
+          lists any it could not meet under `## Not met`, and gets one more turn to fix them.
+          Short on purpose: an agent follows every requirement it is given, needed or not.
+        type: array
+        maxItems: 5
+        items:
+          type: string
+          minLength: 1
+          maxLength: 160
       budget:
         $ref: "#/$defs/RetiredBudget"
       allowRecruiting:

@@ -28,6 +28,8 @@ export interface JobSpec {
   /** How hard that model thinks: one of the efforts its app lists. Absent, the app's own default. */
   thinkingEffort?: string
   skills?: string[]
+  /** What the finished result must satisfy (ADR 0062), copied into a team with the rest. */
+  doneWhen?: string[]
   /** What it may do without asking (ADR 0037); only switches that are on are written. */
   allow?: AgentAllow
   /** Set by the daemon: which version this is. Absent means 1. */
@@ -183,6 +185,7 @@ export function jobFromAgent(agent: AgentConfig, options: { name: string; does?:
     ...(options.appId ? { apps: [options.appId] } : {}),
     ...(options.appId && agent.model ? { model: agent.model, ...(agent.thinkingEffort ? { thinkingEffort: agent.thinkingEffort } : {}) } : {}),
     ...(skills.length ? { skills } : {}),
+    ...(agent.doneWhen?.length ? { doneWhen: [...agent.doneWhen] } : {}),
     ...(allow ? { allow } : {}),
   }
 }
@@ -206,6 +209,7 @@ export function savedJobPreset(job: SavedJob): RolePreset {
     prefers: job.apps ?? [],
     ...(job.model ? { model: job.model, ...(job.thinkingEffort ? { thinkingEffort: job.thinkingEffort } : {}) } : {}),
     ...(job.skills?.length ? { skills: job.skills } : {}),
+    ...(job.doneWhen?.length ? { doneWhen: job.doneWhen } : {}),
     ...(allow ? { allow } : {}),
     from: { agent: job.id, version: versionOf(job) },
   }

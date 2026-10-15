@@ -70,6 +70,13 @@ depend on the document as a whole:
 - `Agent.model` stores the harness model id. Optional `Agent.thinkingEffort` stores the
   harness's reasoning-effort id separately; at session start LoomWatch applies both through
   ACP configuration. Older combined selectors such as `gpt-6-astra[high]` remain readable.
+  LoomWatch's built-in jobs and starter teams set it by job (`low` for tidying, `medium` for
+  most work, `high` for checking, analysis and code), and only to an effort the model lists.
+- Optional `Agent.doneWhen` is up to five short statements (each at most 160 characters) that
+  the finished result must satisfy. They are stated under the role as `## Done when`; the agent
+  checks its result against them before it replies and lists any it could not meet under
+  `## Not met`. A reply with a `## Not met` section gets exactly one more turn in the same
+  session to fix what it can, and the reply to that turn is the agent's answer.
 - `budget` (team or agent level) is retired.
   Readers accept it in any shape and ignore it, so older team files still load; writers must not
   add it. LoomWatch neither tracks spend nor refuses a delegation because of it.
@@ -408,7 +415,7 @@ cannot be reconstructed safely from the normalized projection.
 ## Operator review stops and questions
 
 A pipeline agent may declare `kind: operator` with `role` as its question and optional `name`
-(default `You`). It must omit `spawn`, `model` and `thinkingEffort`. Operator nodes
+(default `You`). It must omit `spawn`, `model`, `thinkingEffort` and `doneWhen`. Operator nodes
 cannot be the entrypoint or appear in team mode; consecutive stops are allowed. The app must
 start a pipeline containing stops, so answers have a loopback operator endpoint.
 

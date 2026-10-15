@@ -1381,12 +1381,18 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const inspectedHarnessId = inspectedNode ? harnessIdForAgent(inspectedNode.data.agent, harnesses) : null
   const inspectedUpdate = inspectedNode && !runView ? instructionUpdates.forAgent(inspectedNode.id) : null
   const inspectedAppHas = useMemo(() => inspectedNode && inspectedNode.data.agent.kind !== 'operator' ? ownedByApp(inspectedHarnessId, capabilityInventory) : null, [inspectedNode, inspectedHarnessId, capabilityInventory])
+  const { updateAgentModel, applyAgentFields } = doc
+  const fillAgentModel = useCallback((agentId: string, model: string, thinkingEffort?: string) => {
+    if (thinkingEffort) applyAgentFields(agentId, { model, thinkingEffort })
+    else updateAgentModel(agentId, model)
+  }, [updateAgentModel, applyAgentFields])
   const modelCatalog = useModelCatalog({
     harnessId: inspectedHarnessId,
     agentId: inspectedNode?.id ?? null,
     agentNeedsModel: Boolean(inspectedNode && inspectedNode.data.agent.kind !== 'operator' && !inspectedNode.data.agent.model),
+    agentRole: inspectedNode?.data.agent.role ?? '',
     editable,
-    updateAgentModel: doc.updateAgentModel,
+    updateAgentModel: fillAgentModel,
   })
   const inspectedEvidence: Evidence | null = inspectedEvidenceId ? projection.evidence.find((item) => item.id === inspectedEvidenceId) ?? null : null
   // Who handed it over: the stage before this one in causal order, which is what the daemon
@@ -2761,7 +2767,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               setStatusAnnouncement(`${added.map((capability) => capability.name).join(', ')} ${added.length === 1 ? 'is' : 'are'} now supplied to ${inspectedNode.data.agent.name}. Save the team to keep this change.`)
             }}
             modelOptions={modelOptionsForAgent(inspectedNode.data.agent, doc.nodes.map((node) => node.data.agent), harnesses, modelCatalog.models)} defaultThinkingEffort={modelCatalog.defaultThinkingEffort} modelOptionsLoading={modelCatalog.loading} modelOptionsError={modelCatalog.error} onRetryModelOptions={modelCatalog.retry}
-            onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)}
+            onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)} onDoneWhenChange={(items) => doc.applyAgentFields(inspectedNode.id, { doneWhen: items.length ? items : undefined })}
             onCwdChange={(value) => doc.updateAgentCwd(inspectedNode.id, value)}
             onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onAllowChange={(key, on) => doc.updateAgentAllow(inspectedNode.id, key, on)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onDelete={() => requestNodeDelete([inspectedNode.id])}
             briefCount={memory?.entries.length ?? 0} teamDeliverAs={memory?.deliverAs}

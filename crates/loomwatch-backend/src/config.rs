@@ -482,7 +482,16 @@ pub struct AgentConfig {
     /// Skills and tools the operator turned off for this agent (ADR 0060): its app would otherwise
     /// load them itself. Empty for an operator node.
     pub turned_off: Vec<TurnedOff>,
+    /// What the finished result must satisfy (ADR 0062), trimmed, blanks dropped. Rendered under
+    /// the role as `## Done when`. Empty for an operator node and for most hand-written agents.
+    pub done_when: Vec<String>,
 }
+
+/// At most this many `doneWhen` items, each at most [`DONE_WHEN_CHARS`] characters: the schema's
+/// limits, enforced where the file is read too, so a hand-edited file cannot hand an agent a
+/// requirements document. Agents follow every requirement they are given, needed or not.
+pub const DONE_WHEN_ITEMS: usize = 5;
+pub const DONE_WHEN_CHARS: usize = 160;
 
 /// A skill or tool an agent's app has of its own that the operator turned off for the agent by
 /// taking it off the canvas (ADR 0060). Everything else the app has stays the agent's to choose.
@@ -531,6 +540,8 @@ struct RawAgent {
     allow: Option<AgentAllow>,
     #[serde(default)]
     turned_off: Vec<TurnedOff>,
+    #[serde(default)]
+    done_when: Vec<String>,
     /// Runtime annotation. Accepted and discarded: writers must not persist it and readers must
     /// ignore it (`docs/TEAM_CONFIG.md`).
     #[serde(default, rename = "status")]
@@ -551,6 +562,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     ("model", raw.model.is_some()),
                     ("allow", raw.allow.is_some()),
                     ("turnedOff", !raw.turned_off.is_empty()),
+                    ("doneWhen", !raw.done_when.is_empty()),
                 ] {
                     if present {
                         return Err(format!(
@@ -585,6 +597,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     memory: raw.memory,
                     allow: AgentAllow::default(),
                     turned_off: Vec::new(),
+                    done_when: Vec::new(),
                 })
             }
             AgentKind::Harness => {
@@ -597,6 +610,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                 for entry in &raw.turned_off {
                     check_turned_off(&id, entry)?;
                 }
+                let done_when = done_when(&id, raw.done_when)?;
                 Ok(Self {
                     id,
                     name: raw.name.unwrap_or_default(),
@@ -610,10 +624,38 @@ impl TryFrom<RawAgent> for AgentConfig {
                     memory: raw.memory,
                     allow: raw.allow.unwrap_or_default(),
                     turned_off: raw.turned_off,
+                    done_when,
                 })
             }
         }
     }
+}
+
+/// `doneWhen` as the prompt will state it: each item trimmed, blank ones dropped, within the
+/// schema's limits.
+fn done_when(id: &str, items: Vec<String>) -> Result<Vec<String>, String> {
+    let items: Vec<String> = items
+        .into_iter()
+        .map(|item| item.trim().to_owned())
+        .filter(|item| !item.is_empty())
+        .collect();
+    if items.len() > DONE_WHEN_ITEMS {
+        return Err(format!(
+            "agent {id:?} has {} `doneWhen` items; keep it to {DONE_WHEN_ITEMS}, the ones the \
+             result must meet.",
+            items.len()
+        ));
+    }
+    if let Some(long) = items
+        .iter()
+        .find(|item| item.chars().count() > DONE_WHEN_CHARS)
+    {
+        return Err(format!(
+            "agent {id:?} has a `doneWhen` item longer than {DONE_WHEN_CHARS} characters: {long:?}. \
+             Say it in one short sentence."
+        ));
+    }
+    Ok(items)
 }
 
 /// A turned-off entry names a skill or a tool, and never the Team Bus, which is how a team hands
@@ -1535,6 +1577,34 @@ mod tests {
         .expect_err("an operator node runs no app");
         assert!(
             format!("{operator:#}").contains("no turnedOff"),
+            "{operator:#}"
+        );
+    }
+
+    /// ADR 0062: `doneWhen` is a short list a harness agent checks its result against. Blank items
+    /// are dropped, the schema's limits hold for a hand-edited file too, and a review stop has none.
+    #[test]
+    fn done_when_is_trimmed_bounded_and_only_for_an_agent_that_runs() {
+        let team = |items: &str| {
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    doneWhen: [{items}]\nedges: []\n"
+            ))
+        };
+        let parsed = team("'  Every claim has a link  ', ' ', 'Under 300 words'").expect("valid");
+        assert_eq!(
+            parsed.agents[0].done_when,
+            ["Every claim has a link", "Under 300 words"]
+        );
+        let six = team("a, b, c, d, e, f").expect_err("six items");
+        assert!(format!("{six:#}").contains("keep it to 5"), "{six:#}");
+        let long = team(&format!("'{}'", "x".repeat(161))).expect_err("an essay");
+        assert!(format!("{long:#}").contains("longer than 160"), "{long:#}");
+        let operator = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n  - id: you\n    kind: operator\n    role: Check it.\n    doneWhen: [Approved]\nedges:\n  - {from: a, to: you, layer: configured, kind: sequence, ts: \"2026-09-10T00:00:00Z\"}\n",
+        )
+        .expect_err("a review stop is answered by the person");
+        assert!(
+            format!("{operator:#}").contains("no doneWhen"),
             "{operator:#}"
         );
     }

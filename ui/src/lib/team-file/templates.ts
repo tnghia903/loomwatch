@@ -1,6 +1,7 @@
 import { stringify } from 'yaml'
 
-import { isHarnessRunnable, type DetectedHarness } from '../harnesses'
+import { isHarnessRunnable, type DetectedHarness, type HarnessModel } from '../harnesses'
+import { effortFor } from '../library/effort'
 import { ROLE_PRESETS } from '../library/roles'
 import type { AgentConfig, EdgeConfig } from './types'
 import { slugifyTeamName } from './useTeamDocument'
@@ -112,17 +113,20 @@ function jobRole(id: 'researcher' | 'writer'): string {
   return preset.role
 }
 
-function agent(id: string, name: string, role: string, harness: DetectedHarness, model: string): AgentConfig {
+function agent(id: string, name: string, role: string, harness: DetectedHarness, model: string, catalog?: HarnessModel): AgentConfig {
   // The Researcher job's own switches (ADR 0037), so a template's researcher can search the web
-  // like one hired from the palette.
-  const allow = ROLE_PRESETS.find((preset) => preset.id === id)?.allow
+  // like one hired from the palette; and each job's effort, as its model lists it (ADR 0062).
+  const preset = ROLE_PRESETS.find((candidate) => candidate.id === id)
+  const thinkingEffort = preset?.effort ? effortFor(preset.effort, catalog) : undefined
   return {
     id,
     name,
     role,
     spawn: { cmd: harness.spawn.cmd, args: [...harness.spawn.args], env: {}, cwd: '.' },
     model,
-    ...(allow ? { allow: { ...allow } } : {}),
+    ...(thinkingEffort ? { thinkingEffort } : {}),
+    ...(preset?.doneWhen?.length ? { doneWhen: [...preset.doneWhen] } : {}),
+    ...(preset?.allow ? { allow: { ...preset.allow } } : {}),
   }
 }
 
@@ -137,8 +141,10 @@ function sequence(from: string, to: string, ts: string): EdgeConfig {
  * that advertises models rejects an id it does not know, which would fail the first run.
  */
 /** `id` should come from the file the team is saved as (`teamIdForPath`), so a second team with
- * the same name does not share the first one's id, and with it the first one's Notebook. */
-export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, name: string, harness: DetectedHarness, model: string, now = new Date(), id = slugifyTeamName(name)): string {
+ * the same name does not share the first one's id, and with it the first one's Notebook.
+ * `catalog` is that model's catalog entry, which decides each job's effort; without it every agent
+ * keeps the app's default effort. */
+export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, name: string, harness: DetectedHarness, model: string, now = new Date(), id = slugifyTeamName(name), catalog?: HarnessModel): string {
   const ts = now.toISOString()
   let agents: AgentConfig[]
   let edges: EdgeConfig[]
@@ -146,13 +152,13 @@ export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, nam
     agents = [agent('assistant', 'Assistant', ROLES.assistant, harness, model)]
     edges = []
   } else if (template === 'research-write') {
-    agents = [agent('researcher', 'Researcher', jobRole('researcher'), harness, model), agent('writer', 'Writer', jobRole('writer'), harness, model)]
+    agents = [agent('researcher', 'Researcher', jobRole('researcher'), harness, model, catalog), agent('writer', 'Writer', jobRole('writer'), harness, model, catalog)]
     edges = [sequence('researcher', 'writer', ts)]
   } else {
     agents = [
-      agent('researcher', 'Researcher', jobRole('researcher'), harness, model),
+      agent('researcher', 'Researcher', jobRole('researcher'), harness, model, catalog),
       { id: 'review', kind: 'operator', name: 'You', role: ROLES.review },
-      agent('writer', 'Writer', jobRole('writer'), harness, model),
+      agent('writer', 'Writer', jobRole('writer'), harness, model, catalog),
     ]
     edges = [sequence('researcher', 'review', ts), sequence('review', 'writer', ts)]
   }

@@ -10,12 +10,19 @@ import { InstructionShape } from './InstructionShape'
 afterEach(cleanup)
 
 describe('instructionShape', () => {
-  it('finds all three parts in every built-in job', () => {
-    for (const job of ROLE_PRESETS) expect(instructionShape(job.role), job.id).toEqual({ job: true, method: true, reply: true })
+  it('finds every part in every built-in job', () => {
+    for (const job of ROLE_PRESETS) expect(instructionShape(job.role), job.id).toEqual({ job: true, method: true, check: true, reply: true })
+  })
+
+  it('does not read a check before replying as saying what it replies with', () => {
+    const role = 'You write the launch announcement for our app.\n\nBefore you reply, check every date against the release notes.'
+    expect(instructionShape(role)).toMatchObject({ method: false, check: true, reply: false })
+    expect(instructionShape(`${role}\n\nReply with the post only.`)).toMatchObject({ check: true, reply: true })
   })
 
   it('does not count a part that was started but not written', () => {
-    expect(instructionShape('Write launch copy.')).toEqual({ job: false, method: false, reply: false })
+    expect(instructionShape('Write launch copy.')).toEqual({ job: false, method: false, check: false, reply: false })
+    expect(instructionShape('You write the launch announcement for our app.\n\nBefore you reply, check ')).toMatchObject({ job: true, check: false })
     expect(instructionShape('You write the launch announcement for our app.\n\nReply with ')).toMatchObject({ job: true, reply: false })
     expect(instructionShape('You write the launch announcement for our app.\n\nHow to work:\n- ')).toMatchObject({ method: false })
     expect(instructionShape('You write the launch announcement for our app.\n\nReply with the post only.')).toMatchObject({ reply: true })
@@ -26,10 +33,12 @@ describe('InstructionShape', () => {
   it('shows what the instructions cover, and starts a missing part where the operator writes on', () => {
     const onChange = vi.fn()
     render(<InstructionShape role="You write the launch announcement for our app." field={createRef()} onChange={onChange} />)
-    expect(screen.getByRole('group', { name: 'What these instructions cover' })).toHaveTextContent('Its jobHow to workWhat it replies with')
+    expect(screen.getByRole('group', { name: 'What these instructions cover' })).toHaveTextContent('Its jobHow to workHow it checksWhat it replies with')
     expect(screen.queryByRole('button', { name: 'Its job' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'How to work' }))
     expect(onChange).toHaveBeenCalledWith('You write the launch announcement for our app.\n\nHow to work:\n- ')
+    fireEvent.click(screen.getByRole('button', { name: 'How it checks' }))
+    expect(onChange).toHaveBeenLastCalledWith('You write the launch announcement for our app.\n\nBefore you reply, check ')
   })
 
   it('says nothing about empty instructions, and changes nothing on a read-only team', () => {
