@@ -19,6 +19,7 @@ import { UpdateBadge } from '../updates/Updates'
 import { DeleteTeamDialog } from './DeleteTeamDialog'
 import { NewTeamDialog } from './NewTeamDialog'
 import { TeamCardMenu } from './TeamCardMenu'
+import { YourAgentsShelf } from './YourAgentsShelf'
 
 export interface HomeProps {
   /** Something the operator must know before choosing a team, e.g. a link that did not open. */
@@ -236,6 +237,8 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
           )}
           {teams && teams.length > 0 && query && shown.length === 0 && <p className="home-empty">No team matches “{query}”.</p>}
         </section>
+
+        <YourAgentsShelf />
       </main>
 
       <footer className="home-foot t-meta" role="status">

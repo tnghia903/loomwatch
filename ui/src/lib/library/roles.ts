@@ -1,6 +1,6 @@
 import { rankHarnesses } from '../team-file/templates'
 import type { DetectedHarness } from '../harnesses'
-import type { AgentAllow } from '../team-file/types'
+import type { AgentAllow, AgentLink } from '../team-file/types'
 import type { LibrarySource } from './types'
 
 /**
@@ -40,6 +40,8 @@ export interface RolePreset {
   /** What the agent may do without asking from the start (ADR 0037). Only what the job cannot be
       done without: a researcher that cannot search the web can only guess. */
   allow?: AgentAllow
+  /** Set on one of Your agents: the agent it places links back to this version of it. */
+  from?: AgentLink
 }
 
 const WRITING = ['claude', 'codex', 'opencode', 'gemini']
@@ -197,5 +199,6 @@ export function roleSource(preset: RolePreset, harnesses: readonly DetectedHarne
     ...(preset.model && harness.id === preset.prefers[0] ? { model: preset.model } : {}),
     ...(preset.skills?.length ? { capabilities: preset.skills.map((name) => ({ kind: 'skill' as const, name })) } : {}),
     ...(preset.allow ? { allow: { ...preset.allow } } : {}),
+    ...(preset.from ? { from: { ...preset.from } } : {}),
   }
 }

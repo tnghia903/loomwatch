@@ -1108,6 +1108,35 @@ export function useTeamDocument() {
     markDirty()
   }, [markDirty, captureHistory])
 
+  /**
+   * Several fields of one agent at once, as one undo step: what Update to a newer version of one of
+   * Your agents writes, and what linking or unlinking it changes. A field given as `undefined` is
+   * removed from the file rather than written as null.
+   */
+  const applyAgentFields = useCallback(
+    (id: string, fields: Partial<Pick<AgentConfig, 'name' | 'role' | 'model' | 'thinkingEffort' | 'spawn' | 'capabilities' | 'allow' | 'from'>>) => {
+      const target = nodes.find((node) => node.id === id)
+      if (!target || target.data.agent.kind === 'operator') return
+      captureHistory()
+      const entries = Object.entries(fields) as [keyof AgentConfig, AgentConfig[keyof AgentConfig]][]
+      for (const [key, value] of entries) modelRef.current?.setAgentField(id, key, value)
+      setNodes((current) =>
+        current.map((node) => {
+          if (node.id !== id) return node
+          const agent: Record<string, unknown> = { ...node.data.agent }
+          for (const [key, value] of entries) {
+            if (value === undefined) delete agent[key]
+            else agent[key] = value
+          }
+          const next = agent as unknown as AgentConfig
+          return { ...node, data: { ...node.data, label: next.name, agent: next } }
+        }),
+      )
+      markDirty()
+    },
+    [nodes, markDirty, captureHistory],
+  )
+
   const promoteEntrypoint = useCallback(
     (id: string) => {
       captureHistory()
@@ -1581,6 +1610,7 @@ export function useTeamDocument() {
     setAgentCapabilities,
     turnOff,
     turnBackOn,
+    applyAgentFields,
     promoteEntrypoint,
     promoteResponder,
     updateTeamSchedule,

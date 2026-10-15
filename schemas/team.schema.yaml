@@ -488,6 +488,7 @@ $defs:
             - required: [thinkingEffort]
             - required: [allow]
             - required: [turnedOff]
+            - required: [from]
     properties:
       id:
         $ref: "#/$defs/Identifier"
@@ -594,6 +595,24 @@ $defs:
               minLength: 1
               not:
                 const: loomwatch-team-bus
+      from:
+        description: >-
+          The agent in "Your agents" this one was placed from (`<teams root>/.jobs/<agent>.yaml`),
+          and the version it copies. The fields above are that version's, so the team runs exactly
+          what it was approved with: editing the agent there makes a new version, which reaches
+          this team only when the operator chooses Update here. The daemon does not read it.
+          Removing it makes the agent this team's own.
+        type: object
+        additionalProperties: false
+        required:
+          - agent
+          - version
+        properties:
+          agent:
+            $ref: "#/$defs/Identifier"
+          version:
+            type: integer
+            minimum: 1
       status:
         description: Runtime-only status; team-file writers omit it and readers ignore it.
         type: string

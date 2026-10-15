@@ -8,11 +8,25 @@ import { AgentUsageLine } from './AgentUsageLine'
 import { InstructionShape } from './InstructionShape'
 import { InstructionsUpdated } from './InstructionsUpdated'
 import { Inspector, type InspectorProps } from './Inspector'
+import { LinkedAgent } from './LinkedAgent'
 import { SaveAsJob } from './SaveAsJob'
 import { StatusGlyph } from '../ui/glyphs'
 import type { DetectedHarness } from '../../lib/harnesses'
+import type { SavedJob } from '../../lib/library/jobs'
+import type { AgentLinkState } from '../../lib/library/link'
+import type { AgentLink } from '../../lib/team-file/types'
 
-export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHarness[]; harnessId?: string; onHarnessChange?: (id: string) => void; startAdvanced?: boolean }) {
+/** The agent's versioned link to Your agents, and what the panel may do about it. */
+export interface BuildInspectorLink {
+  /** `null` for an agent that is this team's own. */
+  state: AgentLinkState | null
+  onApply: (job: SavedJob) => void
+  onUnlink: () => void
+  /** "Add to Your agents" made a version of this agent: link to it. */
+  onLink: (link: AgentLink) => void
+}
+
+export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHarness[]; harnessId?: string; onHarnessChange?: (id: string) => void; startAdvanced?: boolean; link?: BuildInspectorLink }) {
   const roleField = useRef<HTMLTextAreaElement>(null)
   const [advanced, setAdvanced] = useState(Object.keys(props.fieldProblems ?? {}).length > 0 || props.startAdvanced === true)
   const { node, onRename, onClose, onDelete, readOnly, harnesses = [], harnessId, onHarnessChange } = props
@@ -25,23 +39,28 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
     setWasForced(forced)
     if (forced) setAdvanced(true)
   }
-  if (advanced) return <div className="advanced-node-settings"><Inspector {...props} onClose={() => setAdvanced(false)} /></div>
+  const link = props.link
+  const linkPanel = (headClassName: string) => link?.state ? <LinkedAgent agent={node.data.agent} link={link.state} readOnly={readOnly} onApply={link.onApply} onUnlink={link.onUnlink} headClassName={headClassName} /> : undefined
+  if (advanced) return <div className="advanced-node-settings"><Inspector {...props} linked={linkPanel('zone-head t-micro')} onClose={() => setAdvanced(false)} /></div>
   const reviewStep = node.data.agent.kind === 'operator'
+  // An agent placed from Your agents takes these fields from its version; they change there.
+  const locked = readOnly || Boolean(link?.state)
   // The same panel in Build and in a run (ADR 0041); a run adds what this agent is doing in it.
   const runtime = node.data.runtime
   return <aside className="node-inspector" aria-label="Selected node settings" onKeyDown={e => { if (e.key === 'Escape') onClose() }}>
     <div className="inspector-head"><div><span className="eyebrow">{reviewStep ? 'Your review step' : 'Agent'}</span><strong>{node.data.agent.name}</strong>{runtime && <span className="inspector-run-status"><StatusGlyph status={runtime.status} /> {runtime.taskState.toLowerCase()} · {runtime.task}</span>}</div><button className="icon-button" onClick={onClose} aria-label="Close inspector"><X size={15} /></button><button className="icon-button" onClick={onDelete} disabled={readOnly} aria-label={`Remove ${node.data.agent.name}`}><Trash2 size={15} /></button></div>
     <div className="inspector-fields">
-      <label>Name<input value={node.data.agent.name} disabled={readOnly} onChange={e => onRename('name', e.target.value)} /></label>
+      {!reviewStep && linkPanel('build-context-head')}
+      <label>Name<input value={node.data.agent.name} disabled={reviewStep ? readOnly : locked} onChange={e => onRename('name', e.target.value)} /></label>
       {/* Instructions are prose; a one-line input hid all but the first few words of them. */}
-      <label>{reviewStep ? 'What to check' : 'Instructions'}<textarea ref={roleField} rows={4} className={props.instructionUpdate?.update.state === 'updated' ? 'instructions-marked' : undefined} value={node.data.agent.role} disabled={readOnly} onChange={e => onRename('role', e.target.value)} placeholder={reviewStep ? 'What should you look at before the team continues?' : 'What should this agent do?'} /></label>
+      <label>{reviewStep ? 'What to check' : 'Instructions'}<textarea ref={roleField} rows={4} className={props.instructionUpdate?.update.state === 'updated' ? 'instructions-marked' : undefined} value={node.data.agent.role} disabled={reviewStep ? readOnly : locked} onChange={e => onRename('role', e.target.value)} placeholder={reviewStep ? 'What should you look at before the team continues?' : 'What should this agent do?'} /></label>
       {props.instructionUpdate && <InstructionsUpdated {...props.instructionUpdate} agent={node.data.agent} readOnly={readOnly} />}
-      {!reviewStep && <InstructionShape role={node.data.agent.role} readOnly={readOnly} field={roleField} onChange={(role) => onRename('role', role)} />}
+      {!reviewStep && <InstructionShape role={node.data.agent.role} readOnly={locked} field={roleField} onChange={(role) => onRename('role', role)} />}
       {!reviewStep && props.checkup && props.checkup.findings.length > 0 && <section className="build-context" aria-label="Make it work better"><AgentCheckup {...props.checkup} readOnly={readOnly} headClassName="build-context-head" /></section>}
       {reviewStep
         ? <p>The team pauses here and waits for you to approve the work or ask for changes.</p>
         : <>
-          <label>AI app<select value={harnessId ?? ''} disabled={readOnly} onChange={e => onHarnessChange?.(e.target.value)}><option value="" disabled>Choose an app</option>{harnesses.map(h => <option key={h.id} value={h.id} disabled={h.acpAvailable === false}>{h.name}</option>)}</select></label>
+          <label>AI app<select value={harnessId ?? ''} disabled={locked} onChange={e => onHarnessChange?.(e.target.value)}><option value="" disabled>Choose an app</option>{harnesses.map(h => <option key={h.id} value={h.id} disabled={h.acpAvailable === false}>{h.name}</option>)}</select></label>
           {props.usage && <AgentUsageLine usage={props.usage.agent} runs={props.usage.runs} alone={props.usage.alone} />}
           <section className="build-context" aria-label="Context">
             <AgentContext
@@ -54,11 +73,11 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
             <AgentWorkFolder agent={node.data.agent} readOnly={readOnly} onChange={props.onCwdChange} problem={props.fieldProblems?.cwd} teamPath={props.teamPath} headClassName="build-context-head" />
           </section>
           <section className="build-context" aria-label="Allowed without asking">
-            <AgentPermissions agent={node.data.agent} readOnly={readOnly} onChange={props.onAllowChange} teamAuto={props.teamAutoMode} headClassName="build-context-head" />
+            <AgentPermissions agent={node.data.agent} readOnly={locked} onChange={props.onAllowChange} teamAuto={props.teamAutoMode} headClassName="build-context-head" />
           </section>
           <p><Puzzle size={13} />Skills you connect work with any AI app.</p>
           <button className="btn" onClick={() => setAdvanced(true)}>Model and more settings</button>
-          <SaveAsJob key={node.id} agent={node.data.agent} appId={harnessId} />
+          {!link?.state && <SaveAsJob key={node.id} agent={node.data.agent} appId={harnessId} onLinked={readOnly ? undefined : link?.onLink} />}
         </>}
     </div>
   </aside>

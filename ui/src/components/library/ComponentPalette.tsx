@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { BookmarkCheck, Bot, Box, ChartColumn, Code2, ExternalLink, FileText, Folder, Globe, GripVertical, Info, LocateFixed, Lock, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, Wrench, type LucideIcon } from 'lucide-react'
 import { harnessProblem, KNOWN_HARNESSES, knownHarness } from '../../lib/harnesses'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
-import { removeJob, savedJobPreset, useSavedJobs } from '../../lib/library/jobs'
+import { removeJob, savedJobPreset, useSavedJobs, versionOf } from '../../lib/library/jobs'
 import { usedInRun, type UsedInRun } from '../../lib/library/observed'
 import { harnessForRole, ROLE_PRESETS, roleSource, type RoleIcon, type RolePreset } from '../../lib/library/roles'
 import type { CapabilityInventory, DetectedCapability } from '../../lib/library/client'
@@ -21,7 +21,7 @@ const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: P
 
 const USED = 'Used in this run'
 const BUILT_IN = 'Hire by job'
-const YOURS = 'Your jobs'
+const YOURS = 'Your agents'
 const APPS = 'AI apps'
 const CONNECTIONS = 'Connections'
 const FILES = 'Folders & files'
@@ -220,6 +220,7 @@ const EXPLAIN: Record<string, ReactNode> = {
   [CONNECTIONS]: <>Services you connected in Connections. Drag <b>Notion</b> onto an agent and choose a page: the agent is given the page’s text each time the team runs. The pages this team reads are listed under it.</>,
   [FILES]: <>This team’s folders and files. Add one from an agent’s panel, with <b>Folder</b> or <b>File</b> under Given. Then drag it onto another agent to share it, or click it to find its card.</>,
   [MEMORY]: 'Other teams’ memory and imported packs. Drag one onto an agent to supply it there.',
+  [YOURS]: <>Agents you built or kept. A team keeps the version it was given until you choose <b>Update</b> in that agent’s panel. Build and try them in <a href="/agents">Your agents</a>.</>,
 }
 
 /**
@@ -281,7 +282,7 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
   ] }
   // The operator's own jobs, saved from agents that worked (ADR 0030). Once there are any they lead
   // the list: someone who saved a job comes back for it more than for a built-in one.
-  const yours = { name: YOURS, items: saved.jobs.map(job => jobItem(savedJobPreset(job), harnesses, job.id)) }
+  const yours = { name: YOURS, items: saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), harnesses, job.id); return { ...item, engine: `v${versionOf(job)} · ${item.engine}` } }) }
   const groups: { name: string; items: PaletteItem[] }[] = [
     ...(yours.items.length || saved.problems.length ? [yours, builtIn] : [builtIn]),
     // The same agents without a job: an app and an empty brief, for operators who write their own.
@@ -325,7 +326,7 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
     const confirming = confirmRemove === item.jobId
     return <div key={`${item.name}-${i}`} className="palette-job" onMouseLeave={() => { if (confirming) setConfirmRemove(null) }}>
       {add}
-      <button className={confirming ? 'palette-job-remove confirming' : 'palette-job-remove icon-button'} onClick={() => remove(item)} onBlur={() => { if (confirming) setConfirmRemove(null) }} aria-label={confirming ? `Confirm removing ${item.name}` : `Remove the job ${item.name}`} title={confirming ? 'Click again to remove. Teams that use it keep their copy.' : 'Remove this job'}>{confirming ? 'Remove' : <Trash2 size={12} />}</button>
+      <button className={confirming ? 'palette-job-remove confirming' : 'palette-job-remove icon-button'} onClick={() => remove(item)} onBlur={() => { if (confirming) setConfirmRemove(null) }} aria-label={confirming ? `Confirm removing ${item.name}` : `Remove the agent ${item.name}`} title={confirming ? 'Click again to remove. Teams that use it keep their copy.' : 'Remove this job'}>{confirming ? 'Remove' : <Trash2 size={12} />}</button>
     </div>
   }
   const usedRow = (item: UsedInRun) => {
@@ -381,7 +382,7 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
         {group.name === MEMORY && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty"><Box size={13} aria-hidden="true" />None yet</p>}
         {(group.name === 'Skills' || group.name === 'Tools') && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty">{group.name === 'Skills' ? <Puzzle size={13} aria-hidden="true" /> : <Wrench size={13} aria-hidden="true" />}None found on this Mac</p>}
       </>, group.name === BUILT_IN && saved.available
-        ? <><div>{EXPLAIN[BUILT_IN]}</div><div>To reuse an agent that worked, select it and choose <b>Save as job</b>.</div></>
+        ? <><div>{EXPLAIN[BUILT_IN]}</div><div>To reuse an agent that worked, select it and choose <b>Add to Your agents</b>, or build one in <a href="/agents">Your agents</a>.</div></>
         : EXPLAIN[group.name])
     })}
     {query && usedShown.length === 0 && groups.every(group => !group.items.some(item => matches(`${item.name} ${item.detail}`))) && <p className="palette-hint">Nothing matches “{query}”.</p>}
