@@ -23,7 +23,7 @@ import { buildReceipt } from '../../lib/story/receipt'
 import { RunReceipt } from './RunReceipt'
 import { WeftBar } from './WeftBar'
 import type { WeftKnot } from '../../lib/story/weft'
-import { markState } from '../../lib/story/mark'
+import { markLabel, markState } from '../../lib/story/mark'
 import { AgentPortrait } from '../agents/AvatarFace'
 
 export interface DeliveryLaneProps extends RunColumnProps {
@@ -319,7 +319,7 @@ export function DeliveryLane({
                             ? 'Can’t start'
                             : planned
                               ? 'Ready'
-                              : (runtime?.taskState?.toLowerCase() ?? 'waiting')}
+                              : runtime ? markLabel(markState(runtime), runtime.openCalls) : 'Not started yet'}
                         </span>
                       </button>
                       {appProblem && <p className="delivery-stage-problem">{appProblem}</p>}

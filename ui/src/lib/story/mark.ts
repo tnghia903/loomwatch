@@ -77,6 +77,17 @@ export const MARK_WORDS: Record<MarkState, string> = {
   stopped: 'stopped',
 }
 
+/**
+ * The state as a label beside the mark, in sentence case, for anyone who can't read a weave: it says
+ * what the record shows and no more. A running agent with no tool call open is "Working", not "Using
+ * a tool": between events the record doesn't say what it is doing.
+ */
+export function markLabel(state: MarkState, openCalls = 0): string {
+  if (state === 'working' && openCalls === 0) return 'Working'
+  const words = MARK_WORDS[state]
+  return words ? `${words[0].toUpperCase()}${words.slice(1)}` : ''
+}
+
 /** Live states animate; settled ones only change their look. */
 export const LIVE_MARK_STATES: ReadonlySet<MarkState> = new Set(['starting', 'thinking', 'working', 'writing', 'waiting'])
 

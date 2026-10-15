@@ -2,7 +2,7 @@ import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { AgentMark } from '../../components/ui/AgentMark'
-import { markPattern, markState, stitchCell } from './mark'
+import { markLabel, markPattern, markState, stitchCell } from './mark'
 
 afterEach(cleanup)
 
@@ -71,5 +71,22 @@ describe('AgentMark', () => {
   it('is decorative when it has nothing to say', () => {
     const { container } = render(<AgentMark id="researcher" />)
     expect(container.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+  })
+})
+
+describe('markLabel', () => {
+  it('says the state in words, in sentence case', () => {
+    expect(markLabel('thinking')).toBe('Thinking')
+    expect(markLabel('writing')).toBe('Writing its reply')
+    expect(markLabel('waiting')).toBe('Waiting for you')
+    expect(markLabel('failed')).toBe('Stopped with a problem')
+    expect(markLabel('turn')).toBe('Not started yet')
+    expect(markLabel('still')).toBe('')
+  })
+
+  it('says it uses a tool only while a call is open: between events the record does not say', () => {
+    expect(markLabel('working', 1)).toBe('Using a tool')
+    expect(markLabel('working', 0)).toBe('Working')
+    expect(markLabel('working')).toBe('Working')
   })
 })

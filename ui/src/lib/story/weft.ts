@@ -23,6 +23,8 @@ export interface WeftLane {
   status: string
   /** The projected task state, so a lane's mark says the same thing as the agent's card. */
   taskState?: string
+  /** Tool calls it has open now: only then is it "using a tool". */
+  openCalls?: number
 }
 
 export interface WeftStitch {
@@ -184,7 +186,7 @@ export function weave(projection: RunProjection, order: readonly WeftAgent[], no
     const start = projected && Number.isFinite(t0) ? Math.max(0, ms(projected.firstTs) - t0) : null
     const running = status === 'running' || status === 'starting'
     const end = projected && Number.isFinite(t0) ? (running && live ? duration : Math.max(start ?? 0, ms(projected.lastTs) - t0)) : null
-    return { id: agent.id, name: agent.name, operator: agent.operator, start, end, live: running && live, status, taskState: agent.taskState ?? projected?.taskState }
+    return { id: agent.id, name: agent.name, operator: agent.operator, start, end, live: running && live, status, taskState: agent.taskState ?? projected?.taskState, openCalls: projected?.openCalls ?? 0 }
   })
 
   const label = (id: string) => name.get(id) ?? id

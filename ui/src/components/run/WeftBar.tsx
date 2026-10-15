@@ -1,8 +1,8 @@
 import { BookOpen, ChevronLeft, ChevronRight, FileSearch, MessagesSquare, Radio } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { clock, momentAt, narrate, weave, type WeftAgent, type WeftKnot } from '../../lib/story/weft'
-import { markState } from '../../lib/story/mark'
+import { clock, momentAt, narrate, weave, type WeftAgent, type WeftKnot, type WeftLane } from '../../lib/story/weft'
+import { markLabel, markState, type MarkState } from '../../lib/story/mark'
 import type { AgentStatus } from '../../lib/team-file/types'
 import type { TaskState } from '../../lib/watch/events'
 import { AgentPortrait } from '../agents/AvatarFace'
@@ -83,7 +83,13 @@ export function WeftBar({ projection, order, relay, onInspectEvidence, messageFo
       )}
       <div className="weft-cloth" style={{ ['--weft-rows' as string]: weft.lanes.length }}>
         <div className="weft-names" aria-hidden="true">
-          {weft.lanes.map((lane) => <span key={lane.id} className={lane.operator ? 'you' : ''}><AgentPortrait id={lane.id} size={20} operator={lane.operator} state={lane.start === null ? 'turn' : markState({ status: lane.status as AgentStatus, taskState: lane.taskState as TaskState | undefined })} animate={weft.live} />{lane.operator ? 'You' : lane.name}</span>)}
+          {weft.lanes.map((lane) => {
+            const state = laneState(lane)
+            // Said in words while the run is live, and when it stopped on something; a finished
+            // replay would only repeat "Done" down the column.
+            const say = weft.live || state === 'waiting' || state === 'failed' ? markLabel(state, lane.openCalls) : ''
+            return <span key={lane.id} className={lane.operator ? 'you' : ''}><AgentPortrait id={lane.id} size={20} operator={lane.operator} state={state} animate={weft.live} /><span className="weft-who"><b>{lane.operator ? 'You' : lane.name}</b>{say && <em className={`weft-state st-${state}`}>{say}</em>}</span></span>
+          })}
         </div>
         <div
           ref={tracks}
@@ -141,4 +147,8 @@ export function WeftBar({ projection, order, relay, onInspectEvidence, messageFo
       </p>
     </section>
   )
+}
+
+function laneState(lane: WeftLane): MarkState {
+  return lane.start === null ? 'turn' : markState({ status: lane.status as AgentStatus, taskState: lane.taskState as TaskState | undefined })
 }
