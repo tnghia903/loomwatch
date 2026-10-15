@@ -202,7 +202,7 @@
   /* ================================================================ Live figures */
 
   // The figures are the app's own (ui/src/site/landingLive.ts, built into assets/live/live.js with
-  // three.js): the crew on the first screen and the agent's bench in Act I. The module loads only
+  // three.js): the crew on the first screen and the agent's bench in Step 1. The module loads only
   // where WebGL works; everywhere else the still pictures under the canvases stay, and the page works.
   const canDraw = (() => {
     try { const probe = document.createElement('canvas'); return Boolean(probe.getContext('webgl2') || probe.getContext('webgl')) } catch { return false }
@@ -551,7 +551,7 @@
 
   window.addEventListener('resize', () => drawLanes())
 
-  /* ================================================================ Act I · Agents */
+  /* ================================================================ Step 1 · Agents */
 
   // The same crew as the app: six figures in seven colours (ui/src/lib/library/figures.ts).
   const KINDS = [
@@ -707,7 +707,7 @@
     paintFaces()
     benchScene?.set(benchView())
   }
-  // The bench loads when Act I is near, so the first screen only waits for the crew.
+  // The bench loads when Step 1 is near, so the first screen only waits for the crew.
   if ('IntersectionObserver' in window) {
     const near = new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting)) return
@@ -2256,7 +2256,7 @@
       reviewBody.replaceChildren(state.team.review
         ? quiet('', 'Nothing to review yet.', 'Write to the team in Ask, above. When Researcher hands over, the work stops here, in the chat, and waits for you.')
         : quiet('warn', 'This team has no review step.', "Researcher's findings would go straight to Writer, unchecked.",
-          el('a', { class: 'link', href: '#build', style: 'display:inline-block;margin-top:16px', text: 'Add one in the team sentence ↑' })))
+          el('a', { class: 'link', href: '#act-workflow', style: 'display:inline-block;margin-top:16px', text: 'Add one in the team sentence ↑' })))
       return
     }
     if (run.only) {
@@ -2271,7 +2271,7 @@
           : "This team has no review step, so Researcher's findings go straight to Writer, unchecked.",
         state.team.review
           ? el('p', { text: 'The review step is on the team now. @team again, and the work stops here.' })
-          : el('a', { class: 'link', href: '#build', style: 'display:inline-block;margin-top:16px', text: 'Add one in the team sentence ↑' })))
+          : el('a', { class: 'link', href: '#act-workflow', style: 'display:inline-block;margin-top:16px', text: 'Add one in the team sentence ↑' })))
       return
     }
     if (run.phase === 'review') {
