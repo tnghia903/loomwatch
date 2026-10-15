@@ -18,6 +18,9 @@ describe('what each part of the workbench stands for', () => {
     // The file holder is made on the page, not in the model: its steps, sides and what stands in it.
     expect(partOfNode(['reads_1_folder', 'reads_1', 'reads'])).toBe('reads')
     expect(partOfNode(['reads_step_3', 'reads'])).toBe('reads')
+    // So is the tool rack: its rail, its pegs and the wrenches on them.
+    expect(partOfNode(['tools_2_steel', 'tools_2_wrench', 'tools_2', 'tools'])).toBe('tools')
+    expect(partOfNode(['tools_rail', 'tools'])).toBe('tools')
     expect(partOfNode(['dish_bowl', 'dish', 'bench'])).toBe('keys')
     expect(partOfNode(['envelope_seal', 'envelope', 'tray', 'bench'])).toBe('reply')
   })

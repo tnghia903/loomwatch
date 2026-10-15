@@ -32,9 +32,10 @@ export interface AgentBuilderProps {
   /**
    * Shown inside a team's Agents tab, for an agent placed from Your agents: there is no page to
    * go back to, and every save is followed by moving that team to the version just saved. What it
-   * reads stays the team's own (lib/library/link.ts), so its file holder shows the team's.
+   * reads and the tools it uses stay the team's own (lib/library/link.ts), so its file holder and
+   * tool rack show the team's.
    */
-  inTeam?: { name: string; onSaved: (job: SavedJob) => void; reads: readonly ReadSource[]; onShowWorkflow?: () => void }
+  inTeam?: { name: string; onSaved: (job: SavedJob) => void; reads: readonly ReadSource[]; tools: readonly string[]; onShowWorkflow?: () => void }
 }
 
 type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; version: number; bumped: boolean } | { kind: 'error'; message: string }
@@ -195,7 +196,7 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
         </div>
       </header>
 
-      <ByHand draft={draft} set={set} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={markId} figure={figure} onFigure={(next) => set('figure', next)} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow} />
+      <ByHand draft={draft} set={set} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={markId} figure={figure} onFigure={(next) => set('figure', next)} record={benchRecord} reads={inTeam?.reads} tools={inTeam?.tools} onShowWorkflow={inTeam?.onShowWorkflow} />
 
       <div className="agent-builder-grid">
         <div className="agent-builder-form">{bench}</div>

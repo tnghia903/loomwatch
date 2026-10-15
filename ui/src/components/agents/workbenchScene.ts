@@ -13,6 +13,7 @@ import {
   MeshStandardMaterial,
   NeutralToneMapping,
   Object3D,
+  Path,
   PCFShadowMap,
   PerspectiveCamera,
   Plane,
@@ -34,7 +35,7 @@ import {
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
-import { CARD_SLOTS, FIGURE_KEYS, partOfNode, reactionsBetween, READ_SLOTS, type FigureLook, type FigureMood, type FigurePart, type FigureReaction, type ReadSource } from '../../lib/library/figure'
+import { CARD_SLOTS, FIGURE_KEYS, partOfNode, reactionsBetween, READ_SLOTS, TOOL_SLOTS, type FigureLook, type FigureMood, type FigurePart, type FigureReaction, type ReadSource } from '../../lib/library/figure'
 import { COLOR_HEX, FIGURE_KINDS, type FigureChoice, type FigureKind } from '../../lib/library/figures'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { cardTexture, keyLabelTexture, pegboardTexture, swatchTextures, woundTexture } from './benchTextures'
@@ -61,10 +62,15 @@ export interface BenchView {
    * is the team's to give, so without a team (Your agents, the landing page) there is no holder.
    */
   reads?: readonly ReadSource[] | null
+  /**
+   * The tools (MCP servers) it is given, hanging on the tool rack. Only a team's agent has one, as
+   * with what it reads: without a team (Your agents, the landing page) there is no rack.
+   */
+  tools?: readonly string[] | null
 }
 
 /** `reply` is above the tray, `tray` below it: the file holder stands behind the tray. */
-export type BenchAnchor = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'keys' | 'dish' | 'reply' | 'tray'
+export type BenchAnchor = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'tools' | 'keys' | 'dish' | 'reply' | 'tray'
 export type BenchAnchors = Record<BenchAnchor, { x: number; y: number }>
 /** The faces that carry words: the nameplate, the job sheet and the laptop's lid. */
 export type BenchFace = 'name' | 'job' | 'app'
@@ -117,6 +123,13 @@ const HOLDER = { at: new Vector3(0.7, 0.62, -0.255), width: 0.36, depth: 0.18, s
  * thing it reads stands. Any higher and it runs into the label beside the figure's head.
  */
 const HOLDER_LABEL = new Vector3(0, HOLDER.floor + 0.23, HOLDER.depth / 2 - HOLDER.depth / READ_SLOTS / 2)
+/**
+ * The tool rack: a rail on the pegboard under the key hooks, with a peg for each tool to hang on,
+ * clear of the keys above it and of the figure's head to its right.
+ */
+const RACK = { at: new Vector3(-0.72, 1.03, -1.075), width: 0.5, pitch: 0.115 }
+/** Each wrench's grip, so tools side by side read apart. */
+const GRIP_TINTS = ['#C0342E', '#2F7DD3', '#D8A93C', '#6E9C6A']
 const FOLDER_TINTS = ['#E6CD97', '#DCC08A', '#E9D5AA', '#D9BC80']
 const HIGHLIGHT = new Color('#E9C46A')
 const LIVE = new Color('#6AB8FF')
@@ -180,6 +193,8 @@ export class WorkbenchScene {
   private readonly cards: { group: Group | null; skill: string | null }[] = Array.from({ length: CARD_SLOTS }, () => ({ group: null, skill: null }))
   /** What stands in each slot of the file holder, by what it is and where. */
   private readonly files: { group: Group | null; source: string | null }[] = Array.from({ length: READ_SLOTS }, () => ({ group: null, source: null }))
+  /** Which tool hangs on each peg of the rack. */
+  private readonly racked: { group: Group | null; tool: string | null }[] = Array.from({ length: TOOL_SLOTS }, () => ({ group: null, tool: null }))
   private readonly faces = new Map<string, Mesh>()
   /** Each worded face's top left, top right and bottom left corners, in its own space. */
   private readonly faceCorners = new Map<BenchFace, Vector3[]>()
@@ -283,6 +298,7 @@ export class WorkbenchScene {
     for (const [face, name] of Object.entries(FACE_MESH) as [BenchFace, string][]) this.faceCorners.set(face, corners(this.node(name) as Mesh))
     this.scene.add(model)
     this.buildHolder()
+    this.buildRack()
     model.updateMatrixWorld(true)
     for (const { key, node } of FIGURE_KEYS) {
       const found = this.node(`key_${node}`)
@@ -432,6 +448,8 @@ export class WorkbenchScene {
     this.pinCards(look.skills, before !== null)
     this.node('reads').visible = Boolean(view.reads)
     this.fileSources(view.reads ?? [], before !== null)
+    this.node('tools').visible = Boolean(view.tools)
+    this.hangTools(view.tools ?? [], before !== null)
 
     for (const { key } of FIGURE_KEYS) {
       const node = this.node(`key_${KEY_NODE[key]}`)
@@ -446,6 +464,7 @@ export class WorkbenchScene {
       for (const reaction of reactionsBetween(before.look, look)) this.react(reaction)
       if (before.figure.kind !== view.figure.kind || before.figure.color !== view.figure.color) this.react({ kind: 'redressed' })
       if (before.reads && view.reads && sourceKeys(before.reads) !== sourceKeys(view.reads)) this.react({ kind: 'filed' })
+      if (before.tools && view.tools && before.tools.join('\n') !== view.tools.join('\n')) this.react({ kind: 'tooled' })
       if (before.mood !== view.mood) this.moodChanged(before.mood, view.mood)
     }
   }
@@ -628,6 +647,105 @@ export class WorkbenchScene {
     return group
   }
 
+  /**
+   * The tool rack, made here like the file holder: a graphite rail with a peg for each tool
+   * (`tools_1` at the left), on the pegboard under the key hooks.
+   */
+  private buildRack() {
+    const rack = new Group()
+    rack.name = 'tools'
+    rack.position.copy(RACK.at)
+    const add = (mesh: Mesh, name: string) => {
+      mesh.name = name
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+      rack.add(mesh)
+      this.pickables.push(mesh)
+      this.roles.set(mesh, 'graphite')
+      this.disposables.push(mesh.geometry)
+    }
+    const rail = new Mesh(new BoxGeometry(RACK.width, 0.026, 0.022), this.material('graphite', 'tools'))
+    add(rail, 'tools_rail')
+    for (let slot = 0; slot < TOOL_SLOTS; slot += 1) {
+      const x = (slot - (TOOL_SLOTS - 1) / 2) * RACK.pitch
+      const peg = new Mesh(new BoxGeometry(0.008, 0.008, 0.05), this.material('graphite', 'tools'))
+      peg.position.set(x, -0.022, 0.03)
+      add(peg, `tools_peg_${slot + 1}`)
+      const at = new Group()
+      at.name = `tools_${slot + 1}`
+      at.position.set(x, -0.022, 0.03)
+      rack.add(at)
+      this.nodes.set(at.name, at)
+    }
+    this.scene.add(rack)
+    rack.updateMatrixWorld(true)
+    this.nodes.set(rack.name, rack)
+  }
+
+  /** The tools it is given, one on each peg from the left, in the order the team file lists them. */
+  private hangTools(tools: readonly string[], animate: boolean) {
+    for (let slot = 0; slot < TOOL_SLOTS; slot += 1) {
+      const tool = tools[slot] ?? null
+      const hung = this.racked[slot]
+      if (hung.tool === tool) continue
+      if (hung.group) this.unpin(hung.group, animate)
+      hung.group = tool ? this.wrench(slot, animate) : null
+      hung.tool = tool
+    }
+  }
+
+  /** An open-ended wrench, hanging by the hole in its handle, its head down and a coloured grip. */
+  private wrench(slot: number, animate: boolean): Group {
+    const group = new Group()
+    group.name = `tools_${slot + 1}_wrench`
+    // Drawn head up around its head's middle, then turned over to hang from the hole.
+    const head = 0.034
+    const half = 0.011
+    const length = 0.19
+    const shape = new Shape()
+    const meet = Math.sqrt(head * head - half * half)
+    const side = Math.atan2(meet, half)
+    shape.moveTo(-half, -length)
+    shape.lineTo(-half, -meet)
+    // Round the head's left side, from the handle up to the jaw, then its right side back down.
+    shape.absarc(0, 0, head, side - Math.PI, Math.PI - side, true)
+    shape.lineTo(-half, 0.004)
+    shape.lineTo(half, 0.004)
+    shape.lineTo(half, meet)
+    shape.absarc(0, 0, head, side, -side, true)
+    shape.lineTo(half, -length)
+    shape.absarc(0, -length, half, 0, Math.PI, true)
+    const hole = new Path()
+    hole.absarc(0, -length + 0.002, 0.0045, 0, Math.PI * 2, false)
+    shape.holes.push(hole)
+    const steel = new Mesh(new ExtrudeGeometry(shape, { depth: 0.006, bevelEnabled: true, bevelThickness: 0.002, bevelSize: 0.002, bevelSegments: 2, curveSegments: 18 }), new MeshStandardMaterial({ color: '#C9CCD2', roughness: 0.3, metalness: 0.85 }))
+    steel.name = `tools_${slot + 1}_steel`
+    const grip = new Mesh(new BoxGeometry(0.03, 0.085, 0.014), new MeshStandardMaterial({ color: GRIP_TINTS[slot % GRIP_TINTS.length], roughness: 0.55 }))
+    grip.name = `tools_${slot + 1}_grip`
+    grip.position.set(0, -length + 0.07, 0.003)
+    const body = new Group()
+    body.add(steel, grip)
+    // Turned over, so the hole is at the top, on the peg, and the head hangs down.
+    body.rotation.z = Math.PI
+    body.position.y = -length + 0.002
+    group.add(body)
+    group.rotation.z = MathUtils.degToRad(((slot * 29) % 5) - 2)
+    this.node(`tools_${slot + 1}`).add(group)
+    for (const mesh of [steel, grip]) {
+      mesh.castShadow = true
+      this.pickables.push(mesh)
+      this.roles.set(mesh, 'tool')
+      this.disposables.push(mesh.geometry)
+    }
+    if (animate && !this.reduced) {
+      // It is hung on its peg, from in front of the board.
+      group.scale.setScalar(0.01)
+      group.position.z = 0.25
+      this.tween(group, new Vector3(0, 0, 0), group.quaternion.clone(), 0.5, 0.06)
+    }
+    return group
+  }
+
   /** Hang a key on its hook (it may) or put it in your dish (it asks you first). */
   private homeKey(key: AllowSwitch, given: boolean, animate = true) {
     const node = this.node(`key_${KEY_NODE[key]}`)
@@ -646,7 +764,7 @@ export class WorkbenchScene {
 
   // ------------------------------------------------------------------ reacting
 
-  private react(reaction: FigureReaction | { kind: 'redressed' } | { kind: 'filed' }) {
+  private react(reaction: FigureReaction | { kind: 'redressed' } | { kind: 'filed' } | { kind: 'tooled' }) {
     if (this.reduced) return
     const at = (kind: string, duration: number, side?: number) => this.actions.push({ kind, start: this.now, duration, side })
     switch (reaction.kind) {
@@ -659,6 +777,7 @@ export class WorkbenchScene {
       case 'key': at(reaction.given ? 'keyGive' : 'keyTake', 1.1); break
       case 'redressed': at('redressed', 0.9); break
       case 'filed': at('file', 1.4); break
+      case 'tooled': at('tool', 1.4); break
     }
   }
 
@@ -837,6 +956,12 @@ export class WorkbenchScene {
           target.bodyY += 0.025 * bump(u * 2)
           this.flashes.set('reads', 0.5 * (1 - u))
           break
+        case 'tool':
+          // A tool went onto the rack, or came off it: it looks over.
+          towards(this.node('tools').getWorldPosition(new Vector3()).add(new Vector3(0, -0.1, 0)))
+          target.bodyY += 0.025 * bump(u * 2)
+          this.flashes.set('tools', 0.5 * (1 - u))
+          break
         case 'keyGive':
           towards(this.node('hooks').getWorldPosition(new Vector3()))
           target.bodyY += 0.025 * bump(u * 2)
@@ -971,6 +1096,8 @@ export class WorkbenchScene {
       job: this.screen(world('job', [0, 0.3, -0.12])),
       skills: this.screen(cards),
       reads: this.screen(world('reads', HOLDER_LABEL.toArray())),
+      // Under the wrenches' heads: above the rack are the keys, with their own label.
+      tools: this.screen(world('tools', [0, -0.25, 0.03])),
       keys: this.screen(world('hooks', [0, 0.06, 0])),
       dish: this.screen(world('dish', [0, -0.01, 0.2])),
       reply: this.screen(world('tray', [0, 0.1, -0.05])),
@@ -988,7 +1115,7 @@ export class WorkbenchScene {
   }
 
   private partPoint(part: FigurePart): Vector3 | null {
-    const name = { mind: null, app: 'laptop_lid', name: 'nameplate', job: 'job', skills: 'card_3', reads: 'reads', keys: 'hooks', reply: 'tray' }[part]
+    const name = { mind: null, app: 'laptop_lid', name: 'nameplate', job: 'job', skills: 'card_3', reads: 'reads', tools: 'tools', keys: 'hooks', reply: 'tray' }[part]
     return name ? this.node(name).getWorldPosition(new Vector3()) : null
   }
 
