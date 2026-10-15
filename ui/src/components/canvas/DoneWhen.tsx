@@ -14,8 +14,8 @@ export interface DoneWhenProps {
 
 /**
  * DONE WHEN, under the instructions (ADR 0062): what the finished result must have, as state. The
- * agent checks its result against these before it replies, lists any it missed under "Not met",
- * and gets one more pass at them. An item is written when the field is left, so a half-typed or
+ * agent checks its result against these before it replies, fixes what it can, and lists any it
+ * could not meet under "Not met", which reaches you and any check step. An item is written when the field is left, so a half-typed or
  * emptied line never lands in the team file; emptying one removes it.
  */
 export function DoneWhen({ items, readOnly = false, onChange }: DoneWhenProps) {
@@ -36,7 +36,7 @@ export function DoneWhen({ items, readOnly = false, onChange }: DoneWhenProps) {
     <div className="done-when" role="group" aria-label="Done when">
       <div className="done-when-head">
         <span className="t-micro">Done when</span>
-        <span className="t-meta">{items.length ? 'It checks these before it replies, and gets one more pass at any it missed.' : 'Nothing set. Say what the finished result must have, and it checks before it replies.'}</span>
+        <span className="t-meta">{items.length ? 'It checks these before it replies, and says which it could not meet.' : 'Nothing set. Say what the finished result must have, and it checks before it replies.'}</span>
       </div>
       {items.length > 0 && (
         <ul>

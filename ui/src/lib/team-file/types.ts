@@ -111,7 +111,7 @@ export interface AgentConfig {
   model?: string
   thinkingEffort?: string
   /** What the finished result must satisfy (ADR 0062): checked before it replies, and anything
-      not met gets one more pass. At most five short lines. */
+      it could not meet is listed under "Not met". At most five short lines. */
   doneWhen?: string[]
   /** Makes it a check step (ADR 0062): the agent whose work it checks, its direct predecessor. */
   checks?: string

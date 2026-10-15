@@ -271,9 +271,6 @@ pub struct AcpProcess {
     /// The permission requests declined since the last `session/prompt` was sent: what an app that
     /// ended its turn on a decline is told when it is asked to carry on (ADR 0046).
     declined: Vec<Declined>,
-    /// Whether the last finished turn had a request declined. A miss the agent reports after a
-    /// decline is one another pass would hit again (ADR 0062), so it gets none.
-    last_turn_declined: bool,
 }
 
 impl AcpProcess {
@@ -341,7 +338,6 @@ impl AcpProcess {
             session_meta: None,
             tool_calls: OpenToolCalls::default(),
             declined: Vec::new(),
-            last_turn_declined: false,
         })
     }
 
@@ -1189,15 +1185,6 @@ impl AcpProcess {
             .await?;
         let archive_session_id = recorder.event_log.session_id().to_owned();
         let reply = self.prompt_turn(&mut recorder, prompt).await?;
-        // ADR 0062: an agent whose prompt carried `## Done when` gets one pass at what it reported
-        // as not met, here as on the pipeline and team paths.
-        let has_done_when = context.composed.is_some_and(|composed| {
-            composed
-                .sections
-                .iter()
-                .any(|section| section.kind == crate::memory::PromptSectionKind::DoneWhen)
-        });
-        let reply = crate::revise_if_not_met(self, &mut recorder, has_done_when, reply).await?;
         // The boundary turn, before the close and after the work: a session that has already been
         // closed cannot say where it stopped, and a session that is asked before it works has
         // nothing to say.
@@ -1227,11 +1214,6 @@ impl AcpProcess {
     ///
     /// A turn the app reported as failed ([`AppReportedError`]) is an error, not a reply: its
     /// `turn_end` is archived as the app sent it, followed by `LoomWatch`'s `turn_failed` note.
-    /// Whether the last finished turn had a permission request declined (ADR 0062).
-    pub(crate) const fn last_turn_declined(&self) -> bool {
-        self.last_turn_declined
-    }
-
     pub(crate) async fn prompt_turn(
         &mut self,
         recorder: &mut Recorder,
@@ -1241,7 +1223,6 @@ impl AcpProcess {
         recorder.reply_phase_known = false;
         recorder.app_error = None;
         let mut prompted = self.prompt_round(recorder, prompt).await?;
-        let mut declined_any = !self.declined.is_empty();
         for _ in 0..RESUMES_PER_TURN {
             if stop_reason(&prompted.result) != "cancelled" || self.declined.is_empty() {
                 break;
@@ -1273,9 +1254,7 @@ impl AcpProcess {
             prompted = self
                 .prompt_round(recorder, &carry_on_request(&declined))
                 .await?;
-            declined_any |= !self.declined.is_empty();
         }
-        self.last_turn_declined = declined_any;
         self.declined.clear();
         let mut turn_end = serde_json::Map::from_iter([(
             "stopReason".to_owned(),

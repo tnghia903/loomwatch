@@ -529,7 +529,7 @@ $defs:
         description: >-
           What the finished result must satisfy (ADR 0062): a few short statements the agent checks
           its result against before it replies, each checkable from the result alone. The agent
-          lists any it could not meet under `## Not met`, and gets one more turn to fix them.
+          fixes what it can and lists any it could not meet under `## Not met`.
           Short on purpose: an agent follows every requirement it is given, needed or not.
         type: array
         maxItems: 5

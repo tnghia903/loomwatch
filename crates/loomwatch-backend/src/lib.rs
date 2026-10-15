@@ -826,14 +826,6 @@ async fn run_pipeline_nodes(
         reply = work
             .deliver_notes(&mut session, shared_log.as_ref(), reply)
             .await?;
-        reply = revise_if_not_met(
-            &mut session.process,
-            &mut session.recorder,
-            !agent.done_when.is_empty(),
-            reply,
-        )
-        .await
-        .with_context(|| format!("pipeline node {} failed on its second pass", agent.id))?;
         drop(work);
         if let Some(checked) = agent.checks.as_deref() {
             reply = run_checks(
@@ -1017,13 +1009,6 @@ pub(crate) async fn run_answerable_session(
                 .await?;
         }
     }
-    reply = revise_if_not_met(
-        &mut session.process,
-        &mut session.recorder,
-        !asked.agent.done_when.is_empty(),
-        reply,
-    )
-    .await?;
     if let Some(boundary) = context.boundary {
         let answer = session
             .process
@@ -2989,62 +2974,11 @@ fn done_when_section(items: &[String]) -> Option<String> {
     }
     let _ = write!(
         text,
-        "Before you reply, check your result against each of these. If you could not meet one, \
-         end your reply with a `{NOT_MET_HEADING}` section that lists only those items, one line \
-         each, saying why. If you met them all, leave that section out."
+        "Before you reply, check your result against each of these and fix what you can. If you \
+         could not meet one, end your reply with a `{NOT_MET_HEADING}` section that lists only \
+         those items, one line each, saying why. If you met them all, leave that section out."
     );
     Some(text)
-}
-
-/// What a reply lists under `## Not met`, when it lists anything. A section that only says
-/// "none" is not a miss.
-fn not_met(reply: &str) -> Option<String> {
-    let mut lines = reply.lines();
-    lines
-        .by_ref()
-        .find(|line| line.trim().eq_ignore_ascii_case(NOT_MET_HEADING))?;
-    let listed = lines
-        .take_while(|line| {
-            !line.trim_start().starts_with("# ") && !line.trim_start().starts_with("## ")
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let listed = listed.trim();
-    let nothing = listed.is_empty()
-        || [
-            "none", "none.", "nothing", "nothing.", "n/a", "-", "all met", "all met.",
-        ]
-        .contains(&listed.to_lowercase().as_str());
-    (!nothing).then(|| listed.to_owned())
-}
-
-/// The one extra turn an agent gets when it reports an item of its `doneWhen` as not met (ADR
-/// 0062): the same session, so everything it read is still there and cached, and the reply to this
-/// turn replaces the one before. One, because a second pass at the same gap mostly re-reports it.
-const REVISE_TURN: &str = "## One more pass\nYour reply lists items under `## Not met`. Fix what \
-     you can now, within the task: do the missing work, or correct the result. Then reply again \
-     with the complete result, not only what changed. Keep under `## Not met` only what still \
-     cannot be met, each with its reason.";
-
-/// Whether a reply earns its one more pass: the agent has a `doneWhen`, it reported something not
-/// met, and nothing was declined in the turn. After a decline the miss is usually the declined
-/// thing itself (code it could not run, a page it could not open), and a second pass asks for it
-/// again and is declined again: measured on the analyst job, twice the tokens for the same answer.
-fn wants_another_pass(has_done_when: bool, declined: bool, reply: &str) -> bool {
-    has_done_when && !declined && not_met(reply).is_some()
-}
-
-/// Give an agent with a `doneWhen` its one pass at what it reported as not met.
-pub(crate) async fn revise_if_not_met(
-    process: &mut AcpProcess,
-    recorder: &mut acp::Recorder,
-    has_done_when: bool,
-    reply: String,
-) -> Result<String> {
-    if !wants_another_pass(has_done_when, process.last_turn_declined(), &reply) {
-        return Ok(reply);
-    }
-    process.prompt_turn(recorder, REVISE_TURN).await
 }
 
 const STAGE_RESULTS_HEADING: &str = "## Results from preceding stages";
@@ -3343,12 +3277,12 @@ mod tests {
         Ok(())
     }
 
-    /// ADR 0062: an agent that reports an item of its `doneWhen` as not met gets exactly one more
-    /// turn in the same session, and the reply to it is the answer. The script exits 61 if the
-    /// prompt does not state the items, 62 if the second turn is not the one-more-pass request,
-    /// and 63 if it is asked for anything after that but the close.
+    /// ADR 0062: an agent with a `doneWhen` is told the items and to report what it could not
+    /// meet, and its report is part of its answer: no second turn is taken on its own say-so
+    /// (measured: every such pass was spent on a miss it could not fix). The script exits 61 if
+    /// the prompt does not state the items, and 62 if it is prompted again rather than closed.
     #[sqlx::test(migrations = "../../migrations")]
-    async fn a_reported_miss_gets_one_more_pass_and_its_reply_is_the_answer(
+    async fn a_reported_miss_is_reported_and_no_second_turn_is_taken(
         pool: sqlx::PgPool,
     ) -> Result<()> {
         let script = r#"
@@ -3359,24 +3293,17 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"done-when","configOptions":[]}}'
             IFS= read -r prompt
             case "$prompt" in
-              *'## Done when'*'Every story has a link'*'## Not met'*'## Task'*) ;;
+              *'## Done when'*'Every story has a link'*'fix what you can'*'## Not met'*'## Task'*) ;;
               *) printf 'no done-when in the prompt: %s\n' "$prompt" >&2; exit 61 ;;
             esac
             printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"done-when","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"draft\n\n## Not met\n- story two has no link"}}}}'
             printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r again
-            case "$again" in
-              *'One more pass'*'complete result'*) ;;
-              *) printf 'expected one more pass: %s\n' "$again" >&2; exit 62 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"done-when","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"final, every story linked"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
             IFS= read -r after
             case "$after" in
               *'"method":"session/close"'*) ;;
-              *) printf 'a second pass is the only extra turn: %s\n' "$after" >&2; exit 63 ;;
+              *) printf 'a reported miss was prompted again: %s\n' "$after" >&2; exit 62 ;;
             esac
-            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         "#;
         let mut agent = pipeline_agent("a", vec!["-c".into(), script.into()]);
         agent.done_when = vec!["Every story has a link".into()];
@@ -3408,98 +3335,10 @@ mod tests {
             &RunLineage::default(),
         )
         .await?;
-        assert_eq!(outcome.reply, "final, every story linked");
-        Ok(())
-    }
-
-    /// The same pass on a pipeline stage: it comes after the stage's work and before its
-    /// handover, so the next stage is handed the fixed result. Exits 71 if the pass does not come
-    /// second, 72 if the handover is not asked for after it, 73 if the next stage was not handed
-    /// the result of the pass.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_pipeline_stage_takes_its_pass_before_its_handover(pool: sqlx::PgPool) -> Result<()> {
-        let first = r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"stage-a","configOptions":[]}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"stage-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"three sources\n\n## Not met\n- only three of five sources"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r again
-            case "$again" in
-              *'One more pass'*) ;;
-              *) printf 'expected one more pass: %s\n' "$again" >&2; exit 71 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"stage-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"five sources"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r handover
-            case "$handover" in
-              *'## Summary'*'## Findings'*) ;;
-              *) printf 'expected the handover after the pass: %s\n' "$handover" >&2; exit 72 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"stage-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"handed: five sources"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":6,"result":{}}'
-        "#;
-        let second = r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"stage-b","configOptions":[]}}'
-            IFS= read -r prompt
-            case "$prompt" in
-              *'handed: five sources'*) ;;
-              *) printf 'expected the fixed handover: %s\n' "$prompt" >&2; exit 73 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"stage-b","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"written"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
-        "#;
-        let mut researcher = pipeline_agent("a", vec!["-c".into(), first.into()]);
-        researcher.done_when = vec!["Five sources, each opened".into()];
-        let team = Arc::new(TeamConfig {
-            schema_version: 1,
-            id: "done-when-pipeline".into(),
-            name: "Done when pipeline".into(),
-            entrypoint: "a".into(),
-            responder: Some("b".into()),
-            schedule: None,
-            deliver: None,
-            conversation: ConversationConfig::default(),
-            permissions: crate::config::TeamPermissions::default(),
-            memory: None,
-            guards: GuardsConfig::default(),
-            agents: vec![
-                researcher,
-                pipeline_agent("b", vec!["-c".into(), second.into()]),
-            ],
-            edges: vec![EdgeConfig {
-                from: "a".into(),
-                to: "b".into(),
-                layer: "configured".into(),
-                kind: "sequence".into(),
-                ts: "2026-10-15T00:00:00Z".into(),
-            }],
-        });
-        let archive = EventArchive::from_pool(pool);
-        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
-        let outcome = run_pipeline_mode(
-            &team,
-            &team_path,
-            archive.clone(),
-            "research it",
-            Duration::from_secs(2),
-            None,
-            &Arc::new(memory::TeamMemory::default()),
-            &RunLineage::default(),
-        )
-        .await?;
-        assert_eq!(outcome.reply, "written");
+        assert_eq!(
+            outcome.reply,
+            "draft\n\n## Not met\n- story two has no link"
+        );
         Ok(())
     }
 
@@ -5015,9 +4854,9 @@ IFS= read -r _
             composed.text,
             "## Your assigned role\na role\n\n## Done when\nYour result is finished when:\n\
              - Every story has a link\n- Five stories\nBefore you reply, check your result \
-             against each of these. If you could not meet one, end your reply with a `## Not met` \
-             section that lists only those items, one line each, saying why. If you met them all, \
-             leave that section out.\n\n## Task\ndo the thing"
+             against each of these and fix what you can. If you could not meet one, end your reply \
+             with a `## Not met` section that lists only those items, one line each, saying why. \
+             If you met them all, leave that section out.\n\n## Task\ndo the thing"
         );
         assert_eq!(
             composed
@@ -5031,21 +4870,6 @@ IFS= read -r _
                 memory::PromptSectionKind::Task
             ]
         );
-    }
-
-    #[test]
-    fn a_miss_after_a_declined_request_gets_no_second_pass() {
-        let missed = "Done by hand.\n\n## Not met\n- Every number is computed with code: declined";
-        assert!(wants_another_pass(true, false, missed));
-        assert!(
-            !wants_another_pass(true, true, missed),
-            "a decline makes the second pass ask for the same thing again"
-        );
-        assert!(
-            !wants_another_pass(false, false, missed),
-            "no doneWhen, no pass"
-        );
-        assert!(!wants_another_pass(true, false, "All done."));
     }
 
     #[test]
@@ -5069,27 +4893,6 @@ IFS= read -r _
         assert_eq!(missing.len(), 1);
         assert_eq!(missing[0].verdict, "not_sure");
         assert_eq!(missing[0].item, "Five stories");
-    }
-
-    #[test]
-    fn not_met_reads_only_a_section_that_lists_something() {
-        assert_eq!(
-            not_met("The brief.\n\n## Not met\n- Story 4 has no link: none found\n").as_deref(),
-            Some("- Story 4 has no link: none found")
-        );
-        assert_eq!(
-            not_met("## Not met\n- one\n\n## Sources\n- a").as_deref(),
-            Some("- one"),
-            "the section ends at the next heading"
-        );
-        for met in [
-            "The brief.",
-            "The brief.\n## Not met\n",
-            "The brief.\n## Not met\nNone.",
-            "Talks about what was not met, with no heading.",
-        ] {
-            assert_eq!(not_met(met), None, "{met:?}");
-        }
     }
 
     #[test]

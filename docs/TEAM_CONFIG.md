@@ -74,10 +74,9 @@ depend on the document as a whole:
   most work, `high` for checking, analysis and code), and only to an effort the model lists.
 - Optional `Agent.doneWhen` is up to five short statements (each at most 160 characters) that
   the finished result must satisfy. They are stated under the role as `## Done when`; the agent
-  checks its result against them before it replies and lists any it could not meet under
-  `## Not met`. A reply with a `## Not met` section gets exactly one more turn in the same
-  session to fix what it can, and the reply to that turn is the agent's answer. A turn in which a
-  permission request was declined gets no extra pass: the miss is usually what was declined.
+  checks its result against them before it replies, fixes what it can, and lists any it could not
+  meet under `## Not met`, which reaches the operator and any check step. No second turn is taken
+  on the agent's own say-so: a check step with `sendBackOnce` is what sends work back.
 - Optional `Agent.checks` makes a pipeline agent a check step: it names the agent whose work it
   checks, which must hand its work straight to it. That agent writes no summary for it; the check
   step is handed the work as written and its `doneWhen`, and ends its reply with a `## Check` block
