@@ -2215,6 +2215,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     { label: notificationsOn ? 'Disable notifications' : 'Enable notifications', run: () => void enableNotifications() },
     { label: 'Copy file path', run: () => { if (doc.path) void navigator.clipboard?.writeText(doc.path) }, disabled: !doc.path },
     { label: 'Show YAML', run: () => setYamlOpen(true), disabled: !doc.path },
+    { label: 'Your agents…', run: () => window.location.assign('/agents') },
     { label: 'Connections…', run: () => window.location.assign('/connections') },
     { label: 'Getting started guide', run: startTour },
     { label: 'Send feedback…', run: () => openFeedback({ screen: !doc.path ? 'home' : runView ? 'run' : 'build' }) },

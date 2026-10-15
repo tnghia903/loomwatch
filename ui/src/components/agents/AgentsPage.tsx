@@ -41,7 +41,7 @@ export function AgentsPage(props: AgentsPageProps) {
       <main className="home-main agents-main">
         {route.kind === 'list'
           ? <AgentsList harnesses={props.harnesses} />
-          : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} {...props} />}
+          : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.kind === 'agent' ? route.team : null} {...props} />}
       </main>
     </div>
   )
