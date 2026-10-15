@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent, type ReactNode } from 'react'
 
 import type { FigurePart } from '../../lib/library/figure'
 import type { AllowSwitch } from '../../lib/team-file/types'
-import { WorkbenchScene, type BenchAnchor, type BenchAnchors, type BenchView } from './workbenchScene'
+import { placeFace, WorkbenchScene, type BenchAnchor, type BenchAnchors, type BenchFace, type BenchFaces, type BenchView } from './workbenchScene'
 
 export interface BenchLabel {
   anchor: BenchAnchor
@@ -34,13 +34,16 @@ const SCENE_URL = '/agent/workbench.glb'
 /**
  * The workbench, drawn live (workbenchScene.ts), with its labels laid over it. Each label is a
  * button for its part and follows its object every frame, so the words stay on the things they
- * name. Loaded only when Build by hand opens, because it brings three.js with it.
+ * name. The words on the nameplate, the job sheet and the laptop's lid are page text too, laid
+ * over their faces: painted into the picture they blurred, because the bench is drawn small.
+ * Loaded only when Build by hand opens, because it brings three.js with it.
  */
 export default function AgentFigure({ view, labels, open, onPart, onKey, onSkillDrop, skillMime, onFail }: AgentFigureProps) {
   const stage = useRef<HTMLDivElement>(null)
   const surface = useRef<HTMLCanvasElement>(null)
   const scene = useRef<WorkbenchScene | null>(null)
   const tags = useRef(new Map<BenchAnchor, HTMLElement>())
+  const faces = useRef(new Map<BenchFace, HTMLElement>())
   const width = useRef(0)
   const latest = useRef({ view, onPart, onKey, onFail })
   useLayoutEffect(() => { latest.current = { view, onPart, onKey, onFail } })
@@ -52,8 +55,10 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
     const box = stage.current
     if (!canvas || !box) return
     const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-    // Each label follows its object, kept inside the stage so none runs off its edge.
-    const place = (anchors: BenchAnchors) => {
+    // The words on each face, and each label, follow their object; a label is kept inside the
+    // stage so none runs off its edge.
+    const place = (anchors: BenchAnchors, quads: BenchFaces) => {
+      for (const [face, element] of faces.current) placeFace(element, quads[face])
       for (const [anchor, element] of tags.current) {
         const at = anchors[anchor]
         const wide = (element.firstElementChild as HTMLElement | null)?.offsetWidth ?? 0
@@ -102,6 +107,12 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
 
   useEffect(() => { scene.current?.set(view) }, [view])
 
+  const face = (which: BenchFace) => (element: HTMLDivElement | null) => { if (element) faces.current.set(which, element); else faces.current.delete(which) }
+  const name = view.look.name.trim() || 'New agent'
+  const does = view.does.trim()
+  const instructions = view.look.instructions.trim()
+  const appWord = view.appName || 'No app yet'
+
   const at = (event: PointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
     return [event.clientX - rect.left, event.clientY - rect.top] as const
@@ -133,6 +144,11 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
         onPointerLeave={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) scene.current?.pointerLeave() }}
       />
       {!ready && <p className="bench-loading t-meta">Setting up the bench…</p>}
+      <div className="bench-faces" aria-hidden="true">
+        <div ref={face('name')} className="bench-face bench-face-name"><p><b>{name}</b>{does && <span>{does}</span>}</p></div>
+        <div ref={face('job')} className={`bench-face bench-face-job${instructions ? '' : ' empty'}`}><p>{instructions || 'Nothing written yet.'}</p></div>
+        <div ref={face('app')} className={`bench-face bench-face-app${view.appName ? '' : ' empty'}`} style={{ '--chars': appWord.length } as CSSProperties}><p>{appWord}</p></div>
+      </div>
       {labels.map((tag) => (
         <button
           key={tag.anchor}

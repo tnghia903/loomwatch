@@ -107,7 +107,6 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
     pattern,
     does: draft.does,
     appName: harness?.name ?? '',
-    jobParts: instructionShape(draft.instructions),
     hasReply: Boolean(replyLine(draft.instructions)),
     mood,
     events,
