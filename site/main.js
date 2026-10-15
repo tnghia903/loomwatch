@@ -186,209 +186,85 @@
     progressQueued = false
     const max = root.scrollHeight - window.innerHeight
     progress.style.setProperty('--read', max > 0 ? clamp(window.scrollY / max).toFixed(4) : '0')
-    paintOpen()
   }
   window.addEventListener('scroll', () => { if (!progressQueued) { progressQueued = true; window.requestAnimationFrame(paintProgress) } }, { passive: true })
 
-  /* ================================================================ Cold open: from glue to loom */
+  /* ================================================================ Live figures */
 
-  const open = $('.open')
-  const field = $('.open-field')
-  const terms = $$('.term', field)
-  const youTag = $('.open-you')
-  const weftSvg = $('.open-weft')
-  const pastePath = $('#paste-path')
-  const pasteDot = $('#paste-dot')
-  const pasteSvg = $('.open-paste')
-  const pasteLabel = $('.paste-label')
-  // Where each window sits on the messy desk, as a fraction of the free space, and its tilt.
-  const DESK = { claude: [0.04, 0.05, -3], codex: [0.96, 0, 2.4], hermes: [0, 0.9, 1.8], opencode: [0.92, 1, -2.2] }
-  const tags = terms.map((term) => { const tag = el('span', { class: 'term-tag', text: term.dataset.app }); field.append(tag); return tag })
-  const crew = $('.open-crew')
-  let openReady = false
-  let openP = reduced ? 1 : 0
-  let fieldBox = { w: 0, h: 0 }
-  let deskSize = { w: 260, h: 150 }
+  // The figures are the app's own (ui/src/site/landingLive.ts, built into assets/live/live.js with
+  // three.js): the crew on the first screen and the agent's bench in Act I. The module loads only
+  // where WebGL works; everywhere else the still pictures under the canvases stay, and the page works.
+  const canDraw = (() => {
+    try { const probe = document.createElement('canvas'); return Boolean(probe.getContext('webgl2') || probe.getContext('webgl')) } catch { return false }
+  })()
+  let live = null
+  const loadLive = () => (live ||= canDraw ? import('./assets/live/live.js') : Promise.reject(new Error('WebGL is off')))
+  const MODEL = 'assets/live/workbench.glb'
 
-  function measureOpen() {
-    fieldBox = { w: field.clientWidth, h: field.clientHeight }
-    const narrow = window.innerWidth <= 640
-    const mid = window.innerWidth <= 900
-    const w = Math.round(clamp(fieldBox.w * 0.46, 150, narrow ? 176 : mid ? 230 : 270))
-    deskSize = { w, h: Math.round(w * 0.58) }
-    weftSvg.setAttribute('viewBox', `0 0 ${fieldBox.w} ${fieldBox.h}`)
-    pasteSvg.setAttribute('viewBox', `0 0 ${fieldBox.w} ${fieldBox.h}`)
-    openReady = fieldBox.w > 0
+  // Draw a stage only while it can be seen, and size its canvas to it.
+  function stageOf(box, scene, onResize) {
+    let seen = false
+    const sync = () => { if (seen && document.visibilityState === 'visible') scene.start(); else scene.stop() }
+    new ResizeObserver(([entry]) => { if (entry) { scene.resize(entry.contentRect.width, entry.contentRect.height); onResize?.() } }).observe(box)
+    new IntersectionObserver(([entry]) => { seen = Boolean(entry?.isIntersecting); sync() }).observe(box)
+    document.addEventListener('visibilitychange', sync)
   }
-  const threadX = (i) => fieldBox.w * (0.1 + i * 0.2)
-
-  function paintOpen() {
-    if (!openReady) return
-    if (!reduced) {
-      const rect = open.getBoundingClientRect()
-      const span = open.offsetHeight - window.innerHeight
-      openP = span > 0 ? clamp(-rect.top / span) : 1
-    }
-    const p = openP
-    const t = smooth(0.16, 0.52, p)
-    // Once the cloth is woven, the crew steps out in front of it: the agents you will build.
-    const crewIn = smooth(0.8, 0.97, p)
-    const labels = 1 - crewIn
-    const thin = smooth(0.14, 0.36, p) // windows narrow first, then stretch into threads
-    const { w: W, h: H } = fieldBox
-    const top = H * 0.08
-    const tall = H * 0.84
-    const centres = []
-    terms.forEach((term, i) => {
-      const [fx, fy, tilt] = DESK[term.dataset.app]
-      const sx = fx * Math.max(0, W - deskSize.w)
-      const sy = fy * Math.max(0, H - deskSize.h)
-      const w = lerp(deskSize.w, 2, thin)
-      const h = lerp(deskSize.h, tall, t)
-      const x = lerp(sx, threadX(i) - 1, t)
-      const y = lerp(sy, top, t)
-      term.style.width = `${w}px`
-      term.style.height = `${h}px`
-      term.style.transform = `translate(${x}px, ${y}px) rotate(${lerp(tilt, 0, t)}deg)`
-      term.style.borderRadius = `${lerp(10, 1, thin)}px`
-      term.style.boxShadow = thin > 0.5 ? 'none' : ''
-      term.style.setProperty('--content', String(clamp(1 - thin * 2.2)))
-      term.style.setProperty('--thread', String(smooth(0.35, 0.85, thin)))
-      centres.push([sx + deskSize.w / 2, sy + deskSize.h / 2])
-      tags[i].style.left = `${threadX(i)}px`
-      tags[i].style.top = `${top - 20}px`
-      tags[i].style.opacity = String(smooth(0.75, 1, t) * labels)
-    })
-    youTag.style.left = `${threadX(4)}px`
-    youTag.style.top = `${top - 20}px`
-    youTag.style.opacity = String(smooth(0.8, 1, t) * labels)
-
-    // The copy-and-paste loop between the windows, gone once they are threads.
-    const order = [0, 1, 3, 2, 0].map((i) => centres[i])
-    pastePath.setAttribute('d', order.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(''))
-    const pasteAlpha = clamp(1 - thin * 3)
-    pasteSvg.style.opacity = String(pasteAlpha)
-    pasteLabel.style.opacity = String(pasteAlpha)
-
-    // Weft rows weave across the threads, one after another, with you on the end.
-    weftSvg.replaceChildren()
-    const youA = smooth(0.8, 1, t)
-    if (youA > 0) weftSvg.append(el('svg:line', { class: 'w-you', x1: threadX(4), x2: threadX(4), y1: top, y2: top + tall, opacity: youA }))
-    const rows = 6
-    for (let r = 0; r < rows; r++) {
-      const q = smooth(0.62 + r * 0.055, 0.7 + r * 0.055, p)
-      if (q <= 0) continue
-      const y = top + tall * (0.14 + r * 0.14)
-      const x0 = threadX(0) - 18
-      const x1 = lerp(x0, threadX(4) + 18, q)
-      weftSvg.append(el('svg:path', { class: 'w-weft', d: `M${x0} ${y}H${x1}` }))
-      for (let i = 0; i < 5; i++) {
-        if ((r + i) % 2 || threadX(i) > x1) continue
-        const x = threadX(i)
-        weftSvg.append(el('svg:line', { class: 'w-halo', x1: x, x2: x, y1: y - 7, y2: y + 7 }))
-        weftSvg.append(el('svg:line', { class: i === 4 ? 'w-you' : 'w-warp', x1: x, x2: x, y1: y - 7, y2: y + 7 }))
-      }
-    }
-
-    open.style.setProperty('--crew', String(crewIn))
-    open.style.setProperty('--cloth', String(1 - crewIn * 0.7))
-    crew.classList.toggle('wave', crewIn > 0.99 && !reduced)
-
-    open.style.setProperty('--before', String(1 - smooth(0.08, 0.26, p)))
-    const after = smooth(0.3, 0.5, p)
-    open.style.setProperty('--after', String(after))
-    open.style.setProperty('--after-pe', after > 0.5 ? 'auto' : 'none')
+  const local = (event, canvas) => { const r = canvas.getBoundingClientRect(); return [event.clientX - r.left, event.clientY - r.top] }
+  // A label centred on a point of the picture, kept inside its stage so none runs off an edge.
+  function placeTag(tag, at, stage) {
+    const half = tag.offsetWidth / 2
+    const x = clamp(at.x, half + 6, Math.max(half + 6, stage.clientWidth - half - 6))
+    tag.style.transform = `translate(${x.toFixed(1)}px, ${at.y.toFixed(1)}px)`
   }
 
-  let pasteT = 0
-  function animatePaste(now) {
-    if (openP < 0.3 && openReady && !document.hidden) {
-      pasteT = (now / 3200) % 1
-      const length = pastePath.getTotalLength ? pastePath.getTotalLength() : 0
-      if (length > 0) {
-        const point = pastePath.getPointAtLength(length * pasteT)
-        pasteDot.setAttribute('cx', point.x)
-        pasteDot.setAttribute('cy', point.y)
-      }
-    }
-    window.requestAnimationFrame(animatePaste)
-  }
+  /* ================================================================ The crew */
 
-  if (reduced) open.classList.add('still')
-  // A keyboard visitor tabbing into the call to action is taken to where it is fully drawn.
-  $('.open-after').addEventListener('focusin', () => {
-    if (reduced || openP >= 0.7) return
-    window.scrollTo({ top: open.offsetTop + (open.offsetHeight - window.innerHeight) * 0.78, behavior: 'auto' })
-  })
-  measureOpen()
-  paintOpen()
-  if (!reduced) window.requestAnimationFrame(animatePaste)
-  window.addEventListener('resize', () => { measureOpen(); paintOpen(); drawLanes() })
+  // Six agents, each in its own figure. Point at one and it waves; pick one to build one like it.
+  const CREW = [
+    { id: 'scout', name: 'Scout', does: 'finds sources', job: 'sources', figure: { kind: 'yarn', color: 'clay' } },
+    { id: 'writer', name: 'Writer', does: 'writes the brief', job: 'brief', figure: { kind: 'spool', color: 'sky' } },
+    { id: 'editor', name: 'Editor', does: 'tightens every line', job: 'brief', figure: { kind: 'button', color: 'butter' } },
+    { id: 'checker', name: 'Checker', does: 'checks each claim', job: 'check', figure: { kind: 'thimble', color: 'sage' } },
+    { id: 'researcher', name: 'Researcher', does: 'digs into one question', job: 'sources', figure: { kind: 'pincushion', color: 'rose' } },
+    { id: 'planner', name: 'Planner', does: 'splits the job up', job: 'check', figure: { kind: 'cone', color: 'lilac' } },
+  ]
+  const crewBox = $('#crew')
+  const crewCanvas = $('#crew-canvas')
+  const crewTags = $('#crew-tags')
+  const touchOnly = window.matchMedia('(hover: none)').matches
+  if (touchOnly) $('#crew-hint').replaceChildren('Tap one to build one like it.')
+  let crewTag = null
+  let crewHover = null
 
-  /* ================================================================ 01 · Threads */
-
-  const appsList = $('#apps')
-  function renderApps() {
-    appsList.replaceChildren(...APPS.map((a) => {
-      const on = state.apps.includes(a.id)
-      const button = el('button', {
-        type: 'button', class: 'app', role: 'checkbox', 'aria-checked': String(on),
-        onclick: () => toggleApp(a.id),
+  async function mountCrew() {
+    const { CrewScene } = await loadLive()
+    const scene = new CrewScene(crewCanvas, CREW, {
+      onHover: (index) => {
+        crewHover = index
+        crewCanvas.style.cursor = index === null ? '' : 'pointer'
+        crewTag?.remove()
+        crewTag = index === null ? null : el('p', { class: 'crew-tag' }, el('b', { text: CREW[index].name }), ` ${CREW[index].does}`)
+        if (crewTag) crewTags.append(crewTag)
       },
-      el('span', { class: 'mono-tile', 'aria-hidden': 'true', text: a.mono }),
-      el('span', { class: 'app-text' }, el('span', { class: 'app-name', text: a.name }), el('span', { class: 'app-meta', text: [a.spawn, ...(a.args || [])].join(' ') })),
-      el('span', { class: 'app-check', 'aria-hidden': 'true' }, svgCheck()))
-      return el('li', {}, button)
-    }))
-    $('#apps-count').textContent = `${state.apps.length} on the loom`
+      onPick: (index) => buildLike(CREW[index]),
+      onFrame: (heads) => {
+        if (!crewTag || crewHover === null) return
+        placeTag(crewTag, heads[crewHover], crewCanvas)
+      },
+    }, reduced)
+    stageOf(crewBox, scene)
+    // They look where you point anywhere on the first screen, not only over their canvas.
+    window.addEventListener('pointermove', (event) => { const [x, y] = local(event, crewCanvas); scene.pointerMove(x, y) }, { passive: true })
+    document.documentElement.addEventListener('pointerleave', () => scene.pointerMove(null, null))
+    crewCanvas.addEventListener('pointerup', (event) => { const [x, y] = local(event, crewCanvas); scene.pointerUp(x, y) })
+    await scene.load(MODEL)
+    crewBox.classList.add('live')
   }
-  function svgCheck() {
-    const svg = el('svg:svg', { viewBox: '0 0 12 12', fill: 'none', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })
-    svg.append(el('svg:path', { d: 'M2.5 6.2 5 8.6 9.6 3.6' }))
-    return svg
-  }
-  function toggleApp(id) {
-    const on = state.apps.includes(id)
-    if (on && state.apps.length === 1) {
-      const count = $('#apps-count')
-      count.textContent = 'Keep one thread'
-      window.setTimeout(() => { count.textContent = `${state.apps.length} on the loom` }, 1400)
-      return
-    }
-    state.apps = APPS.map((a) => a.id).filter((a) => (a === id ? !on : state.apps.includes(a)))
-    // An agent whose app left the loom moves to the first thread still on it.
-    for (const who of ['researcher', 'writer']) if (!state.apps.includes(state.team[who])) state.team[who] = state.apps[0]
-    if (!on && state.apps.length === 2 && state.team.researcher === state.team.writer) state.team.writer = id
-    renderTeamViews(['researcher', 'writer'])
-    renderApps()
-    renderAgent()
-    renderWarpPreview()
-    renderSwatch()
-  }
+  mountCrew().catch(() => crewBox.classList.add('still'))
 
-  function renderWarpPreview() {
-    const svg = $('#warp-preview')
-    const names = [...state.apps.map((id) => app(id).name), 'you']
-    const n = names.length
-    const x = (i) => (n === 1 ? 260 : 40 + (i * 440) / (n - 1))
-    svg.replaceChildren()
-    names.forEach((name, i) => {
-      const you = i === n - 1
-      svg.append(el('svg:text', { class: `wp-label${you ? ' you' : ''}`, x: x(i), y: 12, text: name }))
-      svg.append(el('svg:line', { class: you ? 'wp-you' : 'wp-warp', x1: x(i), x2: x(i), y1: 24, y2: 106 }))
-    })
-    ;[48, 66, 84].forEach((y, r) => {
-      svg.append(el('svg:path', { class: 'wp-weft', d: `M${x(0) - 16} ${y}H${x(n - 1) + 16}` }))
-      names.forEach((name, i) => {
-        if ((r + i) % 2) return
-        svg.append(el('svg:line', { class: 'wp-halo', x1: x(i), x2: x(i), y1: y - 6, y2: y + 6 }))
-        svg.append(el('svg:line', { class: i === n - 1 ? 'wp-you' : 'wp-warp', x1: x(i), x2: x(i), y1: y - 6, y2: y + 6 }))
-      })
-    })
-    svg.setAttribute('aria-label', `The threads on your loom: ${listText(names)}.`)
-  }
+  window.addEventListener('resize', () => drawLanes())
 
-  /* ================================================================ 02 · Agent */
+  /* ================================================================ Act I · Agents */
 
   // The same crew as the app: six figures in seven colours (ui/src/lib/library/figures.ts).
   const KINDS = [
@@ -399,19 +275,35 @@
   const figureSrc = (kind, color) => `assets/figures/${kind}-${color}.webp`
   // The keys an agent may be handed, and what each one means, said beside it as the app says it.
   const KEYS = [
-    { key: 'web', label: 'Search the web', may: 'search the web', asks: 'searches the web', off: 'Asks you before it searches the web.', on: 'Searches the web without asking.' },
-    { key: 'edits', label: 'Change files', may: 'change files in its folder', asks: 'changes a file', off: 'Asks you before it changes a file.', on: 'Changes files in its folder without asking.' },
-    { key: 'commands', label: 'Run commands', may: 'run commands', asks: 'runs a command', off: 'Asks you before it runs a command.', on: 'Runs commands without asking.' },
+    { key: 'web', word: 'Web', label: 'Search the web', may: 'search the web', asks: 'searches the web', off: 'Asks you before it searches the web.', on: 'Searches the web without asking.' },
+    { key: 'edits', word: 'Files', label: 'Change files', may: 'change files in its folder', asks: 'changes a file', off: 'Asks you before it changes a file.', on: 'Changes files in its folder without asking.' },
+    { key: 'commands', word: 'Commands', label: 'Run commands', may: 'run commands', asks: 'runs a command', off: 'Asks you before it runs a command.', on: 'Runs commands without asking.' },
   ]
-  const agent = { name: 'Scout', kind: 'pincushion', color: 'rose', app: 'claude', keys: { web: false, edits: false, commands: false } }
+  // A job is its instructions (the pattern on its clipboard), the skills pinned on its board, and
+  // the one key its test run reaches for.
+  const JOBS = [
+    { id: 'sources', label: 'Find sources', does: 'Finds sources', instructions: 'Find what is new this week. Reply with each claim and a link to its source.', skills: ['web-research'], needs: 'web', tool: 'web search', ask: 'search the web for “open-weight models this week”',
+      reply: 'Three stories this week, each with its link: a new open coding model, a faster small model for phones, and a licence change.', without: 'Without the web, I can only tell you what I already know, and it may be out of date.' },
+    { id: 'brief', label: 'Write the brief', does: 'Writes the brief', instructions: 'Turn the findings into a short brief in plain words. Reply with the brief as Markdown.', skills: ['house-style', 'markdown'], needs: 'edits', tool: 'writing brief.md', ask: 'save the brief as brief.md in its folder',
+      reply: 'The brief is in brief.md: five lines, the biggest story first, every claim with its link.', without: 'Here is the brief in my reply instead of a file: five lines, the biggest story first.' },
+    { id: 'check', label: 'Check the facts', does: 'Checks each claim', instructions: 'Check every claim in the draft against its source. Reply with what holds and what does not.', skills: ['fact-check', 'web-research'], needs: 'web', tool: 'checking 3 sources', ask: 'open the 3 sources the draft links to',
+      reply: 'Two claims hold. One quotes the wrong benchmark: the model card says 61%, not 67%.', without: 'Without opening the sources, I can only say which claims have a link, not whether they hold.' },
+  ]
+  const agent = { name: 'Scout', kind: 'pincushion', color: 'rose', app: 'claude', job: 'sources', keys: { web: false, edits: false, commands: false } }
   const shelf = [] // { name, version, job, kind, color }
   let trial = 0 // the test run in flight, or 0; a newer one or an edit ends it
   let trials = 0
+  let mood = 'still'
+  let asked = null
+  let events = 0
+  let replied = false
+  let allowOnce = null
   const ENDED = Symbol('ended')
   const orText = (items) => items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} or ${items.at(-1)}`
 
+  const jobOf = () => JOBS.find((j) => j.id === agent.job)
   const agentName = () => agent.name.trim() || 'Your agent'
-  const agentJob = () => `${agent.app}|${KEYS.filter((k) => agent.keys[k.key]).map((k) => k.key).join(',')}`
+  const agentJob = () => `${agent.app}|${agent.job}|${KEYS.filter((k) => agent.keys[k.key]).map((k) => k.key).join(',')}`
   const shelved = () => shelf.find((s) => s.name.toLowerCase() === agentName().toLowerCase())
   const looksLike = () => {
     const kind = KINDS.find((k) => k.id === agent.kind).name
@@ -434,45 +326,130 @@
     container.replaceChildren(...buttons)
   }
 
-  const agFigure = $('#ag-figure')
+  // ---------------------------------------------------------------- the bench
+
+  const bench = $('#bench')
+  const benchCanvas = $('#bench-canvas')
+  const benchTags = $('#bench-tags')
   const agImg = $('#ag-img')
-  function paintFigure() {
+  let benchScene = null
+
+  function benchView() {
+    const job = jobOf()
+    return {
+      look: { name: agentName(), instructions: job.instructions, app: agent.app, model: '', skills: job.skills, allow: { ...agent.keys } },
+      figure: { kind: agent.kind, color: agent.color },
+      pattern: benchPattern(agentName()),
+      does: job.does,
+      appName: app(agent.app).name,
+      jobParts: { job: true, method: true, reply: true },
+      hasReply: replied,
+      mood, events, asked, open: null, dropping: false,
+    }
+  }
+  let benchPattern = () => Array.from({ length: 9 }, (_, i) => i % 2 === 0)
+  // Words on the bench itself, following the things they name.
+  const TAGS = [
+    { anchor: 'keys', text: () => { const on = KEYS.filter((k) => agent.keys[k.key]); return on.length ? `On its hooks · ${on.map((k) => k.word).join(', ')}` : 'Its hooks · empty' } },
+    { anchor: 'dish', text: () => { const off = KEYS.filter((k) => !agent.keys[k.key]); return off.length ? `You keep · ${off.map((k) => k.word).join(', ')}` : 'Your dish · empty' } },
+    { anchor: 'skills', text: () => `Skills · ${jobOf().skills.length}` },
+    { anchor: 'reply', text: () => (replied ? 'Its reply is here' : 'Hands back here') },
+  ]
+  const tagEls = new Map(TAGS.map((t) => [t.anchor, el('span', { class: `bench-tag at-${t.anchor}` })]))
+  benchTags.append(...tagEls.values())
+  function paintTags() { for (const t of TAGS) tagEls.get(t.anchor).textContent = t.text() }
+
+  const PART_BLOCK = {
+    name: '#ag-name', app: '#ag-apps [aria-checked="true"]', job: '#ag-jobs [aria-checked="true"]', skills: '#ag-jobs [aria-checked="true"]',
+    mind: '#ag-kinds [aria-checked="true"]', keys: '#ag-keys button', reply: '#ag-try',
+  }
+  async function mountBench() {
+    const { WorkbenchScene, markPattern } = await loadLive()
+    benchPattern = (name) => markPattern(name.toLowerCase()).over
+    const scene = new WorkbenchScene(benchCanvas, {
+      // Clicking a thing on the bench takes you to the block that changes it.
+      onPart: (part) => { if (PART_BLOCK[part]) $(PART_BLOCK[part])?.focus() },
+      // A key dragged onto its hook is handed over; into your dish, taken back.
+      onKey: (key, given) => {
+        if (given && asked === key && allowOnce) { agent.keys[key] = true; allowOnce(true); renderAgent(); return }
+        agent.keys[key] = given
+        edited()
+      },
+      onHover: (part, grab) => { benchCanvas.style.cursor = grab ? 'grab' : part ? 'pointer' : '' },
+      onFrame: (anchors) => {
+        for (const [anchor, tag] of tagEls) placeTag(tag, anchors[anchor], benchCanvas)
+      },
+    }, reduced)
+    benchScene = scene
+    scene.set(benchView())
+    stageOf(bench, scene)
+    benchCanvas.addEventListener('pointermove', (event) => { const [x, y] = local(event, benchCanvas); scene.pointerMove(x, y) })
+    benchCanvas.addEventListener('pointerdown', (event) => {
+      const [x, y] = local(event, benchCanvas)
+      if (scene.pointerDown(x, y)) { benchCanvas.setPointerCapture(event.pointerId); benchCanvas.style.cursor = 'grabbing' }
+    })
+    benchCanvas.addEventListener('pointerup', (event) => { const [x, y] = local(event, benchCanvas); scene.pointerUp(x, y); scene.pointerMove(x, y) })
+    benchCanvas.addEventListener('pointerleave', (event) => { if (!benchCanvas.hasPointerCapture(event.pointerId)) scene.pointerLeave() })
+    benchCanvas.addEventListener('pointercancel', () => scene.pointerLeave())
+    await scene.load(MODEL)
+    bench.classList.add('live')
+    paintBench()
+  }
+  function paintBench() {
+    paintTags()
+    benchScene?.set(benchView())
+  }
+  // The bench loads when Act I is near, so the first screen only waits for the crew.
+  if ('IntersectionObserver' in window) {
+    const near = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return
+      near.disconnect()
+      mountBench().catch(() => bench.classList.add('still'))
+    }, { rootMargin: '600px 0px' })
+    near.observe(bench)
+  } else bench.classList.add('still')
+
+  // Without WebGL, the figure's still picture stands in for the bench.
+  function paintStill() {
     const src = figureSrc(agent.kind, agent.color)
-    agFigure.style.setProperty('--fig', COLORS[agent.color])
+    bench.style.setProperty('--fig', COLORS[agent.color])
     if (agImg.getAttribute('src') === src) return
-    agFigure.classList.add('swap')
     const next = new Image()
     next.src = src
-    const show = () => { agImg.src = src; agFigure.classList.remove('swap') }
+    const show = () => { agImg.src = src }
     if (next.decode) next.decode().then(show, show)
     else show()
   }
 
+  // ---------------------------------------------------------------- the blocks
+
   function renderAgent() {
     if (!state.apps.includes(agent.app)) agent.app = state.apps[0]
-    paintFigure()
+    paintStill()
     $('#ag-plate-name').textContent = agentName()
     $('#ag-plate-what').textContent = looksLike()
+    radios($('#ag-apps'), state.apps.map((id) => ({ id, label: app(id).name, kids: [app(id).name] })), agent.app, (id) => { agent.app = id; edited() })
+    radios($('#ag-jobs'), JOBS.map((j) => ({ id: j.id, label: j.label, kids: [j.label] })), agent.job, (id) => { agent.job = id; edited() })
     radios($('#ag-kinds'), KINDS.map((k) => ({
       id: k.id, label: k.name[0].toUpperCase() + k.name.slice(1),
-      kids: [el('img', { src: figureSrc(k.id, agent.color), width: '96', height: '96', alt: '', loading: 'lazy' }), el('span', { text: k.name.replace('thread ', '') })],
+      kids: [el('img', { src: figureSrc(k.id, agent.color), width: '96', height: '96', alt: '', loading: 'lazy' })],
     })), agent.kind, (id) => { agent.kind = id; edited() })
     radios($('#ag-colors'), Object.keys(COLORS).map((c) => ({ id: c, label: c[0].toUpperCase() + c.slice(1), style: `--c:${COLORS[c]}` })), agent.color, (id) => { agent.color = id; edited() })
-    radios($('#ag-apps'), state.apps.map((id) => ({ id, label: app(id).name, kids: [app(id).name] })), agent.app, (id) => { agent.app = id; edited() })
-    $('#ag-keys').replaceChildren(...KEYS.map((k) => {
+    $('#ag-keys').replaceChildren(...KEYS.map((k, i) => {
       const on = agent.keys[k.key]
       return el('li', { class: on ? 'on' : '' },
         el('b', { text: k.label }),
         el('em', { text: on ? k.on : k.off }),
-        el('button', { type: 'button', 'aria-pressed': String(on), 'aria-label': `${on ? 'Take back' : 'Hand over'}: ${k.label}`, onclick: () => { agent.keys[k.key] = !on; edited(); $(`#ag-keys li:nth-child(${KEYS.indexOf(k) + 1}) button`).focus() } }, on ? 'Take it back' : 'Hand it over'))
+        el('button', { type: 'button', 'aria-pressed': String(on), 'aria-label': `${on ? 'Take back' : 'Hand over'}: ${k.label}`, onclick: () => { agent.keys[k.key] = !on; edited(); $(`#ag-keys li:nth-child(${i + 1}) button`).focus() } }, on ? 'Take it back' : 'Hand it over'))
     }))
     // The blocks add up to one sentence, so the visitor reads what the agent will do, not settings.
     const free = KEYS.filter((k) => agent.keys[k.key]).map((k) => k.may)
     const asks = KEYS.filter((k) => !agent.keys[k.key]).map((k) => k.asks)
-    $('#ag-says').replaceChildren(el('b', { text: agentName() }), ` is ${looksLike()} on ${app(agent.app).name}. `,
+    $('#ag-says').replaceChildren(el('b', { text: agentName() }), ` ${jobOf().does.toLowerCase()}, on ${app(agent.app).name}. `,
       free.length ? `It may ${listText(free)} on its own` : 'It only reads and replies on its own',
       asks.length ? `, and asks you before it ${orText(asks)}.` : ', and never stops to ask you.')
     paintSaved()
+    paintBench()
   }
 
   function paintSaved() {
@@ -491,63 +468,80 @@
   // Any edit ends a test run: what was being tried is no longer this agent.
   function edited() {
     if (trial) endTrial()
+    replied = false
     renderAgent()
   }
 
-  const MOOD = { starting: 'thinking', thinking: 'thinking', working: 'working', writing: 'writing', waiting: 'asking', done: 'done', still: 'still' }
+  // ---------------------------------------------------------------- trying it
+
+  // The bench's moods, and the words the app says beside an agent for each.
+  const MOOD = { still: 'still', starting: 'starting', thinking: 'quiet', working: 'working', writing: 'working', waiting: 'asking', done: 'done' }
   const TONE = { starting: 'live', thinking: 'live', working: 'live', writing: 'live', waiting: 'you', done: 'done', still: '' }
   const WORDS = { still: 'Ready', starting: 'Starting', thinking: 'Thinking', working: 'Using a tool', writing: 'Writing its reply', waiting: 'Waiting for you', done: 'Done' }
   function mark(stateName, detail = '') {
-    agFigure.dataset.mood = MOOD[stateName]
+    mood = MOOD[stateName]
+    bench.dataset.mood = stateName
     const status = $('#ag-status')
     status.dataset.tone = TONE[stateName]
     status.lastElementChild.textContent = detail ? `${WORDS[stateName]} · ${detail}` : WORDS[stateName]
+    paintBench()
   }
   function endTrial() {
     trial = 0
+    asked = null
+    allowOnce = null
     mark('still')
     $('#ag-reply').hidden = true
     $('#ag-try').textContent = 'Try it'
     paintSaved()
   }
   const pause = (ms, mine) => new Promise((resolve, reject) => window.setTimeout(() => (trial === mine ? resolve() : reject(ENDED)), reduced ? Math.min(ms, 200) : ms))
+  // Each event in the record flickers its screen, as the app's bench does.
+  async function busyFor(ms, mine) {
+    for (let at = 0; at < ms; at += 420) { events += 1; paintBench(); await pause(Math.min(420, ms - at), mine) }
+  }
 
-  // A test run on its own, before any team depends on it: the real app's status words, and the
-  // stop it makes for any key it was not handed.
+  // A test run on its own, before any team depends on it: the app's status words, and the stop it
+  // makes for the key its job reaches for when you kept it.
   async function tryAgent() {
     if (trial) { endTrial(); return }
     const mine = ++trials
     trial = mine
+    replied = false
+    const job = jobOf()
+    const key = KEYS.find((k) => k.key === job.needs)
     const reply = $('#ag-reply')
     const badge = $('#ag-badge')
     $('#ag-try').textContent = 'Stop'
     badge.textContent = 'Testing'
     badge.dataset.state = 'running'
     reply.hidden = true
-    const query = 'open-weight models this week'
     try {
-      mark('starting'); await pause(700, mine)
-      mark('thinking'); await pause(1300, mine)
-      let searched = agent.keys.web
-      if (!searched) {
-        mark('waiting')
-        searched = await new Promise((resolve) => {
+      mark('starting'); await pause(800, mine)
+      mark('thinking'); await pause(1400, mine)
+      let allowed = agent.keys[job.needs]
+      if (!allowed) {
+        asked = job.needs
+        mark('waiting', `it wants to ${key.label.toLowerCase()}`)
+        allowed = await new Promise((resolve) => {
+          allowOnce = resolve
           reply.replaceChildren(el('div', { class: 'ag-ask' },
-            el('span', {}, el('b', { text: agentName() }), ` wants to search the web for “${query}”.`),
+            el('span', {}, el('b', { text: agentName() }), ` wants to ${job.ask}. It points at the key you kept.`),
             el('div', {},
               el('button', { type: 'button', class: 'btn btn-primary', onclick: () => resolve(true) }, 'Allow once'),
-              el('button', { type: 'button', class: 'btn', onclick: () => resolve(false) }, 'Decline'))))
+              el('button', { type: 'button', class: 'btn', onclick: () => resolve(false) }, 'Decline')),
+            el('small', { text: 'Or drag the key from your dish onto its hook.' })))
           reply.hidden = false
-          reply.querySelector('button').focus({ preventScroll: true })
         })
         if (trial !== mine) return
+        asked = null
+        allowOnce = null
         reply.hidden = true
       }
-      if (searched) { mark('working', 'web search'); await pause(1600, mine) }
-      mark('writing'); await pause(1300, mine)
-      reply.replaceChildren(searched
-        ? el('span', {}, 'Three stories this week, each with its link: a new open coding model, a faster small model for phones, and a licence change. ', el('b', { text: 'Want them as a digest?' }))
-        : el('span', {}, 'Without the web I can only give you what I already know, which may be out of date. Hand me ', el('b', { text: 'Search the web' }), ' and I will look it up.'))
+      if (allowed) { mark('working', job.tool); await busyFor(1800, mine) }
+      mark('writing'); await busyFor(1300, mine)
+      replied = true
+      reply.replaceChildren(el('span', {}, allowed ? job.reply : job.without))
       reply.hidden = false
       mark('done')
       $('#ag-try').textContent = 'Try it again'
@@ -581,6 +575,16 @@
     paintSaved()
   }
 
+  // The crew's pick: an agent like the one you clicked, ready on the bench.
+  function buildLike(member) {
+    if (trial) endTrial()
+    Object.assign(agent, { name: member.name, kind: member.figure.kind, color: member.figure.color, job: member.job })
+    $('#ag-name').value = member.name
+    replied = false
+    renderAgent()
+    scrollToId('act-agents')
+  }
+
   $('#ag-name').addEventListener('input', (event) => { agent.name = event.target.value; edited() })
   $('#ag-try').addEventListener('click', tryAgent)
   $('#ag-save').addEventListener('click', saveAgent)
@@ -596,7 +600,7 @@
     return select
   }
   function agentChip(who) {
-    return el('span', { class: 'chip' }, el('span', { text: LANE[who] }), appSelect(who))
+    return el('span', { class: 'chip' }, el('span', { class: `face m-${who}`, 'aria-hidden': 'true' }), el('span', { text: LANE[who] }), appSelect(who))
   }
   function renderSentence() {
     const t = state.team
@@ -626,7 +630,7 @@
       return el('div', { class: `card${you ? ' you' : ''}${flash.includes(who) ? ' flash' : ''}` },
         el('span', { class: 'step', text: String(step) }),
         el('div', { class: 'kind' }, el('span', { text: you ? 'Review step' : who === 'researcher' ? 'Researcher' : 'Writer' }), step === 1 ? el('span', { class: 'start', text: 'Start' }) : null),
-        el('div', { class: 'nm', text: LANE[who] }),
+        el('div', { class: 'nm' }, you ? null : el('span', { class: `face m-${who}`, 'aria-hidden': 'true' }), LANE[who]),
         el('div', { class: 'ln', text: you ? 'Approve, or send it back' : who === 'researcher' ? 'Finds what is true, with sources' : 'Writes the answer' }),
         you ? null : el('div', { class: 'ap', text: `on ${app(t[who]).name}` }),
         you || !state.give[who].length ? null : el('a', { class: 'gv', href: '#give', text: `${state.give[who].length} handed over` }))
@@ -960,6 +964,75 @@
       el('p', { class: 'pk-foot', text: asksFirst ? 'Anything else it asks for waits for your answer during the run.' : "OpenCode doesn't ask before it acts, so these switches can't hold it back." }))
   }
 
+  /* ================================================================ Act II · Workflow tabs */
+
+  // The team and what each agent is given are two tabs of one window.
+  const flowTabs = $$('[data-flow]')
+  function showFlow(name, focus = false) {
+    flowTabs.forEach((tab) => {
+      const on = tab.dataset.flow === name
+      tab.setAttribute('aria-selected', String(on))
+      tab.tabIndex = on ? 0 : -1
+      if (on && focus) tab.focus()
+    })
+    $('#flow-team').hidden = name !== 'team'
+    $('#flow-give').hidden = name !== 'give'
+    if (name === 'give') drawGiveThreads()
+  }
+  flowTabs.forEach((tab, i) => {
+    tab.addEventListener('click', () => showFlow(tab.dataset.flow))
+    tab.addEventListener('keydown', (event) => {
+      const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key]
+      if (!step) return
+      event.preventDefault()
+      showFlow(flowTabs[(i + step + flowTabs.length) % flowTabs.length].dataset.flow, true)
+    })
+  })
+
+  /* ================================================================ Act III · Chat steps */
+
+  // Ask, Watch, Review and Result are four views of the team's one chat (see below), shown one at
+  // a time as steps of a single window. The step follows the work: sending starts Watch, a stop
+  // for you opens Review, the answer opens Result. You can look back at any step; the next change
+  // in the work brings you along again.
+  const STEPS = ['ask', 'watch', 'review', 'result']
+  const stepTabs = $$('[data-step]')
+  let stepFollowed = 'ask'
+  function showStep(name, focus = false) {
+    stepTabs.forEach((tab) => {
+      const on = tab.dataset.step === name
+      tab.setAttribute('aria-selected', String(on))
+      tab.tabIndex = on ? 0 : -1
+      if (on && focus) tab.focus()
+    })
+    for (const step of STEPS) $(`#step-${step}`).hidden = step !== name
+    if (name === 'watch') drawLanes()
+  }
+  function followStep() {
+    const place = boxPlace()
+    if (place === stepFollowed) return
+    stepFollowed = place
+    showStep(place)
+  }
+  stepTabs.forEach((tab, i) => {
+    tab.addEventListener('click', () => showStep(tab.dataset.step))
+    tab.addEventListener('keydown', (event) => {
+      const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key]
+      if (!step) return
+      event.preventDefault()
+      showStep(stepTabs[(i + step + stepTabs.length) % stepTabs.length].dataset.step, true)
+    })
+  })
+  // The chat's own links ("Review it", "Read the answer") move between the steps, and a card's
+  // "handed over" opens what each agent is given.
+  document.addEventListener('click', (event) => {
+    const link = event.target.closest('a[href^="#"]')
+    if (!link) return
+    const to = link.getAttribute('href').slice(1)
+    if (STEPS.includes(to)) { event.preventDefault(); showStep(to) }
+    else if (to === 'give') { event.preventDefault(); showFlow('give') }
+  })
+
   /* ================================================================ 04–07 · The team's chat */
 
   // A team has one chat (ADR 0051 in LoomWatch): what you wrote to it and each piece of work, oldest
@@ -1050,7 +1123,7 @@
       const away = name === 'ask' && run
         ? el('p', { class: 'box-away' }, 'The message box went with the work. ', el('a', { class: 'link', href: `#${place}`, text: `${CHAPTER[place]} ↓` }))
         : name === 'result' && place === 'ask' && run && run.phase === 'done'
-          ? el('p', { class: 'box-away' }, 'New work starts from the message box, back in ', el('a', { class: 'link', href: '#ask', text: 'Ask ↑' }))
+          ? el('p', { class: 'box-away' }, 'New work starts from the message box, back in ', el('a', { class: 'link', href: '#ask', text: 'Ask' }))
           : null
       slot.replaceChildren(...(away ? [away] : []))
     }
@@ -1110,7 +1183,7 @@
     const w = where()
     const text = drafts[mode].trim()
     if (!text || w.off !== undefined || mode === 'review') return
-    if (mode === 'request') { startRun(); scrollToId('watch'); return }
+    if (mode === 'request') { startRun(); return }
     if (mode === 'followup') { startFollowUp(); return }
     if (mode === 'teamnote') {
       chatItems.push({ kind: 'teamnote', text, readBy: null })
@@ -1201,10 +1274,10 @@
   function pieceLine(r) {
     const live = r === run && r.phase !== 'done'
     const [text, href, go] = !live
-      ? [worked(r), r === run ? '#result' : null, r === run ? 'Read the answer ↓' : null]
-      : r.phase === 'review' ? ["Waiting for you · Researcher's work is ready for your review", '#review', 'Review it ↓']
-        : r.phase === 'asking' ? ['Waiting for you · Researcher asked you something', '#watch', 'Answer it ↓']
-          : [`${LANE[r.working] || 'The team'} is working`, '#watch', 'Watch it ↓']
+      ? [worked(r), r === run ? '#result' : null, r === run ? 'Read the answer →' : null]
+      : r.phase === 'review' ? ["Waiting for you · Researcher's work is ready for your review", '#review', 'Review it →']
+        : r.phase === 'asking' ? ['Waiting for you · Researcher asked you something', '#watch', 'Answer it →']
+          : [`${LANE[r.working] || 'The team'} is working`, '#watch', 'Watch it →']
     return el('div', { class: 'piece-line' }, weft(r), el('span', { text }), href ? el('a', { class: 'link', href, text: go }) : null)
   }
 
@@ -1381,7 +1454,7 @@
     } catch (error) {
       if (error !== CANCEL) throw error
     }
-    if (run === mine) scrollToId('result')
+    if (run === mine) showStep('result')
   }
 
   async function researcherPass() {
@@ -1620,6 +1693,7 @@
   const needsYou = $('#needs-you')
 
   function renderChatUI(force = false) {
+    followStep()
     renderAsk()
     renderPiece()
     renderNarration()
@@ -2050,7 +2124,7 @@
     if (!base) { resultBody.replaceChildren(empty('Nothing to read yet.', 'Write to the team, and its answer lands in the chat with a receipt.')); return }
     if (base.phase === 'review') {
       resultBody.replaceChildren(empty('The team is waiting for you.', 'Nothing gets written past the review step until you decide.',
-        el('a', { class: 'link', href: '#review', style: 'display:inline-block;margin-top:14px', text: 'Go to the review ↑' })))
+        el('a', { class: 'link', href: '#review', style: 'display:inline-block;margin-top:14px', text: 'Go to the review →' })))
       return
     }
     if (base.phase !== 'done') {
@@ -2078,293 +2152,11 @@
         try { await navigator.clipboard.writeText(receiptMarkdown(shown)); copied.textContent = 'Copied' } catch { copied.textContent = 'Copy failed' }
         window.setTimeout(() => { copied.textContent = '' }, 1800)
       } }),
-      el('a', { class: 'link', href: '#watch', style: 'font-size:13px', text: 'Replay the timeline ↑' }),
+      el('a', { class: 'link', href: '#watch', style: 'font-size:13px', text: 'Replay the timeline →' }),
       copied)
     resultBody.replaceChildren(el('div', { class: 'result-grid' }, thread,
       el('section', { class: 'res-details', 'aria-label': 'Details' }, el('span', { class: 'micro', text: 'Details · how it was made' }), slip, acts)))
   }
-
-  /* ================================================================ 07 · Tomorrow */
-
-  // The team's answer as a morning paper. Issues are numbered, never dated, so the page doesn't go
-  // stale, and flipping back through the pile shows the paper getting better as the Notebook fills.
-  const HEADLINES = [
-    ['A new open-weight coding model tops a public benchmark', 'Its weights are public, and the licence allows commercial use.'],
-    ['Two browser makers ship on-device AI features', 'Most of them work without a connection.'],
-    ['A chip export rule changes next month', 'Two more product lines will need a licence.'],
-    ['An open agent protocol adds a way to resume a session', 'Apps can pick a conversation up where it stopped.'],
-    ['A lab publishes its safety evaluations', 'Outside testers had four weeks of access.'],
-    ['Regulators open a consultation on AI labels', 'Comments are open for sixty days.'],
-    ['A coding agent ships a team mode', 'Several agents can now share one repository.'],
-    ['Data centre power deals keep growing', 'Utilities report record long-term contracts.'],
-    ['A translation model adds forty languages', 'Quality is uneven for less common languages.'],
-    ['Universities update their AI coursework rules', 'Most now ask students to say when they used it.'],
-  ]
-  const ISSUES = [
-    { items: 10, when: '10:00 → 10:06', tag: 'A schedule', story: 'The first scheduled issue. Collector, Editor and Writer were done by 10:06, and it was waiting in Notion.' },
-    { items: 10, when: '10:00 → 10:05', story: 'An ordinary morning. The issue arrived, and nothing needed you.' },
-    { items: 7, when: '10:00 → 10:05 · 10:31', tag: '@Writer', note: ['You, 10:24', '@Writer Shorter, please.'], stamp: ['ok', 'Second pass 10:31'], story: 'You read it over coffee and wrote <span class="q">“@Writer Shorter, please.”</span> in the team’s chat. Writer alone did one more pass on the same issue, back at 10:31. Nobody started over.' },
-    { items: 7, when: '10:00 → 10:02 · 10:40', stopped: true, tag: 'Try again', stamp: ['bad', 'First run stopped 10:02', 'Redone 10:40'], story: "Collector couldn't open one of its sources, and the work stopped and said why, right in the chat. You pressed Try again, and the reprint was ready at 10:40." },
-    { items: 5, when: '10:00 → 10:05', tag: 'Notebook', note: ['Notebook', 'Five items, not ten.'], story: 'You added a line to the team’s Notebook: <span class="q">“Five items, not ten.”</span> Every issue since has read it before starting.' },
-    { items: 5, when: '10:00 → 10:04', story: 'Five items, not ten. It remembered without being told again.' },
-    { items: 5, when: '10:00 → 10:05', tag: 'Swap a thread', foot: 'Edited on a newer app', story: 'A newer app was better at editing, so you moved Editor to it. One change in the sentence. The team, its Brief and its Notebook stayed as they were.' },
-    { items: 5, when: '10:00 → 10:04', tag: 'Share a source', foot: 'Sources + market-reports', story: 'You dragged market-reports onto Editor too. One card, two threads: Collector and Editor read the same folder, and neither can change it.' },
-    { items: 5, when: '10:00 → 18:40', tag: 'A review step waits', stamp: ['wait', 'Held for your review', 'Approved 18:40'], story: "Editor flagged a claim it couldn't confirm, and the review waited in the chat until you were back. You approved at 18:40, and it went out then, not before." },
-    { items: 5, when: '10:00 → 10:05', tag: 'Saved job', foot: 'Editor also edits a second team', story: 'You saved Editor as a job, with its instructions, app and skills, and added it to a second team.' },
-    { items: 5, when: '10:00 → 10:04', story: 'Most mornings now need nothing from you. That was the point.' },
-    { items: 5, when: '10:00 → 10:05', tag: 'Replay any morning', story: 'Every issue stays in the team’s chat with the work that made it, so you can open any morning’s Details and drag back through its timeline.' },
-    { items: 5, when: '10:00 → 10:05', story: 'Ready at 10:05. Every issue so far is on the pile, the stopped one included.' },
-    { items: 5, when: '10:00 → now', live: true, tag: 'Writing now', stamp: ['live', 'Writing now'], story: "Today's issue is being written. Collector is reading, and it will be on the pile before you sit down." },
-  ]
-  const pile = $('#pile')
-  const dayStory = $('#day-story')
-  const today = ISSUES.length - 1
-  const readyAt = (issue) => issue.when.split(/→|·/).at(-1).trim()
-  // Waiting by 10:10: the first run's answer, unless that run stopped.
-  const onTime = (issue) => !issue.live && !issue.stopped && issue.when.split('·')[0].split('→')[1].trim() <= '10:10'
-  let issueAt = today
-  let playing = 0
-  let sorting = false
-  let hovered = null
-  let cardEls = []
-  const pileTag = el('div', { class: 'pile-tag', 'aria-hidden': 'true', hidden: true })
-
-  function issueCard(issue, i) {
-    const items = issue.live
-      ? [72, 90, 64, 84, 58].map((w) => el('li', { class: 'bar', style: `width:${w}%` }))
-      : Array.from({ length: issue.items }, (_, k) => {
-        const [head, sub] = HEADLINES[(k + i * 3) % HEADLINES.length]
-        return el('li', {}, el('span', {}, head, issue.items <= 5 ? el('small', { text: sub }) : null))
-      })
-    return el('article', { class: 'issue', 'aria-hidden': 'true', 'data-i': String(i) },
-      el('div', { class: 'mast' }, el('b', { text: 'AI and tech, today' }), el('span', { text: `No. ${i + 1}` })),
-      el('div', { class: 'sub' }, el('span', { text: `${issue.items} items` }), el('span', { text: issue.live ? 'writing…' : `ready ${readyAt(issue)}` })),
-      el('ol', { class: issue.live ? 'writing' : '' }, items),
-      issue.stamp ? el('div', { class: `stamp ${issue.stamp[0]}` }, issue.stamp.slice(1).flatMap((line, n) => (n ? [el('br'), line] : [line]))) : null,
-      issue.note ? el('div', { class: 'note' }, el('small', { text: issue.note[0] }), issue.note[1]) : null,
-      el('div', { class: 'colophon' }, el('span', { text: 'Collector · Editor · You · Writer' }), el('span', { text: issue.foot || 'to Notion' })))
-  }
-  // The pile is a deck you sort. The chosen issue is on top and every other one is behind it in
-  // order, older first and round again to the newest, with their edges fanned out so each can be
-  // found by pointing at it: to the left on a wide screen, upward on a narrow one, where a phone has
-  // room. Taking the top paper puts it at the bottom; taking one from behind pulls it out and lays
-  // it on top.
-  const FAN = { dx: 12, dy: 2, turn: 0.6, up: 9 }
-  const narrow = () => window.matchMedia('(max-width: 900px)').matches
-  const slotOf = (i) => (issueAt - i + ISSUES.length) % ISSUES.length
-  function pose(slot, out = 0) {
-    if (narrow()) {
-      if (slot === 0) return out ? `translate(0, ${-out * 0.4}px)` : 'none'
-      return `translate(0, ${-slot * FAN.up - out}px) rotate(${slot % 2 ? 0.4 : -0.4}deg)`
-    }
-    if (slot === 0) return out ? `translate(0, ${-out * 0.25}px)` : 'none'
-    return `translate(${-slot * FAN.dx - out}px, ${slot * FAN.dy - out * 0.3}px) rotate(${-slot * FAN.turn}deg) scale(${1 - slot * 0.01})`
-  }
-  function layPile(except = null) {
-    const lift = narrow() ? 12 : 22
-    cardEls.forEach((card, i) => {
-      if (card === except) return
-      const slot = slotOf(i)
-      card.classList.toggle('front', slot === 0)
-      card.style.zIndex = String(100 - slot)
-      card.style.transform = pose(slot, card === hovered ? lift : 0)
-      card.style.filter = slot ? `brightness(${card === hovered ? 1 : 1 - slot * 0.03})` : 'none'
-    })
-  }
-  // Which paper is under a point, worked out from where the point is along the fan rather than from
-  // what is drawn there, so drawing one paper out never hides the next one from the pointer.
-  function paperAt(x, y) {
-    const front = cardEls[issueAt]
-    const box = pile.getBoundingClientRect()
-    const left = box.left + front.offsetLeft
-    const top = box.top + front.offsetTop
-    const W = front.offsetWidth
-    const H = front.offsetHeight
-    let slot
-    if (narrow()) {
-      if (x < left || x > left + W || y > top + H) return null
-      slot = y >= top ? 0 : Math.ceil((top - y) / FAN.up)
-    } else {
-      if (y < top - 24 || y > top + H + 24 || x > left + W) return null
-      slot = x >= left ? 0 : Math.ceil((left - x) / FAN.dx)
-    }
-    return slot < ISSUES.length ? cardEls[(issueAt - slot + ISSUES.length) % ISSUES.length] : null
-  }
-  function renderStory() {
-    const issue = ISSUES[issueAt]
-    const story = el('p')
-    story.innerHTML = issue.story
-    dayStory.replaceChildren(el('span', { class: 'when' }, el('b', { text: issue.tag || 'On time' }), `No. ${issueAt + 1} · ${issue.when}`), story)
-    pile.setAttribute('aria-label', `Issue ${issueAt + 1} of ${ISSUES.length} on top${issue.tag ? `: ${issue.tag}` : ''}. The left arrow puts the top paper at the bottom; the right arrow brings the bottom one up.`)
-    const done = ISSUES.slice(0, issueAt + 1).filter((x) => !x.live)
-    const n = done.filter(onTime).length
-    $('#issue-count').textContent = done.length ? `${n} of ${done.length} ${done.length === 1 ? 'issue was' : 'issues were'} waiting by 10:10.` : ''
-  }
-  function renderPaper() {
-    if (!cardEls.length) { cardEls = ISSUES.map(issueCard); pile.append(...cardEls, pileTag) }
-    layPile()
-    renderStory()
-  }
-  // Sorting. Down: the top paper lifts off and is tucked under the pile while the rest move up. Up:
-  // a paper is drawn out, then laid on top while the ones above it sink. On a narrow screen both
-  // move up and down, so nothing slides off the side of a phone.
-  function sortTo(next, how) {
-    if (sorting || next === issueAt) return
-    sorting = true
-    clearHover()
-    const W = cardEls[issueAt].offsetWidth
-    const mover = how === 'down' ? cardEls[issueAt] : cardEls[next]
-    issueAt = next
-    renderStory()
-    layPile(mover)
-    mover.style.transition = `transform ${reduced ? 1 : 230}ms var(--ease), filter .3s var(--ease)`
-    mover.style.transform = narrow()
-      ? (how === 'down' ? 'translate(0, -46px) rotate(-1.5deg)' : `translate(0, ${-(ISSUES.length * FAN.up + 24)}px) rotate(1.5deg)`)
-      : (how === 'down' ? `translate(${W * 0.38}px, -26px) rotate(6deg)` : `translate(${-W * 0.42}px, -26px) rotate(-7deg)`)
-    mover.style.filter = 'none'
-    if (how === 'down') mover.style.zIndex = '150' // over the new top paper until it is tucked under
-    window.setTimeout(() => {
-      mover.style.transition = ''
-      layPile()
-      window.setTimeout(() => { sorting = false }, reduced ? 0 : 430)
-    }, reduced ? 0 : 230)
-  }
-  const older = () => (issueAt + ISSUES.length - 1) % ISSUES.length
-  const newer = () => (issueAt + 1) % ISSUES.length
-  function stopPlaying() {
-    window.clearInterval(playing)
-    playing = 0
-    $('#issue-play').textContent = 'Read the first two weeks'
-  }
-
-  // Pointing at a paper shows which issue it is; one behind the top is drawn out a little. A mouse
-  // does it by hovering, a finger by sliding along the papers.
-  function clearHover() {
-    pileTag.hidden = true
-    if (!hovered) return
-    hovered = null
-    layPile()
-  }
-  function point(card, event, touch) {
-    const behind = card === cardEls[issueAt] ? null : card
-    if (behind !== hovered) { hovered = behind; layPile() }
-    const i = Number(card.dataset.i)
-    const note = behind ? ISSUES[i].tag || (ISSUES[i].live ? 'Today' : 'On time') : touch ? 'Tap to put it at the bottom' : 'Click to put it at the bottom'
-    pileTag.replaceChildren(el('b', { text: `No. ${i + 1}` }), el('span', { text: note }))
-    const box = pile.getBoundingClientRect()
-    pileTag.style.left = `${Math.min(box.width - 80, Math.max(80, event.clientX - box.left))}px`
-    pileTag.style.top = `${event.clientY - box.top - (touch ? 26 : 0)}px`
-    pileTag.hidden = false
-  }
-  let touch = null
-  let touchedAt = 0
-  pile.addEventListener('pointerdown', (event) => {
-    event.preventDefault() // pressing never selects the words
-    if (event.pointerType !== 'touch' || sorting) return
-    const card = paperAt(event.clientX, event.clientY)
-    if (!card) return
-    touch = { id: event.pointerId, x: event.clientX, y: event.clientY, front: card === cardEls[issueAt] }
-    if (!touch.front) point(card, event, true)
-  })
-  pile.addEventListener('pointermove', (event) => {
-    if (touch && event.pointerId === touch.id) {
-      if (touch.front) return
-      const card = paperAt(event.clientX, event.clientY)
-      if (card) point(card, event, true)
-      return
-    }
-    if (sorting || event.pointerType === 'touch') return
-    const card = paperAt(event.clientX, event.clientY)
-    if (card) point(card, event, false)
-    else clearHover()
-  })
-  pile.addEventListener('pointerup', (event) => {
-    if (!touch || event.pointerId !== touch.id) return
-    const t = touch
-    touch = null
-    const dx = event.clientX - t.x
-    const dy = event.clientY - t.y
-    if (t.front) {
-      // A swipe sorts the top paper either way; a tap is left to the click below.
-      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) { touchedAt = performance.now(); stopPlaying(); sortTo(dx < 0 ? older() : newer(), dx < 0 ? 'down' : 'up') }
-      return
-    }
-    // Letting go on a paper behind lays it on top.
-    const pick = hovered
-    clearHover()
-    touchedAt = performance.now()
-    if (pick) { stopPlaying(); sortTo(Number(pick.dataset.i), 'up') }
-  })
-  pile.addEventListener('pointercancel', () => { touch = null; clearHover() })
-  pile.addEventListener('pointerleave', (event) => { if (event.pointerType !== 'touch') clearHover() })
-  pile.addEventListener('click', (event) => {
-    if (sorting || performance.now() - touchedAt < 500) return
-    const card = paperAt(event.clientX, event.clientY) || hovered || event.target.closest?.('.issue')
-    if (!card) return
-    stopPlaying()
-    const i = Number(card.dataset.i)
-    if (i === issueAt) sortTo(older(), 'down')
-    else sortTo(i, 'up')
-  })
-  pile.addEventListener('keydown', (event) => {
-    const how = { ArrowLeft: 'down', ArrowRight: 'up' }[event.key]
-    if (!how) return
-    event.preventDefault()
-    stopPlaying()
-    sortTo(how === 'down' ? older() : newer(), how)
-  })
-  $('#issue-play').addEventListener('click', () => {
-    if (playing) { stopPlaying(); return }
-    sortTo(0, 'up')
-    $('#issue-play').textContent = 'Stop'
-    playing = window.setInterval(() => { if (issueAt >= today) stopPlaying(); else sortTo(newer(), 'up') }, reduced ? 2200 : 1400)
-  })
-  window.addEventListener('resize', () => layPile())
-
-  /* ================================================================ 08 · Why a loom */
-
-  let loomMode = 'any'
-  const swatch = $('#swatch')
-  function renderSwatch() {
-    const names = [...state.apps.map((id) => app(id).name), 'you']
-    const n = names.length
-    const one = loomMode === 'one'
-    const x = (i) => (n === 1 ? 240 : 52 + (i * 376) / (n - 1))
-    const rotate = n > 5
-    swatch.replaceChildren()
-    const top = 54
-    const bottom = 286
-    names.forEach((name, i) => {
-      const you = i === n - 1
-      const off = one && i !== 0
-      const tagAttrs = { class: `sw-tag${you ? ' you' : ''}${off ? ' off' : ''}`, x: x(i), y: 30, text: name }
-      if (rotate) Object.assign(tagAttrs, { transform: `rotate(-28 ${x(i)} 30)` })
-      swatch.append(el('svg:text', tagAttrs))
-      swatch.append(el('svg:line', { class: `sw-warp${you ? ' you' : ''}${off ? ' off' : ''}`, x1: x(i), x2: x(i), y1: top, y2: bottom }))
-    })
-    const rows = 12
-    for (let r = 0; r < rows; r++) {
-      const y = top + 16 + r * 18.5
-      const from = one ? x(0) - 20 : x(0) - 22
-      const to = one ? x(0) + 20 : x(n - 1) + 22
-      swatch.append(el('svg:path', { class: 'sw-weft', d: `M${from} ${y}H${to}` }))
-      names.forEach((name, i) => {
-        if ((r + i) % 2 || (one && i !== 0)) return
-        swatch.append(el('svg:line', { class: 'sw-halo', x1: x(i), x2: x(i), y1: y - 7, y2: y + 7 }))
-        swatch.append(el('svg:line', { class: `sw-warp${i === n - 1 ? ' you' : ''}`, x1: x(i), x2: x(i), y1: y - 7, y2: y + 7 }))
-      })
-    }
-    const others = state.apps.slice(1).map((id) => app(id).name)
-    $('#swatch-cap').textContent = one
-      ? `One company's team weaves only its own agents. ${others.length ? `${listText(others)} ${others.length === 1 ? 'stays' : 'stay'} off the loom, and so do you.` : 'And you stay off the loom.'}`
-      : `LoomWatch: ${listText(state.apps.map((id) => app(id).name))} on one cloth, with you woven in. Swap any thread and the cloth stays.`
-    swatch.setAttribute('aria-label', $('#swatch-cap').textContent)
-  }
-  $$('[data-loom]').forEach((b) => b.addEventListener('click', () => {
-    loomMode = b.dataset.loom
-    $$('[data-loom]').forEach((x) => x.setAttribute('aria-checked', String(x === b)))
-    renderSwatch()
-  }))
 
   /* ================================================================ 09 · Start */
 
@@ -2438,28 +2230,31 @@
         if (target.id === 'start') typeCommands()
       }
     }, { rootMargin: '0px 0px -30% 0px' })
-    $$('.chapter, .close, #start').forEach((node) => seen.observe(node))
+    $$('.chapter, .act, #start').forEach((node) => seen.observe(node))
 
-    // The team starts on its own when its timeline comes into view, if nobody pressed Run.
-    const watchPanel = $('#watch .ch-panel')
+    // The team starts on its own when its chat comes into view, if nobody pressed Start: the
+    // request is already in the box, and the Start button is pressed for you after a moment.
+    // Watched by its step bar, which fits on any screen, unlike the whole window on a phone.
+    const chatPanel = $('#act-chat .steps')
+    let autoTimer = 0
     const autostart = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting) && !run) startRun()
-    }, { threshold: 0.45 })
-    autostart.observe(watchPanel)
+      const inView = entries.some((e) => e.isIntersecting)
+      window.clearTimeout(autoTimer)
+      if (!inView || run) return
+      boxGo.classList.add('nudge')
+      autoTimer = window.setTimeout(() => { boxGo.classList.remove('nudge'); if (!run && boxPlace() === 'ask' && boxMode() === 'request') boxEl.requestSubmit ? boxEl.requestSubmit(boxGo) : startRun() }, reduced ? 600 : 2200)
+    }, { threshold: 1, rootMargin: '0px 0px -25% 0px' })
+    autostart.observe(chatPanel)
   } else {
-    $$('.chapter, .close').forEach((node) => node.classList.add('seen'))
+    $$('.chapter, .act').forEach((node) => node.classList.add('seen'))
   }
 
   /* ================================================================ First paint */
 
   applyTheme(root.dataset.theme === 'light' ? 'light' : 'dark')
-  renderApps()
   renderAgent()
-  renderWarpPreview()
   renderTeamViews()
   renderChatUI(true)
-  renderPaper()
-  renderSwatch()
   showScreen('home')
   paintProgress()
 })()

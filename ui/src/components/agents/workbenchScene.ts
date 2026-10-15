@@ -876,42 +876,51 @@ export class WorkbenchScene {
   }
 
   private material(role: string, mesh: string): Material {
-    const physical = (color: string, roughness: number, clearcoat = 0.4) => new MeshPhysicalMaterial({ color, roughness, clearcoat, clearcoatRoughness: 0.35 })
-    const standard = (color: string, roughness: number, metalness = 0) => new MeshStandardMaterial({ color, roughness, metalness })
-    switch (role) {
-      case 'bone': return physical('#EFEAE0', 0.5, 0.55)
-      case 'benchtop': return physical('#E6DFD1', 0.6, 0.3)
-      case 'graphite': return physical('#24242B', 0.55, 0.35)
-      case 'shoe': return physical('#2B2B33', 0.55, 0.3)
-      case 'pegboard': return mesh === 'pegboard_face' ? new MeshStandardMaterial({ map: this.own(pegboardTexture()), roughness: 0.9 }) : standard('#1C1C21', 0.8)
-      // The figure. Its skin is coloured when it is dressed (wear), from the figure it wears.
-      case 'skin': return new MeshPhysicalMaterial({ color: '#E3A386', roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.4, sheen: 0.3, sheenRoughness: 0.6, sheenColor: '#FFFFFF' })
-      case 'skin_wound': return new MeshStandardMaterial({ color: '#E3A386', roughness: 0.78, bumpMap: this.wound, bumpScale: 1.6 })
-      case 'skin_deep': return new MeshStandardMaterial({ color: '#C38C73', roughness: 0.62 })
-      case 'eye': return new MeshPhysicalMaterial({ color: '#1E1E26', roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.08 })
-      case 'glint': return new MeshBasicMaterial({ color: '#FFFFFF' })
-      case 'stitch': return standard('#D8A93C', 0.35, 0.6)
-      case 'wood': return physical('#E9D5B1', 0.55, 0.3)
-      case 'leaf': return physical('#6E9C6A', 0.5, 0.3)
-      case 'steel': return standard('#C9CCD2', 0.3, 0.9)
-      case 'pin_a': return physical('#E9C46A', 0.3, 0.6)
-      case 'pin_b': return physical('#F4F1EA', 0.3, 0.6)
-      case 'pin_c': return physical('#4A4A55', 0.3, 0.6)
-      case 'scarf': return new MeshStandardMaterial({ color: '#FFFFFF', roughness: 0.82, bumpScale: 3 })
-      case 'gold': return standard('#E2B451', 0.3, 1)
-      case 'appband': return new MeshStandardMaterial({ color: '#85817A', emissive: LIVE, emissiveIntensity: 0, roughness: 0.4 })
-      case 'screen': return new MeshStandardMaterial({ color: '#141A24', emissive: LIVE, emissiveIntensity: 0.12, roughness: 0.3 })
-      case 'paper': return standard('#F4EFE4', 0.85)
-      case 'ink': return standard('#B9B1A2', 0.85)
-      case 'tag_web': return standard('#E9C46A', 0.5)
-      case 'tag_files': return standard('#EFEAE0', 0.55)
-      case 'tag_cmd': return standard('#3A3A44', 0.55)
-      default: return standard('#888888', 0.6)
-    }
+    return benchMaterial(role, mesh, { pegboard: () => this.own(pegboardTexture()), wound: this.wound })
   }
 
   private own<T extends { dispose: () => void }>(item: T): T {
     this.disposables.push(item)
     return item
+  }
+}
+
+/**
+ * The look of each material in workbench.glb, by the role Blender named it. The figure's skin is
+ * coloured when it is dressed. Shared with the landing page's crew (src/site/crewScene.ts), so a
+ * figure looks the same there as on its bench.
+ */
+export function benchMaterial(role: string, mesh: string, textures: { pegboard: () => Texture; wound: Texture | null }): Material {
+  const physical = (color: string, roughness: number, clearcoat = 0.4) => new MeshPhysicalMaterial({ color, roughness, clearcoat, clearcoatRoughness: 0.35 })
+  const standard = (color: string, roughness: number, metalness = 0) => new MeshStandardMaterial({ color, roughness, metalness })
+  switch (role) {
+    case 'bone': return physical('#EFEAE0', 0.5, 0.55)
+    case 'benchtop': return physical('#E6DFD1', 0.6, 0.3)
+    case 'graphite': return physical('#24242B', 0.55, 0.35)
+    case 'shoe': return physical('#2B2B33', 0.55, 0.3)
+    case 'pegboard': return mesh === 'pegboard_face' ? new MeshStandardMaterial({ map: textures.pegboard(), roughness: 0.9 }) : standard('#1C1C21', 0.8)
+    // The figure. Its skin is coloured when it is dressed (wear), from the figure it wears.
+    case 'skin': return new MeshPhysicalMaterial({ color: '#E3A386', roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.4, sheen: 0.3, sheenRoughness: 0.6, sheenColor: '#FFFFFF' })
+    case 'skin_wound': return new MeshStandardMaterial({ color: '#E3A386', roughness: 0.78, bumpMap: textures.wound, bumpScale: 1.6 })
+    case 'skin_deep': return new MeshStandardMaterial({ color: '#C38C73', roughness: 0.62 })
+    case 'eye': return new MeshPhysicalMaterial({ color: '#1E1E26', roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.08 })
+    case 'glint': return new MeshBasicMaterial({ color: '#FFFFFF' })
+    case 'stitch': return standard('#D8A93C', 0.35, 0.6)
+    case 'wood': return physical('#E9D5B1', 0.55, 0.3)
+    case 'leaf': return physical('#6E9C6A', 0.5, 0.3)
+    case 'steel': return standard('#C9CCD2', 0.3, 0.9)
+    case 'pin_a': return physical('#E9C46A', 0.3, 0.6)
+    case 'pin_b': return physical('#F4F1EA', 0.3, 0.6)
+    case 'pin_c': return physical('#4A4A55', 0.3, 0.6)
+    case 'scarf': return new MeshStandardMaterial({ color: '#FFFFFF', roughness: 0.82, bumpScale: 3 })
+    case 'gold': return standard('#E2B451', 0.3, 1)
+    case 'appband': return new MeshStandardMaterial({ color: '#85817A', emissive: LIVE, emissiveIntensity: 0, roughness: 0.4 })
+    case 'screen': return new MeshStandardMaterial({ color: '#141A24', emissive: LIVE, emissiveIntensity: 0.12, roughness: 0.3 })
+    case 'paper': return standard('#F4EFE4', 0.85)
+    case 'ink': return standard('#B9B1A2', 0.85)
+    case 'tag_web': return standard('#E9C46A', 0.5)
+    case 'tag_files': return standard('#EFEAE0', 0.55)
+    case 'tag_cmd': return standard('#3A3A44', 0.55)
+    default: return standard('#888888', 0.6)
   }
 }
