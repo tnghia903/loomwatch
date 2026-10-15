@@ -45,7 +45,9 @@ export type CheckupRule =
   | 'large-team'
   | 'shouting'
   | 'overthinking'
+  | 'long-instructions'
   // Read from the team's recent runs (runLessons.ts).
+  | 'heavy-agent'
   | 'idle-teammate'
   | 'asked-again'
   | 'keeps-failing'
@@ -98,6 +100,12 @@ export function unshout(role: string): string {
 
 /** Fewer words than this and the AI app has to guess the scope, the method and the format. */
 export const THIN_WORDS = 12
+/**
+ * More words than this and the instructions cost more than they add: the app reads every word at the
+ * start of every run, and in a long prompt each line gets less of the model's attention. The
+ * built-in jobs are well under 300.
+ */
+export const LONG_WORDS = 700
 /** Content-word overlap at which two agents are doing the same job. */
 const SAME_JOB_OVERLAP = 0.7
 /** More working agents than this, and it is worth asking whether some could be one. */
@@ -289,6 +297,15 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
         askPrompt: `Rewrite the instructions of ${agent.name} in this team so it knows what it does and does not do, how to work, and exactly what to reply with. Keep the job it has now: “${role.trim()}”.`,
       })
       continue
+    }
+
+    if (count > LONG_WORDS) {
+      add({
+        rule: 'long-instructions', severity: 'improve', agentId: agent.id,
+        title: `${agent.name}'s instructions are ${count} words long`,
+        why: 'Its AI app reads every word at the start of every run, and in a long prompt each line counts for less. Keep what changes how it works; cut background it can look up and rules any careful worker follows anyway.',
+        askPrompt: `Tighten the instructions of ${agent.name} in this team to under 300 words. Keep its job, how it works, how it checks and exactly what it replies with; cut repetition, background and rules any careful worker would follow anyway.`,
+      })
     }
 
     if ((role.match(SHOUTED) ?? []).length >= SHOUTING) {

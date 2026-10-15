@@ -43,6 +43,9 @@ export interface AgentRunUsage {
 export const LESSON_RUNS = 5
 /** A teammate left idle this many times running is not a coincidence. */
 const IDLE_RUNS = 3
+/** One agent spending this much of the team's tokens, over at least `HEAVY_RUNS` runs, is where to look. */
+const HEAVY_SHARE = 0.6
+const HEAVY_RUNS = 3
 
 const PERMISSION_WORDS: Record<AllowSwitch, string> = { web: 'search the web', edits: 'change files', commands: 'run commands' }
 const ALLOW_LABEL: Record<AllowSwitch, string> = { web: 'Allow web search', edits: 'Allow file changes', commands: 'Allow commands' }
@@ -189,6 +192,21 @@ export function runLessons(runs: readonly LessonRun[], { agents, edges, entrypoi
         fix: { label: ALLOW_LABEL[key], change: { kind: 'allow', agentId: agent.id, key } },
       })
     }
+  }
+
+  // ── One agent spending most of the team's tokens with no Done when to bound its work (ADR 0062).
+  // A long run is not wrong in itself, so it is said only when nothing says when the work is done;
+  // the Done when items have to fit its job, so Ask LoomWatch writes them rather than a stock line. ──
+  const usage = teamUsage(recent, agents)
+  const heaviest = usage && usage.runs >= HEAVY_RUNS && usage.agents.length > 1 ? usage.agents[0] : null
+  const spender = heaviest && heaviest.share >= HEAVY_SHARE ? byId.get(heaviest.id) : undefined
+  if (usage && heaviest && spender && !spender.doneWhen?.length) {
+    findings.push({
+      id: `heavy-agent:${spender.id}`, rule: 'heavy-agent', severity: 'improve', agentId: spender.id, agentIds: [spender.id], learned: usage.runs,
+      title: `${spender.name} used ${Math.round(heaviest.share * 100)}% of the team's tokens`,
+      why: `Over the last ${usage.runs} runs, and it has no Done when, so nothing tells it when its part is finished. A short Done when list is usually the cheapest saving.`,
+      askPrompt: `${spender.name} uses most of this team's tokens and has no Done when. Propose two or three short Done when items for it that say when its part is finished and how much is enough for this job, and nothing else.`,
+    })
   }
 
   // ── An agent that fails again. Nothing to fix in one click: its panel is where to look. ──

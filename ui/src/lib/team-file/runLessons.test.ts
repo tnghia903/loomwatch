@@ -80,6 +80,25 @@ describe('runLessons', () => {
   })
 })
 
+describe('heavy-agent', () => {
+  const agents = [agent('lead', `${LEAD_ROLE} Hand research to Scout.`), agent('scout', 'You find recent product launches in our market and list each one with a link.')]
+  const runs = ['a', 'b', 'c'].map((id) => run(id, 'team', ['lead', 'scout'], [message('dispatch', 'lead', 'scout')], [], [['lead', { tokens: 20_000, opening: 10_000 }], ['scout', { tokens: 80_000, opening: 10_000 }]]))
+  const heavy = (input: CheckupInput, from = runs) => runLessons(from, input).filter((finding) => finding.rule === 'heavy-agent')
+
+  it('names the agent spending most of the tokens with no Done when, and asks for one', () => {
+    expect(heavy(team(agents))).toEqual([expect.objectContaining({ id: 'heavy-agent:scout', agentId: 'scout', learned: 3, title: 'Scout used 80% of the team\'s tokens' })])
+    expect(heavy(team(agents))[0].askPrompt).toContain('Done when')
+    expect(heavy(team(agents))[0].fix).toBeUndefined()
+  })
+
+  it('says nothing once it has a Done when, before three runs, or when the spend is shared', () => {
+    expect(heavy(team(agents.map((each) => each.id === 'scout' ? { ...each, doneWhen: ['Five launches, each with a link'] } : each)))).toEqual([])
+    expect(heavy(team(agents), runs.slice(0, 2))).toEqual([])
+    const even = ['a', 'b', 'c'].map((id) => run(id, 'team', ['lead', 'scout'], [message('dispatch', 'lead', 'scout')], [], [['lead', { tokens: 50_000, opening: 10_000 }], ['scout', { tokens: 50_000, opening: 10_000 }]]))
+    expect(heavy(team(agents), even)).toEqual([])
+  })
+})
+
 describe('lessonRun', () => {
   it('keeps what the lessons read from a projection and its events', () => {
     const reduced = lessonRun(
