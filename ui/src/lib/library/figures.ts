@@ -1,3 +1,4 @@
+import { isAccessory, type Accessory, type EarnedFigure } from '../quests/catalog'
 import { hashId } from '../story/mark'
 import type { AgentConfig } from '../team-file/types'
 
@@ -7,7 +8,10 @@ import type { AgentConfig } from '../team-file/types'
  * the backend's jobs.rs accepts the same names). The figure is only how the agent looks here: a
  * team never copies it, so choosing one never makes a new version.
  */
-export const FIGURE_KINDS = ['yarn', 'spool', 'button', 'thimble', 'pincushion', 'cone'] as const
+export const STARTER_KINDS = ['yarn', 'spool', 'button', 'thimble', 'pincushion', 'cone'] as const
+/** Every figure: the starters anyone can choose, then the ones quests earn (lib/quests). Only the
+    starters are ever picked for an agent, so an agent nobody dressed keeps the figure it had. */
+export const FIGURE_KINDS = [...STARTER_KINDS, 'scissors', 'bobbin'] as const satisfies readonly (string | EarnedFigure)[]
 export type FigureKind = (typeof FIGURE_KINDS)[number]
 
 /** Satin and quiet, and never one of the app's status colours: blue runs, gold is you, red is trouble. */
@@ -17,6 +21,8 @@ export type FigureColor = (typeof FIGURE_COLORS)[number]
 export interface FigureChoice {
   kind: FigureKind
   color: FigureColor
+  /** Accessories from the wardrobe it wears; absent or empty means none. */
+  wear?: Accessory[]
 }
 
 export const FIGURE_NAMES: Record<FigureKind, string> = {
@@ -26,6 +32,8 @@ export const FIGURE_NAMES: Record<FigureKind, string> = {
   thimble: 'Thimble',
   pincushion: 'Pincushion',
   cone: 'Thread cone',
+  scissors: 'Scissors',
+  bobbin: 'Bobbin',
 }
 
 export const COLOR_NAMES: Record<FigureColor, string> = {
@@ -62,15 +70,20 @@ export const COLOR_HEX: Record<FigureColor, string> = {
 
 export function isFigureChoice(value: unknown): value is FigureChoice {
   if (!value || typeof value !== 'object') return false
-  const { kind, color } = value as Record<string, unknown>
-  return FIGURE_KINDS.includes(kind as FigureKind) && FIGURE_COLORS.includes(color as FigureColor)
+  const { kind, color, wear } = value as Record<string, unknown>
+  return FIGURE_KINDS.includes(kind as FigureKind) && FIGURE_COLORS.includes(color as FigureColor) && (wear === undefined || (Array.isArray(wear) && wear.every(isAccessory)))
+}
+
+/** What it wears, each once, in the wardrobe's order. */
+export function wornBy(figure: Pick<FigureChoice, 'wear'>): Accessory[] {
+  return [...new Set(figure.wear ?? [])]
 }
 
 /** The figure an agent wears: the one chosen for it, or one picked from its id, the same every time. */
 export function figureFor(id: string, chosen?: FigureChoice | null): FigureChoice {
   if (chosen && isFigureChoice(chosen)) return chosen
   const seed = hashId(id)
-  return { kind: FIGURE_KINDS[seed % FIGURE_KINDS.length], color: FIGURE_COLORS[Math.floor(seed / FIGURE_KINDS.length) % FIGURE_COLORS.length] }
+  return { kind: STARTER_KINDS[seed % STARTER_KINDS.length], color: FIGURE_COLORS[Math.floor(seed / STARTER_KINDS.length) % FIGURE_COLORS.length] }
 }
 
 /**
@@ -91,7 +104,7 @@ export function agentFigure(agent: Pick<AgentConfig, 'id' | 'from'>, saved: read
  */
 export function freshFigure(seed: string, worn: readonly FigureChoice[]): FigureChoice {
   const start = figureFor(seed)
-  const kinds = rotate(FIGURE_KINDS, FIGURE_KINDS.indexOf(start.kind))
+  const kinds = rotate<FigureKind>(STARTER_KINDS, STARTER_KINDS.indexOf(start.kind as (typeof STARTER_KINDS)[number]))
   const colors = rotate(FIGURE_COLORS, FIGURE_COLORS.indexOf(start.color))
   const count = (kind: FigureKind) => worn.filter((figure) => figure.kind === kind).length
   const byUse = [...kinds].sort((a, b) => count(a) - count(b))

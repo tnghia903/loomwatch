@@ -1101,6 +1101,7 @@ you can share it by copying it into another teams folder's `.jobs`.
 - [Team configuration](docs/TEAM_CONFIG.md) — roles, models, working directories, and workflow rules.
 - [Team memory](docs/TEAM_MEMORY.md) — Brief, Notebook, inheritance, and checkpoints.
 - [Watch and replay](docs/WATCH.md) — inspecting runs, routines, and the local API.
+- [Quests and the wardrobe](docs/QUESTS.md) — practices for building good agents, noticed in your own runs and rewarded with figures and accessories.
 - [Architecture](docs/ARCHITECTURE.md) — technical details for developers.
 - [Security](SECURITY.md) — how to report a problem privately, and what LoomWatch does and doesn't protect against.
 - [Contributing](CONTRIBUTING.md) — building from source and sending a change.

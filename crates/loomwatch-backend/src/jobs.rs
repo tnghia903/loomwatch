@@ -44,8 +44,18 @@ const ICONS: &[&str] = &[
 ];
 
 /// The figures an agent may wear in Your agents, and their colours (ui/src/lib/library/figures.ts
-/// draws them). Only the builder and the agent lists show it: a team never copies it.
-const FIGURES: &[&str] = &["yarn", "spool", "button", "thimble", "pincushion", "cone"];
+/// draws them). Only the builder and the agent lists show it: a team never copies it. The last
+/// ones are earned on quests (`crate::wardrobe`), and the app offers them once they are.
+const FIGURES: &[&str] = &[
+    "yarn",
+    "spool",
+    "button",
+    "thimble",
+    "pincushion",
+    "cone",
+    "scissors",
+    "bobbin",
+];
 const FIGURE_COLORS: &[&str] = &["clay", "butter", "sage", "sky", "lilac", "rose", "oat"];
 
 const FILE_HEADER: &str = "# One of your LoomWatch agents: add it to a team from \"Your agents\" in the Build palette.\n\
@@ -83,6 +93,9 @@ fn is_false(value: &bool) -> bool {
 pub(crate) struct JobFigure {
     pub(crate) kind: String,
     pub(crate) color: String,
+    /// Accessories from the wardrobe it wears (`crate::wardrobe::ACCESSORIES`), each once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) wear: Vec<String>,
 }
 
 fn first_version() -> u32 {
@@ -254,7 +267,7 @@ fn normalize_icon(icon: Option<String>) -> Result<Option<String>, String> {
 
 /// A figure is one the UI draws, in one of its colours.
 fn normalize_figure(figure: Option<JobFigure>) -> Result<Option<JobFigure>, String> {
-    let Some(JobFigure { kind, color }) = figure else {
+    let Some(JobFigure { kind, color, wear }) = figure else {
         return Ok(None);
     };
     let (kind, color) = (kind.trim().to_owned(), color.trim().to_owned());
@@ -270,7 +283,24 @@ fn normalize_figure(figure: Option<JobFigure>) -> Result<Option<JobFigure>, Stri
             FIGURE_COLORS.join(", ")
         ));
     }
-    Ok(Some(JobFigure { kind, color }))
+    let mut worn: Vec<String> = Vec::new();
+    for item in wear {
+        let item = item.trim().to_owned();
+        if !crate::wardrobe::ACCESSORIES.contains(&item.as_str()) {
+            return Err(format!(
+                "Unknown accessory {item:?}. Use one of: {}.",
+                crate::wardrobe::ACCESSORIES.join(", ")
+            ));
+        }
+        if !worn.contains(&item) {
+            worn.push(item);
+        }
+    }
+    Ok(Some(JobFigure {
+        kind,
+        color,
+        wear: worn,
+    }))
 }
 
 /// Trim every field and refuse what the palette could not show or the team file could not hold.
@@ -841,6 +871,7 @@ mod tests {
         dressed.figure = Some(JobFigure {
             kind: " button ".into(),
             color: "sage".into(),
+            wear: vec!["monocle".into(), " band".into(), "monocle".into()],
         });
         let same = save_job(root.path(), "notes", dressed, false, Some(1)).expect("figure");
         assert_eq!(same.spec.version, 1);
@@ -849,19 +880,27 @@ mod tests {
             same.spec.figure,
             Some(JobFigure {
                 kind: "button".into(),
-                color: "sage".into()
+                color: "sage".into(),
+                wear: vec!["monocle".into(), "band".into()],
             })
         );
         let written = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
         assert!(
-            written.contains("figure:\n  kind: button\n  color: sage\n"),
+            written.contains(
+                "figure:\n  kind: button\n  color: sage\n  wear:\n  - monocle\n  - band\n"
+            ),
             "{written}"
         );
-        for (kind, color) in [("robot", "sage"), ("button", "red")] {
+        for (kind, color, wear) in [
+            ("robot", "sage", None),
+            ("button", "red", None),
+            ("button", "sage", Some("crown")),
+        ] {
             let mut odd = spec("Notes");
             odd.figure = Some(JobFigure {
                 kind: kind.into(),
                 color: color.into(),
+                wear: wear.into_iter().map(str::to_owned).collect(),
             });
             assert!(matches!(
                 save_job(root.path(), "notes", odd, false, None),

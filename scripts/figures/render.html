@@ -1,0 +1,55 @@
+<!doctype html><html><body style="margin:0;background:transparent">
+<script type="importmap">{"imports":{"three":"./three/build/three.module.js","three/addons/":"./three/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+const params = new URLSearchParams(location.search)
+const kind = params.get('kind') || 'yarn', color = params.get('color') || '#E3A386'
+const cam = JSON.parse(params.get('cam') || '{"y":0.62,"z":2.4,"fov":22,"ty":0.6,"exp":1}')
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true })
+renderer.setPixelRatio(1); renderer.setSize(320, 320)
+renderer.toneMapping = ({aces:THREE.ACESFilmicToneMapping,agx:THREE.AgXToneMapping,neutral:THREE.NeutralToneMapping,none:THREE.NoToneMapping})[cam.tm ?? "aces"]; renderer.toneMappingExposure = cam.exp
+renderer.outputColorSpace = THREE.SRGBColorSpace
+document.body.appendChild(renderer.domElement)
+const scene = new THREE.Scene()
+const pmrem = new THREE.PMREMGenerator(renderer)
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+const key = new THREE.DirectionalLight('#fff', 1.2); key.position.set(1, 2, 3); scene.add(key)
+const gltf = await new GLTFLoader().loadAsync(params.get('glb') || './agent/workbench.glb')
+if (params.get('build')) { const { bobbin, scissors } = await import('./heads.js'); const head = gltf.scene.getObjectByName('head'); head.add(bobbin(gltf)); head.add(scissors(gltf)) }
+const fig = gltf.scene.getObjectByName('figure')
+fig.removeFromParent(); fig.position.set(0, 0, 0); fig.scale.setScalar(1)
+scene.add(fig); fig.rotation.y = cam.rot ?? 0; scene.environmentIntensity = cam.env ?? 1; key.intensity = cam.key ?? 1.2
+const skin = new THREE.Color(color)
+fig.traverse((o) => {
+  if (o.name.startsWith('head_')) o.visible = o.name === 'head_' + kind
+  if (!o.isMesh) return
+  const role = o.material.name
+  const m = {
+    skin: () => new THREE.MeshPhysicalMaterial({ color: skin, roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.4, sheen: 0.3, sheenRoughness: 0.6, sheenColor: '#FFFFFF' }),
+    skin_wound: () => new THREE.MeshStandardMaterial({ color: skin, roughness: 0.78 }),
+    skin_deep: () => new THREE.MeshStandardMaterial({ color: skin.clone().multiplyScalar(0.86), roughness: 0.62 }),
+    eye: () => new THREE.MeshPhysicalMaterial({ color: '#1E1E26', roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.08 }),
+    glint: () => new THREE.MeshBasicMaterial({ color: '#FFFFFF' }),
+    stitch: () => new THREE.MeshStandardMaterial({ color: '#D8A93C', roughness: 0.35, metalness: 0.6 }),
+    wood: () => new THREE.MeshPhysicalMaterial({ color: '#E9D5B1', roughness: 0.55, clearcoat: 0.3 }),
+    leaf: () => new THREE.MeshPhysicalMaterial({ color: '#6E9C6A', roughness: 0.5, clearcoat: 0.3 }),
+    steel: () => new THREE.MeshStandardMaterial({ color: '#C9CCD2', roughness: 0.3, metalness: 0.9 }),
+    pin_a: () => new THREE.MeshPhysicalMaterial({ color: '#E9C46A', roughness: 0.3, clearcoat: 0.6 }),
+    pin_b: () => new THREE.MeshPhysicalMaterial({ color: '#F4F1EA', roughness: 0.3, clearcoat: 0.6 }),
+    pin_c: () => new THREE.MeshPhysicalMaterial({ color: '#4A4A55', roughness: 0.3, clearcoat: 0.6 }),
+    scarf: () => new THREE.MeshStandardMaterial({ color: '#E9C46A', roughness: 0.82 }),
+  }[role]
+  o.material = m ? m() : new THREE.MeshStandardMaterial({ color: '#888' })
+})
+const camera = new THREE.PerspectiveCamera(cam.fov, 1, 0.01, 50)
+camera.position.set(0, cam.y, cam.z); camera.lookAt(0, cam.ty, 0)
+renderer.render(scene, camera)
+const px = (v) => { const p = v.clone().project(camera); return [Math.round((p.x + 1) * 160 * 10) / 10, Math.round((1 - p.y) * 160 * 10) / 10] }
+const at = (name) => { const o = fig.getObjectByName(name); return o ? px(o.getWorldPosition(new THREE.Vector3())) : null }
+const box = new THREE.Box3().setFromObject(fig.getObjectByName('head_' + kind))
+const corners = [px(new THREE.Vector3(box.min.x, box.max.y, box.max.z)), px(new THREE.Vector3(box.max.x, box.min.y, box.max.z))]
+window.measure = { eyeL: at(kind + '_eye_l'), eyeR: at(kind + '_eye_r'), headTopLeft: corners[0], headBottomRight: corners[1], handL: at('hand_l'), handR: at('hand_r') }
+window.done = true
+</script></body></html>

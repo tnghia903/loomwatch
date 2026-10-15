@@ -3,7 +3,8 @@ import { Check, FilePen, Globe, SquareTerminal } from 'lucide-react'
 import type { DetectedHarness } from '../../lib/harnesses'
 import type { AgentDraft } from '../../lib/library/draft'
 import { agentFromDraft } from '../../lib/library/draft'
-import { figureStill, figureWords, type FigureChoice } from '../../lib/library/figures'
+import { figureWords, type FigureChoice } from '../../lib/library/figures'
+import { FigureStill } from './FigureStill'
 import { actsWithoutAsking, ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { AgentMark } from '../ui/AgentMark'
@@ -42,7 +43,7 @@ export function AgentBadge({ markId, figure, draft, harness, modelName, effortNa
     <div className={`agent-badge${compact ? ' compact' : ''}`}>
       <div className="agent-badge-head">
         {figure
-          ? <img className="agent-badge-figure" src={figureStill(figure)} alt={`${name}, a ${figureWords(figure)}`} width={compact ? 84 : 92} height={compact ? 84 : 92} loading="lazy" decoding="async" />
+          ? <FigureStill className="agent-badge-figure" figure={figure} alt={`${name}, a ${figureWords(figure)}`} width={compact ? 84 : 92} height={compact ? 84 : 92} loading="lazy" decoding="async" />
           : <AgentMark id={markId} name={name} size={compact ? 26 : 34} animate={false} />}
         <div className="agent-badge-who">
           <strong>{name}</strong>

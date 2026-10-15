@@ -1,0 +1,49 @@
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { Wardrobe } from '../../lib/quests/wardrobe'
+import { FigurePicker } from './FigurePicker'
+import { QuestsSection } from './QuestsSection'
+
+beforeEach(() => vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 }))))
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+const earned: Wardrobe = { monocle: { at: '2026-10-15T10:00:00Z', runId: 'run-1' }, scissors: { at: '2026-10-15T11:00:00Z', runId: 'run-2' } }
+
+describe('the figure picker’s wardrobe', () => {
+  it('puts an earned item on, and takes it off again', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(<FigurePicker figure={{ kind: 'spool', color: 'sky' }} onChange={onChange} wardrobe={earned} />)
+    fireEvent.click(screen.getByRole('button', { name: /Button monocle/ }))
+    expect(onChange).toHaveBeenLastCalledWith({ kind: 'spool', color: 'sky', wear: ['monocle'] })
+    rerender(<FigurePicker figure={{ kind: 'spool', color: 'sky', wear: ['monocle'] }} onChange={onChange} wardrobe={earned} />)
+    expect(screen.getByRole('button', { name: /Button monocle/ })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: /Button monocle/ }))
+    expect(onChange).toHaveBeenLastCalledWith({ kind: 'spool', color: 'sky', wear: [] })
+  })
+
+  it('shows what is not earned yet with its hint, and lets nobody wear it', () => {
+    render(<FigurePicker figure={{ kind: 'spool', color: 'sky' }} onChange={vi.fn()} wardrobe={earned} />)
+    const wardrobe = screen.getByRole('group', { name: 'Wardrobe' }).closest('details') as HTMLElement
+    expect(within(wardrobe).queryByRole('button', { name: /Tape-measure band/ })).toBeNull()
+    expect(wardrobe).toHaveTextContent('Hint: Give an agent only the folders its job needs, not a whole drive.')
+    expect(wardrobe).toHaveTextContent('1 of 7 earned, shared by all your agents')
+  })
+
+  it('offers a figure a quest earns only once it is earned', () => {
+    render(<FigurePicker figure={{ kind: 'spool', color: 'sky' }} onChange={vi.fn()} wardrobe={earned} />)
+    expect(screen.getByRole('radio', { name: 'Scissors' })).toBeEnabled()
+    expect(screen.getByRole('radio', { name: /Bobbin, locked/ })).toBeDisabled()
+  })
+})
+
+describe('the quests on Your agents', () => {
+  it('names each practice, what to try next, and where it comes from', () => {
+    render(<QuestsSection wardrobe={earned} />)
+    const quests = screen.getByRole('region', { name: 'Quests' })
+    expect(quests).toHaveTextContent('2 of 9 earned')
+    expect(quests).toHaveTextContent('Try this: Give an agent a Done when it can check itself against before it replies.')
+    expect(quests).toHaveTextContent('Evaluator–optimizer loop')
+    expect(within(quests).getAllByRole('link', { name: /^From / }).length).toBe(8)
+  })
+})

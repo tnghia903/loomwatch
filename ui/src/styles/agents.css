@@ -236,7 +236,7 @@
 .figure-picker { margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4); border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid); display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
 .figure-picker legend { padding: 0 6px; margin-left: -6px; font: 600 14px/1.3 var(--font-sans); color: var(--color-ink); }
 .figure-picker legend .t-meta { font-weight: 400; margin-left: 6px; color: var(--color-ink-3); }
-.figure-picker-kinds { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--sp-2); }
+.figure-picker-kinds { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: var(--sp-2); }
 .figure-picker-kind { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px 6px; border-radius: var(--r-md); border: 1px solid transparent; cursor: pointer; font-size: 11.5px; color: var(--color-ink-3); text-align: center; }
 .figure-picker-kind img { width: 100%; max-width: 64px; height: auto; aspect-ratio: 1; display: block; }
 .figure-picker-kind:hover { background: var(--color-accent-tint); }
@@ -246,7 +246,36 @@
 .figure-picker-color { position: relative; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; cursor: pointer; }
 .figure-picker-color > span:first-of-type { width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12); }
 .figure-picker-color:has(input:checked) { box-shadow: 0 0 0 2px var(--color-accent); }
-@media (max-width: 520px) { .figure-picker-kinds { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* A figure a quest earns, before it is earned: its silhouette, with the hint in its title. */
+.figure-picker-kind.locked { cursor: default; }
+.figure-picker-kind.locked:hover { background: transparent; }
+.figure-picker-kind.locked img { filter: brightness(0) opacity(.16); }
+.figure-picker-lock { position: absolute; top: 6px; right: 6px; color: var(--color-ink-3); }
+/* The wardrobe (docs/QUESTS.md): what every agent can wear, and what is still to earn. */
+.figure-wardrobe { display: grid; gap: var(--sp-2); padding-top: var(--sp-3); border-top: 1px solid var(--color-hairline); }
+.figure-wardrobe-head { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; cursor: pointer; list-style: none; }
+.figure-wardrobe-head::-webkit-details-marker { display: none; }
+.figure-wardrobe-head::before { content: "▸"; color: var(--color-ink-3); font-size: 11px; transition: transform .15s; }
+.figure-wardrobe[open] > .figure-wardrobe-head::before { transform: rotate(90deg); }
+.figure-wardrobe[open] > .figure-wardrobe-head { margin-bottom: var(--sp-1); }
+/* Open, the wardrobe makes the bench column taller than a screen: it scrolls with the page then,
+   so every item can be reached. */
+.byhand-stage:has(.figure-wardrobe[open]) { position: static; }
+@media (prefers-reduced-motion: reduce) { .figure-wardrobe-head::before { transition: none; } }
+.figure-wardrobe-head b { font: 600 13px/1.3 var(--font-sans); color: var(--color-ink); }
+.figure-wardrobe-items { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: var(--sp-2); }
+.figure-wardrobe-item { width: 100%; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; align-items: center; text-align: left; padding: 8px 10px; border-radius: var(--r-md); border: 1px solid var(--color-hairline); background: var(--color-panel); font: inherit; color: inherit; cursor: pointer; min-width: 0; }
+.figure-wardrobe-item .accessory-icon { width: 36px; height: 36px; overflow: visible; }
+.figure-wardrobe-item:hover:not(.locked) { border-color: color-mix(in srgb, var(--color-ink-3) 50%, transparent); }
+.figure-wardrobe-item[aria-pressed="true"] { border-color: color-mix(in srgb, var(--color-accent) 60%, transparent); background: var(--color-accent-tint); }
+.figure-wardrobe-item:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.figure-wardrobe-item.locked { cursor: default; border-style: dashed; background: transparent; }
+.figure-wardrobe-item.locked .accessory-icon { filter: brightness(0) opacity(.18); }
+[data-theme="dark"] .figure-wardrobe-item.locked .accessory-icon, [data-theme="dark"] .figure-picker-kind.locked img { filter: brightness(0) invert(1) opacity(.2); }
+.figure-wardrobe-name { display: block; font: 600 13px/1.25 var(--font-sans); color: var(--color-ink); }
+.figure-wardrobe-note { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.35; color: var(--color-ink-3); }
+.figure-wardrobe-item[aria-pressed="true"] .figure-wardrobe-note { color: var(--color-accent); }
+@media (max-width: 520px) { .figure-picker-kinds { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
 .byhand-keys { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
 .byhand-keys li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--sp-3); align-items: center; padding: var(--sp-3); border-radius: var(--r-md); border: 1px solid var(--color-hairline); color: var(--color-ink-3); }
@@ -320,3 +349,29 @@
 /* In Details, beside its name: the stage cards and the timeline. */
 .agent-portrait { flex: none; object-fit: contain; vertical-align: middle; margin: -3px 0; }
 
+
+/* Quests on Your agents (docs/QUESTS.md): one practice each, what to try, and where it comes from. */
+.agents-quests { display: grid; gap: var(--sp-3); }
+.agents-quests-intro { margin: 0; max-width: 72ch; color: var(--color-ink-2); font-size: 14px; }
+.agents-quests-list { list-style: none; margin: 0; padding: 0; display: grid; border-top: 1px solid var(--color-hairline); }
+.agents-quests-list li { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: var(--sp-3); align-items: start; padding: var(--sp-3) 0; border-bottom: 1px solid var(--color-hairline); }
+.agents-quests-list p { margin: 0; }
+.quest-art { display: grid; place-items: center; width: 48px; height: 48px; border-radius: var(--r-md); border: 1px solid var(--color-hairline); background: var(--color-panel); overflow: hidden; }
+.quest-art .accessory-icon { width: 34px; height: 34px; overflow: visible; }
+.quest-art img { width: 48px; height: 48px; }
+.quest-art.locked { border-style: dashed; background: transparent; }
+.quest-art.locked .accessory-icon, .quest-art.locked img { filter: brightness(0) opacity(.18); }
+[data-theme="dark"] .quest-art.locked .accessory-icon, [data-theme="dark"] .quest-art.locked img { filter: brightness(0) invert(1) opacity(.2); }
+.agents-quests-list li.earned .quest-art { border-color: color-mix(in srgb, var(--color-accent) 50%, transparent); background: var(--color-accent-tint); }
+.agents-quest-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.agents-quest-name b { font: 600 14.5px/1.3 var(--font-sans); color: var(--color-ink); }
+.agents-quest-text { margin-top: 4px !important; font-size: 13.5px; line-height: 1.5; color: var(--color-ink-2); }
+.agents-quest-source { display: inline-block; margin-top: 4px; font-size: 12px; }
+.agents-quest-state { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; color: var(--color-ink-3); }
+.agents-quests-list li.earned .agents-quest-state { color: var(--color-ok); }
+@media (max-width: 520px) { .agents-quests-list li { grid-template-columns: 48px minmax(0, 1fr); } .agents-quest-state { grid-column: 2; } }
+
+/* A still wearing accessories (FigureStill): the class sizes the box, the still and its overlay fill it. */
+.figure-still { position: relative; display: inline-block; vertical-align: middle; }
+.figure-still > img, .figure-still > .worn-overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.figure-still > .worn-overlay { pointer-events: none; overflow: visible; }

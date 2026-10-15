@@ -25,6 +25,9 @@ import { WeftBar } from './WeftBar'
 import type { WeftKnot } from '../../lib/story/weft'
 import { markLabel, markState } from '../../lib/story/mark'
 import { AgentPortrait } from '../agents/AvatarFace'
+import type { RunRecord } from '../../lib/runs/client'
+import type { AgentConfig } from '../../lib/team-file/types'
+import { useRunQuests } from './useRunQuests'
 
 export interface DeliveryLaneProps extends RunColumnProps {
   harnessLabels?: ReadonlyMap<string, string>
@@ -47,6 +50,9 @@ export interface DeliveryLaneProps extends RunColumnProps {
    * lane (ADR 0051), so the lane asks the chat to show the message rather than drawing it again.
    */
   onRevealMessage?: (messageId: string) => void
+  /** The run's record and the team file's agents, for the quests a finished run earned (lib/quests). */
+  record?: RunRecord | null
+  teamAgents?: readonly AgentConfig[]
 }
 
 /**
@@ -91,6 +97,8 @@ export function DeliveryLane({
   onAllow,
   focusAgentId = null,
   onRevealMessage,
+  record = null,
+  teamAgents,
 }: DeliveryLaneProps) {
   const [selectedId, setSelectedId] = useState<string | null>(output.producer)
   const [filter, setFilter] = useState<'all' | 'skill' | 'tool'>('all')
@@ -194,6 +202,9 @@ export function DeliveryLane({
     harnessLabels: new Map(agents.map((node) => [node.id, snapshots.get(node.id)?.[0]?.harness ?? harnessLabels.get(node.id) ?? ''])),
     answered: Boolean(output.text),
   })), [planned, terminal, attempt, prompt, phase, elapsed, agents, projection, evidenceByAgent, snapshots, harnessLabels, output.text])
+  // What the run earned on a quest, judged from the whole team file, not only the agents shown.
+  const questAgents = useMemo(() => teamAgents ?? agents.map((node) => node.data.agent), [teamAgents, agents])
+  const earned = useRunQuests({ record: planned ? null : record, projection, agents: questAgents, phase })
   // An Attention alert names the agent it belongs to; opening that stage is what "go to it" means
   // on this surface, where the skills and tools panel is already scoped to the selected stage.
   // Adjusted during render rather than in an effect (React's "adjusting state when a prop
@@ -261,7 +272,7 @@ export function DeliveryLane({
         {/* A finished run's receipt sits beside the record it sums up, once the pane is wide enough
             for both (delivery.css); a narrower pane keeps it above. */}
         <div className={`delivery-sheet${runReceipt ? ' with-receipt' : ''}`}>
-          {runReceipt && <RunReceipt receipt={runReceipt} onInspectEvidence={onInspectEvidence} onAllow={onAllow} />}
+          {runReceipt && <RunReceipt receipt={runReceipt} onInspectEvidence={onInspectEvidence} onAllow={onAllow} earned={earned} />}
           <div className="delivery-record">
             {!planned && projection.startedAt && <WeftBar projection={projection} order={weftOrder} relay={pipeline} onInspectEvidence={onInspectEvidence} messageFor={messageFor} onReadMessage={onRevealMessage} />}
             <div className="delivery-section-head">

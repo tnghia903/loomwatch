@@ -29,6 +29,7 @@ pub mod skill_routing;
 pub mod spa;
 mod team_bus;
 pub mod updates;
+pub mod wardrobe;
 pub mod watch_api;
 pub mod workspace;
 

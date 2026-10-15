@@ -7,7 +7,7 @@ import type { DetectedCapability } from '../../lib/library/client'
 import type { AgentDraft } from '../../lib/library/draft'
 import { replyLine } from '../../lib/library/desk'
 import { askedKey, CARD_SLOTS, FIGURE_KEYS, figureMood, type FigurePart, type ReadSource } from '../../lib/library/figure'
-import { COLOR_HEX, COLOR_NAMES, FIGURE_COLORS, FIGURE_KINDS, FIGURE_NAMES, figureStill, type FigureChoice } from '../../lib/library/figures'
+import type { FigureChoice } from '../../lib/library/figures'
 import type { RunRecord } from '../../lib/runs/client'
 import { markPattern } from '../../lib/story/mark'
 import { useNow } from '../../lib/useNow'
@@ -17,6 +17,7 @@ import type { AllowSwitch } from '../../lib/team-file/types'
 import { DoneWhen } from '../canvas/DoneWhen'
 import { InstructionShape } from '../canvas/InstructionShape'
 import type { BenchLabel } from './AgentFigure'
+import { FigurePicker } from './FigurePicker'
 import type { BenchView } from './workbenchScene'
 
 const AgentFigure = lazy(() => import('./AgentFigure'))
@@ -333,37 +334,6 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
         </div>
       </div>
     </div>
-  )
-}
-
-/**
- * Its figure: which of the crew it is, and in what colour, so you can tell your agents apart at a
- * glance in Your agents. Teams never copy it, so changing it never makes a new version.
- */
-function FigurePicker({ figure, onChange }: { figure: FigureChoice; onChange: (figure: FigureChoice) => void }) {
-  const name = useId()
-  return (
-    <fieldset className="figure-picker">
-      <legend>Its figure <span className="t-meta">how you tell it apart in Your agents</span></legend>
-      <div className="figure-picker-kinds">
-        {FIGURE_KINDS.map((kind) => (
-          <label key={kind} className="figure-picker-kind" title={FIGURE_NAMES[kind]}>
-            <input type="radio" className="visually-hidden" name={`${name}-kind`} checked={figure.kind === kind} onChange={() => onChange({ ...figure, kind })} />
-            <img src={figureStill({ kind, color: figure.color })} alt="" width={56} height={56} loading="lazy" decoding="async" />
-            <span>{FIGURE_NAMES[kind]}</span>
-          </label>
-        ))}
-      </div>
-      <div className="figure-picker-colors">
-        {FIGURE_COLORS.map((color) => (
-          <label key={color} className="figure-picker-color" title={COLOR_NAMES[color]}>
-            <input type="radio" className="visually-hidden" name={`${name}-color`} checked={figure.color === color} onChange={() => onChange({ ...figure, color })} />
-            <span style={{ background: COLOR_HEX[color] }} aria-hidden="true" />
-            <span className="visually-hidden">{COLOR_NAMES[color]}</span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
   )
 }
 

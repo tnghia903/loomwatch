@@ -1,8 +1,10 @@
 import type { CSSProperties, ReactNode } from 'react'
 
-import { figureStill } from '../../lib/library/figures'
+import { figureStill, wornBy } from '../../lib/library/figures'
 import type { MarkState } from '../../lib/story/mark'
 import { AgentMark } from '../ui/AgentMark'
+import { WornOverlay } from './AccessoryArt'
+import { FigureStill } from './FigureStill'
 import { useTeamFigure } from './figureContext'
 
 /**
@@ -27,7 +29,7 @@ export function AvatarFace({ id, hue, size, fontSize, text, title, className = '
   const style: CSSProperties = { width: size, height: size, ...(fontSize ? { fontSize } : {}), ...(figure ? { backgroundImage: `url(${figureStill(figure)})` } : {}) }
   return (
     <i className={`chat-avatar hue-${hue}${figure ? ' has-figure' : ''}${className ? ` ${className}` : ''}`} style={style} title={title} aria-hidden={hidden ? true : undefined}>
-      {figure ? null : text}
+      {figure ? <WornOverlay kind={figure.kind} wear={wornBy(figure)} headOnly className="chat-avatar-worn" /> : text}
       {children}
     </i>
   )
@@ -40,6 +42,6 @@ export function AvatarFace({ id, hue, size, fontSize, text, title, className = '
 export function AgentPortrait({ id, name, size, operator = false, state, events, animate }: { id: string; name?: string; size: number; operator?: boolean; state?: MarkState; events?: number; animate?: boolean }) {
   const figure = useTeamFigure(id)
   if (operator || !figure) return <AgentMark id={id} name={name} size={size} operator={operator} state={state} events={events} animate={animate} />
-  return <img className="agent-portrait" src={figureStill(figure)} alt="" width={size} height={size} />
+  return <FigureStill className="agent-portrait" figure={figure} alt="" width={size} height={size} />
 }
 

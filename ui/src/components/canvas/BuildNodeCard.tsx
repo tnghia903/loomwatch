@@ -18,7 +18,7 @@ import type { CapabilityNode } from './capabilityNode'
 import { roleGlyph } from './roleGlyph'
 import { depthForZoom, storyLine } from '../../lib/story/depth'
 import { markLabel, markState } from '../../lib/story/mark'
-import { figureStill } from '../../lib/library/figures'
+import { FigureStill } from '../agents/FigureStill'
 import { useAgentFigure } from '../agents/figureContext'
 import { AgentMark } from '../ui/AgentMark'
 
@@ -110,7 +110,7 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
       {step && <span className="step" aria-hidden="true">{step.step}</span>}
       <div className="build-node-body">
         <div className="build-node-row">
-          <span className="build-node-icon figure-holder"><img className="build-node-figure" src={figureStill(figure)} alt="" draggable={false} /><span className="mark-badge" aria-hidden="true">{createElement(named === Circle ? Bot : named, { size: 9 })}</span></span>
+          <span className="build-node-icon figure-holder"><FigureStill className="build-node-figure" figure={figure} alt="" draggable={false} /><span className="mark-badge" aria-hidden="true">{createElement(named === Circle ? Bot : named, { size: 9 })}</span></span>
           <div><span className="node-kind">{harness}</span><strong className="node-name">{agent.name}</strong><small title={agent.role}>{agent.role || 'Select to set a role'}</small>{depth === 'story' && <p className="depth-story-line">{storyLine(agent, runtime)}</p>}</div>
           {runtime && <StatusGlyph status={status} />}
         </div>
