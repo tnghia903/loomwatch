@@ -54,6 +54,30 @@ describe('a tool that reaches past the run', () => {
   })
 })
 
+// ADR 0061: a team in Auto mode runs commands that only read or download without asking. What ran
+// that way is said once per agent; it explains the run and is not a finding.
+describe('commands Auto mode ran without asking', () => {
+  const autoRan = (seq: number, command: string): RunEvent => ({
+    ...event(seq, 'session_meta', { phase: 'permission_answered', title: 'Bash', kind: 'execute', outcome: 'auto_approved', allowed: true, detail: command }),
+    raw: { source: 'loomwatch', phase: 'permission_answered' },
+  })
+
+  it('are carried on the projection, not as messages', () => {
+    const projection = projectRun([event(0, 'process', { phase: 'spawned', pid: 7 }), autoRan(1, 'ls -la')])
+    expect(projection.autoRan).toEqual([{ agentId: 'writer', title: 'Bash', detail: 'ls -la', ts: at(1) }])
+    expect(projection.messages).toEqual([])
+  })
+
+  it('read as one aside per agent, naming the first few', () => {
+    const receipt = receiptFor(['ls -la', 'git status', 'cat notes.md', 'curl -sS https://example.com'].map((command, index) => autoRan(index + 1, command)))
+    const line = receipt.checks.find((check) => check.text.startsWith('Auto mode'))
+    expect(line).toEqual({ tone: 'ok', text: 'Auto mode let Writer run 4 commands without asking you, each one only reading or downloading: ls -la, git status, cat notes.md and 1 more', agentId: 'writer', aside: true })
+    expect(findingsOf(receipt)).not.toContain(line)
+    expect(receiptFor([autoRan(1, 'ls -la')]).checks.find((check) => check.text.startsWith('Auto mode'))?.text)
+      .toBe('Auto mode let Writer run ls -la without asking you: it only reads or downloads')
+  })
+})
+
 // ADR 0047, run 4bb918c5: a scheduled Gatherer on Codex opened a browser tab through the ChatGPT
 // app's `cua_repl`, a plugin LoomWatch never connected. Codex asked nobody: the tool calls itself
 // read-only. The call failed ("Browser is not available: iab") and the receipt flagged nothing.

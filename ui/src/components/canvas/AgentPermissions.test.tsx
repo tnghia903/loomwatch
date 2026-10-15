@@ -26,6 +26,16 @@ describe('AgentPermissions', () => {
     expect(screen.getByText(/waits for your answer during a run/)).toBeInTheDocument()
   })
 
+  it('says Auto on the commands switch when the team is in Auto mode, and only while that switch is off', () => {
+    const { rerender } = render(<AgentPermissions agent={agent()} onChange={vi.fn()} teamAuto />)
+    expect(screen.getByRole('button', { name: /Run commands/ })).toHaveTextContent('CommandsAuto')
+    // Auto mode decides commands only: the web and edits still ask.
+    expect(screen.getByRole('button', { name: /Search the web/ })).toHaveTextContent('WebAsks you')
+    expect(screen.getByRole('button', { name: /Edit files/ })).toHaveTextContent('Edit filesAsks you')
+    rerender(<AgentPermissions agent={agent({ allow: { commands: true } })} onChange={vi.fn()} teamAuto />)
+    expect(screen.getByRole('button', { name: /Run commands/ })).toHaveTextContent('CommandsAllowed')
+  })
+
   it('flips one switch at a time, and does nothing when the team is read-only', () => {
     const onChange = vi.fn()
     const { rerender } = render(<AgentPermissions agent={agent({ allow: { web: true } })} onChange={onChange} />)

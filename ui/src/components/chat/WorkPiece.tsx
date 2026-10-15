@@ -16,6 +16,7 @@ import { APPROVAL_TEXT } from '../../lib/story/needsYou'
 import type { Party } from '../../lib/story/conversation'
 import type { ReceiptLine } from '../../lib/story/receipt'
 import type { TeamMessage } from '../../lib/watch/messages'
+import type { AutoRan } from '../../lib/watch/events'
 import type { AgentConfig, AllowSwitch } from '../../lib/team-file/types'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { Markdown } from '../ui/Markdown'
@@ -278,7 +279,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
         </div>
       )}
 
-      {live && !open && <Decisions messages={session.projection.messages} operators={team.operators} name={name} />}
+      {live && !open && <Decisions messages={session.projection.messages} autoRan={session.projection.autoRan} operators={team.operators} name={name} />}
 
       {waiting?.kind === 'review_stop' && !onTheMessage && (
         <Appearing key={`review:${waiting.since}`} reveal className="tc-decision" role="group" aria-label={`Review ${name(waiting.handoverFrom ?? '')}'s work`}>
@@ -352,11 +353,25 @@ function permitted(message: TeamMessage, agent: string): string {
  * What you decided while this piece worked — a review answered, a question answered — said where
  * you said it, so your own words do not vanish into the fold. Unfolded, the talk shows them.
  */
-function Decisions({ messages, operators, name }: { messages: readonly TeamMessage[]; operators: ReadonlySet<string>; name: (id: string) => string }) {
+function Decisions({ messages, autoRan = [], operators, name }: { messages: readonly TeamMessage[]; autoRan?: readonly AutoRan[]; operators: ReadonlySet<string>; name: (id: string) => string }) {
   const yours = messages.filter((message) => message.reply && (operators.has(message.reply.from) || message.reply.from === 'operator') && (message.kind === 'handover' || message.kind === 'question' || message.kind === 'permission'))
-  if (yours.length === 0) return null
+  if (yours.length === 0 && autoRan.length === 0) return null
+  const lastAuto = autoRan.at(-1)
   return (
     <>
+      {/* ADR 0061: what Auto mode ran in your place, said once rather than once per command. */}
+      {lastAuto && (
+        <Appearing key={`auto:${autoRan.length}`} className="chat-msg mine tc-decided">
+          <div className="chat-stack">
+            <div className="chat-meta">
+              <span className="tc-to" title={autoRan.map((ran) => `${name(ran.agentId)}: ${ran.detail ?? ran.title}`).join('\n')}>
+                {autoRan.length === 1 ? `Auto mode let ${name(lastAuto.agentId)} run ${lastAuto.detail ?? lastAuto.title}` : `Auto mode ran ${autoRan.length} commands without asking you · latest ${lastAuto.detail ?? lastAuto.title}`}
+              </span>
+              <time>{clockTime(lastAuto.ts)}</time>
+            </div>
+          </div>
+        </Appearing>
+      )}
       {yours.map((message) => {
         const reply = message.reply!
         // A handover is addressed to the review step; whose work it is, the record names.

@@ -71,6 +71,21 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
     expect(model.toYaml()).toBe(source)
   })
 
+  it('turns Auto mode on and off without touching any other line (ADR 0061)', () => {
+    const source = readExample('research-team.yaml')
+    const model = TeamFileModel.parse(source)
+    model.setPermissionMode('auto')
+    const added = model.toYaml()
+    expect(model.snapshot().permissions).toEqual({ mode: 'auto' })
+    expect(added).toMatch(/^permissions:\n {2}mode: auto$/m)
+    expect(isOrderedSubsequence(source.split('\n'), added.split('\n'))).toBe(true)
+
+    // Asking is the default, so it is written as no block at all.
+    model.setPermissionMode('ask')
+    expect(model.snapshot().permissions).toBeUndefined()
+    expect(model.toYaml()).toBe(source)
+  })
+
   it('adds and removes a schedule without touching any other line', () => {
     const source = readExample('research-team.yaml')
     const model = TeamFileModel.parse(source)

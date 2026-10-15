@@ -19,6 +19,7 @@ import { AgentFace } from './AgentFace'
 import { BatonFlight } from './BatonFlight'
 import { BatonPill } from './BatonPill'
 import { Swap } from './Appearing'
+import type { AutoModeControl } from './AutoModeSwitch'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
 import { WorkPiece, type TeamView } from './WorkPiece'
 
@@ -50,6 +51,8 @@ interface TeamChatProps {
   onTeamReview: (review: TeamReview, retry: () => void) => void
   onStale: () => void
   onAlwaysAllow?: (agentId: string, key: AllowSwitch) => void
+  /** Who decides the commands agents ask to run, the switch beside the message box (ADR 0061). */
+  autoMode?: AutoModeControl
   announce: (text: string) => void
   /** The newest piece of work in the chat, whenever it changes: what Details follows. */
   onNewest?: (runId: string | null) => void
@@ -74,7 +77,7 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * work and answer here, with everything said before above it. Runs are still how work executes;
  * each piece of work here is one, and Details opens its full record.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, autoMode }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
   const [draft, setDraft] = useState('')
   // Once the first page has painted, what arrives is news and moves in (lib/chat/appear.ts).
@@ -486,6 +489,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         live={live}
         decision={decision}
         disabled={blocked}
+        autoMode={autoMode}
         value={draft}
         onChange={setDraft}
         onSend={(text, to, now) => send(text, to, now)}

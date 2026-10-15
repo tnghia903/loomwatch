@@ -333,12 +333,27 @@ export interface CategoryCoverage {
   observed: number
 }
 
+/** One command Auto mode ran without asking (ADR 0061): it only read files or downloaded a page. */
+export interface AutoRan {
+  agentId: string
+  /** The app's name for it: "Bash", "Run command". */
+  title: string
+  /** The command itself. */
+  detail: string | null
+  ts: string
+}
+
 export interface RunProjection {
   agents: ProjectedAgent[]
   evidence: Evidence[]
   delegations: Delegation[]
   /** What the agents said to each other — handovers, questions and answers, tasks — in order (./messages). */
   messages: TeamMessage[]
+  /**
+   * Commands Auto mode ran without asking you (ADR 0061), in order. Absent on projections built
+   * by hand.
+   */
+  autoRan?: AutoRan[]
   attention: Attention[]
   prompt: string | null
   promptAgentId: string | null
@@ -686,6 +701,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
   const echoes = new Set<string>()
   const startMs = events.length > 0 ? Date.parse(events[0].ts) : NaN
   const letters = new Correspondence(startMs)
+  const autoRan: AutoRan[] = []
 
   const ensureAgent = (id: string, event: RunEvent) => {
     let agent = agents.get(id)
@@ -789,6 +805,9 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           // ADR 0040: LoomWatch put the app's request to you; in the team's chat it is a message.
           if (p.phase === 'awaiting_permission') letters.permissionAsked(event, evidence.findLast((item) => item.kind === 'permission' && item.agentId === agent.id)?.id ?? null)
           if (p.phase === 'permission_answered') letters.permissionAnswered(event)
+          if (p.phase === 'permission_answered' && p.outcome === 'auto_approved') {
+            autoRan.push({ agentId: agent.id, title: typeof p.title === 'string' ? p.title : 'A command', detail: typeof p.detail === 'string' ? p.detail : null, ts: event.ts })
+          }
           if (p.phase === 'prompt_sections' && agent.requiredSkills === undefined) agent.requiredSkills = skillReceipts(p.requiredSkills, 'prepared', event.id)
           const servers = p.phase === 'prompt_sections' && agent.connectedServers === undefined ? connectedServers(p.tools) : undefined
           if (servers) agent.connectedServers = servers
@@ -1142,6 +1161,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
     evidence,
     delegations: [...delegations.values()],
     messages: letters.list(),
+    autoRan,
     attention,
     prompt,
     promptAgentId,

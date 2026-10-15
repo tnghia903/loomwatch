@@ -240,6 +240,11 @@ pub struct RunRecord {
     /// 0051). Live only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queued_notes: Vec<QueuedNote>,
+    /// The team was in Auto mode when this run started (ADR 0061): commands the agents' switches
+    /// leave open run without asking when they only read or download. Fixed at launch, like
+    /// `deliver_title`, and not stored: a record read back after a restart runs nothing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_mode: bool,
 }
 
 /// A note sent to an agent at work, waiting for its current turn to end (ADR 0051).
@@ -364,6 +369,7 @@ impl RunRecord {
             only_agent: None,
             working: Vec::new(),
             queued_notes: Vec::new(),
+            auto_mode: team.permissions.mode == crate::config::PermissionMode::Auto,
         })
     }
 }
@@ -648,6 +654,7 @@ pub(crate) fn decode_run(row: &sqlx::postgres::PgRow) -> Result<StoredRun, sqlx:
             only_agent: row.try_get("only_agent")?,
             working: Vec::new(),
             queued_notes: Vec::new(),
+            auto_mode: false,
         },
         start_key: row.try_get("start_key")?,
         start_fingerprint: row.try_get("start_fingerprint")?,
@@ -718,6 +725,16 @@ impl RunRegistry {
     /// The approvals record, when the daemon installed one.
     pub(crate) fn approvals(&self) -> Option<Arc<TeamApprovals>> {
         self.approvals.get().cloned()
+    }
+
+    /// Whether `run_id` is live and in Auto mode (ADR 0061): its agents' commands that only read
+    /// or download run without asking.
+    pub(crate) fn auto_mode(&self, run_id: &str) -> bool {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        inner
+            .runs
+            .get(run_id)
+            .is_some_and(|entry| entry.record.auto_mode && !entry.record.status.is_terminal())
     }
 
     /// Write one cached record through to Postgres. A no-op without a store.
@@ -3719,6 +3736,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
             detail: None,
             since: now(),
             expires_at: now(),
+            auto: None,
             scope: kind.to_owned(),
         }
     }

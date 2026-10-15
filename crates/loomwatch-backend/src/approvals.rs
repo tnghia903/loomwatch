@@ -252,6 +252,13 @@ pub fn review(team: &TeamConfig) -> Vec<ReviewLine> {
                 .to_owned(),
         ));
     }
+    // ADR 0061: which commands ask is one line in the file, so the review says it.
+    if team.permissions.mode == crate::config::PermissionMode::Auto {
+        lines.push(ReviewLine::info(
+            "Runs in Auto mode: commands that only read files, or download pages for agents allowed the web, run without asking you."
+                .to_owned(),
+        ));
+    }
     if let Some(schedule) = team.schedule.as_ref().filter(|schedule| schedule.enabled) {
         lines.push(ReviewLine::info(format!(
             "Runs on its own, {}.",
@@ -564,6 +571,21 @@ mod tests {
         );
         assert!(texts.contains(&"Runs on its own, daily at 09:00 Asia/Ho_Chi_Minh."));
         assert!(texts.contains(&"Sends its answers to your connected Notion page."));
+        assert!(!texts.iter().any(|text| text.contains("Auto mode")));
+    }
+
+    /// ADR 0061: Auto mode is one line in the file, and it changes which commands ask, so the
+    /// review of a team that turns it on says so.
+    #[test]
+    fn the_review_flags_a_team_in_auto_mode() {
+        let lines = review(&team(
+            "schemaVersion: 1\nentrypoint: a\npermissions:\n  mode: auto\nagents:\n  - id: a\n    spawn:\n      cmd: claude-agent-acp\n      cwd: .\n    model: x\n",
+        ));
+        assert!(
+            lines
+                .iter()
+                .any(|line| !line.warn && line.text.starts_with("Runs in Auto mode"))
+        );
     }
 
     /// ADR 0050: a team someone else wrote can name one of your Notion pages, and running it

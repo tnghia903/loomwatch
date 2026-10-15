@@ -20,6 +20,15 @@ export function permissionAsks(switchKey: string | null | undefined): string {
   return wants ? `Asks to ${wants}` : 'Asks your permission for'
 }
 
+/**
+ * Why Auto mode left a command to you (ADR 0061), as the daemon put it — "Auto mode never runs
+ * this without you: it deletes files" — ending in a full stop, for the line under the command.
+ */
+export function autoNote(note: string): string {
+  const text = note.trim()
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}${/[.!?]$/.test(text) ? '' : '.'}`
+}
+
 /** What exactly: the app's own title, plus the query, command or path when it named one. */
 export function permissionWhat(request: Pick<PermissionRequest, 'title' | 'detail'>): string {
   return request.detail ? `${request.title} · ${request.detail}` : request.title

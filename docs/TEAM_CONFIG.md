@@ -235,6 +235,26 @@ on without what was declined, up to three times per turn. An agent allowed to ed
 team file (`cwd: .`) runs in its managed folder instead. An operator node takes no `allow:`. An app
 that offers no ask-first mode, OpenCode among them, decides for itself, and the run records that.
 
+A team in Auto mode lets its agents run, without asking, the commands that only read or download
+(ADR 0061). It is the "Commands · Ask me / Auto" switch beside the team chat's message box:
+
+```yaml
+permissions:
+  mode: auto # `ask` (the default) puts every command a switch leaves open to the operator
+```
+
+After the switches and an earlier **Allow for this run**, a command (`kind: execute`, never an MCP
+tool) runs without asking when every part of it is a reading program (`ls`, `cat`, `grep`, `wc`,
+`sort`, `jq`, …), `find` without actions, `sed` that only prints or substitutes, or read-only `git`,
+on paths inside the agent's folder, its knowledge or the temporary folder; or a plain `curl`/`wget`
+GET of an `http(s)` address for an agent allowed the web. Output may go to the temporary folder, or
+into the agent's folder when it may edit files. A fixed list always asks: administrator commands,
+deleting, `git push`/`reset --hard`/`clean -f`, publishing, deploying, stopping programs, system
+settings, credential paths, and anything built from text — `$(…)`, `eval`, `xargs`, a shell, or an
+interpreter given `-c`, a here-document or its script on stdin. Everything else asks as above, and
+the card says why Auto mode left it to you. The decision is made on this computer from the command
+line alone; `permission_answered` records `outcome: auto_approved` for what ran.
+
 No switch lets a run agent publish, post or send outside the run. Claude Code would publish an
 artifact to the operator's claude.ai account without asking, even in its ask-first mode. So each
 run agent's session starts without Claude Code's `Artifact`, `ArtifactComments`, `ArtifactData`,

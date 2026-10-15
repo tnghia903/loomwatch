@@ -9,7 +9,7 @@ import { TeamFileModel, TeamFileParseError } from './document'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
 import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
-import type { AgentAllow, AgentConfig, AllowSwitch, BriefEntryConfig, CapabilityRef, DeliverConfig, EdgeConfig, ScheduleConfig, SpawnConfig, TeamDocument } from './types'
+import type { AgentAllow, AgentConfig, AllowSwitch, BriefEntryConfig, CapabilityRef, DeliverConfig, EdgeConfig, PermissionMode, ScheduleConfig, SpawnConfig, TeamDocument } from './types'
 import {
   loadTeamValidator,
   displayFieldProblems,
@@ -1099,6 +1099,16 @@ export function useTeamDocument() {
     markDirty()
   }, [markDirty, captureHistory])
 
+  /** Who decides what the agents' switches leave open (ADR 0061): the chat's Auto mode switch. */
+  const updateTeamPermissionMode = useCallback(
+    (mode: PermissionMode) => {
+      captureHistory()
+      modelRef.current?.setPermissionMode(mode)
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
   /** Where every run's answer goes (ADR 0038): the Team response's "Send to Notion". */
   const updateTeamDeliver = useCallback(
     (deliver: DeliverConfig | null) => {
@@ -1451,6 +1461,8 @@ export function useTeamDocument() {
     teamSchedule,
     /** The team-wide `deliver` block as the document holds it (ADR 0038). */
     teamDeliver: documentSnapshot?.deliver ?? null,
+    /** Who decides what the agents' switches leave open (ADR 0061); absent is `ask`. */
+    teamPermissionMode: (documentSnapshot?.permissions?.mode === 'auto' ? 'auto' : 'ask') as PermissionMode,
     /**
      * The team's `memory.inherits` entries as the document holds them.
      *
@@ -1515,6 +1527,7 @@ export function useTeamDocument() {
     updateAgentCwd,
     updateAgentAllowRecruiting,
     updateAgentAllow,
+    updateTeamPermissionMode,
     updateAgentMemory,
     setAgentCapabilities,
     promoteEntrypoint,

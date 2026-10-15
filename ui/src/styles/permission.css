@@ -37,6 +37,8 @@
   white-space: nowrap;
 }
 .permission-note { margin: 0; font-size: 12px; color: var(--color-ink-3); }
+/* Why Auto mode left a command to you (ADR 0061). */
+.permission-auto { margin: 0; font-size: 12px; line-height: 1.4; color: var(--color-ink-3); }
 .permission-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .permission-acts .btn { font-size: 12.5px; padding: 6px 12px; }
 .permission-acts .permission-deny { margin-left: auto; border-color: transparent; color: var(--color-ink-2); }

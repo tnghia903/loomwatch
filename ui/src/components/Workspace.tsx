@@ -48,7 +48,7 @@ import { DeleteTeamDialog } from './home/DeleteTeamDialog'
 import { TeamReviewDialog } from './run/TeamReviewDialog'
 import { Home } from './home/Home'
 import { ALLOW_SWITCHES } from '../lib/team-file/allow'
-import type { AllowSwitch } from '../lib/team-file/types'
+import type { AllowSwitch, PermissionMode } from '../lib/team-file/types'
 import type { InspectedCapability } from './canvas/CapabilityInspector'
 import { LayerLegend, type LayerSolo } from './canvas/LayerLegend'
 import { ParseFailureModal } from './canvas/ParseFailureModal'
@@ -1568,6 +1568,19 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     const name = doc.nodes.find((node) => node.id === agentId)?.data.agent.name ?? agentId
     setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === key)?.label.toLowerCase() ?? key} from now on.`)
   }, [doc])
+  // ADR 0061: the chat's Auto mode switch. Saved at once, like "Always allow": it is a decision
+  // about the team's next commands, not a draft.
+  const chooseAutoMode = useCallback(async (mode: PermissionMode) => {
+    doc.updateTeamPermissionMode(mode)
+    // A team with something left to fix is not saved, and runs as it is on disk until it is.
+    const saved = await doc.save()
+    setStatusAnnouncement(!saved
+      ? `Auto mode is ${mode === 'auto' ? 'on' : 'off'} in your unsaved changes. It applies once the team is saved.`
+      : mode === 'auto'
+        ? 'Auto mode is on. Commands that only read files or download pages run without asking; anything else still asks you.'
+        : 'Auto mode is off. Commands an agent isn’t allowed to run on its own ask you first.')
+  }, [doc])
+  const autoMode = useMemo(() => ({ mode: doc.teamPermissionMode, onChange: editable ? (mode: PermissionMode) => void chooseAutoMode(mode) : undefined }), [doc.teamPermissionMode, editable, chooseAutoMode])
   const inspecting = Boolean(inspectedNode || inspectedCapability || inspectedEvidence || provenanceOpen || scheduleOpen || memoryPanelOpen)
   // Ask docks where the inspector does. It waits behind whatever holds the dock, and asking for it
   // again — the header button, ⌘J, the palette — clears the dock for it.
@@ -2380,6 +2393,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             onTeamReview={(review, retry) => setChatReview({ review, retry })}
             onStale={() => void doc.checkDiskRevision()}
             onAlwaysAllow={editable ? allowAlways : undefined}
+            autoMode={autoMode}
             announce={setStatusAnnouncement}
             reveal={chatReveal}
             onOpenFinding={openFinding}
@@ -2558,6 +2572,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             startAdvanced={forcedInspectorField?.agentId === inspectedNode.id} fixHint={forcedInspectorField?.agentId === inspectedNode.id ? forcedInspectorField.hint : undefined} onDismissFixHint={() => setForcedInspectorField(null)}
             harnesses={harnesses} harnessId={inspectedHarnessId ?? undefined} onHarnessChange={(id: string) => { const harness = harnesses.find(item => item.id === id); if (harness) doc.updateAgentSpawn(inspectedNode.id, { env: {}, cwd: '.', ...inspectedNode.data.agent.spawn, ...harness.spawn }) }}
             node={inspectedNode} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} pipeline={doc.mode === 'pipeline'}
+            teamAutoMode={doc.teamPermissionMode === 'auto'}
             checkup={{ findings: teamCheckup.forAgent(inspectedNode.id), onFix: teamCheckup.apply, onDismiss: teamCheckup.dismiss, onAsk: ask.unavailable ? undefined : askFor }}
             usage={teamUsageFor(teamCheckup.usage, inspectedNode.id)}
             place={agentPlace({ agentId: inspectedNode.id, nodes: doc.nodes.map((node) => ({ id: node.id, name: node.data.agent.name, kind: node.data.agent.kind })), edges: doc.edges.map((edge) => ({ from: edge.source, to: edge.target })), steps: doc.pipelineSteps, entrypoint: doc.entrypoint, responder: responderFromDoc, pipeline: doc.mode === 'pipeline' })}

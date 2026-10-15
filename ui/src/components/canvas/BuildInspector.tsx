@@ -52,7 +52,7 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
             <AgentWorkFolder agent={node.data.agent} readOnly={readOnly} onChange={props.onCwdChange} problem={props.fieldProblems?.cwd} teamPath={props.teamPath} headClassName="build-context-head" />
           </section>
           <section className="build-context" aria-label="Allowed without asking">
-            <AgentPermissions agent={node.data.agent} readOnly={readOnly} onChange={props.onAllowChange} headClassName="build-context-head" />
+            <AgentPermissions agent={node.data.agent} readOnly={readOnly} onChange={props.onAllowChange} teamAuto={props.teamAutoMode} headClassName="build-context-head" />
           </section>
           <p><Puzzle size={13} />Skills you connect work with any AI app.</p>
           <button className="btn" onClick={() => setAdvanced(true)}>Model and more settings</button>

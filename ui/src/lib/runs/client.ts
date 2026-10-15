@@ -56,6 +56,8 @@ export interface PermissionRequest {
   detail?: string | null
   since: string
   expiresAt: string
+  /** Why Auto mode left this command to you, when the team is in Auto mode (ADR 0061). */
+  auto?: string | null
 }
 
 /** `allow_team`: every agent in the run, for the same thing, until the run ends. */

@@ -65,6 +65,22 @@ properties:
       Notion destination chosen in Connections; the default title is "{{team}} — {{date}}
       {{time}}". A routine's own `schedule.deliver` wins for scheduled runs. See ADR 0038.
     $ref: "#/$defs/Deliver"
+  permissions:
+    description: >-
+      Who decides what the agents' `allow:` switches leave open. `ask` (the default) puts each
+      request to the operator during the run. `auto` runs, without asking, a command that only
+      reads (inside the agent's folder, its knowledge or the temporary folder) or downloads (for
+      an agent allowed the web); every other command still goes to the operator, and commands on
+      a fixed list (administrator, deleting, pushing, publishing, deploying, credentials, scripts
+      given as text) always do. Decided on this computer from the command line alone. See
+      ADR 0061.
+    type: object
+    additionalProperties: false
+    properties:
+      mode:
+        type: string
+        enum: [ask, auto]
+        default: ask
   conversation:
     description: >-
       How much a pipeline stage hands forward, and how much it may ask back. Defaults suit a

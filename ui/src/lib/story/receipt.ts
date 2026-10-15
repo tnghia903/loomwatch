@@ -235,6 +235,17 @@ export function buildReceipt(input: ReceiptInput): Receipt {
       checks.push({ tone: 'warn', text: `${app} ends ${agent.name}’s turn when a request is declined, so LoomWatch asked ${agent.name} to carry on without it${times}`, agentId: agent.id, aside: true })
     }
 
+    // Auto mode (ADR 0061): what ran without your answer, because it only read or downloaded.
+    const autoRan = (input.projection.autoRan ?? []).filter((ran) => ran.agentId === agent.id)
+    if (autoRan.length > 0) {
+      const shown = autoRan.slice(0, 3).map((ran) => ran.detail ?? ran.title).join(', ')
+      const more = autoRan.length > 3 ? ` and ${autoRan.length - 3} more` : ''
+      const text = autoRan.length === 1
+        ? `Auto mode let ${agent.name} run ${shown} without asking you: it only reads or downloads`
+        : `Auto mode let ${agent.name} run ${autoRan.length} commands without asking you, each one only reading or downloading: ${shown}${more}`
+      checks.push({ tone: 'ok', text, agentId: agent.id, aside: true })
+    }
+
     for (const skill of run.requiredSkills ?? []) {
       if (skill.state !== 'opened') checks.push({ tone: 'warn', text: `${agent.name} was given the skill “${skill.name}” but the record never shows it opened`, agentId: agent.id })
     }

@@ -3,7 +3,7 @@ import { useState, type ReactNode } from 'react'
 
 import { useRevealOnArrival } from '../../lib/chat/follow'
 import { answerPermission, type PermissionDecision, type PermissionRequest, type RunRecord } from '../../lib/runs/client'
-import { permissionDeadline, permissionSentence, permissionWhat } from '../../lib/runs/permissionRequests'
+import { autoNote, permissionDeadline, permissionSentence, permissionWhat } from '../../lib/runs/permissionRequests'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { useNow } from '../../lib/useNow'
 
@@ -70,6 +70,7 @@ function Ask({ request, children }: { request: PermissionRequest; children: Reac
         <strong>{permissionSentence(request)}</strong>
       </header>
       <p className="permission-what" title={permissionWhat(request)}>{permissionWhat(request)}</p>
+      {request.auto && <p className="permission-auto">{autoNote(request.auto)}</p>}
       {children}
     </article>
   )
