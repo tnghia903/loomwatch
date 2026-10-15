@@ -802,9 +802,10 @@ em { font-style: italic; }
 .bench-face-app p { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #EFEAE0; font: 700 min(17cqw, 165cqw / var(--chars, 6))/1.2 var(--sans); }
 .bench-tags { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .5s; }
 .bench.live .bench-tags { opacity: 1; }
-.bench-tag { position: absolute; left: 0; top: 0; translate: -50% -50%; white-space: nowrap; padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--ground) 82%, transparent); color: var(--ink-2); border: 1px solid var(--hairline-2); font: 500 11.5px/1.3 var(--sans); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+/* The bench is a picture, dark in both themes, so its words are the app's dark pills (agents.css). */
+.bench-tag { position: absolute; left: 0; top: 0; translate: -50% -50%; white-space: nowrap; padding: 3px 9px; border-radius: 999px; background: rgb(8 8 10 / .84); color: #F5F3EE; border: 1px solid rgb(255 255 255 / .12); font: 500 12px/1.3 var(--sans); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
 .bench-tag.at-keys { translate: -50% -130%; }
-.bench-tag.at-dish { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.bench-tag.at-dish { border-color: rgb(233 196 106 / .7); }
 .ag-status { position: absolute; left: 12px; top: 12px; margin: 0; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: color-mix(in srgb, var(--ground) 82%, transparent); border: 1px solid var(--hairline-2); font: 500 13px/1.2 var(--sans); color: var(--ink-2); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
 .ag-status i { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; }
 .ag-status[data-tone="live"] { color: var(--live); } .ag-status[data-tone="live"] i { background: var(--live); animation: breathe 1.6s ease-in-out infinite; }
