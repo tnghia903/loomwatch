@@ -124,7 +124,10 @@ describe('buildReceipt', () => {
 
   it('lists who did what, then failures and what happened instead', () => {
     const receipt = buildReceipt({ ...base, projection: projection() })
-    expect(receipt.heading).toBe('Run 16 · Finished')
+    expect(receipt.run).toBe('Run 16')
+    expect(receipt.outcome).toEqual({ word: 'Finished', tone: 'ok' })
+    // The stamp is dated when the record ends, not when the run began.
+    expect(receipt.endedAt).toBe(iso(165))
     expect(receipt.team).toBe('2 helpers + your review')
     expect(receipt.ranOn).toBe('Claude Code')
     expect(receipt.lines.map((line) => [line.tone, line.text])).toEqual([
@@ -191,7 +194,7 @@ describe('buildReceipt', () => {
         { id: 'editor', name: 'News Editor', operator: false },
       ],
     })
-    expect(receipt.heading).toBe('Run 16 · Stopped by you')
+    expect(receipt.outcome).toEqual({ word: 'Stopped by you', tone: 'wait' })
     expect(receipt.lines.map((line) => line.text)).toEqual([
       'News Collector finished · read 1 web page',
       'You stopped the run before giving your decision',

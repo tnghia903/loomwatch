@@ -31,8 +31,18 @@ export interface ReceiptLine {
   aside?: boolean
 }
 
+/** How the run ended, stamped on the slip: its word, in the tone of the slip's own marks. */
+export interface ReceiptOutcome {
+  word: string
+  tone: ReceiptTone
+}
+
 export interface Receipt {
-  heading: string
+  /** "Run 8". */
+  run: string
+  outcome: ReceiptOutcome
+  /** When the run's record ends (ISO), for the stamp's date; `null` when nothing was recorded. */
+  endedAt: string | null
   asked: string
   took: string
   team: string
@@ -175,11 +185,12 @@ export function receiptTokens(summary: TokenSummary | null | undefined, names: R
   }
 }
 
-const PHASE_HEADING: Partial<Record<RunPhase, string>> = {
-  succeeded: 'Finished',
-  partial: 'Finished with gaps',
-  failed: 'Stopped with a problem',
-  cancelled: 'Stopped by you',
+/** The stamp's word for each way a run ends: the words Details led with, now said on the slip. */
+const PHASE_OUTCOME: Partial<Record<RunPhase, ReceiptOutcome>> = {
+  succeeded: { word: 'Finished', tone: 'ok' },
+  partial: { word: 'Finished with gaps', tone: 'warn' },
+  failed: { word: 'Failed', tone: 'bad' },
+  cancelled: { word: 'Stopped by you', tone: 'wait' },
 }
 
 export function buildReceipt(input: ReceiptInput): Receipt {
@@ -270,7 +281,9 @@ export function buildReceipt(input: ReceiptInput): Receipt {
   const helpers = input.agents.filter((agent) => !agent.operator)
   const operator = input.agents.some((agent) => agent.operator)
   return {
-    heading: `Run ${input.attempt} · ${PHASE_HEADING[input.phase] ?? 'In progress'}`,
+    run: `Run ${input.attempt}`,
+    outcome: PHASE_OUTCOME[input.phase] ?? { word: 'In progress', tone: 'wait' },
+    endedAt: input.projection.updatedAt ?? input.projection.startedAt,
     asked: input.prompt.trim() || 'No request was recorded',
     took: input.elapsed,
     team: `${plural(helpers.length, 'helper')}${operator ? ' + your review' : ''}`,
@@ -286,7 +299,7 @@ const MARK: Record<ReceiptTone, string> = { ok: '✓', bad: '✗', warn: '!', wa
 /** The receipt as Markdown, for a pull request, a ticket or a chat. */
 export function receiptMarkdown(receipt: Receipt): string {
   const out = [
-    `### ${receipt.heading}`,
+    `### ${receipt.run} · ${receipt.outcome.word}`,
     '',
     `- **Asked:** ${receipt.asked.split('\n')[0]}`,
     `- **Team:** ${receipt.team}`,

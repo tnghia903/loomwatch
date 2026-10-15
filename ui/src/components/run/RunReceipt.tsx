@@ -1,7 +1,7 @@
 import { ArrowRight, Check, ChevronDown, ChevronRight, ClipboardCopy } from 'lucide-react'
 import { useId, useState } from 'react'
 
-import { RECEIPT_MARK, receiptMarkdown, type Receipt, type ReceiptTokens } from '../../lib/story/receipt'
+import { RECEIPT_MARK, receiptMarkdown, type Receipt, type ReceiptOutcome, type ReceiptTokens } from '../../lib/story/receipt'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { LoomMark } from '../ui/glyphs'
 
@@ -38,8 +38,14 @@ export function RunReceipt({ receipt, onInspectEvidence, onAllow }: RunReceiptPr
   return (
     <section className="run-receipt" aria-label="Run receipt">
       <div className="receipt-slip">
-        <header className="receipt-head"><LoomMark width={30} height={13} /><span>Run receipt</span></header>
-        <p className="receipt-title">{receipt.heading}</p>
+        {/* A letterhead: which run on the left, how it ended stamped on the right. */}
+        <div className="receipt-top">
+          <div className="receipt-name">
+            <header className="receipt-head"><LoomMark width={30} height={13} /><span>Run receipt</span></header>
+            <p className="receipt-title">{receipt.run}</p>
+          </div>
+          <ReceiptStamp outcome={receipt.outcome} endedAt={receipt.endedAt} />
+        </div>
         <hr />
         <dl className="receipt-facts">
           <dt>Asked</dt><dd title={receipt.asked}>{receipt.asked}</dd>
@@ -98,6 +104,57 @@ export function RunReceipt({ receipt, onInspectEvidence, onAllow }: RunReceiptPr
         </footer>
       </div>
     </section>
+  )
+}
+
+/** "Oct 15, 2026 · 2:33 PM" in the reader's own locale; `null` when the record has no time. */
+function stampDate(iso: string | null): string | null {
+  const at = iso ? new Date(iso) : null
+  if (!at || Number.isNaN(at.getTime())) return null
+  return `${at.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })} · ${at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+}
+
+/** The outcome across the stamp's middle: one line, or two split at the space nearest the middle. */
+function stampLines(word: string): string[] {
+  const upper = word.toUpperCase()
+  if (upper.length <= 9 || !upper.includes(' ')) return [upper]
+  const spaces = [...upper].flatMap((char, index) => (char === ' ' ? [index] : []))
+  const split = spaces.reduce((best, index) => (Math.abs(index - upper.length / 2) < Math.abs(best - upper.length / 2) ? index : best))
+  return [upper.slice(0, split), upper.slice(split + 1)]
+}
+
+/**
+ * How the run ended, as a round rubber stamp in the slip's top corner, where a clerk stamps PAID:
+ * the maker around the top, the day around the foot, the outcome across the middle. It leads
+ * Details, so it is the page's heading; the drawing is ink only, and its words are read as text.
+ */
+function ReceiptStamp({ outcome, endedAt }: { outcome: ReceiptOutcome; endedAt: string | null }) {
+  // The arcs are referenced by id, so the id must be one a URL fragment can name.
+  const id = `stamp${useId().replace(/[^\w-]/g, '')}`
+  const ended = stampDate(endedAt)
+  const lines = stampLines(outcome.word)
+  // Monospace, so a line's width is its letter count: the longest line sets one size for all.
+  const size = Math.min(15, 94 / Math.max(...lines.map((line) => line.length)))
+  return (
+    <h1 className={`receipt-stamp tone-${outcome.tone}`}>
+      <svg viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+        <defs>
+          <path id={`${id}-top`} d="M 19 60 A 41 41 0 0 1 101 60" />
+          <path id={`${id}-foot`} d="M 12 60 A 48 48 0 0 0 108 60" />
+        </defs>
+        <circle className="stamp-rim" cx="60" cy="60" r="57" />
+        <circle cx="60" cy="60" r="53" />
+        <circle cx="60" cy="60" r="36" />
+        <circle className="stamp-dot" cx="15.5" cy="60" r="1.6" />
+        <circle className="stamp-dot" cx="104.5" cy="60" r="1.6" />
+        <text className="stamp-ring"><textPath href={`#${id}-top`} startOffset="50%">LOOMWATCH</textPath></text>
+        {ended && <text className="stamp-ring stamp-date"><textPath href={`#${id}-foot`} startOffset="50%">{ended.toUpperCase()}</textPath></text>}
+        {lines.map((line, index) => (
+          <text key={index} className="stamp-word" x="60" y={60 + (index - (lines.length - 1) / 2) * size * 1.1} fontSize={size}>{line}</text>
+        ))}
+      </svg>
+      <span className="visually-hidden">{outcome.word}{ended && <>, <time dateTime={endedAt ?? undefined}>{ended}</time></>}</span>
+    </h1>
   )
 }
 
