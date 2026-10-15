@@ -44,6 +44,16 @@ export function readsOf(agent: Pick<AgentConfig, 'capabilities'>): ReadSource[] 
   })
 }
 
+/**
+ * The tools (MCP servers) a team's agent is given with a line on the canvas, for the rack on its
+ * bench: each named once, in the team file's order. Like what it reads, the team's own for a
+ * linked agent too.
+ */
+export function toolsOf(agent: Pick<AgentConfig, 'capabilities'>): string[] {
+  const names = (agent.capabilities ?? []).flatMap((capability) => (capability.kind === 'tool' && capability.name.trim() ? [capability.name.trim()] : []))
+  return [...new Set(names)]
+}
+
 /** What one workbench change does to the team file. */
 export type TeamAgentEdit =
   | { kind: 'rename'; field: 'name' | 'role'; value: string }

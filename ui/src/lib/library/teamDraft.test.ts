@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { DetectedHarness } from '../harnesses'
 import type { AgentConfig } from '../team-file/types'
-import { draftFromTeamAgent, readsOf, teamAgentEdit } from './teamDraft'
+import { draftFromTeamAgent, readsOf, teamAgentEdit, toolsOf } from './teamDraft'
 
 const claude: DetectedHarness = { id: 'claude', name: 'Claude Code', command: 'claude-agent-acp', executablePath: '/bin/claude-agent-acp', acpAvailable: true, spawn: { cmd: 'claude-agent-acp', args: [] } }
 const codex: DetectedHarness = { id: 'codex', name: 'Codex', command: 'codex-acp', executablePath: '/bin/codex-acp', acpAvailable: true, spawn: { cmd: 'codex-acp', args: ['--quiet'] } }
@@ -65,5 +65,18 @@ describe('a team’s own agent on the workbench', () => {
       { kind: 'folder', name: 'unnamed', where: '/Users/me/unnamed/' },
     ])
     expect(readsOf({})).toEqual([])
+  })
+
+  it('takes the tools the team gives it, for its tool rack: each MCP server once, in order', () => {
+    expect(toolsOf({ capabilities: [
+      { kind: 'tool', name: 'github' },
+      { kind: 'skill', name: 'house-style' },
+      { kind: 'knowledge', name: 'notes', path: '/Users/me/notes' },
+      { kind: 'tool', name: ' notion ' },
+      // The same server given twice is still one tool, and a nameless one names nothing.
+      { kind: 'tool', name: 'github' },
+      { kind: 'tool', name: '  ' },
+    ] })).toEqual(['github', 'notion'])
+    expect(toolsOf({})).toEqual([])
   })
 })

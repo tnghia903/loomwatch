@@ -16,6 +16,8 @@ import type { AllowSwitch } from '../team-file/types'
  * - `reads`: the file holder at the back of the bench, with a folder, file or page standing in it
  *   for each one it reads. Only in a team: what an agent reads is the team's to give (ADR 0042), so
  *   an agent in Your agents has no holder.
+ * - `tools`: wrenches on the tool rack under the key hooks, one per tool (MCP server) its team
+ *   gives it. Only in a team, like what it reads: a tool is given with a line on the canvas.
  * - `keys`: keys on the pegboard hooks go ahead without asking; the ones in your dish ask you first.
  * - `reply`: the tray where what it hands back lands.
  *
@@ -23,7 +25,7 @@ import type { AllowSwitch } from '../team-file/types'
  * motion is a reaction to a change you just made, or what the test bench's run record says: every
  * pose is something the record shows, never a feeling it guesses.
  */
-export type FigurePart = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'keys' | 'reply'
+export type FigurePart = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'tools' | 'keys' | 'reply'
 
 /**
  * The nodes in workbench.glb that stand for each part (the model's own names, as made in Blender).
@@ -42,6 +44,7 @@ const PART_PREFIXES: readonly [string, FigurePart | null][] = [
   ['tray', 'reply'],
   ['envelope', 'reply'],
   ['reads', 'reads'],
+  ['tools', 'tools'],
   ['pegboard', null],
   ['bench', null],
   ['figure', 'mind'],
@@ -76,6 +79,9 @@ export interface ReadSource {
 
 /** How many fit in the file holder; more still count, they just don't stand in it. */
 export const READ_SLOTS = 4
+
+/** How many wrenches hang on the tool rack; more tools still count, they just don't hang there. */
+export const TOOL_SLOTS = 4
 
 /**
  * What the figure is doing, from the test bench's run record only.
