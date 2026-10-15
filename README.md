@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on the Build canvas, then its chat. The operator writes @team Prepare a short getting-started guide for new users. Researcher's handover appears in the chat and the team waits. The operator approves it with the note Keep it to one page, and Writer's answer appears in the chat, marked Nothing flagged.">
+  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on the Workflow canvas, then its chat. The operator writes @team Prepare a short getting-started guide for new users. Researcher's handover appears in the chat and the team waits. The operator approves it with the note Keep it to one page, and Writer's answer appears in the chat, marked Nothing flagged.">
   <br>
   <sub>The bundled offline demo: ask the team in its chat, approve the handover with a note, read the answer.</sub>
 </p>
@@ -85,7 +85,7 @@ anything runs.
 <td valign="middle">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-build-dark.png">
-  <img src="docs/assets/readme/step-build-light.png" alt="Your team, in one sentence: every day at 10:00 AM and whenever you ask, News Collector collects what is needed, then News Editor edits, and finally Digest Writer writes the answer. Scheduled answers go to Notion.">
+  <img src="docs/assets/readme/step-build-light.png" alt="Your team, in one sentence: every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer. Each agent wears its figure.">
 </picture>
 </td>
 </tr>
