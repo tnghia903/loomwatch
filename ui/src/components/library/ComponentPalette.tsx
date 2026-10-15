@@ -376,6 +376,7 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
         ...visible(group.name, items).map(row),
       ], items.length, <>
         {group.name === YOURS && saved.problems.map(problem => <p key={problem.file} className="palette-hint palette-problem" title={problem.message}>Can’t read {problem.file}: {problem.message}</p>)}
+        {group.name === YOURS && !query && <a className="palette-hint palette-build-agent" href="/agents/new">Build a new agent</a>}
         {group.name === APPS && !query && <AppsFooter loading={harnessesLoading} error={harnessesError} onRetry={onRetry} found={harnesses.length} notInstalled={notInstalled} notInstalledOpen={notInstalledOpen} onToggleNotInstalled={() => setNotInstalledOpen(open => !open)} searchPathOpen={searchPathOpen} onToggleSearchPath={() => setSearchPathOpen(open => !open)} knownIds={knownHarnessIds} searchPath={harnessSearchPath} />}
         {/* An empty group is one dashed slot, the shape its first row will fill; why it is empty is behind the heading's "?". */}
         {group.name === FILES && !query && group.items.length === 0 && <p className="palette-empty"><Folder size={13} aria-hidden="true" />None yet</p>}

@@ -46,7 +46,7 @@
 .agent-builder { display: flex; flex-direction: column; gap: var(--sp-5); }
 .agent-back { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; align-self: flex-start; }
 .agent-builder-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-2) var(--sp-5); align-items: end; }
-.agent-builder-head .agent-back { grid-column: 1 / -1; }
+.agent-backs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); }
 .agent-builder-title { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .agent-builder-title h1 { margin: 0; font: 400 34px/1.1 var(--font-serif); letter-spacing: -.01em; overflow-wrap: anywhere; }
 .agent-builder-version { font: 500 12px var(--font-mono); color: var(--color-ink-3); }
@@ -146,3 +146,7 @@
   .agent-field-row { grid-template-columns: minmax(0, 1fr); }
   .agent-badge-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 }
+
+/* the add panel's way in */
+.palette-build-agent { display: block; color: var(--color-accent); text-decoration: none; }
+.palette-build-agent:hover { text-decoration: underline; }

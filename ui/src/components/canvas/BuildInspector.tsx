@@ -40,7 +40,7 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
     if (forced) setAdvanced(true)
   }
   const link = props.link
-  const linkPanel = (headClassName: string) => link?.state ? <LinkedAgent agent={node.data.agent} link={link.state} readOnly={readOnly} onApply={link.onApply} onUnlink={link.onUnlink} headClassName={headClassName} /> : undefined
+  const linkPanel = (headClassName: string) => link?.state ? <LinkedAgent agent={node.data.agent} link={link.state} readOnly={readOnly} onApply={link.onApply} onUnlink={link.onUnlink} teamPath={props.teamPath} headClassName={headClassName} /> : undefined
   if (advanced) return <div className="advanced-node-settings"><Inspector {...props} linked={linkPanel('zone-head t-micro')} onClose={() => setAdvanced(false)} /></div>
   const reviewStep = node.data.agent.kind === 'operator'
   // An agent placed from Your agents takes these fields from its version; they change there.

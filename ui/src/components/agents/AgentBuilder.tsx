@@ -25,6 +25,8 @@ export interface AgentBuilderProps {
   harnessesLoading: boolean
   skills: DetectedCapability[]
   skillsLoading: boolean
+  /** The team the operator came from ("Edit in Your agents"), so the way back is one click. */
+  cameFrom?: string | null
 }
 
 type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; version: number; bumped: boolean } | { kind: 'error'; message: string }
@@ -37,7 +39,7 @@ type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; versio
  * depends on it, and says where it is used and how it got here (its versions). Saving a change
  * a team would copy makes the next version; teams keep theirs until they choose Update.
  */
-export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading, skills, skillsLoading }: AgentBuilderProps) {
+export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading, skills, skillsLoading, cameFrom = null }: AgentBuilderProps) {
   const { jobs, available, loaded } = useSavedJobs()
   const saved = useMemo(() => (id ? jobs.find((job) => job.id === id) ?? null : null), [jobs, id])
   const runnable = useMemo(() => rankHarnesses(harnesses), [harnesses])
@@ -136,6 +138,8 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
   }
 
   const benchId = saved ? saved.id : `new-${jobIdFor(draft.name || 'agent')}`
+  // The team the operator came from, which the team panel names by its file, absolute or not.
+  const cameFromUse = cameFrom ? mine.find((use) => use.teamPath === cameFrom || cameFrom.endsWith(`/${use.teamPath}`)) ?? null : null
   const scheduledUses = mine.filter((use) => use.scheduled).length
   const behindUses = version ? mine.filter((use) => use.version < version).length : 0
   const saveLabel = !saved ? 'Save to Your agents' : bumps ? `Save as v${(version ?? 1) + 1}` : 'Save'
@@ -144,7 +148,10 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
   return (
     <div className="agent-builder">
       <header className="agent-builder-head">
-        <a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />Your agents</a>
+        <span className="agent-backs">
+          <a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />Your agents</a>
+          {cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}`}>Back to {cameFromUse?.teamName ?? 'the team'}{save.kind === 'saved' && save.bumped ? ` to update it to v${save.version}` : ''}</a>}
+        </span>
         <div className="agent-builder-title">
           <h1>{draft.name.trim() || 'New agent'}</h1>
           <span className="agent-builder-version">{saved ? `v${version}${saved.savedAt ? ` · saved ${relativeTime(new Date(saved.savedAt))}` : ''}` : 'Not saved yet'}</span>

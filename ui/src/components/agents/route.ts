@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 
 /** Where Your agents is: the list, one saved agent, or a new one (from a built-in job, maybe). */
-export type AgentsRoute = { kind: 'list' } | { kind: 'agent'; id: string } | { kind: 'new'; from: string | null }
+export type AgentsRoute = { kind: 'list' } | { kind: 'agent'; id: string; team: string | null } | { kind: 'new'; from: string | null }
 
 export function parseAgentsRoute(pathname: string, search: string): AgentsRoute {
   const rest = pathname.replace(/^\/agents\/?/, '')
   if (!rest) return { kind: 'list' }
   if (rest === 'new') return { kind: 'new', from: new URLSearchParams(search).get('from') }
-  return { kind: 'agent', id: decodeURIComponent(rest.split('/')[0]) }
+  return { kind: 'agent', id: decodeURIComponent(rest.split('/')[0]), team: new URLSearchParams(search).get('team') }
 }
 
 const CHANGED = 'loomwatch:agents-route'
