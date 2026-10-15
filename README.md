@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on the Build canvas, then its chat. The operator writes @team Prepare a short getting-started guide for new users. Researcher's handover appears in the chat and the team waits. The operator approves it with the note Keep it to one page, and Writer's answer appears in the chat, marked Nothing flagged.">
+  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on the Workflow canvas, then its chat. The operator writes @team Prepare a short getting-started guide for new users. Researcher's handover appears in the chat and the team waits. The operator approves it with the note Keep it to one page, and Writer's answer appears in the chat, marked Nothing flagged.">
   <br>
   <sub>The bundled offline demo: ask the team in its chat, approve the handover with a note, read the answer.</sub>
 </p>
@@ -38,10 +38,11 @@ curl -fsSL https://loomwatch.github.io/install.sh | bash
 
 ## Your AI apps are the threads. LoomWatch is the loom.
 
-LoomWatch runs on your computer and opens in your browser. Arrange agents on a canvas, connect them
-into a workflow, and watch their progress, tool calls, handovers and final answer in one place. Run a
-single agent, a step-by-step pipeline, or a team that delegates work as it goes. When the team needs
-you, it stops and asks.
+LoomWatch runs on your computer and opens in your browser. Build each agent once and try it on its
+own, connect your agents into a workflow on a canvas, then give the team work in its chat and watch
+their progress, tool calls, handovers and final answer in one place. Run a single agent, a
+step-by-step pipeline, or a team that delegates work as it goes. When the team needs you, it stops
+and asks.
 
 <p align="center">
   <sub>WORKS WITH THE AI APPS YOU ALREADY USE</sub><br>
@@ -56,53 +57,73 @@ you, it stops and asks.
 <tr>
 <td width="50%" valign="middle">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-build-dark.png">
-  <img src="docs/assets/readme/step-build-light.png" alt="Your team, in one sentence: every day at 10:00 AM and whenever you ask, News Collector collects what is needed, then News Editor edits, and finally Digest Writer writes the answer. Scheduled answers go to Notion.">
+  <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/agents-dark.webp">
+  <img src="site/assets/app/agents-light.webp" alt="Building an agent called Writer in Your agents. On the left, a figure sits at a workbench: a clipboard for its job, a laptop for its app, a recipe card for its one skill, empty key hooks because it may not act without asking, and a tray for what it hands back. On the right, the same settings as plain blocks: Name, Instructions and App. Above them, one sentence sums the agent up.">
 </picture>
 </td>
 <td width="50%" valign="middle">
 
-### 01 &nbsp;Build
+### 01 &nbsp;Agents
 
-Pick agents from the AI apps on this computer and connect them on a canvas. LoomWatch reads the
-team back to you in **one plain sentence**, so you can check the plan before anything runs.
+**Build an agent** once: its job, the AI app and model it thinks with, its skills, and the keys it
+may use without asking, such as the web or running commands. Pick it a face, **try it on its own**
+with a real request, and save it to **Your agents**. Change its job later and it becomes the next
+version; a team keeps the version it was given until you choose **Update**.
 
 </td>
 </tr>
 <tr>
 <td valign="middle">
 
-### 02 &nbsp;Ask, and watch
+### 02 &nbsp;Workflow
 
-Each team has one chat. Write **@team** and the job in plain words: _"@team Prepare today's AI and
-tech news digest, and link every claim."_ Each stage starts when the one before it hands over, and
-what the agents tell each other shows in the chat as they say it. A note you write while an agent
-works joins its next turn, and every handover lands on a **live timeline** in Details that you can
-drag back to replay.
+Put your agents in a team, or hire one by job, and connect who hands work to whom on a canvas.
+LoomWatch reads the team back to you in **one plain sentence**, so you can check the plan before
+anything runs.
 
 </td>
+<td valign="middle">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-build-dark.png">
+  <img src="docs/assets/readme/step-build-light.png" alt="Your team, in one sentence: every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer. Each agent wears its figure.">
+</picture>
+</td>
+</tr>
+<tr>
 <td valign="middle">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-watch-dark.png">
   <img src="docs/assets/readme/step-watch-light.png" alt="The team's chat while it works: the request @team Prepare a short getting-started guide for new users, then a note for Researcher, Assume readers have never used an AI app, which waits for Researcher's current step to end. Below them: Researcher is working.">
 </picture>
 </td>
+<td valign="middle">
+
+### 03 &nbsp;Chat: ask, and watch
+
+Each team has one chat. Write **@team** and the job in plain words: _"@team Prepare today's AI and
+tech news digest, and link every claim."_ Each stage starts when the one before it hands over, and
+what the agents tell each other shows in the chat as they say it. A note you write while an agent
+works joins its next turn, each agent's status is said in words beside its face (_"Writing its
+reply"_, _"Waiting for you"_), and every handover lands on a **live timeline** in Details that you
+can drag back to replay.
+
+</td>
 </tr>
 <tr>
 <td valign="middle">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-review-dark.png">
-  <img src="docs/assets/readme/step-review-light.png" alt="Researcher's handover to You in the chat: a summary, and the open question Which format should Writer use? Below it, your turn: Approve, or Send back to Researcher. To send it back, write what to change in the box below.">
-</picture>
-</td>
-<td valign="middle">
 
-### 03 &nbsp;Review
+### 04 &nbsp;Review
 
 A **You** step pauses the team, and the handover waits in the chat with **Approve** and **Send
 back** on it. Approve it, or write what should change and send it back. **Nothing moves on until
 you decide**, and the finished answer comes with the evidence to check before you use it.
 
+</td>
+<td valign="middle">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-review-dark.png">
+  <img src="docs/assets/readme/step-review-light.png" alt="Researcher's handover to You in the chat: a summary, and the open question Which format should Writer use? Below it, your turn: Approve, or Send back to Researcher. To send it back, write what to change in the box below.">
+</picture>
 </td>
 </tr>
 </table>
@@ -111,6 +132,7 @@ you decide**, and the finished answer comes with the evidence to check before yo
 
 - ✅ You use one or more AI apps, such as Claude Code, Codex or OpenCode, and want them to **work on
   one job together**.
+- ✅ You want to **build an agent once, try it on its own**, and reuse it in every team that needs it.
 - ✅ You want to **see what each agent did**, not just read a final answer: every tool call, file and
   handover is recorded.
 - ✅ You want to **approve or redirect work** before the next agent builds on it.
@@ -125,7 +147,8 @@ you decide**, and the finished answer comes with the evidence to check before yo
 | You copy one app's answer into the next app's prompt. | Agents hand work to each other, and every handover is on the timeline. |
 | You find out what an agent did by scrolling back through its terminal. | Every message, tool call and file it touched is recorded, and you can replay it. |
 | A weak first step quietly shapes everything after it. | A review step stops the team until you approve, or send the work back. |
-| Each app has its own skills, tools and folders. | Skills, MCP tools and the folders and files you choose are delivered to the agents that need them. |
+| Each app has its own skills, tools and folders. | Skills, MCP tools and the folders and files you choose are delivered to the agents that need them. Take one off and it is turned off for that agent. |
+| You set the same agent up again in every project. | Build it once in Your agents, try it on its own, and add it to any team. Teams keep their version until you choose Update. |
 | Doing the job again means retyping the prompt. | One chat per team that remembers the conversation, **@** an agent to redo one step, and daily schedules. |
 
 ## How a run works
@@ -178,6 +201,33 @@ with a lead that hands out work and asks its teammates questions as it goes.
 <tr>
 <td width="33%" valign="top">
 
+### 🧑‍🔧 Your agents
+
+Build an agent once: its job, app, model, skills and the keys it may use. Try it on its own on a
+test bench, then add it to any team. A new job makes a new version, and teams keep theirs until you
+choose **Update**.
+
+</td>
+<td width="33%" valign="top">
+
+### 🧶 A face for every agent
+
+Pick each agent a figure from a sewing-box crew and a colour. It is the same on the canvas, in the
+team sentence, in the chat and in Details, and it moves only as the run record says.
+
+</td>
+<td width="33%" valign="top">
+
+### 🩺 Make it work better
+
+Each agent's panel suggests what would help, read from the team file and its last five runs, each
+with a one-click fix, and says about how many tokens a run uses.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
 ### 🧵 One team, many apps
 
 Each agent runs on its own app and model: Claude Code researches, Codex reviews, OpenCode writes on
@@ -186,18 +236,19 @@ a free model. Each agent uses its own app's sign-in or API key, under that provi
 </td>
 <td width="33%" valign="top">
 
-### 🗺️ Build on a canvas
+### 🗺️ Connect a workflow
 
-Hire agents by job, or from your own saved jobs, connect them in order, and read your team back as
-one plain sentence before anything runs.
+Add agents from **Your agents** or hire them by job, connect them in order, and read your team back
+as one plain sentence before anything runs.
 
 </td>
 <td width="33%" valign="top">
 
 ### 👀 Watch every step
 
-Live stages, tool calls, a team chat of what the agents said to each other, and a run receipt. Drag
-the timeline to replay what happened, and when.
+Live stages, tool calls, each agent's status in words, a team chat of what the agents said to each
+other, and a run receipt stamped with how the run ended and the tokens it used. Drag the timeline to
+replay what happened, and when.
 
 </td>
 </tr>
@@ -207,7 +258,7 @@ the timeline to replay what happened, and when.
 ### ✋ You stay in the loop
 
 Add a **You** step to approve the work or send it back with changes. Agents can also stop and ask you
-a question mid-run.
+a question mid-run. In **Auto** mode, commands that only read or download run without asking.
 
 </td>
 <td valign="top">
@@ -224,7 +275,7 @@ stream read it. Nothing is guessed from a title.
 
 Wire in the skills and MCP tools already on your computer, and give an agent any folder or file,
 PDFs included once `pdftotext` is installed (`brew install poppler`). LoomWatch delivers each one
-to the agents you choose.
+to the agents you choose, and turns off what you take off the canvas.
 
 </td>
 </tr>
@@ -283,8 +334,9 @@ model providers, as they always do.
 
 ## Teams you can build
 
-Every team below is made from the jobs in Build's library, each on the AI app it suits. Start from
-**New team**, then add, connect and rename agents to match. To run a team on a schedule, ask
+Every team below is made from the jobs under **Hire by job** in Workflow's add panel, each on the AI
+app it suits, or from agents you built in **Your agents**. Start from **New team**, then add, connect
+and rename agents to match. To run a team on a schedule, ask
 [Ask LoomWatch](#ask-loomwatch-to-set-up-a-team) to add one, or see [Routines](docs/WATCH.md#routines).
 
 | Team | The steps | Good for |
@@ -301,28 +353,28 @@ Every team below is made from the jobs in Build's library, each on the AI app it
 <tr>
 <td align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/build-dark.png">
-  <img src="docs/assets/readme/build-light.png" alt="Build view: a market brief team on the canvas. A weekday schedule feeds Researcher, then a review stop for you, then Writer, which produces the team response. Below the agents hang the sources each one was handed: a q3-reports folder, a brand-guide.md file, and a house-style skill shared by both. Above the canvas, the team is described in one sentence.">
+  <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/home-dark.webp">
+  <img src="site/assets/app/home-light.webp" alt="Home: Put AI agents to work as a team. Build an agent, New team and the 3-minute guide, a box to describe the job to Ask, the Agents, Workflow and Chat steps, a row of Your agents with their figures and versions, and Your teams below.">
 </picture>
-<br><sub><strong>Build.</strong> A team that runs every weekday, summed up in one sentence, with the folder, file and skill each agent was handed wired in beneath it.</sub>
+<br><sub><strong>Home.</strong> Your agents first, each with its face and version, then the teams they work in.</sub>
 </td>
 </tr>
 <tr>
 <td align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.png">
-  <img src="docs/assets/readme/chat-light.png" alt="The team's chat after a finished piece of work: Researcher's handover to you, your approval with a note for Writer, and the team's answer as a document card marked Nothing flagged, with Copy and Share. The brief is open in full beside the chat, under an Answer tab next to Details.">
+  <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/workflow-dark.webp">
+  <img src="site/assets/app/workflow-light.webp" alt="A team's Workflow tab: a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. Above the canvas the team is read back as one sentence, with each agent's figure. On the left, the add panel lists Your agents with their versions, then Hire by job. The heading offers One way to make it work better beside Run team.">
 </picture>
-<br><sub><strong>Chat.</strong> The handover, your review and the answer in one conversation, with the brief open beside it and its record one tab away in Details.</sub>
+<br><sub><strong>Workflow.</strong> Your agents on the canvas, connected in order and read back as one sentence.</sub>
 </td>
 </tr>
 <tr>
 <td align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/home-dark.png">
-  <img src="docs/assets/readme/home-light.png" alt="Home: Put AI agents to work as a team. A New team button, the Build, Ask, Review steps, and three team cards with their last run.">
+  <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/chat-dark.webp">
+  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab: Researcher answers Writer's question with two sources, Writer hands its draft to You, and Approve waits under it. Beside the chat, Details shows the live timeline with a replay slider and the team handoff, stage by stage. Commands · Ask me sits beside the message box.">
 </picture>
-<br><sub><strong>Home.</strong> Your teams at a glance, each with a woven mark of how its recent runs went.</sub>
+<br><sub><strong>Chat.</strong> What the agents say to each other, your review, and the record one pane away in Details.</sub>
 </td>
 </tr>
 </table>
@@ -483,8 +535,8 @@ awake. For scheduled runs and optional Notion delivery, see [Routines](docs/WATC
 
 3. Delete the program: `rm -rf ~/LoomWatch/app`, and `rm ~/.local/bin/loomwatch` if the installer
    made that shortcut.
-4. Your teams are kept in `~/LoomWatch/teams` until you delete `~/LoomWatch` too. It also holds your
-   saved jobs, deleted teams, the agents' working folders, and in `backups` the copies of your run
+4. Your teams are kept in `~/LoomWatch/teams` until you delete `~/LoomWatch` too. It also holds Your
+   agents, deleted teams, the agents' working folders, and in `backups` the copies of your run
    history that updates saved.
 5. LoomWatch remembers which teams you approved to run, and your update-check choices, in
    `~/Library/Application Support/LoomWatch` (`~/.local/state/loomwatch` on Linux). Delete that
@@ -557,16 +609,16 @@ settings meant for the Docker Compose mode below out of a local run.
 
 ## Try your first run
 
-The first time you open LoomWatch, a short guide offers to walk you through creating a team and
-running it with one of your own AI apps. Reopen it any time with **New here? Take the 3-minute
-guide** on Home, from the menu in a team, or by pressing <kbd>⌘</kbd><kbd>K</kbd> and choosing
-**Getting started guide**.
+The first time you open LoomWatch, a short guide offers to walk you through building your first
+agent, trying it on its own, putting it in a team and running it with one of your own AI apps.
+Reopen it any time with **New here? Take the 3-minute guide** on Home, from the menu in a team, or
+by pressing <kbd>⌘</kbd><kbd>K</kbd> and choosing **Getting started guide**.
 
 To try a team without calling a model provider, pick **Review stop demo** under **Your teams**. The
 demo is a three-step workflow: **Researcher → You → Writer**. Its agents produce fixed responses so
 you can learn the interface without calling a model provider.
 
-1. Click **Run team** to open the team's chat, type
+1. Open the team's **Chat** tab (or click **Run team** in **Workflow**), type
    `@team Prepare a short getting-started guide for new users.` in the message box at the bottom,
    and press <kbd>Enter</kbd> (<kbd>Shift</kbd>+<kbd>Enter</kbd> adds a new line). Only a message
    with an **@** starts work; the box says where each message goes before you send it.
@@ -591,7 +643,11 @@ with what should change; under its new version, **Continue with the team** runs 
    lists the AI apps it found. If none can run, **Set up an AI app** opens on the home screen. It
    checks each app's sign-in, not just that it is installed, and says when LoomWatch needs a
    restart to use an app installed after it started.
-3. Click **New team**, give it a name and choose how it should start:
+3. Click **Build an agent** on Home. Give it a name and its instructions, choose its app and model,
+   pin up the skills it needs and hand it the keys it may use without asking. Pick it a face, then
+   **Try it** with a real request: it runs on that app, counts toward that app's account, and asks
+   you before it uses a key it wasn't given. **Save to Your agents** when it does the job.
+4. Click **New team**, give it a name and choose how it should start:
    - **One assistant** — a single agent that does the whole task (recommended to begin with).
    - **Researcher and writer** — one agent gathers facts, a second writes the result.
    - **Research, your approval, then writing** — the team pauses so you can approve the research.
@@ -599,13 +655,15 @@ with what should change; under its new version, **Continue with the team** runs 
 
    Ready-made teams are saved straight away with your AI app's own default model, so you can
    run them immediately.
-4. Click **Run team**, describe what you want in plain words, and press <kbd>Enter</kbd>.
-5. To customise, open **Build**. Add an agent by job under **Hire by job**, such as Researcher or
-   Writer: click it or drag it onto the canvas, and it is set up on the best AI app you have. For a
-   blank agent on one app, pick that app under **AI apps**. Select a card to edit its name,
-   instructions and app, or click **Model and more settings** to change its model. Drag from the
-   dot on a card's right edge to the next card to make them work in order, and add **You (review
-   step)** wherever you want to approve work before the team continues.
+5. A team has three tabs: **Agents**, **Workflow** and **Chat**. On **Agents**, click **Add an
+   agent** to bring in one from Your agents. On **Workflow**, add more from the panel on the left:
+   **Your agents**, or a job under **Hire by job**, such as Researcher or Writer, which is set up on
+   the best AI app you have. For a blank agent on one app, pick that app under **AI apps**. Select a
+   card to edit its name, instructions and app, or click **Model and more settings** to change its
+   model. Drag from the dot on a card's right edge to the next card to make them work in order, and
+   add **You (review step)** wherever you want to approve work before the team continues.
+6. Click **Run team**, or open **Chat**, describe what you want in plain words, and press
+   <kbd>Enter</kbd>.
 
 LoomWatch connects to agent apps through ACP, a protocol for exchanging tasks and results.
 The Library recognizes these integrations:
@@ -647,11 +705,11 @@ layout; organizing does not change the workflow or start a run.
 <details>
 <summary><strong>Connect skills, knowledge and tools</strong></summary>
 
-The library on the left of **Build** lists the skills and MCP tools found on your computer, and
-the teams whose memory you can share. Add one to the canvas, then drag from an agent to it, or open
-the card's **Details & connections** and tick the agents that should use it. To give an agent a
-folder or a file, select the agent and use **Add folder…** or **Add file…** under **Context**. Save
-the team, and the next run delivers it:
+The add panel on the left of **Workflow** lists the skills and MCP tools found on your computer,
+and the teams whose memory you can share. Add one to the canvas, then drag from an agent to it, or
+open the card's **Details & connections** and tick the agents that should use it. To give an agent
+a folder or a file, select the agent and click **Folder** or **File** under **Given** in its
+**Context**. Save the team, and the next run delivers it:
 
 - A **skill** is copied into the agent's working folder and its instructions are given to the agent.
 - A **folder or file** is given to the agent as reference material: a folder's listing and README,
@@ -661,9 +719,18 @@ the team, and the next run delivers it:
 - A **tool** is your own MCP server, handed to that agent's app with the settings you already gave it
   in Claude Code, Codex or OpenCode.
 
+Taking a skill or tool card off the canvas, or the line from it to one agent, **turns it off** for
+that agent, even the copy its own app would load by itself. The agent's **Context** lists what is
+turned off, with a button to turn each back on, and under **Also from** its app, what the app brings
+of its own, each with a button to turn it off. For Claude Code agents this covers skills, tools and
+claude.ai connectors; for Codex agents, skills. Codex's own MCP servers can't be turned off yet, and
+the panel says so. When an agent's instructions still name what you removed, LoomWatch marks it, and
+**Rewrite with** your Ask app drops or rewrites just those sentences as one edit you can keep or put
+back.
+
 If something cannot be delivered (for example, a tool that is turned off in your app's settings),
 the run stops before it starts and says what to change. If an older team shows "drawn but not
-delivered to agents yet" at the top of Build, click **Deliver on the next run**, then save.
+delivered to agents yet" at the top of Workflow, click **Deliver on the next run**, then save.
 
 </details>
 
@@ -673,7 +740,7 @@ delivered to agents yet" at the top of Build, click **Deliver on the next run**,
 Choose **Team memory** from the ☰ menu to add shared instructions or reference files to the
 **Brief**. Use the **Notebook** to review reusable notes and checkpoints.
 
-Select an agent in Build to see its **Context**: its place in the team (for example "Step 2 of 3 ·
+Select an agent in Workflow to see its **Context**: its place in the team (for example "Step 2 of 3 ·
 after Researcher · hands its work to Writer"), the team Brief, and every skill, folder, file and
 tool connected to it, each with an × to disconnect it. In a team of two or more, each agent is told
 its place at the start of every run. In the Run view, an agent's **What this agent received** link
@@ -766,7 +833,7 @@ GLM, Qwen or Mistral.
 <summary><strong>What happens when an agent asks for permission to do something?</strong></summary>
 
 LoomWatch decides, so every AI app follows the same rules. It puts each app in its ask-first mode and
-answers every request itself. Each agent's panel in **Build** has three switches under **Allowed
+answers every request itself. Each agent's panel in **Workflow** has three switches under **Allowed
 without asking**: **Search the web**, **Edit files** (only in the agent's own folder) and **Run
 commands**. They start off, except **Search the web** for researchers. LoomWatch always allows the
 team's own handovers and the tools, folders and files you connected to the agent.
@@ -778,6 +845,15 @@ run**, **Allow for the whole team** (every agent in this run may use that tool w
 ended, such as "You allowed it, this once". The same question shows up in the Needs-you tray from
 any screen. If nobody answers within 10 minutes it is declined, and scheduled runs decline it
 straight away because nobody is watching.
+
+To ask less often, switch the team to **Auto** beside the chat's message box (**Commands · Ask me**
+→ **Auto**), or set `permissions: {mode: auto}` in the team file. A command an agent isn't allowed
+to run on its own then runs without asking when every part of it only reads inside the agent's
+folder, its knowledge or the temp folder, or is a plain download for an agent allowed the web.
+Anything that deletes, pushes, publishes, deploys, needs admin rights, touches credentials or runs a
+script given as text always asks, and so does everything else, with the reason on the card.
+LoomWatch decides this on your computer from the command itself; no model is asked and nothing is
+sent anywhere.
 
 The run records every request and who answered it. When something was declined, the run receipt says
 what the agent couldn't do and offers **Allow from now on**. OpenCode doesn't ask before it acts, so
@@ -927,8 +1003,8 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Team definitions and canvas layouts | `~/LoomWatch/teams`; Compose-only deployments use `LOOMWATCH_TEAMS_DIR` |
 | Brief files | Paths configured by the team, usually beside its YAML file |
 | Deleted teams | `.trash` inside your teams folder, one folder per deleted team |
-| Your saved jobs | `.jobs` inside your teams folder, one `<job>.yaml` per job; removed jobs move to `.jobs/.removed` |
-| Files you add to an agent (**Add file…**) | `<team>.files/` beside the team file |
+| Your agents | `.jobs` inside your teams folder, one `<agent>.yaml` per agent. Earlier versions are in `.jobs/.versions/<agent>/`, removed agents move to `.jobs/.removed`, and the one-agent teams that **Try it** runs are in `.jobs/.bench` |
+| Files you add to an agent (**File** under **Given**) | `<team>.files/` beside the team file |
 | Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
 | AI apps you connected to LoomWatch | `.loomwatch/connections.json` in your teams folder. It holds each app's private key. |
 | Team chats (your messages and every run), recorded events, Notebook entries and Ask conversations | The local PostgreSQL Docker volume |
@@ -962,13 +1038,19 @@ delete its folder from `.trash`.
 </details>
 
 <details>
-<summary>Reusing an agent as a saved job</summary>
+<summary>Reusing an agent with Your agents</summary>
 
-To reuse an agent that works, select it in Build and choose **Save as job**. It appears under
-**Your jobs** at the top of the palette, with its instructions, app, model and skills, and can be
-added to any team. Placing a job copies it into the team, so changing or removing the job later
-leaves existing teams alone. A job is one small file, so you can share it by copying it into another
-teams folder's `.jobs`.
+Build an agent in **Your agents** (**Build an agent** on Home), or keep one that works in a team:
+select it and choose **Add to Your agents**. It appears under **Your agents** in every team's add
+panel, with its instructions, app, model, skills and what it may do without asking.
+
+Placing it copies that version into the team, so a team runs exactly what it was approved with.
+Saving a change to what a team copies, such as its job, makes the next version and keeps the
+earlier ones; a new face keeps the version. The agent's panel in a team says when a newer version
+is ready and offers **Update to v…**, **Edit in Your agents**, or **Make it this team's own** to
+change it there alone. The builder lists the teams that use the agent and the version each one has.
+Removing an agent from Your agents leaves the teams' copies alone. An agent is one small file, so
+you can share it by copying it into another teams folder's `.jobs`.
 
 </details>
 
@@ -992,11 +1074,11 @@ teams folder's `.jobs`.
 | LoomWatch says another copy of LoomWatch is already running, or the page says "Couldn't list your teams" and none of your AI apps can start | An earlier copy is still running, often one whose folder you deleted before downloading LoomWatch again. Stop it with the `kill` command the message gives, then run `loomwatch` again. |
 | Team file not found | Confirm the file is in your teams folder (`~/LoomWatch/teams` unless you set `LOOMWATCH_TEAMS_ROOT`). The demo link uses `?path=operator-stop.yaml`, relative to that folder. |
 | Agent is missing or unavailable | Run `command -v <agent-command>` in the LoomWatch terminal. Authenticate the app, then restart LoomWatch from that same terminal. Compose-only deployments scan the container unless the native companion is running. |
-| Skill or tool is missing locally | Confirm it exists below your `.claude`, `.codex`, `.agents`, `.gemini`, `.hermes`, `.openclaw` or `.config/opencode` folder, then click ↻ beside **Search** in Build to scan again. Check that LoomWatch was not started with `LOOMWATCH_CAPABILITY_HOME` pointing elsewhere. |
-| Skill is missing in Compose | Copy its definition below `LOOMWATCH_CAPABILITIES_DIR` using the conventional harness path, then click ↻ beside **Search** in Build to scan again. Symlinks whose targets are outside that mounted root cannot be followed. |
+| Skill or tool is missing locally | Confirm it exists below your `.claude`, `.codex`, `.agents`, `.gemini`, `.hermes`, `.openclaw` or `.config/opencode` folder, then click ↻ beside **Search** in Workflow's add panel to scan again. Check that LoomWatch was not started with `LOOMWATCH_CAPABILITY_HOME` pointing elsewhere. |
+| Skill is missing in Compose | Copy its definition below `LOOMWATCH_CAPABILITIES_DIR` using the conventional harness path, then click ↻ beside **Search** in Workflow's add panel to scan again. Symlinks whose targets are outside that mounted root cannot be followed. |
 | Ask says it needs an AI app | Install and sign in to Claude Code, Codex or OpenCode, then start LoomWatch again from that terminal. |
 | Harness working directory is missing | Native teams should use a real host path accessible to the agent app. Container-run teams must use `/workspaces/...` and mount its host parent through `LOOMWATCH_WORKSPACES_DIR`. |
-| Agent cannot perform a tool action | While the run is going, answer its question in the run or the Needs-you tray before it is declined after 10 minutes. Afterwards, read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel in Build. An edit outside the agent's own folder is never allowed. |
+| Agent cannot perform a tool action | While the run is going, answer its question in the run or the Needs-you tray before it is declined after 10 minutes. Afterwards, read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel in Workflow. An edit outside the agent's own folder is never allowed. |
 | Build reports an unsupported Node version | Install the current Node.js from <https://nodejs.org/>, reopen Terminal, and check `node --version`. |
 | UI assets are missing or look out of date | Installed copy: run `~/LoomWatch/app/loomwatch update`. Copy of the source: stop LoomWatch, then start it with `./loomwatch --rebuild`. |
 | Cannot connect from another device | This setup serves runs and history only on your own computer at `127.0.0.1`. Use the browser on that computer. |
