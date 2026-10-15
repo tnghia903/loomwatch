@@ -878,13 +878,13 @@ html:not(.js) .open-stage, .open.still .open-stage { position: relative; height:
 /* ================================================================ 0.4: the crew, the acts, the agent builder, what it does */
 
 /* The cold open ends on the crew: the threads weave, and the team steps out of the cloth. */
-.open-crew { position: absolute; left: 50%; bottom: 2%; width: min(108%, 860px); height: auto; transform: translate(-50%, calc((1 - var(--crew, 0)) * 28px)) scale(calc(.94 + var(--crew, 0) * .06)); opacity: var(--crew, 0); pointer-events: none; filter: drop-shadow(0 18px 30px rgb(0 0 0 / .35)); }
+/* Centred by margins (the picture is 5:2, and a margin's % reads the field's width), so transform is free for the entrance and translate for the bob. */
+.open-crew { --crew-w: min(108%, 860px); position: absolute; left: 50%; top: 50%; width: var(--crew-w); height: auto; margin: calc(var(--crew-w) * -.2) 0 0 calc(var(--crew-w) / -2); transform: translateY(calc((1 - var(--crew, 0)) * 28px)) scale(calc(.94 + var(--crew, 0) * .06)); opacity: var(--crew, 0); pointer-events: none; filter: drop-shadow(0 18px 30px rgb(0 0 0 / .35)); }
 .open-crew.wave { animation: crew-bob 5.5s ease-in-out infinite; }
-@keyframes crew-bob { 0%, 100% { margin-top: 0; } 50% { margin-top: -6px; } }
+@keyframes crew-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -6px; } }
 html:not(.js) .open-crew { display: none; }
 .open.still .open-crew { --crew: 1; }
 .js .open-weft, .js .open-field .term { opacity: var(--cloth, 1); }
-.open-crew { top: 50%; bottom: auto; translate: 0 -50%; }
 
 /* An act: where the page is in the app's own three steps. */
 .act { position: relative; padding: 16vh 0 6vh; border-top: 1px solid var(--hairline); display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: clamp(20px, 4vw, 56px); align-items: end; }
@@ -1006,7 +1006,7 @@ html:not(.js) .open-crew { display: none; }
 @media (max-width: 640px) {
   .ag-kinds { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .can-under ul { grid-template-columns: minmax(0, 1fr); }
-  .open-crew { width: 112%; }
+  .open-crew { --crew-w: 112%; }
 }
 @media (prefers-reduced-motion: reduce) {
   .open-crew.wave, .ag-figure img { animation: none !important; }
