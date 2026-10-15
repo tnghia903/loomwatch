@@ -479,11 +479,13 @@
     const saved = shelved()
     const badge = $('#ag-badge')
     const changed = saved && (saved.job !== agentJob())
+    // A new face is saved too, but it keeps the version: the job is what versions an agent.
+    const newFace = saved && !changed && (saved.kind !== agent.kind || saved.color !== agent.color)
     $('#ag-version').textContent = saved ? `${saved.name} · v${saved.version}` : 'New agent'
-    badge.textContent = !saved ? 'Not saved yet' : changed ? `Changed since v${saved.version}` : `Saved · v${saved.version}`
+    badge.textContent = !saved ? 'Not saved yet' : changed ? `Changed since v${saved.version}` : newFace ? `New face · v${saved.version}` : `Saved · v${saved.version}`
     if (trial) return
-    badge.dataset.state = changed ? 'waiting' : ''
-    $('#ag-save').textContent = !saved ? 'Save to Your agents' : changed ? `Save as v${saved.version + 1}` : 'Saved'
+    badge.dataset.state = changed || newFace ? 'waiting' : ''
+    $('#ag-save').textContent = !saved ? 'Save to Your agents' : changed ? `Save as v${saved.version + 1}` : newFace ? 'Save the new face' : 'Saved'
   }
 
   // Any edit ends a test run: what was being tried is no longer this agent.
