@@ -13,6 +13,9 @@ import type { AllowSwitch } from '../team-file/types'
  * - `name`: the nameplate on the front of the bench.
  * - `job`: the pattern on the clipboard, its instructions.
  * - `skills`: recipe cards pinned on the pegboard, one per skill.
+ * - `reads`: the file holder at the back of the bench, with a folder, file or page standing in it
+ *   for each one it reads. Only in a team: what an agent reads is the team's to give (ADR 0042), so
+ *   an agent in Your agents has no holder.
  * - `keys`: keys on the pegboard hooks go ahead without asking; the ones in your dish ask you first.
  * - `reply`: the tray where what it hands back lands.
  *
@@ -20,7 +23,7 @@ import type { AllowSwitch } from '../team-file/types'
  * motion is a reaction to a change you just made, or what the test bench's run record says: every
  * pose is something the record shows, never a feeling it guesses.
  */
-export type FigurePart = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'keys' | 'reply'
+export type FigurePart = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'keys' | 'reply'
 
 /**
  * The nodes in workbench.glb that stand for each part (the model's own names, as made in Blender).
@@ -38,6 +41,7 @@ const PART_PREFIXES: readonly [string, FigurePart | null][] = [
   ['dish', 'keys'],
   ['tray', 'reply'],
   ['envelope', 'reply'],
+  ['reads', 'reads'],
   ['pegboard', null],
   ['bench', null],
   ['figure', 'mind'],
@@ -61,6 +65,17 @@ export const FIGURE_KEYS: readonly { key: AllowSwitch; node: string; word: strin
 
 /** How many recipe cards fit on the pegboard; more skills than this still count, they just aren't pinned. */
 export const CARD_SLOTS = 6
+
+/** One thing it reads, as the file holder shows it: a linked folder, an added file, or a Notion page. */
+export interface ReadSource {
+  kind: 'folder' | 'file' | 'page'
+  name: string
+  /** Where it is, in words: the folder's or file's path, or that it is a Notion page. */
+  where: string
+}
+
+/** How many fit in the file holder; more still count, they just don't stand in it. */
+export const READ_SLOTS = 4
 
 /**
  * What the figure is doing, from the test bench's run record only.

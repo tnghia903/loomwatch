@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { DetectedHarness } from '../harnesses'
 import type { AgentConfig } from '../team-file/types'
-import { draftFromTeamAgent, teamAgentEdit } from './teamDraft'
+import { draftFromTeamAgent, readsOf, teamAgentEdit } from './teamDraft'
 
 const claude: DetectedHarness = { id: 'claude', name: 'Claude Code', command: 'claude-agent-acp', executablePath: '/bin/claude-agent-acp', acpAvailable: true, spawn: { cmd: 'claude-agent-acp', args: [] } }
 const codex: DetectedHarness = { id: 'codex', name: 'Codex', command: 'codex-acp', executablePath: '/bin/codex-acp', acpAvailable: true, spawn: { cmd: 'codex-acp', args: ['--quiet'] } }
@@ -44,5 +44,26 @@ describe('a team’s own agent on the workbench', () => {
     expect(teamAgentEdit({ ...writer, capabilities: [{ kind: 'skill', name: 'house-style' }] }, 'skills', [], [claude])).toEqual({ kind: 'fields', fields: { capabilities: undefined } })
     expect(teamAgentEdit(writer, 'effort', '', [claude])).toEqual({ kind: 'fields', fields: { thinkingEffort: undefined } })
     expect(teamAgentEdit(writer, 'allow', { web: false, commands: true }, [claude])).toEqual({ kind: 'fields', fields: { allow: { commands: true } } })
+  })
+
+  it('reads what the team gives it to read, for its file holder: folders, files and Notion pages, in order', () => {
+    expect(readsOf({ capabilities: [
+      { kind: 'skill', name: 'house-style' },
+      { kind: 'knowledge', name: 'notes', path: '/Users/me/notes' },
+      { kind: 'tool', name: 'github' },
+      { kind: 'knowledge', name: 'brief.md', path: 'digest.files/brief.md' },
+      { kind: 'knowledge', name: 'ref.pdf', path: '/Users/me/ref.pdf' },
+      { kind: 'knowledge', name: 'Hub', notion: { page: 'abc' } },
+      // Knowledge without a path names nothing it can read (ADR 0036).
+      { kind: 'knowledge', name: 'nowhere' },
+      { kind: 'knowledge', name: '', path: '/Users/me/unnamed/' },
+    ] })).toEqual([
+      { kind: 'folder', name: 'notes', where: '/Users/me/notes' },
+      { kind: 'file', name: 'brief.md', where: 'digest.files/brief.md' },
+      { kind: 'file', name: 'ref.pdf', where: '/Users/me/ref.pdf' },
+      { kind: 'page', name: 'Hub', where: 'Notion page · read when each run starts' },
+      { kind: 'folder', name: 'unnamed', where: '/Users/me/unnamed/' },
+    ])
+    expect(readsOf({})).toEqual([])
   })
 })
