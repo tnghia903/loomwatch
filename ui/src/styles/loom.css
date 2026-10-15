@@ -287,8 +287,36 @@ span.story-schedule { cursor: default; }
   -webkit-mask: radial-gradient(circle at 50% 0, transparent 5px, #000 5.5px) 0 0 / 14px 8px repeat-x, linear-gradient(#000, #000) 0 7px / 100% calc(100% - 14px) no-repeat, radial-gradient(circle at 50% 100%, transparent 5px, #000 5.5px) 0 100% / 14px 8px repeat-x;
   mask: radial-gradient(circle at 50% 0, transparent 5px, #000 5.5px) 0 0 / 14px 8px repeat-x, linear-gradient(#000, #000) 0 7px / 100% calc(100% - 14px) no-repeat, radial-gradient(circle at 50% 100%, transparent 5px, #000 5.5px) 0 100% / 14px 8px repeat-x;
 }
-.receipt-head { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--color-accent); font-weight: 500; letter-spacing: .16em; text-transform: uppercase; font-size: 11px; }
-.receipt-title { margin: 6px 0 0; text-align: center; color: var(--color-ink-2); }
+/* The slip's head is a letterhead: which run, large on the left, weighs against the stamp of how it
+   ended on the right, so neither side is left blank. */
+.receipt-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.receipt-head { display: flex; align-items: center; gap: 8px; color: var(--color-accent); font-weight: 500; letter-spacing: .16em; text-transform: uppercase; font-size: 11px; }
+.receipt-title { margin: 4px 0 0; color: var(--color-ink); font-size: 24px; font-weight: 600; line-height: 1.2; letter-spacing: -.01em; }
+/* How the run ended, in ink rather than print: a round rubber stamp in the head's top-right corner,
+   where a clerk stamps PAID, set askew. It is the one thing on the slip in its outcome's colour, and
+   that colour is the marks' own tone. It hangs into the slip's margin, never over a line. */
+.receipt-slip { container: receipt / inline-size; }
+.receipt-stamp {
+  --stamp: var(--color-ink-2);
+  width: 112px; height: 112px; margin: -14px -10px -6px 0;
+  color: var(--stamp); rotate: -12deg; pointer-events: none;
+}
+.receipt-stamp svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.receipt-stamp circle { fill: none; stroke: currentColor; stroke-width: 1; }
+.receipt-stamp .stamp-rim { stroke-width: 2.5; }
+.receipt-stamp .stamp-dot { fill: currentColor; stroke: none; }
+.receipt-stamp text { fill: currentColor; font-family: var(--font-mono); text-anchor: middle; }
+.receipt-stamp .stamp-ring { font-size: 9px; font-weight: 600; letter-spacing: .26em; }
+.receipt-stamp .stamp-date { font-size: 7.5px; font-weight: 500; letter-spacing: .06em; }
+.receipt-stamp .stamp-word { font-weight: 800; letter-spacing: .06em; dominant-baseline: central; }
+.receipt-stamp.tone-ok { --stamp: var(--color-ok); }
+.receipt-stamp.tone-warn { --stamp: var(--color-accent); }
+.receipt-stamp.tone-bad { --stamp: var(--color-alert); }
+/* A narrow slip keeps the letterhead, with a smaller stamp and title. */
+@container receipt (max-width: 400px) {
+  .receipt-title { font-size: 20px; }
+  .receipt-stamp { width: 96px; height: 96px; margin: -10px -8px -4px 0; }
+}
 .receipt-slip hr { border: 0; border-top: 1px dashed color-mix(in srgb, var(--color-ink) 22%, transparent); margin: 14px 0; }
 .receipt-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 16px; margin: 0; }
 .receipt-facts dt { color: var(--color-ink-3); }

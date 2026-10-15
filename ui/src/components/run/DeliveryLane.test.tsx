@@ -95,9 +95,19 @@ describe('Delivery Lane', () => {
     // The receipt still prints what was asked: it is a slip of the record, copied whole.
     expect(screen.queryByText('Research LoomWatch', { selector: 'p, h1, h2' })).toBeNull()
     expect(screen.queryByRole('button', { name: /Review output|New run|Copy team output/ })).toBeNull()
-    // How it went leads, with how long it took; which run it was is the label above.
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Finished2m 53s')
-    expect(screen.getByText('Run 15')).toBeInTheDocument()
+    // How it went leads, stamped on the run's receipt under which run it was...
+    const slip = screen.getByRole('region', { name: 'Run receipt' })
+    expect(within(slip).getByRole('heading', { level: 1, name: 'Finished' })).toBeInTheDocument()
+    expect(within(slip).getByText('Run 15')).toBeInTheDocument()
+    // ...so the heading above the record says neither again, and keeps only its action.
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+    expect(screen.queryByText('2m 53s', { selector: '.delivery-took' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Full trace' })).toBeInTheDocument()
+  })
+  it('says how a run is going in its heading until the receipt is printed', () => {
+    setup({ phase: 'running', mode: 'live' })
+    expect(screen.queryByRole('region', { name: 'Run receipt' })).toBeNull()
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Running2m 53s')
   })
   it('inspects an unverified required skill', () => {
     setup()

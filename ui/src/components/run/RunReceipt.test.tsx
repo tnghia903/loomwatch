@@ -7,7 +7,9 @@ import { RunReceipt } from './RunReceipt'
 afterEach(cleanup)
 
 const receipt = (allowed: boolean): Receipt => ({
-  heading: 'Run 1 · Finished',
+  run: 'Run 1',
+  outcome: { word: 'Finished', tone: 'ok' },
+  endedAt: null,
   asked: 'Find the news',
   took: '1m',
   team: '1 helper',
@@ -79,5 +81,24 @@ describe('RunReceipt', () => {
   it('prints no Tokens line until the run’s numbers are known', () => {
     render(<RunReceipt receipt={receipt(true)} onInspectEvidence={vi.fn()} />)
     expect(screen.queryByText('Tokens')).toBeNull()
+  })
+
+  // How it went moved out of the Details heading: the slip leads with it, stamped in its tone.
+  it('stamps how the run ended, dated when the record ends', () => {
+    const endedAt = '2026-10-15T05:21:00.000Z'
+    render(<RunReceipt receipt={{ ...receipt(true), outcome: { word: 'Failed', tone: 'bad' }, endedAt }} onInspectEvidence={vi.fn()} />)
+    // The round stamp is drawn, so it is read by its words: the outcome, then the day.
+    const stamp = screen.getByRole('heading', { level: 1, name: /^Failed, / })
+    expect(stamp).toHaveClass('receipt-stamp', 'tone-bad')
+    expect(stamp.querySelector('time')).toHaveAttribute('dateTime', endedAt)
+    expect([...stamp.querySelectorAll('.stamp-word')].map((line) => line.textContent)).toEqual(['FAILED'])
+    expect(stamp.querySelector('.stamp-date')).not.toBeNull()
+  })
+
+  it('stamps no date when the record has no time, and breaks a long outcome over two lines', () => {
+    render(<RunReceipt receipt={{ ...receipt(true), outcome: { word: 'Finished with gaps', tone: 'warn' } }} onInspectEvidence={vi.fn()} />)
+    const stamp = screen.getByRole('heading', { level: 1, name: 'Finished with gaps' })
+    expect(stamp.querySelector('.stamp-date')).toBeNull()
+    expect([...stamp.querySelectorAll('.stamp-word')].map((line) => line.textContent)).toEqual(['FINISHED', 'WITH GAPS'])
   })
 })

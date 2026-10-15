@@ -236,17 +236,20 @@ export function DeliveryLane({
       }}
     >
       <section ref={work} className="delivery-work" aria-label="Team work">
-        <header className="delivery-heading">
-          <div>
-            {/* How it went leads; which run it was is a label above it, for the receipt and the trace. */}
-            <span className="delivery-eyebrow delivery-run-kicker">{planned ? 'Next run' : `Run ${attempt}`}</span>
-            <h1>
-              {planned
-                ? <>New run<span className="delivery-status status-idle">Not started</span></>
-                : <><span className={`delivery-outcome status-${phase}`}>{PHASE_WORDS[phase] ?? phase}</span>{elapsed && <span className="delivery-took">{elapsed}</span>}</>}
-            </h1>
-            {planned && <p>Describe the result you want to create.</p>}
-          </div>
+        <header className={`delivery-heading${runReceipt ? ' receipted' : ''}`}>
+          {/* How it went leads; which run it was is a label above it, for the receipt and the trace.
+              Once the run is over, its receipt says both, stamped on the slip, so they are not said here. */}
+          {!runReceipt && (
+            <div>
+              <span className="delivery-eyebrow delivery-run-kicker">{planned ? 'Next run' : `Run ${attempt}`}</span>
+              <h1>
+                {planned
+                  ? <>New run<span className="delivery-status status-idle">Not started</span></>
+                  : <><span className={`delivery-outcome status-${phase}`}>{PHASE_WORDS[phase] ?? phase}</span>{elapsed && <span className="delivery-took">{elapsed}</span>}</>}
+              </h1>
+              {planned && <p>Describe the result you want to create.</p>}
+            </div>
+          )}
           {/* One control per thing (ADR 0043, 0051): the full trace opens only here. What was asked,
               the answer, and its review live in the chat beside this record, so they are not here. */}
           {!planned && (

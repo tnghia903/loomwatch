@@ -43,6 +43,17 @@
   align-items: center;
   gap: 8px;
 }
+/* A finished run's outcome is stamped on its receipt, so the heading keeps only its actions: a
+   toolbar line over the sheet, not a band holding a button. */
+.delivery-heading.receipted,
+.delivery-shown .delivery-heading.receipted {
+  height: auto;
+  min-height: 0;
+  justify-content: flex-end;
+  padding: 14px 0 0;
+  margin-bottom: 10px;
+  border-bottom: 0;
+}
 .delivery-eyebrow {
   text-transform: uppercase;
   font-size: 11px;
