@@ -1458,7 +1458,13 @@ impl AcpProcess {
                 if !approved && is_permission_request(&message) {
                     let outcome = match self.asker.clone() {
                         Some(asker) => {
-                            ask_operator(&asker, &message, recorder.as_deref_mut()).await?
+                            ask_operator(
+                                &asker,
+                                &message,
+                                self.permissions.as_ref(),
+                                recorder.as_deref_mut(),
+                            )
+                            .await?
                         }
                         None => crate::permissions::AskOutcome::NotAsked,
                     };
@@ -2007,18 +2013,35 @@ fn is_permission_request(message: &Value) -> bool {
 }
 
 /// Put a request the policy declined to the run's operator and archive that it was asked and how
-/// it was answered, so the record says who decided — the person, the clock, or nobody: a routine's
-/// run has nobody to ask and declines at once (`not_asked`).
+/// it was answered, so the record says who decided — the person, the clock, Auto mode, or nobody:
+/// a routine's run has nobody to ask and declines at once (`not_asked`).
+///
+/// In a run that is in Auto mode (ADR 0061), a command that only reads or downloads runs without
+/// asking; the operator is asked about the rest, and the card says why Auto mode left it to them.
 async fn ask_operator(
     asker: &crate::permissions::PermissionAsker,
     request: &Value,
+    policy: Option<&crate::permissions::PermissionPolicy>,
     mut recorder: Option<&mut Recorder>,
 ) -> Result<crate::permissions::AskOutcome> {
+    use crate::auto_mode::Verdict;
     use crate::permissions::AskOutcome;
     let (title, kind, _) = crate::permissions::describe(request);
-    let (outcome, request_id) = if asker.allowed_for_run(request) {
+    let allowed_for_run = asker.allowed_for_run(request);
+    let verdict = if allowed_for_run {
+        None
+    } else {
+        policy.and_then(|policy| asker.auto(request, policy))
+    };
+    let auto_note = match &verdict {
+        Some(Verdict::Undecided(why)) => Some(why.clone()),
+        _ => None,
+    };
+    let (outcome, request_id) = if allowed_for_run {
         (AskOutcome::AllowedForRun, None)
-    } else if let Some(open) = asker.open(request) {
+    } else if verdict == Some(Verdict::Approved) {
+        (AskOutcome::AutoApproved, None)
+    } else if let Some(open) = asker.open(request, auto_note.clone()) {
         let request_id = open.request.id.clone();
         if let Some(recorder) = recorder.as_deref_mut() {
             // What the card asks, recorded whole, so the team's chat can show the ask after the
@@ -2034,6 +2057,7 @@ async fn ask_operator(
                         "switch": open.request.switch,
                         "detail": open.request.detail,
                         "expiresAt": open.request.expires_at,
+                        "autoNote": open.request.auto,
                     }),
                     Some(json!({"source": "loomwatch", "phase": "awaiting_permission"})),
                 )
@@ -2054,6 +2078,8 @@ async fn ask_operator(
                     "kind": kind,
                     "outcome": outcome.as_str(),
                     "allowed": outcome.allows(),
+                    "detail": crate::permissions::describe(request).2,
+                    "autoNote": auto_note,
                 }),
                 Some(json!({"source": "loomwatch", "phase": "permission_answered"})),
             )
@@ -3968,6 +3994,148 @@ mod tests {
             format!("{refused:#}").contains("CODEX_CONFIG"),
             "{refused:#}"
         );
+    }
+
+    /// ADR 0061: in a team in Auto mode, a command that only reads runs without asking; one that
+    /// may do more, and one on the fixed list, still wait for the operator, whose card says why
+    /// Auto mode left it to them. The fake app exits 9 unless each answer is the expected one.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn auto_mode_runs_commands_that_only_read_and_asks_about_the_rest(pool: PgPool) {
+        let script = r#"
+            set -eu
+            ask() {
+                printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":\"$1\",\"method\":\"session/request_permission\",\"params\":{\"sessionId\":\"auto-mode\",\"toolCall\":{\"toolCallId\":\"$1\",\"title\":\"Bash\",\"kind\":\"execute\",\"rawInput\":{\"command\":\"$2\"}},\"options\":[{\"optionId\":\"yes\",\"kind\":\"allow_once\"},{\"optionId\":\"no\",\"kind\":\"reject_once\"}]}}"
+                IFS= read -r answer
+                case "$answer" in *"\"optionId\":\"$3\""*) ;; *) exit 9 ;; esac
+            }
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"auto-mode"}}'
+            IFS= read -r _
+            ask look 'ls -la' yes
+            ask tests 'npm test' yes
+            ask clean 'rm -rf build' no
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
+        "#;
+        let team = crate::config::TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: agent\npermissions:\n  mode: auto\nagents:\n  - id: agent\n    name: Builder\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .expect("team");
+        assert_eq!(team.permissions.mode, crate::config::PermissionMode::Auto);
+        let registry = crate::runs::RunRegistry::default();
+        let record = crate::runs::RunRecord::queued(
+            "t.yaml".into(),
+            "Fix the build".into(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )
+        .expect("record");
+        assert!(record.auto_mode);
+        let run_id = record.run_id.clone();
+        registry.insert(record);
+        let cwd = std::env::current_dir().expect("cwd");
+        let archive = EventArchive::from_pool(pool);
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: cwd.clone(),
+            tools: Vec::new(),
+            // Nothing switched on: Auto mode is the only thing between a command and the operator.
+            permissions: Some(crate::permissions::PermissionPolicy::new(
+                crate::config::AgentAllow::default(),
+                &cwd,
+                [],
+                [],
+            )),
+            asker: Some(crate::permissions::PermissionAsker::new(
+                registry.operator_desk(Some(&archive)),
+                &run_id,
+                "agent",
+                "Builder",
+            )),
+        };
+        let operator = {
+            let registry = registry.clone();
+            let run_id = run_id.clone();
+            tokio::spawn(async move {
+                let mut seen = Vec::new();
+                for decision in [
+                    crate::permissions::PermissionDecision::AllowOnce,
+                    crate::permissions::PermissionDecision::Deny,
+                ] {
+                    let request = loop {
+                        if let Some(request) = registry
+                            .get(&run_id)
+                            .and_then(|record| record.permission_requests.first().cloned())
+                        {
+                            break request;
+                        }
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                    };
+                    registry
+                        .answer_permission(&run_id, &request.id, decision)
+                        .expect("the request is open");
+                    seen.push(request);
+                }
+                seen
+            })
+        };
+        let mut process = AcpProcess::spawn(&spec).expect("spawn");
+        process
+            .run_session("agent", "", "hello", &archive, Duration::from_secs(5))
+            .await
+            .expect("each request got the expected answer");
+        let seen = tokio::time::timeout(Duration::from_secs(5), operator)
+            .await
+            .expect("operator finished")
+            .expect("operator task");
+
+        assert_eq!(
+            seen.len(),
+            2,
+            "the command that only reads never reached the operator"
+        );
+        assert_eq!(seen[0].detail.as_deref(), Some("npm test"));
+        assert!(
+            seen[0]
+                .auto
+                .as_deref()
+                .is_some_and(|why| why.contains("may do more than read")),
+            "{:?}",
+            seen[0].auto
+        );
+        assert_eq!(seen[1].detail.as_deref(), Some("rm -rf build"));
+        assert_eq!(
+            seen[1].auto.as_deref(),
+            Some("Auto mode never runs this without you: it deletes files")
+        );
+
+        let events = archive.load_session("auto-mode").await.expect("events");
+        let answered: Vec<_> = events
+            .iter()
+            .filter(|event| event.payload["phase"] == "permission_answered")
+            .collect();
+        let outcomes: Vec<_> = answered
+            .iter()
+            .map(|event| event.payload["outcome"].as_str().unwrap_or_default())
+            .collect();
+        assert_eq!(outcomes, ["auto_approved", "allow_once", "deny"]);
+        assert_eq!(answered[0].payload["detail"], json!("ls -la"));
+        assert!(
+            answered[0].payload["requestId"].is_null(),
+            "nobody was asked"
+        );
+        let asked: Vec<_> = events
+            .iter()
+            .filter(|event| event.payload["phase"] == "awaiting_permission")
+            .map(|event| event.payload["autoNote"].as_str().unwrap_or_default())
+            .collect();
+        assert_eq!(asked.len(), 2);
+        assert!(asked[1].contains("it deletes files"), "{asked:?}");
     }
 
     /// ADR 0040: what the switches do not allow is put to the run's operator while the app waits,

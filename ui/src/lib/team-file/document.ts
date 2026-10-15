@@ -1,6 +1,6 @@
 import { type Document, isMap, isScalar, isSeq, parseDocument, stringify } from 'yaml'
 
-import type { AgentConfig, BriefEntryConfig, DeliverConfig, EdgeConfig, ScheduleConfig, TeamDocument } from './types'
+import type { AgentConfig, BriefEntryConfig, DeliverConfig, EdgeConfig, PermissionMode, ScheduleConfig, TeamDocument } from './types'
 
 /** The document could not be parsed as YAML, or does not shape up as a team file. */
 export class TeamFileParseError extends Error {
@@ -113,6 +113,15 @@ export class TeamFileModel {
   /** Remove the `schedule` block: the team runs only when someone asks it to. */
   clearSchedule(): void {
     this.doc.delete('schedule')
+  }
+
+  /**
+   * Set who decides what the agents' switches leave open (ADR 0061). `ask` is the default, so it
+   * removes the block rather than writing it out.
+   */
+  setPermissionMode(mode: PermissionMode): void {
+    if (mode === 'auto') this.doc.setIn(['permissions', 'mode'], 'auto')
+    else this.doc.delete('permissions')
   }
 
   /** Set the team-wide `deliver` block, or remove it with `null` (ADR 0038). */

@@ -87,6 +87,8 @@ export interface PermissionAsk {
   switch: string | null
   /** The query, command, address or path, when the request named one. */
   detail: string | null
+  /** Why Auto mode left this command to you, when the team was in Auto mode (ADR 0061). */
+  auto?: string | null
   /** How it was settled; `null` while it waits, or when the run ended first. */
   outcome: PermissionOutcome | null
   /** When it was settled. */
@@ -248,7 +250,7 @@ export class Correspondence {
     this.add(event, {
       id: `permission:${requestId}`, kind: 'permission', from: event.agentId, to: OPERATOR_ID, text: words(p.title) ?? 'An action',
       evidenceId, state: 'pending',
-      permission: { requestId, switch: words(p.switch), detail: words(p.detail), outcome: null, settled: null },
+      permission: { requestId, switch: words(p.switch), detail: words(p.detail), auto: words(p.autoNote), outcome: null, settled: null },
     })
   }
 

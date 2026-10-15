@@ -6,6 +6,7 @@ pub mod acp;
 pub mod api;
 pub mod approvals;
 pub mod archive;
+pub mod auto_mode;
 pub mod capabilities;
 pub mod chat;
 pub mod chosen_knowledge;
@@ -2912,6 +2913,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3038,6 +3040,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3182,6 +3185,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3338,6 +3342,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3410,6 +3415,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3498,6 +3504,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![pipeline_agent(
@@ -3578,6 +3585,7 @@ IFS= read -r _
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3637,6 +3645,7 @@ IFS= read -r _
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![pipeline_agent("solo", vec!["-c".into(), "exit 3".into()])],
@@ -3752,6 +3761,7 @@ IFS= read -r _
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: Some(crate::config::MemoryConfig {
                 enabled: true,
                 brief: vec![crate::config::BriefEntryConfig {
@@ -4070,6 +4080,7 @@ IFS= read -r _
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: Some(crate::config::MemoryConfig {
                 enabled: true,
                 brief: vec![crate::config::BriefEntryConfig {
@@ -4264,6 +4275,7 @@ IFS= read -r _
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: Some(crate::config::MemoryConfig {
                 enabled: true,
                 brief: vec![crate::config::BriefEntryConfig {
@@ -4450,6 +4462,7 @@ IFS= read -r _
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -4636,6 +4649,7 @@ IFS= read -r _
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -4833,6 +4847,7 @@ IFS= read -r _
                 stop: config::StopConfig { keep_alive_minutes },
                 ..ConversationConfig::default()
             },
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -5570,6 +5585,7 @@ IFS= read -r _
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![

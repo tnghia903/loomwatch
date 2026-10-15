@@ -772,3 +772,38 @@
 .delivery-heading h1 .delivery-outcome:is(.status-failed, .status-partial) { color: var(--color-alert); }
 .delivery-heading h1 .delivery-outcome:is(.status-running, .status-starting, .status-queued) { color: var(--color-live); }
 .delivery-heading h1 .delivery-took { margin-left: 10px; font-size: .55em; font-weight: 400; color: var(--color-ink-3); }
+
+/* ---------- Auto mode (ADR 0061): who decides the agents' commands, beside the message box ---------- */
+.tc-composer-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tc-composer-top > .tc-where { flex: 1; min-width: 0; }
+.tc-mode { position: relative; flex: none; }
+.tc-mode-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border: 1px solid var(--color-hairline); border-radius: 999px; background: none; font: 400 12px/1.5 var(--font-sans); color: var(--color-ink-3); cursor: pointer; white-space: nowrap; }
+.tc-mode-chip b { font-weight: 600; color: var(--color-ink-2); }
+.tc-mode-chip:hover:not(:disabled), .tc-mode-chip:focus-visible, .tc-mode-chip[aria-expanded='true'] { border-color: color-mix(in srgb, var(--color-ink) 30%, transparent); color: var(--color-ink-2); }
+.tc-mode-chip:disabled { cursor: default; }
+.tc-mode-chip.mode-auto { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-accent); }
+.tc-mode-chip.mode-auto b { color: var(--color-accent); }
+.tc-mode-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 6;
+  display: grid;
+  gap: 2px;
+  width: min(340px, calc(100cqi - 32px));
+  padding: 6px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  background: var(--color-panel-solid);
+}
+.tc-mode-title { margin: 2px 6px 4px; font-size: 12px; font-weight: 600; color: var(--color-ink-2); }
+.tc-mode-item { display: grid; grid-template-columns: 16px minmax(0, 1fr) 14px; align-items: center; gap: 2px 8px; padding: 7px 8px; border: 0; border-radius: 8px; background: none; font: inherit; text-align: left; color: var(--color-ink-2); cursor: pointer; }
+.tc-mode-item:hover:not(:disabled), .tc-mode-item:focus-visible { background: var(--color-accent-tint); outline: none; }
+.tc-mode-item:disabled { cursor: default; opacity: .55; }
+.tc-mode-item svg { color: var(--color-accent); }
+.tc-mode-name { font-size: 13px; font-weight: 600; color: var(--color-ink); }
+.tc-mode-says { grid-column: 2 / -1; font-size: 12px; line-height: 1.4; color: var(--color-ink-3); }
+.tc-mode-foot { margin: 4px 8px 2px; font-size: 11.5px; line-height: 1.45; color: var(--color-ink-3); }
+@media (prefers-reduced-motion: no-preference) {
+  .tc-mode-menu { animation: tc-pop var(--t-quick) var(--ease-out) both; transform-origin: bottom right; }
+}

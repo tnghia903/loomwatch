@@ -144,6 +144,18 @@ impl PermissionPolicy {
         Ok(config.to_string())
     }
 
+    /// The agent's working folder, resolved: where Auto mode lets a command read (ADR 0061).
+    #[must_use]
+    pub fn folder(&self) -> &Path {
+        &self.folder
+    }
+
+    /// The agent's `allow:` switches.
+    #[must_use]
+    pub const fn allow(&self) -> AgentAllow {
+        self.allow
+    }
+
     /// Whether to approve one `session/request_permission`, from the tool call it describes.
     ///
     /// The app's `kind` decides which switch applies: `fetch` is the web, `execute` a command,
@@ -195,6 +207,18 @@ impl PermissionPolicy {
         } else {
             resolve(&self.folder.join(path))
         }
+    }
+
+    /// Whether a command may read `path` without asking, as a `read` request may: inside the
+    /// agent's folder or its knowledge, and never a key file (ADR 0061).
+    pub(crate) fn may_read(&self, path: &Path) -> bool {
+        self.readable(&resolve(path))
+    }
+
+    /// Whether a command may write `path` without asking, as an `edit` request may: only with
+    /// `allow.edits`, inside the agent's folder, never its app's settings (ADR 0061).
+    pub(crate) fn may_write(&self, path: &Path) -> bool {
+        self.allow.edits && self.editable(&resolve(path))
     }
 
     fn editable(&self, path: &Path) -> bool {
@@ -262,6 +286,9 @@ pub struct PermissionRequest {
     pub since: String,
     /// RFC 3339: when it is declined if nobody answers.
     pub expires_at: String,
+    /// Why Auto mode left this command to the operator, when the run is in Auto mode (ADR 0061).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto: Option<String>,
     /// What "Allow for this run" covers ([`grant_scope`]). Internal: the card shows `kind`.
     #[serde(skip)]
     pub scope: String,
@@ -288,6 +315,8 @@ pub enum AskOutcome {
     NotAsked,
     /// The operator allowed this kind for the rest of the run earlier; allowed without asking.
     AllowedForRun,
+    /// The run is in Auto mode and the command only reads or downloads (ADR 0061).
+    AutoApproved,
     Answered(PermissionDecision),
     /// Nobody answered within [`PERMISSION_WAIT`]. Declined.
     TimedOut,
@@ -299,6 +328,7 @@ impl AskOutcome {
         matches!(
             self,
             Self::AllowedForRun
+                | Self::AutoApproved
                 | Self::Answered(
                     PermissionDecision::AllowOnce
                         | PermissionDecision::AllowRun
@@ -313,6 +343,7 @@ impl AskOutcome {
         match self {
             Self::NotAsked => "not_asked",
             Self::AllowedForRun => "allowed_for_run",
+            Self::AutoApproved => "auto_approved",
             Self::Answered(PermissionDecision::AllowOnce) => "allow_once",
             Self::Answered(PermissionDecision::AllowRun) => "allow_run",
             Self::Answered(PermissionDecision::AllowTeam) => "allow_team",
@@ -445,11 +476,26 @@ impl PermissionAsker {
             .allowed_for_run(&self.run_id, &self.agent, &grant_scope(request))
     }
 
-    /// Put one declined `session/request_permission` on the run record for the operator to answer.
-    /// `None` when nobody can be asked — a routine, or a run that has ended — and the request is
-    /// declined at once, as every request was before ADR 0040.
+    /// What Auto mode makes of `request` (ADR 0061), when this run is in Auto mode and the request
+    /// is one of the app's own commands; `policy` is the asking agent's.
     #[must_use]
-    pub fn open(&self, request: &Value) -> Option<OpenRequest> {
+    pub fn auto(
+        &self,
+        request: &Value,
+        policy: &PermissionPolicy,
+    ) -> Option<crate::auto_mode::Verdict> {
+        if !self.desk.registry().auto_mode(&self.run_id) {
+            return None;
+        }
+        crate::auto_mode::decide(request, policy)
+    }
+
+    /// Put one declined `session/request_permission` on the run record for the operator to answer,
+    /// with why Auto mode left it to them, when it did. `None` when nobody can be asked — a
+    /// routine, or a run that has ended — and the request is declined at once, as every request
+    /// was before ADR 0040.
+    #[must_use]
+    pub fn open(&self, request: &Value, auto: Option<String>) -> Option<OpenRequest> {
         let (title, kind, detail) = describe(request);
         let now = chrono::Utc::now();
         let wait = chrono::Duration::from_std(PERMISSION_WAIT).unwrap_or_default();
@@ -472,6 +518,7 @@ impl PermissionAsker {
             detail,
             since: stamp(now),
             expires_at: stamp(now + wait),
+            auto,
         };
         let answer = self
             .desk
@@ -515,7 +562,7 @@ impl OpenRequest {
 /// `/var/x` and `/private/var/x` compare equal, `folder/../elsewhere` is not inside `folder`, and a
 /// link inside the folder that points out of it is judged by where it points. A file about to be
 /// created does not exist yet, so only its deepest existing ancestor is resolved.
-fn resolve(path: &Path) -> PathBuf {
+pub(crate) fn resolve(path: &Path) -> PathBuf {
     let mut lexical = PathBuf::new();
     for component in path.components() {
         match component {

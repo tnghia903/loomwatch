@@ -2003,6 +2003,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -2128,6 +2129,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig {
                 max_dispatch_depth: 2,
@@ -2233,6 +2235,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig {
                 max_concurrent_dispatches: 1,
@@ -2305,6 +2308,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -2400,6 +2404,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: ["a", "b", "c", "d"]
@@ -2475,6 +2480,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![test_agent("lead", "/definitely/not/a/real/acp", Vec::new())],
@@ -2641,6 +2647,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -2825,6 +2832,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -2966,6 +2974,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3124,6 +3133,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3238,6 +3248,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![test_agent("a", "/bin/sh", vec!["-c".into(), script.into()])],
@@ -3370,6 +3381,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: Some(crate::config::MemoryConfig {
                 enabled: true,
                 brief: vec![crate::config::BriefEntryConfig {
@@ -3480,6 +3492,7 @@ mod tests {
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![test_agent("lead", "true", Vec::new()), helper],
@@ -3645,6 +3658,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
                 schedule: None,
                 deliver: None,
                 conversation: ConversationConfig::default(),
+                permissions: crate::config::TeamPermissions::default(),
                 memory: None,
                 guards: GuardsConfig::default(),
                 agents: vec![
@@ -3813,6 +3827,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3964,6 +3979,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             schedule: None,
             deliver: None,
             conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![

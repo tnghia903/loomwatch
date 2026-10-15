@@ -35,6 +35,8 @@ export interface InspectorProps {
   onAllowRecruitingChange: (allow: boolean) => void
   /** ADR 0037: one "Allowed without asking" switch. */
   onAllowChange?: (key: AllowSwitch, on: boolean) => void
+  /** The team is in Auto mode (ADR 0061): a command this agent's switch leaves open runs when it only reads or downloads. */
+  teamAutoMode?: boolean
   /** docs/TEAM_MEMORY.md §5: per-agent `memory.brief` / `memory.deliverAs`. */
   onMemoryBriefChange?: (readsBrief: boolean) => void
   onDeliverAsChange?: (deliverAs: 'native-file' | 'packet-only') => void
@@ -68,7 +70,7 @@ export interface InspectorProps {
 // it), WORKS IN and ALLOWED WITHOUT ASKING (where it works and what it may do there; ADR 0039
 // replaced PROCESS, whose command, arguments and environment stay in Show YAML).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
-export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage }: InspectorProps) {
+export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false }: InspectorProps) {
   const roleField = useRef<HTMLTextAreaElement>(null)
   const { agent, runtime } = node.data
   const status = runtime?.status ?? agent.status ?? 'idle'
@@ -197,7 +199,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
       </div>
 
       <div className="zone">
-        <AgentPermissions agent={agent} readOnly={readOnly} onChange={onAllowChange} headClassName="zone-head t-micro" />
+        <AgentPermissions agent={agent} readOnly={readOnly} onChange={onAllowChange} teamAuto={teamAutoMode} headClassName="zone-head t-micro" />
       </div>
 
       {!readOnly && (

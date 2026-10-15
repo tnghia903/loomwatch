@@ -54,6 +54,13 @@ export interface CapabilityRef {
   notion?: NotionPageRef
 }
 
+/** A skill or tool the agent's app has of its own, turned off for the agent (ADR 0060). A tool is
+    named by its MCP server, as the app lists it. */
+export interface TurnedOff {
+  kind: 'skill' | 'tool'
+  name: string
+}
+
 /** Which Notion page a knowledge entry or card reads (ADR 0050). */
 export interface NotionPageRef {
   page: string
@@ -74,6 +81,17 @@ export interface AgentAllow {
 
 export type AllowSwitch = keyof AgentAllow
 
+/**
+ * Who decides a command an agent's switches leave open (ADR 0061): `ask` puts it to you during the
+ * run; `auto` runs it when it only reads files or downloads a page, and asks you about the rest.
+ */
+export type PermissionMode = 'ask' | 'auto'
+
+/** The team's `permissions:` block (ADR 0061). */
+export interface TeamPermissions {
+  mode?: PermissionMode
+}
+
 export interface AgentConfig {
   id: string
   name: string
@@ -90,6 +108,9 @@ export interface AgentConfig {
   memory?: { brief?: boolean; deliverAs?: 'native-file' | 'packet-only' }
   /** What it may do without asking (ADR 0037). Absent, or a switch left out, means off. */
   allow?: AgentAllow
+  /** Skills and tools of its app's own the operator turned off for it by taking them off the
+      canvas (ADR 0060). Absent means none: the agent chooses from everything its app has. */
+  turnedOff?: TurnedOff[]
   // Runtime-only annotation. Team-file writers must never set this field;
   // it is exposed here only because readers must tolerate it on load.
   status?: AgentStatus
@@ -149,6 +170,8 @@ export interface TeamDocument {
   deliver?: DeliverConfig
   /** What the team knows before a run starts. Executable configuration, so it lives here. */
   memory?: MemoryConfig
+  /** Who decides what the agents' switches leave open (ADR 0061). Absent asks you. */
+  permissions?: TeamPermissions
   agents: AgentConfig[]
   edges: EdgeConfig[]
 }

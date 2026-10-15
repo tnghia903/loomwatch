@@ -65,6 +65,28 @@ pub struct TeamConfig {
     /// byte-for-byte what it was before memory existed. See `docs/TEAM_MEMORY.md`.
     #[serde(default)]
     pub memory: Option<MemoryConfig>,
+    /// How the agents' permission requests are answered beyond their own `allow:` switches
+    /// (ADR 0061). Absent asks the operator, as before Auto mode existed.
+    #[serde(default)]
+    pub permissions: TeamPermissions,
+}
+
+/// The `permissions:` block (ADR 0061).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TeamPermissions {
+    pub mode: PermissionMode,
+}
+
+/// Who decides a command an agent's switches leave open.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionMode {
+    /// The operator, during the run (ADR 0040).
+    #[default]
+    Ask,
+    /// Commands that only read or download run without asking; the rest still ask the operator.
+    Auto,
 }
 
 /// The `memory:` block: the Brief, its budget, and how it is delivered.

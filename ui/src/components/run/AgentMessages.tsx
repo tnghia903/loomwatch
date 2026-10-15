@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { bubbles as layOut, callsWhileWaiting, converse, fold, waited, type Bubble, type Party } from '../../lib/story/conversation'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
 import { clockTime } from '../../lib/chat/format'
-import { permissionAsks, permissionWhat } from '../../lib/runs/permissionRequests'
+import { autoNote, permissionAsks, permissionWhat } from '../../lib/runs/permissionRequests'
 import { clock, describeEvidence } from '../../lib/story/weft'
 import type { Evidence } from '../../lib/watch/events'
 import type { PermissionOutcome, TeamMessage } from '../../lib/watch/messages'
@@ -315,6 +315,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
               <div className="chat-file chat-permission">
                 <p className="chat-file-head"><ShieldQuestionMark size={15} aria-hidden="true" /><span>{permissionAsks(message.permission?.switch)}</span></p>
                 <p className="permission-what" title={permissionWhat({ title: text, detail: message.permission?.detail })}>{permissionWhat({ title: text, detail: message.permission?.detail })}</p>
+                {message.permission?.auto && <p className="permission-auto">{autoNote(message.permission.auto)}</p>}
               </div>
             ) : handover ? (
               <div className="chat-file">
