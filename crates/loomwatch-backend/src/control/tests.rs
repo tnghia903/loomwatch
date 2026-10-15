@@ -443,6 +443,63 @@ async fn the_person_chooses_the_app_and_model_a_conversation_uses(pool: PgPool) 
     }
 }
 
+/// ADR 0059: one turn of the Ask app, with no tools, returns each agent's instructions without the
+/// removed source; nothing is written and no conversation is left open.
+#[sqlx::test(migrations = "../../migrations")]
+async fn removing_a_source_rewrites_the_instructions_that_named_it(pool: PgPool) {
+    let fixture = Fixture::start(Some(EventArchive::from_pool(pool)), None).await;
+    let removed = |name: &str| json!({"name": name, "kind": "Notion page"});
+    let agents = json!([
+        {"id": "scope", "name": "Project scope", "role": "Establish the project's problem. Locate the EKIS page through the connected Notion tools. Reply with a brief."},
+        {"id": "plan", "name": "Plan writer", "role": "Maintain the plan on the canonical EKIS page."},
+    ]);
+
+    let (status, answer) = fixture
+        .post(
+            "/api/ask/instructions",
+            &json!({"removed": removed("EKIS — SUTD Final Project Hub"), "agents": agents}),
+        )
+        .await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(answer["appName"], "Offline assistant");
+    assert_eq!(
+        answer["agents"],
+        json!([{"id": "scope", "role": "Establish the project's problem. Reply with a brief."}]),
+        "an agent left with no instructions is not rewritten to nothing"
+    );
+    assert!(
+        fixture.control.inner.conversations.read().await.is_empty(),
+        "a rewrite is not an Ask conversation"
+    );
+    assert!(
+        std::fs::read_dir(&fixture.root.0)
+            .expect("teams folder")
+            .flatten()
+            .all(|entry| !entry.file_name().to_string_lossy().ends_with(".yaml")),
+        "nothing is written"
+    );
+
+    let (status, refused) = fixture
+        .post(
+            "/api/ask/instructions",
+            &json!({"removed": removed("an unreadable page"), "agents": agents}),
+        )
+        .await;
+    assert_eq!(status, 502, "{refused}");
+    assert_eq!(
+        refused["error"],
+        "Offline assistant replied without the rewritten instructions. Try again."
+    );
+
+    let (status, refused) = fixture
+        .post(
+            "/api/ask/instructions",
+            &json!({"removed": removed("EKIS"), "agents": []}),
+        )
+        .await;
+    assert_eq!(status, 422, "{refused}");
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_tool_server_needs_a_live_token_and_lists_only_its_tools(pool: PgPool) {
     let fixture = Fixture::start(

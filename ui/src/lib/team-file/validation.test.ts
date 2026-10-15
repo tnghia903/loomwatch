@@ -222,3 +222,17 @@ describe('a team file that still carries a legacy budget block', () => {
     expect(model.toYaml()).toContain('    budget:\n      limitUsd: 5\n      warnAtPercent: 80\n')
   })
 })
+
+// ADR 0060: an agent's turned-off list names skills and tools; the schema the daemon serves
+// refuses knowledge, the Team Bus, and a turned-off list on a review stop.
+describe('a turned-off list in the schema the daemon serves', () => {
+  const schema = parse(readFileSync(resolve(process.cwd(), '../schemas/team.schema.yaml'), 'utf8')) as object
+  const validate = compileWith(schema, Ajv2020)
+  const withOff = (turnedOff: unknown) => document({ agents: [{ ...document().agents[0], turnedOff } as never] })
+
+  it('accepts skills and tools, and refuses knowledge or the Team Bus', () => {
+    expect(validate(withOff([{ kind: 'skill', name: 'canvas-design' }, { kind: 'tool', name: 'claude.ai Notion' }])).valid).toBe(true)
+    expect(validate(withOff([{ kind: 'knowledge', name: 'notes' }])).valid).toBe(false)
+    expect(validate(withOff([{ kind: 'tool', name: 'loomwatch-team-bus' }])).valid).toBe(false)
+  })
+})

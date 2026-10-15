@@ -487,6 +487,7 @@ $defs:
             - required: [model]
             - required: [thinkingEffort]
             - required: [allow]
+            - required: [turnedOff]
     properties:
       id:
         $ref: "#/$defs/Identifier"
@@ -567,6 +568,32 @@ $defs:
             description: Run commands in a terminal. A command can do anything the operator can.
             type: boolean
             default: false
+      turnedOff:
+        description: >-
+          Skills and tools this agent's own app has that the operator turned off for it, by taking
+          them off the canvas (ADR 0060). Everything else the app has stays the agent's to choose.
+          A skill or tool wired to the agent in `capabilities` is never turned off by an entry of
+          the same name: wiring is how a skill is shared across apps. A tool is named by its MCP
+          server as the app lists it (`claude.ai Notion`). Not for an operator node.
+        type: array
+        default: []
+        items:
+          type: object
+          additionalProperties: false
+          required:
+            - kind
+            - name
+          properties:
+            kind:
+              type: string
+              enum:
+                - skill
+                - tool
+            name:
+              type: string
+              minLength: 1
+              not:
+                const: loomwatch-team-bus
       status:
         description: Runtime-only status; team-file writers omit it and readers ignore it.
         type: string

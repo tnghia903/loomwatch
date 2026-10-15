@@ -6,6 +6,7 @@ import { AgentPermissions } from './AgentPermissions'
 import { AgentWorkFolder } from './AgentWorkFolder'
 import { AgentUsageLine } from './AgentUsageLine'
 import { InstructionShape } from './InstructionShape'
+import { InstructionsUpdated } from './InstructionsUpdated'
 import { Inspector, type InspectorProps } from './Inspector'
 import { SaveAsJob } from './SaveAsJob'
 import { StatusGlyph } from '../ui/glyphs'
@@ -33,7 +34,8 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
     <div className="inspector-fields">
       <label>Name<input value={node.data.agent.name} disabled={readOnly} onChange={e => onRename('name', e.target.value)} /></label>
       {/* Instructions are prose; a one-line input hid all but the first few words of them. */}
-      <label>{reviewStep ? 'What to check' : 'Instructions'}<textarea ref={roleField} rows={4} value={node.data.agent.role} disabled={readOnly} onChange={e => onRename('role', e.target.value)} placeholder={reviewStep ? 'What should you look at before the team continues?' : 'What should this agent do?'} /></label>
+      <label>{reviewStep ? 'What to check' : 'Instructions'}<textarea ref={roleField} rows={4} className={props.instructionUpdate?.update.state === 'updated' ? 'instructions-marked' : undefined} value={node.data.agent.role} disabled={readOnly} onChange={e => onRename('role', e.target.value)} placeholder={reviewStep ? 'What should you look at before the team continues?' : 'What should this agent do?'} /></label>
+      {props.instructionUpdate && <InstructionsUpdated {...props.instructionUpdate} agent={node.data.agent} readOnly={readOnly} />}
       {!reviewStep && <InstructionShape role={node.data.agent.role} readOnly={readOnly} field={roleField} onChange={(role) => onRename('role', role)} />}
       {!reviewStep && props.checkup && props.checkup.findings.length > 0 && <section className="build-context" aria-label="Make it work better"><AgentCheckup {...props.checkup} readOnly={readOnly} headClassName="build-context-head" /></section>}
       {reviewStep
@@ -45,7 +47,7 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
             <AgentContext
               agent={node.data.agent} place={props.place} briefCount={props.briefCount} inheritedMemory={props.inheritedMemory} readOnly={readOnly}
               onPromoteEntrypoint={props.onPromoteEntrypoint} onMemoryBriefChange={props.onMemoryBriefChange} onRemoveCapability={props.onRemoveCapability}
-              teamPath={props.teamPath} onAddKnowledge={props.onAddKnowledge} headClassName="build-context-head"
+              teamPath={props.teamPath} onAddKnowledge={props.onAddKnowledge} onTurnBackOn={props.onTurnBackOn} appHas={props.appHas} onTurnOff={props.onTurnOff} headClassName="build-context-head"
             />
           </section>
           <section className="build-context" aria-label="Works in">

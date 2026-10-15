@@ -6,7 +6,7 @@ import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { splitModelSelector } from '../../lib/models'
 import type { AgentUsage } from '../../lib/team-file/runLessons'
 import type { AgentPlace } from '../../lib/team-file/agentPlace'
-import type { AllowSwitch, CapabilityRef } from '../../lib/team-file/types'
+import type { AllowSwitch, CapabilityRef, TurnedOff } from '../../lib/team-file/types'
 import { holdsTeamFile } from '../../lib/team-file/workFolder'
 import type { AgentField, AgentFieldProblems } from '../../lib/team-file/validation'
 import { StatusGlyph } from '../ui/glyphs'
@@ -16,6 +16,7 @@ import { AgentPermissions } from './AgentPermissions'
 import { AgentUsageLine } from './AgentUsageLine'
 import { InstructionShape } from './InstructionShape'
 import { AgentWorkFolder } from './AgentWorkFolder'
+import { InstructionsUpdated, type InstructionsUpdatedProps } from './InstructionsUpdated'
 import { roleGlyph } from './roleGlyph'
 
 export interface InspectorProps {
@@ -63,6 +64,13 @@ export interface InspectorProps {
   checkup?: Omit<AgentCheckupProps, 'readOnly' | 'headClassName'>
   /** What this agent used in the team's recent runs; absent before any run reported it. */
   usage?: { agent: AgentUsage; runs: number; alone: boolean }
+  /** What LoomWatch did to these instructions after a removal (ADR 0059), while it is marked. */
+  instructionUpdate?: Omit<InstructionsUpdatedProps, 'agent' | 'readOnly'>
+  /** Turn a turned-off skill or tool back on for this agent (ADR 0060). */
+  onTurnBackOn?: (entry: TurnedOff) => void
+  /** What the agent's app has of its own, and turning one off (ADR 0060). */
+  appHas?: { app: string; items: readonly TurnedOff[] } | null
+  onTurnOff?: (entry: TurnedOff) => void
 }
 
 // UX_REDESIGN §5.4: zones in the order the operator thinks — IDENTITY (what stands between a
@@ -70,7 +78,7 @@ export interface InspectorProps {
 // it), WORKS IN and ALLOWED WITHOUT ASKING (where it works and what it may do there; ADR 0039
 // replaced PROCESS, whose command, arguments and environment stay in Show YAML).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
-export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false }: InspectorProps) {
+export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff }: InspectorProps) {
   const roleField = useRef<HTMLTextAreaElement>(null)
   const { agent, runtime } = node.data
   const status = runtime?.status ?? agent.status ?? 'idle'
@@ -137,7 +145,8 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         <div className="zone-head t-micro">Identity</div>
         <div className={`field ${zoneClass('role')}`}>
           <label className="t-meta" htmlFor="insp-role">Role and instructions</label>
-          <textarea ref={roleField} id="insp-role" className="input" data-agent-field="role" value={agent.role} readOnly={readOnly} placeholder="What this agent should do, which sources to use, what to pass on." onChange={(event) => onRename('role', event.target.value)} onBlur={() => onFieldBlur('role')} />
+          <textarea ref={roleField} id="insp-role" className={instructionUpdate?.update.state === 'updated' ? 'input instructions-marked' : 'input'} data-agent-field="role" value={agent.role} readOnly={readOnly} placeholder="What this agent should do, which sources to use, what to pass on." onChange={(event) => onRename('role', event.target.value)} onBlur={() => onFieldBlur('role')} />
+          {instructionUpdate && <InstructionsUpdated {...instructionUpdate} agent={agent} readOnly={readOnly} />}
           <InstructionShape role={agent.role} readOnly={readOnly} field={roleField} onChange={(role) => onRename('role', role)} />
           <span className="hint t-meta">{hint('role', 'Included in every turn, including delegated work.')}</span>
         </div>
@@ -181,7 +190,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         <AgentContext
           agent={agent} place={place} pipeline={pipeline} briefCount={briefCount} inheritedMemory={inheritedMemory} readOnly={readOnly}
           onPromoteEntrypoint={onPromoteEntrypoint} onAllowRecruitingChange={onAllowRecruitingChange} onMemoryBriefChange={onMemoryBriefChange} onRemoveCapability={onRemoveCapability}
-          teamPath={teamPath} onAddKnowledge={onAddKnowledge} headClassName="zone-head t-micro"
+          teamPath={teamPath} onAddKnowledge={onAddKnowledge} onTurnBackOn={onTurnBackOn} appHas={appHas} onTurnOff={onTurnOff} headClassName="zone-head t-micro"
         />
       </div>
 

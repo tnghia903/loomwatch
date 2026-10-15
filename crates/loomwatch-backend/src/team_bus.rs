@@ -1246,7 +1246,7 @@ impl TeamBus {
             .unwrap_or_default();
         // A helper is held to its own switches, like any other agent of the team (ADR 0037).
         let permissions =
-            crate::permissions::PermissionPolicy::for_agent(agent.allow, &cwd, &delivery);
+            crate::permissions::PermissionPolicy::for_run_agent(agent, &cwd, &delivery);
         let spec = ProcessSpec {
             cmd: agent.spawn.cmd.clone(),
             args: agent.spawn.args.clone(),
@@ -4132,6 +4132,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             memory: None,
             allow_recruiting: true,
             allow: crate::config::AgentAllow::default(),
+            turned_off: Vec::new(),
         }
     }
 

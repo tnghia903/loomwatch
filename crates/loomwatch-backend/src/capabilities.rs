@@ -47,6 +47,10 @@ pub struct CapabilityInventory {
     pub skills: Vec<DetectedCapability>,
     pub tools: Vec<DetectedCapability>,
     pub sources: Vec<DetectedCapability>,
+    /// The claude.ai connectors the operator's Claude Code has connected (ADR 0060): tools every
+    /// Claude agent has of its own. Not in `tools`, because `LoomWatch` cannot give one to an
+    /// agent: only turn it off.
+    pub connectors: Vec<DetectedCapability>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -274,7 +278,63 @@ pub fn detect_capabilities(home: Option<&Path>, teams_root: &Path) -> Capability
         skills: finish_map(skills, "skill"),
         tools: finish_map(tools, "tool"),
         sources: finish_map(sources, "source"),
+        connectors: home.map(claude_connectors).unwrap_or_default(),
     }
+}
+
+/// Claude Code's own record of the claude.ai connectors it has connected
+/// (`claudeAiMcpEverConnected` in `~/.claude.json`), read rather than asked for: `claude mcp list`
+/// checks every server's health and takes most of a minute. Named as Claude names the server, so
+/// turning one off withholds `mcp__claude_ai_<name>` (ADR 0060).
+fn claude_connectors(home: &Path) -> Vec<DetectedCapability> {
+    let Some(Value::Array(names)) = read_json(&home.join(".claude.json"))
+        .and_then(|value| value.get("claudeAiMcpEverConnected").cloned())
+    else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = names
+        .into_iter()
+        .filter_map(|name| name.as_str().map(str::to_owned))
+        .filter(|name| !name.trim().is_empty())
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+        .into_iter()
+        .map(|name| DetectedCapability {
+            id: format!("connector:{name}"),
+            source: "Claude Code".to_owned(),
+            detail: "claude.ai connector".to_owned(),
+            status: "connected".to_owned(),
+            memory: None,
+            name,
+        })
+        .collect()
+}
+
+/// The server keys behind the tool the Library lists as `name`, in every app's config, so a tool
+/// the operator turned off is withheld under the name each app lists its tools by (ADR 0060). A
+/// name the configs do not have, such as a claude.ai connector's, is its own server name.
+#[must_use]
+pub fn tool_servers_named(home: Option<&Path>, name: &str) -> Vec<String> {
+    let item = DetectedCapability {
+        id: String::new(),
+        name: name.to_owned(),
+        source: "Claude Code + Codex + OpenCode".to_owned(),
+        detail: String::new(),
+        status: String::new(),
+        memory: None,
+    };
+    let mut servers: Vec<String> = home
+        .map(|home| tool_definitions_for(home, &item))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|definition| definition.server)
+        .collect();
+    servers.push(name.to_owned());
+    servers.sort();
+    servers.dedup();
+    servers
 }
 
 /// Load the definition of one already-detected capability. Skill bodies are read only for the
@@ -1383,6 +1443,40 @@ mod tests {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.0).expect("remove temp directory");
         }
+    }
+
+    /// ADR 0060: Claude Code's claude.ai connectors are listed from its own record, apart from the
+    /// tools `LoomWatch` can give; and a turned-off tool is found under each app's server name.
+    #[test]
+    fn claude_connectors_are_listed_apart_and_a_tool_resolves_to_its_server_names() {
+        let home = TempDirectory::new();
+        fs::write(
+            home.0.join(".claude.json"),
+            r#"{"claudeAiMcpEverConnected": ["claude.ai Notion", "claude.ai Gmail", "claude.ai Notion"],
+                "mcpServers": {"agentmemory": {"command": "npx"}}}"#,
+        )
+        .expect("claude.json");
+        let inventory = detect_capabilities(Some(&home.0), &home.0);
+        let connectors: Vec<&str> = inventory
+            .connectors
+            .iter()
+            .map(|item| item.name.as_str())
+            .collect();
+        assert_eq!(connectors, vec!["claude.ai Gmail", "claude.ai Notion"]);
+        assert!(
+            inventory
+                .tools
+                .iter()
+                .all(|tool| !tool.name.starts_with("claude.ai"))
+        );
+        assert_eq!(
+            tool_servers_named(Some(&home.0), "Agent Memory"),
+            vec!["Agent Memory".to_owned(), "agentmemory".to_owned()]
+        );
+        assert_eq!(
+            tool_servers_named(None, "claude.ai Notion"),
+            vec!["claude.ai Notion".to_owned()]
+        );
     }
 
     /// A team's memory is a knowledge source, and the row carries the ids wiring it will write —

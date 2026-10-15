@@ -220,7 +220,12 @@ fn withheld_app_config(spec: &ProcessSpec) -> Result<Option<String>> {
         .get(CODEX_CONFIG)
         .cloned()
         .or_else(|| std::env::var(CODEX_CONFIG).ok());
-    crate::permissions::PermissionPolicy::codex_config(current.as_deref())
+    let skills_off = spec
+        .permissions
+        .as_ref()
+        .map(crate::permissions::PermissionPolicy::turned_off_skills)
+        .unwrap_or_default();
+    crate::permissions::PermissionPolicy::codex_config(current.as_deref(), &skills_off)
         .map(Some)
         .context("cannot start Codex without its plugins and apps")
 }
@@ -830,8 +835,8 @@ impl AcpProcess {
     /// the app tools that reach past the run (ADR 0044). Only for a session with a
     /// [`ProcessSpec::permissions`] policy: the Ask assistant and model discovery keep every tool.
     fn session_params(&self, mut params: Value) -> Value {
-        if self.permissions.is_some() {
-            params["_meta"] = crate::permissions::PermissionPolicy::session_meta();
+        if let Some(policy) = &self.permissions {
+            params["_meta"] = policy.agent_meta();
         }
         params
     }
@@ -3923,7 +3928,7 @@ mod tests {
     async fn a_codex_run_agent_starts_without_its_plugins_and_apps(pool: PgPool) {
         let teams = r#"{"model_provider":"gateway"}"#;
         let withheld =
-            crate::permissions::PermissionPolicy::codex_config(Some(teams)).expect("config");
+            crate::permissions::PermissionPolicy::codex_config(Some(teams), &[]).expect("config");
         assert!(withheld.contains(r#""plugins":false"#) && withheld.contains(r#""apps":false"#));
         let script = |session: &str, expected: &str| {
             format!(

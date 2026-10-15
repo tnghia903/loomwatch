@@ -1,11 +1,12 @@
-import { Box, BookOpen, Check, FilePlus2, FolderPlus, Puzzle, ScrollText, Wrench, X } from 'lucide-react'
+import { Ban, Box, BookOpen, Check, FilePlus2, FolderPlus, Puzzle, RotateCcw, ScrollText, Wrench, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import { uniqueLabel } from '../../lib/composer-layout/types'
 import { chosenKnowledge } from '../../lib/knowledge/chosen'
 import { addTeamFile } from '../../lib/knowledge/client'
 import type { AgentPlace, PlaceLink } from '../../lib/team-file/agentPlace'
-import type { AgentConfig, CapabilityRef } from '../../lib/team-file/types'
+import type { AgentConfig, CapabilityRef, TurnedOff } from '../../lib/team-file/types'
+import { withheldByApp } from '../../lib/team-file/turnedOff'
 import { SectionHead } from '../ui/SectionHead'
 import { FolderPicker } from './FolderPicker'
 
@@ -28,6 +29,12 @@ export interface AgentContextProps {
   /** Connect knowledge the operator chose (ADR 0035). Called once per pick with everything added,
       so several files added together cannot overwrite each other. */
   onAddKnowledge?: (added: CapabilityRef[]) => void
+  /** Turn a skill or tool the operator turned off back on for this agent (ADR 0060). */
+  onTurnBackOn?: (entry: TurnedOff) => void
+  /** What the agent's app has of its own, by the scan of this computer (ADR 0060). */
+  appHas?: { app: string; items: readonly TurnedOff[] } | null
+  /** Turn one of the app's own skills or tools off for this agent. */
+  onTurnOff?: (entry: TurnedOff) => void
   /** The heading's look in the panel that shows it. */
   headClassName?: string
 }
@@ -51,7 +58,7 @@ const KIND: Record<CapabilityRef['kind'], { Icon: typeof Puzzle; label: string }
  * hands work to, and what it is given is a row of chips, dashed like their cards on the canvas.
  * The sentences that explain all this sit behind the heading's "?".
  */
-export function AgentContext({ agent, place, pipeline = false, briefCount = 0, inheritedMemory = [], readOnly = false, onPromoteEntrypoint, onAllowRecruitingChange, onMemoryBriefChange, onRemoveCapability, teamPath, onAddKnowledge, headClassName }: AgentContextProps) {
+export function AgentContext({ agent, place, pipeline = false, briefCount = 0, inheritedMemory = [], readOnly = false, onPromoteEntrypoint, onAllowRecruitingChange, onMemoryBriefChange, onRemoveCapability, teamPath, onAddKnowledge, onTurnBackOn, appHas, onTurnOff, headClassName }: AgentContextProps) {
   const capabilities = agent.capabilities ?? []
   // A team with no Brief supplies nothing, so the switch may not read as "on".
   const readsBrief = agent.memory?.brief !== false && briefCount > 0
@@ -83,6 +90,15 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
     setAdding(false)
   }
 
+  const turnedOff = agent.turnedOff ?? []
+  const listed = (entry: TurnedOff) => (list: readonly { kind: string; name: string }[]) => list.some((other) => other.kind === entry.kind && other.name === entry.name)
+  const fromApp = (appHas?.items ?? []).filter((entry) => !listed(entry)(capabilities) && !listed(entry)(turnedOff))
+  const appTools = fromApp.filter((entry) => entry.kind === 'tool').length
+  const appSkills = fromApp.length - appTools
+  // Only some apps' own copies can be withheld (ADR 0060): say so where one is not.
+  const spawned = [agent.spawn?.cmd ?? '', ...(agent.spawn?.args ?? [])].join(' ').toLowerCase()
+  const harness = spawned.includes('claude') ? 'claude' : spawned.includes('codex') ? 'codex' : 'other'
+  const ownCopyKept = turnedOff.some((entry) => !withheldByApp(harness, entry.kind))
   const entries = `${briefCount} ${briefCount === 1 ? 'entry' : 'entries'}`
   const broken = capabilities.filter((capability) => capability.kind === 'knowledge' && !capability.path && !capability.notion)
   return (
@@ -91,6 +107,7 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
         {place && <div>The agent is told its place in the team at the start of every run.</div>}
         <div>{briefCount > 0 ? `The team Brief (${entries}) is supplied at the start of every session. Switch it off to leave this agent out.` : 'No team Brief yet. Notes you add in Memory are supplied to every agent.'}</div>
         <div>Everything given is a card on the canvas. Drag a skill, tool, folder or file from the add panel onto this agent, or draw a line from another agent to a card to share it.</div>
+        <div>Besides what it is given, the agent can use what its own app has. Taking a skill or tool off the canvas turns it off, even the app's own copy, until it is wired again.</div>
       </>} />
       {place && (
         <div className="agent-context-place">
@@ -151,6 +168,46 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
         )}
         {!canAdd && nothingConnected && !(onMemoryBriefChange && briefCount > 0) && <span className="given-none t-meta">Nothing yet</span>}
       </div>
+      {turnedOff.length > 0 && (
+        <div className="context-given context-off">
+          <span className="context-label t-micro">Turned off</span>
+          <ul className="given-chips" aria-label="Turned off for this agent">
+            {turnedOff.map((entry) => {
+              const Icon = entry.kind === 'skill' ? Puzzle : Wrench
+              return (
+                <li key={`${entry.kind}:${entry.name}`} className="given-chip off" title={`${entry.name}\n${entry.kind === 'skill' ? 'Skill' : 'Tool'} · turned off, even its app's own copy`}>
+                  <Icon size={12} aria-hidden="true" />
+                  <span className="given-name">{entry.name}</span>
+                  <span className="visually-hidden">{entry.kind}, turned off</span>
+                  {onTurnBackOn && !readOnly && (
+                    <button type="button" className="given-remove" aria-label={`Turn ${entry.name} back on`} title="Turn back on" onClick={() => onTurnBackOn(entry)}><RotateCcw size={11} aria-hidden="true" /></button>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+      {appHas && fromApp.length > 0 && (
+        <details className="context-app-has">
+          <summary className="t-meta">Also from {appHas.app}: {[appTools > 0 && `${appTools} ${appTools === 1 ? 'tool' : 'tools'}`, appSkills > 0 && `${appSkills} ${appSkills === 1 ? 'skill' : 'skills'}`].filter(Boolean).join(' · ')}</summary>
+          <ul className="given-chips" aria-label={`Also from ${appHas.app}`}>
+            {fromApp.map((entry) => {
+              const Icon = entry.kind === 'skill' ? Puzzle : Wrench
+              return (
+                <li key={`${entry.kind}:${entry.name}`} className="given-chip app" title={`${entry.name}\n${entry.kind === 'skill' ? 'Skill' : 'Tool'} · ${appHas.app} has it; the agent decides when to use it`}>
+                  <Icon size={12} aria-hidden="true" />
+                  <span className="given-name">{entry.name}</span>
+                  {onTurnOff && !readOnly && (
+                    <button type="button" className="given-remove" aria-label={`Turn ${entry.name} off`} title="Turn off for this agent" onClick={() => onTurnOff(entry)}><Ban size={11} aria-hidden="true" /></button>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </details>
+      )}
+      {ownCopyKept && <div className="t-meta agent-context-warning">{harness === 'codex' ? 'Codex can still use a tool from its own settings' : 'This app can still use its own copy'}: turning it off here only stops LoomWatch giving it.</div>}
       {broken.map((capability) => <div key={capability.name} className="t-meta agent-context-warning">{capability.name} names no folder or file. Disconnect it and add one.</div>)}
 
       {canAdd && !teamPath && <div className="t-meta agent-context-empty">Save the team to add a file: it is copied next to the team file.</div>}

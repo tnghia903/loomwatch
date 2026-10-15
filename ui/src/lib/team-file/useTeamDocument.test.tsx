@@ -151,6 +151,34 @@ describe('useTeamDocument', () => {
     expect(result.current.documentChipState).toBe('dirty')
   })
 
+  it('turns skills off for several agents in one edit, and wiring one again turns it back on (ADR 0060)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) =>
+      String(input) === '/api/config/schema' ? jsonResponse(200, SCHEMA_GATE) : jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML }),
+    ))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.nodes).toHaveLength(2))
+    const agent = (id: string) => result.current.nodes.find((node) => node.id === id)?.data.agent
+    act(() => result.current.turnOff(new Map([
+      ['researcher', [{ kind: 'skill' as const, name: 'canvas-design' }, { kind: 'tool' as const, name: 'agentmemory' }]],
+      ['reviewer', [{ kind: 'skill' as const, name: 'canvas-design' }]],
+    ])))
+    expect(agent('researcher')?.turnedOff).toEqual([{ kind: 'skill', name: 'canvas-design' }, { kind: 'tool', name: 'agentmemory' }])
+    expect(agent('reviewer')?.turnedOff).toEqual([{ kind: 'skill', name: 'canvas-design' }])
+    expect(result.current.yamlPreview).toContain('turnedOff:')
+
+    act(() => result.current.setAgentCapabilities('researcher', [{ kind: 'skill', name: 'canvas-design' }]))
+    expect(agent('researcher')?.turnedOff).toEqual([{ kind: 'tool', name: 'agentmemory' }])
+    act(() => result.current.turnBackOn('researcher', { kind: 'tool', name: 'agentmemory' }))
+    expect(agent('researcher')?.turnedOff).toBeUndefined()
+    expect(agent('reviewer')?.turnedOff).toEqual([{ kind: 'skill', name: 'canvas-design' }])
+
+    act(() => result.current.undo())
+    act(() => result.current.undo())
+    act(() => result.current.undo())
+    expect(agent('researcher')?.turnedOff).toBeUndefined()
+    expect(agent('reviewer')?.turnedOff).toBeUndefined()
+  })
+
   it('resolves a relative requested path against the canonical teams root for display', async () => {
     setPath('nested/research-team.yaml')
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {

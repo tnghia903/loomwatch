@@ -164,6 +164,35 @@ export async function reportProposalOutcome(id: string, outcome: ProposalOutcome
   await read(await post(`/api/ask/proposals/${encodeURIComponent(id)}/outcome`, { outcome }))
 }
 
+export interface InstructionsRewrite {
+  app?: string | null
+  model?: string | null
+  /** What was taken off the canvas, as its card showed it. */
+  removed: { name: string; kind: string }
+  agents: { id: string; name: string; role: string }[]
+}
+
+/** The daemon gives the app three minutes; this waits a little longer so its own answer arrives. */
+const REWRITE_TIMEOUT_MS = 200_000
+
+/**
+ * The named agents' instructions without the removed source (ADR 0059), from one turn of the Ask
+ * app with no tools. Only agents the app answered for come back; nothing is saved.
+ */
+export async function rewriteInstructions(request: InstructionsRewrite): Promise<{ id: string; role: string }[]> {
+  const body = await read<{ agents?: { id: string; role: string }[] }>(await daemonFetch('/api/ask/instructions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      removed: request.removed, agents: request.agents,
+      ...(request.app ? { app: request.app } : {}), ...(request.app && request.model ? { model: request.model } : {}),
+    }),
+    cache: 'no-store',
+    signal: AbortSignal.timeout(REWRITE_TIMEOUT_MS),
+  }))
+  return Array.isArray(body?.agents) ? body.agents : []
+}
+
 export async function fetchInbox(signal?: AbortSignal): Promise<InboxItem[]> {
   const body = await read<{ items?: InboxItem[] }>(await daemonFetch('/api/ask/inbox', { signal, cache: 'no-store' }))
   return Array.isArray(body?.items) ? body.items : []

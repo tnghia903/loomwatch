@@ -12,6 +12,7 @@
 //! reload shows exactly what was proposed.
 
 mod connect;
+mod instructions;
 mod mcp;
 #[cfg(test)]
 mod tests;
@@ -251,6 +252,7 @@ impl Control {
                 "/api/ask/conversations/{id}/run-requests/{request}",
                 post(decide_run_request),
             )
+            .route("/api/ask/instructions", post(instructions::rewrite))
             .route("/api/ask/inbox", get(inbox))
             .route("/api/ask/proposals/{id}", get(get_proposal))
             .route("/api/ask/proposals/{id}/outcome", post(proposal_outcome))
@@ -562,6 +564,19 @@ fn assistant_spec(
     workspace: PathBuf,
     token: &str,
 ) -> ProcessSpec {
+    ProcessSpec {
+        tools: vec![control_tool(&control.mcp_url(), token)],
+        ..app_spec(control, app, workspace)
+    }
+}
+
+/// The app on its own, with no tools: what [`assistant_spec`] starts from, and all a one-turn
+/// rewrite needs (ADR 0059).
+fn app_spec(
+    control: &Control,
+    app: &crate::api::DetectedHarness,
+    workspace: PathBuf,
+) -> ProcessSpec {
     let command = control
         .inner
         .search_path
@@ -576,7 +591,7 @@ fn assistant_spec(
         args: app.spawn.args.clone(),
         env: BTreeMap::new(),
         cwd: workspace,
-        tools: vec![control_tool(&control.mcp_url(), token)],
+        tools: Vec::new(),
         // The Ask assistant keeps its own rule: only its Control tools (ADR 0033).
         permissions: None,
         asker: None,
