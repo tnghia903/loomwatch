@@ -219,7 +219,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
                 return (
                 <li key={team.path} style={{ ['--card-i' as string]: index }}>
                   <button type="button" className={`home-card ${fabric.waiting ? 'waiting' : ''}${unread ? ' unread' : ''}`} onClick={() => openTeam(team.path, preview ? 'chat' : 'build')}>
-                    <span className="home-card-name">{teamDisplayName(team)}{fabric.waiting && <em className="home-card-waiting">Waiting for you</em>}{unread && <i className="home-card-unread" aria-label="New since you looked" />}</span>
+                    <span className="home-card-name"><span className="home-card-title" title={teamDisplayName(team)}>{teamDisplayName(team)}</span>{fabric.waiting && <em className="home-card-waiting">Waiting for you</em>}{unread && <i className="home-card-unread" aria-label="New since you looked" />}</span>
                     {preview && (
                       <span className="home-card-chat"><span className="home-card-line">{preview.line}</span><time dateTime={preview.at}>{listTime(preview.at)}</time></span>
                     )}
