@@ -12,6 +12,7 @@ import { rankHarnesses } from '../../lib/team-file/templates'
 import { AgentPermissions } from '../canvas/AgentPermissions'
 import { InstructionShape } from '../canvas/InstructionShape'
 import { AgentBadge } from './AgentBadge'
+import { ByHand } from './ByHand'
 import { SkillPicker } from './SkillPicker'
 import { TestBench } from './TestBench'
 import { navigate } from './route'
@@ -28,6 +29,10 @@ export interface AgentBuilderProps {
   /** The team the operator came from ("Edit in Your agents"), so the way back is one click. */
   cameFrom?: string | null
 }
+
+type View = 'hand' | 'details'
+const VIEW_KEY = 'loomwatch:agent-builder-view'
+const readView = (): View => { try { return localStorage.getItem(VIEW_KEY) === 'details' ? 'details' : 'hand' } catch { return 'hand' } }
 
 type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; version: number; bumped: boolean } | { kind: 'error'; message: string }
 
@@ -48,6 +53,8 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
   const [note, setNote] = useState('')
   const [save, setSave] = useState<SaveState>({ kind: 'idle' })
   const [removing, setRemoving] = useState(false)
+  const [view, setViewState] = useState<View>(readView)
+  const setView = (next: View) => { setViewState(next); try { localStorage.setItem(VIEW_KEY, next) } catch { /* a private window keeps it for this page only */ } }
   const roleField = useRef<HTMLTextAreaElement>(null)
 
   // Start once per agent: from the saved version, from a built-in job, or blank on the best app.
@@ -144,6 +151,8 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
   const behindUses = version ? mine.filter((use) => use.version < version).length : 0
   const saveLabel = !saved ? 'Save to Your agents' : bumps ? `Save as v${(version ?? 1) + 1}` : 'Save'
   const permissionsAgent = agentFromDraft(draft, harness)
+  const badge = <AgentBadge markId={saved?.id ?? (draft.name || 'new')} draft={draft} harness={harness} modelName={modelName} version={saved && !changed ? version : null} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses, behind: behindUses } : undefined} />
+  const bench = <TestBench draft={draft} harness={harness} model={resolvedModel} benchId={benchId} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} />
 
   return (
     <div className="agent-builder">
@@ -167,7 +176,15 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
         </div>
       </header>
 
-      <div className="agent-builder-grid">
+      <div className="agent-view-switch" role="group" aria-label="How to build it">
+        <button type="button" aria-pressed={view === 'hand'} onClick={() => setView('hand')}>By hand</button>
+        <button type="button" aria-pressed={view === 'details'} onClick={() => setView('details')}>Details</button>
+      </div>
+      {view === 'hand' && <ByHand draft={draft} set={set} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} />}
+
+      <div className={`agent-builder-grid${view === 'hand' ? ' hand' : ''}`}>
+        {view === 'details'
+          ? <>
         <div className="agent-builder-form">
           <section className="agent-section" aria-label="Who it is">
             <div className="agent-section-head">Who it is</div>
@@ -211,9 +228,11 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
           </section>
         </div>
 
+          </>
+          : <div className="agent-builder-form">{bench}</div>}
         <aside className="agent-builder-side">
-          <AgentBadge markId={saved?.id ?? (draft.name || 'new')} draft={draft} harness={harness} modelName={modelName} version={saved && !changed ? version : null} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses, behind: behindUses } : undefined} />
-          <TestBench draft={draft} harness={harness} model={resolvedModel} benchId={benchId} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} />
+          {badge}
+          {view === 'details' && bench}
 
           {saved && (
             <section className="agent-section" aria-label="Used in">

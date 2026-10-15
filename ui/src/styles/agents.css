@@ -150,3 +150,56 @@
 /* the add panel's way in */
 .palette-build-agent { display: block; color: var(--color-accent); text-decoration: none; }
 .palette-build-agent:hover { text-decoration: underline; }
+
+/* ---------- Build by hand ---------- */
+.agent-view-switch { display: inline-flex; align-self: flex-start; padding: 3px; gap: 2px; border-radius: var(--r-md); background: var(--color-panel-solid); border: 1px solid var(--color-hairline); }
+.agent-view-switch button { border: 0; background: none; padding: 6px 14px; border-radius: var(--r-sm); font: 500 13px/1 var(--font-sans); color: var(--color-ink-3); cursor: pointer; }
+.agent-view-switch button[aria-pressed="true"] { background: var(--color-accent-tint); color: var(--color-accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent); }
+.agent-builder-grid.hand { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+.agent-builder-grid.hand .agent-builder-side { position: static; }
+
+.byhand { display: flex; flex-direction: column; gap: var(--sp-3); }
+.byhand-say { margin: 0; font-size: 15px; line-height: 1.5; color: var(--color-ink-2); }
+.byhand-say b { color: var(--color-ink); font-weight: 600; }
+/* The desk is a picture, dark in both themes, so what sits on it uses fixed dark-glass colours. */
+/* The render leaves room above the tallest objects; most of it is empty, so pull the desk up into it. */
+.byhand-stage { position: relative; width: 100%; max-width: 100%; margin-top: -4%; user-select: none; -webkit-user-select: none; }
+.byhand-stage > img { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.byhand-tag { position: absolute; transform: translate(-50%, calc(-100% - 6px)); padding: 4px 10px; border-radius: var(--r-full); background: rgba(8, 8, 10, .82); color: #F5F3EE; font: 500 12px/1.3 var(--font-sans); white-space: nowrap; pointer-events: none; box-shadow: 0 0 0 1px rgba(255, 255, 255, .12); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.byhand-tag.quiet { transform: translate(-50%, 8px); color: #A9A59C; }
+.byhand-parts { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: 1px; }
+.byhand-parts i { width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px #85817A; }
+.byhand-parts i.on { background: #E9C46A; box-shadow: none; }
+.byhand-plate { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; overflow: hidden; pointer-events: none; text-align: center; }
+.byhand-plate b { font: 400 clamp(11px, 1.6vw, 19px)/1.05 var(--font-serif); color: #17150F; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 92%; }
+.byhand-plate em { font: 500 clamp(8px, .9vw, 11px)/1.2 var(--font-sans); font-style: normal; color: #56524A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 92%; }
+.byhand-spot { position: absolute; border: 1.5px dashed transparent; border-radius: 14px; background: none; padding: 0; cursor: pointer; transition: border-color .15s, background-color .15s; }
+.byhand-spot:hover, .byhand-spot:focus-visible, .byhand-spot.open { border-color: rgba(233, 196, 106, .85); background: rgba(233, 196, 106, .07); outline: none; }
+.byhand-stage.dragging-key .zone-rack, .byhand-stage.dragging-key .zone-dish, .byhand-stage.dragging-skill .zone-box { border-color: #E9C46A; border-style: solid; background: rgba(233, 196, 106, .12); }
+.byhand-key { position: absolute; border: 0; background: none; padding: 0; cursor: grab; border-radius: 10px; z-index: 1; }
+.byhand-key:hover, .byhand-key:focus-visible { outline: 1.5px solid rgba(233, 196, 106, .9); outline-offset: 2px; }
+.byhand-key:active { cursor: grabbing; }
+
+.byhand-drawer { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-hairline)); border-radius: var(--r-lg); background: var(--color-panel-solid); }
+.byhand-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); font-size: 14px; }
+.byhand-drawer-head b { font-weight: 600; }
+.byhand-drawer > .t-meta { margin: 0; color: var(--color-ink-3); }
+.byhand-keys { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.byhand-keys li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--sp-3); align-items: center; padding: var(--sp-3); border-radius: var(--r-md); border: 1px solid var(--color-hairline); color: var(--color-ink-3); }
+.byhand-keys li.on { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-accent); }
+.byhand-keys li span { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; color: var(--color-ink); }
+.byhand-keys li em { font-style: normal; font-size: 12.5px; color: var(--color-ink-2); }
+.byhand-reply { margin: 0; padding: var(--sp-3) var(--sp-4); border-left: 3px solid var(--color-accent); background: var(--color-ground); border-radius: var(--r-sm); font-size: 14px; color: var(--color-ink); }
+.byhand-shelf { display: flex; flex-direction: column; gap: var(--sp-2); }
+.byhand-shelf > .t-meta { margin: 0; color: var(--color-ink-3); }
+.byhand-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--sp-2); }
+.byhand-cards li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--sp-2); padding: 12px 10px 10px 12px; border-radius: var(--r-md); background: #EFEAE0; color: #17150F; cursor: grab; box-shadow: 0 1px 0 rgba(0, 0, 0, .25), 0 6px 14px -8px rgba(0, 0, 0, .6); }
+.byhand-cards li:active { cursor: grabbing; }
+.byhand-cards li b { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.byhand-cards li span:not(.byhand-card-tab) { grid-column: 1; font-size: 11.5px; color: #56524A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.byhand-cards li .iconbtn { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: #17150F; }
+.byhand-card-tab { position: absolute; top: -5px; left: 12px; width: 34px; height: 9px; border-radius: 4px; background: #E9C46A; }
+.byhand-cards li:nth-child(3n + 2) .byhand-card-tab { background: #D9D2C4; }
+.byhand-cards li:nth-child(3n) .byhand-card-tab { background: #85817A; }
+@media (max-width: 900px) { .agent-builder-grid.hand { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 640px) { .byhand-tag { font-size: 10px; padding: 2px 7px; } }
