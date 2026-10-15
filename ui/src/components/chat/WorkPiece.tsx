@@ -8,7 +8,7 @@ import type { ChatItem, ChatMessage } from '../../lib/chat/client'
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
 import { clockTime, listNames, took } from '../../lib/chat/format'
 import { answerRun, cancelRun, isTerminalRun, type RunRecord } from '../../lib/runs/client'
-import { plainRunError } from '../../lib/runs/errors'
+import { failedAgent, plainRunError } from '../../lib/runs/errors'
 import { useRunSession } from '../../lib/runs/useRunSession'
 import { fileRefsIn, withFolderPaths } from '../../lib/files/fileRefs'
 import { checkAnswer, type AnswerCheck } from '../../lib/story/answerCheck'
@@ -166,6 +166,11 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   // A permission request is answered the same way: on the agent's message that asks, once the
   // talk shows it, and on a card of its own until then.
   const asking = live ? record.permissionRequests ?? [] : []
+  // Each figure on the piece's line glows what it is doing: asking you (gold), at work (blue), or,
+  // once the piece is over, the one it stopped at (red).
+  const stoppedAt = failedAgent(record)
+  const askingYou = new Set([...asking.map((request) => request.agent), ...(waiting ? [waiting.kind === 'review_stop' ? waiting.handoverFrom ?? waiting.node : waiting.node] : [])])
+  const weftState = (id: string) => (live ? (askingYou.has(id) ? 'waiting' : record.working?.includes(id) ? 'working' : '') : stoppedAt === id ? 'failed' : '')
   const askedOnMessage = new Set(open ? session.projection.messages.flatMap((message) => (message.kind === 'permission' && message.state === 'pending' && message.permission ? [message.permission.requestId] : [])) : [])
   const unasked = asking.filter((request) => !askedOnMessage.has(request.id))
   // Who has the work now: said on this piece's line, and on the header's pill while the line is out
@@ -227,7 +232,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
 
       <div ref={lineRef} className="tc-talk" data-tour={newest ? 'stages' : undefined}>
         <Weft workers={workers} at={weftAt(workers, record, live, waiting)} live={live} waiting={Boolean(waiting) || asking.length > 0} status={record.status}>
-          {workers.map((id) => <AvatarFace key={id} id={id} hue={hue(id)} size={22} fontSize={9} text={initials(name(id))} className={live && record.working?.includes(id) ? 'working' : ''} />)}
+          {workers.map((id) => <AvatarFace key={id} id={id} hue={hue(id)} size={22} fontSize={9} text={initials(name(id))} className={weftState(id)} />)}
         </Weft>
         <Swap key={talkKey(live, waiting, asking.map((request) => request.id), working, run.status, pass)} className="tc-talk-line">
           {live

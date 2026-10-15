@@ -1,11 +1,12 @@
 import { lazy, Suspense, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { KeyRound, Plus, Puzzle, Search, X } from 'lucide-react'
+import { FileText, Folder, KeyRound, Network, NotebookText, Plus, Puzzle, Search, X } from 'lucide-react'
 
+import { middleTruncate } from '../../lib/format'
 import { isHarnessRunnable, type DetectedHarness, type HarnessModels } from '../../lib/harnesses'
 import type { DetectedCapability } from '../../lib/library/client'
 import type { AgentDraft } from '../../lib/library/draft'
 import { replyLine } from '../../lib/library/desk'
-import { askedKey, CARD_SLOTS, FIGURE_KEYS, figureMood, type FigurePart } from '../../lib/library/figure'
+import { askedKey, CARD_SLOTS, FIGURE_KEYS, figureMood, type FigurePart, type ReadSource } from '../../lib/library/figure'
 import { COLOR_HEX, COLOR_NAMES, FIGURE_COLORS, FIGURE_KINDS, FIGURE_NAMES, figureStill, type FigureChoice } from '../../lib/library/figures'
 import type { RunRecord } from '../../lib/runs/client'
 import { markPattern } from '../../lib/story/mark'
@@ -26,10 +27,11 @@ const AgentFigure = lazy(() => import('./AgentFigure'))
  *
  * The blocks are the way in: each says what its setting does, in words, so nobody needs to learn
  * the bench first. The bench is the picture of the same settings: the laptop is the app, the
- * nameplate the name, the clipboard the job, the cards on the pegboard the skills, the keys on the
- * hooks what it may do without asking (the ones in your dish ask you first), and the tray what it
- * hands back. Clicking anything on the bench takes you to its block, and working in a block lights
- * its thing on the bench. While you try it on the test bench, the figure works as the run record says.
+ * nameplate the name, the clipboard the job, the cards on the pegboard the skills, the folders in
+ * the file holder what its team gives it to read, the keys on the hooks what it may do without
+ * asking (the ones in your dish ask you first), and the tray what it hands back. Clicking anything
+ * on the bench takes you to its block, and working in a block lights its thing on the bench. While
+ * you try it on the test bench, the figure works as the run record says.
  */
 
 const SKILL_MIME = 'application/x-loomwatch-skill'
@@ -59,6 +61,13 @@ export interface ByHandProps {
   hideDoes?: boolean
   /** Changes can't be kept here (a team you can't edit): every control shows, none applies. */
   readOnly?: boolean
+  /**
+   * In a team: the folders, files and Notion pages the team gives it to read (teamDraft.ts
+   * readsOf), shown in the file holder. Absent in Your agents, where an agent reads nothing yet.
+   */
+  reads?: readonly ReadSource[]
+  /** In a team: open its Workflow, where what it reads is given with a line. */
+  onShowWorkflow?: () => void
 }
 
 /** Each block: its title, and where it is on the bench. In the order you would set an agent up. */
@@ -68,11 +77,12 @@ const BLOCKS: readonly { part: FigurePart; title: string; where: string }[] = [
   { part: 'app', title: 'App', where: 'the laptop' },
   { part: 'mind', title: 'Model', where: 'the figure' },
   { part: 'skills', title: 'Skills', where: 'the recipe cards' },
+  { part: 'reads', title: 'What it reads', where: 'the file holder' },
   { part: 'keys', title: 'What it may do without asking', where: 'the keys, and your dish' },
   { part: 'reply', title: 'What it hands back', where: 'the tray' },
 ]
 
-export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading, models, modelsError = null, modelName, skills, skillsLoading, roleField, markId, figure, onFigure, record, hideDoes = false, readOnly = false }: ByHandProps) {
+export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading, models, modelsError = null, modelName, skills, skillsLoading, roleField, markId, figure, onFigure, record, hideDoes = false, readOnly = false, reads, onShowWorkflow }: ByHandProps) {
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
   const [focus, setFocus] = useState<FigurePart | null>(null)
@@ -113,7 +123,8 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
     asked,
     open: focus,
     dropping: dragging === 'skill',
-  }), [draft, figure, pattern, harness, mood, events, asked, focus, dragging])
+    reads: reads ?? null,
+  }), [draft, figure, pattern, harness, mood, events, asked, focus, dragging, reads])
 
   /** From the bench: go to the block for what was picked, and start working in it. */
   const goTo = (part: FigurePart) => {
@@ -131,6 +142,7 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   const asking = asked && !draft.allow[asked] ? FIGURE_KEYS.find(({ key }) => key === asked)?.word : null
   const dishText = asking ? `It’s asking you for the ${asking} key` : wild ? `${wild} doesn’t ask before it acts` : kept.length ? `You keep: ${kept.map((item) => item.word).join(', ')} · it asks you first` : 'You keep no keys'
   const parts = (['job', 'method', 'reply'] as const).filter((part) => shape[part]).length
+  const readsText = !reads?.length ? 'Reads · nothing yet' : reads.length === 1 ? `Reads · ${reads[0].name}` : `Reads · ${readCount(reads)}`
   // What each setting adds up to, in words: the line under each block's title.
   const says: Record<FigurePart, string> = {
     name: hideDoes || !draft.does.trim() ? name : `${name} · ${draft.does.trim()}`,
@@ -138,6 +150,7 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
     app: harness ? `Works in ${harness.name}, on this computer, signed in as you` : 'No app chosen yet',
     mind: `Thinks with ${thinks}`,
     skills: draft.skills.length ? `${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'} it opens when the work calls for one` : 'No skills yet',
+    reads: reads?.length ? `Reads ${readCount(reads)} the team gives it` : 'The team gives it nothing to read yet',
     keys: wild ? `${wild} doesn’t ask before it acts, so every door is open` : given.length ? `Goes ahead with ${given.map((item) => item.word.toLowerCase()).join(' and ')}${kept.length ? `; asks you first for ${kept.map((item) => item.word.toLowerCase()).join(' and ')}` : ''}` : 'Asks you before it searches the web, changes files or runs a command',
     reply: reply ?? 'Its instructions don’t say yet',
   }
@@ -147,7 +160,9 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
     { anchor: 'skills', part: 'skills', place: 'above', text: `Skills · ${draft.skills.length || 'none yet'}${more}`, short: `Skills · ${draft.skills.length}`, label: `The recipe cards: ${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'}` },
     { anchor: 'keys', part: 'keys', place: 'above', text: keysText, short: `Keys · ${wild ? 'all' : given.length}`, label: `The key hooks: ${keysText}` },
     { anchor: 'dish', part: 'keys', place: 'below', text: dishText, short: asking ? `Asking for ${asking}` : `You keep ${wild ? 0 : kept.length}`, label: `Your dish: ${dishText}` },
-    { anchor: 'reply', part: 'reply', place: 'above', text: `Hands back · ${reply ? 'see the tray' : 'not said yet'}`, short: 'Hands back', label: 'The tray: what it hands back' },
+    // Below its tray, as your dish's is below the dish: in a team, the file holder stands behind the tray.
+    { anchor: 'tray', part: 'reply', place: 'below', text: `Hands back · ${reply ? 'see the tray' : 'not said yet'}`, short: 'Hands back', label: 'The tray: what it hands back' },
+    ...(reads ? [{ anchor: 'reads', part: 'reads', place: 'above', text: readsText, short: `Reads · ${reads.length}`, label: `The file holder: ${says.reads}` } satisfies BenchLabel] : []),
     { anchor: 'name', part: 'name', place: 'plate', label: `The nameplate: ${name}` },
     { anchor: 'app', part: 'app', place: 'plate', label: `The laptop, the app it works in: ${harness?.name ?? 'none chosen'}` },
   ]
@@ -180,7 +195,7 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
 
   return (
     <div className="byhand">
-      <p className="byhand-say" aria-live="polite">{sentence(draft, harness, model, wild)}</p>
+      <p className="byhand-say" aria-live="polite">{sentence(draft, harness, model, wild, reads)}</p>
       <div className="byhand-main">
         <div className="byhand-stage">
           {failed
@@ -263,6 +278,17 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
           </>)}
 
           {block('skills', <SkillShelf chosen={draft.skills} available={skills} loading={skillsLoading} onAdd={addSkill} onRemove={(skill) => set('skills', draft.skills.filter((item) => item !== skill))} onDrag={setDragging} />)}
+
+          {reads && block('reads', <>
+            {reads.length > 0 && <ul className="byhand-reads" aria-label="In its file holder">
+              {reads.map((source, index) => {
+                const Icon = source.kind === 'page' ? NotebookText : source.kind === 'file' ? FileText : Folder
+                return <li key={`${source.kind}:${source.where}:${index}`}><Icon size={15} aria-hidden="true" /><span><b>{source.name}</b><em title={source.where}>{source.kind === 'page' ? source.where : `${source.kind === 'file' ? 'File' : 'Folder'} · ${middleTruncate(source.where, 64)}`}</em></span></li>
+              })}
+            </ul>}
+            <p className="t-meta">What it reads is the team’s to give: draw a line from a folder, file or Notion page to this agent in Workflow.</p>
+            {onShowWorkflow && <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />{reads.length ? 'Change it in Workflow' : 'Give it something in Workflow'}</button>}
+          </>)}
 
           {block('keys', <ul className="byhand-keys">
             {FIGURE_KEYS.map(({ key, word }) => {
@@ -358,10 +384,21 @@ function SkillShelf({ chosen, available, loading, onAdd, onRemove, onDrag }: { c
 }
 
 /** The bench in one sentence, for anyone who reads rather than looks, and for screen readers. */
-function sentence(draft: AgentDraft, harness: DetectedHarness | null, model: string, wild: string | null): ReactNode {
+function sentence(draft: AgentDraft, harness: DetectedHarness | null, model: string, wild: string | null, reads?: readonly ReadSource[]): ReactNode {
   const name = draft.name.trim() || 'This agent'
   const has = FIGURE_KEYS.filter(({ key }) => draft.allow[key]).map(({ word }) => word.toLowerCase())
   const keys = wild ? `${wild} doesn’t ask before it acts, so every door is open.` : has.length ? `It has the ${has.join(' and ')} key${has.length === 1 ? '' : 's'}; for anything else it asks you first.` : 'It has no keys, so it asks you before it searches the web, changes files or runs a command.'
   const skills = draft.skills.length ? `${draft.skills.length} recipe card${draft.skills.length === 1 ? '' : 's'}` : 'no recipe cards yet'
-  return <><b>{name}</b> thinks with {model}, works {harness ? `in ${harness.name}` : 'in no app yet'}, and has {skills}. {keys}</>
+  const works = harness ? `in ${harness.name}` : 'in no app yet'
+  if (reads) return <><b>{name}</b> thinks with {model}, works {works}, has {skills}, and reads {reads.length ? readCount(reads) : 'nothing yet'}. {keys}</>
+  return <><b>{name}</b> thinks with {model}, works {works}, and has {skills}. {keys}</>
+}
+
+/** What it reads, counted in words: "1 folder", "2 folders and 1 Notion page". */
+function readCount(reads: readonly ReadSource[]): string {
+  const words = ([['folder', 'folder'], ['file', 'file'], ['page', 'Notion page']] as const).flatMap(([kind, word]) => {
+    const count = reads.filter((source) => source.kind === kind).length
+    return count ? [`${count} ${word}${count === 1 ? '' : 's'}`] : []
+  })
+  return words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}` : words[0] ?? 'nothing'
 }

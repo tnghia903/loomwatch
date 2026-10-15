@@ -19,7 +19,9 @@ describe('an agent’s avatar in the chat and Details', () => {
     )
     const [reader, you] = container.querySelectorAll('.chat-avatar')
     expect(reader).toHaveClass('has-figure', 'hue-2')
-    expect((reader as HTMLElement).style.backgroundImage).toContain(figureStill({ kind: 'yarn', color: 'clay' }))
+    // The figure alone, as a picture: no disc of its colour behind it.
+    expect(reader.querySelector('img.chat-avatar-figure')).toHaveAttribute('src', figureStill({ kind: 'yarn', color: 'clay' }))
+    expect((reader as HTMLElement).style.backgroundImage).toBe('')
     expect(reader).toHaveTextContent('')
     expect(you).not.toHaveClass('has-figure')
     expect(you).toHaveTextContent('You')

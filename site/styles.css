@@ -162,6 +162,37 @@ em { font-style: italic; }
 .progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; pointer-events: none; }
 .progress i { display: block; height: 100%; width: 100%; transform-origin: 0 50%; transform: scaleX(var(--read, 0)); background: var(--accent); filter: var(--bloom-gold); }
 
+/* ---------------------------------------------------------------- The lamp
+
+   The theme button is a bulb, lit in the light theme. With JS, a gold thread comes out of its cap,
+   through the header, and hangs below it with one of the crew on the end; main.js swings it, and
+   pulling it down switches the light. The thread inside the header stays put; the swinging part
+   below is clipped at the header's edge, so reeling it up hides it in the "ceiling". */
+
+.lamp { position: relative; display: grid; --thread: var(--accent-fill); }
+.bulb-rays { opacity: 0; transition: opacity .2s var(--ease); }
+.bulb-glass { transition: fill .2s var(--ease); }
+:root[data-theme="light"] #theme { color: var(--accent); }
+:root[data-theme="light"] .bulb-glass { fill: #F6D46E; }
+:root[data-theme="light"] .bulb-rays { opacity: 1; }
+.js .lamp::after { content: ''; position: absolute; left: calc(50% - .75px); top: 25px; width: 1.5px; height: 22px; border-radius: 1px; background: var(--thread); pointer-events: none; }
+.cord { display: none; }
+.js .cord { display: block; position: absolute; left: 50%; top: calc(100% + 13px); width: 0; height: 0; pointer-events: none; clip-path: inset(0 -120px -320px -420px); }
+.cord-thread { position: absolute; left: 0; top: 0; z-index: 1; width: 1px; height: 1px; overflow: visible; }
+.cord-thread path { fill: none; stroke: var(--thread); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.cord-figure { position: absolute; left: 0; top: 0; width: 64px; height: 64px; transform-origin: 0 0; pointer-events: auto; touch-action: none; cursor: grab; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
+.cord-figure.held { cursor: grabbing; }
+.cord-still, .cord-canvas { position: absolute; left: 0; top: 0; width: 64px; height: 64px; transition: opacity .5s var(--ease); -webkit-user-drag: none; }
+.cord-canvas { opacity: 0; }
+.cord.live .cord-canvas { opacity: 1; }
+.cord.live .cord-still { opacity: 0; }
+:root[data-theme="light"] .cord-figure { filter: drop-shadow(0 2px 3px rgb(23 21 15 / .16)); }
+.cord-tag { position: absolute; left: 0; top: 0; margin: 0; white-space: nowrap; translate: calc(-100% - 8px) -50%; padding: 6px 12px; border-radius: 999px; background: var(--slip); color: var(--slip-ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), var(--shadow); font-size: 13px; opacity: 0; transition: opacity .2s var(--ease); }
+.cord-tag b { font-weight: 600; }
+.cord.near .cord-tag { opacity: 1; }
+/* The new theme spreads out from the bulb (main.js animates the clip); nothing crossfades. */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+
 /* ---------------------------------------------------------------- Cold open */
 
 .cta { display: flex; align-items: center; gap: 22px; margin-top: 32px; flex-wrap: wrap; }

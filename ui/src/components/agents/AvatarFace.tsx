@@ -6,9 +6,9 @@ import { AgentMark } from '../ui/AgentMark'
 import { useTeamFigure } from './figureContext'
 
 /**
- * An agent's round avatar in the chat and in Details: its figure's head and shoulders on the disc of
- * its chat colour, so it looks as it does on Home and on the canvas. You, and a helper the team file
- * doesn't list, have no figure and keep the initials.
+ * An agent's avatar in the chat and in Details: its figure alone, with no disc behind it, so it looks
+ * as it does on Home and on the canvas. You, and a helper the team file doesn't list, have no figure
+ * and keep the initials on a disc.
  */
 export function AvatarFace({ id, hue, size, fontSize, text, title, className = '', hidden = true, children }: {
   id: string
@@ -24,10 +24,10 @@ export function AvatarFace({ id, hue, size, fontSize, text, title, className = '
   children?: ReactNode
 }) {
   const figure = useTeamFigure(id)
-  const style: CSSProperties = { width: size, height: size, ...(fontSize ? { fontSize } : {}), ...(figure ? { backgroundImage: `url(${figureStill(figure)})` } : {}) }
+  const style: CSSProperties = { width: size, height: size, ...(fontSize ? { fontSize } : {}) }
   return (
     <i className={`chat-avatar hue-${hue}${figure ? ' has-figure' : ''}${className ? ` ${className}` : ''}`} style={style} title={title} aria-hidden={hidden ? true : undefined}>
-      {figure ? null : text}
+      {figure ? <img className="chat-avatar-figure" src={figureStill(figure)} alt="" draggable={false} /> : text}
       {children}
     </i>
   )

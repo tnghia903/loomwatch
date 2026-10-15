@@ -88,7 +88,7 @@
 .tc-faces .tc-member + .tc-member { margin-left: -5px; }
 /* A face rests above the one beside it while the pointer is on it. */
 .tc-faces .tc-member:hover, .tc-faces .tc-member:focus-within { z-index: 1; }
-.tc-faces .chat-avatar { box-shadow: 0 0 0 2px var(--color-panel); }
+.tc-faces .chat-avatar:not(.has-figure) { box-shadow: 0 0 0 2px var(--color-panel); }
 /* Who has the work: its face grows into a pill in its colour that says how the work reached it —
    "Asking Researcher…" (BatonPill, lib/chat/baton.ts). Every face carries one, folded to nothing
    under its own avatar, so the pill starts from the face's middle and the faces after it make room.
@@ -131,41 +131,30 @@
 .tc-baton.landing, .tc-member em.landing, .tc-talk-landing .tc-talk-line { visibility: hidden; }
 /* While one face has the work, the others step back a little: muted, but still opaque, since the
    face after the pill overlaps its end. */
-.tc-faces.has-baton .tc-member:not(.holds) .tc-face:not(:hover, :focus-visible) .chat-avatar {
+.tc-faces.has-baton .tc-member:not(.holds) .tc-face:not(:hover, :focus-visible) .chat-avatar:not(.has-figure) {
   background: color-mix(in srgb, var(--hue) 7%, var(--color-panel-solid));
   color: color-mix(in srgb, var(--hue) 45%, var(--color-ink-3));
 }
+/* A figure steps back by losing most of its colour, but keeps its glow. */
+.tc-faces.has-baton .tc-member:not(.holds) .tc-face:not(:hover, :focus-visible) .chat-avatar-figure { filter: saturate(.25) drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2px var(--glow)); }
 .tc-roster-more .tc-roster-words { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .tc-members { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; list-style: none; }
 .tc-members[hidden] { display: none; }
 .tc-member { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--color-ink-2); }
 .tc-member .chat-avatar { position: relative; }
-.tc-member .chat-avatar::after {
-  content: '';
-  position: absolute;
-  right: -3px;
-  bottom: -3px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  border: 2px solid var(--color-panel-solid);
-  /* Ready for work: green, like anyone available. */
-  background: var(--color-ok);
-}
-/* Working: green with a ring round the face, which breathes where motion is welcome. */
-.tc-member.working .chat-avatar::before {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  border: 2px solid var(--color-ok);
-  pointer-events: none;
-}
-.tc-member.waiting .chat-avatar::after { background: var(--color-accent); }
-.tc-member.away .chat-avatar::after { background: transparent; border-color: var(--color-ink-3); }
+/* What an agent is doing glows round its figure's outline, with no dot or ring: green ready, gold
+   waiting for you, blue at work (breathing where motion is welcome), red stopped by an error, or
+   LoomWatch out of reach. On a piece's line only the figures doing something glow. */
+.tc-member { --glow: var(--color-ok); }
+.tc-member.waiting, .tc-weft .chat-avatar.waiting { --glow: var(--color-accent); }
+.tc-member.working, .tc-weft .chat-avatar.working { --glow: var(--color-live); }
+.tc-member:is(.failed, .away), .tc-weft .chat-avatar.failed { --glow: var(--color-alert); }
+.tc-member .chat-avatar-figure,
+.tc-weft .chat-avatar:is(.waiting, .working, .failed) .chat-avatar-figure { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2px var(--glow)); }
 .tc-member em { font-style: normal; font-size: 11.5px; color: var(--color-ink-3); }
-.tc-member.working em { color: var(--color-ok); }
+.tc-member.working em { color: var(--color-live); }
 .tc-member.waiting em { color: var(--color-accent); }
+.tc-member:is(.failed, .away) em { color: var(--color-alert); }
 
 /* ---------- an agent's face: its card on hover, an @mention on click ---------- */
 .tc-face {
@@ -186,7 +175,9 @@
 .tc-face > span { display: inline-flex; align-items: center; gap: 6px; }
 .tc-face:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .tc-face .chat-avatar { transition: box-shadow var(--t-quick) var(--ease-out); }
-.tc-face:hover .chat-avatar, .tc-face:focus-visible .chat-avatar { box-shadow: 0 0 0 2px var(--color-panel), 0 0 0 3px var(--color-accent-dim); }
+.tc-face:hover .chat-avatar:not(.has-figure), .tc-face:focus-visible .chat-avatar:not(.has-figure) { box-shadow: 0 0 0 2px var(--color-panel), 0 0 0 3px var(--color-accent-dim); }
+/* A figure under the pointer glows wider, in its state's colour. */
+.tc-face:hover .chat-avatar-figure, .tc-face:focus-visible .chat-avatar-figure { filter: drop-shadow(0 0 1px var(--glow, var(--color-ink-3))) drop-shadow(0 0 4px var(--glow, var(--color-ink-3))); }
 .tc-face-row { border-radius: var(--r-sm); padding: 1px 4px 1px 0; }
 .tc-face-row:hover > span > span { color: var(--color-ink); }
 
@@ -209,7 +200,9 @@
 .tc-agent-card-who { display: grid; min-width: 0; }
 .tc-agent-card-who b { overflow-wrap: anywhere; font: 600 13.5px/1.3 var(--font-sans); }
 .tc-agent-card-state { font-size: 11.5px; color: var(--color-ink-3); }
-.tc-agent-card-state.idle, .tc-agent-card-state.working { color: var(--color-ok); }
+.tc-agent-card-state.idle { color: var(--color-ok); }
+.tc-agent-card-state.working { color: var(--color-live); }
+.tc-agent-card-state:is(.failed, .away) { color: var(--color-alert); }
 .tc-agent-card-state.waiting { color: var(--color-accent); }
 .tc-agent-card-app { color: var(--color-ink); }
 /* The job in a few lines; the whole of it is in Build. */
@@ -540,17 +533,9 @@
   .tc-agent-card.leaving { animation: tc-fade-out var(--t-quick) var(--ease-out) both; }
   /* The box the name went into calls once with a gold ring, as what waits on you does. */
   .tc-mention-glow { animation: tc-attention var(--t-settle) var(--ease-out) both; }
-  /* Whoever is working breathes a green ring, in the header and on the piece. */
-  .tc-member.working .chat-avatar::before,
-  .tc-weft .chat-avatar.working::before {
-    content: '';
-    position: absolute;
-    inset: -3px;
-    border-radius: 50%;
-    border: 2px solid var(--color-ok);
-    pointer-events: none;
-    animation: tc-ring var(--t-flow) var(--ease-out) infinite;
-  }
+  /* Whoever is working breathes its blue glow, in the header and on the piece. */
+  .tc-member.working .chat-avatar-figure,
+  .tc-weft .chat-avatar.working .chat-avatar-figure { animation: tc-glow var(--t-flow) ease-in-out infinite; }
   .tc-weft .chat-avatar { transition: translate var(--t-move) var(--ease-out); }
   .tc-weft .chat-avatar.working { translate: 0 -2px; }
   /* The work passing on: the gold runs to the next agent and the bead slides after it. */
@@ -594,7 +579,6 @@
   .tc-weave path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: tc-weave 1100ms var(--ease-out) forwards; }
   .tc-weave .tc-weave-warp { animation-delay: 380ms; }
   .tc-member em, .tc-where { transition: color var(--t-move) var(--ease-out); }
-  .tc-member .chat-avatar::after { transition: background-color var(--t-move) var(--ease-out); }
   .tc-note .chat-bubble { transition: border-color var(--t-move) var(--ease-out), background-color var(--t-move) var(--ease-out); }
   .tc-picker, .tc-jump { animation: tc-pop var(--t-quick) var(--ease-out) both; }
   .tc-picker { transform-origin: bottom left; }
@@ -613,7 +597,7 @@
 @keyframes tc-card-in-above { from { opacity: 0; translate: 0 4px; } }
 @keyframes tc-fade-out { to { opacity: 0; } }
 @keyframes tc-slide { from { translate: 24px 0; } }
-@keyframes tc-ring { 0% { scale: .9; opacity: .8; } 100% { scale: 1.45; opacity: 0; } }
+@keyframes tc-glow { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5px var(--glow)); } }
 @keyframes tc-bead { 50% { scale: .55; } }
 @keyframes tc-draw-down { from { scale: 1 0; } }
 @keyframes tc-thread-rest { to { opacity: 0; } }
