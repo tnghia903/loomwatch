@@ -4,7 +4,7 @@ name: Pages
 # (scripts/install.sh, served as /install.sh). The built page is pushed to the
 # loomwatch/loomwatch.github.io repository, and GitHub Pages serves that repository's main branch.
 # It runs when the page, the installer, the screenshots it borrows from docs/assets/readme, the
-# agent figures it borrows from ui/public/agent/figures, the design-system fonts or this workflow
+# agent figures and live-figure code it borrows from ui/, the design-system fonts or this workflow
 # change on main, and by hand.
 #
 # The push uses PAGES_DEPLOY_KEY, the private half of an SSH deploy key that has write access to
@@ -18,7 +18,11 @@ on:
       - docs/assets/readme/**
       - docs/assets/usecases/**
       - docs/design-system/fonts/**
-      - ui/public/agent/figures/**
+      - ui/public/agent/**
+      - ui/src/site/**
+      - ui/src/components/agents/workbenchScene.ts
+      - ui/src/components/agents/benchTextures.ts
+      - ui/vite.site.config.ts
       - examples/usecases/**
       - examples/skills/**
       - .github/workflows/pages.yml
@@ -36,7 +40,7 @@ jobs:
   publish:
     name: Publish
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     environment:
       name: loomwatch.github.io
       url: https://loomwatch.github.io
@@ -44,6 +48,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The page's live figures are built from the app's own code (ui/src/site), so the site needs
+      # ui's packages, with the same Node and pnpm as CI.
+      - uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
+        with:
+          node-version-file: .node-version
+          cache: true
+          cache-dependency-path: ui/pnpm-lock.yaml
+          install: false
+      - name: Install
+        working-directory: ui
+        run: pnpm install --frozen-lockfile
       - name: Assemble the site
         run: |
           site/build.sh _site

@@ -37,6 +37,10 @@ mkdir -p "$out/assets/app" "$out/assets/crew" "$out/assets/figures"
 cp "$root"/site/assets/app/*.webp "$out/assets/app/"
 cp "$root"/site/assets/crew/*.webp "$out/assets/crew/"
 cp "$root"/ui/public/agent/figures/*.webp "$out/assets/figures/"
+# The live figures: the app's own 3D figure code (ui/src/site/landingLive.ts), built with three.js
+# into one module, and the model it draws. Needs ui's packages (pnpm install in ui/).
+(cd "$root/ui" && LANDING_LIVE_OUT="$out/assets/live" pnpm exec vite build --config vite.site.config.ts --logLevel warn)
+cp "$root"/ui/public/agent/workbench.glb "$out/assets/live/"
 # The fonts' license (SIL OFL) has to travel with every copy of them.
 cp "$root"/docs/design-system/fonts/fonts.css "$root"/docs/design-system/fonts/*.woff2 "$root"/docs/design-system/fonts/OFL.txt "$out/assets/fonts/"
 echo "Built the landing page in $out"

@@ -68,158 +68,100 @@
 
 <main id="main">
 
-<!-- ================= Cold open: the apps you have, before and after the loom ================= -->
-<section class="open" id="top" aria-labelledby="open-h">
-  <div class="open-stage">
-    <div class="open-copy">
-      <div class="open-before" aria-hidden="true">
-        <span class="micro">Today, on your computer</span>
-        <p class="open-line">You already have the AI.<br><em>You are still the glue.</em></p>
-        <p class="open-sub">One app researches, another writes, a third double-checks, and you carry every answer between them by hand, hoping the first step was right.</p>
-      </div>
-      <div class="open-after">
-        <span class="micro">Free and open source · for macOS · runs on your computer · new in 0.4</span>
-        <h1 id="open-h">Build AI agents you can see. <em>Put them to work as one team.</em></h1>
-        <p class="open-sub">Give each agent a job, a face and the keys it may use, and try it on its own. Connect your agents in a workflow, then talk to the team in one chat, on the AI apps you already have: Claude Code, Codex, OpenCode.</p>
-        <div class="cta">
-          <a class="btn btn-primary btn-lg" href="#agent">Build an agent, right here</a>
-          <a class="link" href="#start">Or install it ↓</a>
-        </div>
-      </div>
+<!-- ================= Hero: the crew, alive ================= -->
+<section class="hero" id="top" aria-labelledby="hero-h">
+  <div class="hero-copy">
+    <span class="micro">Free and open source · for macOS · runs on your computer · new in 0.4</span>
+    <h1 id="hero-h">Build AI agents you can see. <em>Put them to work as one team.</em></h1>
+    <p class="hero-sub">Give each agent a job, a face and the keys it may use. Connect them in a workflow, then talk to the team in one chat, on the AI apps you already have: Claude Code, Codex, OpenCode.</p>
+    <div class="cta">
+      <a class="btn btn-primary btn-lg" href="#act-agents">Build an agent, right here</a>
+      <a class="link" href="#start">Or install it ↓</a>
     </div>
-
-    <div class="open-field" aria-hidden="true">
-      <svg class="open-paste" preserveAspectRatio="none"><path id="paste-path"/><circle r="3.5" id="paste-dot"/></svg>
-      <span class="paste-label">you, copying answers between apps</span>
-      <div class="term" data-app="claude"><div class="term-bar"><i></i><i></i><i></i><span>claude</span></div><pre><b>›</b> find today's AI news, with sources
-Found 4 items. 1 has no source.
-<b>›</b> <span class="caret"></span></pre></div>
-      <div class="term" data-app="codex"><div class="term-bar"><i></i><i></i><i></i><span>codex</span></div><pre><b>›</b> write a digest from this:
-<span class="dim">(paste the research here)</span>
-<b>›</b> <span class="caret"></span></pre></div>
-      <div class="term" data-app="hermes"><div class="term-bar"><i></i><i></i><i></i><span>hermes</span></div><pre><b>›</b> check every claim in this draft
-<span class="dim">(paste the draft here)</span>
-<b>›</b> <span class="caret"></span></pre></div>
-      <div class="term" data-app="opencode"><div class="term-bar"><i></i><i></i><i></i><span>opencode</span></div><pre><b>›</b> what did the other one change?
-I can't see the other app's work.
-<b>›</b> <span class="caret"></span></pre></div>
-      <span class="open-you">you</span>
-      <svg class="open-weft" preserveAspectRatio="none"></svg>
-      <img class="open-crew" src="assets/crew/crew.webp" width="2000" height="800" alt="" decoding="async">
-    </div>
-
-    <p class="open-cue" aria-hidden="true"><span>Scroll, and watch them become your crew</span><i></i></p>
   </div>
+  <div class="crew" id="crew">
+    <img class="crew-poster" src="assets/crew/crew.webp" width="2000" height="800" alt="Six friendly figures, a yarn ball, a spool, a button, a thimble, a pincushion and a thread cone, holding one gold thread." decoding="async">
+    <canvas class="crew-canvas" id="crew-canvas" aria-hidden="true"></canvas>
+    <div class="crew-tags" id="crew-tags" aria-hidden="true"></div>
+  </div>
+  <p class="crew-hint" id="crew-hint">Point at one and it waves. <span>Click it to build one like it.</span></p>
 </section>
 
-<!-- ================= The run: the visitor operates one team, chapter by chapter ================= -->
 <div class="story" id="story">
 
-  <div class="story-intro">
-    <span class="micro eyebrow">Three acts, the way the app works</span>
-    <p class="story-lede">Build your agents. Connect them in a workflow. Talk to the team in its chat. This page is that app, and you're in it: every step below is yours to try.</p>
-    <p class="story-note">Everything below runs in your browser. Nothing calls a model, and nothing you type leaves this page.</p>
-  </div>
-
-  <header class="act" id="act-agents" aria-labelledby="act-agents-h">
-    <span class="act-n">Act I</span>
-    <h2 class="act-h" id="act-agents-h">Agents</h2>
-    <p class="act-line">Start with the AI apps you already have, then build each agent on its own: a job, a face, the keys it may use. Try it before any team depends on it.</p>
-    <ol class="act-path" aria-label="The three acts"><li class="on" aria-current="step">Agents</li><li>Workflow</li><li>Chat</li></ol>
-  </header>
-
-  <!-- 01 · Threads -->
-  <article class="chapter" id="threads" data-chapter="1" aria-labelledby="threads-h">
-    <div class="ch-copy">
-      <span class="ch-n"><b>01</b> Threads</span>
-      <h2 id="threads-h">Start with the threads you already have.</h2>
-      <p class="ch-body">LoomWatch finds the command-line AI apps on your Mac and puts each one on the loom as a thread. Tick the ones you use, and the rest of this page weaves with them.</p>
-      <dl class="fine">
-        <div><dt>Your apps, your accounts</dt><dd>Each agent runs on one of your AI apps, with that app's own sign-in or API key. LoomWatch has no account of its own.</dd></div>
-        <div><dt>Their terms apply</dt><dd>Usage counts toward each app's account or API billing, under its provider's terms.</dd></div>
-        <div><dt>Mix them on one team</dt><dd>Each agent has its own app and model. Through OpenCode, open models such as DeepSeek, Kimi, GLM, Qwen or Mistral too.</dd></div>
-      </dl>
-    </div>
-    <div class="ch-panel">
-      <div class="win">
-        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>AI apps on this computer</b></span><span class="badge" id="apps-count">3 on the loom</span></div>
-        <div class="win-body">
-          <ul class="apps" id="apps" aria-label="AI apps. Choose the ones you use."></ul>
-          <div class="warp-preview">
-            <svg id="warp-preview" viewBox="0 0 520 112" role="img" aria-label="The threads on your loom"></svg>
-          </div>
-        </div>
+  <!-- ================= Act I · Agents ================= -->
+  <section class="act act-agents" id="act-agents" aria-labelledby="agents-h">
+    <div class="act-head">
+      <div>
+        <span class="act-tag"><b>Act I</b>Agents</span>
+        <h2 id="agents-h">Build an agent once. <em>Watch it work.</em></h2>
+      </div>
+      <div>
+        <p class="ch-body">Give it a job, a face and the keys it may use, then try it on its own. It types while it works, points at any key you kept when it needs one, and drops its reply in the tray. Drag a key onto its hook to hand it over.</p>
+        <dl class="fine fine-row">
+          <div><dt>Versions, never surprises</dt><dd>Change its job and it becomes v2. A team keeps its version until you choose Update.</dd></div>
+          <div><dt>Your apps, your accounts</dt><dd>It runs on one of your AI apps, with that app's sign-in, under its provider's terms.</dd></div>
+        </dl>
       </div>
     </div>
-  </article>
-
-  <!-- 02 · Agent -->
-  <article class="chapter" id="agent" data-chapter="2" aria-labelledby="agent-h">
-    <div class="ch-copy">
-      <span class="ch-n"><b>02</b> Agent</span>
-      <h2 id="agent-h">Build an agent once. <em>Give it a face.</em></h2>
-      <p class="ch-body">Write its job, choose the app it runs on and the keys it may use without asking, then try it on a real request before any team depends on it. When it's right, save it, and put it in any team.</p>
-      <dl class="fine">
-        <div><dt>Every switch says what it means</dt><dd>“Asks you before it changes files.” The consequence sits beside the setting, in plain words, so you never need a manual.</dd></div>
-        <div><dt>Versions, never surprises</dt><dd>Change what an agent does and it becomes v2. A team keeps the version it was given until you choose Update in that team.</dd></div>
-        <div><dt>One face, everywhere</dt><dd>Six figures in seven colours. The same agent wears the same face on Home, on the canvas and in the chat, so you can tell your agents apart at a glance.</dd></div>
-      </dl>
-    </div>
-    <div class="ch-panel">
-      <div class="win win-agent">
-        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Your agents</b><span class="mono" id="ag-version">New agent</span></span><span class="badge" id="ag-badge">Not saved yet</span></div>
-        <div class="win-body ag">
-          <div class="ag-stage">
-            <figure class="ag-figure" id="ag-figure" data-mood="still">
-              <img id="ag-img" src="assets/figures/pincushion-rose.webp" width="320" height="320" alt="">
-              <figcaption class="ag-plate"><b id="ag-plate-name">Scout</b><span id="ag-plate-what">a rose pincushion</span></figcaption>
-            </figure>
+    <div class="win win-agent" id="agent">
+      <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Your agents</b><span class="mono" id="ag-version">New agent</span></span><span class="badge" id="ag-badge">Not saved yet</span></div>
+      <div class="win-body ag">
+        <div class="ag-stage">
+          <div class="bench" id="bench" data-mood="still">
+            <img class="bench-poster" id="ag-img" src="assets/figures/pincushion-rose.webp" width="320" height="320" alt="">
+            <p class="bench-plate"><b id="ag-plate-name">Scout</b><span id="ag-plate-what">a rose pincushion</span></p>
+            <canvas class="bench-canvas" id="bench-canvas" aria-hidden="true"></canvas>
+            <div class="bench-tags" id="bench-tags" aria-hidden="true"></div>
             <p class="ag-status" id="ag-status" aria-live="polite"><i aria-hidden="true"></i><span>Ready</span></p>
-            <div class="ag-reply" id="ag-reply" hidden></div>
-            <div class="ag-acts">
-              <button class="btn btn-primary" type="button" id="ag-try">Try it</button>
-              <button class="btn" type="button" id="ag-save">Save to Your agents</button>
-            </div>
           </div>
-          <div class="ag-blocks">
+          <div class="ag-reply" id="ag-reply" hidden></div>
+        </div>
+        <div class="ag-blocks">
+          <div class="ag-pair">
             <label class="ag-block ag-name"><span class="ag-k">Name</span><input id="ag-name" value="Scout" maxlength="24" autocomplete="off" spellcheck="false"></label>
-            <fieldset class="ag-block"><legend class="ag-k">Its figure <span>how you tell it apart</span></legend>
-              <div class="ag-kinds" id="ag-kinds" role="radiogroup" aria-label="Figure"></div>
-              <div class="ag-colors" id="ag-colors" role="radiogroup" aria-label="Colour"></div>
-            </fieldset>
-            <fieldset class="ag-block"><legend class="ag-k">App <span>the AI app it runs on</span></legend><div class="ag-apps" id="ag-apps" role="radiogroup" aria-label="App"></div></fieldset>
-            <fieldset class="ag-block"><legend class="ag-k">What it may do without asking <span>the keys you hand over</span></legend><ul class="ag-keys" id="ag-keys"></ul></fieldset>
-            <p class="ag-says" id="ag-says" aria-live="polite"></p>
+            <fieldset class="ag-block"><legend class="ag-k">App</legend><div class="ag-apps" id="ag-apps" role="radiogroup" aria-label="App"></div></fieldset>
+          </div>
+          <fieldset class="ag-block"><legend class="ag-k">Its job <span>pins its skills on the board</span></legend><div class="ag-jobs" id="ag-jobs" role="radiogroup" aria-label="Job"></div></fieldset>
+          <fieldset class="ag-block"><legend class="ag-k">Its figure <span>how you tell it apart</span></legend>
+            <div class="ag-kinds" id="ag-kinds" role="radiogroup" aria-label="Figure"></div>
+            <div class="ag-colors" id="ag-colors" role="radiogroup" aria-label="Colour"></div>
+          </fieldset>
+          <fieldset class="ag-block"><legend class="ag-k">What it may do without asking <span>the keys on its hooks</span></legend><ul class="ag-keys" id="ag-keys"></ul></fieldset>
+          <p class="ag-says" id="ag-says" aria-live="polite"></p>
+          <div class="ag-acts">
+            <button class="btn btn-primary" type="button" id="ag-try">Try it</button>
+            <button class="btn" type="button" id="ag-save">Save to Your agents</button>
           </div>
         </div>
-        <div class="ag-shelf" id="ag-shelf" hidden><span class="micro">Your agents</span><ul id="ag-shelf-list"></ul><p class="ag-shelf-note" id="ag-shelf-note"></p></div>
       </div>
+      <div class="ag-shelf" id="ag-shelf" hidden><span class="micro">Your agents</span><ul id="ag-shelf-list"></ul><p class="ag-shelf-note" id="ag-shelf-note"></p></div>
     </div>
-  </article>
+    <p class="sim-note">Try it plays a recorded run in your browser. Nothing calls a model, and nothing you type leaves this page.</p>
+  </section>
 
-  <header class="act" id="act-workflow" aria-labelledby="act-workflow-h">
-    <span class="act-n">Act II</span>
-    <h2 class="act-h" id="act-workflow-h">Workflow</h2>
-    <p class="act-line">Put agents in a team: who hands work to whom, where you check the work, and what each one is given to work with.</p>
-    <ol class="act-path" aria-label="The three acts"><li>Agents</li><li class="on" aria-current="step">Workflow</li><li>Chat</li></ol>
-  </header>
 
-  <!-- 02 · Build -->
-  <article class="chapter" id="build" data-chapter="3" aria-labelledby="build-h">
+  <!-- ================= Act II · Workflow ================= -->
+  <section class="chapter act" id="act-workflow" aria-labelledby="workflow-h">
     <div class="ch-copy">
-      <span class="ch-n"><b>03</b> Team</span>
-      <h2 id="build-h">Hire by job. Read the team back as one sentence.</h2>
-      <p class="ch-body">Put agents on a canvas and connect them in order. LoomWatch reads the whole team back to you as one plain sentence, so you can check the plan before anything runs. Change an app in the sentence and the canvas follows.</p>
+      <span class="act-tag"><b>Act II</b>Workflow</span>
+      <h2 id="workflow-h">Put your agents in a team. <em>Read it back as one sentence.</em></h2>
+      <p class="ch-body">Connect them in order and put yourself where the work should stop for you. Then hand each one the folders, files and skills it needs, with a drag.</p>
       <dl class="fine">
-        <div><dt>Ask LoomWatch</dt><dd>Describe the team you want. One of your own AI apps proposes it on the canvas, and nothing changes until you press Apply.</dd></div>
-        <div><dt>One agent, a pipeline, or a lead</dt><dd>Steps in order with stops where you want them, or a lead that hands out work and asks its teammates questions as it goes.</dd></div>
-        <div><dt>Easy to find your way</dt><dd>Each action has one button, in the same place on every screen. Keyboard shortcuts are there when you want speed.</dd></div>
+        <div><dt>Or just describe it</dt><dd>Ask LoomWatch proposes the team on the canvas, and nothing changes until you press Apply.</dd></div>
+        <div><dt>A pipeline, or a lead</dt><dd>Steps in order with stops where you want them, or a lead that hands out work and asks its teammates questions.</dd></div>
       </dl>
     </div>
     <div class="ch-panel">
-      <div class="win">
-        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono">research-and-write.yaml</span></span><span class="badge">Build</span></div>
-        <div class="win-body">
+      <div class="win win-flow">
+        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b></span>
+          <div class="win-tabs" role="tablist" aria-label="Workflow">
+            <button type="button" role="tab" id="flowtab-team" data-flow="team" aria-controls="flow-team" aria-selected="true">The team</button>
+            <button type="button" role="tab" id="flowtab-give" data-flow="give" aria-controls="flow-give" aria-selected="false" tabindex="-1">What each is given <span class="tab-n" id="give-count">3 threads</span></button>
+          </div>
+        </div>
+        <div class="flow-panel" role="tabpanel" id="flow-team" aria-labelledby="flowtab-team">
+<div class="win-body">
           <p class="sentence" id="sentence" aria-live="polite"></p>
           <div class="propose" id="propose" hidden></div>
           <div class="team-views" id="team-views" data-view="team">
@@ -235,26 +177,9 @@ I can't see the other app's work.
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  </article>
-
-  <!-- 03 · Give -->
-  <article class="chapter" id="give" data-chapter="4" aria-labelledby="give-h">
-    <div class="ch-copy">
-      <span class="ch-n"><b>04</b> Give</span>
-      <h2 id="give-h">Hand each agent what it needs. <em>Share it with a drag.</em></h2>
-      <p class="ch-body">Folders, files, skills and tools sit on the canvas as cards. Drag one onto an agent, and it's handed to that agent at the start of every run. Drag the same card onto a second agent and they share it: one card, two threads.</p>
-      <dl class="fine">
-        <div><dt>Your project stays yours</dt><dd>An agent works in the folder you choose, and changes files there only if you allow it. What you hand it is read only, and nothing is written into your project.</dd></div>
-        <div><dt>Exactly what arrives</dt><dd>A folder arrives as its listing and README, a file as its text, and a skill as its instructions. A PDF's text is read when pdftotext is installed (<code>brew install poppler</code>). The record shows which ones were opened.</dd></div>
-        <div><dt>Three switches each</dt><dd>Search the web, edit files, run commands. Anything else an agent asks for waits for your answer, mid-run. OpenCode doesn't ask before it acts, so these switches can't hold it back.</dd></div>
-      </dl>
-    </div>
-    <div class="ch-panel">
-      <div class="win">
-        <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono">what each agent is given</span></span><span class="badge" id="give-count">3 threads</span></div>
-        <div class="win-body">
+        </div>
+        <div class="flow-panel" role="tabpanel" id="flow-give" aria-labelledby="flowtab-give" hidden>
+<div class="win-body">
           <div class="give dots" id="give-canvas" role="group" aria-label="Agents and the sources on the canvas">
             <svg class="give-threads" id="give-threads" aria-hidden="true"></svg>
             <div class="give-agents" id="give-agents"></div>
@@ -263,30 +188,30 @@ I can't see the other app's work.
           <p class="give-hint" id="give-hint">Drag a card onto an agent. On a phone, tap the card, then the agent.</p>
           <section class="packet" id="packet" aria-live="polite" aria-label="What the selected agent is given"></section>
         </div>
+        </div>
       </div>
     </div>
-  </article>
+  </section>
 
-  <header class="act" id="act-chat" aria-labelledby="act-chat-h">
-    <span class="act-n">Act III</span>
-    <h2 class="act-h" id="act-chat-h">Chat</h2>
-    <p class="act-line">Talk to the team in one chat. Only an @ starts work; you watch every step, and nothing moves on until you decide.</p>
-    <ol class="act-path" aria-label="The three acts"><li>Agents</li><li>Workflow</li><li class="on" aria-current="step">Chat</li></ol>
-  </header>
-
-  <!-- 04 · Ask -->
-  <article class="chapter" id="ask" data-chapter="5" aria-labelledby="ask-h">
+  <!-- ================= Act III · Chat ================= -->
+  <section class="chapter act act-chat" id="act-chat" aria-labelledby="chat-h">
     <div class="ch-copy">
-      <span class="ch-n"><b>05</b> Ask</span>
-      <h2 id="ask-h">Talk to the team in its chat. <em>Only an @ starts work.</em></h2>
-      <p class="ch-body">Each team has one chat. Write <b class="say-gold">@team</b> and the job to start everyone, or <b class="say-gold">@</b> an agent's name to ask it alone. Before you send, the line above the box says where your message will go. Without an @, nothing starts: it's a note the team reads the next time it works.</p>
+      <span class="act-tag"><b>Act III</b>Chat</span>
+      <h2 id="chat-h">Talk to the team. <em>Nothing moves on until you decide.</em></h2>
+      <p class="ch-body"><b class="say-gold">@team</b> starts the work, <b class="say-gold">@Writer</b> asks one agent, and anything else is a note. Watch who has the work, approve it or send it back, and read the answer with its receipt.</p>
       <dl class="fine">
-        <div><dt>Nothing guessed from your words</dt><dd>Work starts only when you @ someone, so a passing thought never sets a team running.</dd></div>
-        <div><dt>It remembers the conversation</dt><dd>Every new piece of work is handed the conversation so far, so “shorter, please” needs no explaining.</dd></div>
-        <div><dt>Every agent knows its place</dt><dd>Each one is told its step, who hands work to it, and who gets its answer.</dd></div>
+        <div><dt>Talk while it works</dt><dd>A note reaches the agent at work in its next turn; Send now hands it over at once.</dd></div>
+        <div><dt>Every step on a timeline</dt><dd><span class="say-live">Blue</span> while an agent works, <span class="say-gold">gold</span> where it worked. Drag back to replay any moment.</dd></div>
       </dl>
     </div>
     <div class="ch-panel">
+      <div class="steps" role="tablist" aria-label="The team's chat, step by step">
+        <button type="button" role="tab" id="steptab-ask" data-step="ask" aria-controls="step-ask" aria-selected="true"><b>1</b>Ask</button>
+        <button type="button" role="tab" id="steptab-watch" data-step="watch" aria-controls="step-watch" aria-selected="false" tabindex="-1"><b>2</b>Watch</button>
+        <button type="button" role="tab" id="steptab-review" data-step="review" aria-controls="step-review" aria-selected="false" tabindex="-1"><b>3</b>Review</button>
+        <button type="button" role="tab" id="steptab-result" data-step="result" aria-controls="step-result" aria-selected="false" tabindex="-1"><b>4</b>Result</button>
+      </div>
+    <div class="step-panel" role="tabpanel" id="step-ask" aria-labelledby="steptab-ask">
       <div class="win chatwin">
         <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono">the team's chat</span></span><span class="badge" data-run-badge>Ready</span></div>
         <div class="win-body chat-body">
@@ -311,22 +236,9 @@ I can't see the other app's work.
           <p class="sim-note">This page plays a recorded run for each request, so a request can't be free text. A note can, and it never leaves this page.</p>
         </div>
       </div>
+    
     </div>
-  </article>
-
-  <!-- 05 · Watch -->
-  <article class="chapter" id="watch" data-chapter="6" aria-labelledby="watch-h">
-    <div class="ch-copy">
-      <span class="ch-n"><b>06</b> Watch</span>
-      <h2 id="watch-h">Watch it work. <em>Talk to it while it works.</em></h2>
-      <p class="ch-body">Your message starts a piece of work in the chat. The chat says who is working, and what the agents tell each other appears as they say it. Write while an agent works, and your note joins its next turn. Send now stops its current step and hands it your note at once.</p>
-      <dl class="fine">
-        <div><dt>Details, beside the chat</dt><dd>Every tool call and handover on a timeline: <span class="say-live">blue</span> while an agent works, <span class="say-gold">gold</span> where it worked, dashed while the team waits for you. When it's done, drag back to replay any moment.</dd></div>
-        <div><dt>Evidence, not guesses</dt><dd>A skill shows as loaded only when it was actually sent, and a file as opened only when the agent's own stream read it.</dd></div>
-        <div><dt>It asks before it reaches</dt><dd>Turn off Researcher's web search in Give, and the work stops to ask you before it searches, unless Researcher is on OpenCode, which never asks.</dd></div>
-      </dl>
-    </div>
-    <div class="ch-panel">
+    <div class="step-panel" role="tabpanel" id="step-watch" aria-labelledby="steptab-watch" hidden>
       <div class="win chatwin">
         <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono" id="watch-clock">0:00</span></span><span class="badge" data-run-badge>Ready</span></div>
         <div class="win-body watch-body">
@@ -340,7 +252,7 @@ I can't see the other app's work.
             </div>
             <ol class="tchat-log" id="tchat-log" aria-label="What the agents said to each other"><li class="tchat-none">Nothing has passed between the agents yet.</li></ol>
             <div class="ask-perm" id="ask-perm" hidden></div>
-            <a class="needs-you" id="needs-you" href="#review" hidden>The team is waiting for you <span aria-hidden="true">↓</span></a>
+            <a class="needs-you" id="needs-you" href="#review" hidden>The team is waiting for you <span aria-hidden="true">→</span></a>
           </div>
           <div class="box-slot" data-slot="watch"></div>
           <section class="details" id="details" aria-label="Details: how this work was made">
@@ -355,23 +267,9 @@ I can't see the other app's work.
           </section>
         </div>
       </div>
+    
     </div>
-  </article>
-
-  <!-- 06 · Review -->
-  <article class="chapter" id="review" data-chapter="7" aria-labelledby="review-h">
-    <div class="ch-copy">
-      <span class="ch-n"><b>07</b> Review</span>
-      <h2 id="review-h">Nothing moves on until you decide.</h2>
-      <p class="ch-body">Put yourself on the team as a step. When the work reaches you, it stops, and the handover waits in the chat with Approve and Send back on it. Say what to change in the box and send it back, so a weak first step never quietly shapes everything after it.</p>
-      <dl class="fine">
-        <div><dt>Easy answers stay easy</dt><dd>Approve without a comment, or send it back with one line.</dd></div>
-        <div><dt>Agents can ask you, too</dt><dd>Mid-run, an agent can stop and put a question to you. You answer it in the chat.</dd></div>
-        <div><dt>It waits, even on a schedule</dt><dd>A review step in a 10:00 run still waits for you.</dd></div>
-        <div><dt>Never decided for you</dt><dd>Ask LoomWatch can propose teams and start work, but it can never answer a review step.</dd></div>
-      </dl>
-    </div>
-    <div class="ch-panel">
+    <div class="step-panel" role="tabpanel" id="step-review" aria-labelledby="steptab-review" hidden>
       <div class="win win-review chatwin" id="review-win">
         <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono">your review</span></span><span class="badge" data-run-badge>Ready</span></div>
         <div class="win-body chat-body">
@@ -379,22 +277,9 @@ I can't see the other app's work.
           <div class="box-slot" data-slot="review"></div>
         </div>
       </div>
+    
     </div>
-  </article>
-
-  <!-- 07 · Result -->
-  <article class="chapter" id="result" data-chapter="8" aria-labelledby="result-h">
-    <div class="ch-copy">
-      <span class="ch-n"><b>08</b> Result</span>
-      <h2 id="result-h">The answer lands in the chat, <em>with its receipt.</em></h2>
-      <p class="ch-body">The team's answer is the last message of its piece of work, with a check of its record, the files it made, and Copy under it. Details keeps the receipt: what you asked, who did what, how long it took, and anything worth a second look. Not quite right? @ the agent whose step should change.</p>
-      <dl class="fine">
-        <div><dt>@ one agent</dt><dd>Only that agent works again, with the conversation so far. The steps before it keep their work.</dd></div>
-        <div><dt>Continue with the team</dt><dd>@ an agent before your review step, and its new version comes back to you. Continue with the team counts as your review and runs the steps after it.</dd></div>
-        <div><dt>Files, not paths</dt><dd>A file the team made opens as a card: open it, show it in its folder, or copy its path.</dd></div>
-      </dl>
-    </div>
-    <div class="ch-panel">
+    <div class="step-panel" role="tabpanel" id="step-result" aria-labelledby="steptab-result" hidden>
       <div class="win chatwin">
         <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b><span class="mono" id="result-file">digest.md</span></span><span class="badge" data-run-badge>Ready</span></div>
         <div class="win-body chat-body">
@@ -402,54 +287,54 @@ I can't see the other app's work.
           <div class="box-slot" data-slot="result"></div>
         </div>
       </div>
+    
     </div>
-  </article>
+    </div>
+  </section>
 </div>
 
-<!-- ================= 09 · What it does: every capability, in the order you use it ================= -->
+<!-- ================= What it does: every capability, in the order you use it ================= -->
 <section class="band band-can" id="can" aria-labelledby="can-h">
   <div class="wrap">
-    <div class="band-head can-head">
-      <span class="ch-n"><b>09</b> What it does</span>
+    <div class="can-head">
+      <span class="act-tag">What it does</span>
       <h2 id="can-h">Everything LoomWatch does, <em>in the order you use it.</em></h2>
-      <p class="ch-body">You just tried the heart of it. Here is all of it, on one page: what you can build, connect and talk to, and what runs underneath.</p>
     </div>
 
     <div class="can-grid">
       <section class="can-col" aria-labelledby="can-agents-h">
         <header class="can-col-head"><img src="assets/figures/yarn-clay.webp" width="64" height="64" alt=""><div><span class="micro">Act I</span><h3 id="can-agents-h">Agents</h3></div></header>
         <ul class="can-list">
-          <li><b>Build an agent once <i class="new">new</i></b><span>Its job, the app and model it runs on, and how hard it thinks, as plain blocks that say what each setting adds up to.</span></li>
-          <li><b>A face you pick <i class="new">new</i></b><span>Six figures in seven colours. One agent, one face and one colour, on Home, the canvas, the chat and Details.</span></li>
-          <li><b>Try it on its own</b><span>A test bench runs a real request on the real app, and asks you for anything it needs, before any team depends on it.</span></li>
-          <li><b>Versions, never surprises</b><span>A change makes the next version. Teams keep theirs until you choose Update, with your note on what changed.</span></li>
-          <li><b>Asks before it acts</b><span>Searching the web, changing files and running commands each ask you first, until you hand over that key. Auto mode lets commands that only read go ahead.</span></li>
-          <li><b>Skills, when the work calls for them</b><span>Recipe cards from the skills on your computer, opened only when a step needs one.</span></li>
+          <li><b>Build an agent once <i class="new">new</i></b><span>Its job, app, model and keys, as plain blocks.</span></li>
+          <li><b>A face you pick <i class="new">new</i></b><span>Six figures, seven colours, the same everywhere.</span></li>
+          <li><b>Try it on its own</b><span>A real request on the real app, before a team relies on it.</span></li>
+          <li><b>Versions</b><span>Teams keep theirs until you choose Update.</span></li>
+          <li><b>Asks before it acts</b><span>Web, files and commands wait for you, unless you hand over the key.</span></li>
+          <li><b>Skills when needed</b><span>From your computer, opened only when a step calls for one.</span></li>
         </ul>
       </section>
 
       <section class="can-col" aria-labelledby="can-workflow-h">
         <header class="can-col-head"><img src="assets/figures/spool-sky.webp" width="64" height="64" alt=""><div><span class="micro">Act II</span><h3 id="can-workflow-h">Workflow</h3></div></header>
         <ul class="can-list">
-          <li><b>Start from your agents <i class="new">new</i></b><span>A new team starts on its Agents tab: your saved agents are one click away, linked to the version you approved.</span></li>
-          <li><b>Hire by job, or just describe it</b><span>Pick ready-made jobs, or tell Ask LoomWatch what you want done and check the team it proposes before anything is saved.</span></li>
-          <li><b>Hand work along</b><span>Draw who hands work to whom, or let a lead agent recruit helpers. The team reads back as one sentence.</span></li>
-          <li><b>Stops where you decide</b><span>Put yourself in the workflow: the team pauses for your approval before the next agent builds on the work.</span></li>
-          <li><b>Give each agent what it needs</b><span>Folders, files, Notion pages and the team's notebook, wired to the agents that use them. Take one off the canvas and it's turned off for that agent.</span></li>
-          <li><b>Make it work better</b><span>Suggestions with one-click fixes, and what each choice costs in tokens, from your team's own runs.</span></li>
-          <li><b>On a schedule</b><span>Runs while you're away. Anything that would ask you is declined, so nothing happens behind your back.</span></li>
+          <li><b>Start from your agents <i class="new">new</i></b><span>Saved agents are one click away in every team.</span></li>
+          <li><b>Hire by job, or describe it</b><span>Ask LoomWatch proposes the team; you apply it.</span></li>
+          <li><b>Stops where you decide</b><span>Put yourself in the workflow as a review step.</span></li>
+          <li><b>Give each agent what it needs</b><span>Folders, files, Notion pages, the team's notebook.</span></li>
+          <li><b>Make it work better</b><span>One-click fixes, and what each choice costs in tokens.</span></li>
+          <li><b>On a schedule</b><span>Runs while you're away; anything that would ask is declined.</span></li>
         </ul>
       </section>
 
       <section class="can-col" aria-labelledby="can-chat-h">
         <header class="can-col-head"><img src="assets/figures/pincushion-rose.webp" width="64" height="64" alt=""><div><span class="micro">Act III</span><h3 id="can-chat-h">Chat</h3></div></header>
         <ul class="can-list">
-          <li><b>One chat per team</b><span><code>@team</code> starts the whole team, <code>@Writer</code> asks one agent, and anything else is a note that starts nothing.</span></li>
-          <li><b>Talk while it works</b><span>A note reaches an agent after its current step; Send now interrupts. See who has the work, and agents asking each other, as it happens.</span></li>
-          <li><b>Status in plain words <i class="new">new</i></b><span>“Writing its reply”, “Waiting for you”, “Using a tool” only while a tool call is open.</span></li>
-          <li><b>Approve, or send it back</b><span>Review a handover in the chat. Nothing moves on until you decide, and your note travels with the work.</span></li>
-          <li><b>Answers with receipts</b><span>Every answer lands with its files, its sources and how it ended. Details shows every step on a timeline you can replay.</span></li>
-          <li><b>Never miss a question</b><span>One tray for everything waiting on you, across all your teams, and answers you can send to Notion.</span></li>
+          <li><b>One chat per team</b><span><code>@team</code> starts it, <code>@Writer</code> asks one agent.</span></li>
+          <li><b>Status in plain words <i class="new">new</i></b><span>“Writing its reply”, “Waiting for you”, “Using a tool”.</span></li>
+          <li><b>Talk while it works</b><span>Notes reach the agent at work; Send now interrupts.</span></li>
+          <li><b>Approve, or send it back</b><span>Your note travels with the work.</span></li>
+          <li><b>Answers with receipts</b><span>Files, sources and every step, on a timeline you can replay.</span></li>
+          <li><b>Never miss a question</b><span>One tray for all your teams; answers can go to Notion.</span></li>
         </ul>
       </section>
     </div>
@@ -457,70 +342,13 @@ I can't see the other app's work.
     <div class="can-under">
       <span class="micro">Underneath</span>
       <ul>
-        <li><b>On your computer</b><span>Your files, your folders, your history. LoomWatch has no account and no cloud of its own.</span></li>
-        <li><b>The AI you already have</b><span>Claude Code, Codex and OpenCode, each with its own sign-in. Mix them on one team; open models through OpenCode.</span></li>
-        <li><b>Every step recorded</b><span>Each agent's calls, handovers and answers, kept so you can read how any answer was made.</span></li>
-        <li><b>Free and open source</b><span>One command installs it; Update and restart keeps it current, and rollback takes you back.</span></li>
+        <li><b>On your computer</b><span>Your files and history stay on your Mac. No account, no cloud of its own.</span></li>
+        <li><b>The AI you already have</b><span>Claude Code, Codex and OpenCode, mixed on one team.</span></li>
+        <li><b>Every step recorded</b><span>Calls, handovers and answers, kept so you can check them.</span></li>
+        <li><b>Free and open source</b><span>One command installs it; Update keeps it current.</span></li>
       </ul>
     </div>
-  </div>
-</section>
-
-<!-- ================= Tomorrow: two weeks of one scheduled team, as a morning paper ================= -->
-<section class="band" id="tomorrow" aria-labelledby="tomorrow-h">
-  <div class="wrap">
-    <div class="band-head">
-      <span class="ch-n"><b>10</b> Tomorrow</span>
-      <h2 id="tomorrow-h">A team you trust becomes a habit.</h2>
-      <p class="ch-body">Put a team on a schedule and its answer lands like a morning paper, waiting when you start work. Scheduled runs happen only while LoomWatch is running and your Mac is awake. Its Notebook keeps what you taught it, so every issue is a little better than the last. Here are one team's first two weeks. Flip back through the pile.</p>
-    </div>
-    <div class="fabric-wrap">
-      <div class="fabric-top">
-        <span class="sched"><span class="chip outline">Every day at 10:00</span><span class="to">→</span><span class="chip">Collector</span><span class="to">→</span><span class="chip">Editor</span><span class="to">→</span><span class="chip dashed">You</span><span class="to">→</span><span class="chip">Writer</span><span class="to">→</span><span class="chip outline">Notion</span></span>
-      </div>
-      <div class="press">
-        <div class="pile-col">
-          <div class="pile" id="pile" tabindex="0" role="group" aria-roledescription="pile of issues" aria-label="The team's issues"></div>
-          <p class="pile-hint" aria-hidden="true"><span class="for-pointer">Click the top paper to put it at the bottom, or hover the papers behind and pick one.</span><span class="for-touch">Tap the top paper to put it at the bottom, or swipe it sideways. Tap a paper behind to bring it to the top.</span></p>
-        </div>
-        <div class="press-side">
-          <div class="day-story" id="day-story" aria-live="polite"></div>
-          <div class="press-acts"><button class="btn" type="button" id="issue-play">Read the first two weeks</button></div>
-          <p class="press-count" id="issue-count"></p>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ================= Why a loom: the position nobody else holds ================= -->
-<section class="band band-why" id="why" aria-labelledby="why-h">
-  <div class="wrap">
-    <div class="why-grid">
-      <div class="band-head">
-        <span class="ch-n"><b>11</b> Why a loom</span>
-        <h2 id="why-h">Most team features come from one AI company. <em>A loom takes anyone's thread.</em></h2>
-        <p class="ch-body">AI apps leapfrog each other every few months. LoomWatch doesn't belong to any of them, so each job gets the app that does it best. When a better one ships, you change one thread, not your whole setup.</p>
-        <div class="seg" role="radiogroup" aria-label="Compare">
-          <button type="button" role="radio" aria-checked="false" data-loom="one">One company's team</button>
-          <button type="button" role="radio" aria-checked="true" data-loom="any">LoomWatch</button>
-        </div>
-      </div>
-      <figure class="swatch" aria-labelledby="swatch-cap">
-        <svg id="swatch" viewBox="0 0 480 300" role="img" aria-label="Threads woven into cloth"></svg>
-        <figcaption id="swatch-cap"></figcaption>
-      </figure>
-    </div>
-
-    <ol class="pillars">
-      <li><span class="p-n">i</span><h3>Any app, one team</h3><p>Claude Code, Codex and OpenCode side by side (Hermes and OpenClaw too), each on the job it does best.</p></li>
-      <li><span class="p-n">ii</span><h3>On your computer</h3><p>LoomWatch runs on your Mac and opens in your browser, at an address only your Mac can reach. Each team's chat and its history stay in a database on your Mac, your teams are plain files, and your folders stay where they are.</p></li>
-      <li><span class="p-n">iii</span><h3>Nothing new to sign up for</h3><p>LoomWatch is free and has no account. Each agent uses its own app's sign-in or API key, so that provider's terms and limits apply.</p></li>
-      <li><span class="p-n">iv</span><h3>With you in it</h3><p>You're in the team's chat and a step on the team, not a spectator. It stops wherever you put yourself.</p></li>
-      <li><span class="p-n">v</span><h3>Proof, not a guess</h3><p>Handovers are recorded as calls, not read out of chat, so the receipt only says what happened.</p></li>
-      <li><span class="p-n">vi</span><h3>Context that outlives a switch</h3><p>The Brief, the Notebook, the team's chat, and every folder and file you handed over stay with your team, whichever app you swap in.</p></li>
-    </ol>
-    <p class="footnote">To be exact about privacy: LoomWatch itself sends nothing anywhere unless you turn on Send to Notion, which posts the team's answer to your Notion. Each agent's own app still sends prompts and files to its model provider, as it does when you use it directly.</p>
+    <p class="footnote">To be exact about privacy: LoomWatch itself sends nothing anywhere unless you turn on Send to Notion. Each agent's own app still sends prompts and files to its model provider, as it does when you use it directly.</p>
   </div>
 </section>
 
@@ -529,7 +357,7 @@ I can't see the other app's work.
   <div class="wrap">
     <div class="start-grid">
       <div class="band-head">
-        <span class="ch-n"><b>12</b> Start</span>
+        <span class="act-tag">Start</span>
         <h2 id="start-h">One command, and your first team is already waiting.</h2>
         <p class="ch-body">Paste it into Terminal on your Mac. It downloads a ready-built LoomWatch (about 21 MB), checks it, and opens it in your browser with an offline demo team you can run before you connect any AI app. Nothing is compiled.</p>
         <dl class="needs">
@@ -544,7 +372,7 @@ I can't see the other app's work.
         <div class="termbox-bar"><span class="micro">Terminal</span><button class="btn" type="button" id="copy-cmds">Copy</button></div>
 <pre id="cmds"><span class="p">$ </span><span class="cmd">curl -fsSL https://loomwatch.github.io/install.sh | bash</span>
 <span class="c"><b>==&gt; Downloading LoomWatch for macOS</b>
-<b>==&gt; Installing LoomWatch 0.1.0 in ~/LoomWatch/app</b>
+<b>==&gt; Installing LoomWatch 0.4.0 in ~/LoomWatch/app</b>
 Installed. Start LoomWatch at any time with: ~/LoomWatch/app/loomwatch
 Created your teams folder at ~/LoomWatch/teams, with an offline demo team in it.
 <b>==&gt; Starting the database</b>
@@ -572,19 +400,6 @@ Keep this window open while you use LoomWatch. Press Ctrl-C to stop it.</span></
   </div>
 </section>
 
-<!-- ================= Closing ================= -->
-<section class="close" aria-label="What LoomWatch is">
-  <div class="wrap">
-    <p class="stanza">
-      <span>Not a <s>chatbot</s>.</span>
-      <span>Not a <s>cloud</s>.</span>
-      <span>Not a <s>model</s>.</span>
-      <span>Not <s>autopilot</s>.</span>
-    </p>
-    <p class="stanza-end">A loom, and a crew you can see, for the AI <em>you already have.</em></p>
-    <a class="btn btn-primary btn-lg" href="#start">Get LoomWatch</a>
-  </div>
-</section>
 
 </main>
 
