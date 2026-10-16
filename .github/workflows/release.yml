@@ -2,7 +2,8 @@ name: Release
 
 # Builds the ready-to-run LoomWatch that https://loomwatch.github.io/install.sh downloads: one macOS
 # program for Apple silicon and Intel Macs, and Linux programs for x86_64 and arm64, each packed by
-# scripts/package-release.sh with a checksum. A version tag such as v0.1.0 puts them on a DRAFT
+# scripts/package-release.sh with a checksum. The macOS job also builds LoomWatch-macos.dmg, the
+# LoomWatch.app people download and open (scripts/package-macos-app.sh). A version tag such as v0.1.0 puts them on a DRAFT
 # GitHub release; publish it by hand once its files have been tried, because the installer always
 # fetches the newest published release. Run it by hand to build the files without a release.
 on:
@@ -92,6 +93,44 @@ jobs:
           build/loomwatchd --help >/dev/null
       - name: Pack
         run: scripts/package-release.sh macos-universal build/loomwatchd dist
+      - name: Build the app for Apple silicon and Intel
+        run: |
+          cargo build --release --locked -p loomwatch-app --target aarch64-apple-darwin
+          cargo build --release --locked -p loomwatch-app --target x86_64-apple-darwin
+          lipo -create -output build/LoomWatch \
+            target/aarch64-apple-darwin/release/LoomWatch \
+            target/x86_64-apple-darwin/release/LoomWatch
+          lipo -info build/LoomWatch
+      # Signing and notarizing need an Apple Developer account. Until its secrets are set, the app is
+      # signed ad hoc, and macOS asks people once to allow it (System Settings, Privacy & Security).
+      - name: Package LoomWatch.app
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY_NAME: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [ -n "$MACOS_CERTIFICATE" ]; then
+            keychain=$RUNNER_TEMP/signing.keychain-db
+            keychain_password=$(openssl rand -hex 24)
+            security create-keychain -p "$keychain_password" "$keychain"
+            security set-keychain-settings -lut 21600 "$keychain"
+            security unlock-keychain -p "$keychain_password" "$keychain"
+            printf '%s' "$MACOS_CERTIFICATE" | base64 --decode >"$RUNNER_TEMP/certificate.p12"
+            security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            rm -f "$RUNNER_TEMP/certificate.p12"
+            security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+            security list-keychains -d user -s "$keychain" login.keychain-db
+            export MACOS_SIGN_IDENTITY="$MACOS_SIGN_IDENTITY_NAME"
+            if [ -n "$APPLE_ID" ]; then
+              xcrun notarytool store-credentials loomwatch --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+                --password "$APPLE_APP_PASSWORD" --keychain "$keychain"
+              export MACOS_NOTARY_PROFILE=loomwatch
+            fi
+          fi
+          scripts/package-macos-app.sh build/loomwatchd build/LoomWatch dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-macos-universal

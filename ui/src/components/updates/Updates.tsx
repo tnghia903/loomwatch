@@ -341,6 +341,12 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
                   {rollback && <> If the new version gives you trouble, <code className="t-mono-sm">{rollback}</code> goes back to this one.</>}
                 </p>
               </>
+            ) : status?.install === 'app' ? (
+              <ol>
+                <li>Download <strong>LoomWatch-macos.dmg</strong> from the release page above and open it.</li>
+                <li>Quit LoomWatch: click its icon in the menu bar, then <strong>Quit LoomWatch</strong>.</li>
+                <li>Drag LoomWatch to Applications and choose <strong>Replace</strong>, then open it again. Your teams and history stay.</li>
+              </ol>
             ) : (
               <p>Download it from the release page above, or update LoomWatch the way you installed it.</p>
             )}
