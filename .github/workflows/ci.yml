@@ -146,8 +146,9 @@ jobs:
         run: cargo test --locked -p loomwatch-backend --lib 'import::' -- --include-ignored
 
   # Pull requests only, since it compares the change with its base branch. Fails when the change
-  # adds a dependency, in Cargo.lock or ui/pnpm-lock.yaml, with a known vulnerability of moderate
-  # severity or worse. It reads GitHub's dependency graph, so it needs no checkout.
+  # adds a dependency, in Cargo.lock, ui/pnpm-lock.yaml or the connectors' package-lock.json files,
+  # with a known vulnerability of moderate severity or worse. It reads GitHub's dependency graph, so
+  # it needs no checkout.
   dependency-review:
     name: Dependency review
     if: github.event_name == 'pull_request'
@@ -157,6 +158,11 @@ jobs:
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: moderate
+          # glib is in Cargo.lock only as the Linux (GTK) dependency of tao and tray-icon, which
+          # crates/loomwatch-app uses on macOS alone, so it is never built for any platform
+          # LoomWatch ships: `cargo tree --workspace --target <platform> -i glib` prints nothing for
+          # Linux, Windows and macOS. Its advisory concerns an iterator in glib's GVariant API.
+          allow-ghsas: GHSA-wrw7-89jp-8q8g
 
   # The one check for the branch rule on main to require, so adding or renaming a job never needs a
   # settings change. It waits for every job above and fails unless each one passed; Dependency
