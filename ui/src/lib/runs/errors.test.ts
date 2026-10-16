@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { plainRunError } from './errors'
+import { failedAgent, plainRunError } from './errors'
 
 const agents = new Map([['helper', { name: 'Helper', command: 'acme-agent-cli' }]])
 
@@ -31,5 +31,24 @@ describe('plainRunError', () => {
 
   it('leaves every other error exactly as the daemon wrote it', () => {
     expect(plainRunError('protocol failure: session execution failed', agents)).toBe('protocol failure: session execution failed')
+  })
+})
+
+describe('failedAgent', () => {
+  const failed = (error: string | null, more: { onlyAgent?: string | null; agentIds?: string[] } = {}) => ({ status: 'failed', error, agentIds: ['gatherer', 'writer'], ...more })
+
+  it('is the agent the error names: a stage that stopped, or an app that couldn’t start', () => {
+    expect(failedAgent(failed('pipeline node gatherer failed: Codex reported an error instead of an answer: Quota exceeded.'))).toBe('gatherer')
+    expect(failedAgent(failed('failed to spawn ACP harness for agent writer: No such file or directory (os error 2)'))).toBe('writer')
+  })
+
+  it('is the one agent a one-agent turn ran, whatever its error says', () => {
+    expect(failedAgent(failed('protocol failure', { onlyAgent: 'writer' }))).toBe('writer')
+    expect(failedAgent(failed(null, { agentIds: ['writer'] }))).toBe('writer')
+  })
+
+  it('is nobody when the run didn’t fail, or its error names no one among many', () => {
+    expect(failedAgent({ ...failed('pipeline node gatherer failed: boom'), status: 'cancelled' })).toBeNull()
+    expect(failedAgent(failed('protocol failure: session execution failed'))).toBeNull()
   })
 })

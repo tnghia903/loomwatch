@@ -9,6 +9,7 @@ import { AppearContext, useAppear } from '../../lib/chat/appear'
 import { FollowContext, type ChatFollow } from '../../lib/chat/follow'
 import { useTeamChat, type PendingMessage } from '../../lib/chat/useTeamChat'
 import { DaemonUnreachableError } from '../../lib/daemonFetch'
+import { failedAgent } from '../../lib/runs/errors'
 import { answerRun, newStartKey, RunApiError, STALE_TEAM_REVISION, TEAM_NEEDS_REVIEW, type RunRecord, type TeamReview } from '../../lib/runs/client'
 import type { ReceiptLine } from '../../lib/story/receipt'
 import type { AllowSwitch } from '../../lib/team-file/types'
@@ -300,7 +301,8 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // An agent that asked you something, or asked your permission, is still in its turn, but it is
   // you it waits on.
   const asking = new Set(live.flatMap((run) => (run.permissionRequests ?? []).map((request) => request.agent)))
-  const presence = members.map((agent) => ({ agent, state: (unreachable ? 'away' : waitingFor === agent.id || asking.has(agent.id) ? 'waiting' : workingNow.has(agent.id) ? 'working' : 'idle') as Presence }))
+  const failed = failedNow(runs.values())
+  const presence = members.map((agent) => ({ agent, state: (unreachable ? 'away' : waitingFor === agent.id || asking.has(agent.id) ? 'waiting' : workingNow.has(agent.id) ? 'working' : failed.has(agent.id) ? 'failed' : 'idle') as Presence }))
   // Each face can say who its agent is, and puts `@name` in the message box when clicked.
   const [mentioned, setMentioned] = useState(0)
   const states = new Map(presence.map(({ agent, state }) => [agent.id, state]))
@@ -543,9 +545,22 @@ function WeaveMark() {
   )
 }
 
-// The words the chat uses for work everywhere: ready to take it, at it, or waiting on you.
-const STATE_WORDS = { working: 'working', waiting: 'waiting for you', idle: 'ready', away: 'away' } as const
+// The words the chat uses for work everywhere: ready to take it, at it, waiting on you, or stopped
+// by an error. Each face glows its state's colour (team-chat.css).
+const STATE_WORDS = { working: 'working', waiting: 'waiting for you', idle: 'ready', failed: 'failed', away: 'offline' } as const
 type Presence = keyof typeof STATE_WORDS
+
+/** The agents whose newest piece of work stopped at them with an error, until they work again. */
+function failedNow(runs: Iterable<RunRecord>): Set<string> {
+  const newest = new Map<string, RunRecord>()
+  for (const run of runs) {
+    for (const id of run.onlyAgent ? [run.onlyAgent] : run.agentIds) {
+      const seen = newest.get(id)
+      if (!seen || seen.createdAt < run.createdAt) newest.set(id, run)
+    }
+  }
+  return new Set([...newest].filter(([id, run]) => failedAgent(run) === id).map(([id]) => id))
+}
 
 /** Who has the work in the newest live piece that has someone at it, as that piece said. */
 function heldBy(live: readonly RunRecord[], batons: ReadonlyMap<string, Baton | null>, members: ReadonlySet<string>) {
@@ -558,7 +573,7 @@ function heldBy(live: readonly RunRecord[], batons: ReadonlyMap<string, Baton | 
 
 /** "1 working · 4 ready": the folded team, busiest first. */
 function rosterSummary(presence: readonly { state: Presence }[]): string {
-  const order: Presence[] = ['waiting', 'working', 'idle', 'away']
+  const order: Presence[] = ['waiting', 'failed', 'working', 'idle', 'away']
   return order
     .map((state) => [state, presence.filter((member) => member.state === state).length] as const)
     .filter(([, count]) => count > 0)
