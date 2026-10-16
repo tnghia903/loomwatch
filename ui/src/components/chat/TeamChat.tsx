@@ -63,6 +63,8 @@ interface TeamChatProps {
   reveal?: { runId: string; id: string; at: number } | null
   /** A finding of an answer's review, opened in Details: its record, or the agent's work. */
   onOpenFinding: (runId: string, line: ReceiptLine) => void
+  /** The newest piece's run as it changes, or null for none: an agent's chat shows its figure at work by it. */
+  onNewestRun?: (run: RunRecord | null) => void
 }
 
 /** Within this of the bottom, the chat follows new messages. */
@@ -77,8 +79,11 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * people — @team to start everyone, @ a name for one agent, anything else a note — and the agents
  * work and answer here, with everything said before above it. Runs are still how work executes;
  * each piece of work here is one, and Details opens its full record.
+ *
+ * With `team.solo` it is one agent's own chat (Your agents): everything you write goes to that
+ * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, autoMode }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, autoMode, onNewestRun }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
   const [draft, setDraft] = useState('')
   // Once the first page has painted, what arrives is news and moves in (lib/chat/appear.ts).
@@ -219,7 +224,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       chat.settleSend(localId, result)
       if ((result.route === 'team' || result.route === 'agent') && result.run) onStarted?.(result.run.runId)
       startKeys.current.delete(localId)
-      if (result.route !== where.route) announce(routeChanged(result.route, team.names.get(result.message.agentId ?? '') ?? result.message.agentId ?? ''))
+      if (result.route !== where.route) announce(routeChanged(result.route, team.names.get(result.message.agentId ?? '') ?? result.message.agentId ?? '', Boolean(team.solo)))
       return true
     } catch (caught) {
       if (caught instanceof RunApiError && caught.code === TEAM_NEEDS_REVIEW && caught.review) {
@@ -234,7 +239,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       chat.failSend(localId, caught instanceof DaemonUnreachableError ? caught.message : caught instanceof Error ? caught.message : String(caught))
       return true
     }
-  }, [live, team.names, steps, prepare, chat, teamPath, announce, onTeamReview, onStale, onStarted])
+  }, [live, team.names, team.solo, steps, prepare, chat, teamPath, announce, onTeamReview, onStale, onStarted])
 
   useEffect(() => { resend.current = send }, [send])
 
@@ -283,9 +288,12 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   useEffect(() => { restart.current = startNote }, [startNote])
 
   // ---- drawing -------------------------------------------------------------------------------
-  const newestRun = chat.items.findLast((item): item is Extract<ChatItem, { kind: 'work' }> => item.kind === 'work')?.run.runId ?? null
+  const newestWork = chat.items.findLast((item): item is Extract<ChatItem, { kind: 'work' }> => item.kind === 'work')?.run ?? null
+  const newestRun = newestWork?.runId ?? null
   useEffect(() => { if (chat.loaded) onNewest?.(newestRun) }, [chat.loaded, newestRun, onNewest])
+  useEffect(() => { if (chat.loaded) onNewestRun?.(newestWork) }, [chat.loaded, newestWork, onNewestRun])
   const members = agents.filter((agent) => !agent.operator)
+  const soloAgent = team.solo ? members.find((agent) => agent.id === team.solo) ?? null : null
   const workingNow = new Set(live.flatMap((run) => run.working ?? []))
   const waitingFor = decision?.from
   const unreachable = chat.error && /reach the LoomWatch server/i.test(chat.error)
@@ -315,7 +323,8 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   const faces: AgentFaces = {
     facts: (id) => {
       const agent = members.find((member) => member.id === id)
-      if (!agent) return null
+      // One agent's own chat has its whole workbench beside it, and no one to @: no card.
+      if (!agent || soloAgent) return null
       const config = team.configs?.get(id)
       const state = states.get(id) ?? 'idle'
       const capabilities = config?.capabilities ?? []
@@ -359,7 +368,19 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     <FollowContext.Provider value={follow}>
     <AgentFacesContext.Provider value={faces}>
     <section className="tc" aria-label={`${teamName} chat`} data-tour="chat" data-newest-run={newestRun ?? undefined}>
-      <header className={`tc-head${rosterOpen ? '' : ' folded'}`}>
+      <header className={`tc-head${rosterOpen && !soloAgent ? '' : ' folded'}${soloAgent ? ' solo' : ''}`}>
+        {soloAgent ? (
+          // One agent's own chat: its face, its name and what it is doing, and nothing to fold.
+          <div className="tc-title folded">
+            <h2 className={`tc-member ${states.get(soloAgent.id) ?? 'idle'}`} aria-label={`${soloAgent.name || soloAgent.id}, ${STATE_WORDS[states.get(soloAgent.id) ?? 'idle']}`}>
+              <span className="tc-face-row">
+                <AvatarFace id={soloAgent.id} hue={team.hues.get(soloAgent.id) ?? 1} size={26} fontSize={10} text={initialsOf(soloAgent.name || soloAgent.id)} />
+                <span className="tc-roster-name">{soloAgent.name || soloAgent.id}</span>
+              </span>
+              <Swap key={states.get(soloAgent.id) ?? 'idle'}><em>{STATE_WORDS[states.get(soloAgent.id) ?? 'idle']}</em></Swap>
+            </h2>
+          </div>
+        ) : (
         <div className={`tc-title${rosterOpen ? '' : ' folded'}`}>
           <h2>
             <button type="button" className="tc-roster-toggle" aria-expanded={rosterOpen} aria-controls={rosterId} onClick={toggleRoster} title={rosterOpen ? 'Fold the list of who is on the team' : 'Show who is on the team'}>
@@ -409,6 +430,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
             })}
           </ul>
         </div>
+        )}
         <div className="tc-head-acts">
           {search.open ? (
             <label className="tc-search">
@@ -440,11 +462,16 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         {chat.loaded && chat.items.length === 0 && chat.pending.length === 0 && !chat.error && (
           <div className="tc-empty">
             <WeaveMark />
-            <h3>Talk to {teamName}</h3>
-            <p>Write <b>@team</b> and what you need to start the whole team, or <b>@</b> a name to ask one agent. Anything without an @ is a note the team reads the next time it works.</p>
+            {soloAgent ? <>
+              <h3>Talk to {soloAgent.name || soloAgent.id}</h3>
+              <p>Ask it for real work, the kind you would hand it. It works on it here, as it is on screen, and reads what was said before each time. Nothing here changes a team.</p>
+            </> : <>
+              <h3>Talk to {teamName}</h3>
+              <p>Write <b>@team</b> and what you need to start the whole team, or <b>@</b> a name to ask one agent. Anything without an @ is a note the team reads the next time it works.</p>
+            </>}
             {suggestion && (
-              <button type="button" className="btn tc-suggest" onClick={() => setDraft(`@team ${suggestion}`)}>
-                <Play size={13} aria-hidden="true" />@team {suggestion}
+              <button type="button" className="btn tc-suggest" onClick={() => setDraft(soloAgent ? suggestion : `@team ${suggestion}`)}>
+                <Play size={13} aria-hidden="true" />{soloAgent ? suggestion : `@team ${suggestion}`}
               </button>
             )}
           </div>
@@ -496,6 +523,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         onSend={(text, to, now) => send(text, to, now)}
         onAnswer={answer}
         mentioned={mentioned}
+        solo={soloAgent}
       />
       {line.flight && <BatonFlight key={line.flight.id} flight={line.flight} holding={holding} onDone={line.done} />}
     </section>
@@ -612,9 +640,9 @@ function Pending({ message, onRetry, onEdit, onDismiss }: { message: PendingMess
   )
 }
 
-function routeChanged(route: string, agent: string): string {
+function routeChanged(route: string, agent: string, solo = false): string {
   if (route === 'note') return `${agent} was working, so your message became a note for its next turn.`
-  if (route === 'agent') return `${agent} had finished, so your message started it on its own.`
+  if (route === 'agent') return solo ? `${agent} had finished, so your message started new work.` : `${agent} had finished, so your message started it on its own.`
   if (route === 'team_note') return 'Nobody was working any more, so your message became a team note.'
   return 'Your message started the team.'
 }

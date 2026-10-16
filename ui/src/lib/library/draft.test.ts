@@ -2,7 +2,7 @@ import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 
 import type { DetectedHarness } from '../harnesses'
-import { benchTeamYaml, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft } from './draft'
+import { benchTeamYaml, chatAgentId, chatTeamYaml, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft } from './draft'
 import { ROLE_PRESETS } from './roles'
 
 const claude: DetectedHarness = { id: 'claude', name: 'Claude Code', command: 'claude-agent-acp', executablePath: '/bin/claude-agent-acp', acpAvailable: true, spawn: { cmd: 'claude-agent-acp', args: [] } }
@@ -86,5 +86,15 @@ describe('the agent builder’s draft', () => {
         capabilities: [{ kind: 'skill', name: 'house-style' }], allow: { web: true },
       }],
     })
+  })
+
+  it('keeps its chat’s agent under the chat’s id, whatever the agent is called', () => {
+    const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', appId: 'claude', model: '', effort: '', skills: [], doneWhen: [], allow: {}, figure: null }
+    const before = parse(chatTeamYaml(draft, claude, 'sonnet', 'notes')) as { id: string; name: string; entrypoint: string; agents: { id: string; name: string }[] }
+    const renamed = parse(chatTeamYaml({ ...draft, name: 'Changelog writer' }, claude, 'sonnet', 'notes')) as typeof before
+    expect(before).toMatchObject({ id: 'bench-notes', name: 'Release notes writer · chat', entrypoint: 'notes', agents: [{ id: 'notes', name: 'Release notes writer' }] })
+    // The same file, and the same agent in it: its history and a note for its turn still find it.
+    expect(renamed).toMatchObject({ id: 'bench-notes', entrypoint: 'notes', agents: [{ id: 'notes', name: 'Changelog writer' }] })
+    expect(chatAgentId('notes')).toBe('notes')
   })
 })

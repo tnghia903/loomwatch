@@ -18,7 +18,7 @@ export function YourAgentsShelf() {
         <a className="link home-agents-all" href="/agents">{jobs.length > 0 ? 'All agents' : 'Open Your agents'}<ArrowRight size={14} aria-hidden="true" /></a>
       </div>
       {loaded && jobs.length === 0 && (
-        <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>Start here: build an agent once, try it on its own, then use it in any team. <a href="/agents/new">Build your first agent</a></span></div>
+        <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>Start here: build an agent once, chat with it on its own, then use it in any team. <a href="/agents/new">Build your first agent</a></span></div>
       )}
       {jobs.length > 0 && (
         <ul className="home-agents-row">

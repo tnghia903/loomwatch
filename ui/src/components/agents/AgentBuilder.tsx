@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ExternalLink, History, Trash2 } from 'lucide-react'
+import { ArrowLeft, ExternalLink, History, MessagesSquare, Trash2, Wrench } from 'lucide-react'
 
 import { fetchHarnessModels, type DetectedHarness, type HarnessModels } from '../../lib/harnesses'
 import type { DetectedCapability } from '../../lib/library/client'
@@ -13,10 +13,12 @@ import { useAgentUses } from '../../lib/library/uses'
 import { relativeTime } from '../../lib/format'
 import type { RunRecord } from '../../lib/runs/client'
 import { rankHarnesses } from '../../lib/team-file/templates'
+import { SegmentThumb } from '../ui/SegmentThumb'
 import { AgentBadge } from './AgentBadge'
+import { AgentAnswer, AgentChat } from './AgentChat'
 import { ByHand } from './ByHand'
 import { TestBench } from './TestBench'
-import { navigate } from './route'
+import { navigate, withView, type AgentView } from './route'
 
 export interface AgentBuilderProps {
   /** The saved agent's id, or `null` for a new one. */
@@ -29,6 +31,8 @@ export interface AgentBuilderProps {
   skillsLoading: boolean
   /** The team the operator came from ("Edit in Your agents"), so the way back is one click. */
   cameFrom?: string | null
+  /** Which tab of its page is open, from the address: Build, or its Chat. Your agents only. */
+  view?: AgentView
   /**
    * Shown inside a team's Agents tab, for an agent placed from Your agents: there is no page to
    * go back to, and every save is followed by moving that team to the version just saved. What it
@@ -41,14 +45,19 @@ export interface AgentBuilderProps {
 type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; version: number; bumped: boolean } | { kind: 'error'; message: string }
 
 /**
- * One of Your agents, built on its own: its workbench (ByHand), plus a test bench.
+ * One of Your agents, on its own page with two tabs, as a team has its own: Build and Chat.
  *
- * The workbench holds every setting, each in one place, with what you picked open beside it.
- * Below it you can try the agent on a real request before any team depends on it, and see what
- * its settings add up to (the ID card), where it is used and how it got here (its versions).
+ * Build is its workbench (ByHand): every setting, each in one place, with what you picked open
+ * beside it, then what its settings add up to (the ID card), where it is used and how it got here
+ * (its versions). Chat is where you work with it before any team depends on it, and after (AgentChat):
+ * the same bench, with the figure working as the chat's newest work says, beside the conversation.
  * Saving a change a team would copy makes the next version; teams keep theirs until they Update.
+ *
+ * Inside a team (`inTeam`) there is no Chat tab, since the team has its own chat: the agent is tried
+ * on the test bench under its workbench instead.
  */
-export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading, skills, skillsLoading, cameFrom = null, inTeam }: AgentBuilderProps) {
+export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading, skills, skillsLoading, cameFrom = null, view: asked = 'build', inTeam }: AgentBuilderProps) {
+  const view: AgentView = inTeam ? 'build' : asked
   const { jobs, available, loaded } = useSavedJobs()
   const saved = useMemo(() => (id ? jobs.find((job) => job.id === id) ?? null : null), [jobs, id])
   const runnable = useMemo(() => rankHarnesses(harnesses), [harnesses])
@@ -59,6 +68,8 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
   const [removing, setRemoving] = useState(false)
   const roleField = useRef<HTMLTextAreaElement>(null)
   const [benchRecord, setBenchRecord] = useState<RunRecord | null>(null)
+  // A long answer from the chat, read in full over the bench.
+  const [answerRun, setAnswerRun] = useState<string | null>(null)
 
   // Start once per agent: from the saved version, from a built-in job, or blank on the best app.
   // Later reloads of the list (every save anywhere) must never overwrite edits on screen.
@@ -143,7 +154,12 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
       setNote('')
       setSave({ kind: 'saved', version: versionOf(result), bumped: Boolean(saved) && versionOf(result) > versionOf(saved!) })
       inTeam?.onSaved(result)
-      if (!saved) { setStartedFor(result.id); navigate(`/agents/${encodeURIComponent(result.id)}${cameFrom ? `?team=${encodeURIComponent(cameFrom)}` : ''}`, true) }
+      if (!saved) {
+        setStartedFor(result.id)
+        const query = new URLSearchParams(cameFrom ? { team: cameFrom } : {})
+        if (view === 'chat') query.set('view', 'chat')
+        navigate(`/agents/${encodeURIComponent(result.id)}${query.size ? `?${query}` : ''}`, true)
+      }
     } catch (failed) {
       const message = failed instanceof JobApiError && failed.status === 412
         ? saved ? failed.message : `You already have an agent called “${draft.name.trim()}”. Give this one another name, or open that one from Your agents.`
@@ -163,6 +179,11 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
   }
 
   const benchId = saved ? saved.id : `new-${jobIdFor(draft.name || 'agent')}`
+  // Its chat is kept under the id it is saved as, so a new agent saved under the name it had in its
+  // chat goes on talking in the same chat. A name one of your agents already has keeps its own.
+  const provisional = jobIdFor(draft.name || 'agent')
+  const chatId = saved ? saved.id : jobs.some((job) => job.id === provisional) ? `new-${provisional}` : provisional
+  const showView = (next: AgentView) => { if (next !== view) navigate(withView(next), true) }
   // The team the operator came from, which the team panel names by its file, absolute or not.
   const cameFromUse = cameFrom ? mine.find((use) => use.teamPath === cameFrom || cameFrom.endsWith(`/${use.teamPath}`)) ?? null : null
   const scheduledUses = mine.filter((use) => use.scheduled).length
@@ -171,7 +192,7 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
   const markId = saved?.id ?? (draft.name || 'new')
   const figure = figureFor(saved?.id ?? startKey, draft.figure)
   const badge = <AgentBadge markId={markId} figure={figure} draft={draft} harness={harness} modelName={modelName} effortName={effortName} version={saved && !changed ? version : null} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses, behind: behindUses } : undefined} />
-  const bench = <TestBench draft={draft} harness={harness} model={resolvedModel} benchId={benchId} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRecord={setBenchRecord} />
+  const bench = inTeam && <TestBench draft={draft} harness={harness} model={resolvedModel} benchId={benchId} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRecord={setBenchRecord} />
 
   return (
     <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
@@ -184,6 +205,13 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
         <div className="agent-builder-title">
           <h1>{draft.name.trim() || 'New agent'}</h1>
           <span className="agent-builder-version">{saved ? `v${version}${saved.savedAt ? ` · saved ${relativeTime(new Date(saved.savedAt))}` : ''}` : 'Not saved yet'}</span>
+          {!inTeam && (
+            <nav className="workspace-view-tabs agent-view-tabs" aria-label="Agent view">
+              <SegmentThumb />
+              <button type="button" aria-pressed={view === 'build'} onClick={() => showView('build')} data-tour="agent-tab-build"><Wrench size={14} aria-hidden="true" />Build</button>
+              <button type="button" aria-pressed={view === 'chat'} onClick={() => showView('chat')} data-tour="agent-tab-chat"><MessagesSquare size={14} aria-hidden="true" />Chat</button>
+            </nav>
+          )}
         </div>
         <div className="agent-builder-save">
           {saved && changed && bumps && <input className="agent-note" value={note} maxLength={200} onChange={(event) => setNote(event.target.value)} placeholder="What changed? Teams see this when they update" aria-label="What changed in this version" />}
@@ -196,10 +224,15 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
         </div>
       </header>
 
-      <ByHand draft={draft} set={set} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={markId} figure={figure} onFigure={(next) => set('figure', next)} record={benchRecord} reads={inTeam?.reads} tools={inTeam?.tools} onShowWorkflow={inTeam?.onShowWorkflow} />
+      <ByHand
+        draft={draft} set={set} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={markId} figure={figure} onFigure={(next) => set('figure', next)} record={benchRecord} reads={inTeam?.reads} tools={inTeam?.tools} onShowWorkflow={inTeam?.onShowWorkflow}
+        chat={view === 'chat' ? <AgentChat draft={draft} harness={harness} model={resolvedModel} chatId={chatId} figure={figure} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} /> : undefined}
+        onBuild={() => showView('build')}
+        cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={draft.name.trim() || 'New agent'} onClose={() => setAnswerRun(null)} /> : undefined}
+      />
 
-      <div className="agent-builder-grid">
-        <div className="agent-builder-form">{bench}</div>
+      {view === 'build' && <div className={`agent-builder-grid${inTeam ? '' : ' no-bench'}`}>
+        {inTeam && <div className="agent-builder-form">{bench}</div>}
         <aside className="agent-builder-side">
           {badge}
 
@@ -237,7 +270,7 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
             </div>
           )}
         </aside>
-      </div>
+      </div>}
     </div>
   )
 }

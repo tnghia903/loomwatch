@@ -645,3 +645,48 @@ describe('a piece of work', () => {
     expect(stopped).toHaveTextContent('The work stopped. Researcher stopped. Codex reported an error instead of an answer: The \'gpt-6.1-sol\' model is not supported when using Codex with a ChatGPT account.')
   })
 })
+
+// An agent's own chat in Your agents: the team chat on a team of one, where everything goes to it.
+describe('one agent’s own chat', () => {
+  const ada = [{ id: 'ada', name: 'Ada' }]
+  const solo: TeamView = { names: new Map([['ada', 'Ada']]), hues: new Map([['ada', 3]]), parties: [{ id: 'ada', name: 'Ada', operator: false }], predecessors: new Map(), order: [], operators: new Set(), solo: 'ada' }
+  const renderSolo = (overrides: Partial<Parameters<typeof TeamChat>[0]> = {}) => renderChat({ teamPath: 'ada.yaml', teamName: 'Ada', agents: ada, team: solo, steps: 1, suggestion: null, ...overrides })
+  const soloBox = () => screen.getByRole('textbox', { name: 'Message Ada' })
+
+  it('greets you by the agent’s name and sends to it without an @', async () => {
+    answer = () => new Response(JSON.stringify({ route: 'agent', message: message({ text: 'sum up the report', route: 'agent', agentId: 'ada' }), run: run({ status: 'queued', reply: null, finishedAt: null, onlyAgent: 'ada', responder: 'ada' }) }), { status: 202 })
+    const { props } = renderSolo()
+    expect(await screen.findByRole('heading', { name: 'Talk to Ada' })).toBeInTheDocument()
+    // Nothing to fold and nobody to @: its face, its name, and what it is doing.
+    expect(screen.queryByRole('button', { name: /who is on the team/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Ada, ready' })).toBeInTheDocument()
+    expect(screen.getByText('To Ada')).toBeInTheDocument()
+
+    fireEvent.change(soloBox(), { target: { value: 'sum up the report' } })
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { teamPath: 'ada.yaml', text: 'sum up the report', to: { kind: 'agent', agent: 'ada' }, expectedRevision: 'sha256:1' } }))
+    expect(props.prepare).toHaveBeenCalledTimes(1)
+  })
+
+  it('makes a message a note for its turn while it works, without saving the agent again', async () => {
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, onlyAgent: 'ada', responder: 'ada', agentIds: ['ada'], working: ['ada'] }), request: message({ text: 'sum up the report', route: 'agent', agentId: 'ada' }), notes: [] }]
+    answer = () => new Response(JSON.stringify({ route: 'note', message: message({ id: 'n-1', text: 'only the first half', route: 'note', agentId: 'ada' }) }), { status: 200 })
+    const { props } = renderSolo()
+    expect(await screen.findByRole('heading', { name: 'Ada, working' })).toBeInTheDocument()
+    expect(within(screen.getByRole('log')).getByText('You → Ada')).toBeInTheDocument()
+    fireEvent.change(soloBox(), { target: { value: 'only the first half' } })
+    expect(screen.getByText('Note for Ada · after its current step')).toBeInTheDocument()
+    fireEvent.keyDown(soloBox(), { key: 'Enter' })
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { to: { kind: 'agent', agent: 'ada' } } }))
+    expect(props.prepare).not.toHaveBeenCalled()
+  })
+
+  it('reports the newest piece’s run, for the figure at the bench', async () => {
+    const working = run({ status: 'running', reply: null, finishedAt: null, onlyAgent: 'ada', responder: 'ada', agentIds: ['ada'], working: ['ada'] })
+    page = [{ kind: 'work', run: working, request: message({ text: 'sum up the report', route: 'agent', agentId: 'ada' }), notes: [] }]
+    const onNewestRun = vi.fn()
+    renderSolo({ onNewestRun })
+    await waitFor(() => expect(onNewestRun).toHaveBeenLastCalledWith(expect.objectContaining({ runId: 'run-1', status: 'running' })))
+  })
+})

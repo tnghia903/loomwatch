@@ -35,6 +35,12 @@ interface ChatComposerProps {
   mentioned?: number
   /** Who decides the commands agents ask to run (ADR 0061); absent hides the switch. */
   autoMode?: AutoModeControl
+  /**
+   * The one agent this chat is with (an agent's own chat in Your agents): every message goes to it,
+   * so there is nothing to @ and no picker. It starts work when the agent is free, and joins its
+   * turn as a note while it works.
+   */
+  solo?: ChatAgent | null
 }
 
 /**
@@ -43,7 +49,7 @@ interface ChatComposerProps {
  * after its current step", "Team note · starts nothing" — because only an @ starts work and
  * nothing is guessed from the words.
  */
-export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, autoMode }: ChatComposerProps) {
+export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, autoMode, solo = null }: ChatComposerProps) {
   const [caret, setCaret] = useState(0)
   const [picked, setPicked] = useState(0)
   const [pickerClosed, setPickerClosed] = useState(false)
@@ -61,12 +67,12 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
     const compose = (event: Event) => {
       const value = (event as CustomEvent<unknown>).detail
       if (typeof value !== 'string') return
-      setText(value.startsWith('@') ? value : `@team ${value}`)
+      setText(value.startsWith('@') || solo ? value : `@team ${value}`)
       window.setTimeout(() => box.current?.focus(), 0)
     }
     window.addEventListener('loomwatch:compose', compose)
     return () => window.removeEventListener('loomwatch:compose', compose)
-  }, [setText])
+  }, [setText, solo])
 
   // A face clicked to @mention its agent: carry on writing after the name.
   useEffect(() => {
@@ -88,12 +94,14 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   }
   const answering = decision && !teamInstead ? decision : null
 
-  const mention = useMemo(() => findMention(text, agents), [text, agents])
-  const target: ChatTarget = mention?.target ?? null
-  const query = mentionQuery(text, caret)
+  const mention = useMemo(() => (solo ? null : findMention(text, agents)), [solo, text, agents])
+  const target: ChatTarget = solo ? { kind: 'agent', agent: solo.id } : mention?.target ?? null
+  const query = solo ? null : mentionQuery(text, caret)
   const choices = useMemo(() => (query && !pickerClosed ? mentionChoices(query.query, agents) : []), [query, pickerClosed, agents])
   const pickerOpen = choices.length > 0
-  const where: Destination = destination(target, live, names, steps)
+  const routed: Destination = destination(target, live, names, steps)
+  // With one agent there is nobody else it could start: the box just says who it goes to.
+  const where: Destination = solo && routed.route === 'agent' ? { ...routed, label: `To ${solo.name || solo.id}` } : routed
   const canSendNow = where.route === 'note'
   const trimmed = text.trim()
 
@@ -166,8 +174,9 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
     }
   }
 
-  // An empty box says how to start work; once there are words, it says where they will go.
-  const hint = !answering && !trimmed
+  // An empty box says how to start work; once there are words, it says where they will go. A chat
+  // with one agent has only one place a message can go, so it says that from the start.
+  const hint = !solo && !answering && !trimmed
   const answeringLabel = answering
     ? answering.kind === 'question'
       ? `Your answer to ${answering.fromName}'s question`
@@ -176,9 +185,13 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   const route = answering ? null : where.route
   const icon = answering ? <MessageSquareText size={14} aria-hidden="true" />
     : route === 'team' ? <Users size={14} aria-hidden="true" />
-      : route === 'agent' ? <AtSign size={14} aria-hidden="true" />
+      : route === 'agent' && !solo ? <AtSign size={14} aria-hidden="true" />
         : <MessageSquareText size={14} aria-hidden="true" />
-  const sendLabel = answering ? 'Reply' : route === 'team' || route === 'agent' ? 'Start' : 'Send note'
+  const starts = !answering && (route === 'team' || route === 'agent')
+  const sendLabel = answering ? 'Reply' : starts ? (solo ? 'Send' : 'Start') : 'Send note'
+  const placeholder = answering?.kind === 'question' ? `Answer ${answering.fromName}…`
+    : answering ? 'A note for Approve, or what to change'
+      : solo ? `Message ${solo.name || solo.id}` : 'Message the team'
 
   return (
     <form className={`tc-composer${answering ? ' answering' : ''}`} data-tour="composer" onSubmit={(event) => { event.preventDefault(); void send(false) }}>
@@ -190,7 +203,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
           : <Swap key={answeringLabel ?? where.label}>{answeringLabel ?? where.label}</Swap>}
         {answering && (
           <button type="button" className="tc-where-escape" onClick={() => setTeamInstead(true)}>
-            <X size={12} aria-hidden="true" />Write to the team instead
+            <X size={12} aria-hidden="true" />{solo ? 'Write a note instead' : 'Write to the team instead'}
           </button>
         )}
         {!answering && route === 'team_note' && trimmed && <em className="tc-where-hint">Add @team or @{agents.find((agent) => !agent.operator)?.name ?? 'name'} to start work.</em>}
@@ -222,10 +235,8 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
           className="tc-input"
           rows={1}
           value={text}
-          placeholder={answering?.kind === 'question' ? `Answer ${answering.fromName}…`
-            : answering ? 'A note for Approve, or what to change'
-              : 'Message the team'}
-          aria-label="Message the team"
+          placeholder={placeholder}
+          aria-label={solo ? `Message ${solo.name || solo.id}` : 'Message the team'}
           aria-describedby={hintId}
           aria-controls={pickerOpen ? pickerId : undefined}
           aria-expanded={pickerOpen}
@@ -244,7 +255,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
           {/* A review is decided with the buttons on its message; this box only holds the note. */}
           {answering?.kind !== 'review_stop' && (
             <button type="submit" className="btn btn-primary tc-go" disabled={!trimmed || sending || Boolean(disabled)} aria-label={sendLabel}>
-              {sendLabel === 'Start' ? <ArrowUp size={15} aria-hidden="true" /> : <CornerDownLeft size={14} aria-hidden="true" />}
+              {starts ? <ArrowUp size={15} aria-hidden="true" /> : <CornerDownLeft size={14} aria-hidden="true" />}
               <span>{sendLabel}</span>
             </button>
           )}
