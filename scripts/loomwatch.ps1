@@ -27,6 +27,16 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
+# Started from PowerShell 7 (through loomwatch.cmd, say), Windows PowerShell inherits PowerShell 7's
+# module folders first, and then lacks commands of its own, such as Get-FileHash. Its own come
+# first again; PowerShell 7 itself is left as it is.
+if ($PSVersionTable.PSEdition -eq 'Desktop' -and $env:PSModulePath) {
+  $own = Join-Path $PSHOME 'Modules'
+  $folders = @($env:PSModulePath -split ';' | Where-Object { $_ -and $_ -notmatch '[\\/]PowerShell[\\/]' })
+  if (-not ($folders -contains $own)) { $folders += $own }
+  $env:PSModulePath = $folders -join ';'
+}
+
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $RepoRoot
 $HomeFolder = [Environment]::GetFolderPath('UserProfile')

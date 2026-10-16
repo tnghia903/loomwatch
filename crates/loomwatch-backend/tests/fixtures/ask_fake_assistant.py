@@ -23,6 +23,10 @@ import re
 import sys
 import urllib.request
 
+# LoomWatch speaks UTF-8. Windows hands a program whose output is piped its ANSI code page instead.
+sys.stdin.reconfigure(encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
+
 SESSION = "ask-fake"
 mcp = {"url": None, "headers": {}, "session": None, "next": 1}
 state = {"team": None}

@@ -36,6 +36,15 @@ function Install-LoomWatch {
   param([switch]$NoStart, [switch]$Update, [switch]$Latest, [string]$Dir)
   $ErrorActionPreference = 'Stop'
   Set-StrictMode -Version 2.0
+  # Started from PowerShell 7 (through loomwatch.cmd, say), Windows PowerShell inherits PowerShell 7's
+  # module folders first, and then lacks commands of its own, such as Get-FileHash. Its own come
+  # first again; PowerShell 7 itself is left as it is.
+  if ($PSVersionTable.PSEdition -eq 'Desktop' -and $env:PSModulePath) {
+    $own = Join-Path $PSHOME 'Modules'
+    $folders = @($env:PSModulePath -split ';' | Where-Object { $_ -and $_ -notmatch '[\\/]PowerShell[\\/]' })
+    if (-not ($folders -contains $own)) { $folders += $own }
+    $env:PSModulePath = $folders -join ';'
+  }
   # Invoke-WebRequest draws its progress bar so slowly in Windows PowerShell that it slows the
   # download itself.
   $ProgressPreference = 'SilentlyContinue'
@@ -50,6 +59,14 @@ function Install-LoomWatch {
     Write-Host ''
     Write-Host "LoomWatch could not be installed: $Text" -ForegroundColor Red
     throw 'LoomWatch could not be installed.'
+  }
+  # The SHA-256 of a file, as .NET computes it: Get-FileHash is missing from a Windows PowerShell
+  # whose modules a PowerShell 7 hid.
+  function Get-Sha256([string]$Path) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $stream = [IO.File]::OpenRead($Path)
+    try { return -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) }
+    finally { $stream.Dispose(); $sha.Dispose() }
   }
   function Pretty([string]$Path) {
     if ($Path.StartsWith($homeFolder + '\', [StringComparison]::OrdinalIgnoreCase)) {
@@ -148,16 +165,18 @@ function Install-LoomWatch {
     }
 
     $expected = ([IO.File]::ReadAllText("$archive.sha256").Trim() -split '\s+')[0].ToLowerInvariant()
-    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+    $actual = Get-Sha256 $archive
     if (-not $expected -or $expected -ne $actual) {
       Fail "the download does not match the release's checksum, so it was not installed. Try again; if it keeps happening, report it at https://github.com/$repo/issues"
     }
 
     $unpacked = Join-Path $tmp 'unpacked'
     try {
-      Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
+      # .NET's own unzip, for the same reason as Get-Sha256.
+      Add-Type -AssemblyName System.IO.Compression.FileSystem
+      [IO.Compression.ZipFile]::ExtractToDirectory($archive, $unpacked)
     } catch {
-      Fail 'the download could not be unpacked.'
+      Fail "the download could not be unpacked. $($_.Exception.Message)"
     }
     $new = Join-Path $unpacked 'loomwatch'
     foreach ($part in @('bin\loomwatchd.exe', 'LoomWatch.exe', 'loomwatch.cmd', 'scripts\loomwatch.ps1')) {

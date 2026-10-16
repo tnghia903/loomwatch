@@ -10,6 +10,10 @@ import json
 import sys
 import urllib.request
 
+# LoomWatch speaks UTF-8. Windows hands a program whose output is piped its ANSI code page instead.
+sys.stdin.reconfigure(encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
+
 agent = sys.argv[1]
 bus = None  # (url, headers) of the Team Bus, from session/new
 turns = 0

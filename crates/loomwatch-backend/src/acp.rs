@@ -401,6 +401,15 @@ impl AcpProcess {
         if let Some(path) = child_path {
             command.env("PATH", path);
         }
+        // LoomWatch speaks UTF-8 to every app. On Windows, Python reads and writes a pipe in the
+        // ANSI code page instead, so an app or tool written in Python would garble anything that
+        // isn't English; its UTF-8 mode fixes that, unless the person chose otherwise.
+        if cfg!(windows)
+            && !spec.env.contains_key("PYTHONUTF8")
+            && std::env::var_os("PYTHONUTF8").is_none()
+        {
+            command.env("PYTHONUTF8", "1");
+        }
         if let Some(config) = withheld_app_config(spec)? {
             command.env(CODEX_CONFIG, config);
         }
