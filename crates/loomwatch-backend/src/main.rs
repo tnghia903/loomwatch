@@ -410,7 +410,7 @@ async fn main() -> Result<()> {
         }
         Commands::Show { database, session } => {
             let archive = EventArchive::open(&database.database()?).await?;
-            for event in archive.verify_session(&session).await? {
+            for event in archive.load_verified_session(&session).await? {
                 println!("{}", serde_json::to_string(&event)?);
             }
         }

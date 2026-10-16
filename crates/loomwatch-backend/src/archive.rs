@@ -1,6 +1,4 @@
 use std::path::Path;
-#[cfg(test)]
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -9,7 +7,7 @@ use serde::Serialize;
 use serde_json::Value;
 use sqlx::Row;
 use sqlx::sqlite::{SqlitePool, SqliteRow};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::db::{self, Db};
 use crate::{EventKind, RunEvent};
@@ -65,6 +63,23 @@ pub struct StoredContextPacket {
 }
 
 const EVENT_COLUMNS: &str = "id, session_id, agent_id, seq, ts, kind, payload, raw";
+
+/// [`EVENT_COLUMNS`] with `raw` only for the kinds a [`Frames::Lean`] page keeps it on. Decided
+/// in SQL, so a frame left out is not even read from the file, let alone decompressed.
+const LEAN_EVENT_COLUMNS: &str = "id, session_id, agent_id, seq, ts, kind, payload, \
+     CASE WHEN kind IN ('message', 'session_meta', 'turn_end') THEN raw END AS raw";
+
+/// Which events in a page of a trace carry their raw ACP frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Frames {
+    /// Every event's, as archived.
+    All,
+    /// Only those of the kinds the browser reads a frame of: `message`, `session_meta` and
+    /// `turn_end` (its token usage). Every other event goes without, exactly like an event that
+    /// never had one. Most of a real trace's bytes were frames of `tool_update` events, which
+    /// repeat the tool output their payload already holds.
+    Lean,
+}
 
 impl EventArchive {
     /// Open the archive in the database file at `path`, creating it when it is not there.
@@ -156,6 +171,15 @@ impl EventArchive {
     /// Wait until every event handed over before this call is written.
     pub async fn flush(&self) {
         self.db.flush_events().await;
+    }
+
+    /// A signal that changes each time the writer commits a batch of events, to any session.
+    ///
+    /// A live view waits on this instead of polling: it reads what is written, marks the signal
+    /// seen, and reads again when it changes. It is a counter rather than a notification, so a
+    /// batch committed while the view was busy sending still shows as a change.
+    pub(crate) fn written(&self) -> watch::Receiver<u64> {
+        self.db.events().written()
     }
 
     /// Record what one agent was supplied from team memory, before it is sent.
@@ -309,13 +333,49 @@ impl EventArchive {
         after_seq: i64,
         limit: i64,
     ) -> Result<Vec<RunEvent>> {
+        self.trace_page(session_id, after_seq, limit, Frames::All)
+            .await
+    }
+
+    /// [`Self::event_page`], keeping the raw ACP frames `frames` says to.
+    ///
+    /// # Errors
+    /// Returns an error for invalid bounds, database failures, or invalid archived events.
+    pub(crate) async fn trace_page(
+        &self,
+        session_id: &str,
+        after_seq: i64,
+        limit: i64,
+        frames: Frames,
+    ) -> Result<Vec<RunEvent>> {
+        self.flush().await;
+        self.written_page(session_id, after_seq, limit, frames)
+            .await
+    }
+
+    /// [`Self::trace_page`] over what the writer has already committed, without asking it to
+    /// write what it holds. A live view that follows [`Self::written`] reads this way, so following
+    /// a run never makes the writer commit early.
+    ///
+    /// # Errors
+    /// Returns an error for invalid bounds, database failures, or invalid archived events.
+    pub(crate) async fn written_page(
+        &self,
+        session_id: &str,
+        after_seq: i64,
+        limit: i64,
+        frames: Frames,
+    ) -> Result<Vec<RunEvent>> {
         ensure!(
             after_seq >= -1 && (1..=500).contains(&limit),
             "invalid event page bounds"
         );
-        self.flush().await;
+        let columns = match frames {
+            Frames::All => EVENT_COLUMNS,
+            Frames::Lean => LEAN_EVENT_COLUMNS,
+        };
         let rows = sqlx::query(&format!(
-            "SELECT {EVENT_COLUMNS} FROM run_events
+            "SELECT {columns} FROM run_events
              WHERE session_id = $1 AND seq > $2 ORDER BY seq LIMIT $3"
         ))
         .bind(session_id)
@@ -326,30 +386,112 @@ impl EventArchive {
         rows.iter().map(decode_event).collect()
     }
 
-    /// Assert that a session is non-empty and has a contiguous sequence.
+    /// Assert that a session is non-empty and has a contiguous sequence, and say how many events
+    /// it has.
+    ///
+    /// Counted, not loaded: `seq` is unique per session and never negative, so the session is
+    /// whole exactly when its lowest `seq` is 0 and its highest is one less than its count. A run
+    /// checks this as it ends, and loading every frame it archived only to count them was most of
+    /// what ending a long run cost.
     ///
     /// # Errors
     ///
-    /// Returns an error when loading fails or the archived sequence is incomplete.
-    pub async fn verify_session(&self, session_id: &str) -> Result<Vec<RunEvent>> {
-        let events = self.load_session(session_id).await?;
+    /// Returns an error when the archive cannot be read or the archived sequence is incomplete.
+    pub async fn verify_session(&self, session_id: &str) -> Result<usize> {
+        self.flush().await;
+        let (count, first, last): (i64, Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT count(*), min(seq), max(seq) FROM run_events WHERE session_id = $1",
+        )
+        .bind(session_id)
+        .fetch_one(self.db.reader())
+        .await
+        .with_context(|| format!("failed to load session {session_id}"))?;
         if let Some(reason) = self.db.events().lost(session_id) {
             anyhow::bail!(
                 "session {session_id} lost an event that could not be archived: {reason}"
             );
         }
-        ensure!(
-            !events.is_empty(),
-            "session {session_id} has no archived events"
-        );
-        for (expected, event) in events.iter().enumerate() {
-            ensure!(
-                event.seq == expected as u64,
-                "session {session_id} has a sequence gap at event {}",
-                event.id
-            );
+        ensure!(count > 0, "session {session_id} has no archived events");
+        if first != Some(0) || last != Some(count - 1) {
+            let id = self.first_out_of_place(session_id).await?;
+            anyhow::bail!("session {session_id} has a sequence gap at event {id}");
         }
-        Ok(events)
+        usize::try_from(count).context("archive contains a negative event count")
+    }
+
+    /// How many events a session has archived, whole or not.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the archive cannot be read.
+    pub(crate) async fn event_count(&self, session_id: &str) -> Result<usize> {
+        self.flush().await;
+        let count: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM run_events WHERE session_id = $1")
+                .bind(session_id)
+                .fetch_one(self.db.reader())
+                .await
+                .with_context(|| format!("failed to load session {session_id}"))?;
+        usize::try_from(count).context("archive contains a negative event count")
+    }
+
+    /// [`Self::verify_session`], then the session itself, for a caller that reads the events.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when loading fails or the archived sequence is incomplete.
+    pub async fn load_verified_session(&self, session_id: &str) -> Result<Vec<RunEvent>> {
+        self.verify_session(session_id).await?;
+        self.load_session(session_id).await
+    }
+
+    /// The id of a session's first event, in `seq` order, whose `seq` is not its position: the
+    /// event a gap is reported at. Only asked once a gap is known to be there.
+    async fn first_out_of_place(&self, session_id: &str) -> Result<String> {
+        sqlx::query_scalar(
+            "SELECT id FROM (
+                 SELECT id, seq, row_number() OVER (ORDER BY seq) - 1 AS position
+                 FROM run_events WHERE session_id = $1
+             )
+             WHERE seq <> position ORDER BY seq LIMIT 1",
+        )
+        .bind(session_id)
+        .fetch_one(self.db.reader())
+        .await
+        .with_context(|| format!("failed to load session {session_id}"))
+    }
+
+    /// The `payload` of a session's `kind` events, newest first, optionally only `agent_id`'s and
+    /// at most `limit` of them.
+    ///
+    /// For a question about the last few events of one kind, such as how the run's process ended,
+    /// that would otherwise load and decode the whole session. The raw frames are not read.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for database failures or a payload that is not JSON.
+    pub(crate) async fn latest_payloads(
+        &self,
+        session_id: &str,
+        kind: EventKind,
+        agent_id: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<Vec<Value>> {
+        self.flush().await;
+        let rows: Vec<Value> = sqlx::query_scalar(
+            "SELECT payload FROM run_events
+             WHERE session_id = $1 AND kind = $2 AND ($3 IS NULL OR agent_id = $3)
+             ORDER BY seq DESC LIMIT $4",
+        )
+        .bind(session_id)
+        .bind(kind.as_str())
+        .bind(agent_id)
+        // SQLite reads a negative LIMIT as none.
+        .bind(limit.map_or(-1, i64::from))
+        .fetch_all(self.db.reader())
+        .await
+        .with_context(|| format!("failed to load session {session_id}"))?;
+        Ok(rows)
     }
 }
 
@@ -424,8 +566,8 @@ fn parse_event_kind(kind: &str) -> Result<EventKind> {
 /// An agent streaming its reply sends a frame per few tokens, and a busy team peaks near two
 /// hundred a second. One transaction per event was most of what writing them cost; one per tenth
 /// of a second, or per [`BATCH_MAX`] events, makes a burst a handful of commits. Nothing waits for
-/// the window to close: readers flush first ([`Db::flush_events`]), so a live view still sees an
-/// event as soon as it polls.
+/// the window to close: readers flush first ([`Db::flush_events`]), and a live view is woken by
+/// the commit itself ([`EventArchive::written`]).
 pub(crate) const BATCH_WINDOW: Duration = Duration::from_millis(100);
 /// Events in one transaction, at most.
 pub(crate) const BATCH_MAX: usize = 256;
@@ -486,16 +628,16 @@ struct WriterShared {
     /// session is verified, so a run whose last events were never written cannot pass for whole:
     /// a missing tail leaves no gap in `seq` to notice.
     lost: Mutex<std::collections::HashMap<String, String>>,
-    /// Transactions committed, which the batching test counts.
-    #[cfg(test)]
-    commits: AtomicU64,
+    /// Transactions committed so far. Live views wait for it to change ([`EventArchive::written`]),
+    /// and the batching test counts it.
+    written: watch::Sender<u64>,
 }
 
 impl WriterShared {
-    #[cfg_attr(not(test), allow(clippy::unused_self))]
+    /// A batch is committed: wake everyone following the archive. `send_modify` rather than
+    /// `send`, which would leave the count alone while nobody is following.
     fn committed(&self) {
-        #[cfg(test)]
-        self.commits.fetch_add(1, Ordering::Relaxed);
+        self.written.send_modify(|count| *count += 1);
     }
 
     fn lost(&self, session_id: &str, message: &str) {
@@ -518,7 +660,17 @@ impl EventWriter {
     /// How many transactions the writer has committed.
     #[cfg(test)]
     pub(crate) fn commits(&self) -> u64 {
-        self.shared.commits.load(Ordering::Relaxed)
+        *self.shared.written.borrow()
+    }
+
+    /// How many live views are following the archive right now.
+    #[cfg(test)]
+    pub(crate) fn followers(&self) -> usize {
+        self.shared.written.receiver_count()
+    }
+
+    fn written(&self) -> watch::Receiver<u64> {
+        self.shared.written.subscribe()
     }
 
     /// Why `session_id` lost an event, if it did.
@@ -796,7 +948,7 @@ mod tests {
         assert_eq!(second[0].seq, 2);
         assert_eq!(
             first.into_iter().chain(second).collect::<Vec<_>>(),
-            archive.verify_session("page").await?
+            archive.load_verified_session("page").await?
         );
         assert!(archive.event_page("page", 2, 2).await?.is_empty());
         assert!(archive.event_page("page", -2, 2).await.is_err());
@@ -1065,7 +1217,7 @@ mod tests {
         archive.append(&event).await?;
         drop(archive);
         let reopened = EventArchive::open(db.path()).await?;
-        assert_eq!(reopened.verify_session("session").await?, [event]);
+        assert_eq!(reopened.load_verified_session("session").await?, [event]);
         Ok(())
     }
 
@@ -1116,7 +1268,7 @@ mod tests {
             archive.enqueue(next, &failure).await?;
         }
         // Without waiting for any window: the read itself flushes.
-        let events = archive.verify_session("burst").await?;
+        let events = archive.load_verified_session("burst").await?;
         assert_eq!(events.len(), 600);
         assert!(events.iter().enumerate().all(|(i, e)| e.seq == i as u64));
         assert_eq!(events[7], {
@@ -1171,6 +1323,51 @@ mod tests {
             .await
             .expect_err("lost an event");
         assert!(format!("{error:#}").contains("lost an event"), "{error:#}");
+        Ok(())
+    }
+
+    /// The check counts rather than loads, and still finds what loading found: a session with no
+    /// events, a hole in the middle, and one that does not start at 0, each named at the first
+    /// event out of place.
+    #[tokio::test]
+    async fn verifying_counts_the_session_and_names_the_first_event_after_a_gap() -> Result<()> {
+        let archive = EventArchive::new(Db::temp().await);
+        for seq in 0..4 {
+            archive.append(&event("whole", seq)).await?;
+        }
+        for seq in [0, 1, 3, 4] {
+            archive.append(&event("holed", seq)).await?;
+        }
+        for seq in [1, 2] {
+            archive.append(&event("late", seq)).await?;
+        }
+        assert_eq!(archive.verify_session("whole").await?, 4);
+        assert_eq!(archive.load_verified_session("whole").await?.len(), 4);
+        let error = |session: &'static str| {
+            let archive = archive.clone();
+            async move {
+                format!(
+                    "{:#}",
+                    archive
+                        .verify_session(session)
+                        .await
+                        .expect_err("not whole")
+                )
+            }
+        };
+        assert_eq!(
+            error("holed").await,
+            "session holed has a sequence gap at event holed:3"
+        );
+        assert_eq!(
+            error("late").await,
+            "session late has a sequence gap at event late:1"
+        );
+        assert_eq!(
+            error("missing").await,
+            "session missing has no archived events"
+        );
+        assert!(archive.load_verified_session("holed").await.is_err());
         Ok(())
     }
 

@@ -753,10 +753,10 @@ impl AcpProcess {
                 exit.stderr
             );
         }
-        let events = context.archive.verify_session(&archive_session_id).await?;
+        let event_count = context.archive.verify_session(&archive_session_id).await?;
         Ok(SessionOutcome {
             session_id: archive_session_id,
-            event_count: events.len(),
+            event_count,
             exit_code: exit.code,
             reply: last_reply,
         })
@@ -823,7 +823,7 @@ impl AcpProcess {
                         None,
                     )
                     .await?;
-                let events = context.archive.verify_session(&session_id).await?;
+                let event_count = context.archive.verify_session(&session_id).await?;
                 if !exit.success {
                     bail!(
                         "ACP session {session_id} child exited with code {}; stderr: {}",
@@ -833,7 +833,7 @@ impl AcpProcess {
                 }
                 Ok(SessionOutcome {
                     session_id,
-                    event_count: events.len(),
+                    event_count,
                     exit_code: exit.code,
                     reply,
                 })
@@ -1303,8 +1303,8 @@ impl AcpProcess {
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = answer;
         }
         self.close_session(&mut recorder).await?;
-        let events = context.archive.verify_session(&archive_session_id).await?;
-        Ok((archive_session_id, events.len(), reply))
+        let event_count = context.archive.verify_session(&archive_session_id).await?;
+        Ok((archive_session_id, event_count, reply))
     }
 
     /// One `session/prompt` round trip on an already-negotiated session, archived exactly as a
@@ -2664,8 +2664,12 @@ impl EventLog {
     ///
     /// The event gets the next `seq` and is handed to the archive's writer under the same lock,
     /// so events are written in `seq` order. It returns before the row is written: every read of
-    /// the archive flushes first, so nothing reads around it, and a write that fails is returned
-    /// by the next append.
+    /// the archive flushes first, and a live stream is woken when the row commits, so nothing
+    /// reads around it, and a write that fails is returned by the next append.
+    ///
+    /// The id is a time-ordered UUID (v7), so each new row lands at the end of the archive's
+    /// primary key instead of on a random page of it, which is most of what an insert costs once
+    /// the history is large.
     pub(crate) async fn append(
         &self,
         agent_id: &str,
@@ -2673,7 +2677,7 @@ impl EventLog {
         payload: Value,
         raw: Option<Value>,
     ) -> Result<()> {
-        self.append_event(Uuid::new_v4().to_string(), agent_id, kind, payload, raw)
+        self.append_event(new_event_id(), agent_id, kind, payload, raw)
             .await
     }
 
@@ -2724,6 +2728,17 @@ impl EventLog {
         *next_seq += 1;
         Ok(())
     }
+}
+
+/// A new run event id: a UUID whose leading bits are the time it was made (v7).
+///
+/// `run_events.id` is the table's primary key, so where a new id sorts is where its row goes. A
+/// random (v4) id put every insert on a random page of a key that grows with the whole history;
+/// measured on 1.5 million rows, batches were about 19 times slower and wrote about 12 times
+/// more to the write-ahead log than with time-ordered ids. Ids already archived as v4 stay valid:
+/// nothing reads meaning into an id beyond equality.
+pub(crate) fn new_event_id() -> String {
+    Uuid::now_v7().to_string()
 }
 
 /// An agent's reply, assembled from the message chunks it streamed.
@@ -3275,7 +3290,7 @@ async fn append_archive_event(
 ) -> Result<()> {
     archive
         .append(&RunEvent {
-            id: Uuid::new_v4().to_string(),
+            id: new_event_id(),
             session_id: session_id.to_owned(),
             agent_id: agent_id.to_owned(),
             seq,
@@ -3290,6 +3305,19 @@ async fn append_archive_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Event ids sort in the order they were made, so new rows go at the end of the archive's
+    /// primary key; and they are still UUIDs in the same text form as the v4 ids already stored.
+    #[test]
+    fn event_ids_are_time_ordered_uuids() {
+        let ids: Vec<String> = (0..1000).map(|_| new_event_id()).collect();
+        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]), "{ids:?}");
+        for id in &ids {
+            let parsed = Uuid::parse_str(id).expect("an event id is a UUID");
+            assert_eq!(parsed.get_version_num(), 7);
+            assert_eq!(parsed.to_string(), *id, "the usual hyphenated form");
+        }
+    }
 
     #[cfg(unix)]
     #[test]
@@ -3493,7 +3521,14 @@ mod tests {
             recorder.record_frame(&json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "phase-test", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}, "_meta": {"codex": {"phase": phase}}}}})).await.unwrap();
         }
         assert_eq!(recorder.reply.as_str(), "Final report");
-        assert_eq!(archive.verify_session("phase-test").await.unwrap().len(), 6);
+        assert_eq!(
+            archive
+                .load_verified_session("phase-test")
+                .await
+                .unwrap()
+                .len(),
+            6
+        );
     }
 
     #[tokio::test]
@@ -3840,7 +3875,7 @@ mod tests {
             );
             // The archive still holds every chunk exactly as the harness sent it.
             let chunks: Vec<String> = archive
-                .verify_session(&outcome.session_id)
+                .load_verified_session(&outcome.session_id)
                 .await
                 .expect("archived")
                 .iter()
@@ -3915,7 +3950,7 @@ mod tests {
         drop(archive);
         let reopened = EventArchive::new(pool);
         let events = reopened
-            .verify_session(&outcome.session_id)
+            .load_verified_session(&outcome.session_id)
             .await
             .expect("recover session");
         assert_eq!(outcome.exit_code, 0);
@@ -5446,7 +5481,7 @@ mod tests {
         );
 
         let events = archive
-            .verify_session("partial-session")
+            .load_verified_session("partial-session")
             .await
             .expect("recover partial session");
         assert_eq!(events.len(), 6);
@@ -5543,7 +5578,7 @@ mod tests {
         );
 
         let events = archive
-            .verify_session("session-1")
+            .load_verified_session("session-1")
             .await
             .expect("the partial session must still be reachable via show");
         assert_eq!(
@@ -5592,7 +5627,7 @@ mod tests {
         assert!(format!("{error:#}").contains("session_id=signal-session"));
 
         let events = archive
-            .verify_session("signal-session")
+            .load_verified_session("signal-session")
             .await
             .expect("recover partial session");
         let last = events.last().unwrap();
@@ -5647,7 +5682,7 @@ mod tests {
         );
 
         let events = archive
-            .verify_session("cancel-session")
+            .load_verified_session("cancel-session")
             .await
             .expect("recover stalled session");
         let last = events.last().unwrap();

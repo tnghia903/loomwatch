@@ -39,7 +39,7 @@ tokio = { version = "1.47", features = ["io-std", "io-util", "macros", "net", "p
 # LoomWatch's own Node.js download (connectors.rs) is a .tar.gz.
 flate2 = "1.1"
 tar = "0.4"
-uuid = { version = "1.18", features = ["v4"] }
+uuid = { version = "1.18", features = ["v4", "v7"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 cron = "0.17"
 chrono-tz = "0.10"

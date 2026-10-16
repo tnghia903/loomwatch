@@ -247,14 +247,14 @@ pub fn detect_capabilities(home: Option<&Path>, teams_root: &Path) -> Capability
         }
     }
 
+    // Read once for both what it lists: its MCP servers and its claude.ai connectors. It is
+    // Claude Code's whole state file, and grows with every project it has opened.
+    let claude_json = home.and_then(|home| read_json(&home.join(".claude.json")));
     if let Some(home) = home {
         scan_codex_mcp(&home.join(".codex/config.toml"), &mut tools);
-        scan_json_connectors(
-            &home.join(".claude.json"),
-            "Claude Code",
-            "mcpServers",
-            &mut tools,
-        );
+        if let Some(claude_json) = &claude_json {
+            collect_json_connector_keys(claude_json, "mcpServers", "Claude Code", &mut tools);
+        }
         scan_json_connectors(
             &home.join(".claude/settings.json"),
             "Claude Code",
@@ -278,22 +278,23 @@ pub fn detect_capabilities(home: Option<&Path>, teams_root: &Path) -> Capability
         skills: finish_map(skills, "skill"),
         tools: finish_map(tools, "tool"),
         sources: finish_map(sources, "source"),
-        connectors: home.map(claude_connectors).unwrap_or_default(),
+        connectors: claude_json
+            .as_ref()
+            .map(claude_connectors)
+            .unwrap_or_default(),
     }
 }
 
 /// Claude Code's own record of the claude.ai connectors it has connected
-/// (`claudeAiMcpEverConnected` in `~/.claude.json`), read rather than asked for: `claude mcp list`
-/// checks every server's health and takes most of a minute. Named as Claude names the server, so
-/// turning one off withholds `mcp__claude_ai_<name>` (ADR 0060).
-fn claude_connectors(home: &Path) -> Vec<DetectedCapability> {
-    let Some(Value::Array(names)) = read_json(&home.join(".claude.json"))
-        .and_then(|value| value.get("claudeAiMcpEverConnected").cloned())
-    else {
+/// (`claudeAiMcpEverConnected` in `~/.claude.json`, given here as read), read rather than asked
+/// for: `claude mcp list` checks every server's health and takes most of a minute. Named as Claude
+/// names the server, so turning one off withholds `mcp__claude_ai_<name>` (ADR 0060).
+fn claude_connectors(claude_json: &Value) -> Vec<DetectedCapability> {
+    let Some(Value::Array(names)) = claude_json.get("claudeAiMcpEverConnected") else {
         return Vec::new();
     };
     let mut names: Vec<String> = names
-        .into_iter()
+        .iter()
         .filter_map(|name| name.as_str().map(str::to_owned))
         .filter(|name| !name.trim().is_empty())
         .collect();

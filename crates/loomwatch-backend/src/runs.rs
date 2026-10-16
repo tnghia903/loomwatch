@@ -3023,30 +3023,43 @@ async fn first_process_spawned(archive: &EventArchive, session_id: &str) -> bool
 /// What the archive knows about a finished run: the last terminal `process` marker's exit
 /// code, how many events were archived, and the canonical responder's final `turn_end`
 /// stop reason, when one was recorded.
+///
+/// Asked of the archive directly (the count, the `process` markers, the responder's last
+/// `turn_end`) rather than by loading and decoding the whole run to look at a few events.
 async fn archived_exit(
     archive: &EventArchive,
     session_id: &str,
     responder: Option<&str>,
 ) -> (Option<i32>, Option<usize>, Option<String>) {
-    let Ok(events) = archive.load_session(session_id).await else {
+    let read = async {
+        let event_count = archive.event_count(session_id).await?;
+        // Newest first, like the scan backwards through the whole run this replaced.
+        let processes = archive
+            .latest_payloads(session_id, EventKind::Process, None, None)
+            .await?;
+        let last_turn_end = match responder {
+            Some(responder) => archive
+                .latest_payloads(session_id, EventKind::TurnEnd, Some(responder), Some(1))
+                .await?
+                .into_iter()
+                .next(),
+            None => None,
+        };
+        anyhow::Ok((event_count, processes, last_turn_end))
+    };
+    let Ok((event_count, processes, last_turn_end)) = read.await else {
         return (None, None, None);
     };
-    let exit_code = events
+    let exit_code = processes
         .iter()
-        .rev()
-        .filter(|event| event.kind == EventKind::Process)
-        .find_map(|event| event.payload.get("exitCode").and_then(Value::as_i64))
+        .find_map(|payload| payload.get("exitCode").and_then(Value::as_i64))
         .and_then(|code| i32::try_from(code).ok());
-    let event_count = (!events.is_empty()).then_some(events.len());
-    let stop_reason = responder.and_then(|responder| {
-        events
-            .iter()
-            .rev()
-            .find(|event| event.kind == EventKind::TurnEnd && event.agent_id == responder)
-            .and_then(|event| event.payload.get("stopReason"))
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-    });
+    let event_count = (event_count > 0).then_some(event_count);
+    let stop_reason = last_turn_end
+        .as_ref()
+        .and_then(|payload| payload.get("stopReason"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     (exit_code, event_count, stop_reason)
 }
 
@@ -3060,14 +3073,17 @@ async fn stable_error_code(
     session_id: &str,
     error: &anyhow::Error,
 ) -> &'static str {
-    let events = archive.load_session(session_id).await.unwrap_or_default();
-    let terminal_process = events.iter().rev().find(|event| {
-        event.kind == EventKind::Process
-            && matches!(event.payload["phase"].as_str(), Some("exited" | "crashed"))
-    });
-    let process_crashed = terminal_process.is_some_and(|event| event.payload["phase"] == "crashed");
+    // Only the `process` markers, newest first: not the whole run.
+    let processes = archive
+        .latest_payloads(session_id, EventKind::Process, None, None)
+        .await
+        .unwrap_or_default();
+    let terminal_process = processes
+        .iter()
+        .find(|payload| matches!(payload["phase"].as_str(), Some("exited" | "crashed")));
+    let process_crashed = terminal_process.is_some_and(|payload| payload["phase"] == "crashed");
     let crash_message = terminal_process
-        .and_then(|event| event.payload.get("message"))
+        .and_then(|payload| payload.get("message"))
         .and_then(Value::as_str)
         .map(str::to_owned);
     classify_failure_code(error, process_crashed, crash_message.as_deref())
@@ -3304,7 +3320,8 @@ async fn answer_run(
         OperatorAnswer {
             text: request.text,
             send_back: request.send_back,
-            answer_event_id: Uuid::new_v4().to_string(),
+            // The id of the `message` event the run is about to archive the answer as.
+            answer_event_id: crate::acp::new_event_id(),
         },
     )
     .await
@@ -5019,6 +5036,94 @@ exit 7
         );
     }
 
+    /// What a finished run reads back from the archive, now asked of a few events instead of the
+    /// whole run, is what the scan backwards through every event found: the newest `process`
+    /// marker that has an exit code (a signal leaves none), the responder's own last `turn_end`,
+    /// and the newest marker that says how the process ended.
+    #[tokio::test]
+    async fn a_finished_run_reads_its_exit_from_the_newest_markers() {
+        let archive = EventArchive::new(crate::db::Db::temp().await);
+        let events = [
+            (
+                "lead",
+                EventKind::Process,
+                json!({"phase": "spawned", "pid": 1}),
+            ),
+            (
+                "lead",
+                EventKind::TurnEnd,
+                json!({"stopReason": "max_tokens"}),
+            ),
+            (
+                "lead",
+                EventKind::TurnEnd,
+                json!({"stopReason": "end_turn"}),
+            ),
+            (
+                "helper",
+                EventKind::TurnEnd,
+                json!({"stopReason": "cancelled"}),
+            ),
+            (
+                "lead",
+                EventKind::Process,
+                json!({"phase": "exited", "exitCode": 3}),
+            ),
+            (
+                "helper",
+                EventKind::Process,
+                json!({"phase": "spawned", "pid": 2}),
+            ),
+            (
+                "helper",
+                EventKind::Process,
+                json!({"phase": "crashed", "exitCode": null, "signal": "SIGKILL",
+                       "message": "stderr: killed"}),
+            ),
+            ("helper", EventKind::Message, json!({"role": "agent"})),
+        ];
+        for (seq, (agent, kind, payload)) in events.into_iter().enumerate() {
+            archive
+                .append(&crate::RunEvent {
+                    id: format!("exit:{seq}"),
+                    session_id: "exit".into(),
+                    agent_id: agent.into(),
+                    seq: seq as u64,
+                    ts: "2026-10-16T00:00:00Z".into(),
+                    kind,
+                    payload,
+                    raw: None,
+                })
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            archived_exit(&archive, "exit", Some("lead")).await,
+            (Some(3), Some(8), Some("end_turn".to_owned()))
+        );
+        assert_eq!(
+            archived_exit(&archive, "exit", Some("helper")).await,
+            (Some(3), Some(8), Some("cancelled".to_owned()))
+        );
+        assert_eq!(
+            archived_exit(&archive, "exit", None).await,
+            (Some(3), Some(8), None)
+        );
+        assert_eq!(
+            archived_exit(&archive, "missing", Some("lead")).await,
+            (None, None, None)
+        );
+        let crash = anyhow::anyhow!("child exited unsuccessfully");
+        assert_eq!(
+            stable_error_code(&archive, "exit", &crash).await,
+            PROCESS_CRASHED
+        );
+        assert_eq!(
+            stable_error_code(&archive, "missing", &crash).await,
+            PROTOCOL_FAILURE
+        );
+    }
+
     #[tokio::test]
     async fn start_rejects_malformed_prompts_and_bodies() {
         let dir = TeamsDir::new();
@@ -5470,7 +5575,10 @@ exit 7
         assert_eq!(done.exit_code, Some(0));
         assert!(done.started_at.is_some() && done.finished_at.is_some());
 
-        let events = archive.verify_session(&accepted.run_id).await.unwrap();
+        let events = archive
+            .load_verified_session(&accepted.run_id)
+            .await
+            .unwrap();
         assert_eq!(done.event_count, Some(events.len()));
         assert!(
             events
