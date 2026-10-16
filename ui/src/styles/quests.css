@@ -1,0 +1,54 @@
+/* Quests (`/quests`, docs/QUESTS.md): every accessory and figure your runs can earn. Built on Home's
+   frame (home.css); gold (accent) marks what you have earned, as it marks what is yours elsewhere. */
+
+.quests-main { width: min(1180px, 100%); }
+.lw-quests a.home-brand { color: inherit; text-decoration: none; }
+.quests-hero { max-width: 760px; }
+
+.quests-progress { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
+.quests-progress-count { font-size: 15px; color: var(--color-ink-2); }
+.quests-progress-count b { font: 600 22px/1 var(--font-sans); color: var(--color-ink); margin-right: 2px; }
+.quests-progress-pips { display: inline-flex; gap: 5px; }
+.quests-progress-pips i { width: 18px; height: 6px; border-radius: var(--r-full); background: var(--color-hairline); }
+.quests-progress-pips i.on { background: var(--color-accent); }
+.home-hero p.quests-rule { font-size: 13px; line-height: 1.5; color: var(--color-ink-3); }
+
+.quests-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: var(--sp-3); }
+.quest-card { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--sp-4); align-items: start; padding: var(--sp-4); border: 1px dashed var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel); min-width: 0; }
+.quest-card.earned { border-style: solid; border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-hairline)); background: var(--color-panel-solid); }
+
+.quest-art { display: grid; place-items: center; width: 64px; height: 64px; }
+.quest-art .accessory-icon { width: 56px; height: 56px; border-radius: var(--r-md); }
+.quest-art img { width: 64px; height: 64px; object-fit: contain; }
+.quest-art.locked .accessory-icon, .quest-art.locked img { filter: brightness(0) opacity(.18); }
+[data-theme="dark"] .quest-art.locked .accessory-icon, [data-theme="dark"] .quest-art.locked img { filter: brightness(0) invert(1) opacity(.2); }
+
+.quest-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.quest-body p { margin: 0; }
+.quest-name { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px var(--sp-3); }
+.quest-name b { font: 600 15px/1.3 var(--font-sans); color: var(--color-ink); }
+.quest-state { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--color-ink-3); white-space: nowrap; }
+.quest-card.earned .quest-state { color: var(--color-accent); font-weight: 600; }
+.quest-practice { font-size: 12.5px; color: var(--color-ink-3); }
+.quest-text { font-size: 13.5px; line-height: 1.45; color: var(--color-ink-2); }
+.quest-when { font-size: 12.5px; line-height: 1.45; color: var(--color-ink-3); }
+.quest-label { display: block; margin-bottom: 1px; font: 600 10.5px/1.4 var(--font-sans); letter-spacing: .07em; text-transform: uppercase; color: var(--color-ink-3); }
+
+/* Bobbin's five parts: which ones the wardrobe already holds an item from. */
+.quest-parts { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.quest-parts li { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border: 1px solid var(--color-hairline); border-radius: var(--r-full); font-size: 11.5px; color: var(--color-ink-3); }
+.quest-parts li.on { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-ink); }
+.quest-run { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; font-size: 12.5px; text-decoration: none; }
+
+.quests-wear { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); font-size: 14px; color: var(--color-ink-2); }
+.quests-wear .link { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
+
+/* The link to it from the top bars of Home and Your agents: how many are earned, at a glance. */
+.quests-link { gap: 6px; text-decoration: none; }
+.quests-link-count { font: 600 11px/1 var(--font-mono); color: var(--color-ink-3); }
+
+@media (max-width: 560px) {
+  .quest-card { grid-template-columns: 48px minmax(0, 1fr); gap: var(--sp-3); }
+  .quest-art, .quest-art img { width: 48px; height: 48px; }
+  .quest-art .accessory-icon { width: 44px; height: 44px; }
+}

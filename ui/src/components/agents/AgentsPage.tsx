@@ -9,6 +9,7 @@ import { useSavedJobs, versionOf } from '../../lib/library/jobs'
 import { ROLE_PRESETS } from '../../lib/library/roles'
 import { useAgentUses } from '../../lib/library/uses'
 import { useTheme } from '../../lib/theme'
+import { QuestsLink } from '../quests/QuestsLink'
 import { LoomMark } from '../ui/glyphs'
 import { AgentBadge } from './AgentBadge'
 import { AgentBuilder } from './AgentBuilder'
@@ -36,6 +37,7 @@ export function AgentsPage(props: AgentsPageProps) {
       <header className="home-top">
         <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark width={46} height={20} /><span>LoomWatch</span></a>
         <span className="home-top-acts">
+          <QuestsLink />
           <a className="btn" href="/" data-tour="your-teams">Your teams</a>
           <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
         </span>

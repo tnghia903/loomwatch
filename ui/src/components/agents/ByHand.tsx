@@ -18,7 +18,6 @@ import type { AllowSwitch } from '../../lib/team-file/types'
 import { DoneWhen } from '../canvas/DoneWhen'
 import { InstructionShape } from '../canvas/InstructionShape'
 import type { BenchLabel } from './AgentFigure'
-import { FigurePicker } from './FigurePicker'
 import type { BenchView } from './workbenchScene'
 
 const AgentFigure = lazy(() => import('./AgentFigure'))
@@ -60,8 +59,6 @@ export interface ByHandProps {
   markId: string
   /** The figure it wears (lib/library/figures.ts). */
   figure: FigureChoice
-  /** Choose another figure: only in Your agents, where the figure is kept. */
-  onFigure?: (figure: FigureChoice) => void
   /** The run in its chat, if one is on screen: the figure works as its record and events say. */
   record: RunRecord | null
   /** A team's own agent has no palette line ("what it does"): that belongs to Your agents. */
@@ -100,7 +97,7 @@ const BLOCKS: readonly { part: FigurePart; title: string; where: string }[] = [
   { part: 'reply', title: 'What it hands back', where: 'the tray' },
 ]
 
-export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading, models, modelsError = null, modelName, skills, skillsLoading, roleField, markId, figure, onFigure, record, hideDoes = false, readOnly = false, tools, toolsLoading, reads, onShowWorkflow, chat, onBuild, cover }: ByHandProps) {
+export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading, models, modelsError = null, modelName, skills, skillsLoading, roleField, markId, figure, record, hideDoes = false, readOnly = false, tools, toolsLoading, reads, onShowWorkflow, chat, onBuild, cover }: ByHandProps) {
   const chatting = chat !== undefined
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
@@ -254,7 +251,6 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
                 />
               </Suspense>}
           {cover && <div className="byhand-cover">{cover}</div>}
-          {onFigure && !chatting && <FigurePicker figure={figure} onChange={(next) => { if (!readOnly) onFigure(next) }} />}
         </div>
         {chatting && <div className="byhand-chat">{chat}</div>}
 

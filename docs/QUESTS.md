@@ -8,7 +8,7 @@ LoomWatch is a tool for configuring agents, not a course on them. A quest says w
 once, one sentence of why it works. It has no lessons, reading lists or links to learn more.
 
 ```
-Before   a locked item shows a one-line hint             (the wardrobe, in an agent's figure)
+Before   a locked item shows a one-line hint             (the Quests page, and an agent's figure)
 During   you try it on work you wanted done anyway       (nothing about the run changes)
 After    the receipt says what the run did, and why it   (the run receipt, once, on the run
          works in one sentence                             that earned it)
@@ -41,6 +41,19 @@ After    the receipt says what the run did, and why it   (the run receipt, once,
 | Sewn-on patch | Checking | Learn from failures | Something that went wrong in two or more of the team’s last five runs (a permission asked for, an agent failing, a teammate left idle, a stage asking for more) doesn’t happen in this run. |
 | Scissors (a figure) | Team shape | Start simple | The team runs with fewer agents than its last finished run, and uses fewer tokens. |
 | Bobbin (a figure) | All five | The whole craft | The wardrobe holds an item from each of the five parts. |
+
+## Where you see them
+
+- **The Quests page** (`/quests`, `ui/src/components/quests/QuestsPage.tsx`) is how you find out
+  that runs earn anything at all. It lists every accessory and figure: what you have, when you
+  earned it and the run that did, and for each one still locked, what to try and how a run earns
+  it. Bobbin shows which of the five parts the wardrobe already holds. A **Quests** pill with the
+  count (`QuestsLink`) sits in the top bar of Home and Your agents, and ⌘K has **Quests…**.
+- **An agent's figure** (`FigurePicker`) sits beside its ID card in Your agents, not on the
+  workbench: the bench is how the agent works, the figure only how it looks. It has three parts
+  side by side: **Shape** (the earned figures are locked silhouettes until earned), **Color**, and
+  **Accessories**, which lists all seven, earned ones to wear and locked ones with their hint.
+- **The receipt** of the run that earned an item, once, with one sentence of why.
 
 ## How it works
 

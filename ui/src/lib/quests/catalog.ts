@@ -18,6 +18,9 @@ export type QuestArea = 'prompt' | 'context' | 'harness' | 'graph' | 'loop'
 
 export const AREAS: readonly QuestArea[] = ['prompt', 'context', 'harness', 'graph', 'loop']
 
+/** The five parts of building agents, as the Quests page names them. */
+export const AREA_NAMES: Record<QuestArea, string> = { prompt: 'Prompt', context: 'Context', harness: 'Harness', graph: 'Team shape', loop: 'Checking' }
+
 /** Accessories, in the order they are layered on a figure: what sits behind first. */
 export const ACCESSORIES = ['band', 'chalk', 'patch', 'pin', 'monocle', 'cushion', 'shuttle'] as const
 export type Accessory = (typeof ACCESSORIES)[number]
