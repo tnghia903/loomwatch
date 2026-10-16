@@ -29,8 +29,10 @@
   <sub>The bundled offline demo: ask the team in its chat, approve the handover with a note, read the answer.</sub>
 </p>
 
-**Install on a Mac** (macOS 11 or newer; nothing else to install first), then follow
-[Try your first run](#try-your-first-run):
+**Install on a Mac** (macOS 11 or newer; nothing else to install first): download
+**[LoomWatch-macos.dmg](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-macos.dmg)**,
+open it, drag LoomWatch to Applications, and open it. Then follow
+[Try your first run](#try-your-first-run). Rather use Terminal?
 
 ```sh
 curl -fsSL https://loomwatch.github.io/install.sh | bash
@@ -388,7 +390,25 @@ and rename agents to match. To run a team on a schedule, ask
 
 ## Quickstart
 
-On a Mac, paste this into Terminal:
+### The Mac app
+
+1. Download **[LoomWatch-macos.dmg](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-macos.dmg)**
+   (about 30 MB, for Apple silicon and Intel Macs) and open it.
+2. Drag **LoomWatch** to **Applications**, then open it from Applications.
+
+LoomWatch opens in your browser with an offline demo team ready to run, and keeps an icon in the
+menu bar: **Open LoomWatch**, **Start at login**, **Show log** and **Quit LoomWatch**. There is no
+window to keep open; closing the browser tab leaves LoomWatch running until you quit it from the
+menu bar. Then follow [Try your first run](#try-your-first-run).
+
+> [!NOTE]
+> LoomWatch is not notarized by Apple yet, so the first time you open it macOS may say it can't
+> check it for malicious software. Click **Done**, open **System Settings › Privacy & Security**,
+> scroll down, and click **Open Anyway** beside LoomWatch. macOS asks only once.
+
+### Or in Terminal
+
+On a Mac (or Linux), paste this into Terminal:
 
 ```sh
 curl -fsSL https://loomwatch.github.io/install.sh | bash
@@ -428,9 +448,12 @@ account.
 
 - **A Mac** with macOS 11 or newer. Linux downloads exist for x86_64 and arm64 but are untested.
   Windows is not supported yet.
-- **For real runs, one AI app** installed and signed in: Claude Code, Codex or OpenCode, for
-  example. OpenCode has free models and needs no account. You don't need any for the demo, and the
-  home screen's **Set up an AI app** gives each app's install and sign-in commands.
+- **For real runs, one AI app** signed in: Claude Code, Codex or OpenCode, for example. OpenCode has
+  free models and needs no account. You don't need any for the demo. The home screen's **Set up an
+  AI app** has a button for each: **Set up Claude Code** and **Set up Codex** download the app into
+  LoomWatch's own folder (Node.js too, when this computer has none), **Sign in** opens the app's own
+  sign-in page, and **Install OpenCode** runs OpenCode's installer. Each also shows the Terminal
+  commands, for anyone who prefers them.
 
 The offline demo runs on Python 3. On a Mac without Apple's Command Line Tools, macOS offers to
 install them the first time the demo runs; say yes, or install them first with
@@ -457,8 +480,14 @@ Coming from a version that kept the run history in Docker? The first start after
 it into the file and leaves the Docker database as it was. If Docker is not running then, the
 terminal says how to do it later: `~/LoomWatch/app/loomwatch import`.
 
-Keep the Terminal window open while you use LoomWatch. To stop LoomWatch, press
-<kbd>Ctrl</kbd>+<kbd>C</kbd> in it.
+Started from Terminal, keep that window open while you use LoomWatch, and press
+<kbd>Ctrl</kbd>+<kbd>C</kbd> in it to stop LoomWatch. The Mac app needs no window: quit it from its
+menu-bar icon. Its log is in `~/Library/Logs/LoomWatch` (**Show log** opens it).
+
+Already used LoomWatch from Terminal? The Mac app uses the same teams and the same run history
+file. Run `~/LoomWatch/app/loomwatch update` once first if that copy still kept its history in
+Docker, so the history is moved into the file. Only one LoomWatch can use the history at a time:
+stop the Terminal one before opening the app.
 
 LoomWatch looks for your skills and tools in the usual places in your home folder (`.claude`,
 `.codex`, `.agents`, `.config/opencode` and similar) and for AI apps on the terminal's `PATH`. It
@@ -479,6 +508,11 @@ When the installer added the `loomwatch` shortcut, plain `loomwatch` works too. 
 history are kept in every case.
 
 ### Updating
+
+**The Mac app:** when **Update available** shows, download the new
+[LoomWatch-macos.dmg](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-macos.dmg),
+quit LoomWatch from its menu-bar icon, drag the new one to Applications and choose **Replace**.
+Your teams and history stay. The rest of this section is about the Terminal install.
 
 LoomWatch checks once a day, and again right after you update, whether a newer release is out.
 When one is, Home shows **Update available** and the terminal running LoomWatch says so too. Click
@@ -521,6 +555,11 @@ its runs. Scheduled teams run only while LoomWatch is running and the computer i
 [Notion setup](docs/NOTION.md).
 
 ### Remove LoomWatch
+
+**The Mac app:** turn off **Start at login** in its menu, choose **Quit LoomWatch**, and drag
+LoomWatch from Applications to the Trash. Your teams and history stay where steps 4 and 5 below
+say; delete those folders, and `~/Library/Logs/LoomWatch`, to leave nothing behind. The steps
+below are for the Terminal install.
 
 1. If you connected LoomWatch to other AI apps, choose **Connections…** from the ☰ menu and click
    **Disconnect** beside each one. For Claude Code, Codex and Gemini CLI this also removes LoomWatch

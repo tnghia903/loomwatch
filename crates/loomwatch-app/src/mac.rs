@@ -258,6 +258,11 @@ fn supervise(
     let path = login_shell_path();
     let mut stops: Vec<Instant> = Vec::new();
     loop {
+        // One LoomWatch per run history: one started from Terminal on another port holds it.
+        if history_in_use() {
+            say("Already running from Terminal: stop it there, then open LoomWatch again");
+            return;
+        }
         let Some(port) = free_port() else {
             say("Can’t start: ports 3000–3020 are all in use");
             return;
@@ -304,6 +309,34 @@ fn supervise(
         }
         say("Restarting…");
     }
+}
+
+/// Whether another `loomwatchd` holds the run history this app's would use: the daemon's own
+/// default (`<state folder>/loomwatch.db`) unless `LOOMWATCH_DATABASE` or `LOOMWATCH_STATE_DIR`
+/// says otherwise, locked by `<file>.lock` while a daemon uses it.
+fn history_in_use() -> bool {
+    let database = std::env::var_os("LOOMWATCH_DATABASE")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("LOOMWATCH_STATE_DIR")
+                .map(PathBuf::from)
+                .or_else(|| {
+                    std::env::var_os("HOME").map(|home| {
+                        PathBuf::from(home).join("Library/Application Support/LoomWatch")
+                    })
+                })
+                .map(|state| state.join("loomwatch.db"))
+        });
+    let Some(database) = database else {
+        return false;
+    };
+    let mut lock = database.into_os_string();
+    lock.push(".lock");
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(PathBuf::from(lock))
+        .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)))
 }
 
 fn start_daemon(paths: &Paths, port: u16, path: Option<&str>) -> Result<Child> {
