@@ -1,16 +1,30 @@
 import { useEffect, useState } from 'react'
 
+/** An agent's page: its workbench, where it is built, or its chat, where you work with it. */
+export type AgentView = 'build' | 'chat'
+
 /**
  * Where Your agents is: the list, one saved agent, or a new one (from a built-in job, maybe). `team`
  * is the team the operator came from, so the way back is one click.
  */
-export type AgentsRoute = { kind: 'list' } | { kind: 'agent'; id: string; team: string | null } | { kind: 'new'; from: string | null; team: string | null }
+export type AgentsRoute = { kind: 'list' } | { kind: 'agent'; id: string; team: string | null; view: AgentView } | { kind: 'new'; from: string | null; team: string | null; view: AgentView }
 
 export function parseAgentsRoute(pathname: string, search: string): AgentsRoute {
   const rest = pathname.replace(/^\/agents\/?/, '')
   if (!rest) return { kind: 'list' }
-  if (rest === 'new') return { kind: 'new', from: new URLSearchParams(search).get('from'), team: new URLSearchParams(search).get('team') }
-  return { kind: 'agent', id: decodeURIComponent(rest.split('/')[0]), team: new URLSearchParams(search).get('team') }
+  const query = new URLSearchParams(search)
+  const view: AgentView = query.get('view') === 'chat' ? 'chat' : 'build'
+  if (rest === 'new') return { kind: 'new', from: query.get('from'), team: query.get('team'), view }
+  return { kind: 'agent', id: decodeURIComponent(rest.split('/')[0]), team: query.get('team'), view }
+}
+
+/** The page's own address with `view` set, keeping everything else it says. */
+export function withView(view: AgentView, location: { pathname: string; search: string } = window.location): string {
+  const query = new URLSearchParams(location.search)
+  if (view === 'chat') query.set('view', 'chat')
+  else query.delete('view')
+  const rest = query.toString()
+  return `${location.pathname}${rest ? `?${rest}` : ''}`
 }
 
 const CHANGED = 'loomwatch:agents-route'

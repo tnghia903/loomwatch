@@ -22,7 +22,7 @@ export interface AgentsPageProps {
 }
 
 /**
- * Your agents: build an agent once, try it on its own, then use it in any team. Each team keeps the
+ * Your agents: build an agent once, work with it in its own chat, then use it in any team. Each team keeps the
  * version it was given until someone chooses Update in that team, so changing an agent here never
  * changes a team behind its back.
  */
@@ -42,7 +42,7 @@ export function AgentsPage(props: AgentsPageProps) {
       <main className="home-main agents-main">
         {route.kind === 'list'
           ? <AgentsList harnesses={props.harnesses} />
-          : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} {...props} />}
+          : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} {...props} />}
       </main>
     </div>
   )
@@ -70,7 +70,7 @@ function AgentsList({ harnesses }: { harnesses: DetectedHarness[] }) {
     <>
       <section className="home-hero agents-hero">
         <h1 className="t-display">Your agents</h1>
-        <p>Build an agent once and try it on its own. Then add it to any team: each team keeps the version it was given until you update it there.</p>
+        <p>Build an agent once and work with it in its own chat. Then add it to any team: each team keeps the version it was given until you update it there.</p>
         <div className="home-hero-acts">
           <button type="button" className="btn btn-primary btn-lg" onClick={() => setChoosing((value) => !value)} aria-expanded={choosing} data-tour="new-agent"><Plus size={16} aria-hidden="true" />New agent</button>
         </div>

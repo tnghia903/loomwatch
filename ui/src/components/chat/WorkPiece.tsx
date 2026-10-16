@@ -41,6 +41,8 @@ export interface TeamView {
   configs?: ReadonlyMap<string, AgentConfig>
   /** The AI app each agent runs in, in words ("Claude", "Codex (not installed)"), for its card. */
   apps?: ReadonlyMap<string, string>
+  /** An agent's own chat (Your agents): its one agent, whom all the work is with. There is no team. */
+  solo?: string
 }
 
 type Work = Extract<ChatItem, { kind: 'work' }>
@@ -222,7 +224,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   return (
     <AppearContext.Provider value={news && painted}>
     <li ref={piece} className={`tc-piece${live ? ' live' : ''}${newest ? ' newest' : ''}${detailsOpen ? ' in-details' : ''}${appear ? ' tc-appear-soft' : ''}`} data-run={run.runId}>
-      <Request run={run} request={request} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} />
+      <Request run={run} request={request} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} />
       {notes.map((note) => <Note key={note.id} note={note} live={live} name={name} />)}
 
       <div ref={lineRef} className="tc-talk" data-tour={newest ? 'stages' : undefined}>
@@ -313,7 +315,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
       )}
       {unasked.length > 0 && <PermissionPrompt inline team={crew} run={{ runId: run.runId, permissionRequests: unasked }} onAlwaysAllow={onAlwaysAllow} onDecide={pin} />}
 
-      <Outcome tour={newest} run={record} answer={answer} streaming={streaming} name={name} hue={hue} open={answerOpen} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
+      <Outcome tour={newest} run={record} answer={answer} streaming={streaming} name={name} hue={hue} open={answerOpen} solo={Boolean(team.solo)} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
         <AnswerTools
           run={record}
           answer={answer}
@@ -397,12 +399,12 @@ function Decisions({ messages, autoRan = [], operators, name }: { messages: read
 }
 
 /** What started this piece: your message, the schedule's, or your Continue. */
-function Request({ run, request, continuedFrom, name }: { run: RunRecord; request: ChatMessage | null; continuedFrom: string | null; name: (id: string) => string }) {
+function Request({ run, request, continuedFrom, name, solo }: { run: RunRecord; request: ChatMessage | null; continuedFrom: string | null; name: (id: string) => string; solo?: string }) {
   if (continuedFrom) {
     return <div className="chat-notice"><span>You pressed Continue with the team · from {continuedFrom}</span><time>{clockTime(run.createdAt)}</time></div>
   }
   const text = request?.text ?? run.prompt
-  const to = run.onlyAgent ? name(run.onlyAgent) : 'the team'
+  const to = run.onlyAgent ? name(run.onlyAgent) : solo ? name(solo) : 'the team'
   if (run.trigger === 'schedule') {
     return (
       <div className="chat-msg">
@@ -451,6 +453,8 @@ interface AnswerProps {
   /** A document answer is open in the pane beside the chat. */
   open: boolean
   onOpen: () => void
+  /** An agent's own chat: every answer is to you, there being no team. */
+  solo: boolean
   children: ReactNode
 }
 
@@ -486,7 +490,7 @@ function Stopped({ run, name, onTryAgain, onDetails }: { run: RunRecord; name: (
  * message. A long one, or one with a title, is a document: a card with its title, its opening
  * words and its length, read in full in the pane beside the chat (lib/chat/document.ts).
  */
-function Answer({ tour, run, answer, streaming, name, hue, open, onOpen, children }: AnswerProps) {
+function Answer({ tour, run, answer, streaming, name, hue, open, onOpen, solo, children }: AnswerProps) {
   const appear = useAppear()
   // Names listed under a folder read as files in the sentence too; copy and save keep the agent's words.
   const shown = useMemo(() => withFolderPaths(answer), [answer])
@@ -496,7 +500,7 @@ function Answer({ tour, run, answer, streaming, name, hue, open, onOpen, childre
     <div className={`chat-msg tc-answer${appear ? ' tc-appear' : ''}`} data-tour={tour ? 'output' : undefined}>
       <span className="chat-gutter"><AgentFace id={responder}><AvatarFace id={responder} hue={hue(responder)} size={28} text={initials(name(responder))} /></AgentFace></span>
       <div className="chat-stack">
-        <div className={`chat-meta hue-${hue(responder)}`}><span className="chat-name">{name(responder)}</span><span className="tc-to">{run.onlyAgent ? 'to you' : "the team's answer"}</span><time>{clockTime(run.finishedAt)}</time></div>
+        <div className={`chat-meta hue-${hue(responder)}`}><span className="chat-name">{name(responder)}</span><span className="tc-to">{run.onlyAgent || solo ? 'to you' : "the team's answer"}</span><time>{clockTime(run.finishedAt)}</time></div>
         {facts ? (
           <button type="button" className={`tc-doc${open ? ' open' : ''}${streaming ? ' streaming' : ''}`} aria-pressed={open} aria-label={`${facts.title}, ${streaming ? 'being written' : documentSize(facts)}. ${open ? 'Showing beside the chat' : 'Open'}`} onClick={onOpen}>
             <span className="tc-doc-icon" aria-hidden="true"><FileText size={18} /></span>

@@ -54,6 +54,11 @@
 .agent-builder-title { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .agent-builder-title h1 { margin: 0; font: 400 34px/1.1 var(--font-serif); letter-spacing: -.01em; overflow-wrap: anywhere; }
 .agent-builder-version { font: 500 12px var(--font-mono); color: var(--color-ink-3); }
+/* Build · Chat: the agent's two tabs, the same switch as a team's Agents · Workflow · Chat. */
+.agent-view-tabs { align-self: flex-start; margin-top: var(--sp-2); }
+.agent-view-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 96px; height: 32px; padding: 0 16px; border: 0; background: transparent; color: var(--color-ink-2); font: 500 13px var(--font-sans); cursor: pointer; }
+.agent-view-tabs button[aria-pressed='true'] { color: var(--color-accent); font-weight: 600; }
+.agent-view-tabs button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .agent-builder-save { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); max-width: 560px; }
 .agent-note { width: 280px; max-width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid); color: var(--color-ink); font: inherit; font-size: 13px; }
 .agent-save-state { flex-basis: 100%; text-align: right; min-height: 16px; color: var(--color-ink-3); }
@@ -61,6 +66,9 @@
 .agent-builder-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: var(--sp-5); align-items: start; }
 .agent-builder-form, .agent-builder-side { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
 .agent-builder-side { position: sticky; top: var(--sp-4); }
+/* Your agents has no test bench (its chat is a tab): the ID card, where it is used and its versions share the row. */
+.agent-builder-grid.no-bench { grid-template-columns: minmax(0, 1fr); }
+.agent-builder-grid.no-bench .agent-builder-side { position: static; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); align-items: start; }
 .agent-section { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid); min-width: 0; }
 .agent-section-head { display: flex; align-items: center; gap: 6px; font: 600 11px/1.4 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
 .agent-field { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--color-ink-2); min-width: 0; }
@@ -214,8 +222,26 @@
 .byhand-stage { position: sticky; top: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
 .byhand-stage > .bench-stage { aspect-ratio: 4 / 3; }
 .byhand-blocks { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.byhand-blocks[hidden] { display: none; }
+
+/* The Chat tab: the same bench, its figure at work, beside the agent's chat (AgentChat). The chat is
+   as tall as the window allows, so its message box stays in view while the log scrolls. */
+.byhand.chatting .byhand-main { grid-template-columns: minmax(0, 1fr) minmax(400px, 1fr); }
+.byhand-chat { min-width: 0; }
+.byhand-chat .tc { position: relative; inset: auto; height: clamp(480px, calc(100dvh - 300px), 900px); border: 1px solid var(--color-hairline); border-radius: var(--r-lg); overflow: hidden; }
+.byhand-chat .tc-head { padding: 10px var(--sp-4); }
+.agent-chat-wait { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-5); border: 1px dashed var(--color-hairline); border-radius: var(--r-lg); }
+.agent-chat-wait h3 { margin: 0; font: 600 16px/1.3 var(--font-sans); }
+.agent-chat-wait p { margin: 0; }
+/* A long answer from the chat, read over the bench; Back (or Esc) shows the figure again. */
+.byhand-cover { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid); overflow: hidden; }
+.agent-answer { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.agent-answer-back { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin: var(--sp-3) var(--sp-4) 0; text-decoration: none; }
+.agent-answer .tc-document { position: relative; inset: auto; flex: 1; min-height: 0; overflow: auto; background: transparent; }
+.agent-answer .tc-document-by { margin-top: var(--sp-3); padding: 0 var(--sp-5); }
+.agent-answer .tc-document .tc-document-page { padding: 4px var(--sp-5) var(--sp-6); }
 @media (max-width: 1000px) {
-  .byhand-main { grid-template-columns: minmax(0, 1fr); }
+  .byhand-main, .byhand.chatting .byhand-main { grid-template-columns: minmax(0, 1fr); }
   .byhand-stage { position: static; }
 }
 

@@ -130,24 +130,32 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: 'try',
     screen: 'agents',
-    // Once its try has finished, the step points at the answer and waits for Next, so the guide
-    // never scrolls away from an answer the operator is still reading.
-    view: () => present('[data-tour="bench-result"][data-tour-done]')
+    // Its chat is a tab of its page. Once it has answered, the step points at the answer and waits
+    // for Next, so the guide never scrolls away from an answer the operator is still reading.
+    view: () => present('[data-tour="agent-builder"] [data-tour="output"]')
       ? {
           title: 'Read its answer',
-          body: 'This is what it did and what it replied. Not what you wanted? Change a block above, then Try again.',
-          target: ['[data-tour="bench-result"]'],
-          sides: ['right', 'top', 'left', 'bottom'],
+          body: 'This is what it did and what it replied. Not what you wanted? Change it in Build, then ask again here: it always works as it is on screen.',
+          target: ['[data-tour="agent-builder"] [data-tour="output"]'],
+          sides: ['left', 'top', 'right', 'bottom'],
           advance: 'next',
           dim: true,
         }
-      : {
-          title: 'Try it on its own',
-          body: 'Give it a request, the kind a team would hand it, and press Try it. It runs exactly as it is on screen, saved or not, and no team changes.',
-          target: ['[data-tour="bench"]'],
-          sides: ['right', 'top', 'left', 'bottom'],
-          advance: 'action',
-        },
+      : present('[data-tour="agent-builder"] [data-tour="composer"]')
+        ? {
+            title: 'Ask it for something',
+            body: 'Write a request, the kind a team would hand it, and send it. It works on it here, exactly as it is on screen, saved or not, and no team changes.',
+            target: ['[data-tour="agent-builder"] [data-tour="composer"]'],
+            sides: ['top', 'left', 'right'],
+            advance: 'action',
+          }
+        : {
+            title: 'Chat with it on its own',
+            body: 'Open its Chat. You work with it there before any team depends on it, and its figure works at the bench while it does.',
+            target: ['[data-tour="agent-tab-chat"]'],
+            sides: ['bottom', 'right', 'left'],
+            advance: 'action',
+          },
   },
   {
     id: 'save',

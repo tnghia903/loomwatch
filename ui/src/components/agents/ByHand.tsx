@@ -1,4 +1,4 @@
-import { lazy, Suspense, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { FileText, Folder, KeyRound, Network, NotebookText, Plus, Puzzle, Search, Wrench, X } from 'lucide-react'
 
 import { middleTruncate } from '../../lib/format'
@@ -34,7 +34,7 @@ const AgentFigure = lazy(() => import('./AgentFigure'))
  * the keys on the hooks what it may do without
  * asking (the ones in your dish ask you first), and the tray what it hands back. Clicking anything
  * on the bench takes you to its block, and working in a block lights its thing on the bench. While
- * you try it on the test bench, the figure works as the run record says.
+ * it works in its chat (or on a team's test bench), the figure works as the run record says.
  */
 
 const SKILL_MIME = 'application/x-loomwatch-skill'
@@ -76,6 +76,15 @@ export interface ByHandProps {
   tools?: readonly string[]
   /** In a team: open its Workflow, where what it reads and the tools it uses are given with a line. */
   onShowWorkflow?: () => void
+  /**
+   * Its chat (Your agents' Chat tab), shown beside the bench instead of the blocks: the figure
+   * works there as the chat's newest run says. The bench stays the same one, so it is never drawn
+   * twice. Picking something on it goes back to Build, to that thing's block (`onBuild`).
+   */
+  chat?: ReactNode
+  onBuild?: () => void
+  /** Laid over the bench while it is shown: an answer in the chat, read in full beside it. */
+  cover?: ReactNode
 }
 
 /** Each block: its title, and where it is on the bench. In the order you would set an agent up. */
@@ -91,7 +100,8 @@ const BLOCKS: readonly { part: FigurePart; title: string; where: string }[] = [
   { part: 'reply', title: 'What it hands back', where: 'the tray' },
 ]
 
-export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading, models, modelsError = null, modelName, skills, skillsLoading, roleField, markId, figure, onFigure, record, hideDoes = false, readOnly = false, reads, tools, onShowWorkflow }: ByHandProps) {
+export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading, models, modelsError = null, modelName, skills, skillsLoading, roleField, markId, figure, onFigure, record, hideDoes = false, readOnly = false, reads, tools, onShowWorkflow, chat, onBuild, cover }: ByHandProps) {
+  const chatting = chat !== undefined
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
   const [focus, setFocus] = useState<FigurePart | null>(null)
@@ -99,6 +109,13 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   const [dragging, setDragging] = useState<'skill' | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
   const blocks = useRef(new Map<FigurePart, HTMLElement>())
+  // Picked on the bench while chatting: its block is shown once Build is back on screen.
+  const picked = useRef<FigurePart | null>(null)
+  useEffect(() => {
+    if (chatting || !picked.current) return
+    showBlock(blocks.current.get(picked.current))
+    picked.current = null
+  }, [chatting])
   const ids = useId()
   const wild = harness ? actsWithoutAsking({ spawn: { cmd: harness.spawn.cmd, args: harness.spawn.args, env: {}, cwd: '.' } }) : null
   const shape = { ...instructionShape(draft.instructions), ...(draft.doneWhen.length ? { check: true } : {}) }
@@ -138,12 +155,14 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
 
   /** From the bench: go to the block for what was picked, and start working in it. */
   const goTo = (part: FigurePart) => {
-    const block = blocks.current.get(part)
     setFocus(part)
     setFlash((current) => ({ part, at: (current?.at ?? 0) + 1 }))
-    if (!block) return
-    block.scrollIntoView({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest' })
-    block.querySelector<HTMLElement>('textarea, input, select, button')?.focus({ preventScroll: true })
+    if (chatting) {
+      picked.current = part
+      onBuild?.()
+      return
+    }
+    showBlock(blocks.current.get(part))
   }
 
   const name = draft.name.trim() || 'New agent'
@@ -208,8 +227,8 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   }
 
   return (
-    <div className="byhand">
-      <p className="byhand-say" aria-live="polite">{sentence(draft, harness, model, wild, reads, tools)}</p>
+    <div className={`byhand${chatting ? ' chatting' : ''}`}>
+      {!chatting && <p className="byhand-say" aria-live="polite">{sentence(draft, harness, model, wild, reads, tools)}</p>}
       <div className="byhand-main">
         <div className="byhand-stage">
           {failed
@@ -226,10 +245,13 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
                   onFail={setFailed}
                 />
               </Suspense>}
-          {onFigure && <FigurePicker figure={figure} onChange={(next) => { if (!readOnly) onFigure(next) }} />}
+          {cover && <div className="byhand-cover">{cover}</div>}
+          {onFigure && !chatting && <FigurePicker figure={figure} onChange={(next) => { if (!readOnly) onFigure(next) }} />}
         </div>
+        {chatting && <div className="byhand-chat">{chat}</div>}
 
-        <div className="byhand-blocks" data-tour="agent-blocks">
+        {/* Kept while chatting, only hidden: what you were writing in a block is there when you come back. */}
+        <div className="byhand-blocks" data-tour="agent-blocks" hidden={chatting}>
           {block('name', <div className="agent-field-row">
             <label className="agent-field">Name<input value={draft.name} maxLength={80} onChange={(event) => set('name', event.target.value)} placeholder="e.g. Release notes writer" /></label>
             {!hideDoes && <label className="agent-field"><span>What it does <span className="optional">optional</span></span><input value={draft.does} maxLength={120} onChange={(event) => set('does', event.target.value)} placeholder="Shown under its name" /></label>}
@@ -338,6 +360,13 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
 }
 
 /** The figure's mood, from the run record, on the shared clock while the run is live, to tell working from quiet. */
+/** A block brought into view, with its first control taken, so you can carry on in it. */
+function showBlock(block: HTMLElement | undefined) {
+  if (!block) return
+  block.scrollIntoView({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest' })
+  block.querySelector<HTMLElement>('textarea, input, select, button')?.focus({ preventScroll: true })
+}
+
 function useFigureMood(record: RunRecord | null) {
   const now = useNow(record?.status === 'running')
   const [moved, setMoved] = useState<{ run: string; events: number; at: number } | null>(null)

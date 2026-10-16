@@ -43,8 +43,11 @@ afterEach(() => {
 })
 
 const HOME = '<div data-tour="home"><span data-tour="apps">Ready</span><a data-tour="build-agent">Build an agent</a><button data-tour="new-team">New team</button></div>'
-/** Your agents: the builder for one agent, or the list with its New agent button. */
-const builder = (saved = false) => `<div data-tour="agents"><a data-tour="your-teams">Your teams</a><div data-tour="agent-builder"${saved ? ' data-tour-saved="true"' : ''}><button data-tour="save-agent">Save to Your agents</button><div data-tour="agent-blocks"></div><section data-tour="bench"></section></div></div>`
+/** Your agents: the builder for one agent, with its chat open or not, or the list with its New agent button. */
+const builder = (saved = false, chat = '') => `<div data-tour="agents"><a data-tour="your-teams">Your teams</a><div data-tour="agent-builder"${saved ? ' data-tour-saved="true"' : ''}><button data-tour="save-agent">Save to Your agents</button><nav><button data-tour="agent-tab-build"></button><button data-tour="agent-tab-chat"></button></nav><div data-tour="agent-blocks"></div>${chat}</div></div>`
+/** Its chat, before and after it answers. */
+const CHAT = '<section data-tour="chat"><form data-tour="composer"></form></section>'
+const ANSWERED = '<section data-tour="chat"><div data-tour="output"></div><form data-tour="composer"></form></section>'
 const AGENTS_LIST = '<div data-tour="agents"><a data-tour="your-teams">Your teams</a><button data-tour="new-agent">New agent</button></div>'
 const workspace = (inner: string, agents = 1, view = 'workflow') => `<div data-tour="workspace" data-tour-agents="${agents}" data-tour-view="${view}"><nav data-tour="view-tabs"><button data-tour="tab-agents"></button><button data-tour="tab-workflow"></button><button data-tour="tab-chat"></button></nav>${inner}</div>`
 
@@ -81,7 +84,7 @@ describe('GettingStarted', () => {
     expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Next/ }))
     tick()
-    expect(screen.getByRole('heading', { name: 'Try it on its own' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Chat with it on its own' })).toBeInTheDocument()
   })
 
   it('asks for a new agent on the list of Your agents', () => {
@@ -94,17 +97,19 @@ describe('GettingStarted', () => {
     expect(screen.getByRole('heading', { name: 'Give it a name and a job' })).toBeInTheDocument()
   })
 
-  it('waits for a try to finish, then points at its answer until the operator moves on', () => {
+  it('opens its chat, waits for its answer, then points at it until the operator moves on', () => {
     showPage(builder())
     goToStep('try')
     renderGuide()
+    expect(screen.getByRole('heading', { name: 'Chat with it on its own' })).toBeInTheDocument()
     expect(screen.getByText('Waiting for you')).toBeInTheDocument()
 
-    showPage(builder().replace('<section data-tour="bench"></section>', '<section data-tour="bench"><div data-tour="bench-result"></div></section>'))
+    showPage(builder(false, CHAT))
     tick(250)
-    expect(screen.getByRole('heading', { name: 'Try it on its own' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Ask it for something' })).toBeInTheDocument()
+    expect(readTourState()?.step).toBe('try')
 
-    showPage(builder().replace('<section data-tour="bench"></section>', '<section data-tour="bench"><div data-tour="bench-result" data-tour-done="true"></div></section>'))
+    showPage(builder(false, ANSWERED))
     tick(250)
     expect(screen.getByRole('heading', { name: 'Read its answer' })).toBeInTheDocument()
     expect(readTourState()?.step).toBe('try')
@@ -114,13 +119,13 @@ describe('GettingStarted', () => {
   })
 
   it('brings each card’s target into view, a tall one by its top', () => {
-    // jsdom has no scrolling: the bench sits below the fold, and its answer is taller than the screen.
+    // jsdom has no scrolling: the Chat tab sits below the fold, and the answer is taller than the screen.
     const scrolled = vi.fn()
     Object.defineProperty(Element.prototype, 'scrollIntoView', { value: scrolled, configurable: true })
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
       const tour = this.getAttribute('data-tour')
-      const box = tour === 'bench' ? { x: 100, y: 1200, width: 400, height: 300 }
-        : tour === 'bench-result' ? { x: 100, y: 1300, width: 400, height: 2000 }
+      const box = tour === 'agent-tab-chat' ? { x: 100, y: 1200, width: 100, height: 32 }
+        : tour === 'output' ? { x: 100, y: 1300, width: 400, height: 2000 }
         : tour ? { x: 100, y: 100, width: 200, height: 40 } : { x: 0, y: 0, width: 0, height: 0 }
       return { ...box, top: box.y, left: box.x, right: box.x + box.width, bottom: box.y + box.height, toJSON: () => box } as DOMRect
     })
@@ -133,7 +138,7 @@ describe('GettingStarted', () => {
       expect(scrolled).toHaveBeenCalledTimes(1)
       expect(scrolled).toHaveBeenLastCalledWith(expect.objectContaining({ block: 'center' }))
 
-      showPage(builder().replace('<section data-tour="bench"></section>', '<section data-tour="bench"><div data-tour="bench-result" data-tour-done="true"></div></section>'))
+      showPage(builder(false, ANSWERED))
       tick(1000)
       expect(scrolled).toHaveBeenCalledTimes(2)
       expect(scrolled).toHaveBeenLastCalledWith(expect.objectContaining({ block: 'start' }))

@@ -83,7 +83,7 @@ function describeTeam(team: TeamSummary): string {
 
 /**
  * What the operator sees before any team is open: what LoomWatch is for, and the work in the order
- * it is done. First your agents (build each one and try it on its own), then your teams (put agents
+ * it is done. First your agents (build each one and chat with it on its own), then your teams (put agents
  * in a workflow, then give the team work in its chat). One obvious way to start: build an agent.
  */
 export function Home({ notice = null, harnesses, harnessesLoading, harnessesError, onRetryHarnesses, onCreateBlank, onPalette, topActions, runs = [], ask, children }: HomeProps) {
@@ -173,7 +173,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
         {notice && <p role="alert" className="home-empty alert">{notice}</p>}
         <section className="home-hero">
           <h1 className="t-display">Put AI agents to work as a team.</h1>
-          <p>Build each agent and try it on its own, connect your agents in a workflow, then give the team work in its chat and review what it hands back.</p>
+          <p>Build each agent and chat with it on its own, connect your agents in a workflow, then give the team work in its chat and review what it hands back.</p>
           <div className="home-hero-acts">
             <a className="btn btn-primary btn-lg" href="/agents/new" data-tour="build-agent"><UserRoundPlus size={16} aria-hidden="true" />Build an agent</a>
             <button type="button" className="btn btn-lg" data-tour="new-team" onClick={() => setCreating(true)}><Plus size={16} aria-hidden="true" />New team</button>
@@ -181,7 +181,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
           </div>
           {ask && <DescribeTheJob unavailable={ask.unavailable} onAsk={ask.onAsk} />}
           <ol className="home-steps" aria-label="How it works">
-            <li><b>1</b><span><strong>Agents.</strong> Build each agent and try it on its own.</span></li>
+            <li><b>1</b><span><strong>Agents.</strong> Build each agent and chat with it on its own.</span></li>
             <li><b>2</b><span><strong>Workflow.</strong> Put agents in a team and connect who hands work to whom.</span></li>
             <li><b>3</b><span><strong>Chat.</strong> Give the team work, and review each step and the result.</span></li>
           </ol>
