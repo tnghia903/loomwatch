@@ -158,6 +158,63 @@ describe('quests', () => {
     expect(items(facts({ agents, current: now, earlier: [{ ...last, succeeded: false }] }))).toEqual([])
   })
 
+  it('vest: an agent asked you a question, and your answer came back', () => {
+    const agents = [agent('writer')]
+    const asked = (extra: Partial<TeamMessage>) => facts({ agents, projection: { agents: [ran('writer')], evidence: [], messages: [message('question', 'writer', 'operator', { reply: { from: 'operator', text: 'The 2026 one.' } as TeamMessage['reply'], ...extra })], checks: [] } })
+    expect(questsEarned(asked({}))).toEqual([{ item: 'vest', agentId: 'writer', line: 'Writer asked you a question instead of guessing, and your answer saw the run through.' }])
+    expect(items(asked({ state: 'pending', reply: null }))).toEqual([])
+    expect(items(asked({ carried: true }))).toEqual([])
+    // A permission request is its app asking, not the agent weighing a choice; a run that failed earns nothing.
+    expect(items(asked({ kind: 'permission' }))).toEqual([])
+    expect(items({ ...asked({}), succeeded: false })).toEqual([])
+  })
+
+  it('apron: an agent opened a skill it was given, as the daemon recorded', () => {
+    const writer = agent('writer', { capabilities: [{ kind: 'skill', name: 'house-style' }] })
+    const opened = (extra: Partial<Evidence>) => facts({ agents: [writer], projection: { agents: [ran('writer')], evidence: [evidence('writer', { kind: 'skill', relation: 'opened by the agent', name: 'house-style', ...extra })], messages: [], checks: [] } })
+    expect(questsEarned(opened({}))).toEqual([{ item: 'apron', agentId: 'writer', line: 'Writer opened its “house-style” skill when the work called for it.' }])
+    // Loaded into its prompt is delivery, not use; a tool's title naming a skill is not the record.
+    expect(items(opened({ relation: 'loaded into prompt' }))).toEqual([])
+    expect(items(opened({ relation: 'used skill' }))).toEqual([])
+    // A skill it was not given, or another agent's opening, does not count for it.
+    expect(items(opened({ name: 'pdf' }))).toEqual([])
+    expect(items(facts({ agents: [writer, agent('editor')], projection: { agents: [ran('writer'), ran('editor')], evidence: [evidence('editor', { kind: 'skill', relation: 'opened by the agent', name: 'house-style' })], messages: [], checks: [] } }))).toEqual([])
+  })
+
+  it('overalls: two teammates handed work by one agent worked at the same time, and both finished', () => {
+    const agents = [agent('lead'), agent('scout'), agent('writer')]
+    const step = (agentId: string, offsetMs: number) => evidence(agentId, { kind: 'search', relation: 'searched', offsetMs })
+    const run = (steps: Evidence[], extra: Partial<Omit<QuestFacts, 'agents'>> & { agents?: AgentConfig[] } = {}) => facts({
+      agents,
+      projection: { agents: agents.map((one) => ran(one.id)), evidence: steps, messages: [message('dispatch', 'lead', 'scout', { state: 'delivered', offsetMs: 1_000 }), message('dispatch', 'lead', 'writer', { state: 'delivered', offsetMs: 2_000 })], checks: [] },
+      current: lesson('now', ['lead', 'scout', 'writer']),
+      ...extra,
+    })
+    expect(questsEarned(run([step('scout', 1_500), step('scout', 9_000), step('writer', 3_000), step('writer', 8_000)]))).toEqual([{ item: 'overalls', agentId: 'lead', line: 'Lead dispatched work to Scout and Writer, who worked on it at the same time and both finished.' }])
+    // One after the other is not side by side: the scout was done before the writer was handed its part.
+    expect(items(run([step('scout', 1_200), step('scout', 1_800), step('writer', 3_000), step('writer', 8_000)]))).toEqual([])
+    // A teammate that failed did not finish its part; steps from before the dispatch are not its work on it.
+    expect(items(run([step('scout', 1_500), step('scout', 9_000), step('writer', 3_000), step('writer', 8_000)], { current: lesson('now', ['lead', 'scout', 'writer'], { failed: new Map([['writer', null]]) }) }))).toEqual([])
+    expect(items(run([step('scout', 500), step('scout', 900), step('writer', 3_000), step('writer', 8_000)]))).toEqual([])
+  })
+
+  it('tee: a pipeline of three or more stages, each after the first handed what came before', () => {
+    const agents = [agent('scout'), agent('writer'), agent('editor')]
+    const handed = (to: string) => ({ ...message('handover', 'scout', to, { state: 'delivered' }), from: null })
+    const pipeline = (messages: TeamMessage[], extra: Partial<Omit<QuestFacts, 'agents'>> & { agents?: AgentConfig[] } = {}) => facts({
+      agents,
+      projection: { agents: agents.map((one) => ran(one.id)), evidence: [], messages, checks: [] },
+      current: lesson('now', ['scout', 'writer', 'editor'], { mode: 'pipeline' }),
+      ...extra,
+    })
+    expect(questsEarned(pipeline([handed('writer'), handed('editor')]))).toEqual([{ item: 'tee', agentId: null, line: 'This run passed the work along 3 stages, each starting from what the one before handed it.' }])
+    expect(items(pipeline([handed('writer')]))).toEqual([])
+    // Two stages and a review step are a chain of two; a team that talks is not a pipeline.
+    const reviewed = [agent('scout'), agent('review', { kind: 'operator' }), agent('writer')]
+    expect(items(pipeline([handed('review'), handed('writer')], { agents: reviewed, current: lesson('now', ['scout', 'review', 'writer'], { mode: 'pipeline' }) }))).toEqual([])
+    expect(items(pipeline([handed('writer'), handed('editor')], { current: lesson('now', ['scout', 'writer', 'editor']) }))).toEqual([])
+  })
+
   it('bobbin: one item from each of the five parts', () => {
     expect(wholeCraft(['chalk', 'band', 'pin', 'shuttle', 'monocle'])).toBe(true)
     expect(wholeCraft(['chalk', 'band', 'cushion', 'scissors', 'patch'])).toBe(true)

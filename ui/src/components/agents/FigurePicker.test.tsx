@@ -29,6 +29,18 @@ describe('the figure picker', () => {
     expect(screen.getByText('1 of 7 earned, shared by all your agents')).toBeVisible()
   })
 
+  it('wears one set of clothes at a time: putting one on takes the other off', () => {
+    const onChange = vi.fn()
+    const dressed: Wardrobe = { ...earned, tee: { at: '2026-10-16T10:00:00Z', runId: 'run-3' }, overalls: { at: '2026-10-16T11:00:00Z', runId: 'run-4' } }
+    render(<FigurePicker figure={{ kind: 'spool', color: 'sky', wear: ['tee', 'monocle'] }} onChange={onChange} wardrobe={dressed} />)
+    const clothes = screen.getByRole('group', { name: 'Clothes' })
+    expect(within(clothes).getByRole('button', { name: /Plain tee/ })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(within(clothes).getByRole('button', { name: /Work overalls/ }))
+    expect(onChange).toHaveBeenLastCalledWith({ kind: 'spool', color: 'sky', wear: ['overalls', 'monocle'] })
+    expect(within(clothes).queryByRole('button', { name: /Crew vest/ })).toBeNull()
+    expect(clothes).toHaveTextContent('Hint: Tell an agent to ask you when the brief leaves a real choice open.')
+  })
+
   it('offers a figure a quest earns only once it is earned', () => {
     render(<FigurePicker figure={{ kind: 'spool', color: 'sky' }} onChange={vi.fn()} wardrobe={earned} />)
     expect(screen.getByRole('radio', { name: 'Scissors' })).toBeEnabled()
@@ -42,6 +54,6 @@ describe('the figure picker', () => {
     expect(within(section).getByRole('group', { name: 'Color' })).toBeVisible()
     expect(within(section).getByRole('button', { name: /Button monocle/ })).toBeVisible()
     expect(section.querySelector('details')).toBeNull()
-    expect(within(section).getByRole('link', { name: /Quests · 2 of 9 earned/ })).toHaveAttribute('href', '/quests')
+    expect(within(section).getByRole('link', { name: /Quests · 2 of 13 earned/ })).toHaveAttribute('href', '/quests')
   })
 })

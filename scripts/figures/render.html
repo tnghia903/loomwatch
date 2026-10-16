@@ -39,7 +39,6 @@ fig.traverse((o) => {
     pin_a: () => new THREE.MeshPhysicalMaterial({ color: '#E9C46A', roughness: 0.3, clearcoat: 0.6 }),
     pin_b: () => new THREE.MeshPhysicalMaterial({ color: '#F4F1EA', roughness: 0.3, clearcoat: 0.6 }),
     pin_c: () => new THREE.MeshPhysicalMaterial({ color: '#4A4A55', roughness: 0.3, clearcoat: 0.6 }),
-    scarf: () => new THREE.MeshStandardMaterial({ color: '#E9C46A', roughness: 0.82 }),
   }[role]
   o.material = m ? m() : new THREE.MeshStandardMaterial({ color: '#888' })
 })

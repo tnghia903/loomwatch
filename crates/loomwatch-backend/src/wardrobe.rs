@@ -26,10 +26,12 @@ use serde::{Deserialize, Serialize};
 use crate::api::ApiError;
 use crate::watch_api::local_evidence;
 
-/// Everything a quest can earn (ui/src/lib/quests/catalog.ts names the quest behind each): the
-/// accessories any agent can wear, then the figures it can be.
+/// Everything a quest can earn (ui/src/lib/quests/catalog.ts names the quest behind each): what
+/// any agent can wear (the clothes, worn one at a time, then the accessories), then the figures
+/// it can be.
 pub(crate) const ACCESSORIES: &[&str] = &[
-    "chalk", "band", "pin", "cushion", "shuttle", "monocle", "patch",
+    "tee", "overalls", "apron", "vest", "chalk", "band", "pin", "cushion", "shuttle", "monocle",
+    "patch",
 ];
 pub(crate) const FIGURE_ITEMS: &[&str] = &["scissors", "bobbin"];
 

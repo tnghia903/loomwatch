@@ -39,7 +39,7 @@ function face(kind, gltf, at, spread, mouthDrop) {
 export function bobbin(gltf) {
   const head = new THREE.Group()
   head.name = 'head_bobbin'
-  head.position.set(0, 0.07, 0)
+  head.position.set(0, 0.02, 0)
   const flange = new THREE.CylinderGeometry(0.34, 0.34, 0.026, 40)
   head.add(mesh('bobbin_flange_bottom', flange, mat.steel, [0, 0.013, 0]))
   head.add(mesh('bobbin_flange_top', flange, mat.steel, [0, 0.317, 0]))
@@ -57,7 +57,7 @@ export function bobbin(gltf) {
 export function scissors(gltf) {
   const head = new THREE.Group()
   head.name = 'head_scissors'
-  head.position.set(0, 0.05, 0)
+  head.position.set(0, 0, 0)
   // Two finger rings side by side, the eyes inside them.
   for (const [side, x] of [['l', -0.14], ['r', 0.14]]) {
     head.add(mesh(`scissors_ring_${side}`, new THREE.TorusGeometry(0.115, 0.05, 14, 40), mat.skin, [x, 0.17, 0]))

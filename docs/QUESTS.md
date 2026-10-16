@@ -1,8 +1,8 @@
 # Quests and the wardrobe
 
 LoomWatch notices when one of your real runs shows a good practice of building agents and agent
-teams, and rewards it with an accessory or a figure. The reward goes into one wardrobe that every
-agent in Your agents can wear.
+teams, and rewards it with clothes, an accessory or a figure. The reward goes into one wardrobe that
+every agent in Your agents can wear. A figure starts bare: everything it wears is earned.
 
 LoomWatch is a tool for configuring agents, not a course on them. A quest says what to try and,
 once, one sentence of why it works. It has no lessons, reading lists or links to learn more.
@@ -33,10 +33,14 @@ After    the receipt says what the run did, and why it   (the run receipt, once,
 | Item | Part | Practice | Earned when |
 |---|---|---|---|
 | Tailor’s chalk | Prompt | Clear success criteria | A check step’s first look at an agent’s work gives a verdict on every item of its Done when, every one is Met, and no check sends the work back. What the agent says about its own work never counts. |
+| Crew vest (clothes) | Prompt | Ask, don’t guess | An agent asks you a question (`ask_user`), and your answer comes back. A permission request is its app asking, so it doesn’t count. |
 | Tailor’s tape | Context | Scoped context | An agent is given at least one folder, and reads from every folder it was given. |
+| Maker’s apron (clothes) | Context | Reusable skills | An agent opens a skill it was given: the daemon’s `skill_opened` record. A skill only loaded into its prompt, or named in a tool’s title, doesn’t count. |
 | Safety-pin clip | Harness | Least privilege | A scheduled run never asks for a permission, and every key its agents hold (web, files, commands) was used. |
 | Wrist pincushion | Harness | Test before you ship | A team runs an agent from Your agents that had a test bench run that finished before it. |
 | Shuttle | Team shape | Orchestrator and workers | One agent asks another over the Team Bus and gets an answer. |
+| Work overalls (clothes) | Team shape | Parallel work | One agent dispatches work to two teammates, each still working when the other is handed its part, and neither fails. A teammate's time at work runs from the dispatch that reached it to its last recorded step after it. |
+| Plain tee (clothes) | Team shape | Chain clear steps | A pipeline of three or more stages (a review step is you, not a stage), every stage after the first handed what came before it, and none fails. |
 | Button monocle | Checking | Evaluator–optimizer loop | A check step sends work back, and the second pass meets every item it checks. |
 | Sewn-on patch | Checking | Learn from failures | Something that went wrong in two or more of the team’s last five runs (a permission asked for, an agent failing, a teammate left idle, a stage asking for more) doesn’t happen in this run. |
 | Scissors (a figure) | Team shape | Start simple | The team runs with fewer agents than its last finished run, and uses fewer tokens. |
@@ -51,8 +55,9 @@ After    the receipt says what the run did, and why it   (the run receipt, once,
   count (`QuestsLink`) sits in the top bar of Home and Your agents, and ⌘K has **Quests…**.
 - **An agent's figure** (`FigurePicker`) sits beside its ID card in Your agents, not on the
   workbench: the bench is how the agent works, the figure only how it looks. It has three parts
-  side by side: **Shape** (the earned figures are locked silhouettes until earned), **Color**, and
-  **Accessories**, which lists all seven, earned ones to wear and locked ones with their hint.
+  side by side: **Shape** (the earned figures are locked silhouettes until earned), **Color**,
+  **Clothes** (one set at a time: putting one on takes the other off) and **Accessories**, each
+  listing earned items to wear and locked ones with their hint.
 - **The receipt** of the run that earned an item, once, with one sentence of why.
 
 ## How it works
@@ -74,13 +79,19 @@ After    the receipt says what the run did, and why it   (the run receipt, once,
   The first run to earn it keeps it, so that run's receipt is the one that says so.
 - **Wearing** is part of a saved agent's figure (`figure.wear` in `.jobs/<agent>.yaml`). Like the
   figure itself, it never makes a new version, and a team never copies it.
-- **The accessories are worn, not stuck on.** Each is a 3D object fitted to the figure by casting
-  rays onto its body (`accessoryMeshes.ts`): the tailor's tape lies over the shoulders and down the
-  chest, the button monocle sits on the eye and is tied to the scarf with plum thread, the chalk is
+- **The clothes and accessories are worn, not stuck on.** Each is a 3D object fitted to the figure
+  by casting rays onto its body (`accessoryMeshes.ts`). Clothes are cloth laid a little off the
+  torso, under the arms: a plain tee in a deeper shade of the figure's own colour with short
+  sleeves, denim work overalls with a bib pocket and nickel buttons, a linen maker's apron on
+  leather straps with a pencil in its pocket, and a charcoal crew vest open in a V. None of it is
+  gold, blue or red: those say you, running and trouble. What goes over them lies
+  on them: the tailor's tape lies over the shoulders and down the
+  chest, the button monocle sits on the eye and is tied to the chest with plum thread, the chalk is
   tucked behind an ear and has drawn a cut line on the tummy, the patch is sewn onto the tummy's
-  curve, a safety pin fastens the scarf, the pincushion is strapped round a wrist, and a shuttle is
+  curve, a safety pin is worn on the chest like a brooch, the pincushion is strapped round a wrist, and a shuttle is
   pushed through the top of the head as needles are stuck in a ball of yarn. The 3D bench wears
-  them. The pictures stack one layer per accessory over the still (`ui/public/agent/wear`),
+  them. The pictures stack one layer per item over the still (`ui/public/agent/wear`; the tee,
+  made in the figure's own colour, has one per colour),
   rendered from the same objects with the figure hiding what is behind it and catching its
   shadow, so pictures and bench agree. Only the face-high ones show in the chat avatar.
 - **The earned figures** are heads in `ui/public/agent/workbench.glb` (`head_scissors`,

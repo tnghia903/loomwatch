@@ -1,4 +1,4 @@
-import { isAccessory, type Accessory, type EarnedFigure } from '../quests/catalog'
+import { ACCESSORIES, isAccessory, isGarment, type Accessory, type EarnedFigure } from '../quests/catalog'
 import { hashId } from '../story/mark'
 import type { AgentConfig } from '../team-file/types'
 
@@ -74,9 +74,11 @@ export function isFigureChoice(value: unknown): value is FigureChoice {
   return FIGURE_KINDS.includes(kind as FigureKind) && FIGURE_COLORS.includes(color as FigureColor) && (wear === undefined || (Array.isArray(wear) && wear.every(isAccessory)))
 }
 
-/** What it wears, each once, in the wardrobe's order. */
+/** What it wears, each once, in the wardrobe's order, and one set of clothes at most. */
 export function wornBy(figure: Pick<FigureChoice, 'wear'>): Accessory[] {
-  return [...new Set(figure.wear ?? [])]
+  const worn = new Set(figure.wear ?? [])
+  const clothes = (figure.wear ?? []).find(isGarment)
+  return ACCESSORIES.filter((item) => worn.has(item) && (!isGarment(item) || item === clothes))
 }
 
 /** The figure an agent wears: the one chosen for it, or one picked from its id, the same every time. */

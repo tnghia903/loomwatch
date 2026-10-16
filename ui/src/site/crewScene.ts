@@ -29,15 +29,13 @@ import {
   type Vector4,
 } from 'three'
 import { benchMaterial, drawn, fitCanvas, readModel, readyToDraw, roomEnvironment } from '../components/agents/workbenchScene'
-import { pegboardTexture, swatchTextures, woundTexture } from '../components/agents/benchTextures'
+import { pegboardTexture, woundTexture } from '../components/agents/benchTextures'
 import { COLOR_HEX, FIGURE_KINDS, type FigureChoice } from '../lib/library/figures'
-import { markPattern } from '../lib/story/mark'
 import { CrewGlow, easeTint, glowColor } from './crewGlow'
 import { glowAt, talkAt, type Glow, type TalkLine, type TalkState } from './crewTalk'
 
-/** One figure in the crew: who it is (its scarf is woven from this) and what it wears. */
+/** One figure in the crew: what it wears. */
 export interface CrewMember {
-  id: string
   figure: FigureChoice
 }
 
@@ -697,26 +695,19 @@ export class CrewScene {
 
 /**
  * Dress a clone of the model's figure as one member: the bench's materials, its skin in its colour,
- * its scarf woven from its id, and only its own head showing. Each mesh keeps the role Blender
+ * and only its own head showing. Each mesh keeps the role Blender
  * named its material in `userData.role`. Whatever it makes is handed to `own` to dispose of.
  */
 export function dressFigure(root: Object3D, member: CrewMember, wound: Texture, own: <T extends { dispose: () => void }>(item: T) => T): Mesh[] {
   const meshes: Mesh[] = []
   const pegboard = () => own(pegboardTexture())
   const skin = new Color(COLOR_HEX[member.figure.color])
-  const swatch = swatchTextures(markPattern(member.id).over)
-  own(swatch.map)
-  own(swatch.bump)
   root.traverse((object) => {
     if (!(object instanceof Mesh)) return
     const role = (object.material as Material).name
     const material = own(benchMaterial(role, object.name, { pegboard, wound }))
     if (role === 'skin' || role === 'skin_wound') (material as MeshStandardMaterial).color.copy(skin)
     if (role === 'skin_deep') (material as MeshStandardMaterial).color.copy(skin).multiplyScalar(0.86)
-    if (role === 'scarf') {
-      ;(material as MeshStandardMaterial).map = swatch.map
-      ;(material as MeshStandardMaterial).bumpMap = swatch.bump
-    }
     object.material = material
     object.userData.role = role
     meshes.push(object)

@@ -1,5 +1,5 @@
 import { IN_CHAT, wearIcon, wearLayer, wearShape } from '../../lib/library/accessorySpots'
-import type { FigureKind } from '../../lib/library/figures'
+import type { FigureColor, FigureKind } from '../../lib/library/figures'
 import { ACCESSORIES, type Accessory } from '../../lib/quests/catalog'
 
 /**
@@ -9,12 +9,12 @@ import { ACCESSORIES, type Accessory } from '../../lib/quests/catalog'
  * accessories (accessoryMeshes.ts), so the pictures and the bench agree. `headOnly` keeps only
  * what shows at the size of a face, for the smallest pictures.
  */
-export function WornOverlay({ kind, wear, headOnly = false, className }: { kind: FigureKind; wear: readonly Accessory[]; headOnly?: boolean; className?: string }) {
+export function WornOverlay({ kind, color, wear, headOnly = false, className }: { kind: FigureKind; color: FigureColor; wear: readonly Accessory[]; headOnly?: boolean; className?: string }) {
   const shown = ACCESSORIES.filter((item) => wear.includes(item) && (!headOnly || IN_CHAT.has(item)))
   if (shown.length === 0) return null
   return (
     <span className={className ?? 'worn-overlay'} aria-hidden="true">
-      {shown.map((item) => <img key={item} src={wearLayer(kind, item)} alt="" decoding="async" />)}
+      {shown.map((item) => <img key={item} src={wearLayer(kind, item, color)} alt="" decoding="async" />)}
     </span>
   )
 }

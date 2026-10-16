@@ -44,15 +44,13 @@ import { CARD_SLOTS, FIGURE_KEYS, partOfNode, reactionsBetween, READ_SLOTS, TOOL
 import { COLOR_HEX, FIGURE_KINDS, wornBy, type FigureChoice, type FigureKind } from '../../lib/library/figures'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { dress, type Dressed } from './accessoryMeshes'
-import { cardTexture, keyLabelTexture, pegboardTexture, swatchTextures, woundTexture } from './benchTextures'
+import { cardTexture, keyLabelTexture, pegboardTexture, woundTexture } from './benchTextures'
 
 /** Everything the bench shows, from the agent on screen and the run in its chat. */
 export interface BenchView {
   look: FigureLook
   /** The figure it wears: which head, and the colour of its skin. */
   figure: FigureChoice
-  /** The agent's woven mark (markPattern), woven into its scarf. */
-  pattern: readonly boolean[]
   does: string
   appName: string
   hasReply: boolean
@@ -228,12 +226,11 @@ export class WorkbenchScene {
   private flicker = 0
   private screenLight: PointLight | null = null
   private moodSince = 0
-  private swatch: { map: Texture; bump: Texture } | null = null
   private wound: Texture | null = null
   /** Each head it can wear, and every eye (they blink together; only the worn head's show). */
   private readonly heads = new Map<FigureKind, Object3D>()
   private readonly eyes: Object3D[] = []
-  private drawn = { pattern: '', figure: '' }
+  private drawn = { figure: '' }
   /** What it wears from the wardrobe (docs/QUESTS.md), fitted to the head it wears now. */
   private dressed: Dressed | null = null
 
@@ -435,19 +432,6 @@ export class WorkbenchScene {
 
   private apply(before: BenchView | null, view: BenchView) {
     const { look } = view
-    const pattern = view.pattern.map((on) => (on ? 1 : 0)).join('')
-    if (this.drawn.pattern !== pattern) {
-      this.drawn.pattern = pattern
-      this.swatch?.map.dispose()
-      this.swatch?.bump.dispose()
-      this.swatch = swatchTextures(view.pattern)
-      for (const mesh of this.meshes('scarf')) {
-        const material = mesh.material as MeshStandardMaterial
-        material.map = this.swatch.map
-        material.bumpMap = this.swatch.bump
-        material.needsUpdate = true
-      }
-    }
     const figureKey = `${view.figure.kind}/${view.figure.color}/${wornBy(view.figure).join()}`
     if (this.drawn.figure !== figureKey) {
       this.drawn.figure = figureKey
@@ -1326,7 +1310,6 @@ export function benchMaterial(role: string, mesh: string, textures: { pegboard: 
     case 'pin_a': return physical('#E9C46A', 0.3, 0.6)
     case 'pin_b': return physical('#F4F1EA', 0.3, 0.6)
     case 'pin_c': return physical('#4A4A55', 0.3, 0.6)
-    case 'scarf': return new MeshStandardMaterial({ color: '#FFFFFF', roughness: 0.82, bumpScale: 3 })
     case 'gold': return standard('#E2B451', 0.3, 1)
     case 'appband': return new MeshStandardMaterial({ color: '#85817A', emissive: LIVE, emissiveIntensity: 0, roughness: 0.4 })
     case 'screen': return new MeshStandardMaterial({ color: '#141A24', emissive: LIVE, emissiveIntensity: 0.12, roughness: 0.3 })

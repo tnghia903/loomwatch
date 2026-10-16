@@ -7,9 +7,12 @@ import type { FigureChoice } from './figures'
  * size of the figure's still: the figure hides what is behind it, and catches its shadow. Stacked
  * over the still, the layers dress it. Made by scripts/figures.
  */
-export function wearLayer(kind: FigureChoice['kind'], item: Accessory): string {
-  return `/agent/wear/${kind}-${item}.webp`
+export function wearLayer(kind: FigureChoice['kind'], item: Accessory, color: FigureChoice['color']): string {
+  return IN_COLOR.has(item) ? `/agent/wear/${kind}-${item}-${color}.webp` : `/agent/wear/${kind}-${item}.webp`
 }
+
+/** What is made in the figure's own colour (a tee is a deeper shade of it): a layer per colour. */
+export const IN_COLOR: ReadonlySet<Accessory> = new Set(['tee'])
 
 /** The accessory worn, close up: for the wardrobe once earned, and the receipt. */
 export function wearIcon(item: Accessory): string {

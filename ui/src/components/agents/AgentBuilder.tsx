@@ -226,7 +226,7 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
       </header>
 
       <ByHand
-        draft={draft} set={set} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={markId} figure={figure} record={benchRecord} tools={tools} toolsLoading={skillsLoading} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
+        draft={draft} set={set} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} tools={tools} toolsLoading={skillsLoading} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
         chat={view === 'chat' ? <AgentChat draft={draft} harness={harness} model={resolvedModel} chatId={chatId} figure={figure} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={inTeam?.knowledge} /> : undefined}
         onBuild={() => showView('build')}
         cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={draft.name.trim() || 'New agent'} onClose={() => setAnswerRun(null)} /> : undefined}

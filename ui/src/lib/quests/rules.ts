@@ -8,6 +8,7 @@ import { readCount } from '../story/reads'
 import type { LessonRun } from '../team-file/runLessons'
 import type { AgentConfig, AllowSwitch } from '../team-file/types'
 import type { RunProjection } from '../watch/events'
+import { OPERATOR_ID } from '../watch/messages'
 import { chosenIsFile } from '../knowledge/chosen'
 import { AREAS, QUESTS, type QuestItem } from './catalog'
 
@@ -82,6 +83,15 @@ function chalk({ succeeded, agents, projection }: QuestFacts): Award | null {
   return null
 }
 
+/** An agent asked you, not a teammate, and your answer came back: a question left unanswered, or a
+    permission request, is not one. */
+function vest({ succeeded, agents, projection }: QuestFacts): Award | null {
+  if (!succeeded) return null
+  const asked = projection.messages.find((message) => message.kind === 'question' && !message.carried && message.state === 'answered' && message.from && message.from !== OPERATOR_ID && message.reply?.text.trim())
+  if (!asked?.from) return null
+  return { item: 'vest', agentId: asked.from, line: `${nameOf(agents, asked.from)} asked you a question instead of guessing, and your answer saw the run through.` }
+}
+
 function band({ succeeded, agents, projection, current }: QuestFacts): Award | null {
   if (!succeeded) return null
   for (const agent of agents) {
@@ -95,6 +105,21 @@ function band({ succeeded, agents, projection, current }: QuestFacts): Award | n
       item: 'band', agentId: agent.id,
       line: `${agent.name} was given ${plural(folders.length, 'folder')} and read from every one${files ? `, ${plural(files, 'file')} in all` : ''}.`,
     }
+  }
+  return null
+}
+
+/** A skill it was given, opened by the agent itself: the daemon's `skill_opened` record, which is
+    evidence of use. A skill only loaded into its prompt, or named in a tool's title, is not. */
+function apron({ succeeded, agents, projection, current }: QuestFacts): Award | null {
+  if (!succeeded) return null
+  const key = (name: string) => name.trim().toLowerCase()
+  for (const agent of agents) {
+    if (!current.agentIds.includes(agent.id)) continue
+    const given = new Set((agent.capabilities ?? []).flatMap((capability) => (capability.kind === 'skill' ? [key(capability.name)] : [])))
+    if (given.size === 0) continue
+    const opened = projection.evidence.find((item) => item.agentId === agent.id && item.kind === 'skill' && item.relation === 'opened by the agent' && item.status === 'succeeded' && given.has(key(item.name)))
+    if (opened) return { item: 'apron', agentId: agent.id, line: `${agent.name} opened its “${opened.name}” skill when the work called for it.` }
   }
   return null
 }
@@ -127,6 +152,43 @@ function shuttle({ succeeded, agents, projection }: QuestFacts): Award | null {
   const ask = projection.messages.find((message) => message.kind === 'ask' && !message.carried && message.state === 'answered' && message.from && message.to && message.from !== message.to)
   if (!ask?.from || !ask.to) return null
   return { item: 'shuttle', agentId: ask.from, line: `${nameOf(agents, ask.from)} asked ${nameOf(agents, ask.to)} a question over the Team Bus and got an answer.` }
+}
+
+/** Two teammates sent work by the same agent, each still working when the other was handed its
+    part, and neither failing. A teammate's time at work runs from the dispatch that reached it to
+    its last recorded step after it. */
+function overalls({ succeeded, agents, projection, current }: QuestFacts): Award | null {
+  if (!succeeded) return null
+  const sent = new Map<string, Map<string, number>>()
+  for (const message of projection.messages) {
+    if (message.carried || message.kind !== 'dispatch' || message.state === 'failed' || !message.from || !message.to || message.from === message.to) continue
+    if (current.failed.has(message.to)) continue
+    const teammates = sent.get(message.from) ?? new Map<string, number>()
+    if (!teammates.has(message.to)) teammates.set(message.to, message.offsetMs)
+    sent.set(message.from, teammates)
+  }
+  for (const [lead, teammates] of sent) {
+    const windows = [...teammates].flatMap(([id, from]) => {
+      const steps = projection.evidence.filter((item) => item.agentId === id && item.offsetMs >= from).map((item) => item.offsetMs)
+      return steps.length ? [{ id, from, to: Math.max(...steps) }] : []
+    })
+    for (const [index, one] of windows.entries()) {
+      const other = windows.slice(index + 1).find((candidate) => Math.max(one.from, candidate.from) < Math.min(one.to, candidate.to))
+      if (other) return { item: 'overalls', agentId: lead, line: `${nameOf(agents, lead)} dispatched work to ${nameOf(agents, one.id)} and ${nameOf(agents, other.id)}, who worked on it at the same time and both finished.` }
+    }
+  }
+  return null
+}
+
+/** A pipeline of three or more stages, every stage after the first handed what came before it. A
+    review step is you, not a stage. */
+function tee({ succeeded, agents, projection, current }: QuestFacts): Award | null {
+  if (!succeeded || current.mode !== 'pipeline') return null
+  const stages = agents.filter((agent) => agent.kind !== 'operator' && current.agentIds.includes(agent.id))
+  if (stages.length < 3 || stages.some((stage) => current.failed.has(stage.id))) return null
+  const handed = (id: string) => projection.messages.some((message) => message.kind === 'handover' && !message.carried && message.to === id && message.text.trim())
+  if (!stages.filter((stage) => stage.id !== current.entrypoint).every((stage) => handed(stage.id))) return null
+  return { item: 'tee', agentId: null, line: `This run passed the work along ${stages.length} stages, each starting from what the one before handed it.` }
 }
 
 function monocle({ succeeded, agents, projection }: QuestFacts): Award | null {
@@ -207,7 +269,7 @@ function scissors({ succeeded, current, earlier }: QuestFacts): Award | null {
   return { item: 'scissors', agentId: null, line: `This team ran with ${plural(current.agentIds.length, 'agent')} instead of ${last.agentIds.length}, and used ${saved}% fewer tokens than its last run.` }
 }
 
-const RULES = [chalk, band, pin, cushion, shuttle, monocle, patch, scissors]
+const RULES = [chalk, vest, band, apron, pin, cushion, shuttle, overalls, tee, monocle, patch, scissors]
 
 /** Everything this run earned, in the catalog's order. A one-agent turn or a follow-up that started
     part-way earns nothing: it is not the whole team at work. */

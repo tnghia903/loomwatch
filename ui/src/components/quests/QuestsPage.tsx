@@ -1,7 +1,7 @@
 import { ArrowRight, Check, Lock, Moon, Sun } from 'lucide-react'
 
 import { figureStill, type FigureKind } from '../../lib/library/figures'
-import { AREA_NAMES, AREAS, isAccessory, QUESTS, type Quest } from '../../lib/quests/catalog'
+import { AREA_NAMES, AREAS, isAccessory, isGarment, QUESTS, type Quest } from '../../lib/quests/catalog'
 import { partsDone, useWardrobe, type EarnedItem, type Wardrobe } from '../../lib/quests/wardrobe'
 import type { LoomMarkState } from '../../lib/story/loomMark'
 import { useTheme } from '../../lib/theme'
@@ -14,7 +14,7 @@ function earnedDate(entry: EarnedItem): string {
 }
 
 /**
- * Quests (`/quests`): every accessory and figure your runs can earn, what you have, and what is left.
+ * Quests (`/quests`): every set of clothes, accessory and figure your runs can earn, what you have, and what is left.
  * It is where you find out that LoomWatch has quests at all. Like the rest of the app it configures
  * rather than teaches (docs/QUESTS.md): each quest says what to try and how a run earns it, and once
  * earned, why the practice works in one sentence. Nothing here is a task to tick.
@@ -24,7 +24,8 @@ export function QuestsPage({ wardrobe: given, mark }: { wardrobe?: Wardrobe; mar
   const wardrobe = given ?? read.wardrobe
   const { resolved, toggle } = useTheme()
   const done = QUESTS.filter((quest) => wardrobe[quest.item]).length
-  const accessories = QUESTS.filter((quest) => quest.reward === 'accessory')
+  const clothes = QUESTS.filter((quest) => quest.reward === 'accessory' && isGarment(quest.item))
+  const accessories = QUESTS.filter((quest) => quest.reward === 'accessory' && !isGarment(quest.item))
   const figures = QUESTS.filter((quest) => quest.reward === 'figure')
   return (
     <div className="lw-home lw-quests">
@@ -39,7 +40,7 @@ export function QuestsPage({ wardrobe: given, mark }: { wardrobe?: Wardrobe; mar
       <main className="home-main quests-main">
         <section className="home-hero quests-hero">
           <h1 className="t-display">Quests</h1>
-          <p>Your runs earn accessories and figures for your agents. Each quest is one good practice: try it on work you wanted done anyway, and the receipt of the run that shows it says what it earned. Everything goes into one wardrobe all your agents share.</p>
+          <p>Your runs earn clothes, accessories and figures for your agents. Each quest is one good practice: try it on work you wanted done anyway, and the receipt of the run that shows it says what it earned. Everything goes into one wardrobe all your agents share.</p>
           <div className="quests-progress" role="group" aria-label="Your progress">
             <span className="quests-progress-count"><b>{done}</b> of {QUESTS.length} earned</span>
             <span className="quests-progress-pips" aria-hidden="true">{QUESTS.map((quest) => <i key={quest.item} className={wardrobe[quest.item] ? 'on' : ''} />)}</span>
@@ -47,6 +48,7 @@ export function QuestsPage({ wardrobe: given, mark }: { wardrobe?: Wardrobe; mar
           <p className="quests-rule t-meta">Only a run that finishes can earn, judged by what LoomWatch recorded, never by what an agent says about itself. Running more earns nothing.</p>
         </section>
 
+        <QuestGroup id="quests-clothes" title="Clothes" says="Any of your agents can wear one set at a time" quests={clothes} wardrobe={wardrobe} />
         <QuestGroup id="quests-accessories" title="Accessories" says="Any of your agents can wear them" quests={accessories} wardrobe={wardrobe} />
         <QuestGroup id="quests-figures" title="Figures" says="Any of your agents can be one" quests={figures} wardrobe={wardrobe} />
 

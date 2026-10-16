@@ -170,7 +170,7 @@ function OwnAgent({ agent, teamPath, editable, harnesses, harnessesLoading, skil
         <AgentViewTabs view={view} onView={setView} />
       </div>
       <ByHand
-        draft={draft} set={(key, value) => onEdit(agent.id, key, value)} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={agent.id} figure={figure} record={record} hideDoes readOnly={!editable} tools={tools} toolsLoading={skillsLoading} reads={reads} onShowWorkflow={onShowWorkflow}
+        draft={draft} set={(key, value) => onEdit(agent.id, key, value)} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} tools={tools} toolsLoading={skillsLoading} reads={reads} onShowWorkflow={onShowWorkflow}
         chat={view === 'chat' ? <AgentChat draft={draft} harness={harness} model={resolvedModel} chatId={chatId} figure={figure} onAllow={(key) => onEdit(agent.id, 'allow', { ...draft.allow, [key]: true })} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} /> : undefined}
         onBuild={() => setView('build')}
         cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
