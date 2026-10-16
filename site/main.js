@@ -361,6 +361,11 @@
   const buzzSwitch = 'switch' in HTMLInputElement.prototype ? el('input', { class: 'buzz-switch', type: 'checkbox', switch: true, tabindex: '-1', style: `width: ${BUZZ}px; height: ${BUZZ}px` }) : null
   if (buzzSwitch) cord.append(buzzSwitch)
   const handles = [cordFigure, buzzSwitch].filter(Boolean)
+  let buzzAt = { x: 0, y: 0 } // where the switch lies, in the cord's box
+  // A trackpad's tick is faint, so a mouse's pull ticks three times, a couple of frames apart.
+  const TICKS = 3
+  const TICK_GAP = 30 // ms
+  const placeSwitch = (x, y) => { buzzAt = { x, y }; buzzSwitch.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)` }
   const restLength = () => (window.innerWidth <= 640 ? 30 : 44)
   const hiddenAt = () => -(rest + BOX + 12)
   let rest = restLength()
@@ -515,7 +520,7 @@
       const my = BOX / 2 - tie.y
       const c = Math.cos(tilt)
       const s = Math.sin(tilt)
-      buzzSwitch.style.transform = `translate(${(end.x + mx * c - my * s - BUZZ / 2).toFixed(2)}px, ${(end.y + mx * s + my * c - BUZZ / 2).toFixed(2)}px)`
+      placeSwitch(end.x + mx * c - my * s - BUZZ / 2, end.y + mx * s + my * c - BUZZ / 2)
     }
     cordTag.style.transform = `translate(${(end.x - BOX * 0.3).toFixed(1)}px, ${(end.y + BOX * 0.4).toFixed(1)}px)`
     cord.classList.toggle('near', near && !held && out < 2 && shown())
@@ -555,8 +560,23 @@
     event.currentTarget.setPointerCapture(event.pointerId)
     const at = cordPoint(event)
     held = { id: event.pointerId, touch: event.pointerType !== 'mouse', dx: at.x - end.x, dy: at.y - end.y, x: end.x, y: end.y, from: at, moved: 0, vx: 0, vy: 0, t: event.timeStamp }
+    if (event.currentTarget === buzzSwitch && event.pointerType === 'mouse') held.tick = { from: at.y - buzzAt.y, count: 0, at: 0 }
     handles.forEach((h) => h.classList.add('held'))
     wakeCord()
+  }
+  // Safari ticks once its switch's thumb is pulled CLICK below where it was pressed. A pixel and a
+  // half further it surely has, and from the next move on the switch goes with the pointer, on one
+  // side of its middle or, for each tick more, the other: the thumb crosses back and forth, and
+  // then nothing more ticks, however the pull goes on.
+  function tickMore(tick, y, time) {
+    const local = y - buzzAt.y
+    if (!tick.count) {
+      if (local >= tick.from + CLICK + 1.5) { tick.count = 1; tick.at = time }
+      return
+    }
+    if (tick.count < TICKS && time - tick.at >= TICK_GAP) { tick.count += 1; tick.at = time }
+    placeSwitch(buzzAt.x, y - BUZZ / 2 + (tick.count % 2 ? -10 : 10))
+    buzzSwitch.getBoundingClientRect() // so Safari measures the move against where it is now
   }
   function pullCord(event) {
     if (!held || event.pointerId !== held.id) return
@@ -570,6 +590,7 @@
     held.y = y
     held.t = event.timeStamp
     held.moved = Math.max(held.moved, Math.hypot(at.x - held.from.x, at.y - held.from.y))
+    if (held.tick) tickMore(held.tick, at.y, event.timeStamp)
     // The switch clicks as the cord comes out past the click, here rather than in a frame, so a
     // quick pull counts however few frames the page draws while it happens.
     if (!clicked && Math.hypot(x, y - hang) - rest >= CLICK) { clicked = true; flip(held.touch) }
@@ -579,10 +600,11 @@
     const { moved, vx, vy } = held
     held = null
     handles.forEach((h) => h.classList.remove('held'))
-    // Let go off the switch, or while the new theme spreads, and a mouse's click never reaches it,
-    // so Safari would carry this pull into the next one (and buzz early, or on a hover). Checking it
-    // from script resets it, without a buzz; after the click, when there is one.
-    if (buzzSwitch && event.pointerType === 'mouse') window.setTimeout(() => { buzzSwitch.checked = true; buzzSwitch.checked = false })
+    // Safari's switch is made anew after every pull, once its click (if any) is done. Let go off it,
+    // or while the new theme spreads, and a mouse's click never reaches it, so it would carry this
+    // pull into the next (and tick early, or on a hover); and on a phone it times every hold from
+    // the first touch it ever had. Changing its type renews it, without a tick.
+    if (buzzSwitch) window.setTimeout(() => { buzzSwitch.type = 'text'; buzzSwitch.type = 'checkbox'; buzzSwitch.checked = false }, 50)
     if (moved < 4 && event.type === 'pointerup') {
       // A tap is a short pull, and it switches as the button does.
       flip(event.pointerType !== 'mouse')
