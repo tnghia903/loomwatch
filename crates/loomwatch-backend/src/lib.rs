@@ -2794,18 +2794,20 @@ pub(crate) struct CheckItem {
 }
 
 /// The `## Check` block a check step ends with, one line per item: `- Met — item — evidence`.
-/// A reply without a readable block makes every expected item Not sure, never Met.
+/// The heading is read however a section is headed (`## Check`, `**Check**`), and the block ends
+/// at the next section. A reply without a readable block makes every expected item Not sure,
+/// never Met.
 fn read_checks(reply: &str, expected: &[String]) -> Vec<CheckItem> {
     let mut lines = reply.lines();
     let mut items = Vec::new();
     if lines.by_ref().any(|line| {
-        matches!(
-            line.trim().to_lowercase().as_str(),
-            "## check" | "## checks"
-        )
+        section_title(line.trim()).is_some_and(|title| {
+            let title = title.trim_end_matches(':').trim_end();
+            title.eq_ignore_ascii_case("check") || title.eq_ignore_ascii_case("checks")
+        })
     }) {
-        for line in lines.take_while(|line| !line.trim_start().starts_with('#')) {
-            let line = line.trim_start_matches(|c: char| {
+        for raw in lines {
+            let line = raw.trim_start_matches(|c: char| {
                 matches!(c, '-' | '*' | '•' | '_') || c.is_whitespace()
             });
             let Some((verdict, rest)) = [
@@ -2815,6 +2817,10 @@ fn read_checks(reply: &str, expected: &[String]) -> Vec<CheckItem> {
             ]
             .into_iter()
             .find_map(|(word, verdict)| Some((verdict, verdict_word(line, word)?))) else {
+                // Another section ends the block; anything else between the items is skipped.
+                if section_title(raw.trim()).is_some() {
+                    break;
+                }
                 continue;
             };
             let rest = rest
@@ -2828,7 +2834,11 @@ fn read_checks(reply: &str, expected: &[String]) -> Vec<CheckItem> {
             items.push(CheckItem {
                 verdict,
                 item: item.trim().to_owned(),
-                evidence: evidence.trim().to_owned(),
+                evidence: evidence
+                    .trim()
+                    .trim_end_matches(['*', '_'])
+                    .trim_end()
+                    .to_owned(),
             });
         }
     }
@@ -5101,6 +5111,26 @@ IFS= read -r _
                 ("not_met", "Has a link", "none"),
                 ("met", "Short", "90 words")
             ]
+        );
+        // Checkers head the block in bold as often as with `##` (2 of 6 real runs), and the
+        // Done when's own `## Not met` after it is another section, not more checks.
+        let bold = read_checks(
+            "Problems.\n\n**Check**\n- Met — Five stories — counted five\n\
+             **Not met — Has a link — story 2 has none**\n\n## Not met\n- Met the length — no",
+            &[],
+        );
+        assert_eq!(
+            bold.iter()
+                .map(|item| (item.verdict, item.item.as_str(), item.evidence.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("met", "Five stories", "counted five"),
+                ("not_met", "Has a link", "story 2 has none")
+            ]
+        );
+        assert_eq!(
+            read_checks("### Checks:\n- Not sure — x — y", &[])[0].verdict,
+            "not_sure"
         );
         let missing = read_checks("Looks fine to me.", &["Five stories".to_owned()]);
         assert_eq!(missing.len(), 1);
