@@ -54,10 +54,14 @@ describe('a finished run’s quests', () => {
       }
       return json({}, 404)
     }))
-    const agents: AgentConfig[] = [{ id: 'writer', name: 'Writer', role: 'Write.', doneWhen: ['Under 300 words'] }]
+    const agents: AgentConfig[] = [{ id: 'writer', name: 'Writer', role: 'Write.', doneWhen: ['Under 300 words'] }, { id: 'checker', name: 'Checker', role: 'Check it.', checks: 'writer' }]
     const projection = {
-      agents: [{ id: 'writer', status: 'succeeded', reply: 'Here it is.', tokens: null } as unknown as ProjectedAgent],
-      evidence: [], messages: [], checks: [],
+      agents: [
+        { id: 'writer', status: 'succeeded', reply: 'Here it is.', tokens: null },
+        { id: 'checker', status: 'succeeded', reply: '## Check\n- Met — Under 300 words — 212 words', tokens: null },
+      ] as unknown as ProjectedAgent[],
+      evidence: [], messages: [],
+      checks: [{ checker: 'checker', checked: 'writer', round: 1, items: [{ verdict: 'met', item: 'Under 300 words', evidence: '212 words' }] }],
       coverage: { agents: { level: 'complete', reason: 'observed' } },
     } as unknown as RunProjection
     const { result, rerender } = renderHook((props: { complete: boolean }) => useRunQuests({
@@ -70,6 +74,6 @@ describe('a finished run’s quests', () => {
     rerender({ complete: true })
     await waitFor(() => expect(result.current.map((earned) => earned.quest.item)).toEqual(['chalk']))
     expect(posted).toEqual([{ item: 'chalk', runId: 'now', teamPath: 'research.yaml', agentId: 'writer' }])
-    expect(result.current[0].line).toBe('Writer met all 1 item of its Done when on the first pass.')
+    expect(result.current[0].line).toBe('Checker checked Writer’s work and found all 1 item of its Done when met on the first pass.')
   })
 })

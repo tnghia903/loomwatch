@@ -28,7 +28,7 @@ After    the receipt names the practice, says why it   (the run receipt, once, o
 
 | Item | Part | Practice | Earned when | Source |
 |---|---|---|---|---|
-| Tailor’s chalk | Prompt | Clear success criteria | An agent with a Done when replies with nothing under “Not met”, and no check step had to send its work back. | [Claude docs: Define your success criteria](https://platform.claude.com/docs/en/test-and-evaluate/define-success) |
+| Tailor’s chalk | Prompt | Clear success criteria | A check step’s first look at an agent’s work gives a verdict on every item of its Done when, every one is Met, and no check sends the work back. What the agent says about its own work never counts. | [Claude docs: Define your success criteria](https://platform.claude.com/docs/en/test-and-evaluate/define-success) |
 | Tailor’s tape | Context | Scoped context | An agent is given at least one folder, and reads from every folder it was given. | [Anthropic: Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) |
 | Safety-pin clip | Harness | Least privilege | A scheduled run never asks for a permission, and every key its agents hold (web, files, commands) was used. | [OWASP Top 10 for LLM apps: Excessive Agency](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/) |
 | Wrist pincushion | Harness | Test before you ship | A team runs an agent from Your agents that had a test bench run that finished before it. | [Anthropic: Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) |

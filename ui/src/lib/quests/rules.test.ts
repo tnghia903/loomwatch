@@ -43,22 +43,36 @@ describe('quests', () => {
   })
 
   it('earn nothing for a run that did not finish, or for one agent’s turn', () => {
-    const writer = agent('writer', { doneWhen: ['Under 300 words'] })
-    expect(items(facts({ agents: [writer], succeeded: false }))).toEqual([])
-    expect(items(facts({ agents: [writer], run: { runId: 'now', createdAt: '', onlyAgent: 'writer' } }))).toEqual([])
-    expect(items(facts({ agents: [writer] }))).toEqual(['chalk'])
+    const agents = [agent('writer', { doneWhen: ['Under 300 words'] }), agent('checker', { checks: 'writer' })]
+    const checked = { agents: agents.map((one) => ran(one.id)), evidence: [], messages: [], checks: [{ checker: 'checker', checked: 'writer', round: 1, items: [{ verdict: 'met' as const, item: 'Under 300 words', evidence: '212 words' }] }] }
+    expect(items(facts({ agents, projection: checked, succeeded: false }))).toEqual([])
+    expect(items(facts({ agents, projection: checked, run: { runId: 'now', createdAt: '', onlyAgent: 'writer' } }))).toEqual([])
+    expect(items(facts({ agents, projection: checked }))).toEqual(['chalk'])
   })
 
-  it('chalk: a Done when met on the first pass, and not one the agent says it missed', () => {
+  it('chalk: a check step found every item of a Done when met on its first look, whatever the agent said', () => {
     const writer = agent('writer', { doneWhen: ['Under 300 words', 'Cites a source'] })
-    const [award] = questsEarned(facts({ agents: [writer] }))
-    expect(award).toEqual({ item: 'chalk', agentId: 'writer', line: 'Writer met all 2 items of its Done when on the first pass.' })
-    const missed = facts({ agents: [writer], projection: { agents: [ran('writer', { reply: 'Draft.\n\n## Not met\n- Cites a source' })], evidence: [], messages: [], checks: [] } })
-    expect(items(missed)).toEqual([])
-    // A check step that had to send it back means it was not met the first time.
-    const resent = facts({ agents: [writer], projection: { agents: [ran('writer')], evidence: [], messages: [], checks: [{ checker: 'checker', checked: 'writer', round: 2, items: [{ verdict: 'met', item: 'Cites a source', evidence: '' }] }] } })
-    expect(items(resent)).not.toContain('chalk')
-    expect(items(facts({ agents: [agent('writer')] }))).toEqual([])
+    const agents = [writer, agent('checker', { checks: 'writer' })]
+    const verdict = (item: string, met: 'met' | 'not_met' | 'not_sure' = 'met') => ({ verdict: met, item, evidence: '' })
+    const checked = (rounds: { round: number; items: ReturnType<typeof verdict>[]; checker?: string }[], reply = 'Done.') => facts({
+      agents,
+      projection: { agents: [ran('writer', { reply }), ran('checker')], evidence: [], messages: [], checks: rounds.map(({ checker = 'checker', ...round }) => ({ checker, checked: 'writer', ...round })) },
+    })
+    const both = [verdict('Under 300 words'), verdict('Cites a source')]
+    expect(questsEarned(checked([{ round: 1, items: both }]))).toEqual([{ item: 'chalk', agentId: 'writer', line: 'Checker checked Writer’s work and found all 2 items of its Done when met on the first pass.' }])
+    // The agent's own reply is its account of itself: "Done." with nothing under "Not met" earns
+    // nothing without a check, and a reply listing a miss does not outweigh a check that found none.
+    expect(items(checked([]))).toEqual([])
+    expect(items(checked([{ round: 1, items: both }], 'Draft.\n\n## Not met\n- Cites a source'))).toEqual(['chalk'])
+    // Every item needs a verdict, and every verdict has to be Met.
+    expect(items(checked([{ round: 1, items: [verdict('Under 300 words')] }]))).toEqual([])
+    expect(items(checked([{ round: 1, items: [verdict('Under 300 words'), verdict('Cites a source', 'not_sure')] }]))).toEqual([])
+    // Work a check step had to send back was not met the first time; an agent cannot check itself.
+    expect(items(checked([{ round: 2, items: both }]))).not.toContain('chalk')
+    expect(items(checked([{ round: 1, items: both }, { round: 2, items: both, checker: 'editor' }]))).not.toContain('chalk')
+    expect(items(checked([{ round: 1, items: both, checker: 'writer' }]))).toEqual([])
+    // No Done when, nothing to meet.
+    expect(items(facts({ agents: [agent('writer'), agents[1]], projection: checked([{ round: 1, items: both }]).projection }))).toEqual([])
   })
 
   it('band: every folder an agent was given was read from', () => {

@@ -35,7 +35,6 @@ export interface QuestFacts {
 }
 
 const SWITCH_WORDS: Record<AllowSwitch, string> = { web: 'search the web', edits: 'change files', commands: 'run commands' }
-const NOT_MET = /^#{1,6}\s*not met\b/im
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
 
 function nameOf(agents: readonly AgentConfig[], id: string): string {
@@ -65,16 +64,20 @@ function readPaths(projection: QuestFacts['projection'], agentId: string): strin
     })
 }
 
+/** Only a check step's verdict decides, as the daemon recorded it: an agent saying it met its Done
+    when, or listing nothing under "Not met", is the agent's account of itself. Every check on its
+    work has to have stopped at its first round (nothing sent back) with every verdict Met, and one
+    of them has to give a verdict for every item. */
 function chalk({ succeeded, agents, projection }: QuestFacts): Award | null {
   if (!succeeded) return null
   for (const agent of agents) {
-    if (!agent.doneWhen?.length) continue
-    const ran = projection.agents.find((candidate) => candidate.id === agent.id)
-    if (!ran || ran.status === 'failed' || !ran.reply.trim() || NOT_MET.test(ran.reply)) continue
-    // A check step on it is the outside word: the first pass must have met everything it checked.
-    const checked = (projection.checks ?? []).filter((round) => round.checked === agent.id)
-    if (checked.some((round) => round.round > 1 || round.items.some((item) => item.verdict !== 'met'))) continue
-    return { item: 'chalk', agentId: agent.id, line: `${agent.name} met all ${plural(agent.doneWhen.length, 'item')} of its Done when on the first pass.` }
+    const count = agent.doneWhen?.length ?? 0
+    if (count === 0) continue
+    const rounds = (projection.checks ?? []).filter((candidate) => candidate.checked === agent.id && candidate.checker !== agent.id)
+    if (!rounds.every((candidate) => candidate.round === 1 && candidate.items.every((item) => item.verdict === 'met'))) continue
+    const round = rounds.find((candidate) => candidate.items.length >= count)
+    if (!round) continue
+    return { item: 'chalk', agentId: agent.id, line: `${nameOf(agents, round.checker)} checked ${agent.name}’s work and found all ${plural(count, 'item')} of its Done when met on the first pass.` }
   }
   return null
 }

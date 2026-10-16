@@ -42,7 +42,7 @@ describe('the quests on Your agents', () => {
     render(<QuestsSection wardrobe={earned} />)
     const quests = screen.getByRole('region', { name: 'Quests' })
     expect(quests).toHaveTextContent('2 of 9 earned')
-    expect(quests).toHaveTextContent('Try this: Give an agent a Done when it can check itself against before it replies.')
+    expect(quests).toHaveTextContent('Try this: Give an agent a Done when, and a check step that checks its work against it.')
     expect(quests).toHaveTextContent('Evaluator–optimizer loop')
     expect(within(quests).getAllByRole('link', { name: /^From / }).length).toBe(8)
   })

@@ -70,9 +70,9 @@ export interface Quest {
 export const QUESTS: readonly Quest[] = [
   {
     item: 'chalk', reward: 'accessory', area: 'prompt', name: 'Tailor’s chalk', practice: 'Clear success criteria',
-    hint: 'Give an agent a Done when it can check itself against before it replies.',
+    hint: 'Give an agent a Done when, and a check step that checks its work against it.',
     teach: 'Specific, checkable criteria tell the model when it is finished, and give you something to check its work against.',
-    earnedWhen: 'An agent with a Done when replies with nothing under “Not met”, in a run that finished.',
+    earnedWhen: 'A check step’s first look at an agent’s work finds every item of its Done when met, in a run that finished.',
     source: SOURCES.success,
   },
   {
