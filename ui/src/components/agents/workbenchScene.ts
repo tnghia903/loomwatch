@@ -37,6 +37,7 @@ import {
   type Material,
 } from 'three'
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js'
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
 import { CARD_SLOTS, FIGURE_KEYS, partOfNode, reactionsBetween, READ_SLOTS, TOOL_SLOTS, type FigureLook, type FigureMood, type FigurePart, type FigureReaction, type ReadSource } from '../../lib/library/figure'
@@ -1219,10 +1220,11 @@ export function fitCanvas(renderer: WebGLRenderer, width: number, height: number
 /**
  * workbench.glb, from its URL, or from its bytes when the caller has fetched them already: the
  * landing page fetches the model once, alongside the code that draws it, and builds each of its
- * scenes from the same bytes.
+ * scenes from the same bytes. The page's copy is compressed (meshopt; site/build.sh makes it), so
+ * this can decode that too; the app's own copy, public/agent/workbench.glb, is the model as made.
  */
 export function readModel(source: string | ArrayBuffer): Promise<GLTF> {
-  const loader = new GLTFLoader()
+  const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)
   return typeof source === 'string' ? loader.loadAsync(source) : loader.parseAsync(source, '')
 }
 

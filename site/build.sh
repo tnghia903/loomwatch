@@ -36,7 +36,12 @@ cp "$root"/ui/public/agent/figures/*.webp "$out/assets/figures/"
 # The live figures: the app's own 3D figure code (ui/src/site/landingLive.ts), built with three.js
 # into one module, and the model it draws. Needs ui's packages (pnpm install in ui/).
 (cd "$root/ui" && LANDING_LIVE_OUT="$out/assets/live" pnpm exec vite build --config vite.site.config.ts --logLevel warn)
-cp "$root"/ui/public/agent/workbench.glb "$out/assets/live/"
+# The model, compressed for the download (311 KB gzipped → 104 KB) with meshopt; readModel decodes it.
+# Positions and UVs stay floats (-vpf -vtf): quantized positions move each mesh under a new unnamed
+# node, and quantized UVs come out at 1/16 scale in a model with no textures to scale them back.
+# -kn -km -ke -kv keep the node names, materials, extras and UVs the scenes look things up by.
+# ui/public/agent/workbench.glb stays as made: the app reads it, and scripts/figures/merge.py edits it.
+(cd "$root/ui" && pnpm exec gltfpack -i public/agent/workbench.glb -o "$out/assets/live/workbench.glb" -cc -vpf -vtf -kn -km -ke -kv > /dev/null)
 # The app's own font files and @font-face rules, so the page and the app set type in the same fonts.
 # The fonts' license (SIL OFL) has to travel with every copy of them.
 cp "$root"/ui/public/fonts/fonts.css "$root"/ui/public/fonts/*.woff2 "$root"/ui/public/fonts/OFL.txt "$out/assets/fonts/"
