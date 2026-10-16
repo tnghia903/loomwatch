@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Assemble the landing page for GitHub Pages: the page in site/, plus the README's screenshots, the
-# agent figures and the design system's fonts, which are read from where they already live rather
-# than copied into site/ a second time. The Pages workflow runs this; run it yourself to preview the page.
+# agent figures and the app's fonts, which are read from where they already live rather than copied
+# into site/ a second time. The Pages workflow runs this; run it yourself to preview the page.
 #
 #   site/build.sh            # writes ./_site
 #   site/build.sh /tmp/page  # writes there
@@ -37,6 +37,7 @@ cp "$root"/ui/public/agent/figures/*.webp "$out/assets/figures/"
 # into one module, and the model it draws. Needs ui's packages (pnpm install in ui/).
 (cd "$root/ui" && LANDING_LIVE_OUT="$out/assets/live" pnpm exec vite build --config vite.site.config.ts --logLevel warn)
 cp "$root"/ui/public/agent/workbench.glb "$out/assets/live/"
+# The app's own font files and @font-face rules, so the page and the app set type in the same fonts.
 # The fonts' license (SIL OFL) has to travel with every copy of them.
-cp "$root"/docs/design-system/fonts/fonts.css "$root"/docs/design-system/fonts/*.woff2 "$root"/docs/design-system/fonts/OFL.txt "$out/assets/fonts/"
+cp "$root"/ui/public/fonts/fonts.css "$root"/ui/public/fonts/*.woff2 "$root"/ui/public/fonts/OFL.txt "$out/assets/fonts/"
 echo "Built the landing page in $out"

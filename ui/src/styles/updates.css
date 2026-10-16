@@ -10,7 +10,7 @@
 }
 .lw-updates .up-notes-body > :first-child { margin-top: 0; }
 .lw-updates .up-notes-body > :last-child { margin-bottom: 0; }
-/* The notes' own headings, not the dialog title's serif (.lw-feedback h2). */
+/* The notes' own headings, smaller than the dialog title (.lw-feedback h2). */
 .lw-updates .up-notes-body :is(h1, h2, h3, h4) { margin: 12px 0 4px; font: 600 13px/1.4 var(--font-sans); color: var(--color-ink); }
 .lw-updates .up-notes-body p { margin: 0 0 6px; font-size: 13px; }
 .lw-updates .up-notes-body :is(ul, ol) { margin: 0 0 6px; padding-left: 18px; }

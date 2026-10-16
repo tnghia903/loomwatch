@@ -52,7 +52,7 @@
 .agent-builder-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-2) var(--sp-5); align-items: end; }
 .agent-backs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); }
 .agent-builder-title { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.agent-builder-title h1 { margin: 0; font: 400 34px/1.1 var(--font-serif); letter-spacing: -.01em; overflow-wrap: anywhere; }
+.agent-builder-title h1 { margin: 0; font: 600 28px/1.15 var(--font-sans); letter-spacing: -.02em; overflow-wrap: anywhere; }
 .agent-builder-version { font: 500 12px var(--font-mono); color: var(--color-ink-3); }
 .agent-builder-save { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); max-width: 560px; }
 .agent-note { width: 280px; max-width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid); color: var(--color-ink); font: inherit; font-size: 13px; }
@@ -188,9 +188,10 @@
 .bench-face { position: absolute; left: 0; top: 0; box-sizing: border-box; container-type: size; transform-origin: 0 0; display: flex; flex-direction: column; justify-content: center; align-items: center; overflow: hidden; color: #17150F; text-align: center; opacity: 0; transition: opacity .35s ease; }
 .bench-stage.ready .bench-face { opacity: 1; }
 .bench-face p { margin: 0; }
-/* Name and role on one line, so both can be as tall as the plate allows. */
+/* Name and role on one line, so both can be as tall as the plate allows. A long name gets
+   smaller type (--chars, its length) so it fits whole. */
 .bench-face-name p { display: flex; align-items: baseline; justify-content: center; gap: .4em; max-width: 94%; white-space: nowrap; }
-.bench-face-name b { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 400 70cqh/1.15 var(--font-serif); }
+.bench-face-name b { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 400 min(62cqh, 170cqw / var(--chars, 10))/1.15 var(--font-serif); }
 .bench-face-name span { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 600 38cqh/1.15 var(--font-sans); color: #38352E; }
 .bench-face-name span::before { content: '·'; margin-right: .4em; }
 /* Below the clip, and faded where it runs off the sheet: the whole of it is in the Instructions block. */

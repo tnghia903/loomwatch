@@ -6,7 +6,7 @@
   padding: var(--sp-6); box-sizing: border-box;
   display: flex; flex-direction: column; gap: var(--sp-4);
 }
-.lw-feedback h2 { margin: 0; font: 400 26px/1.15 var(--font-serif); color: var(--color-ink); }
+.lw-feedback h2 { margin: 0; font: 600 20px/1.25 var(--font-sans); letter-spacing: -.01em; color: var(--color-ink); }
 .lw-feedback p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--color-ink-2); }
 .lw-feedback .fb-details { display: flex; flex-direction: column; gap: var(--sp-2); }
 .lw-feedback .fb-details pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9.5em; overflow-y: auto; }

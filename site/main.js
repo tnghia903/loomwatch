@@ -719,6 +719,7 @@
     if (say.join('\n') === facesSay) return
     facesSay = say.join('\n')
     faceEls.name.replaceChildren(el('p', {}, el('b', { text: say[0] }), say[1] ? el('span', { text: say[1] }) : null))
+    faceEls.name.style.setProperty('--chars', say[0].length)
     faceEls.job.replaceChildren(el('p', { text: say[2] }))
     faceEls.app.replaceChildren(el('p', { text: say[3] }))
     faceEls.app.style.setProperty('--chars', say[3].length)

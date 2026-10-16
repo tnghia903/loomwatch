@@ -35,9 +35,10 @@
   --bloom-gold: drop-shadow(0 0 6px rgb(233 196 106 / 0.22));
   --bloom-live: drop-shadow(0 0 6px rgb(106 184 255 / 0.3));
 
-  --serif: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
-  --sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* The app's own stacks (ui/src/styles/tokens.css), checked by ui/src/site/fonts.test.ts. */
+  --serif: "Fraunces", ui-serif, Georgia, serif;
+  --sans: "Inter", "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --ease: cubic-bezier(.2, 0, 0, 1);
   --gutter: 24px;
   color-scheme: dark;
@@ -239,7 +240,7 @@ em { font-style: italic; }
 /* 01 · Threads */
 
 /* 02 · Build */
-.sentence { margin: 0; font: 400 22px/1.75 var(--serif); color: var(--ink); text-wrap: pretty; }
+.sentence { margin: 0; font: 400 20px/1.75 var(--serif); color: var(--ink); text-wrap: pretty; }
 .sentence .chip { font-size: 13px; height: 28px; vertical-align: 3px; padding: 0 4px 0 10px; }
 .sentence .chip.dashed { padding: 0 4px 0 10px; }
 .chip select {
@@ -302,7 +303,7 @@ em { font-style: italic; }
 @keyframes ring { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 28%, transparent); } }
 .clog { display: grid; align-content: start; gap: 10px; max-height: 300px; overflow-y: auto; overscroll-behavior: contain; padding: 2px; }
 .tc-empty { text-align: center; padding: 6px 8px 2px; }
-.tc-empty h3 { margin: 0; font: 400 26px/1.15 var(--serif); letter-spacing: -.01em; }
+.tc-empty h3 { margin: 0; font: 600 20px/1.25 var(--sans); letter-spacing: -.01em; }
 .tc-empty p { margin: 8px auto 0; max-width: 420px; font-size: 13.5px; line-height: 1.5; color: var(--ink-2); }
 .tc-empty b { color: var(--accent); font-weight: 600; }
 .ask-piece { display: grid; gap: 6px; }
@@ -371,7 +372,7 @@ em { font-style: italic; }
 .details-head { margin: 0; display: flex; align-items: baseline; gap: 8px; }
 .details-head b { font: 600 10.5px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
 .details-head span { font-size: 12px; color: var(--ink-3); }
-.narration { margin: 10px 0 4px; font: 400 19px/1.35 var(--serif); color: var(--ink); min-height: 1.35em; text-wrap: pretty; }
+.narration { margin: 10px 0 4px; font: 400 16px/1.45 var(--sans); color: var(--ink); min-height: 1.35em; text-wrap: pretty; }
 .lanes-wrap { margin-top: 8px; }
 .lanes { width: 100%; height: auto; display: block; overflow: visible; }
 .ln-name { font: 600 11.5px var(--sans); fill: var(--ink-2); }
@@ -394,7 +395,7 @@ em { font-style: italic; }
 .tchat-log { list-style: none; margin: 0; padding: 2px 2px 4px; display: grid; align-content: start; gap: 9px; max-height: 340px; overflow-y: auto; overscroll-behavior: contain; }
 /* Scrolled down: earlier messages fade out at the top, so there is plainly more above. */
 .tchat-log.clipped { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 36px); mask-image: linear-gradient(to bottom, transparent, #000 36px); }
-.tchat-none { color: var(--ink-3); font: italic 400 15px/1.4 var(--serif); }
+.tchat-none { color: var(--ink-3); font: 400 14px/1.45 var(--sans); }
 /* Each member keeps one colour: neither gold, which is you, nor blue, which is working now. */
 .m-researcher { --m: var(--m-researcher); }
 .m-writer { --m: var(--m-writer); }
@@ -448,7 +449,7 @@ em { font-style: italic; }
 
 /* 06 · Review: decided on the message that asks */
 .win-review[data-state="waiting"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
-.rv-q { margin: 0; font: 400 19px/1.3 var(--serif); text-wrap: pretty; }
+.rv-q { margin: 0; font: 400 16px/1.4 var(--sans); text-wrap: pretty; }
 .rv-msg .tc-main, .ans-msg .tc-main { justify-items: stretch; }
 .rv-msg .tc-bubble, .ans-msg .tc-bubble { max-width: 100%; padding: 12px 14px; }
 .tc-turn { display: grid; gap: 6px; justify-items: end; margin-top: 6px; }
@@ -470,7 +471,7 @@ em { font-style: italic; }
 .rv-note textarea:focus { outline: none; border-color: var(--accent); }
 .rv-acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
 .rv-quiet { text-align: center; padding: 28px 10px; }
-.rv-quiet .big { margin: 0; font: 400 26px/1.25 var(--serif); }
+.rv-quiet .big { margin: 0; font: 600 20px/1.3 var(--sans); letter-spacing: -.01em; }
 .rv-quiet p { color: var(--ink-2); font-size: 14px; margin: 10px auto 0; max-width: 380px; }
 .rv-quiet .btn { margin-top: 18px; }
 .rv-shape { width: 46px; height: 46px; margin: 0 auto 18px; display: grid; place-items: center; }
@@ -484,14 +485,14 @@ em { font-style: italic; }
 
 /* 07 · Result: the answer in the chat, and its record in Details */
 .res-empty { text-align: center; padding: 40px 10px; }
-.res-empty .big { margin: 0; font: 400 26px/1.25 var(--serif); }
+.res-empty .big { margin: 0; font: 600 20px/1.3 var(--sans); letter-spacing: -.01em; }
 .res-empty p { color: var(--ink-2); font-size: 14px; margin: 10px auto 0; max-width: 360px; }
 .result-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
 .res-chat { display: grid; gap: 12px; }
 .res-chat > .piece-line { padding-left: 2px; }
 .ans-msg .reader h3 { margin-top: 0; font-size: 28px; }
 .ans-doc { display: grid; gap: 4px; }
-.ans-doc b { font: 400 20px/1.2 var(--serif); }
+.ans-doc b { font: 600 16px/1.3 var(--sans); letter-spacing: -.01em; }
 .ans-doc span { font-size: 13px; color: var(--ink-2); }
 .ans-doc .m { font: 400 11px/1.3 var(--mono); color: var(--ink-3); }
 .ans-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }
@@ -507,8 +508,8 @@ em { font-style: italic; }
 .slip .worth.flash { animation: worth 1.2s var(--ease); }
 @keyframes worth { 30% { background: color-mix(in srgb, var(--accent) 30%, transparent); } }
 .reader .micro { color: var(--ink-3); }
-.reader h3 { margin: 8px 0 0; font: 400 32px/1.1 var(--serif); letter-spacing: -.01em; }
-.reader .intro { margin: 8px 0 0; font: 400 18px/1.45 var(--serif); color: var(--ink-2); }
+.reader h3 { margin: 8px 0 0; font: 400 28px/1.15 var(--serif); letter-spacing: -.01em; }
+.reader .intro { margin: 8px 0 0; font: 400 15px/1.55 var(--sans); color: var(--ink-2); }
 .reader ul { margin: 14px 0 0; padding-left: 18px; display: grid; gap: 8px; font-size: 14.5px; line-height: 1.55; }
 .reader li::marker { color: var(--accent); }
 .reader .unchecked { color: var(--ink); }
@@ -591,7 +592,7 @@ em { font-style: italic; }
 .foot nav { display: flex; gap: 20px; flex-wrap: wrap; }
 .foot nav a { color: var(--ink-2); text-decoration: none; font-size: 13px; }
 .foot nav a:hover { color: var(--accent); }
-.foot-line { margin: 0 0 0 auto; font: 400 15px/1.3 var(--serif); font-style: italic; color: var(--ink-3); }
+.foot-line { margin: 0 0 0 auto; font: 400 13.5px/1.4 var(--sans); color: var(--ink-3); }
 .foot-legal { flex-basis: 100%; margin: 0; max-width: 760px; font-size: 12.5px; line-height: 1.55; color: var(--ink-3); }
 
 /* ---------------------------------------------------------------- Responsive */
@@ -641,7 +642,7 @@ em { font-style: italic; }
 .give-hint { margin: 12px 2px 0; min-height: 1.5em; font-size: 12.5px; color: var(--ink-3); }
 .packet { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--hairline); }
 .pk-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.pk-head b { font: 400 21px/1.2 var(--serif); }
+.pk-head b { font: 600 17px/1.25 var(--sans); letter-spacing: -.01em; }
 .pk { margin: 12px 0 0; display: grid; gap: 10px; }
 .pk > div { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 12px; align-items: baseline; }
 .pk dt { font: 600 10.5px/1.6 var(--sans); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
@@ -797,13 +798,13 @@ em { font-style: italic; }
 .crew-play[hidden], .crew:not(.live) .crew-play { display: none; }
 .crew-play-icon { width: 9px; height: 10px; background: currentColor; clip-path: polygon(0 0, 100% 50%, 0 100%); }
 .crew-play[data-status="playing"] .crew-play-icon { clip-path: none; background: linear-gradient(90deg, currentColor 0 35%, transparent 35% 65%, currentColor 65%); }
-.crew-hint { margin: 0; font: 400 15px/1.4 var(--serif); font-style: italic; color: var(--ink-3); }
+.crew-hint { margin: 0; font: 400 14px/1.45 var(--sans); color: var(--ink-3); }
 .crew-hint span { color: var(--ink-2); }
 .crew:not(.live) ~ .crew-hint { visibility: hidden; }
 
 /* An act: a heading row, then its window. */
 .act-tag { display: inline-flex; align-items: baseline; gap: 10px; font: 600 11px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
-.act-tag b { font: 400 22px/1 var(--serif); font-style: italic; letter-spacing: 0; text-transform: none; color: var(--accent); }
+.act-tag b { font: 600 15px/1 var(--sans); letter-spacing: 0; text-transform: none; color: var(--accent); }
 .chapter { min-height: 0; padding: 10vh 0; }
 .act-agents { padding: 10vh 0 8vh; border-top: 1px solid var(--hairline); }
 .act-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: clamp(28px, 5vw, 72px); align-items: end; margin-bottom: 32px; }
@@ -838,7 +839,7 @@ em { font-style: italic; }
 .bench-face { position: absolute; left: 0; top: 0; box-sizing: border-box; container-type: size; transform-origin: 0 0; display: flex; flex-direction: column; justify-content: center; align-items: center; overflow: hidden; color: #17150F; text-align: center; }
 .bench-face p { margin: 0; }
 .bench-face-name p { display: flex; align-items: baseline; justify-content: center; gap: .4em; max-width: 94%; white-space: nowrap; }
-.bench-face-name b { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 400 70cqh/1.15 var(--serif); }
+.bench-face-name b { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 400 min(62cqh, 170cqw / var(--chars, 10))/1.15 var(--serif); }
 .bench-face-name span { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 600 38cqh/1.15 var(--sans); color: #38352E; }
 .bench-face-name span::before { content: '·'; margin-right: .4em; }
 .bench-face-job { justify-content: flex-start; align-items: stretch; text-align: left; -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent 97%); mask-image: linear-gradient(to bottom, #000 78%, transparent 97%); }
@@ -935,7 +936,7 @@ em { font-style: italic; }
 .can-col { padding: 14px 18px 6px; border: 1px solid var(--hairline-2); border-radius: 16px; background: var(--panel-solid); }
 .can-col-head { display: flex; align-items: center; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--hairline); }
 .can-col-head img { width: 56px; height: 56px; margin: -8px -4px -8px -8px; object-fit: contain; -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 78%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 78%, transparent 100%); }
-.can-col-head h3 { margin: 2px 0 0; font: 400 30px/1 var(--serif); }
+.can-col-head h3 { margin: 2px 0 0; font: 600 21px/1.15 var(--sans); letter-spacing: -.015em; }
 .can-list { list-style: none; margin: 0; padding: 0; }
 .can-list li { display: grid; gap: 2px; padding: 9px 0; border-bottom: 1px solid var(--hairline); }
 .can-list li:last-child { border-bottom: 0; }
