@@ -66,6 +66,10 @@ interface TeamChatProps {
   onOpenFinding: (runId: string, line: ReceiptLine) => void
   /** The newest piece's run as it changes, or null for none: an agent's chat shows its figure at work by it. */
   onNewestRun?: (run: RunRecord | null) => void
+  /** Run team brought you here: the box starts with @team, so what you write starts the team. */
+  startTeam?: boolean
+  /** The box has taken `startTeam`, so coming back to the chat later does not take it again. */
+  onStartTeamTaken?: () => void
 }
 
 /** Within this of the bottom, the chat follows new messages. */
@@ -84,9 +88,14 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * With `team.solo` it is one agent's own chat (Your agents): everything you write goes to that
  * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, autoMode, onNewestRun }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, autoMode, onNewestRun, startTeam = false, onStartTeamTaken }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
-  const [draft, setDraft] = useState('')
+  // Run team means start the team. Without an @, what is written is a note that starts nothing,
+  // which is not what someone who pressed Run team expects, so the box it opens starts with @team.
+  // Run team is on the workflow, where the chat is not open, so the chat always opens fresh for it.
+  // One agent's own chat needs no @, and a box that cannot send yet (`blocked`) is not written in.
+  const startsWithTeam = startTeam && !team.solo && !blocked
+  const [draft, setDraft] = useState(() => (startsWithTeam ? '@team ' : ''))
   // Once the first page has painted, what arrives is news and moves in (lib/chat/appear.ts).
   const [settled, setSettled] = useState(false)
   useEffect(() => {
@@ -303,8 +312,12 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   const asking = new Set(live.flatMap((run) => (run.permissionRequests ?? []).map((request) => request.agent)))
   const failed = failedNow(runs.values())
   const presence = members.map((agent) => ({ agent, state: (unreachable ? 'away' : waitingFor === agent.id || asking.has(agent.id) ? 'waiting' : workingNow.has(agent.id) ? 'working' : failed.has(agent.id) ? 'failed' : 'idle') as Presence }))
-  // Each face can say who its agent is, and puts `@name` in the message box when clicked.
-  const [mentioned, setMentioned] = useState(0)
+  // Each face can say who its agent is, and puts `@name` in the message box when clicked. A box
+  // that opens with @team (`startsWithTeam`) takes the caret the same way.
+  const [mentioned, setMentioned] = useState(() => (startsWithTeam ? 1 : 0))
+  useEffect(() => {
+    if (startTeam) onStartTeamTaken?.()
+  }, [startTeam, onStartTeamTaken])
   const states = new Map(presence.map(({ agent, state }) => [agent.id, state]))
   // Who has the work right now (lib/chat/baton.ts). Each live piece says it on its own line and
   // reports it here; the header follows the newest piece with someone at work. While that piece's

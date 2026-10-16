@@ -373,6 +373,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   // A team opened from its chat in the team list lands in that chat (ADR 0051); with a piece of
   // work named too — the chat reloaded — it lands there with that piece open in Details.
   const [runSetup, setRunSetup] = useState(() => !initialRunId && new URLSearchParams(window.location.search).get('view') === 'chat')
+  // Run team was pressed and the chat's box has not yet started with @team.
+  const [startTeam, setStartTeam] = useState(false)
+  const startTeamTaken = useCallback(() => setStartTeam(false), [])
   // Build is two views: Workflow (the canvas) and Agents (each agent on its workbench).
   const [agentsView, setAgentsView] = useState(() => !initialRunId && new URLSearchParams(window.location.search).get('view') === 'agents')
   const [benchAgentId, setBenchAgentId] = useState<string | null>(() => new URLSearchParams(window.location.search).get('agent'))
@@ -2523,6 +2526,8 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             announce={setStatusAnnouncement}
             reveal={chatReveal}
             onOpenFinding={openFinding}
+            startTeam={startTeam}
+            onStartTeamTaken={startTeamTaken}
           />
           {detailsOpen && wide && <ChatResizer width={chatWidth} onResize={setChatWidth} />}
           {detailsOpen && (
@@ -2621,7 +2626,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
-        {!runView && !runSetup && !agentsView && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} appProblem={appProblemDetail} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); window.setTimeout(focusComposer, 0) }} onSchedule={editable && !visibleSchedule ? startSchedule : undefined} checkup={{ findings: teamCheckup.findings, hiddenCount: teamCheckup.hiddenCount, onRestore: teamCheckup.restore, onOpenAgent: focusAgent, names: nodeNames }} usage={teamCheckup.usage} />}
+        {!runView && !runSetup && !agentsView && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} appProblem={appProblemDetail} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); setStartTeam(true); window.setTimeout(focusComposer, 0) }} onSchedule={editable && !visibleSchedule ? startSchedule : undefined} checkup={{ findings: teamCheckup.findings, hiddenCount: teamCheckup.hiddenCount, onRestore: teamCheckup.restore, onOpenAgent: focusAgent, names: nodeNames }} usage={teamCheckup.usage} />}
 
         <div aria-live="polite" aria-atomic="true" className="visually-hidden">{politeAnnouncement}</div>
         <div aria-live="assertive" className="visually-hidden">{assertiveAnnouncement}</div>
