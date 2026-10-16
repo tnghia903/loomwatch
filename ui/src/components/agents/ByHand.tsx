@@ -126,12 +126,16 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   const giveKey = (key: AllowSwitch, on: boolean) => set('allow', { ...draft.allow, [key]: on })
   const addSkill = (name: string) => { if (!draft.skills.includes(name)) set('skills', [...draft.skills, name]) }
   const model = modelName || draft.model || 'the app’s current model'
-  // How hard it thinks: one of the efforts its model lists, or the app's default for it.
+  // How hard it thinks: one of the efforts its model lists, or the app's default for it. The app
+  // lists efforts only for the model it runs on (and Codex for each model it lists them for);
+  // another model runs at its own default.
   const thinkingModel = models?.models.find((item) => item.id === (draft.model || models.currentModelId)) ?? null
   const efforts = thinkingModel?.thinkingEfforts ?? []
   const effortId = draft.effort || models?.currentThinkingEffort || ''
   const effortIndex = Math.max(0, efforts.findIndex((item) => item.id === effortId))
   const effort = efforts.length ? efforts[effortIndex] : null
+  // A saved effort on a model whose efforts are not known is used only if the model has it.
+  const askedOfUnknown = draft.effort && thinkingModel && !thinkingModel.effortsKnown ? models?.models.flatMap((item) => item.thinkingEfforts).find((item) => item.id === draft.effort)?.name ?? draft.effort : null
   const thinks = effort ? `${model} · ${effort.name.toLowerCase()} effort` : model
   const events = record?.eventCount ?? 0
   const asked = askedKey(record)
@@ -291,18 +295,18 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
               </select>
             </label>
             <div className="thinking-field agent-field">
-              <span className="thinking-label"><label htmlFor={`${ids}-thinking`}>Thinking effort</label><output htmlFor={`${ids}-thinking`}>{effort?.name ?? 'App default'}</output></span>
-              <input
+              <span className="thinking-label"><label htmlFor={`${ids}-thinking`}>Thinking effort</label><output htmlFor={`${ids}-thinking`}>{effort?.name ?? askedOfUnknown ?? 'Model default'}</output></span>
+              {effort && <input
                 id={`${ids}-thinking`}
                 className="thinking-slider"
                 type="range"
                 min={0}
-                max={Math.max(0, efforts.length - 1)}
+                max={efforts.length - 1}
                 step={1}
                 value={effortIndex}
-                disabled={!draft.appId || efforts.length === 0}
+                disabled={!draft.appId}
                 aria-label="Thinking effort"
-                aria-valuetext={effort?.name ?? 'App default'}
+                aria-valuetext={effort.name}
                 onChange={(event) => {
                   const picked = efforts[Number(event.target.value)]
                   if (!picked) return
@@ -310,9 +314,14 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
                   if (!draft.model && thinkingModel) set('model', thinkingModel.id)
                   set('effort', picked.id)
                 }}
-              />
+              />}
               {efforts.length > 1 && <span className="thinking-scale t-micro"><span>{efforts[0].name}</span><span>{efforts[efforts.length - 1].name}</span></span>}
-              <span className="t-meta">{effort?.description ?? (!draft.appId ? 'Choose its app first.' : efforts.length === 0 ? (models ? 'This model has no separate effort setting.' : 'Loading effort choices…') : 'How much it reasons before it answers.')}</span>
+              <span className="t-meta">{effort ? effort.description ?? 'How much it reasons before it answers.'
+                : !draft.appId ? 'Choose its app first.'
+                : !models ? 'Loading effort choices…'
+                : askedOfUnknown ? <>Used only if this model has that setting, else it runs at its own default.{!readOnly && <> <button type="button" className="link" onClick={() => set('effort', '')}>Use its default</button></>}</>
+                : thinkingModel?.effortsKnown ? 'This model has no separate effort setting.'
+                : 'It runs at the model’s own default effort.'}</span>
             </div>
             {modelsError && <p className="t-meta agent-save-error">Couldn’t list this app’s models: {modelsError}</p>}
             <p className="t-meta">{harness ? <>The models {harness.name} offers. </> : <>Choose its app first. </>}A bigger model can think more through, and costs more of your plan per run.</p>

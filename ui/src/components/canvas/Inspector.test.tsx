@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
+import claude from '../../lib/models/fixtures/claude.json'
 import { Inspector, type InspectorProps } from './Inspector'
 
 const node: AgentNode = {
@@ -22,8 +23,8 @@ function renderInspectorProps(overrides: Partial<InspectorProps> = {}): Inspecto
     onDelete: vi.fn(), onClose: vi.fn(), onFieldBlur: vi.fn(),
     onMemoryBriefChange: vi.fn(), onDeliverAsChange: vi.fn(),
     modelOptions: [
-      { id: 'claude-sonnet-5', name: 'Sonnet 5', thinkingEfforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High', description: 'More deliberate reasoning.' }] },
-      { id: 'claude-opus-5', name: 'Opus 5', thinkingEfforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }] },
+      { id: 'claude-sonnet-5', name: 'Sonnet 5', thinkingEfforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High', description: 'More deliberate reasoning.' }], effortsKnown: true },
+      { id: 'claude-opus-5', name: 'Opus 5', thinkingEfforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }], effortsKnown: true },
     ], ...overrides,
   }
 }
@@ -105,6 +106,52 @@ describe('Inspector model picker', () => {
     render(<Inspector {...renderInspectorProps({ node: unset, fieldProblems: { model: { weight: 'error', message: 'Required' } } })} />)
     expect(screen.getByText('Required')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+  })
+})
+
+// Claude lists one effort option, for the model its session runs on, and nothing for any other.
+// Recorded from claude-agent-acp 0.85.1 running on Sonnet (lib/models/fixtures/claude.json).
+describe('Inspector thinking effort, on Claude’s recorded catalog', () => {
+  const onClaude = (agent: Partial<AgentNode['data']['agent']>) => renderInspector({
+    node: { ...node, data: { ...node.data, agent: { ...node.data.agent, ...agent } } },
+    modelOptions: claude.models, defaultThinkingEffort: claude.currentThinkingEffort, onThinkingEffortChange: vi.fn(),
+  })
+
+  it('offers the efforts of the model Claude runs on', () => {
+    onClaude({ model: 'sonnet' })
+    const slider = screen.getByRole('slider', { name: 'Thinking effort' })
+    expect(slider).toHaveAttribute('aria-valuetext', 'Xhigh')
+    expect(slider).toHaveAttribute('max', '5')
+  })
+
+  it('offers none on Haiku 4.5, which runs at its own default', () => {
+    onClaude({ model: 'haiku' })
+    expect(screen.queryByRole('slider', { name: 'Thinking effort' })).not.toBeInTheDocument()
+    expect(screen.getByText('Model default')).toBeInTheDocument()
+    expect(screen.getByText('Runs at the model’s own default effort.')).toBeInTheDocument()
+  })
+
+  it('takes the effort out when the new model does not list it', () => {
+    const props = onClaude({ model: 'sonnet', thinkingEffort: 'low' })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: 'haiku' } })
+    expect(props.onThinkingEffortChange).toHaveBeenCalledWith(undefined)
+    expect(props.onModelChange).toHaveBeenCalledWith('haiku')
+  })
+
+  it('keeps the effort when the new model lists it too', () => {
+    const onThinkingEffortChange = vi.fn()
+    renderInspector({ node: { ...node, data: { ...node.data, agent: { ...node.data.agent, thinkingEffort: 'high' } } }, onThinkingEffortChange })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: 'claude-opus-5' } })
+    expect(onThinkingEffortChange).not.toHaveBeenCalled()
+  })
+
+  it('says an effort an older file asks of Haiku is used only if it has one, and offers its default', () => {
+    const props = onClaude({ model: 'haiku', thinkingEffort: 'high' })
+    expect(screen.queryByRole('slider', { name: 'Thinking effort' })).not.toBeInTheDocument()
+    expect(screen.getByText('High')).toBeInTheDocument()
+    expect(screen.getByText(/Used only if this model has that setting/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Use its default' }))
+    expect(props.onThinkingEffortChange).toHaveBeenCalledWith(undefined)
   })
 })
 

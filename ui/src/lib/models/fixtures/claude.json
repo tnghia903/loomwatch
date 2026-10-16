@@ -1,0 +1,116 @@
+{
+ "harnessId": "claude",
+ "models": [
+  {
+   "id": "default",
+   "name": "Default (recommended)",
+   "description": "Opus 5.5",
+   "thinkingEfforts": [],
+   "effortsKnown": false
+  },
+  {
+   "id": "opus",
+   "name": "Opus 5.5",
+   "description": "Best for everyday, complex tasks",
+   "thinkingEfforts": [],
+   "effortsKnown": false
+  },
+  {
+   "id": "claude-fable-5-1",
+   "name": "Fable 5.1",
+   "description": "Most capable for your hardest and longest-running tasks",
+   "thinkingEfforts": [],
+   "effortsKnown": false
+  },
+  {
+   "id": "sonnet",
+   "name": "Sonnet 5.5",
+   "description": "Efficient for routine tasks",
+   "thinkingEfforts": [
+    {
+     "id": "default",
+     "name": "Default"
+    },
+    {
+     "id": "low",
+     "name": "Low"
+    },
+    {
+     "id": "medium",
+     "name": "Medium"
+    },
+    {
+     "id": "high",
+     "name": "High"
+    },
+    {
+     "id": "xhigh",
+     "name": "Xhigh"
+    },
+    {
+     "id": "max",
+     "name": "Max"
+    }
+   ],
+   "effortsKnown": true
+  },
+  {
+   "id": "haiku",
+   "name": "Haiku 4.5",
+   "description": "Fastest for quick answers",
+   "thinkingEfforts": [],
+   "effortsKnown": false
+  },
+  {
+   "id": "claude-sonnet-5",
+   "name": "Sonnet 5",
+   "description": "Efficient for routine tasks",
+   "thinkingEfforts": [],
+   "effortsKnown": false
+  },
+  {
+   "id": "claude-opus-5",
+   "name": "Opus 5",
+   "description": "Best for everyday, complex tasks",
+   "thinkingEfforts": [],
+   "effortsKnown": false
+  },
+  {
+   "id": "claude-fable-5",
+   "name": "Fable 5",
+   "description": "Most capable for your hardest and longest-running tasks",
+   "thinkingEfforts": [],
+   "effortsKnown": false
+  },
+  {
+   "id": "claude-opus-4-8",
+   "name": "Opus 4.8",
+   "description": "Best for everyday, complex tasks",
+   "thinkingEfforts": [],
+   "effortsKnown": false
+  },
+  {
+   "id": "claude-opus-4-7",
+   "name": "Opus 4.7",
+   "description": "Best for everyday, complex tasks",
+   "thinkingEfforts": [],
+   "effortsKnown": false
+  },
+  {
+   "id": "claude-opus-4-6",
+   "name": "Opus 4.6",
+   "description": "Best for everyday, complex tasks",
+   "thinkingEfforts": [],
+   "effortsKnown": false
+  },
+  {
+   "id": "claude-sonnet-4-6",
+   "name": "Sonnet 4.6",
+   "description": "Efficient for routine tasks",
+   "thinkingEfforts": [],
+   "effortsKnown": false
+  }
+ ],
+ "currentModelId": "sonnet",
+ "currentThinkingEffort": "xhigh"
+}

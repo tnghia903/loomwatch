@@ -33,7 +33,8 @@ export interface InspectorProps {
   onAddKnowledge?: (added: CapabilityRef[]) => void
   onRename: (field: 'name' | 'role', value: string) => void
   onModelChange: (value: string) => void
-  onThinkingEffortChange?: (value: string) => void
+  /** `undefined` takes the effort out, so the model runs at its own default. */
+  onThinkingEffortChange?: (value: string | undefined) => void
   /** Write the agent's Done when list (ADR 0062); absent hides the list. */
   onDoneWhenChange?: (items: string[]) => void
   /** Set on a check step (ADR 0062): whose work it checks, and its send-back switch. */
@@ -95,13 +96,19 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
   const status = runtime?.status ?? agent.status ?? 'idle'
   const parsedSelector = splitModelSelector(agent.model ?? '')
   const selectableModelsById = new Map<string, HarnessModel>(modelOptions.map((model) => [model.id, model]))
-  if (parsedSelector.modelId && !selectableModelsById.has(parsedSelector.modelId)) selectableModelsById.set(parsedSelector.modelId, { id: parsedSelector.modelId, name: parsedSelector.modelId, thinkingEfforts: [] })
+  if (parsedSelector.modelId && !selectableModelsById.has(parsedSelector.modelId)) selectableModelsById.set(parsedSelector.modelId, { id: parsedSelector.modelId, name: parsedSelector.modelId, thinkingEfforts: [], effortsKnown: false })
   const selectableModels = [...selectableModelsById.values()]
   const selectedModel = selectableModels.find((model) => model.id === parsedSelector.modelId)
-  const configuredEffort = agent.thinkingEffort ?? parsedSelector.thinkingEffort ?? defaultThinkingEffort
+  const askedEffort = agent.thinkingEffort ?? parsedSelector.thinkingEffort
+  const configuredEffort = askedEffort ?? defaultThinkingEffort
   const thinkingOptions = selectedModel?.thinkingEfforts ?? []
   const selectedEffortIndex = Math.max(0, thinkingOptions.findIndex((effort) => effort.id === configuredEffort))
   const selectedEffort = thinkingOptions[selectedEffortIndex]
+  // The app lists efforts only for the model it runs on (and Codex for each model it lists them
+  // for). Another model runs at its own default; one the file still asks an effort of gets it only
+  // if the model has that setting.
+  const effortsUnknown = !selectedModel?.effortsKnown
+  const askedOfUnknown = effortsUnknown && askedEffort ? modelOptions.flatMap((model) => model.thinkingEfforts).find((effort) => effort.id === askedEffort)?.name ?? askedEffort : null
   const nativeFile = (agent.memory?.deliverAs ?? teamDeliverAs) === 'native-file'
   const connected = (agent.capabilities ?? []).length > 0
   const zoneClass = (field: AgentField) => fieldProblems?.[field] ? (fieldProblems[field]?.weight === 'error' ? 'error' : 'needs') : ''
@@ -169,7 +176,10 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         <div className={`field ${zoneClass('model')}`}>
           <label className="t-meta" htmlFor="insp-model">Model</label>
           <select id="insp-model" className="input model-select" data-agent-field="model" value={parsedSelector.modelId} disabled={locked || modelOptionsLoading} onChange={(event) => {
-            if (!agent.thinkingEffort && parsedSelector.thinkingEffort) onThinkingEffortChange?.(parsedSelector.thinkingEffort)
+            // An effort belongs to one model: keep it only if the new model lists it too.
+            const kept = Boolean(askedEffort && selectableModelsById.get(event.target.value)?.thinkingEfforts.some((effort) => effort.id === askedEffort))
+            if (kept && !agent.thinkingEffort) onThinkingEffortChange?.(askedEffort)
+            else if (!kept && agent.thinkingEffort) onThinkingEffortChange?.(undefined)
             onModelChange(event.target.value)
           }} onBlur={() => onFieldBlur('model')}>
             {!agent.model && <option value="" disabled>Select a model</option>}
@@ -178,25 +188,29 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
           <span className="hint t-meta">{runtime?.status === 'running' ? 'Used by the AI app for this run.' : selectedModel?.description ?? modelHint}{modelOptionsError && onRetryModelOptions && <> <button type="button" className="link model-retry" onClick={onRetryModelOptions}>Retry</button></>}</span>
         </div>
         <div className="field thinking-field">
-          <span className="thinking-label"><label className="t-meta" htmlFor="insp-thinking">Thinking effort</label><output className="t-body-m" htmlFor="insp-thinking">{selectedEffort?.name ?? 'App default'}</output></span>
-          <input
+          <span className="thinking-label"><label className="t-meta" htmlFor="insp-thinking">Thinking effort</label><output className="t-body-m" htmlFor="insp-thinking">{selectedEffort?.name ?? askedOfUnknown ?? 'Model default'}</output></span>
+          {thinkingOptions.length > 0 && <input
             id="insp-thinking"
             className="thinking-slider"
             type="range"
             min={0}
-            max={Math.max(0, thinkingOptions.length - 1)}
+            max={thinkingOptions.length - 1}
             step={1}
             value={selectedEffortIndex}
-            disabled={locked || modelOptionsLoading || !onThinkingEffortChange || thinkingOptions.length === 0}
+            disabled={locked || modelOptionsLoading || !onThinkingEffortChange}
             aria-label="Thinking effort"
-            aria-valuetext={selectedEffort?.name ?? 'App default'}
+            aria-valuetext={selectedEffort?.name}
             onChange={(event) => {
               const effort = thinkingOptions[Number(event.target.value)]
               if (effort) onThinkingEffortChange?.(effort.id)
             }}
-          />
+          />}
           {thinkingOptions.length > 1 && <span className="thinking-scale t-micro"><span>{thinkingOptions[0].name}</span><span>{thinkingOptions[thinkingOptions.length - 1].name}</span></span>}
-          <span className="hint t-meta">{selectedEffort?.description ?? (modelOptionsLoading ? 'Loading effort choices…' : thinkingOptions.length === 0 ? 'This AI app does not offer a separate effort setting.' : 'Controls how much reasoning the model uses.')}</span>
+          <span className="hint t-meta">{selectedEffort?.description ?? (modelOptionsLoading ? 'Loading effort choices…'
+            : askedOfUnknown ? <>Used only if this model has that setting, else it runs at its own default.{!locked && agent.thinkingEffort && onThinkingEffortChange && <> <button type="button" className="link" onClick={() => onThinkingEffortChange(undefined)}>Use its default</button></>}</>
+            : effortsUnknown ? 'Runs at the model’s own default effort.'
+            : thinkingOptions.length === 0 ? 'This model has no separate effort setting.'
+            : 'Controls how much reasoning the model uses.')}</span>
         </div>
         {usage && <AgentUsageLine usage={usage.agent} runs={usage.runs} alone={usage.alone} />}
       </div>

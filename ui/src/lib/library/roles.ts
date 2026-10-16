@@ -1,5 +1,6 @@
 import { rankHarnesses } from '../team-file/templates'
 import type { DetectedHarness } from '../harnesses'
+import type { ModelTier } from '../models/tiers'
 import type { AgentAllow, AgentLink, CapabilityRef } from '../team-file/types'
 import { CHECKER_ROLE } from './checker'
 import type { LibrarySource } from './types'
@@ -49,6 +50,12 @@ export interface RolePreset {
   thinkingEffort?: string
   /** A built-in job's effort tier, applied through the model's own catalog (`effort.ts`). */
   effort?: EffortTier
+  /**
+   * A built-in job's model tier (ADR 0057), applied through its app's catalog (`models/tiers.ts`)
+   * when it is placed: `fast` for a job that gathers for another, `strong` for one whose work is
+   * the piece or decides it.
+   */
+  tier?: ModelTier
   /** What the job's finished result must satisfy, checkable from the result alone (ADR 0062). */
   doneWhen?: readonly string[]
   /** Skill names the agent is given, on whichever app it runs (ADR 0031). */
@@ -69,7 +76,7 @@ const lines = (...text: string[]) => text.join('\n')
 
 export const ROLE_PRESETS: readonly RolePreset[] = [
   {
-    id: 'researcher', label: 'Researcher', does: 'Finds and checks sources', icon: 'research', prefers: WRITING, effort: 'standard',
+    id: 'researcher', label: 'Researcher', does: 'Finds and checks sources', icon: 'research', prefers: WRITING, effort: 'standard', tier: 'fast',
     allow: { web: true },
     doneWhen: ['Every finding links to a source you opened, with its date', 'Says what you could not find or confirm'],
     role: lines(
@@ -94,7 +101,7 @@ export const ROLE_PRESETS: readonly RolePreset[] = [
     ),
   },
   {
-    id: 'writer', label: 'Writer', does: 'Drafts the finished piece', icon: 'write', prefers: WRITING, effort: 'standard',
+    id: 'writer', label: 'Writer', does: 'Drafts the finished piece', icon: 'write', prefers: WRITING, effort: 'standard', tier: 'strong',
     doneWhen: ['Answers what the request asked, in the format and length it named', 'Uses only facts you were given, each source link beside its claim'],
     role: lines(
       'You are the team’s writer. Turn the request, and anything earlier steps handed you, into the finished piece the request asks for.',
@@ -110,7 +117,7 @@ export const ROLE_PRESETS: readonly RolePreset[] = [
     ),
   },
   {
-    id: 'editor', label: 'Editor', does: 'Tightens and corrects a draft', icon: 'edit', prefers: WRITING, effort: 'light',
+    id: 'editor', label: 'Editor', does: 'Tightens and corrects a draft', icon: 'edit', prefers: WRITING, effort: 'light', tier: 'strong',
     doneWhen: ['Adds no new claims', 'Lists every change that alters the meaning'],
     role: lines(
       'You are the team’s editor. Improve the draft you were handed without changing what it says. If you were handed no draft, edit the text in the request.',
@@ -126,7 +133,7 @@ export const ROLE_PRESETS: readonly RolePreset[] = [
     ),
   },
   {
-    id: 'reviewer', label: 'Reviewer', does: 'Checks work against the request', icon: 'review', prefers: CODING, effort: 'deep',
+    id: 'reviewer', label: 'Reviewer', does: 'Checks work against the request', icon: 'review', prefers: CODING, effort: 'deep', tier: 'strong',
     doneWhen: ['The verdict is "Ready" or "Needs changes"', 'Every problem says where it is and how to fix it'],
     role: lines(
       'You are the team’s reviewer. Check the work you were handed against the request. Do not rewrite it.',
@@ -151,13 +158,13 @@ export const ROLE_PRESETS: readonly RolePreset[] = [
     // A check step (ADR 0062): connected after the agent it checks, it is handed that agent's work
     // and its Done when, and its result shows on the answer. On a different app by preference, so
     // another model family reads the work.
-    id: 'checker', label: 'Checker', does: 'Checks work against its Done when', icon: 'review', prefers: CODING, effort: 'deep',
+    id: 'checker', label: 'Checker', does: 'Checks work against its Done when', icon: 'review', prefers: CODING, effort: 'deep', tier: 'strong',
     allow: { web: true },
     doneWhen: ['Every item has a verdict and the evidence for it', 'Nothing in the work is rewritten'],
     role: CHECKER_ROLE,
   },
   {
-    id: 'coder', label: 'Coder', does: 'Changes code in a folder', icon: 'code', prefers: CODING, effort: 'deep',
+    id: 'coder', label: 'Coder', does: 'Changes code in a folder', icon: 'code', prefers: CODING, effort: 'deep', tier: 'strong',
     doneWhen: ['The build and the tests you ran pass', 'Says which checks you could not run'],
     role: lines(
       'You are the team’s coder. Make the change the request asks for, in this folder.',
@@ -178,7 +185,7 @@ export const ROLE_PRESETS: readonly RolePreset[] = [
     ),
   },
   {
-    id: 'designer', label: 'Designer', does: 'Makes slides, pages and visuals', icon: 'design', prefers: WRITING, effort: 'standard',
+    id: 'designer', label: 'Designer', does: 'Makes slides, pages and visuals', icon: 'design', prefers: WRITING, effort: 'standard', tier: 'strong',
     doneWhen: ['Every file you made opens and is named in the reply', 'Every placeholder is marked as one'],
     role: lines(
       'You are the team’s designer. Make what the request asks for: slides, a web page, a document layout, a diagram or another visual.',
@@ -194,7 +201,7 @@ export const ROLE_PRESETS: readonly RolePreset[] = [
     ),
   },
   {
-    id: 'analyst', label: 'Analyst', does: 'Makes sense of data', icon: 'analyse', prefers: CODING, effort: 'deep',
+    id: 'analyst', label: 'Analyst', does: 'Makes sense of data', icon: 'analyse', prefers: CODING, effort: 'deep', tier: 'strong',
     doneWhen: ['Every number in the answer comes from a calculation shown in Detail', 'Says what data you left out and why'],
     role: lines(
       'You are the team’s analyst. Answer the request’s question from the data or material you were given.',

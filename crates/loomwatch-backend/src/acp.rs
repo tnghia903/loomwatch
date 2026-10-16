@@ -42,6 +42,12 @@ pub struct DiscoveredModel {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub thinking_efforts: Vec<DiscoveredThinkingEffort>,
+    /// Whether `thinking_efforts` is what this model offers. An app lists one effort option for
+    /// the model its session runs on, and some list one selector per model and effort; any
+    /// other model's efforts are learnt only by switching to it, so they are not known, its list
+    /// is empty, and it runs at its own default. Claude offers Low to Max on Sonnet and nothing
+    /// on Haiku 4.5, yet a session on Sonnet does not say so.
+    pub efforts_known: bool,
 }
 
 /// The live model/configuration state reported by a newly-created ACP session.
@@ -1019,6 +1025,12 @@ impl AcpProcess {
     /// negotiation and must stay in this order — the effort option's id can appear for the first
     /// time in the *response* to setting the model, which is why `updated_options` is consulted
     /// before the `session/new` result.
+    ///
+    /// When that response lists the options at all, it is the only list that counts: they belong
+    /// to the model now set, and an effort missing from them means this model has none (Claude's
+    /// Haiku 4.5). The `session/new` effort belonged to the model the session started on, and the
+    /// app rejects it ("Unknown config option: effort"), which used to fail the whole run. Only a
+    /// response without its options falls back to `session/new`'s.
     async fn configure_thinking_effort(
         &mut self,
         effort: &str,
@@ -1026,9 +1038,10 @@ impl AcpProcess {
         negotiated: &NegotiatedSession,
         recorder: &mut Recorder,
     ) -> Result<()> {
-        let effort_config_id = updated_options
-            .and_then(find_effort_config_id)
-            .or_else(|| find_effort_config_id(&negotiated.created.result));
+        let effort_config_id = match updated_options {
+            Some(options) => find_effort_config_id(options),
+            None => find_effort_config_id(&negotiated.created.result),
+        };
         let Some(config_id) = effort_config_id else {
             recorder
                 .append(
@@ -1036,7 +1049,11 @@ impl AcpProcess {
                     json!({
                         "phase": "set_thinking_effort_skipped",
                         "value": effort,
-                        "reason": "harness did not advertise a reasoning-effort config option"
+                        "reason": if updated_options.is_some() {
+                            "the model set has no reasoning-effort config option"
+                        } else {
+                            "harness did not advertise a reasoning-effort config option"
+                        }
                     }),
                     Some(json!({
                         "source": "loomwatch",
@@ -1667,11 +1684,6 @@ fn model_catalog_from_session(session: &Value) -> DiscoveredModelCatalog {
             description: choice.description,
         })
         .collect::<Vec<_>>();
-    let effort_by_id = global_efforts
-        .iter()
-        .cloned()
-        .map(|effort| (effort.id.clone(), effort))
-        .collect::<HashMap<_, _>>();
 
     let available = session
         .pointer("/models/availableModels")
@@ -1689,15 +1701,11 @@ fn model_catalog_from_session(session: &Value) -> DiscoveredModelCatalog {
         for choice in select_choices(options, "value") {
             if seen.insert(choice.id.clone()) {
                 models.push(DiscoveredModel {
-                    thinking_efforts: efforts_for_model(
-                        &choice.id,
-                        &supported_efforts,
-                        &global_efforts,
-                        &effort_by_id,
-                    ),
                     id: choice.id,
                     name: choice.name,
                     description: choice.description,
+                    thinking_efforts: Vec::new(),
+                    efforts_known: false,
                 });
             }
         }
@@ -1729,23 +1737,80 @@ fn model_catalog_from_session(session: &Value) -> DiscoveredModelCatalog {
                 .get("description")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
-            thinking_efforts: efforts_for_model(
-                model_id,
-                &supported_efforts,
-                &global_efforts,
-                &effort_by_id,
-            ),
+            thinking_efforts: Vec::new(),
+            efforts_known: false,
         });
     }
 
     let (current_model_id, current_thinking_effort) =
         current_selection(session, model_config, effort_config);
 
+    // The session's own effort option belongs to the model it runs on. With no such option the
+    // current model offers none, unless its selector names an effort: Codex runs
+    // `gpt-6.1-sol[medium]` and lists no selector for it, so that model's efforts are not known.
+    let current_efforts = if effort_config.is_some() {
+        Some(&global_efforts[..])
+    } else if current_thinking_effort.is_none() {
+        Some(&[][..])
+    } else {
+        None
+    };
+    attach_efforts(
+        &mut models,
+        current_model_id.as_deref(),
+        current_efforts,
+        &supported_efforts,
+        &global_efforts,
+    );
+
     DiscoveredModelCatalog {
         models,
         current_model_id,
         current_thinking_effort,
     }
+}
+
+/// Each model's efforts where they are known: its own `model[effort]` selectors (named as the
+/// session's effort option names them), else `current_efforts` for the model the session runs on
+/// and an alias for it. Any other model's are learnt only by switching to it, so its list stays
+/// empty and unknown.
+fn attach_efforts(
+    models: &mut [DiscoveredModel],
+    current_model_id: Option<&str>,
+    current_efforts: Option<&[DiscoveredThinkingEffort]>,
+    supported: &HashMap<String, Vec<String>>,
+    named: &[DiscoveredThinkingEffort],
+) {
+    let by_id = named
+        .iter()
+        .map(|effort| (effort.id.clone(), effort.clone()))
+        .collect::<HashMap<_, _>>();
+    let current = current_model_id
+        .and_then(|id| models.iter().find(|model| model.id == id))
+        .cloned();
+    for model in models {
+        let efforts = if let Some(ids) = supported.get(&model.id) {
+            Some(listed_efforts(ids, &by_id))
+        } else if current
+            .as_ref()
+            .is_some_and(|current| same_model(model, current))
+        {
+            current_efforts.map(<[_]>::to_vec)
+        } else {
+            None
+        };
+        model.efforts_known = efforts.is_some();
+        model.thinking_efforts = efforts.unwrap_or_default();
+    }
+}
+
+/// Two entries for one model: the same id, or an alias and its model. An alias names its model
+/// in its description: Claude lists `default` as "Opus 5.5", the name of `opus`.
+fn same_model(a: &DiscoveredModel, b: &DiscoveredModel) -> bool {
+    let names = |alias: &DiscoveredModel, model: &DiscoveredModel| {
+        alias.description.as_deref().map(str::trim) == Some(model.name.as_str())
+    };
+    a.id == b.id || names(a, b) || names(b, a)
 }
 
 /// Modern model state may enumerate one id per model/effort pair. Keep that information so the
@@ -1774,19 +1839,26 @@ fn current_selection(
     model_config: Option<&Value>,
     effort_config: Option<&Value>,
 ) -> (Option<String>, Option<String>) {
+    let state_selector = session
+        .pointer("/models/currentModelId")
+        .and_then(Value::as_str);
     let current_selector = model_config
         .and_then(|option| option.get("currentValue"))
         .and_then(Value::as_str)
-        .or_else(|| {
-            session
-                .pointer("/models/currentModelId")
-                .and_then(Value::as_str)
-        });
-    let (current_model_id, selector_effort) = current_selector
+        .or(state_selector);
+    let (current_model_id, mut selector_effort) = current_selector
         .map(split_reasoning_selector)
         .map_or((None, None), |(model, effort)| {
             (Some(model.to_owned()), effort.map(str::to_owned))
         });
+    // The config option can name the bare model while the model state carries its effort: Codex
+    // reports `gpt-6.1-sol` there and `gpt-6.1-sol[medium]` here.
+    if selector_effort.is_none()
+        && let Some((model, Some(effort))) = state_selector.map(split_reasoning_selector)
+        && current_model_id.as_deref() == Some(model)
+    {
+        selector_effort = Some(effort.to_owned());
+    }
     let current_thinking_effort = effort_config
         .and_then(|option| option.get("currentValue"))
         .and_then(Value::as_str)
@@ -1830,15 +1902,11 @@ fn select_choices(options: &[Value], value_key: &str) -> Vec<SelectChoice> {
     choices
 }
 
-fn efforts_for_model(
-    model_id: &str,
-    supported: &HashMap<String, Vec<String>>,
-    global: &[DiscoveredThinkingEffort],
+/// A model's efforts from its `model[effort]` selectors.
+fn listed_efforts(
+    ids: &[String],
     by_id: &HashMap<String, DiscoveredThinkingEffort>,
 ) -> Vec<DiscoveredThinkingEffort> {
-    let Some(ids) = supported.get(model_id) else {
-        return global.to_vec();
-    };
     ids.iter()
         .map(|id| {
             by_id
@@ -3184,6 +3252,83 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["high"]
         );
+        assert!(catalog.models.iter().all(|model| model.efforts_known));
+    }
+
+    /// Each model's efforts as `id: effort ids`, `?` for a model whose efforts are not known.
+    fn efforts_by_model(catalog: &DiscoveredModelCatalog) -> Vec<String> {
+        catalog
+            .models
+            .iter()
+            .map(|model| {
+                let efforts = model
+                    .thinking_efforts
+                    .iter()
+                    .map(|effort| effort.id.as_str())
+                    .collect::<Vec<_>>();
+                let efforts = if model.efforts_known {
+                    efforts.join(" ")
+                } else {
+                    assert!(efforts.is_empty(), "{} lists unknown efforts", model.id);
+                    "?".to_owned()
+                };
+                format!("{}: {efforts}", model.id)
+            })
+            .collect()
+    }
+
+    fn recorded(text: &str) -> Value {
+        serde_json::from_str(text).expect("recorded ACP answers are JSON")
+    }
+
+    #[test]
+    fn claude_offers_efforts_only_on_the_model_its_session_runs_on() {
+        let claude = recorded(include_str!(
+            "../tests/fixtures/acp/claude-agent-acp-0.85.1.json"
+        ));
+        let all = "default low medium high xhigh max";
+
+        // The session runs on Sonnet: its effort option is Sonnet's, not every model's.
+        let catalog = model_catalog_from_session(&claude["sessionNew"]);
+        assert_eq!(catalog.current_model_id.as_deref(), Some("sonnet"));
+        assert_eq!(catalog.current_thinking_effort.as_deref(), Some("xhigh"));
+        let efforts = efforts_by_model(&catalog);
+        assert_eq!(efforts.len(), 12);
+        assert!(efforts.contains(&format!("sonnet: {all}")));
+        for unknown in ["default: ?", "opus: ?", "haiku: ?", "claude-opus-4-8: ?"] {
+            assert!(efforts.iter().any(|line| line == unknown), "{efforts:?}");
+        }
+
+        // What Claude answered when switched to each model: Haiku 4.5 has no effort at all.
+        let haiku = model_catalog_from_session(&claude["setModel"]["haiku"]);
+        assert_eq!(haiku.current_thinking_effort, None);
+        assert!(efforts_by_model(&haiku).contains(&"haiku: ".to_owned()));
+        let opus = model_catalog_from_session(&claude["setModel"]["opus"]);
+        assert!(efforts_by_model(&opus).contains(&format!("opus: {all}")));
+
+        // `default` is described as "Opus 5.5", the name of `opus`: the same model's efforts.
+        let default = efforts_by_model(&model_catalog_from_session(&claude["setModel"]["default"]));
+        assert!(default.contains(&format!("default: {all}")));
+        assert!(default.contains(&format!("opus: {all}")));
+        assert!(default.contains(&"sonnet: ?".to_owned()));
+    }
+
+    #[test]
+    fn codex_keeps_the_efforts_it_lists_for_each_model() {
+        let codex = recorded(include_str!("../tests/fixtures/acp/codex-acp-2.1.1.json"));
+        let catalog = model_catalog_from_session(&codex["sessionNew"]);
+        assert_eq!(catalog.current_model_id.as_deref(), Some("gpt-6.1-sol"));
+        assert_eq!(catalog.current_thinking_effort.as_deref(), Some("medium"));
+        assert_eq!(
+            efforts_by_model(&catalog),
+            [
+                // It runs at medium, yet Codex lists no selector for it.
+                "gpt-6.1-sol: ?",
+                "gpt-6-luna: low medium high xhigh max",
+                "gpt-5.6-terra: low medium high xhigh max ultra",
+                "gpt-5.6-luna: low medium high xhigh max",
+            ]
+        );
     }
 
     #[sqlx::test(migrations = "../../migrations")]
@@ -3718,6 +3863,176 @@ mod tests {
             .expect("set_model metadata");
         assert_eq!(configured.payload["value"], "vendor/deep");
         assert_eq!(configured.raw.as_ref().unwrap()["id"], 3);
+    }
+
+    /// ADR 0057 decision 6: model and effort are set once, when the session opens, and a later
+    /// turn of the same session (a send-back, a note, an `ask`) reuses them as they were. Providers
+    /// cache prompts per model, so a switch mid-session would re-read the whole context uncached.
+    /// The fake app exits 9, failing the turn, on any model or config change after a prompt.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn model_and_effort_are_fixed_when_the_session_opens(pool: PgPool) {
+        let script = r#"
+            set -eu
+            n=0
+            prompted=0
+            while IFS= read -r request; do
+              n=$((n + 1))
+              case "$request" in
+                *'"method":"initialize"'*)
+                  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$n,\"result\":{\"protocolVersion\":1}}" ;;
+                *'"method":"session/new"'*)
+                  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$n,\"result\":{\"sessionId\":\"fixed-per-session\",\"configOptions\":[{\"id\":\"model\",\"type\":\"select\",\"currentValue\":\"vendor/deep\",\"options\":[{\"value\":\"vendor/deep\",\"name\":\"Deep\"},{\"value\":\"vendor/fast\",\"name\":\"Fast\"}]},{\"id\":\"reasoning_effort\",\"type\":\"select\",\"currentValue\":\"high\",\"options\":[{\"value\":\"low\",\"name\":\"Low\"},{\"value\":\"medium\",\"name\":\"Medium\"},{\"value\":\"high\",\"name\":\"High\"}]}]}}" ;;
+                *'"method":"session/set_model"'*|*'"method":"session/set_config_option"'*|*'"method":"session/set_mode"'*)
+                  if [ "$prompted" -ne 0 ]; then exit 9; fi
+                  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$n,\"result\":{}}" ;;
+                *'"method":"session/prompt"'*)
+                  prompted=$((prompted + 1))
+                  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"fixed-per-session\",\"update\":{\"sessionUpdate\":\"agent_message_chunk\",\"messageId\":\"m$prompted\",\"content\":{\"type\":\"text\",\"text\":\"turn $prompted\"}}}}"
+                  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$n,\"result\":{\"stopReason\":\"end_turn\"}}" ;;
+                *'"method":"session/close"'*)
+                  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$n,\"result\":{}}"
+                  exit 0 ;;
+                *) exit 8 ;;
+              esac
+            done
+        "#;
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        };
+        let archive = EventArchive::from_pool(pool);
+        let mut process = AcpProcess::spawn(&spec).expect("spawn");
+        let mut context = TeamSessionContext {
+            archive: &archive,
+            exit_timeout: Duration::from_secs(2),
+            bus: None,
+            event_log: None,
+            packet: None,
+            composed: None,
+            boundary: None,
+        };
+        let mut recorder = process
+            .open_live("gatherer", "vendor/fast[medium]", &mut context)
+            .await
+            .expect("open");
+        let first = process
+            .prompt_turn(&mut recorder, "gather the facts")
+            .await
+            .expect("first turn");
+        let second = process
+            .prompt_turn(&mut recorder, "the writer sent this back: add a source")
+            .await
+            .expect("a later turn reuses the session as it was opened");
+        assert_eq!((first.as_str(), second.as_str()), ("turn 1", "turn 2"));
+        process
+            .finish_live(&mut recorder, second, &context)
+            .await
+            .expect("finish");
+
+        let events = archive
+            .load_session("fixed-per-session")
+            .await
+            .expect("events");
+        let first_prompt = events
+            .iter()
+            .find(|event| event.payload["role"] == "user")
+            .expect("prompt")
+            .seq;
+        let configured: Vec<(&str, &str, u64)> = events
+            .iter()
+            .filter_map(|event| {
+                let phase = event.payload["phase"].as_str()?;
+                matches!(
+                    phase,
+                    "set_config_option" | "set_thinking_effort" | "set_model"
+                )
+                .then(|| {
+                    (
+                        phase,
+                        event.payload["value"].as_str().unwrap_or(""),
+                        event.seq,
+                    )
+                })
+            })
+            .collect();
+        assert_eq!(
+            configured
+                .iter()
+                .map(|(phase, value, _)| (*phase, *value))
+                .collect::<Vec<_>>(),
+            vec![
+                ("set_config_option", "vendor/fast"),
+                ("set_thinking_effort", "medium")
+            ]
+        );
+        assert!(configured.iter().all(|(_, _, seq)| *seq < first_prompt));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.kind == EventKind::TurnEnd)
+                .count(),
+            2
+        );
+    }
+
+    /// A model with no effort of its own (Claude's Haiku 4.5) runs at its default, and the run goes
+    /// on: the app's answer to the model switch lists that model's options without an effort, so
+    /// the effort the session started with is never sent. The fake app exits 9 if it is.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn an_effort_the_set_model_does_not_offer_is_skipped_not_sent(pool: PgPool) {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"no-effort","configOptions":[{"id":"model","type":"select","currentValue":"sonnet","options":[{"value":"sonnet","name":"Sonnet"},{"value":"haiku","name":"Haiku"}]},{"id":"effort","type":"select","currentValue":"xhigh","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"xhigh","name":"Xhigh"}]}]}}'
+            IFS= read -r request
+            case "$request" in *'"configId":"model"'*'"value":"haiku"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"configOptions":[{"id":"model","type":"select","currentValue":"haiku","options":[{"value":"sonnet","name":"Sonnet"},{"value":"haiku","name":"Haiku"}]}]}}'
+            IFS= read -r request
+            case "$request" in *'"method":"session/prompt"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
+        "#;
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        };
+        let archive = EventArchive::from_pool(pool);
+        let mut process = AcpProcess::spawn(&spec).expect("spawn");
+        let outcome = process
+            .run_session(
+                "gatherer",
+                "haiku[medium]",
+                "gather",
+                &archive,
+                Duration::from_secs(2),
+            )
+            .await
+            .expect("the run goes on at the model's default effort");
+        assert_eq!(outcome.exit_code, 0);
+
+        let events = archive.load_session("no-effort").await.expect("events");
+        let skipped = events
+            .iter()
+            .find(|event| event.payload["phase"] == "set_thinking_effort_skipped")
+            .expect("the skip is recorded");
+        assert_eq!(skipped.payload["value"], "medium");
+        assert_eq!(
+            skipped.payload["reason"],
+            "the model set has no reasoning-effort config option"
+        );
     }
 
     /// ADR 0037: a run agent's app is moved to its ask-first mode before the prompt, and what it

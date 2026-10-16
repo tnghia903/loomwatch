@@ -12,7 +12,7 @@ describe('modelOptionsForAgent', () => {
   it('recognises an npx ACP bridge and preserves the configured model', () => {
     const target = agent('claude-sonnet-5')
     expect(harnessIdForAgent(target, [])).toBe('claude')
-    expect(modelOptionsForAgent(target, [target], [])).toEqual([{ id: 'claude-sonnet-5', name: 'claude-sonnet-5', thinkingEfforts: [] }])
+    expect(modelOptionsForAgent(target, [target], [])).toEqual([{ id: 'claude-sonnet-5', name: 'claude-sonnet-5', thinkingEfforts: [], effortsKnown: false }])
   })
 
   it('prefers models discovered from the live harness and keeps existing custom values', () => {
@@ -22,12 +22,12 @@ describe('modelOptionsForAgent', () => {
       spawn: { cmd: 'npx', args: ['-y', '@agentclientprotocol/claude-agent-acp'] },
     }
     expect(modelOptionsForAgent(target, [target], [harness], [
-      { id: 'claude-live', name: 'Claude Live', thinkingEfforts: [] },
-      { id: 'claude-next', name: 'Claude Next', thinkingEfforts: [] },
+      { id: 'claude-live', name: 'Claude Live', thinkingEfforts: [], effortsKnown: true },
+      { id: 'claude-next', name: 'Claude Next', thinkingEfforts: [], effortsKnown: true },
     ])).toEqual([
-      { id: 'claude-live', name: 'Claude Live', thinkingEfforts: [] },
-      { id: 'claude-next', name: 'Claude Next', thinkingEfforts: [] },
-      { id: 'company/custom-claude', name: 'company/custom-claude', thinkingEfforts: [] },
+      { id: 'claude-live', name: 'Claude Live', thinkingEfforts: [], effortsKnown: true },
+      { id: 'claude-next', name: 'Claude Next', thinkingEfforts: [], effortsKnown: true },
+      { id: 'company/custom-claude', name: 'company/custom-claude', thinkingEfforts: [], effortsKnown: false },
     ])
   })
 
@@ -35,8 +35,8 @@ describe('modelOptionsForAgent', () => {
     const target = agent('local/model-a', 'custom-acp', [])
     const peer = agent('local/model-b', 'custom-acp', [])
     expect(modelOptionsForAgent(target, [target, peer], [])).toEqual([
-      { id: 'local/model-a', name: 'local/model-a', thinkingEfforts: [] },
-      { id: 'local/model-b', name: 'local/model-b', thinkingEfforts: [] },
+      { id: 'local/model-a', name: 'local/model-a', thinkingEfforts: [], effortsKnown: false },
+      { id: 'local/model-b', name: 'local/model-b', thinkingEfforts: [], effortsKnown: false },
     ])
   })
 })

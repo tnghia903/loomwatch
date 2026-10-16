@@ -1,0 +1,101 @@
+{
+ "harnessId": "codex",
+ "models": [
+  {
+   "id": "gpt-6.1-sol",
+   "name": "6.1 Sol",
+   "thinkingEfforts": [],
+   "effortsKnown": false
+  },
+  {
+   "id": "gpt-6-luna",
+   "name": "6 Luna",
+   "description": "Fast and affordable model for easier tasks.",
+   "thinkingEfforts": [
+    {
+     "id": "low",
+     "name": "Low"
+    },
+    {
+     "id": "medium",
+     "name": "Medium"
+    },
+    {
+     "id": "high",
+     "name": "High"
+    },
+    {
+     "id": "xhigh",
+     "name": "Extra high"
+    },
+    {
+     "id": "max",
+     "name": "Max"
+    }
+   ],
+   "effortsKnown": true
+  },
+  {
+   "id": "gpt-5.6-terra",
+   "name": "5.6 Terra",
+   "description": "Older balanced model for straightforward work.",
+   "thinkingEfforts": [
+    {
+     "id": "low",
+     "name": "Low"
+    },
+    {
+     "id": "medium",
+     "name": "Medium"
+    },
+    {
+     "id": "high",
+     "name": "High"
+    },
+    {
+     "id": "xhigh",
+     "name": "Extra high"
+    },
+    {
+     "id": "max",
+     "name": "Max"
+    },
+    {
+     "id": "ultra",
+     "name": "Ultra"
+    }
+   ],
+   "effortsKnown": true
+  },
+  {
+   "id": "gpt-5.6-luna",
+   "name": "5.6 Luna",
+   "description": "Older fast and efficient model.",
+   "thinkingEfforts": [
+    {
+     "id": "low",
+     "name": "Low"
+    },
+    {
+     "id": "medium",
+     "name": "Medium"
+    },
+    {
+     "id": "high",
+     "name": "High"
+    },
+    {
+     "id": "xhigh",
+     "name": "Extra high"
+    },
+    {
+     "id": "max",
+     "name": "Max"
+    }
+   ],
+   "effortsKnown": true
+  }
+ ],
+ "currentModelId": "gpt-6.1-sol",
+ "currentThinkingEffort": "medium"
+}

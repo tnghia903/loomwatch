@@ -6,6 +6,10 @@ import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 
 import type { DetectedHarness } from '../harnesses'
+import claude from '../models/fixtures/claude.json'
+import { claudeOn } from '../models/fixtures/claudeOn'
+import codex from '../models/fixtures/codex.json'
+import opencode from '../models/fixtures/opencode.json'
 import { rankHarnesses, TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath } from './templates'
 import type { TeamDocument } from './types'
 import { teamIdForPath } from './useTeamDocument'
@@ -45,8 +49,8 @@ describe('team templates', () => {
   // ADR 0062: each job thinks as hard as it needs, at an effort the model lists, never at the
   // app's most expensive default; without the model's catalog nothing is set.
   it('sets each job’s effort from the model’s own list', () => {
-    const sonnet = { id: 'sonnet', name: 'Sonnet', thinkingEfforts: ['default', 'low', 'medium', 'high', 'xhigh', 'max'].map((id) => ({ id, name: id })) }
-    const doc = parse(templateTeamYaml('research-write', 'Report', harness('claude'), 'sonnet', undefined, undefined, sonnet)) as TeamDocument
+    const sonnet = { id: 'sonnet', name: 'Sonnet', thinkingEfforts: ['default', 'low', 'medium', 'high', 'xhigh', 'max'].map((id) => ({ id, name: id })), effortsKnown: true }
+    const doc = parse(templateTeamYaml('research-write', 'Report', harness('claude'), 'sonnet', undefined, undefined, { models: [sonnet] })) as TeamDocument
     expect(Object.fromEntries(doc.agents.map((agent) => [agent.id, agent.thinkingEffort ?? null]))).toEqual({ researcher: 'medium', writer: 'medium' })
     const unknown = parse(templateTeamYaml('research-write', 'Report', harness('claude'), 'sonnet')) as TeamDocument
     expect(unknown.agents.every((agent) => agent.thinkingEffort === undefined)).toBe(true)
@@ -60,6 +64,29 @@ describe('team templates', () => {
     expect(doc.agents[2]).toMatchObject({ checks: 'writer', allow: { web: true } })
     expect(doc.agents[2].sendBackOnce).toBeUndefined()
     expect(doc.edges.map((edge) => `${edge.from}->${edge.to}`)).toEqual(['researcher->writer', 'writer->checker'])
+  })
+
+  // ADR 0057: the researcher gathers on the app's faster model, the writer writes on its current
+  // one, both from the app's own list; an app that lists nothing faster keeps one model. A job's
+  // effort is set only where the catalog knows the model's efforts: Claude's are known only for the
+  // model it runs on, and Haiku 4.5 has none; Codex lists each model's own.
+  it('puts the researcher on the app’s fast tier and the writer on its strong one', () => {
+    const tiers = (catalog: Parameters<typeof templateTeamYaml>[6] & { currentModelId?: string }, template: 'single' | 'research-write' | 'research-write-check' | 'research-review-write' = 'research-write') => {
+      const doc = parse(templateTeamYaml(template, 'Report', harness('claude'), catalog?.currentModelId ?? '', undefined, undefined, catalog)) as TeamDocument
+      return Object.fromEntries(doc.agents.filter((agent) => agent.kind !== 'operator').map((agent) => [agent.id, `${agent.model}${agent.thinkingEffort ? `[${agent.thinkingEffort}]` : ''}`]))
+    }
+    expect(tiers(claude)).toEqual({ researcher: 'haiku', writer: 'sonnet[medium]' })
+    expect(tiers(claude, 'research-review-write')).toEqual({ researcher: 'haiku', writer: 'sonnet[medium]' })
+    // The check step reads the finished piece: the strong tier, thinking hard.
+    expect(tiers(claude, 'research-write-check')).toEqual({ researcher: 'haiku', writer: 'sonnet[medium]', checker: 'sonnet[high]' })
+    expect(tiers(claudeOn('opus'))).toEqual({ researcher: 'sonnet', writer: 'opus[medium]' })
+    // Codex runs 6.1 Sol at medium without listing its efforts, and lists 6 Luna's.
+    expect(tiers(codex)).toEqual({ researcher: 'gpt-6-luna[medium]', writer: 'gpt-6.1-sol' })
+    // Haiku 4.5 is Claude's smallest and has no effort: both run on it at its own default.
+    expect(tiers(claudeOn('haiku'))).toEqual({ researcher: 'haiku', writer: 'haiku' })
+    expect(tiers(opencode)).toEqual({ researcher: 'opencode/big-pickle', writer: 'opencode/big-pickle' })
+    // One assistant writes the answer itself: the strong tier, as before.
+    expect(tiers(claude, 'single')).toEqual({ assistant: 'sonnet' })
   })
 
   it('wires the review template as researcher → you → writer', () => {

@@ -973,14 +973,17 @@ export function useTeamDocument() {
     [markDirty, captureHistory],
   )
 
+  // `undefined` takes the effort out, so the model runs at its own default.
   const updateAgentThinkingEffort = useCallback(
-    (id: string, value: string) => {
+    (id: string, value: string | undefined) => {
       captureHistory()
       modelRef.current?.setAgentField(id, 'thinkingEffort', value)
       setNodes((current) =>
-        current.map((node) =>
-          node.id === id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, thinkingEffort: value } } } : node,
-        ),
+        current.map((node) => {
+          if (node.id !== id) return node
+          const { thinkingEffort: _previous, ...agent } = node.data.agent
+          return { ...node, data: { ...node.data, agent: value === undefined ? agent : { ...agent, thinkingEffort: value } } }
+        }),
       )
       markDirty()
     },
