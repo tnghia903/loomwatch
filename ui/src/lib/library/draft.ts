@@ -5,7 +5,7 @@ import type { AgentAllow, AgentConfig } from '../team-file/types'
 import { DEFAULT_AGENT_ROLE } from './createAgent'
 import { isFigureChoice, type FigureChoice } from './figures'
 import { guessIcon, onlyOn, versionOf, type JobSpec, type SavedJob } from './jobs'
-import { harnessForRole, type RolePreset } from './roles'
+import { capabilitiesOf, harnessForRole, type RolePreset } from './roles'
 
 /**
  * The agent builder's working copy of one of Your agents: what is on screen, saved or not. Saving
@@ -23,6 +23,11 @@ export interface AgentDraft {
   /** One of that model's thinking efforts; empty means the app's own default. */
   effort: string
   skills: string[]
+  /**
+   * The tools it is given: MCP servers on this computer, by the name the capability scan lists. A
+   * team copies them like its skills, and its Workflow canvas draws each as a card wired to it.
+   */
+  tools: string[]
   /** What the finished result must satisfy (ADR 0062); empty when nothing is set. */
   doneWhen: string[]
   allow: AgentAllow
@@ -30,7 +35,7 @@ export interface AgentDraft {
   figure: FigureChoice | null
 }
 
-export const BLANK_DRAFT: AgentDraft = { name: '', does: '', instructions: DEFAULT_AGENT_ROLE, appId: null, model: '', effort: '', skills: [], doneWhen: [], allow: {}, figure: null }
+export const BLANK_DRAFT: AgentDraft = { name: '', does: '', instructions: DEFAULT_AGENT_ROLE, appId: null, model: '', effort: '', skills: [], tools: [], doneWhen: [], allow: {}, figure: null }
 
 export function draftFromJob(job: JobSpec): AgentDraft {
   return {
@@ -41,6 +46,7 @@ export function draftFromJob(job: JobSpec): AgentDraft {
     model: job.apps?.length ? job.model ?? '' : '',
     effort: job.apps?.length && job.model ? job.thinkingEffort ?? '' : '',
     skills: [...(job.skills ?? [])],
+    tools: [...(job.tools ?? [])],
     doneWhen: [...(job.doneWhen ?? [])],
     allow: { ...(onlyOn(job.allow) ?? {}) },
     figure: isFigureChoice(job.figure) ? { ...job.figure } : null,
@@ -57,6 +63,7 @@ export function draftFromPreset(preset: RolePreset, harnesses: readonly Detected
     model: '',
     effort: '',
     skills: [...(preset.skills ?? [])],
+    tools: [...(preset.tools ?? [])],
     doneWhen: [...(preset.doneWhen ?? [])],
     allow: { ...(onlyOn(preset.allow) ?? {}) },
     figure: null,
@@ -75,6 +82,7 @@ export function specFromDraft(draft: AgentDraft, note = ''): JobSpec {
     ...(draft.appId ? { apps: [draft.appId] } : {}),
     ...(draft.appId && draft.model ? { model: draft.model, ...(draft.effort ? { thinkingEffort: draft.effort } : {}) } : {}),
     ...(draft.skills.length ? { skills: [...draft.skills] } : {}),
+    ...(draft.tools.length ? { tools: [...draft.tools] } : {}),
     ...(doneWhenOf(draft).length ? { doneWhen: doneWhenOf(draft) } : {}),
     ...(allow ? { allow } : {}),
     ...(note.trim() ? { note: note.trim() } : {}),
@@ -96,6 +104,7 @@ export function makesNewVersion(draft: AgentDraft, saved: AgentDraft): boolean {
     || (draft.appId ? draft.model : '') !== (saved.appId ? saved.model : '')
     || (draft.appId && draft.model ? draft.effort : '') !== (saved.appId && saved.model ? saved.effort : '')
     || draft.skills.join('\n') !== saved.skills.join('\n')
+    || draft.tools.join('\n') !== saved.tools.join('\n')
     || doneWhenOf(draft).join('\n') !== doneWhenOf(saved).join('\n')
     || SWITCHES.some((key) => Boolean(draft.allow[key]) !== Boolean(saved.allow[key]))
 }
@@ -122,7 +131,7 @@ export function agentFromDraft(draft: AgentDraft, harness: DetectedHarness | nul
     ...(harness ? { spawn: { cmd: harness.spawn.cmd, args: [...harness.spawn.args], env: {}, cwd: '.' } } : {}),
     model,
     ...(effort ? { thinkingEffort: effort } : {}),
-    ...(draft.skills.length ? { capabilities: draft.skills.map((name) => ({ kind: 'skill' as const, name })) } : {}),
+    ...(draft.skills.length || draft.tools.length ? { capabilities: capabilitiesOf(draft.skills, draft.tools) } : {}),
     ...(doneWhenOf(draft).length ? { doneWhen: doneWhenOf(draft) } : {}),
     ...(allow ? { allow } : {}),
     ...(link?.job ? { from: { agent: link.id, version: versionOf(link.job) } } : {}),

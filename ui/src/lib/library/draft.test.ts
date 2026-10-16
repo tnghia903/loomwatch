@@ -9,9 +9,9 @@ const claude: DetectedHarness = { id: 'claude', name: 'Claude Code', command: 'c
 
 describe('the agent builder’s draft', () => {
   it('saves what it shows and reads back the same', () => {
-    const draft = { name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', appId: 'claude', model: 'sonnet', effort: '', skills: ['source-check'], doneWhen: [], allow: { web: true, edits: false }, figure: { kind: 'button' as const, color: 'sage' as const } }
+    const draft = { name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', appId: 'claude', model: 'sonnet', effort: '', skills: ['source-check'], tools: ['github'], doneWhen: [], allow: { web: true, edits: false }, figure: { kind: 'button' as const, color: 'sage' as const } }
     const spec = specFromDraft(draft, 'First cut')
-    expect(spec).toEqual({ name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', icon: 'review', figure: { kind: 'button', color: 'sage' }, apps: ['claude'], model: 'sonnet', skills: ['source-check'], allow: { web: true }, note: 'First cut' })
+    expect(spec).toEqual({ name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', icon: 'review', figure: { kind: 'button', color: 'sage' }, apps: ['claude'], model: 'sonnet', skills: ['source-check'], tools: ['github'], allow: { web: true }, note: 'First cut' })
     expect(draftFromJob(spec)).toEqual({ ...draft, allow: { web: true } })
   })
 
@@ -21,6 +21,8 @@ describe('the agent builder’s draft', () => {
     expect(draftChanged({ ...saved, does: 'Checks stories' }, saved)).toBe(true)
     expect(makesNewVersion({ ...saved, allow: { commands: true } }, saved)).toBe(true)
     expect(makesNewVersion({ ...saved, skills: ['a'] }, saved)).toBe(true)
+    // A team copies its tools too, so giving it one is a new version.
+    expect(makesNewVersion({ ...saved, tools: ['github'] }, saved)).toBe(true)
     // Its figure is only how it looks in Your agents: worth saving, never a new version.
     const dressed = { ...saved, figure: { kind: 'spool' as const, color: 'sky' as const } }
     expect(makesNewVersion(dressed, saved)).toBe(false)
@@ -67,13 +69,13 @@ describe('the agent builder’s draft', () => {
   })
 
   it('tries it with its thinking effort', () => {
-    const draft = { name: 'Reader', does: '', instructions: 'Check.', appId: 'claude', model: 'opus', effort: 'max', skills: [], doneWhen: [], allow: {}, figure: null }
+    const draft = { name: 'Reader', does: '', instructions: 'Check.', appId: 'claude', model: 'opus', effort: 'max', skills: [], tools: [], doneWhen: [], allow: {}, figure: null }
     const team = parse(benchTeamYaml(draft, claude, 'opus', 'reader')) as { agents: Record<string, unknown>[] }
     expect(team.agents[0]).toMatchObject({ model: 'opus', thinkingEffort: 'max' })
   })
 
   it('tries it as a team of one, with the model the app advertises', () => {
-    const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', appId: 'claude', model: '', effort: '', skills: ['house-style'], doneWhen: [], allow: { web: true }, figure: null }
+    const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', appId: 'claude', model: '', effort: '', skills: ['house-style'], tools: ['github'], doneWhen: [], allow: { web: true }, figure: null }
     const team = parse(benchTeamYaml(draft, claude, 'sonnet', 'release-notes-writer')) as Record<string, unknown>
     expect(team).toEqual({
       schemaVersion: 1,
@@ -83,13 +85,14 @@ describe('the agent builder’s draft', () => {
       agents: [{
         id: 'release-notes-writer', name: 'Release notes writer', role: 'Write the notes.',
         spawn: { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '.' }, model: 'sonnet',
-        capabilities: [{ kind: 'skill', name: 'house-style' }], allow: { web: true },
+        // Its tools go with it, so trying it uses them as a team would.
+        capabilities: [{ kind: 'skill', name: 'house-style' }, { kind: 'tool', name: 'github' }], allow: { web: true },
       }],
     })
   })
 
   it('keeps its chat’s agent under the chat’s id, whatever the agent is called', () => {
-    const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', appId: 'claude', model: '', effort: '', skills: [], doneWhen: [], allow: {}, figure: null }
+    const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', appId: 'claude', model: '', effort: '', skills: [], tools: [], doneWhen: [], allow: {}, figure: null }
     const before = parse(chatTeamYaml(draft, claude, 'sonnet', 'notes')) as { id: string; name: string; entrypoint: string; agents: { id: string; name: string }[] }
     const renamed = parse(chatTeamYaml({ ...draft, name: 'Changelog writer' }, claude, 'sonnet', 'notes')) as typeof before
     expect(before).toMatchObject({ id: 'bench-notes', name: 'Release notes writer · chat', entrypoint: 'notes', agents: [{ id: 'notes', name: 'Release notes writer' }] })

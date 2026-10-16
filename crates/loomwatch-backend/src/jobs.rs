@@ -141,6 +141,10 @@ pub(crate) struct JobSpec {
     /// Skill names, delivered to whichever app the job runs on (ADR 0021 routes them).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) skills: Vec<String>,
+    /// Tools it is given: MCP servers on this computer, by the name the capability scan lists. A
+    /// team copies them into the agent's capabilities like its skills (ADR 0029 delivers them).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) tools: Vec<String>,
     /// What the finished result must satisfy (ADR 0062), copied into the team with the rest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) done_when: Vec<String>,
@@ -169,6 +173,7 @@ impl JobSpec {
             || self.model != other.model
             || self.thinking_effort != other.thinking_effort
             || self.skills != other.skills
+            || self.tools != other.tools
             || self.done_when != other.done_when
             || self.allow != other.allow
     }
@@ -359,20 +364,12 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
     {
         return Err("That thinking effort is too long.".into());
     }
-    let mut skills = Vec::new();
-    for skill in spec.skills {
-        let skill = skill.trim().to_owned();
-        if skill.is_empty() || skill.chars().count() > MAX_NAME * 2 {
-            return Err("A skill name is empty or too long.".into());
-        }
-        if !skills.contains(&skill) {
-            skills.push(skill);
-        }
-    }
+    let skills = normalize_names(spec.skills, "skill")?;
+    let tools = normalize_names(spec.tools, "tool")?;
     let done_when = normalize_done_when(spec.done_when)?;
-    if apps.len() > MAX_LIST || skills.len() > MAX_LIST {
+    if apps.len() > MAX_LIST || skills.len() > MAX_LIST || tools.len() > MAX_LIST {
         return Err(format!(
-            "A job can name at most {MAX_LIST} apps and {MAX_LIST} skills."
+            "A job can name at most {MAX_LIST} apps, {MAX_LIST} skills and {MAX_LIST} tools."
         ));
     }
     let note = spec.note.trim().to_owned();
@@ -391,12 +388,28 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
         model,
         thinking_effort,
         skills,
+        tools,
         done_when,
         allow: spec.allow,
         version: spec.version.max(1),
         note,
         saved_at: spec.saved_at,
     })
+}
+
+/// Names as a job keeps them: trimmed, each once, none blank or too long.
+fn normalize_names(names: Vec<String>, what: &str) -> Result<Vec<String>, String> {
+    let mut kept = Vec::new();
+    for name in names {
+        let name = name.trim().to_owned();
+        if name.is_empty() || name.chars().count() > MAX_NAME * 2 {
+            return Err(format!("A {what} name is empty or too long."));
+        }
+        if !kept.contains(&name) {
+            kept.push(name);
+        }
+    }
+    Ok(kept)
 }
 
 /// A job's `doneWhen` as a team will copy it: trimmed, blank lines dropped, within the team file's
@@ -761,6 +774,7 @@ mod tests {
             model: Some("gpt-5.6".into()),
             thinking_effort: None,
             skills: vec!["release-style".into()],
+            tools: Vec::new(),
             done_when: Vec::new(),
             allow: JobAllow::default(),
             version: 1,
@@ -1064,6 +1078,28 @@ mod tests {
         let mut essay = spec("Notes");
         essay.done_when = vec!["x".repeat(161)];
         assert!(save_job(root.path(), "notes", essay, false, Some(2)).is_err());
+    }
+
+    #[test]
+    fn a_tool_given_is_a_new_version_and_is_kept_once_trimmed() {
+        let root = root();
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
+        let mut tooled = spec("Notes");
+        tooled.tools = vec![" github ".into(), "github".into(), "agentmemory".into()];
+        let second = save_job(root.path(), "notes", tooled, false, Some(1)).expect("second");
+        assert_eq!(
+            second.spec.version, 2,
+            "a team copies its tools, so it is a new version"
+        );
+        assert_eq!(second.spec.tools, ["github", "agentmemory"]);
+        let text = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
+        assert!(text.contains("tools:"), "{text}");
+        let mut blank = spec("Notes");
+        blank.tools = vec!["  ".into()];
+        assert!(save_job(root.path(), "notes", blank, false, Some(2)).is_err());
+        // A job saved before tools existed has none, and reads back unchanged.
+        let old = spec("Notes");
+        assert!(serde_yaml::to_string(&old).is_ok_and(|text| !text.contains("tools")));
     }
 
     #[test]

@@ -103,7 +103,7 @@ function Agents() {
       {/* The guide starts with building an agent, here, then carries on at Home and in a team. */}
       <GettingStarted readyApps={readyApps} appsLoading={loading} />
       <Feedback harnesses={harnesses} />
-      <AgentsPage harnesses={harnesses} harnessesLoading={loading} skills={capabilities.inventory.skills} skillsLoading={capabilities.loading} />
+      <AgentsPage harnesses={harnesses} harnessesLoading={loading} skills={capabilities.inventory.skills} tools={capabilities.inventory.tools} skillsLoading={capabilities.loading} />
     </Suspense>
   )
 }

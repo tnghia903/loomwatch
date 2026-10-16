@@ -28,6 +28,8 @@ export interface AgentBuilderProps {
   harnesses: DetectedHarness[]
   harnessesLoading: boolean
   skills: DetectedCapability[]
+  /** The tools (MCP servers) on this computer, from the same capability scan as the skills. */
+  tools: DetectedCapability[]
   skillsLoading: boolean
   /** The team the operator came from ("Edit in Your agents"), so the way back is one click. */
   cameFrom?: string | null
@@ -36,10 +38,10 @@ export interface AgentBuilderProps {
   /**
    * Shown inside a team's Agents tab, for an agent placed from Your agents: there is no page to
    * go back to, and every save is followed by moving that team to the version just saved. What it
-   * reads and the tools it uses stay the team's own (lib/library/link.ts), so its file drawer
-   * and tool drawer show the team's.
+   * reads stays the team's own (lib/library/link.ts), so its file drawer shows the team's; its
+   * tools are the version's, like its skills.
    */
-  inTeam?: { name: string; onSaved: (job: SavedJob) => void; reads: readonly ReadSource[]; tools: readonly string[]; onShowWorkflow?: () => void }
+  inTeam?: { name: string; onSaved: (job: SavedJob) => void; reads: readonly ReadSource[]; onShowWorkflow?: () => void }
 }
 
 type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; version: number; bumped: boolean } | { kind: 'error'; message: string }
@@ -56,7 +58,7 @@ type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; versio
  * Inside a team (`inTeam`) there is no Chat tab, since the team has its own chat: the agent is tried
  * on the test bench under its workbench instead.
  */
-export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading, skills, skillsLoading, cameFrom = null, view: asked = 'build', inTeam }: AgentBuilderProps) {
+export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading, skills, tools, skillsLoading, cameFrom = null, view: asked = 'build', inTeam }: AgentBuilderProps) {
   const view: AgentView = inTeam ? 'build' : asked
   const { jobs, available, loaded } = useSavedJobs()
   const saved = useMemo(() => (id ? jobs.find((job) => job.id === id) ?? null : null), [jobs, id])
@@ -225,7 +227,7 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
       </header>
 
       <ByHand
-        draft={draft} set={set} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={markId} figure={figure} onFigure={(next) => set('figure', next)} record={benchRecord} reads={inTeam?.reads} tools={inTeam?.tools} onShowWorkflow={inTeam?.onShowWorkflow}
+        draft={draft} set={set} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={markId} figure={figure} onFigure={(next) => set('figure', next)} record={benchRecord} tools={tools} toolsLoading={skillsLoading} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
         chat={view === 'chat' ? <AgentChat draft={draft} harness={harness} model={resolvedModel} chatId={chatId} figure={figure} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} /> : undefined}
         onBuild={() => showView('build')}
         cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={draft.name.trim() || 'New agent'} onClose={() => setAnswerRun(null)} /> : undefined}

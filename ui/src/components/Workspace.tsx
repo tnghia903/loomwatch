@@ -2659,6 +2659,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               harnesses={harnesses}
               harnessesLoading={harnessesLoading}
               skills={capabilityInventory.skills}
+              tools={capabilityInventory.tools}
               skillsLoading={capabilitiesLoading}
               savedJobs={savedJobs}
               onEdit={(agentId, key, value) => {

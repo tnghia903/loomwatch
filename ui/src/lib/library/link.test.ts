@@ -27,12 +27,14 @@ describe('the versioned link to Your agents', () => {
   })
 
   it('updates what the version decides and keeps what is the team’s own', () => {
-    const next = { ...job, instructions: 'Check every story twice.', skills: ['source-check', 'house-style'], allow: { web: true, edits: true } }
-    const fields = fieldsForVersion(next, placed, [claude, codex])
+    const next = { ...job, instructions: 'Check every story twice.', skills: ['source-check', 'house-style'], tools: ['github'], allow: { web: true, edits: true } }
+    // A tool the team drew to it is replaced by the version's, like a skill: the version decides them.
+    const withTool: AgentConfig = { ...placed, capabilities: [...(placed.capabilities ?? []), { kind: 'tool', name: 'linear' }] }
+    const fields = fieldsForVersion(next, withTool, [claude, codex])
     expect(fields).toEqual({
       name: 'Reader',
       role: 'Check every story twice.',
-      capabilities: [{ kind: 'knowledge', name: 'sources.md', path: 'sources.md' }, { kind: 'skill', name: 'source-check' }, { kind: 'skill', name: 'house-style' }],
+      capabilities: [{ kind: 'knowledge', name: 'sources.md', path: 'sources.md' }, { kind: 'skill', name: 'source-check' }, { kind: 'skill', name: 'house-style' }, { kind: 'tool', name: 'github' }],
       allow: { web: true, edits: true },
       from: { agent: 'reader', version: 3 },
       model: 'sonnet',
@@ -63,5 +65,9 @@ describe('the versioned link to Your agents', () => {
     expect(changedHere(reordered, pinned)).toEqual([])
     const edited: AgentConfig = { ...placed, role: 'Something else.', capabilities: [], allow: undefined }
     expect(changedHere(edited, pinned)).toEqual(['instructions', 'skills', 'what it may do without asking'])
+    // A tool drawn to it on the canvas is a change too, until it is put back or updated.
+    const tooled: AgentConfig = { ...placed, capabilities: [...(placed.capabilities ?? []), { kind: 'tool', name: 'github' }] }
+    expect(changedHere(tooled, pinned)).toEqual(['tools'])
+    expect(changedHere(tooled, { ...pinned, tools: ['github'] })).toEqual([])
   })
 })

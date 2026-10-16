@@ -320,6 +320,7 @@
 .byhand-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--sp-2); }
 .byhand-cards li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--sp-2); padding: 12px 10px 10px 12px; border-radius: var(--r-md); background: #EFEAE0; color: #17150F; cursor: grab; box-shadow: 0 1px 0 rgba(0, 0, 0, .25), 0 6px 14px -8px rgba(0, 0, 0, .6); }
 .byhand-cards li:active { cursor: grabbing; }
+.byhand-cards.still li, .byhand-cards.still li:active { cursor: default; }
 .byhand-cards li b { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .byhand-cards li span:not(.byhand-card-tab) { grid-column: 1; font-size: 11.5px; color: #56524A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .byhand-cards li .iconbtn { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: #17150F; }

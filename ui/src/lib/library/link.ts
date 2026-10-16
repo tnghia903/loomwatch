@@ -1,15 +1,15 @@
 import type { DetectedHarness } from '../harnesses'
 import { harnessIdForAgent } from '../models'
-import type { AgentAllow, AgentConfig, CapabilityRef } from '../team-file/types'
+import type { AgentAllow, AgentConfig } from '../team-file/types'
 import { onlyOn, savedJobPreset, versionOf, type JobSpec, type SavedJob } from './jobs'
-import { harnessForRole } from './roles'
+import { capabilitiesOf, harnessForRole } from './roles'
 
 /**
  * A team's side of the versioned link to Your agents.
  *
  * A linked agent carries `from: {agent, version}` and a copy of that version's fields. What the
- * version decides is its name, instructions, app and model, skills, and what it may do without
- * asking; where it works, its knowledge and tools, and its place in the team stay the team's own.
+ * version decides is its name, instructions, app and model, skills and tools, and what it may do
+ * without asking; where it works, what it reads, and its place in the team stay the team's own.
  */
 
 export interface AgentLinkState {
@@ -31,17 +31,16 @@ export function linkState(agent: AgentConfig, jobs: readonly SavedJob[]): AgentL
 }
 
 /**
- * The fields to write on a team's agent to bring it to `job`'s current version. Its knowledge and
- * tools stay; its skills become the version's. Its app changes only when the version prefers an
+ * The fields to write on a team's agent to bring it to `job`'s current version. What it reads
+ * stays; its skills and tools become the version's, and the canvas draws each tool as a card. Its app changes only when the version prefers an
  * installed app other than the one it runs on, and then its folder and environment stay.
  */
 export function fieldsForVersion(job: SavedJob, agent: AgentConfig, harnesses: readonly DetectedHarness[]): Partial<AgentConfig> {
   const preset = savedJobPreset(job)
   const harness = harnessForRole(preset, harnesses)
   const currentApp = harnessIdForAgent(agent, harnesses)
-  const own = (agent.capabilities ?? []).filter((capability) => capability.kind !== 'skill')
-  const skills: CapabilityRef[] = (job.skills ?? []).map((name) => ({ kind: 'skill', name }))
-  const capabilities = [...own, ...skills]
+  const own = (agent.capabilities ?? []).filter((capability) => capability.kind === 'knowledge')
+  const capabilities = [...own, ...capabilitiesOf(job.skills ?? [], job.tools ?? [])]
   const fields: Partial<AgentConfig> = {
     name: job.name,
     role: job.instructions,
@@ -77,6 +76,8 @@ export function changedHere(agent: AgentConfig, pinned: JobSpec): string[] {
   const skills = (agent.capabilities ?? []).filter((capability) => capability.kind === 'skill').map((capability) => capability.name).sort()
   const pinnedSkills = [...(pinned.skills ?? [])].sort()
   if (skills.join('\n') !== pinnedSkills.join('\n')) changed.push('skills')
+  const tools = [...new Set((agent.capabilities ?? []).filter((capability) => capability.kind === 'tool').map((capability) => capability.name))].sort()
+  if (tools.join('\n') !== [...(pinned.tools ?? [])].sort().join('\n')) changed.push('tools')
   if ((agent.doneWhen ?? []).join('\n') !== (pinned.doneWhen ?? []).join('\n')) changed.push('done when')
   const mine = onlyOn(agent.allow) ?? {}
   const theirs = onlyOn(pinned.allow) ?? {}

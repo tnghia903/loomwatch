@@ -59,13 +59,13 @@ export interface BenchView {
   /** A skill card is being dragged over the bench. */
   dropping: boolean
   /**
-   * What it reads, filed in the bench's drawer. Only a team's agent has one: what an agent reads
-   * is the team's to give, so without a team (Your agents, the landing page) there is no drawer.
+   * What it reads, filed in the bench's file drawer. What an agent reads is the team's to give, so
+   * in Your agents it is empty and the drawer stays shut; the landing page's bench has no drawer.
    */
   reads?: readonly ReadSource[] | null
   /**
-   * The tools (MCP servers) it is given, standing in the bench's tool drawer. Only a team's agent
-   * has one, as with what it reads: without a team (Your agents, the landing page) there is none.
+   * The tools (MCP servers) it is given, standing in the bench's tool drawer. Every agent you build
+   * has one, in Your agents and in a team; the landing page's bench has none.
    */
   tools?: readonly string[] | null
 }
@@ -113,11 +113,11 @@ const KEY_NODE: Record<AllowSwitch, string> = { web: 'web', edits: 'files', comm
 const FACE_MESH: Record<BenchFace, string> = { name: 'nameplate_face', job: 'job_sheet', app: 'laptop_face' }
 const DISH_KEY_SCALE = 0.72
 /**
- * The bench's two drawers, either side of the nameplate, hold what the team gives it with a line in
- * Workflow: what it reads on the left, its tools on the right. What is its own (its keys and
- * skills) hangs on the wall, and the work (the job, the laptop, the tray) is on top. `front` is the
- * bench's front face; open, a drawer slides out past the bench top's overhang so what is in it
- * shows, and with nothing in it, it stays shut.
+ * The bench's two drawers, either side of the nameplate, hold what it works with: what it reads on
+ * the left (the team's to give, with a line in Workflow) and its tools on the right (given in its
+ * builder or with a line). Its keys and skills hang on the wall, and the work (the job, the laptop,
+ * the tray) is on top. `front` is the bench's front face; open, a drawer slides out past the bench
+ * top's overhang so what is in it shows, and with nothing in it, it stays shut.
  */
 const DRAWER = { bottom: 0.27, width: 0.42, height: 0.18, depth: 0.32, front: 0.26, open: 0.28 }
 type DrawerName = 'reads' | 'tools'
@@ -613,7 +613,7 @@ export class WorkbenchScene {
     for (const node of [holder, drawer, front]) this.nodes.set(node.name, node)
   }
 
-  /** Open a drawer when the team gives it something for it; shut it when there is nothing. */
+  /** Open a drawer when there is something in it; shut it when there is nothing. */
   private slideDrawer(name: DrawerName, open: boolean, animate: boolean) {
     if (this.drawerOpen[name] === open) return
     this.drawerOpen[name] = open

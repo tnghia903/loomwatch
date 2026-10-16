@@ -8,8 +8,8 @@ import { ROLE_ICON_IDS, type RoleIcon, type RolePreset } from './roles'
 /**
  * Your agents: agents the operator built or saved for reuse (ADR 0030 began them as saved jobs).
  *
- * Each is its instructions, the app and model it runs on, its skills and what it may do without
- * asking. The daemon stores each one as `<teams root>/.jobs/<id>.yaml` and numbers its versions;
+ * Each is its instructions, the app and model it runs on, its skills and tools, and what it may do
+ * without asking. The daemon stores each one as `<teams root>/.jobs/<id>.yaml` and numbers its versions;
  * the palette lists them under "Your agents". Placing one copies its current version's fields into
  * the team with a `from: {agent, version}` link (lib/library/link.ts), so the team runs exactly
  * what it was approved with until the operator chooses Update there.
@@ -28,6 +28,8 @@ export interface JobSpec {
   /** How hard that model thinks: one of the efforts its app lists. Absent, the app's own default. */
   thinkingEffort?: string
   skills?: string[]
+  /** The tools (MCP servers) it is given, by name; a team copies them into its capabilities. */
+  tools?: string[]
   /** What the finished result must satisfy (ADR 0062), copied into a team with the rest. */
   doneWhen?: string[]
   /** What it may do without asking (ADR 0037); only switches that are on are written. */
@@ -171,11 +173,12 @@ export function onlyOn(allow: AgentAllow | undefined): AgentAllow | undefined {
   return Object.keys(kept).length > 0 ? kept : undefined
 }
 
-/** What "Add to Your agents" keeps of an agent: its instructions, app, model and effort, skills and switches. */
+/** What "Add to Your agents" keeps of an agent: its instructions, app, model and effort, skills, tools and switches. */
 export function jobFromAgent(agent: AgentConfig, options: { name: string; does?: string; appId?: string }): JobSpec {
   const name = options.name.trim()
   const icon = guessIcon(name, agent.role)
   const skills = (agent.capabilities ?? []).filter((capability) => capability.kind === 'skill').map((capability) => capability.name)
+  const tools = [...new Set((agent.capabilities ?? []).filter((capability) => capability.kind === 'tool').map((capability) => capability.name))]
   const allow = onlyOn(agent.allow)
   return {
     name,
@@ -185,6 +188,7 @@ export function jobFromAgent(agent: AgentConfig, options: { name: string; does?:
     ...(options.appId ? { apps: [options.appId] } : {}),
     ...(options.appId && agent.model ? { model: agent.model, ...(agent.thinkingEffort ? { thinkingEffort: agent.thinkingEffort } : {}) } : {}),
     ...(skills.length ? { skills } : {}),
+    ...(tools.length ? { tools } : {}),
     ...(agent.doneWhen?.length ? { doneWhen: [...agent.doneWhen] } : {}),
     ...(allow ? { allow } : {}),
   }
@@ -209,6 +213,7 @@ export function savedJobPreset(job: SavedJob): RolePreset {
     prefers: job.apps ?? [],
     ...(job.model ? { model: job.model, ...(job.thinkingEffort ? { thinkingEffort: job.thinkingEffort } : {}) } : {}),
     ...(job.skills?.length ? { skills: job.skills } : {}),
+    ...(job.tools?.length ? { tools: job.tools } : {}),
     ...(job.doneWhen?.length ? { doneWhen: job.doneWhen } : {}),
     ...(allow ? { allow } : {}),
     from: { agent: job.id, version: versionOf(job) },
