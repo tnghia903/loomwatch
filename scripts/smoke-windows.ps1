@@ -185,11 +185,11 @@ try {
   Check (Test-Path -LiteralPath (Join-Path $env:LOOMWATCH_STATE_DIR 'loomwatch.db')) 'its run history is in the state folder'
   $second = Start-Process -FilePath $exe -ArgumentList '--background' -PassThru
   Check ($second.WaitForExit(10000)) 'a second LoomWatch.exe ends at once instead of starting another'
-  Check ((Get-AppProcesses).Count -eq 1) 'one LoomWatch.exe runs'
+  Check (@(Get-AppProcesses).Count -eq 1) 'one LoomWatch.exe runs'
   Check (@(Get-Process -Name loomwatchd -ErrorAction SilentlyContinue).Count -eq 1) 'one loomwatchd runs'
   $quit = Start-Process -FilePath $exe -ArgumentList '--quit' -PassThru
   Check ($quit.WaitForExit(30000)) 'LoomWatch.exe --quit returns'
-  Wait-Until { (Get-AppProcesses).Count -eq 0 -and -not (Get-Health $appPort) } 30 'LoomWatch.exe to quit' | Out-Null
+  Wait-Until { @(Get-AppProcesses).Count -eq 0 -and -not (Get-Health $appPort) } 30 'LoomWatch.exe to quit' | Out-Null
   Check $true 'LoomWatch.exe --quit stops the app and LoomWatch'
   Check ((Get-Content -LiteralPath $appLog -Raw) -match 'stopping too') 'loomwatchd stopped by itself, writing what it held'
 
@@ -209,14 +209,14 @@ try {
     # Running the installer again is how LoomWatch updates: it quits the running one first.
     $again = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -PassThru
     Check ($again.WaitForExit(180000) -and $again.ExitCode -eq 0) 'installing over a running LoomWatch succeeds'
-    Check ((Get-AppProcesses).Count -eq 0 -and -not (Get-Health $appPort)) 'the installer quit the running LoomWatch first'
+    Check (@(Get-AppProcesses).Count -eq 0 -and -not (Get-Health $appPort)) 'the installer quit the running LoomWatch first'
     Start-Process -FilePath (Join-Path $installed 'LoomWatch.exe') -ArgumentList '--background' | Out-Null
     Wait-Until { Get-Health $appPort } 90 'LoomWatch.exe to start after the update' | Out-Null
     $uninstaller = Join-Path $installed 'unins000.exe'
     $removed = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -PassThru
     Check ($removed.WaitForExit(120000)) 'the uninstaller finishes'
     Wait-Until { -not (Test-Path -LiteralPath (Join-Path $installed 'LoomWatch.exe')) } 60 'the uninstaller to remove LoomWatch' | Out-Null
-    Check ((Get-AppProcesses).Count -eq 0 -and -not (Get-Health $appPort)) 'removing LoomWatch quits it first'
+    Check (@(Get-AppProcesses).Count -eq 0 -and -not (Get-Health $appPort)) 'removing LoomWatch quits it first'
     Check (-not (Test-Path -LiteralPath $menu)) 'and takes it off the Start menu'
     Check (Test-Path -LiteralPath (Join-Path $env:LOOMWATCH_STATE_DIR 'loomwatch.db')) 'the run history stays after LoomWatch is removed'
   } else {
