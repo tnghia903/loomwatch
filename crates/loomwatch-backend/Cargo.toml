@@ -36,6 +36,9 @@ regex = "1.11"
 # The archive keeps raw ACP frames compressed (archive/codec.rs).
 zstd = { version = "0.13", default-features = false }
 tokio = { version = "1.47", features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+# LoomWatch's own Node.js download (connectors.rs) is a .tar.gz.
+flate2 = "1.1"
+tar = "0.4"
 uuid = { version = "1.18", features = ["v4"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 cron = "0.17"

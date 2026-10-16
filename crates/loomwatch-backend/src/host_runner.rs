@@ -469,6 +469,8 @@ pub fn merge_reports(mut local: HarnessReport, remote: HarnessReport) -> Harness
         searched_path,
         known_ids: local.known_ids,
         runner_error: None,
+        connectors: local.connectors,
+        setup: local.setup,
     }
 }
 
@@ -489,6 +491,7 @@ mod tests {
             health_detail: None,
             health_cause: None,
             needs_restart: false,
+            connector: None,
             spawn: HarnessSpawn {
                 cmd: command.to_owned(),
                 args: vec!["acp".to_owned()],
@@ -502,6 +505,8 @@ mod tests {
             searched_path: vec![path.to_owned()],
             known_ids: crate::api::known_harness_ids(),
             runner_error: None,
+            connectors: std::collections::BTreeMap::new(),
+            setup: std::collections::BTreeMap::new(),
         }
     }
 

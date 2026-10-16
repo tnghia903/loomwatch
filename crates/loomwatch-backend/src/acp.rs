@@ -236,6 +236,85 @@ fn withheld_app_config(spec: &ProcessSpec) -> Result<Option<String>> {
         .context("cannot start Codex without its plugins and apps")
 }
 
+/// What actually starts a [`ProcessSpec`].
+struct StartCommand {
+    program: std::ffi::OsString,
+    args: Vec<String>,
+    /// The folder to put first on the child's `PATH`: the Node.js a bridge is started with, or
+    /// the per-user folder an app was found in.
+    first_on_path: Option<PathBuf>,
+}
+
+/// `LoomWatch`'s own install of a Node bridge when the spec asks for it through `npx -y`
+/// (`crate::connectors`): about a second faster to start and 140 MB lighter than npx. Otherwise
+/// the command as written, including while the install is still under way and npx can stand in.
+fn start_command(spec: &ProcessSpec) -> Result<StartCommand> {
+    let as_written = || match per_user_program(spec) {
+        Some(program) => StartCommand {
+            first_on_path: program.parent().map(Path::to_path_buf),
+            program: program.into_os_string(),
+            args: spec.args.clone(),
+        },
+        None => StartCommand {
+            program: spec.cmd.clone().into(),
+            args: spec.args.clone(),
+            first_on_path: None,
+        },
+    };
+    let Some(connectors) = crate::connectors::installed() else {
+        return Ok(as_written());
+    };
+    match connectors.resolve(&spec.cmd, &spec.args) {
+        crate::connectors::Resolved::Direct {
+            program,
+            args,
+            node_dir,
+        } => Ok(StartCommand {
+            program: program.into_os_string(),
+            args,
+            first_on_path: Some(node_dir),
+        }),
+        crate::connectors::Resolved::AsWritten => Ok(as_written()),
+        crate::connectors::Resolved::NotReady { app, name } => {
+            connectors.prepare_in_background(app);
+            if connectors.npx_available() {
+                return Ok(as_written());
+            }
+            bail!(
+                "{name} isn't ready yet. LoomWatch is getting it ready, which happens once and takes a minute or two. Try again shortly."
+            )
+        }
+    }
+}
+
+/// A bare command that is not on the `PATH` the child gets but is in a per-user install folder
+/// (`~/.opencode/bin`, `~/.local/bin`, …). The Library lists apps from those folders
+/// (`api::augment_search_path`), so a run finds them there too, instead of asking for a restart
+/// after an app is installed while `LoomWatch` runs.
+fn per_user_program(spec: &ProcessSpec) -> Option<PathBuf> {
+    per_user_program_in(spec, std::env::var_os("HOME").map(PathBuf::from).as_deref())
+}
+
+fn per_user_program_in(spec: &ProcessSpec, home: Option<&Path>) -> Option<PathBuf> {
+    let command = Path::new(&spec.cmd);
+    if command.is_absolute() || command.components().count() != 1 {
+        return None;
+    }
+    let path = spec
+        .env
+        .get("PATH")
+        .map(std::ffi::OsString::from)
+        .or_else(|| std::env::var_os("PATH"));
+    if path
+        .as_deref()
+        .is_some_and(|path| crate::api::find_executable(path, &spec.cmd).is_some())
+    {
+        return None;
+    }
+    let per_user = crate::api::augment_search_path(None, Some(home?))?;
+    crate::api::find_executable(&per_user, &spec.cmd)
+}
+
 /// Owns one ACP child and both sides of its line-delimited JSON-RPC stream.
 pub struct AcpProcess {
     child: Child,
@@ -286,7 +365,8 @@ impl AcpProcess {
     ///
     /// Returns an error when the process cannot be spawned or its streams are unavailable.
     pub fn spawn(spec: &ProcessSpec) -> Result<Self> {
-        let mut command = Command::new(&spec.cmd);
+        let start = start_command(spec)?;
+        let mut command = Command::new(&start.program);
         for (key, _) in std::env::vars_os() {
             if let Some(key) = key.to_str()
                 && daemon_only(key, spec)
@@ -295,13 +375,21 @@ impl AcpProcess {
             }
         }
         command
-            .args(&spec.args)
+            .args(&start.args)
             .envs(&spec.env)
             .current_dir(&spec.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        if let Some(first) = &start.first_on_path {
+            let path = spec
+                .env
+                .get("PATH")
+                .map(std::ffi::OsString::from)
+                .or_else(|| std::env::var_os("PATH"));
+            command.env("PATH", crate::connectors::path_with(first, path.as_deref()));
+        }
         if let Some(config) = withheld_app_config(spec)? {
             command.env(CODEX_CONFIG, config);
         }
@@ -3202,6 +3290,50 @@ async fn append_archive_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_bare_command_missing_from_path_is_found_in_a_per_user_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = std::env::temp_dir().join(format!("loomwatch-home-{}", Uuid::new_v4()));
+        let bin = home.join(".opencode/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let program = bin.join("opencode");
+        std::fs::write(&program, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let spec = |cmd: &str, path: &Path| ProcessSpec {
+            cmd: cmd.into(),
+            args: vec!["acp".into()],
+            env: BTreeMap::from([("PATH".to_owned(), path.to_string_lossy().into_owned())]),
+            cwd: home.clone(),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        };
+        let elsewhere = home.join("empty");
+        assert_eq!(
+            per_user_program_in(&spec("opencode", &elsewhere), Some(&home)),
+            Some(program.clone())
+        );
+        // On the child's own PATH it is started as written, as is any path or unknown name.
+        assert_eq!(
+            per_user_program_in(&spec("opencode", &bin), Some(&home)),
+            None
+        );
+        assert_eq!(
+            per_user_program_in(&spec(&program.to_string_lossy(), &elsewhere), Some(&home)),
+            None
+        );
+        assert_eq!(
+            per_user_program_in(&spec("./opencode", &elsewhere), Some(&home)),
+            None
+        );
+        assert_eq!(
+            per_user_program_in(&spec("codex", &elsewhere), Some(&home)),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
     use serde_json::json;
 
     #[test]

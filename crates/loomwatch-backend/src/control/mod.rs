@@ -381,6 +381,7 @@ fn ask_apps(control: &Control) -> Vec<crate::api::DetectedHarness> {
             health_detail: None,
             health_cause: None,
             needs_restart: false,
+            connector: None,
             spawn: crate::api::HarnessSpawn {
                 cmd: command[0].clone(),
                 args: command[1..].to_vec(),

@@ -159,6 +159,24 @@ async fn recovered_registry(archive: &EventArchive) -> RunRegistry {
     registry
 }
 
+/// Started by `LoomWatch.app` (`LOOMWATCH_EXIT_WITH_PARENT=1`): stop when the app is gone, so a
+/// force-quit app never leaves `LoomWatch` running where nobody can see or stop it. An orphaned
+/// process is adopted by launchd (or init), whose pid is 1.
+fn exit_with_parent() {
+    #[cfg(unix)]
+    if std::env::var_os("LOOMWATCH_EXIT_WITH_PARENT").is_some_and(|value| value == "1") {
+        tokio::spawn(async {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                if std::os::unix::process::parent_id() == 1 {
+                    eprintln!("LoomWatch.app is gone, so loomwatchd is stopping too");
+                    std::process::exit(0);
+                }
+            }
+        });
+    }
+}
+
 /// `~/Library/Application Support/LoomWatch` on macOS, `$XDG_STATE_HOME/loomwatch` or
 /// `~/.local/state/loomwatch` elsewhere.
 fn default_state_dir() -> Option<PathBuf> {
@@ -218,6 +236,7 @@ async fn main() -> Result<()> {
         } => {
             // Fixed now, so `/api/about` tells this start from the next one (ADR 0052).
             let _ = loomwatch_backend::updates::started_at();
+            exit_with_parent();
             if !listen.ip().is_loopback() {
                 eprintln!(
                     "warning: serving on non-loopback address {}; use --allow-host for each trusted hostname",
@@ -250,6 +269,10 @@ async fn main() -> Result<()> {
             })?;
             // Which team files may run (ADR 0048), kept outside the teams folder. Opened before
             // anything can start a run, and the first time, it approves the teams already there.
+            // Claude's and Codex's bridges, installed once and started directly instead of
+            // through npx; installing the ones this computer's apps need starts now, in the
+            // background.
+            loomwatch_backend::connectors::init(&state_dir).prepare_detected();
             let approvals =
                 loomwatch_backend::approvals::TeamApprovals::open(&state_dir, &teams_root)
                     .with_context(|| {

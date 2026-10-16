@@ -4,6 +4,7 @@
 
 pub mod acp;
 pub mod api;
+pub mod app_setup;
 pub mod approvals;
 pub mod archive;
 pub mod auto_mode;
@@ -12,6 +13,7 @@ pub mod chat;
 pub mod chosen_knowledge;
 pub mod composer;
 pub mod config;
+pub mod connectors;
 pub mod control;
 pub mod db;
 pub mod delivery;
