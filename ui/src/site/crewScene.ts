@@ -19,6 +19,7 @@ import {
   ShaderMaterial,
   ShadowMaterial,
   SphereGeometry,
+  SpotLight,
   TubeGeometry,
   Vector2,
   Vector3,
@@ -82,6 +83,14 @@ const HEAD_NOD = 0.24
 const GLOW = { ready: 0.45, waiting: 1, working: [0.6, 1], hovered: 1 } as const
 /** One breath of a working figure's glow, in seconds, as in the page's chat. */
 const BREATH = 2.4
+/** How dark the shadows on the floor are while the lamp is lit. */
+const SHADOW = 0.2
+/**
+ * Where the lamp hangs: on the line from the camera through the bulb, at this much of the way to
+ * the crew (1 is level with them, so their shadows fall straight to the side), then this many times
+ * as far from them in that direction (further out, the shadows are shorter and more nearly alike).
+ */
+const LAMP = { depth: 0.8, out: 3 }
 
 /**
  * The landing page's crew: the app's own figures (workbench.glb, the same model and materials as
@@ -92,8 +101,9 @@ const BREATH = 2.4
  * look at it, a gold bead carries the work along the thread to the next, and when it reaches you
  * they all look out and the last one waves. Each glows round its outline what it is doing, as an
  * agent's figure does in the app: green ready, blue working (breathing), gold waiting for you; the
- * one under the pointer glows wider. Reduced motion keeps the poses and drops the motion, the
- * conversation with it.
+ * one under the pointer glows wider. The page's lamp lights them (lamp()): their shadows fall away
+ * from its bulb, and with it off they cast none. Reduced motion keeps the poses and drops the
+ * motion, the conversation with it.
  */
 export class CrewScene {
   private readonly renderer: WebGLRenderer
@@ -136,7 +146,15 @@ export class CrewScene {
   private passTo: number | null = null
   /** The work on its way from one figure to the next: a glowing gold bead. */
   private readonly bead = new Object3D()
-  private readonly floor: Mesh
+  private readonly floor: Mesh<PlaneGeometry, ShadowMaterial>
+  /** The light their shadows come from: the page's lamp, hung where its bulb is (hangKey()). */
+  private readonly key = new SpotLight('#FFF3E2', 2.3, 0, Math.PI / 4, 0, 0)
+  /** Where the bulb is, in this canvas's CSS pixels; null until the page says (lamp()). */
+  private bulb: Vector2 | null = null
+  /** What the key light has to reach: the crew and its thread, as fit() frames them. */
+  private reach: Vector3[] = []
+  /** The canvas's width in device pixels, which the floor's shadows fade out toward the sides of. */
+  private readonly stageWidth = { value: 1 }
   private readonly glow: CrewGlow
   /** Each state's glow colour, the page's own (glowColors()); these are its dark theme's. */
   private colors: Record<Glow, Vector4> = { ready: glowColor('#4FC98D'), working: glowColor('#6AB8FF'), waiting: glowColor('#E9C46A') }
@@ -154,27 +172,29 @@ export class CrewScene {
     this.renderer.shadowMap.type = PCFShadowMap
 
     this.scene.add(new HemisphereLight('#FFF6E8', '#2A2A32', 0.75))
-    const key = new DirectionalLight('#FFF3E2', 2.3)
-    key.position.set(-1.6, 4.2, 3.4)
+    // A spotlight with no falloff, so it lights them all alike, but each from where the bulb is.
+    const key = this.key
     key.castShadow = true
     key.shadow.mapSize.set(1024, 1024)
-    key.shadow.camera.left = -3.2
-    key.shadow.camera.right = 3.2
-    key.shadow.camera.top = 2
-    key.shadow.camera.bottom = -1
     key.shadow.camera.near = 0.5
-    key.shadow.camera.far = 10
+    key.shadow.camera.far = 30
     key.shadow.bias = -0.0004
     key.shadow.normalBias = 0.02
     key.shadow.radius = 4
-    key.target.position.set(0, 0.5, 0)
     this.scene.add(key, key.target)
     const rim = new DirectionalLight('#DDE6FF', 1.0)
-    rim.position.set(2.5, 2.2, -2.5)
+    rim.position.set(-2.5, 2.2, -2.5)
     this.scene.add(rim)
 
     const floorGeometry = new PlaneGeometry(14, 8)
-    const floorMaterial = new ShadowMaterial({ opacity: 0.2 })
+    const floorMaterial = new ShadowMaterial({ opacity: SHADOW })
+    // A long shadow fades out toward the canvas's sides rather than stopping at its edge.
+    floorMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.stageWidth = this.stageWidth
+      shader.fragmentShader = shader.fragmentShader
+        .replace('void main() {', 'uniform float stageWidth;\nvoid main() {')
+        .replace('opacity * ( 1.0 - getShadowMask() )', 'opacity * ( 1.0 - getShadowMask() ) * smoothstep( 0.0, 0.1, min( gl_FragCoord.x, stageWidth - gl_FragCoord.x ) / stageWidth )')
+    }
     const floor = new Mesh(floorGeometry, floorMaterial)
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
@@ -357,6 +377,18 @@ export class CrewScene {
 
   playTalk() {
     if (this.script && !this.talkState?.done) this.talking = true
+  }
+
+  /**
+   * The page's lamp: where its bulb is, in this canvas's CSS pixels (off the canvas, above it), and
+   * whether it is lit. Their light hangs there, so each figure's shadow falls away from the bulb;
+   * with the bulb off, the floor has no shadows. The page says as it scrolls, so a stopped scene,
+   * which is off the screen, draws it when it starts again rather than now.
+   */
+  lamp(x: number, y: number, lit: boolean) {
+    this.bulb = new Vector2(x, y)
+    this.floor.material.opacity = lit ? SHADOW : 0
+    if (this.loaded) this.hangKey()
   }
 
   private pick(x: number, y: number): number | null {
@@ -621,6 +653,35 @@ export class CrewScene {
     const tall = this.screen(new Vector3(0, 0, front)).y - this.screen(new Vector3(0, this.headTop, front)).y
     const size = this.renderer.getDrawingBufferSize(new Vector2())
     this.glow.resize(size.x, size.y, tall * 0.05 * (size.x / this.width))
+    this.stageWidth.value = size.x
+    // The light reaches every figure and the thread's ends, a waving mitten over a head too.
+    this.reach = [left, right].flatMap((x) => [back - 0.35, front + 0.35].flatMap((z) => [new Vector3(x, 0, z), new Vector3(x, this.headTop + 0.2, z)]))
+    this.hangKey()
+  }
+
+  /**
+   * Hang the key light where the bulb is: from the crew toward the point on the line from the camera
+   * through the bulb a little in front of them (LAMP), so the light and the shadows come from where
+   * you see the bulb. Its cone just takes in the crew, which keeps the shadows as sharp as its map
+   * allows.
+   */
+  private hangKey() {
+    // Until the page says where the bulb is: up and to the right, as it is in the page's header.
+    const bulb = this.bulb ?? new Vector2(this.width * 0.9, -this.height * 1.5)
+    const camera = this.camera.position
+    const ray = new Vector3((bulb.x / this.width) * 2 - 1, 1 - (bulb.y / this.height) * 2, 0.5).unproject(this.camera).sub(camera).normalize()
+    const forward = this.camera.getWorldDirection(new Vector3())
+    const middle = this.reach.reduce((sum, point) => sum.add(point), new Vector3()).divideScalar(this.reach.length)
+    const depth = forward.dot(middle.clone().sub(camera)) * LAMP.depth
+    const key = this.key
+    key.position.copy(camera).addScaledVector(ray, depth / Math.max(0.05, ray.dot(forward))).sub(middle).multiplyScalar(LAMP.out).add(middle)
+    // Aimed down the middle of what it has to reach, and just wide enough for all of it.
+    const toward = this.reach.map((point) => point.clone().sub(key.position).normalize())
+    const aim = toward.reduce((sum, direction) => sum.add(direction), new Vector3()).normalize()
+    key.angle = Math.min(1.45, Math.max(...toward.map((direction) => aim.angleTo(direction))) + 0.06)
+    key.target.position.copy(key.position).add(aim)
+    key.updateMatrixWorld()
+    key.target.updateMatrixWorld()
   }
 
   private screen(point: Vector3) {

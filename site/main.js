@@ -344,6 +344,23 @@
       scene.glowColors(glowColors())
       new MutationObserver(() => scene.glowColors(glowColors())).observe(root, { attributes: true, attributeFilter: ['data-theme'] })
     }
+    // Their light is the lamp's: it hangs where the bulb is, wherever the page has scrolled them to
+    // (with reduced motion, where it was when they came), so each figure's shadow falls away from it;
+    // switched off, they cast none. A live.js cached from before the lamp has no lamp().
+    if (typeof scene.lamp === 'function') {
+      let lampQueued = false
+      const hangLamp = () => {
+        lampQueued = false
+        const bulb = themeButton.getBoundingClientRect()
+        const stage = crewCanvas.getBoundingClientRect()
+        scene.lamp(bulb.left + bulb.width / 2 - stage.left, bulb.top + bulb.height / 2 - stage.top, root.dataset.theme === 'light')
+      }
+      const queueLamp = () => { if (!lampQueued) { lampQueued = true; window.requestAnimationFrame(hangLamp) } }
+      hangLamp()
+      if (!reduced) window.addEventListener('scroll', queueLamp, { passive: true })
+      window.addEventListener('resize', queueLamp)
+      new MutationObserver(hangLamp).observe(root, { attributes: true, attributeFilter: ['data-theme'] })
+    }
     // They look where you point anywhere on the first screen, not only over their canvas.
     window.addEventListener('pointermove', (event) => { const [x, y] = local(event, crewCanvas); scene.pointerMove(x, y) }, { passive: true })
     document.documentElement.addEventListener('pointerleave', () => scene.pointerMove(null, null))
