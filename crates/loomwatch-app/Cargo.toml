@@ -1,0 +1,22 @@
+[package]
+name = "loomwatch-app"
+version = "0.4.1"
+description = "LoomWatch.app's own program: starts loomwatchd and keeps LoomWatch in the menu bar."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "LoomWatch"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+tao = "0.37"
+tray-icon = "0.26"
+
+[lints]
+workspace = true

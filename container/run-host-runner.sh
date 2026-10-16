@@ -9,9 +9,7 @@ if [ -f .env ]; then
   . ./.env
 fi
 
-if [ -z "${LOOMWATCH_HOST_RUNNER_TOKEN:-}" ]; then
-  LOOMWATCH_HOST_RUNNER_TOKEN=${POSTGRES_PASSWORD:-}
-fi
+LOOMWATCH_HOST_RUNNER_TOKEN=${LOOMWATCH_HOST_RUNNER_TOKEN:-}
 if [ "${#LOOMWATCH_HOST_RUNNER_TOKEN}" -lt 16 ]; then
   echo "Set LOOMWATCH_HOST_RUNNER_TOKEN in .env to a random value of at least 16 characters." >&2
   exit 2

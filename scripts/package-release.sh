@@ -5,8 +5,8 @@
 #
 # writes OUT_DIR/loomwatch-PLATFORM.tar.gz and OUT_DIR/loomwatch-PLATFORM.tar.gz.sha256. PLATFORM
 # is macos-universal, linux-x86_64 or linux-arm64, matching what install.sh asks for. The program
-# already holds the browser app, the database migrations and the team schema; the archive adds the
-# launcher, the database's Compose file, the offline demo team and the licenses.
+# already holds the browser app, the database (SQLite, built in), its migrations and the team
+# schema; the archive adds the launcher, the offline demo team and the licenses.
 #
 # The archive's names never change between releases, so the installer can always ask GitHub for
 # releases/latest/download/loomwatch-PLATFORM.tar.gz.
@@ -37,7 +37,7 @@ mkdir -p "$pkg/bin" "$pkg/examples"
 
 cp "$program" "$pkg/bin/loomwatchd"
 cp "$root/loomwatch" "$root/scripts/install.sh" "$pkg/"
-cp "$root/docker-compose.yml" "$root/.env.example" "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$pkg/"
+cp "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$pkg/"
 cp "$root/examples/operator-stop.yaml" "$root/examples/operator-stop-harness.py" "$pkg/examples/"
 chmod 755 "$pkg/bin/loomwatchd" "$pkg/loomwatch" "$pkg/install.sh" "$pkg/examples/operator-stop-harness.py"
 # "<version> <commit>": install.sh shows the first, and the launcher reports the second in
@@ -48,7 +48,8 @@ cat >"$pkg/README.md" <<EOF
 
 Start LoomWatch with \`./loomwatch\` in this folder (or \`~/LoomWatch/app/loomwatch\` from anywhere),
 stop it with Ctrl-C, update it with \`./loomwatch update\`, and see every option with
-\`./loomwatch help\`. It needs Docker for its database and, for real runs, one of your AI apps.
+\`./loomwatch help\`. It keeps its run history in one file on this computer and needs nothing else
+installed, apart from one of your AI apps for real runs.
 
 The guide, the FAQ and how to remove LoomWatch are at https://github.com/tnghia903/loomwatch.
 

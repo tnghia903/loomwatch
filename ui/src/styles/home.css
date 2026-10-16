@@ -131,6 +131,9 @@
 .hs-detail summary { cursor: pointer; color: var(--color-ink-3); }
 .hs-detail pre { margin: var(--sp-2) 0 0; max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-ink-2); }
 .hs-note { margin: 0; line-height: 1.45; color: var(--color-ink-2); }
+/* Claude's sign-in ends with a code to paste back. */
+.hs-code { display: flex; flex-direction: column; gap: var(--sp-2); }
+.hs-code .input { flex: 1; min-width: 0; max-width: 360px; font-family: var(--font-mono, ui-monospace, monospace); }
 .home-setup-foot { margin: 0; color: var(--color-ink-3); }
 
 @media (max-width: 720px) {

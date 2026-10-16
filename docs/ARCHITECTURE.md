@@ -46,19 +46,37 @@ The backend is `loomwatchd`, a single binary the user runs locally. Its job:
   agent processes
 - **Team Bus** — an MCP server the agents call back into (see §3)
 - **Pipeline orchestrator** — topological execution for drawn DAGs (see §4)
-- **Event archive** — PostgreSQL, the durable and unbounded history
+- **Event archive** — one SQLite file, the durable and unbounded history
 - **UI host** — serves the single-page web UI (static assets), a WebSocket for live events,
   and a REST surface (see §5)
 
 **Why Rust:** going vendor-neutral means no vendor SDK is usable anyway — ACP is JSON-RPC over
 stdio — so a JavaScript ecosystem advantage disappears. What remains is process supervision,
-stdio multiplexing, PostgreSQL and WebSocket work, in one binary with no language runtime for the
+stdio multiplexing, storage and WebSocket work, in one binary with no language runtime for the
 user to install.
 
-Run history lives in PostgreSQL, through `sqlx`: its Tokio-native pool and versioned migrations
-fit the async backend. Every event is a `RunEvent` row, ordered by `UNIQUE(session_id, seq)`, which
-is what makes a run replayable. The launcher runs PostgreSQL in Docker; `loomwatchd` itself runs
-as a native process, so it can start the AI apps already installed for the user.
+Run history lives in one SQLite file (`<state dir>/loomwatch.db`, or `--database`), built into
+the program through `sqlx` with its versioned migrations, so installing LoomWatch needs nothing
+else running. Every event is a `RunEvent` row, ordered by `UNIQUE(session_id, seq)`, which is what
+makes a run replayable. How it stays fast as history grows:
+
+- **One writer.** The file is opened in WAL mode with `synchronous=NORMAL`: one connection writes,
+  a few read-only ones read beside it without waiting. Run events go through a batching writer
+  (`archive.rs`) that writes them in the order they were handed over, one transaction per 100 ms or
+  256 events, so a burst of streamed tokens is a handful of commits. Every read of `run_events`
+  flushes the writer first, so nothing reads around a batch.
+- **A summary per session.** `run_sessions` holds what the session list shows, kept by a trigger
+  as each event is inserted, so listing sessions costs the same at any history size.
+- **Raw frames without repeats.** A tool update's raw ACP frame carries its output again, which
+  the projected payload already holds. `raw` is stored as the frame minus the values it shares
+  with `payload`, compressed when smaller (`archive/codec.rs`), and read back byte for byte.
+- **Search** in the Notebook is SQLite FTS5 with English stemming.
+
+`loomwatchd backup <file>` writes a consistent copy while LoomWatch runs (`VACUUM INTO`), which the
+launcher saves before every update. Earlier versions kept the history in PostgreSQL in Docker;
+`loomwatchd import-postgres` copies such a database into the file, and the launcher runs it once,
+on the first start after updating. `loomwatchd` runs as a native process, so it can start the AI
+apps already installed for the user.
 
 ---
 

@@ -276,6 +276,8 @@ pub enum Install {
     Release,
     /// A copy of the source code: `./loomwatch update` pulls it with Git and builds it.
     Source,
+    /// `LoomWatch.app`, opened from Applications: the next one is the release's `.dmg`.
+    App,
     /// Started some other way, such as in a container: the releases page says what changed.
     Other,
 }
@@ -425,6 +427,7 @@ impl Updates {
         let install = match std::env::var(INSTALL_ENV).as_deref() {
             Ok("release") => Install::Release,
             Ok("source") => Install::Source,
+            Ok("app") => Install::App,
             _ => Install::Other,
         };
         let command = std::env::var(COMMAND_ENV)

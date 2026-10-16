@@ -463,7 +463,7 @@ enum StartKeyOutcome {
 /// the append-only rule gets quietly broken by a convenience method.
 #[derive(Clone)]
 pub struct RunStore {
-    pool: sqlx::PgPool,
+    db: crate::db::Db,
 }
 
 /// How many records a cold cache loads at boot. The history list is bounded anyway (the archive's
@@ -473,8 +473,8 @@ const RELOAD_LIMIT: i64 = 500;
 
 impl RunStore {
     #[must_use]
-    pub fn new(pool: sqlx::PgPool) -> Self {
-        Self { pool }
+    pub fn new(db: crate::db::Db) -> Self {
+        Self { db }
     }
 
     /// Write the whole record, creating it or replacing what is stored.
@@ -486,7 +486,7 @@ impl RunStore {
     ///
     /// # Errors
     ///
-    /// Returns an error when the record cannot be encoded or Postgres fails.
+    /// Returns an error when the record cannot be encoded or the database fails.
     pub async fn upsert(
         &self,
         record: &RunRecord,
@@ -564,7 +564,7 @@ impl RunStore {
         .bind((!record.team_key.is_empty()).then_some(record.team_key.as_str()))
         .bind(&record.only_agent)
         .bind(&record.team_revision)
-        .execute(&self.pool)
+        .execute(self.db.writer())
         .await?;
         Ok(())
     }
@@ -577,7 +577,7 @@ impl RunStore {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails or a row cannot be decoded.
+    /// Returns an error when the database fails or a row cannot be decoded.
     pub async fn recent(&self) -> Result<Vec<StoredRun>, sqlx::Error> {
         let rows = sqlx::query(
             "SELECT * FROM (
@@ -585,7 +585,7 @@ impl RunStore {
              ) AS recent ORDER BY created_at ASC, run_id ASC",
         )
         .bind(RELOAD_LIMIT)
-        .fetch_all(&self.pool)
+        .fetch_all(self.db.reader())
         .await?;
         rows.iter().map(decode_run).collect()
     }
@@ -609,7 +609,7 @@ const fn status_str(status: RunStatus) -> &'static str {
     }
 }
 
-pub(crate) fn decode_run(row: &sqlx::postgres::PgRow) -> Result<StoredRun, sqlx::Error> {
+pub(crate) fn decode_run(row: &sqlx::sqlite::SqliteRow) -> Result<StoredRun, sqlx::Error> {
     use sqlx::Row as _;
     let status: String = row.try_get("status")?;
     let trigger: String = row.try_get("trigger")?;
@@ -747,7 +747,7 @@ impl RunRegistry {
             .is_some_and(|entry| entry.record.auto_mode && !entry.record.status.is_terminal())
     }
 
-    /// Write one cached record through to Postgres. A no-op without a store.
+    /// Write one cached record through to the database. A no-op without a store.
     ///
     /// Called after a transition rather than inside it, because the transition methods are
     /// synchronous and used from both async handlers and synchronous tests. A failed write is
@@ -757,7 +757,7 @@ impl RunRegistry {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails.
+    /// Returns an error when the database fails.
     pub async fn persist(&self, run_id: &str) -> Result<(), sqlx::Error> {
         let Some(store) = &self.store else {
             return Ok(());
@@ -792,7 +792,7 @@ impl RunRegistry {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails or a row cannot be decoded.
+    /// Returns an error when the database fails or a row cannot be decoded.
     pub async fn reload(&self) -> Result<usize, sqlx::Error> {
         let Some(store) = &self.store else {
             return Ok(0);
@@ -1446,12 +1446,12 @@ impl RunRegistry {
             .collect()
     }
 
-    /// Where a chat message's rows live: the `runs` table's pool, when this registry is durable.
+    /// Where a chat message's rows live: the `runs` table's database, when this registry is durable.
     #[must_use]
     pub(crate) fn chat_store(&self) -> Option<crate::chat::ChatStore> {
         self.store
             .as_ref()
-            .map(|store| crate::chat::ChatStore::new(store.pool.clone()))
+            .map(|store| crate::chat::ChatStore::new(store.db.clone()))
     }
 }
 
@@ -4032,13 +4032,14 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     ///   would make the operator think a process was killed.
     /// * The recovered start key still collapses a resubmission. A key that did not survive would
     ///   turn the operator's retried submit into a second run.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn run_records_and_their_start_keys_survive_a_registry_reload(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn run_records_and_their_start_keys_survive_a_registry_reload() {
+        let pool = crate::db::Db::temp().await;
         let team = TeamConfig::parse(
             "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
         )
         .expect("a valid team");
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let first = RunRegistry::durable(archive.run_store());
 
         let mut record = RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual)
@@ -4121,13 +4122,14 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     /// ADR 0015 deferred this and named the columns; ADR 0016 takes the decision. The claim is
     /// about the *daemon*, not the harness, and the reconciliation is written back so the boot
     /// after this one does not have to do it again.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_daemon_restart_marks_a_record_no_process_owns_as_failed(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn a_daemon_restart_marks_a_record_no_process_owns_as_failed() {
+        let pool = crate::db::Db::temp().await;
         let team = TeamConfig::parse(
             "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
         )
         .expect("a valid team");
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let first = RunRegistry::durable(archive.run_store());
 
         // One record for each non-terminal status, plus one that finished normally.
@@ -4195,10 +4197,9 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     /// ADR 0038: a team with a top-level `deliver` publishes the answer of a run started by hand,
     /// not only a routine's; a team without one publishes nothing until the operator sends it;
     /// and the explicit send names its own refusals.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_hand_started_run_delivers_when_the_team_does_and_on_request_otherwise(
-        pool: sqlx::PgPool,
-    ) {
+    #[tokio::test]
+    async fn a_hand_started_run_delivers_when_the_team_does_and_on_request_otherwise() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
         let plain = dir.write_team("plain.yaml", &harness);
@@ -4207,7 +4208,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
             "entrypoint: solo\ndeliver:\n  notion: {}\n",
         );
         fs::write(dir.0.join("delivering.yaml"), delivering).unwrap();
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
         registry.set_publisher(Arc::new(Publisher::disconnected()));
         let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
@@ -4299,16 +4300,16 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         );
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_follow_up_is_refused_before_it_starts_when_it_cannot_be_honoured(
-        pool: sqlx::PgPool,
-    ) {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_follow_up_is_refused_before_it_starts_when_it_cannot_be_honoured() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
         // `write_team` writes a single-agent team with no edges, so this team runs in team mode.
         dir.write_team("team.yaml", &harness);
         dir.write_team("other.yaml", &harness);
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
         let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
 
@@ -4428,14 +4429,14 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     /// "from b" needs the handover b was given the first time. A followed run that stored none
     /// refuses the new run and **names the stage**, rather than starting b with nothing where it
     /// had been handed a page — which would look like a cheap follow-up that worked.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_skipped_stage_with_no_stored_handover_refuses_the_run_naming_the_stage(
-        pool: sqlx::PgPool,
-    ) {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_skipped_stage_with_no_stored_handover_refuses_the_run_naming_the_stage() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         dir.write_pipeline_team("chain.yaml");
         let team = TeamConfig::load(&dir.0.join("chain.yaml")).expect("a valid pipeline");
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
         let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
 
@@ -4586,8 +4587,9 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     /// `prompt_sections` record, so it fails if the rule changes. Its counterfactual is the same
     /// diamond one stage later, where every predecessor of every executed stage is skipped and the
     /// replay is unambiguous.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_join_fed_from_both_sides_of_the_boundary_is_refused_by_name(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn a_join_fed_from_both_sides_of_the_boundary_is_refused_by_name() {
+        let pool = crate::db::Db::temp().await;
         // a ─┬─► b ─┬─► d
         //    └─► c ─┘
         let order: Vec<String> = ["a", "b", "c", "d"]
@@ -4599,7 +4601,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
             ("c".to_owned(), vec!["a".to_owned()]),
             ("d".to_owned(), vec!["b".to_owned(), "c".to_owned()]),
         ]);
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         // The followed run's archived prompt record: every stage but the entrypoint was handed
         // its predecessors' results, which is what a replay reads.
         for (seq, stage) in (0u64..).zip(["b", "c", "d"]) {
@@ -4677,10 +4679,9 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     /// the same shape as a turn killed by the ten-minute ACP request timeout — the stage never
     /// reaches its boundary and never answers the checkpoint request — and reaches it in
     /// milliseconds instead of ten minutes.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_run_that_died_mid_turn_leaves_a_coordinator_checkpoint_the_next_run_opens_with(
-        pool: sqlx::PgPool,
-    ) {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_run_that_died_mid_turn_leaves_a_coordinator_checkpoint_the_next_run_opens_with() {
         const DYING_HARNESS: &str = r#"#!/bin/sh
 set -eu
 IFS= read -r _
@@ -4691,10 +4692,11 @@ IFS= read -r _
 printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"dying","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"half of section three"}}}}'
 exit 7
 "#;
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let dying = dir.write_harness("dying.sh", DYING_HARNESS);
         dir.write_team("dying.yaml", &dying);
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
         let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
 
@@ -5219,13 +5221,14 @@ exit 7
     /// Quests judge a run only against the settings it ran with (docs/QUESTS.md), so its record
     /// keeps the revision of the bytes it executed: not the file as it is later, and not lost on a
     /// restart.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_run_keeps_the_revision_of_the_team_file_it_ran(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn a_run_keeps_the_revision_of_the_team_file_it_ran() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
         let team_path = dir.write_team("team.yaml", &harness);
         let ran = team_revision(&fs::read(&team_path).unwrap());
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let registry = RunRegistry::durable(archive.run_store());
         let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
         let response = app
@@ -5430,12 +5433,13 @@ exit 7
         }
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn run_end_to_end_archives_under_the_pre_minted_id(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn run_end_to_end_archives_under_the_pre_minted_id() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
         dir.write_team("team.yaml", &harness);
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
         let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
 
@@ -5515,14 +5519,13 @@ exit 7
         );
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_normal_turn_with_no_response_fails_as_missing_canonical_response(
-        pool: sqlx::PgPool,
-    ) {
+    #[tokio::test]
+    async fn a_normal_turn_with_no_response_fails_as_missing_canonical_response() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let harness = dir.write_harness("quiet.sh", EMPTY_REPLY_HARNESS);
         dir.write_team("team.yaml", &harness);
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
         let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
 
@@ -5560,12 +5563,13 @@ exit 7
         assert!(fetched["error"].is_null());
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn cancel_aborts_the_run_and_kills_the_harness(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn cancel_aborts_the_run_and_kills_the_harness() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let harness = dir.write_harness("sleepy.sh", SLEEPING_HARNESS);
         dir.write_team("team.yaml", &harness);
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
         let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
 
@@ -5660,14 +5664,16 @@ exit 7
         );
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn answers_validate_the_address_and_advance_the_question_queue(pool: sqlx::PgPool) {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn answers_validate_the_address_and_advance_the_question_queue() {
         use crate::operator::{ParkTier, StopKind, WaitingOn};
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
         dir.write_team("team.yaml", &harness);
         let team = TeamConfig::load(&dir.0.join("team.yaml")).unwrap();
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let registry = RunRegistry::durable(archive.run_store());
         let record =
             RunRecord::queued("team.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
@@ -5765,11 +5771,10 @@ exit 7
         assert!(stored.get(&run_id).unwrap().waiting_on.is_none());
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_follow_up_replays_operator_direction_separately_from_the_handover(
-        pool: sqlx::PgPool,
-    ) {
-        let archive = EventArchive::from_pool(pool);
+    #[tokio::test]
+    async fn a_follow_up_replays_operator_direction_separately_from_the_handover() {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
         crate::EventLog::new(archive.clone(), "reviewed".into())
             .append(
                 "writer",
@@ -5802,17 +5807,16 @@ exit 7
         assert_eq!(lineage.replayed_stage_results["writer"], "source material");
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_released_question_starts_a_checkpoint_continuation_and_identifies_it(
-        pool: sqlx::PgPool,
-    ) {
+    #[tokio::test]
+    async fn a_released_question_starts_a_checkpoint_continuation_and_identifies_it() {
         use crate::memory::{CheckpointSource, CheckpointWrite};
         use crate::operator::{ParkTier, StopKind, WaitingOn};
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
         dir.write_team("team.yaml", &harness);
         let team = TeamConfig::load(&dir.0.join("team.yaml")).unwrap();
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let registry = RunRegistry::durable(archive.run_store());
         let record = RunRecord::queued(
             "team.yaml".into(),
@@ -5898,8 +5902,9 @@ exit 7
         }));
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn team_mode_checkpoints_without_replacing_its_answer(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn team_mode_checkpoints_without_replacing_its_answer() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let script = COMPLETING_HARNESS.replace(
             "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{}}'",
@@ -5916,7 +5921,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'"###
             format!("{yaml}\nmemory:\n  deliverAs: packet-only\n  notebook:\n    enabled: true\n"),
         )
         .unwrap();
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
         let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
         let response = app

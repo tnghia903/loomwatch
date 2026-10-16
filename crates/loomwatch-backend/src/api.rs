@@ -1,6 +1,6 @@
 //! REST surface consumed by the `LoomWatch` web UI.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -44,7 +44,7 @@ struct ApiState {
     /// Present only when the daemon has a database, and read by exactly one handler:
     /// `GET /api/capabilities`, to fill each memory source's kept-note count.
     ///
-    /// This router deliberately does **not** depend on Postgres for anything else — reading a
+    /// This router deliberately does **not** depend on the database for anything else — reading a
     /// team's Brief is reading Markdown off disk and must work with the archive down. The
     /// inventory is the one place where a number lives in rows, and `None` there means "not
     /// counted", never "zero" (see `capabilities::MemorySourceRef::kept`).
@@ -312,6 +312,10 @@ pub struct DetectedHarness {
     /// (`CommandStatus::OutsidePath`, judged here the same way, without starting anything).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub needs_restart: bool,
+    /// Where `LoomWatch`'s own copy of this app's ACP bridge stands, for an app started through
+    /// one (`crate::connectors`). Absent for an app that brings its own bridge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<crate::connectors::ConnectorStatus>,
     pub spawn: HarnessSpawn,
 }
 
@@ -351,6 +355,13 @@ pub struct HarnessReport {
     /// Present when a configured host runner could not be reached or authenticated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner_error: Option<String>,
+    /// Every app `LoomWatch` keeps a connector for, by id, including one not on this computer yet:
+    /// the Home panel shows its "Set up" progress from here (`crate::connectors`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub connectors: BTreeMap<String, crate::connectors::ConnectorStatus>,
+    /// Each app's latest sign-in or install started from the Home panel (`crate::app_setup`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub setup: BTreeMap<String, crate::app_setup::SetupJob>,
 }
 
 /// Spawn descriptor the UI can copy into a new team agent.
@@ -633,6 +644,22 @@ fn router_with(
     Ok(Router::new()
         .route("/api/harnesses", get(get_harnesses))
         .route("/api/harnesses/{id}/models", get(get_harness_models))
+        .route(
+            "/api/harnesses/{id}/prepare",
+            axum::routing::post(post_harness_prepare),
+        )
+        .route(
+            "/api/harnesses/{id}/sign-in",
+            axum::routing::post(post_harness_sign_in),
+        )
+        .route(
+            "/api/harnesses/{id}/sign-in/code",
+            axum::routing::post(post_harness_sign_in_code),
+        )
+        .route(
+            "/api/harnesses/{id}/install",
+            axum::routing::post(post_harness_install),
+        )
         .route("/api/commands", get(get_commands))
         .route("/api/capabilities", get(get_capabilities))
         .route("/api/capabilities/{id}", get(get_capability_details))
@@ -719,6 +746,16 @@ async fn harness_report(state: &ApiState) -> HarnessReport {
         searched_path: searched_directories(state.search_path.as_deref()),
         known_ids: known_harness_ids(),
         runner_error: None,
+        connectors: crate::connectors::installed()
+            .map(|connectors| {
+                connectors
+                    .all_status()
+                    .into_iter()
+                    .map(|(app, status)| (app.to_owned(), status))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        setup: crate::app_setup::jobs().snapshot().into_iter().collect(),
     };
     if let Some(config) = &state.host_runner {
         match crate::host_runner::list_harnesses(config).await {
@@ -728,24 +765,19 @@ async fn harness_report(state: &ApiState) -> HarnessReport {
             }
         }
     }
-    let health = state
+    let mut health = state
         .harness_health
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
+    // A sign-in that finished since an app's last check makes that check's verdict stale.
+    health.retain(|app, record| {
+        crate::app_setup::jobs()
+            .signed_in_at(app)
+            .is_none_or(|signed_in| record.checked_at > signed_in)
+    });
     apply_harness_health(&mut report.harnesses, &health, Instant::now());
-    for harness in report
-        .harnesses
-        .iter_mut()
-        .filter(|harness| harness.acp_available)
-    {
-        harness.needs_restart = check_command(
-            &harness.spawn.cmd,
-            state.run_path.as_deref(),
-            state.search_path.as_deref(),
-        )
-        .status
-            == CommandStatus::OutsidePath;
-    }
+    // No `needs_restart` any more: a run finds an app in a per-user folder as the list does
+    // (`acp::per_user_program`). The field stays for a host runner's older report.
     report
 }
 
@@ -913,6 +945,90 @@ async fn get_harnesses(State(state): State<ApiState>) -> Json<HarnessReport> {
     Json(report)
 }
 
+/// Start installing `LoomWatch`'s own copy of an app's bridge (`crate::connectors`), so its first
+/// run starts at once. Answers at once with where it stands; `/api/harnesses` reports the rest.
+async fn post_harness_prepare(
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<crate::connectors::ConnectorStatus>, ApiError> {
+    let connectors = crate::connectors::installed().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::CONFLICT,
+            "this LoomWatch keeps no connectors".to_owned(),
+        )
+    })?;
+    if connectors.status(&id).is_none() {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            format!("{id} needs no connector"),
+        ));
+    }
+    connectors.prepare_in_background(&id);
+    connectors
+        .status(&id)
+        .map(Json)
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, format!("{id} needs no connector")))
+}
+
+/// Start an app's own sign-in (`crate::app_setup`): its browser page opens, and
+/// `/api/harnesses` reports the rest.
+async fn post_harness_sign_in(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<(StatusCode, Json<crate::app_setup::SetupJob>), ApiError> {
+    if !crate::app_setup::can_sign_in(&id) {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            format!("LoomWatch can't sign in to {id}"),
+        ));
+    }
+    let harness = detect_harnesses(state.search_path.as_deref())
+        .into_iter()
+        .find(|harness| harness.id == id)
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::CONFLICT,
+                format!("{id} isn't on this computer yet"),
+            )
+        })?;
+    crate::app_setup::jobs()
+        .sign_in(&id, Path::new(&harness.executable_path))
+        .map(|job| (StatusCode::ACCEPTED, Json(job)))
+        .map_err(|error| ApiError::new(StatusCode::BAD_GATEWAY, format!("{error:#}")))
+}
+
+#[derive(Debug, Deserialize)]
+struct SignInCode {
+    code: String,
+}
+
+/// Give a running sign-in the code its page showed (Claude's ends with one).
+async fn post_harness_sign_in_code(
+    AxumPath(id): AxumPath<String>,
+    Json(body): Json<SignInCode>,
+) -> Result<StatusCode, ApiError> {
+    crate::app_setup::jobs()
+        .submit_code(&id, &body.code)
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|error| ApiError::new(StatusCode::CONFLICT, format!("{error:#}")))
+}
+
+/// Run an app's own installer (`crate::app_setup`); `/api/harnesses` reports how it went.
+async fn post_harness_install(
+    AxumPath(id): AxumPath<String>,
+) -> Result<(StatusCode, Json<crate::app_setup::SetupJob>), ApiError> {
+    if !crate::app_setup::can_install(&id) {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            format!("LoomWatch can't install {id}"),
+        ));
+    }
+    crate::app_setup::jobs()
+        .install(&id)
+        .map(|job| (StatusCode::ACCEPTED, Json(job)))
+        .map_err(|error| ApiError::new(StatusCode::BAD_GATEWAY, format!("{error:#}")))
+}
+
 async fn get_harness_models(
     State(state): State<ApiState>,
     AxumPath(id): AxumPath<String>,
@@ -927,6 +1043,24 @@ async fn get_harness_models(
         return Err(ApiError::new(
             StatusCode::CONFLICT,
             format!("{} does not have an available ACP adapter", harness.name),
+        ));
+    }
+    // Still installing its connector, with no npx to stand in: nothing to check yet, and no
+    // verdict is recorded, so the check runs as soon as the connector is ready.
+    if let Some(connectors) = crate::connectors::installed()
+        && harness
+            .connector
+            .as_ref()
+            .is_some_and(|status| *status != crate::connectors::ConnectorStatus::Ready)
+        && !connectors.npx_available()
+    {
+        connectors.prepare_in_background(&harness.id);
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            format!(
+                "{} isn't ready yet: LoomWatch is getting it ready.",
+                harness.name
+            ),
         ));
     }
 
@@ -1050,6 +1184,8 @@ pub fn system_harness_report() -> HarnessReport {
         searched_path: searched_directories(search_path.as_deref()),
         known_ids: known_harness_ids(),
         runner_error: None,
+        connectors: BTreeMap::new(),
+        setup: BTreeMap::new(),
     }
 }
 
@@ -2408,10 +2544,13 @@ pub fn detect_harnesses(search_path: Option<&std::ffi::OsStr>) -> Vec<DetectedHa
     let Some(search_path) = search_path else {
         return Vec::new();
     };
+    let connectors = crate::connectors::installed();
     HARNESSES
         .iter()
         .filter_map(|spec| {
             find_executable(search_path, spec.command)
+                // Claude or Codex not installed on its own: its connector carries it.
+                .or_else(|| connectors.and_then(|connectors| connectors.engine(spec.id)))
                 .map(|path| detected(search_path, *spec, &path))
         })
         .collect()
@@ -2460,6 +2599,17 @@ pub(crate) fn known_app_name(spawn: &crate::config::SpawnConfig) -> Option<&'sta
     None
 }
 
+/// The `npx` package and version `LoomWatch` starts `app`'s bridge from, when it has one.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn fallback_package(app: &str) -> Option<&'static str> {
+    HARNESSES
+        .iter()
+        .find(|spec| spec.id == app)
+        .and_then(|spec| spec.acp)
+        .and_then(|bridge| bridge.fallback_package)
+}
+
 /// Every id in the catalog, so the UI need not keep a second copy of the vendor list.
 #[must_use]
 pub fn known_harness_ids() -> Vec<String> {
@@ -2486,6 +2636,7 @@ fn detected(
         health_detail: None,
         health_cause: None,
         needs_restart: false,
+        connector: None,
         spawn: HarnessSpawn {
             cmd: command.to_owned(),
             args: args.iter().map(|arg| (*arg).to_owned()).collect(),
@@ -2507,8 +2658,18 @@ fn detected(
         return found(bridge.command, bridge.args, true, None);
     }
     let npx_available = find_executable(search_path, "npx").is_some();
+    // LoomWatch installs this bridge itself and starts it directly (`crate::connectors`). The
+    // spawn still says `npx -y`, so a team file stays portable; a computer without Node.js gets
+    // LoomWatch's own.
+    let connector = bridge
+        .fallback_package
+        .and(crate::connectors::installed())
+        .and_then(|connectors| connectors.status(spec.id));
     match bridge.fallback_package {
-        Some(package) if npx_available => found("npx", &["-y", package], true, None),
+        Some(package) if npx_available || connector.is_some() => DetectedHarness {
+            connector,
+            ..found("npx", &["-y", package], true, None)
+        },
         Some(package) => found(
             bridge.command,
             bridge.args,
@@ -2591,7 +2752,8 @@ fn check_command(
     } else if let Some(found) =
         detection_path.and_then(|detection_path| find_executable(detection_path, cmd))
     {
-        (CommandStatus::OutsidePath, Some(found))
+        // A run finds it there too (`acp::per_user_program`).
+        (CommandStatus::Found, Some(found))
     } else {
         (CommandStatus::NotFound, None)
     };
@@ -3189,7 +3351,7 @@ mod tests {
     /// in `~/.opencode/bin` (detection searches there), but a run cannot start it — so the check
     /// says "outside the PATH", with where it is, rather than "not installed".
     #[tokio::test]
-    async fn a_command_only_in_a_per_user_folder_is_outside_the_run_path() {
+    async fn a_command_only_in_a_per_user_folder_is_found_without_a_restart() {
         let system = TempDirectory::new();
         let per_user = TempDirectory::new();
         create_executable(&per_user.0, "opencode");
@@ -3210,31 +3372,21 @@ mod tests {
         )
         .expect("build API router");
 
+        // A run looks in the per-user folders too (`acp::per_user_program`), so an app installed
+        // there while LoomWatch runs is ready at once.
         let (status, report) = get_json(&router, "/api/commands?cmd=opencode").await;
         assert_eq!(status, StatusCode::OK, "{report}");
         assert_eq!(
             report,
             json!({"commands": [{
                 "cmd": "opencode",
-                "status": "outside_path",
+                "status": "found",
                 "path": per_user.0.join("opencode").to_string_lossy(),
             }]})
         );
-        // The list says the same, so nothing offers the app as ready before a restart.
         let (_, listed_report) = get_json(&router, "/api/harnesses").await;
-        assert_eq!(listed(&listed_report, "opencode")["needsRestart"], true);
-        let restarted = test_router_with_path(&system.0, Some(detection_path.clone()));
-        let (_, restarted_report) = get_json(&restarted, "/api/harnesses").await;
-        let opencode = listed(&restarted_report, "opencode");
+        let opencode = listed(&listed_report, "opencode");
         assert!(opencode.get("needsRestart").is_none(), "{opencode}");
-
-        // Once the daemon's own PATH has the folder, a run finds it there.
-        let found = check_command(
-            "opencode",
-            Some(detection_path.as_os_str()),
-            Some(detection_path.as_os_str()),
-        );
-        assert_eq!(found.status, CommandStatus::Found);
     }
 
     #[tokio::test]
@@ -3775,6 +3927,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             health_detail: None,
             health_cause: None,
             needs_restart: false,
+            connector: None,
             spawn: HarnessSpawn {
                 cmd: "gemini".to_owned(),
                 args: vec!["--acp".to_owned()],

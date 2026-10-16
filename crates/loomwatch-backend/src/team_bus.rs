@@ -2002,10 +2002,10 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tower::ServiceExt;
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn all_tools_emit_events_and_dispatch_runs_a_second_agent(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn all_tools_emit_events_and_dispatch_runs_a_second_agent() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -2044,7 +2044,7 @@ mod tests {
             ],
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let bus = TeamBus::start(
             team,
@@ -2148,10 +2148,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn delegation_guards_reject_before_spawning_and_archive_failures(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[tokio::test]
+    async fn delegation_guards_reject_before_spawning_and_archive_failures() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             schema_version: 1,
             id: "guard-test-team".into(),
@@ -2173,7 +2172,7 @@ mod tests {
                 .collect(),
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let bus = TeamBus::start(
             team,
@@ -2242,10 +2241,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn concurrent_dispatch_guard_caps_and_releases_background_slots(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[tokio::test]
+    async fn concurrent_dispatch_guard_caps_and_releases_background_slots() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -2279,7 +2277,7 @@ mod tests {
             ],
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let bus = TeamBus::start(
             team,
@@ -2325,10 +2323,10 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn pipeline_mode_withdraws_macro_sequencing_tools_and_enforces_the_recruiting_lock(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[tokio::test]
+    async fn pipeline_mode_withdraws_macro_sequencing_tools_and_enforces_the_recruiting_lock()
+    -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let mut locked = test_agent("locked", "true", Vec::new());
         locked.allow_recruiting = false;
         let team = Arc::new(TeamConfig {
@@ -2350,7 +2348,7 @@ mod tests {
             ],
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let bus = TeamBus::start(
             team,
@@ -2421,12 +2419,11 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
+    #[tokio::test]
     /// ADR 0027 retired budgets. Spend a harness reports is still archived as evidence, but no
     /// amount of it refuses a delegation or makes the bus write anything of its own.
-    async fn archived_spend_neither_refuses_a_delegation_nor_raises_a_warning(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    async fn archived_spend_neither_refuses_a_delegation_nor_raises_a_warning() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             schema_version: 1,
             id: "warning-test-team".into(),
@@ -2445,7 +2442,7 @@ mod tests {
                 .collect(),
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let bus = TeamBus::start(
             team,
@@ -2497,11 +2494,12 @@ mod tests {
     /// * No tool takes an agent, team or run id. There is deliberately nothing to distrust.
     /// * `memory.notebook.enabled: false` withdraws them from `tools/list` *and* refuses a call,
     ///   so a harness holding a cached list cannot write.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn the_memory_tools_are_structured_offered_in_both_modes_and_gated_by_the_team_file(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
-        let archive = EventArchive::from_pool(pool);
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn the_memory_tools_are_structured_offered_in_both_modes_and_gated_by_the_team_file()
+    -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let team = Arc::new(TeamConfig {
             schema_version: 1,
@@ -2664,11 +2662,11 @@ mod tests {
 
     /// Scope comes from the token, so an id an agent guessed from another team reads as not
     /// found — and the author of a write is the token's agent, not anything in the arguments.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_bus_caller_reads_only_its_own_scope_and_writes_only_as_itself(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
-        let archive = EventArchive::from_pool(pool);
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_bus_caller_reads_only_its_own_scope_and_writes_only_as_itself() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let team = Arc::new(TeamConfig {
             schema_version: 1,
@@ -2783,7 +2781,7 @@ mod tests {
             "this run's notes and the team's kept notes"
         );
 
-        // The checkpoint tool records a row for the caller, numbered by Postgres.
+        // The checkpoint tool records a row for the caller, numbered by the database.
         let response = post_json(
             &bus,
             &connection.token,
@@ -2839,10 +2837,10 @@ mod tests {
         assert!(message.contains(expected), "{message:?}");
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn teardown_guard_aborts_delegated_helpers_and_the_bus_server(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn teardown_guard_aborts_delegated_helpers_and_the_bus_server() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         // Negotiates a session, then hangs inside `session/prompt`. `exec` makes the
         // archived pid the sleeping process itself, so "is it gone" asks about exactly the
         // child that `kill_on_drop` must have killed.
@@ -2873,7 +2871,7 @@ mod tests {
             ],
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let bus = TeamBus::start(
             team,
@@ -2972,10 +2970,10 @@ mod tests {
     /// by refusing to answer unless it is the same session that already took its own turn, and the
     /// asker has `allowRecruiting: false` — which must not block a question to a predecessor,
     /// because asking one is conversation along a configured edge, not recruiting a helper.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_kept_alive_predecessor_answers_its_successor_from_its_own_session(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_kept_alive_predecessor_answers_its_successor_from_its_own_session() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -3021,7 +3019,7 @@ mod tests {
                 ts: "2026-09-12T00:00:00Z".into(),
             }],
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let bus = TeamBus::start(
             team.clone(),
@@ -3136,8 +3134,10 @@ mod tests {
     /// The 2026-10-14 run's other half: Reader asked Gatherer for its full list, and the answer
     /// it got was Codex's refusal of the model. An `ask` whose turn the app reported as failed is
     /// a tool error naming the refusal, not a reply, and the session it went to still closes.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn an_ask_codex_refused_is_an_error_not_an_answer(pool: sqlx::PgPool) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn an_ask_codex_refused_is_an_error_not_an_answer() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let script = format!(
             r#"
             set -eu
@@ -3180,7 +3180,7 @@ mod tests {
                 ts: "2026-10-14T00:00:00Z".into(),
             }],
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let bus = TeamBus::start(
             team.clone(),
@@ -3250,8 +3250,10 @@ mod tests {
     /// operator id, so it must say which agent it went to: the run view has no other way to know.
     /// The agent's script refuses the turn unless the follow-up reaches it, so this cannot pass by
     /// the event merely being written.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn an_operator_follow_up_records_the_agent_it_went_to(pool: sqlx::PgPool) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn an_operator_follow_up_records_the_agent_it_went_to() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -3286,7 +3288,7 @@ mod tests {
             agents: vec![test_agent("a", "/bin/sh", vec!["-c".into(), script.into()])],
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let bus = TeamBus::start(
             team,
@@ -3367,8 +3369,10 @@ mod tests {
     /// `workspace::materialise` entirely, so a helper received neither the team's standing notes
     /// nor the capabilities the operator had wired to it. The helper's own script refuses the turn
     /// if the constraint is absent, so this cannot pass by the `ask` merely returning.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_delegated_helper_is_supplied_the_team_brief(pool: sqlx::PgPool) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_delegated_helper_is_supplied_the_team_brief() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let scratch =
             std::env::temp_dir().join(format!("loomwatch-helper-brief-{}", Uuid::new_v4()));
         std::fs::create_dir_all(scratch.join("brief")).expect("scratch");
@@ -3432,7 +3436,7 @@ mod tests {
             ],
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let memory = Arc::new(TeamMemory::load(
             &crate::memory::MemoryRoots::for_team(&team_path, None),
             &team_path,
@@ -3487,8 +3491,9 @@ mod tests {
     /// A helper is started at its agent's `thinkingEffort`, as the same agent is when it runs as
     /// a stage or as the lead. The helper's own script refuses its turn unless the effort it is
     /// set to is the one the team file names, so the `ask` cannot succeed without it.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_delegated_helper_runs_at_its_thinking_effort(pool: sqlx::PgPool) -> Result<()> {
+    #[tokio::test]
+    async fn a_delegated_helper_runs_at_its_thinking_effort() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let helper_script = r#"
             set -eu
             IFS= read -r _
@@ -3530,7 +3535,7 @@ mod tests {
             agents: vec![test_agent("lead", "true", Vec::new()), helper],
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let bus = TeamBus::start(
             team,
@@ -3629,10 +3634,10 @@ token=$(printf '%s' "$new" | sed -n 's/.*"Authorization","value":"Bearer \([^"]*
     /// * a **helper started by `ask`** tries `ask` (exit 32) and `dispatch` (exit 33).
     ///
     /// The agent either would have started writes a marker first thing; neither marker exists.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn an_agent_answering_a_question_may_not_start_another_agent(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn an_agent_answering_a_question_may_not_start_another_agent() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let dir = markers("answering");
         let never = |name: &str| {
             format!(
@@ -3702,7 +3707,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
                 edges: mode_edges,
             })
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
 
         // A kept-alive stage, asked by the stage after it.
@@ -3807,10 +3812,10 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
     /// once the predecessor has the question; nothing calls the bus to cancel anything. The
     /// predecessor's script answers only a `session/cancel` (exit 41 otherwise), so the run can
     /// finish only if the end of the asker's turn reached the kept-alive turn.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_question_is_withdrawn_when_the_agent_that_asked_ends_its_turn(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_question_is_withdrawn_when_the_agent_that_asked_ends_its_turn() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let dir = markers("withdrawn");
         let asked = dir.join("asked");
         let predecessor = format!(
@@ -3831,7 +3836,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
 "#,
             asked = asked.display(),
         );
-        let asker = format!(
+        let asking_script = format!(
             r#"set -eu
 IFS= read -r _
 printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"mcpCapabilities":{{"http":true}}}}}}}}'
@@ -3864,7 +3869,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             guards: GuardsConfig::default(),
             agents: vec![
                 test_agent("a", "/bin/sh", vec!["-c".into(), predecessor.clone()]),
-                test_agent("b", "/bin/sh", vec!["-c".into(), asker.clone()]),
+                test_agent("b", "/bin/sh", vec!["-c".into(), asking_script.clone()]),
             ],
             edges: vec![crate::config::EdgeConfig {
                 from: "a".into(),
@@ -3874,7 +3879,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
                 ts: "2026-10-12T00:00:00Z".into(),
             }],
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let bus = TeamBus::start(
             team,
@@ -3911,7 +3916,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
         let live = bus.keep_alive("a", a, a_recorder, first).await;
 
         let b_connection = bus.connection("b").await?;
-        let mut b = AcpProcess::spawn(&spec(&asker))?;
+        let mut b = AcpProcess::spawn(&spec(&asking_script))?;
         let mut b_context = TeamSessionContext {
             archive: &archive,
             exit_timeout: Duration::from_secs(5),
@@ -3964,10 +3969,10 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
     /// The cold half of the same rule: a helper started for an `ask` is ended when the asker's
     /// turn ends first, instead of finishing an answer nobody reads. The helper's script records
     /// its pid and then blocks; it must be gone, and the roster must say it was cancelled.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_helper_started_for_a_question_is_ended_when_the_asker_moves_on(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_helper_started_for_a_question_is_ended_when_the_asker_moves_on() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let dir = markers("withdrawn-helper");
         let pid = dir.join("pid");
         let helper = format!(
@@ -4020,7 +4025,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             ],
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let bus = TeamBus::start(
             team,

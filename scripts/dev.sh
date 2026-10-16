@@ -5,11 +5,12 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 TEAMS_ROOT="${TEAMS_ROOT:-teams}"
-DATABASE_URL="${DATABASE_URL:-postgres://loomwatch:local-test-only@127.0.0.1:5433/loomwatch}"
+# This checkout's own run history, apart from any installed LoomWatch's.
+LOOMWATCH_DATABASE="${LOOMWATCH_DATABASE:-.loomwatch/loomwatch.db}"
 
 (cd ui && pnpm install && pnpm build)
 cargo build --release -p loomwatch-backend
 
 exec ./target/release/loomwatchd serve \
   --teams-root "$TEAMS_ROOT" \
-  --database-url "$DATABASE_URL"
+  --database "$LOOMWATCH_DATABASE"

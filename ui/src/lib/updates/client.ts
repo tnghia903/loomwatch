@@ -8,7 +8,7 @@ import { fetchAbout } from '../feedback/report'
 import { daemonFetch } from '../daemonFetch'
 
 /** How this copy was installed, which decides how it is updated. */
-export type Install = 'release' | 'source' | 'other'
+export type Install = 'release' | 'source' | 'app' | 'other'
 
 /** The newest published release. */
 export interface Release {

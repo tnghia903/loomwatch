@@ -134,6 +134,17 @@ describe('Updates', () => {
     expect(fetchMock.mock.calls.every(([, init]) => ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET')).toBe(true)
   })
 
+  it('tells someone using LoomWatch.app to replace it with the new .dmg, with no Terminal step', async () => {
+    serve({ ...newer, install: 'app', command: null })
+    app()
+    fireEvent.click(await screen.findByRole('button', { name: /Update available/ }))
+    const how = within(screen.getByRole('dialog', { name: 'LoomWatch 0.1.6 is available' })).getByRole('region', { name: 'How to update' })
+    expect(how).toHaveTextContent('Download LoomWatch-macos.dmg from the release page above and open it.')
+    expect(how).toHaveTextContent('Quit LoomWatch: click its icon in the menu bar, then Quit LoomWatch.')
+    expect(how).toHaveTextContent('Drag LoomWatch to Applications and choose Replace, then open it again. Your teams and history stay.')
+    expect(how).not.toHaveTextContent(/Terminal|Ctrl-C/)
+  })
+
   it('stops pointing at a skipped version everywhere at once, and can point at it again', async () => {
     serve(newer)
     app()

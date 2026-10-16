@@ -26,12 +26,13 @@ use axum::{Json, Router};
 use chrono::{DateTime, Local, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sqlx::{PgPool, Row as _};
+use sqlx::Row as _;
 use uuid::Uuid;
 
 use crate::api::{ApiError, normalized_relative_path, resolve_existing_team_path};
 use crate::archive::EventArchive;
 use crate::config::TeamConfig;
+use crate::db::Db;
 use crate::runs::{
     self, LaunchError, QueuedNote, RunRecord, RunRegistry, RunStatus, RunTrigger, StartRunOutcome,
     StartRunRequest,
@@ -113,21 +114,21 @@ pub struct ChatMessage {
     pub now: bool,
 }
 
-/// `chat_messages`, on the archive's pool.
+/// `chat_messages`, in the archive's database.
 #[derive(Clone)]
 pub struct ChatStore {
-    pool: PgPool,
+    db: Db,
 }
 
 impl ChatStore {
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(db: Db) -> Self {
+        Self { db }
     }
 
     /// # Errors
     ///
-    /// Returns an error when Postgres fails.
+    /// Returns an error when the database fails.
     pub async fn insert(&self, message: &ChatMessage) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO chat_messages
@@ -145,7 +146,7 @@ impl ChatStore {
         .bind(&message.agent_id)
         .bind(&message.delivered_at)
         .bind(message.now)
-        .execute(&self.pool)
+        .execute(self.db.writer())
         .await?;
         Ok(())
     }
@@ -157,11 +158,12 @@ impl ChatStore {
             return;
         }
         if let Err(error) = sqlx::query(
-            "UPDATE chat_messages SET delivered_at = $2 WHERE id = ANY($1) AND delivered_at IS NULL",
+            "UPDATE chat_messages SET delivered_at = $2
+             WHERE id IN (SELECT value FROM json_each($1)) AND delivered_at IS NULL",
         )
-        .bind(ids)
+        .bind(crate::db::json_list(ids))
         .bind(now())
-        .execute(&self.pool)
+        .execute(self.db.writer())
         .await
         {
             eprintln!("loomwatchd: could not mark chat notes delivered: {error}");
@@ -170,11 +172,11 @@ impl ChatStore {
 
     /// # Errors
     ///
-    /// Returns an error when Postgres fails.
+    /// Returns an error when the database fails.
     pub async fn get(&self, id: &str) -> Result<Option<ChatMessage>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM chat_messages WHERE id = $1")
             .bind(id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.db.reader())
             .await?;
         row.as_ref().map(decode_message).transpose()
     }
@@ -187,7 +189,7 @@ impl ChatStore {
              WHERE id = $1 AND route = 'team_note' AND run_id IS NULL",
         )
         .bind(id)
-        .execute(&self.pool)
+        .execute(self.db.writer())
         .await?;
         Ok(claimed.rows_affected() == 1)
     }
@@ -202,7 +204,7 @@ impl ChatStore {
             .bind(id)
             .bind(route)
             .bind(run_id)
-            .execute(&self.pool)
+            .execute(self.db.writer())
             .await?;
         Ok(())
     }
@@ -218,8 +220,8 @@ impl ChatStore {
         let rows = sqlx::query(
             "SELECT * FROM chat_messages
              WHERE (team_key = $1 OR team_path = $2) AND route = 'team_note'
-               AND ($3::TEXT IS NULL OR created_at < $3)
-               AND ($5::TEXT IS NULL OR text ILIKE $5 ESCAPE '\\')
+               AND ($3 IS NULL OR created_at < $3)
+               AND ($5 IS NULL OR text REGEXP $5)
              ORDER BY created_at DESC, id DESC LIMIT $4",
         )
         .bind(&team.key)
@@ -227,7 +229,7 @@ impl ChatStore {
         .bind(before)
         .bind(limit)
         .bind(search)
-        .fetch_all(&self.pool)
+        .fetch_all(self.db.reader())
         .await?;
         rows.iter().map(decode_message).collect()
     }
@@ -249,7 +251,7 @@ impl ChatStore {
         .bind(&team.path)
         .bind(before)
         .bind(limit)
-        .fetch_all(&self.pool)
+        .fetch_all(self.db.reader())
         .await?;
         rows.iter().map(decode_message).collect()
     }
@@ -260,10 +262,11 @@ impl ChatStore {
             return Ok(Vec::new());
         }
         let rows = sqlx::query(
-            "SELECT * FROM chat_messages WHERE run_id = ANY($1) ORDER BY created_at ASC, id ASC",
+            "SELECT * FROM chat_messages WHERE run_id IN (SELECT value FROM json_each($1))
+             ORDER BY created_at ASC, id ASC",
         )
-        .bind(run_ids)
-        .fetch_all(&self.pool)
+        .bind(crate::db::json_list(run_ids))
+        .fetch_all(self.db.reader())
         .await?;
         rows.iter().map(decode_message).collect()
     }
@@ -279,10 +282,10 @@ impl ChatStore {
         let rows = sqlx::query(
             "SELECT * FROM runs
              WHERE (team_key = $1 OR team_key = 'path:' || $2 OR (team_key IS NULL AND team_path = $2))
-               AND ($3::TEXT IS NULL OR created_at < $3)
-               AND ($5::TEXT IS NULL OR prompt ILIKE $5 ESCAPE '\\' OR reply ILIKE $5 ESCAPE '\\'
+               AND ($3 IS NULL OR created_at < $3)
+               AND ($5 IS NULL OR prompt REGEXP $5 OR reply REGEXP $5
                     OR run_id IN (SELECT run_id FROM chat_messages
-                                  WHERE run_id IS NOT NULL AND text ILIKE $5 ESCAPE '\\'))
+                                  WHERE run_id IS NOT NULL AND text REGEXP $5))
              ORDER BY created_at DESC, run_id DESC LIMIT $4",
         )
         .bind(&team.key)
@@ -290,7 +293,7 @@ impl ChatStore {
         .bind(before)
         .bind(limit)
         .bind(search)
-        .fetch_all(&self.pool)
+        .fetch_all(self.db.reader())
         .await?;
         rows.iter()
             .map(|row| runs::decode_run(row).map(|stored| stored.record))
@@ -312,7 +315,7 @@ impl ChatStore {
         .bind(&team.key)
         .bind(&team.path)
         .bind(prefix)
-        .fetch_all(&self.pool)
+        .fetch_all(self.db.reader())
         .await?;
         rows.iter()
             .map(|row| runs::decode_run(row).map(|stored| stored.record))
@@ -324,19 +327,21 @@ impl ChatStore {
         if run_ids.is_empty() {
             return Ok(Vec::new());
         }
+        // The answers are run events, which the archive writes in batches: see what was appended.
+        self.db.flush_events().await;
         let rows = sqlx::query(
             "SELECT q.run_id, q.agent_id, q.question, q.answered_at, e.payload, e.raw
              FROM operator_questions q
              JOIN run_events e ON e.id = q.answer_event_id
-             WHERE q.run_id = ANY($1) AND q.answered_at IS NOT NULL",
+             WHERE q.run_id IN (SELECT value FROM json_each($1)) AND q.answered_at IS NOT NULL",
         )
-        .bind(run_ids)
-        .fetch_all(&self.pool)
+        .bind(crate::db::json_list(run_ids))
+        .fetch_all(self.db.reader())
         .await?;
         rows.iter()
             .map(|row| {
-                let payload: Value = row.try_get("payload")?;
-                let raw: Option<Value> = row.try_get("raw")?;
+                let (payload, raw) = crate::archive::decode_payload_and_raw(row)
+                    .map_err(|error| sqlx::Error::Decode(error.into()))?;
                 Ok(Decision {
                     run_id: row.try_get("run_id")?,
                     asked_of: row.try_get("agent_id")?,
@@ -356,7 +361,7 @@ impl ChatStore {
     }
 }
 
-fn decode_message(row: &sqlx::postgres::PgRow) -> Result<ChatMessage, sqlx::Error> {
+fn decode_message(row: &sqlx::sqlite::SqliteRow) -> Result<ChatMessage, sqlx::Error> {
     let route: String = row.try_get("route")?;
     Ok(ChatMessage {
         id: row.try_get("id")?,
@@ -864,13 +869,13 @@ fn open_team(teams_root: &Path, team_path: &str) -> Result<(String, TeamConfig),
     Ok((relative, team))
 }
 
-/// `words` as an `ILIKE` pattern that matches them anywhere, with `%`, `_` and `\` taken literally.
-fn like_pattern(words: &str) -> String {
-    let escaped = words
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_");
-    format!("%{escaped}%")
+/// `words` as a `REGEXP` pattern that matches them anywhere, ignoring case in every alphabet,
+/// with every character taken literally.
+///
+/// Not `LIKE`: SQLite's `LIKE` ignores case only for ASCII letters, so "đường" would miss
+/// "Đường". The regex runs in Rust (sqlx's `REGEXP`), compiled once per query.
+fn search_pattern(words: &str) -> String {
+    format!("(?i){}", regex::escape(words))
 }
 
 fn no_store() -> ApiError {
@@ -940,7 +945,7 @@ async fn chat_page(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(like_pattern);
+        .map(search_pattern);
     let Some(store) = state.registry.chat_store() else {
         return Err(no_store());
     };
@@ -1717,8 +1722,8 @@ done
         archive: EventArchive,
     }
 
-    fn rig(pool: PgPool, dir: &TeamsDir) -> Rig {
-        let archive = EventArchive::from_pool(pool.clone());
+    fn rig(pool: crate::db::Db, dir: &TeamsDir) -> Rig {
+        let archive = EventArchive::new(pool.clone());
         let registry = RunRegistry::durable(RunStore::new(pool));
         let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
         Rig {
@@ -1828,10 +1833,9 @@ done
             .collect()
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_team_note_waits_for_the_next_work_and_a_note_joins_the_working_agents_session(
-        pool: PgPool,
-    ) {
+    #[tokio::test]
+    async fn a_team_note_waits_for_the_next_work_and_a_note_joins_the_working_agents_session() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let gate = dir.0.join("gate");
         write_news_desk(&dir, &agent_script("researcher", Some(&gate), false));
@@ -1940,8 +1944,9 @@ done
         assert!(found["items"].as_array().unwrap().is_empty(), "{found}");
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn send_now_stops_the_agents_turn_and_hands_it_the_note_at_once(pool: PgPool) {
+    #[tokio::test]
+    async fn send_now_stops_the_agents_turn_and_hands_it_the_note_at_once() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         write_news_desk(&dir, &agent_script("researcher", None, true));
         let rig = rig(pool, &dir);
@@ -1979,8 +1984,9 @@ done
         assert!(writer[0].contains("researcher handover"));
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn an_at_agent_runs_only_it_and_continue_hands_its_new_handover_on(pool: PgPool) {
+    #[tokio::test]
+    async fn an_at_agent_runs_only_it_and_continue_hands_its_new_handover_on() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         write_news_desk(&dir, &agent_script("researcher", None, false));
         let rig = rig(pool, &dir);
@@ -2075,10 +2081,9 @@ done
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_team_with_no_fixed_order_carries_the_conversation_and_runs_an_at_agent_alone(
-        pool: PgPool,
-    ) {
+    #[tokio::test]
+    async fn a_team_with_no_fixed_order_carries_the_conversation_and_runs_an_at_agent_alone() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let lead = dir.write_harness("lead.sh", &agent_script("lead", None, false));
         let helper = dir.write_harness("helper.sh", &agent_script("helper", None, false));

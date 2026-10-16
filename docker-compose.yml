@@ -1,23 +1,4 @@
 services:
-  postgres:
-    image: postgres:17.6-bookworm
-    # Back after Docker Desktop restarts, as its updates do, so a LoomWatch still running keeps its
-    # database. Not after `./loomwatch stop` or `docker compose stop`: a stopped database stays so.
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 2s
-      timeout: 5s
-      retries: 15
-    ports:
-      - "127.0.0.1:${POSTGRES_PORT:?set POSTGRES_PORT in .env}:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-
   loomwatch:
     build:
       context: .
@@ -26,13 +7,15 @@ services:
     user: "${LOOMWATCH_UID:-1000}:${LOOMWATCH_GID:-1000}"
     read_only: true
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB in .env}
       HOME: /home/node
+      # The run history is one SQLite file in LoomWatch's state folder, inside the loomwatch-home
+      # volume, so it outlives the container.
+      LOOMWATCH_STATE_DIR: /home/node/.local/state/loomwatch
       LOOMWATCH_CAPABILITY_HOME: /opt/loomwatch/capabilities
       LOOMWATCH_ALLOW_CONTAINER_LISTENER: "true"
       # The optional native companion keeps host-installed harnesses and credentials on the host.
       LOOMWATCH_HOST_RUNNER_ADDR: ${LOOMWATCH_HOST_RUNNER_ADDR:-host.docker.internal:3031}
-      LOOMWATCH_HOST_RUNNER_TOKEN: ${LOOMWATCH_HOST_RUNNER_TOKEN:-${POSTGRES_PASSWORD}}
+      LOOMWATCH_HOST_RUNNER_TOKEN: ${LOOMWATCH_HOST_RUNNER_TOKEN:?set LOOMWATCH_HOST_RUNNER_TOKEN in .env}
     command:
       - serve
       - --teams-root
@@ -43,9 +26,6 @@ services:
       - localhost
       - --allow-host
       - 127.0.0.1
-    depends_on:
-      postgres:
-        condition: service_healthy
     ports:
       - "127.0.0.1:${LOOMWATCH_PORT:-3000}:3000"
     extra_hosts:
@@ -70,11 +50,6 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     working_dir: /workspace
-    environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB in .env}
-    depends_on:
-      postgres:
-        condition: service_healthy
     volumes:
       - .:/workspace
       - cargo-registry:/usr/local/cargo/registry
@@ -82,7 +57,6 @@ services:
       - rust-target:/workspace/target
 
 volumes:
-  postgres-data:
   loomwatch-home:
   cargo-registry:
   cargo-git:

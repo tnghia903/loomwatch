@@ -15,7 +15,7 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use uuid::Uuid;
 
-use crate::archive::EventArchive;
+use crate::archive::{EventArchive, WriteFailure};
 use crate::team_bus::TeamBusConnection;
 use crate::{EventKind, RunEvent, SessionOutcome};
 
@@ -236,6 +236,85 @@ fn withheld_app_config(spec: &ProcessSpec) -> Result<Option<String>> {
         .context("cannot start Codex without its plugins and apps")
 }
 
+/// What actually starts a [`ProcessSpec`].
+struct StartCommand {
+    program: std::ffi::OsString,
+    args: Vec<String>,
+    /// The folder to put first on the child's `PATH`: the Node.js a bridge is started with, or
+    /// the per-user folder an app was found in.
+    first_on_path: Option<PathBuf>,
+}
+
+/// `LoomWatch`'s own install of a Node bridge when the spec asks for it through `npx -y`
+/// (`crate::connectors`): about a second faster to start and 140 MB lighter than npx. Otherwise
+/// the command as written, including while the install is still under way and npx can stand in.
+fn start_command(spec: &ProcessSpec) -> Result<StartCommand> {
+    let as_written = || match per_user_program(spec) {
+        Some(program) => StartCommand {
+            first_on_path: program.parent().map(Path::to_path_buf),
+            program: program.into_os_string(),
+            args: spec.args.clone(),
+        },
+        None => StartCommand {
+            program: spec.cmd.clone().into(),
+            args: spec.args.clone(),
+            first_on_path: None,
+        },
+    };
+    let Some(connectors) = crate::connectors::installed() else {
+        return Ok(as_written());
+    };
+    match connectors.resolve(&spec.cmd, &spec.args) {
+        crate::connectors::Resolved::Direct {
+            program,
+            args,
+            node_dir,
+        } => Ok(StartCommand {
+            program: program.into_os_string(),
+            args,
+            first_on_path: Some(node_dir),
+        }),
+        crate::connectors::Resolved::AsWritten => Ok(as_written()),
+        crate::connectors::Resolved::NotReady { app, name } => {
+            connectors.prepare_in_background(app);
+            if connectors.npx_available() {
+                return Ok(as_written());
+            }
+            bail!(
+                "{name} isn't ready yet. LoomWatch is getting it ready, which happens once and takes a minute or two. Try again shortly."
+            )
+        }
+    }
+}
+
+/// A bare command that is not on the `PATH` the child gets but is in a per-user install folder
+/// (`~/.opencode/bin`, `~/.local/bin`, …). The Library lists apps from those folders
+/// (`api::augment_search_path`), so a run finds them there too, instead of asking for a restart
+/// after an app is installed while `LoomWatch` runs.
+fn per_user_program(spec: &ProcessSpec) -> Option<PathBuf> {
+    per_user_program_in(spec, std::env::var_os("HOME").map(PathBuf::from).as_deref())
+}
+
+fn per_user_program_in(spec: &ProcessSpec, home: Option<&Path>) -> Option<PathBuf> {
+    let command = Path::new(&spec.cmd);
+    if command.is_absolute() || command.components().count() != 1 {
+        return None;
+    }
+    let path = spec
+        .env
+        .get("PATH")
+        .map(std::ffi::OsString::from)
+        .or_else(|| std::env::var_os("PATH"));
+    if path
+        .as_deref()
+        .is_some_and(|path| crate::api::find_executable(path, &spec.cmd).is_some())
+    {
+        return None;
+    }
+    let per_user = crate::api::augment_search_path(None, Some(home?))?;
+    crate::api::find_executable(&per_user, &spec.cmd)
+}
+
 /// Owns one ACP child and both sides of its line-delimited JSON-RPC stream.
 pub struct AcpProcess {
     child: Child,
@@ -286,7 +365,8 @@ impl AcpProcess {
     ///
     /// Returns an error when the process cannot be spawned or its streams are unavailable.
     pub fn spawn(spec: &ProcessSpec) -> Result<Self> {
-        let mut command = Command::new(&spec.cmd);
+        let start = start_command(spec)?;
+        let mut command = Command::new(&start.program);
         for (key, _) in std::env::vars_os() {
             if let Some(key) = key.to_str()
                 && daemon_only(key, spec)
@@ -295,13 +375,21 @@ impl AcpProcess {
             }
         }
         command
-            .args(&spec.args)
+            .args(&start.args)
             .envs(&spec.env)
             .current_dir(&spec.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        if let Some(first) = &start.first_on_path {
+            let path = spec
+                .env
+                .get("PATH")
+                .map(std::ffi::OsString::from)
+                .or_else(|| std::env::var_os("PATH"));
+            command.env("PATH", crate::connectors::path_with(first, path.as_deref()));
+        }
         if let Some(config) = withheld_app_config(spec)? {
             command.env(CODEX_CONFIG, config);
         }
@@ -699,7 +787,7 @@ impl AcpProcess {
             .or_else(|| self.session_id.clone());
 
         // A protocol or shutdown failure still needs a terminal marker and a recoverable session,
-        // otherwise the partial run sits in Postgres with no `crashed` marker and `show` has no
+        // otherwise the partial run sits in the archive with no `crashed` marker and `show` has no
         // session ID to look it up by.
         let crash_marker_error = if (execution.is_err() || exit.is_err())
             && let Some(session_id) = failure_session_id.as_deref()
@@ -2543,6 +2631,9 @@ struct EventLogInner {
     archive: EventArchive,
     session_id: String,
     next_seq: Mutex<u64>,
+    /// A write the archive's writer could not make, reported by the next append. Appends hand
+    /// events to the writer without waiting for the row, so this is where a failure surfaces.
+    failure: Arc<WriteFailure>,
 }
 
 impl EventLog {
@@ -2552,6 +2643,7 @@ impl EventLog {
                 archive,
                 session_id,
                 next_seq: Mutex::new(0),
+                failure: Arc::default(),
             }),
         }
     }
@@ -2568,6 +2660,12 @@ impl EventLog {
         *self.inner.next_seq.lock().await
     }
 
+    /// Append the run's next event.
+    ///
+    /// The event gets the next `seq` and is handed to the archive's writer under the same lock,
+    /// so events are written in `seq` order. It returns before the row is written: every read of
+    /// the archive flushes first, so nothing reads around it, and a write that fails is returned
+    /// by the next append.
     pub(crate) async fn append(
         &self,
         agent_id: &str,
@@ -2575,19 +2673,8 @@ impl EventLog {
         payload: Value,
         raw: Option<Value>,
     ) -> Result<()> {
-        let mut next_seq = self.inner.next_seq.lock().await;
-        append_archive_event(
-            &self.inner.archive,
-            &self.inner.session_id,
-            agent_id,
-            *next_seq,
-            kind,
-            payload,
-            raw,
-        )
-        .await?;
-        *next_seq += 1;
-        Ok(())
+        self.append_event(Uuid::new_v4().to_string(), agent_id, kind, payload, raw)
+            .await
     }
 
     /// Append an event under an id the caller already minted.
@@ -2604,19 +2691,35 @@ impl EventLog {
         payload: Value,
         raw: Option<Value>,
     ) -> Result<()> {
+        self.append_event(id.to_owned(), agent_id, kind, payload, raw)
+            .await
+    }
+
+    async fn append_event(
+        &self,
+        id: String,
+        agent_id: &str,
+        kind: EventKind,
+        payload: Value,
+        raw: Option<Value>,
+    ) -> Result<()> {
         let mut next_seq = self.inner.next_seq.lock().await;
+        self.inner.failure.check()?;
         self.inner
             .archive
-            .append(&RunEvent {
-                id: id.to_owned(),
-                session_id: self.inner.session_id.clone(),
-                agent_id: agent_id.to_owned(),
-                seq: *next_seq,
-                ts: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true),
-                kind,
-                payload,
-                raw,
-            })
+            .enqueue(
+                RunEvent {
+                    id,
+                    session_id: self.inner.session_id.clone(),
+                    agent_id: agent_id.to_owned(),
+                    seq: *next_seq,
+                    ts: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true),
+                    kind,
+                    payload,
+                    raw,
+                },
+                &self.inner.failure,
+            )
             .await?;
         *next_seq += 1;
         Ok(())
@@ -3187,8 +3290,51 @@ async fn append_archive_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_bare_command_missing_from_path_is_found_in_a_per_user_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = std::env::temp_dir().join(format!("loomwatch-home-{}", Uuid::new_v4()));
+        let bin = home.join(".opencode/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let program = bin.join("opencode");
+        std::fs::write(&program, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let spec = |cmd: &str, path: &Path| ProcessSpec {
+            cmd: cmd.into(),
+            args: vec!["acp".into()],
+            env: BTreeMap::from([("PATH".to_owned(), path.to_string_lossy().into_owned())]),
+            cwd: home.clone(),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        };
+        let elsewhere = home.join("empty");
+        assert_eq!(
+            per_user_program_in(&spec("opencode", &elsewhere), Some(&home)),
+            Some(program.clone())
+        );
+        // On the child's own PATH it is started as written, as is any path or unknown name.
+        assert_eq!(
+            per_user_program_in(&spec("opencode", &bin), Some(&home)),
+            None
+        );
+        assert_eq!(
+            per_user_program_in(&spec(&program.to_string_lossy(), &elsewhere), Some(&home)),
+            None
+        );
+        assert_eq!(
+            per_user_program_in(&spec("./opencode", &elsewhere), Some(&home)),
+            None
+        );
+        assert_eq!(
+            per_user_program_in(&spec("codex", &elsewhere), Some(&home)),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
     use serde_json::json;
-    use sqlx::PgPool;
 
     #[test]
     fn reads_model_names_and_reasoning_efforts_from_acp_session_state() {
@@ -3331,9 +3477,10 @@ mod tests {
         );
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn final_reply_excludes_explicit_progress_but_archives_every_chunk(pool: PgPool) {
-        let archive = EventArchive::from_pool(pool);
+    #[tokio::test]
+    async fn final_reply_excludes_explicit_progress_but_archives_every_chunk() {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
         let mut recorder = Recorder::new(&archive, "phase-test".to_owned(), "agent");
         for (text, phase) in [
             ("Harness warning", None),
@@ -3349,9 +3496,10 @@ mod tests {
         assert_eq!(archive.verify_session("phase-test").await.unwrap().len(), 6);
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn maps_real_acp_updates_without_losing_the_raw_payload(pool: PgPool) {
-        let archive = EventArchive::from_pool(pool);
+    #[tokio::test]
+    async fn maps_real_acp_updates_without_losing_the_raw_payload() {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
         let mut recorder = Recorder::new(&archive, "session".to_owned(), "agent");
         recorder
             .record_frame(&json!({
@@ -3401,9 +3549,10 @@ mod tests {
         );
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn archives_unprojectable_updates_instead_of_failing_the_session(pool: PgPool) {
-        let archive = EventArchive::from_pool(pool);
+    #[tokio::test]
+    async fn archives_unprojectable_updates_instead_of_failing_the_session() {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
         let mut recorder = Recorder::new(&archive, "session".to_owned(), "agent");
         let frames = [
             json!({
@@ -3590,11 +3739,11 @@ mod tests {
     #[test]
     fn archive_failure_context_retains_the_execution_error() {
         let execution = anyhow::anyhow!("protocol exploded");
-        let archive = anyhow::anyhow!("Postgres unavailable");
+        let archive = anyhow::anyhow!("archive unavailable");
         let combined = with_archive_failure_context(execution, Some(&archive));
         let rendered = format!("{combined:#}");
         assert!(rendered.contains("protocol exploded"));
-        assert!(rendered.contains("Postgres unavailable"));
+        assert!(rendered.contains("archive unavailable"));
     }
 
     #[test]
@@ -3634,8 +3783,9 @@ mod tests {
     /// Run 820bb0e8: the writer narrated between tool calls and its reply read
     /// "…then I'll build and render it.Draft builds and renders." Each note is its own ACP
     /// message, so the delivered reply must keep them apart — with or without message IDs.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn messages_on_either_side_of_a_tool_call_do_not_run_together(pool: PgPool) {
+    #[tokio::test]
+    async fn messages_on_either_side_of_a_tool_call_do_not_run_together() {
+        let pool = crate::db::Db::temp().await;
         for (session, first_id, second_id) in [
             (
                 "with-ids",
@@ -3672,7 +3822,7 @@ mod tests {
                 permissions: None,
                 asker: None,
             };
-            let archive = EventArchive::from_pool(pool.clone());
+            let archive = EventArchive::new(pool.clone());
             let mut process = AcpProcess::spawn(&spec).expect("spawn");
             let outcome = process
                 .run_session(
@@ -3715,8 +3865,9 @@ mod tests {
         }
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn completes_a_turn_and_recovers_the_full_session_after_exit(pool: PgPool) {
+    #[tokio::test]
+    async fn completes_a_turn_and_recovers_the_full_session_after_exit() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -3749,7 +3900,7 @@ mod tests {
             permissions: None,
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool.clone());
+        let archive = EventArchive::new(pool.clone());
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         let outcome = process
             .run_session(
@@ -3762,7 +3913,7 @@ mod tests {
             .await
             .expect("session");
         drop(archive);
-        let reopened = EventArchive::from_pool(pool);
+        let reopened = EventArchive::new(pool);
         let events = reopened
             .verify_session(&outcome.session_id)
             .await
@@ -3815,8 +3966,9 @@ mod tests {
         assert_events_match_schema(&events);
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn configures_models_advertised_through_current_acp_model_state(pool: PgPool) {
+    #[tokio::test]
+    async fn configures_models_advertised_through_current_acp_model_state() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -3843,7 +3995,7 @@ mod tests {
             permissions: None,
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         process
             .run_session(
@@ -3869,8 +4021,10 @@ mod tests {
     /// turn of the same session (a send-back, a note, an `ask`) reuses them as they were. Providers
     /// cache prompts per model, so a switch mid-session would re-read the whole context uncached.
     /// The fake app exits 9, failing the turn, on any model or config change after a prompt.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn model_and_effort_are_fixed_when_the_session_opens(pool: PgPool) {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn model_and_effort_are_fixed_when_the_session_opens() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             n=0
@@ -3905,7 +4059,7 @@ mod tests {
             permissions: None,
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         let mut context = TeamSessionContext {
             archive: &archive,
@@ -3983,8 +4137,9 @@ mod tests {
     /// A model with no effort of its own (Claude's Haiku 4.5) runs at its default, and the run goes
     /// on: the app's answer to the model switch lists that model's options without an effort, so
     /// the effort the session started with is never sent. The fake app exits 9 if it is.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn an_effort_the_set_model_does_not_offer_is_skipped_not_sent(pool: PgPool) {
+    #[tokio::test]
+    async fn an_effort_the_set_model_does_not_offer_is_skipped_not_sent() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -4009,7 +4164,7 @@ mod tests {
             permissions: None,
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         let outcome = process
             .run_session(
@@ -4038,8 +4193,9 @@ mod tests {
     /// ADR 0037: a run agent's app is moved to its ask-first mode before the prompt, and what it
     /// then asks is answered by the operator's switches: the web was switched on, commands not.
     /// The fake app exits 9, failing the session, unless all three happen.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_run_agent_asks_first_and_loomwatch_answers_by_its_switches(pool: PgPool) {
+    #[tokio::test]
+    async fn a_run_agent_asks_first_and_loomwatch_answers_by_its_switches() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -4077,7 +4233,7 @@ mod tests {
             permissions: Some(crate::permissions::PermissionPolicy::new(web, &cwd, [], [])),
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         process
             .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
@@ -4098,8 +4254,9 @@ mod tests {
     /// Code publishes to claude.ai without asking — so `session/new` carries them as
     /// `_meta.claudeCode.options.disallowedTools`. A session with no policy (Ask, model discovery)
     /// keeps every tool. Each fake app exits 9, failing its session, unless it got exactly that.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_run_agent_starts_without_the_app_tools_that_reach_past_the_run(pool: PgPool) {
+    #[tokio::test]
+    async fn a_run_agent_starts_without_the_app_tools_that_reach_past_the_run() {
+        let pool = crate::db::Db::temp().await;
         let withheld = serde_json::to_string(&crate::permissions::PermissionPolicy::session_meta())
             .expect("meta");
         let script = |session: &str, check: &str| {
@@ -4123,7 +4280,7 @@ mod tests {
             )
         };
         let cwd = std::env::current_dir().expect("cwd");
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let run = |args: String, permissions| ProcessSpec {
             cmd: "/bin/sh".into(),
             args: vec!["-c".into(), args],
@@ -4223,14 +4380,18 @@ mod tests {
         assert!(daemon_only("DATABASE_URL", &runner));
     }
 
-    /// ADR 0048, end to end: `#[sqlx::test]` needs `DATABASE_URL`, so this process has it, and the
-    /// fake app exits 9, failing its session, if it reaches the app.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn an_agent_does_not_inherit_the_daemons_database_address(pool: PgPool) {
-        assert!(std::env::var_os("DATABASE_URL").is_some());
+    /// ADR 0048, end to end: the fake app exits 9, failing its session, if any of the daemon's own
+    /// settings reaches it. CI sets `LOOMWATCH_DAEMON_ONLY_PROBE` for the test run so there is
+    /// always one to withhold there; anywhere else, whatever `LOOMWATCH_` settings the shell has.
+    #[tokio::test]
+    async fn an_agent_does_not_inherit_the_daemons_own_settings() {
+        let pool = crate::db::Db::temp().await;
+        if std::env::var_os("CI").is_some() {
+            assert!(std::env::var_os("LOOMWATCH_DAEMON_ONLY_PROBE").is_some());
+        }
         let script = r#"
             set -eu
-            [ -z "${DATABASE_URL+set}" ] || exit 9
+            if env | grep -Eq '^(LOOMWATCH_|POSTGRES_|DATABASE_URL=|PGPASSWORD=)'; then exit 9; fi
             [ -n "${PATH-}" ] || exit 8
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
@@ -4256,11 +4417,11 @@ mod tests {
                 "agent",
                 "",
                 "hello",
-                &EventArchive::from_pool(pool),
+                &EventArchive::new(pool),
                 Duration::from_secs(2),
             )
             .await
-            .expect("the agent starts without the daemon's DATABASE_URL");
+            .expect("the agent starts without the daemon's own settings");
     }
 
     /// ADR 0047: a Codex run agent is started without its plugins and apps — the `ChatGPT` app's
@@ -4271,8 +4432,9 @@ mod tests {
     ///
     /// `$0` names the app the way `npx`'s arguments do. The scripts mention `CODEX_CONFIG`, so the
     /// Claude Code one relies on `Harness::of_spawn` testing `claude` before `codex`.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_codex_run_agent_starts_without_its_plugins_and_apps(pool: PgPool) {
+    #[tokio::test]
+    async fn a_codex_run_agent_starts_without_its_plugins_and_apps() {
+        let pool = crate::db::Db::temp().await;
         let teams = r#"{"model_provider":"gateway"}"#;
         let withheld =
             crate::permissions::PermissionPolicy::codex_config(Some(teams), &[]).expect("config");
@@ -4294,7 +4456,7 @@ mod tests {
             )
         };
         let cwd = std::env::current_dir().expect("cwd");
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let policy = || {
             Some(crate::permissions::PermissionPolicy::new(
                 crate::config::AgentAllow::default(),
@@ -4351,8 +4513,10 @@ mod tests {
     /// ADR 0061: in a team in Auto mode, a command that only reads runs without asking; one that
     /// may do more, and one on the fixed list, still wait for the operator, whose card says why
     /// Auto mode left it to them. The fake app exits 9 unless each answer is the expected one.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn auto_mode_runs_commands_that_only_read_and_asks_about_the_rest(pool: PgPool) {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn auto_mode_runs_commands_that_only_read_and_asks_about_the_rest() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             ask() {
@@ -4389,7 +4553,7 @@ mod tests {
         let run_id = record.run_id.clone();
         registry.insert(record);
         let cwd = std::env::current_dir().expect("cwd");
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let spec = ProcessSpec {
             cmd: "/bin/sh".into(),
             args: vec!["-c".into(), script.into()],
@@ -4494,8 +4658,10 @@ mod tests {
     /// instead of being refused on the spot. "Allow for this run" lets the next request of the same
     /// kind through without asking again; "Deny" refuses; the archive says who decided. The fake app
     /// exits 9, failing the session, unless each answer is the one the operator gave.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_declined_request_waits_for_the_operator_and_takes_their_answer(pool: PgPool) {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_declined_request_waits_for_the_operator_and_takes_their_answer() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -4531,7 +4697,7 @@ mod tests {
         let run_id = record.run_id.clone();
         registry.insert(record);
         let cwd = std::env::current_dir().expect("cwd");
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let spec = ProcessSpec {
             cmd: "/bin/sh".into(),
             args: vec!["-c".into(), script.into()],
@@ -4635,8 +4801,9 @@ mod tests {
     }
 
     /// An app with no ask-first mode still runs, and the record says it decides for itself.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn an_app_without_an_ask_first_mode_is_recorded_as_deciding_for_itself(pool: PgPool) {
+    #[tokio::test]
+    async fn an_app_without_an_ask_first_mode_is_recorded_as_deciding_for_itself() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -4664,7 +4831,7 @@ mod tests {
             )),
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         process
             .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
@@ -4702,8 +4869,9 @@ mod tests {
 
     /// ADR 0029's tool contract, enforced by the harness rather than by reading our own request
     /// back: the fake exits 9 unless `session/new` hands it the wired server beside nothing else.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_wired_tool_is_handed_to_the_harness_in_session_new(pool: PgPool) {
+    #[tokio::test]
+    async fn a_wired_tool_is_handed_to_the_harness_in_session_new() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -4730,7 +4898,7 @@ mod tests {
             permissions: None,
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         AcpProcess::spawn(&spec)
             .expect("spawn")
             .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
@@ -4758,8 +4926,9 @@ mod tests {
         assert_eq!(servers[0]["type"], "http");
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn required_skills_are_in_the_prompt_and_receipted_after_send(pool: PgPool) {
+    #[tokio::test]
+    async fn required_skills_are_in_the_prompt_and_receipted_after_send() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -4811,7 +4980,7 @@ mod tests {
             ],
         }
         .with_required_skills(&[skill]);
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         process
             .run_session_with_context(
@@ -4993,7 +5162,7 @@ mod tests {
 
     /// Deliver one inlined skill to a scripted harness and return everything it archived.
     async fn run_with_delivered_skill(
-        pool: PgPool,
+        pool: crate::db::Db,
         script: &str,
         session: &str,
     ) -> Vec<crate::RunEvent> {
@@ -5026,7 +5195,7 @@ mod tests {
             }],
         }
         .with_required_skills(&[skill]);
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         process
             .run_session_with_context(
@@ -5050,8 +5219,9 @@ mod tests {
 
     /// `docs/RUN_PROVENANCE_CONTRACT.md` §12: "prompt/filesystem presence is not use". Delivery
     /// was already receipted; this is the open event that makes the other half sayable.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_read_of_the_delivered_skill_is_archived_as_an_open(pool: PgPool) {
+    #[tokio::test]
+    async fn a_read_of_the_delivered_skill_is_archived_as_an_open() {
+        let pool = crate::db::Db::temp().await;
         let events = run_with_delivered_skill(pool, OPENS_THE_SKILL, "opened").await;
         let opens = events
             .iter()
@@ -5092,8 +5262,9 @@ mod tests {
 
     /// The agent's own account is archived apart from the evidence, under its own phase, because
     /// CONTRACT §8.2 forbids prose from labelling anything as used.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn the_agents_account_of_what_it_skipped_is_archived_as_a_self_report(pool: PgPool) {
+    #[tokio::test]
+    async fn the_agents_account_of_what_it_skipped_is_archived_as_a_self_report() {
+        let pool = crate::db::Db::temp().await;
         let events = run_with_delivered_skill(pool, OPENS_THE_SKILL, "opened").await;
         let report = events
             .iter()
@@ -5117,10 +5288,9 @@ mod tests {
     /// The counterfactual for both lanes: the same run without the read and without the phrase
     /// archives neither record. A detector that fired on delivery alone would pass the two tests
     /// above and still prove nothing.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_delivered_skill_the_agent_never_opened_archives_no_open_and_no_self_report(
-        pool: PgPool,
-    ) {
+    #[tokio::test]
+    async fn a_delivered_skill_the_agent_never_opened_archives_no_open_and_no_self_report() {
+        let pool = crate::db::Db::temp().await;
         let silent = r#"
             set -eu
             IFS= read -r _
@@ -5149,8 +5319,9 @@ mod tests {
         }
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn skips_model_configuration_when_the_harness_does_not_advertise_it(pool: PgPool) {
+    #[tokio::test]
+    async fn skips_model_configuration_when_the_harness_does_not_advertise_it() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -5175,7 +5346,7 @@ mod tests {
             permissions: None,
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         process
             .run_session(
@@ -5231,8 +5402,9 @@ mod tests {
         }
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn mid_turn_failure_is_marked_and_returns_the_recoverable_session_id(pool: PgPool) {
+    #[tokio::test]
+    async fn mid_turn_failure_is_marked_and_returns_the_recoverable_session_id() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -5254,7 +5426,7 @@ mod tests {
             permissions: None,
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
 
         let error = process
@@ -5289,8 +5461,9 @@ mod tests {
         );
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn child_exit_is_reported_without_hanging(pool: PgPool) {
+    #[tokio::test]
+    async fn child_exit_is_reported_without_hanging() {
+        let pool = crate::db::Db::temp().await;
         let spec = ProcessSpec {
             cmd: "false".into(),
             args: Vec::new(),
@@ -5300,7 +5473,7 @@ mod tests {
             permissions: None,
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         let result = timeout(
             Duration::from_secs(2),
@@ -5332,8 +5505,9 @@ mod tests {
         );
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn mid_turn_failure_still_marks_and_recovers_the_partial_session(pool: PgPool) {
+    #[tokio::test]
+    async fn mid_turn_failure_still_marks_and_recovers_the_partial_session() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -5352,7 +5526,7 @@ mod tests {
             permissions: None,
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         let result = process
             .run_session(
@@ -5380,8 +5554,9 @@ mod tests {
         assert_eq!(events.last().unwrap().payload["phase"], "crashed");
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn signal_death_is_recorded_distinctly_from_a_negative_exit_code(pool: PgPool) {
+    #[tokio::test]
+    async fn signal_death_is_recorded_distinctly_from_a_negative_exit_code() {
+        let pool = crate::db::Db::temp().await;
         // Answer the handshake so a session id exists, then die by SIGKILL mid-turn. Without
         // the signal field this is indistinguishable from a genuine exit code of -1.
         let script = r#"
@@ -5402,7 +5577,7 @@ mod tests {
             permissions: None,
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         let error = process
             .run_session(
@@ -5427,8 +5602,9 @@ mod tests {
         assert_eq!(last.payload["signal"], "SIGKILL");
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn request_timeout_sends_session_cancel_before_teardown(pool: PgPool) {
+    #[tokio::test]
+    async fn request_timeout_sends_session_cancel_before_teardown() {
+        let pool = crate::db::Db::temp().await;
         // Complete the handshake, then stall the prompt turn. On timeout LoomWatch should
         // deliver session/cancel; this child echoes whatever it receives to stderr, which
         // the crash marker then captures.
@@ -5451,7 +5627,7 @@ mod tests {
             permissions: None,
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec)
             .expect("spawn")
             .with_request_timeout(Duration::from_millis(200));
@@ -5581,8 +5757,9 @@ mod tests {
     /// The same prompt end to end, in the frames Codex sent in run 6ebcd025. Nothing is switched on
     /// and nobody can be asked: the fake app exits 9, failing the session, unless the Team Bus
     /// prompt is allowed once and a bare command it never announced is still refused.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_codex_team_bus_prompt_is_allowed_without_any_switch(pool: PgPool) {
+    #[tokio::test]
+    async fn a_codex_team_bus_prompt_is_allowed_without_any_switch() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -5615,7 +5792,7 @@ mod tests {
             )),
             asker: None,
         };
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let mut process = AcpProcess::spawn(&spec).expect("spawn");
         process
             .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
@@ -5652,8 +5829,10 @@ mod tests {
     /// Codex's only rejection, `cancel`, and Codex ends the turn. `LoomWatch` then asks it, in the
     /// same session, to carry on without it, and the turn finishes with the story list. The fake
     /// app exits 9, failing the session, unless the second prompt says what was declined and why.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_turn_codex_ended_on_a_decline_is_carried_on_in_the_same_session(pool: PgPool) {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_turn_codex_ended_on_a_decline_is_carried_on_in_the_same_session() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -5692,7 +5871,7 @@ mod tests {
         .expect("record");
         let run_id = record.run_id.clone();
         registry.insert(record);
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let asker = crate::permissions::PermissionAsker::new(
             registry.operator_desk(Some(&archive)),
             &run_id,
@@ -5769,8 +5948,9 @@ mod tests {
     /// An app that ends its turn on every decline is carried on [`RESUMES_PER_TURN`] times, then
     /// its turn ends `cancelled`, as it said. A turn an app cancels with nothing declined is not
     /// carried on at all: `LoomWatch` did not cause it. Each fake app exits 9 if prompted again.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_turn_is_carried_on_only_after_a_decline_and_only_so_often(pool: PgPool) {
+    #[tokio::test]
+    async fn a_turn_is_carried_on_only_after_a_decline_and_only_so_often() {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -5788,7 +5968,7 @@ mod tests {
             case "$request" in *'"method":"session/close"'*) ;; *) exit 9 ;; esac
             printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{}}'
         "#;
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         declining_process(script, None)
             .run_session("agent", "", "hello", &archive, Duration::from_secs(2))
             .await
@@ -5829,8 +6009,9 @@ mod tests {
     /// `threadStatus: systemError`, the refusal as agent text, and an `end_turn` answer. The turn
     /// fails with the refusal, and the archive keeps the app's `turn_end` as sent, then says why
     /// `LoomWatch` failed it. The fake app exits 9 if it is prompted again, as a handover would.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_turn_codex_reports_as_a_system_error_fails_instead_of_answering(pool: PgPool) {
+    #[tokio::test]
+    async fn a_turn_codex_reports_as_a_system_error_fails_instead_of_answering() {
+        let pool = crate::db::Db::temp().await;
         let script = format!(
             r#"
             set -eu
@@ -5846,7 +6027,7 @@ mod tests {
             "#,
             crate::test_support::codex_refuses_the_model("codex-refused", 3)
         );
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let error = declining_process(&script, None)
             .run_session("gatherer", "", "gather", &archive, Duration::from_secs(2))
             .await
@@ -5896,8 +6077,9 @@ mod tests {
     /// Only the status Codex reports last counts: a thread that errors and then reports itself
     /// working again recovered, and its turn answers as usual. A turn that ends `idle` is the
     /// ordinary case.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_codex_thread_that_works_again_after_a_system_error_still_answers(pool: PgPool) {
+    #[tokio::test]
+    async fn a_codex_thread_that_works_again_after_a_system_error_still_answers() {
+        let pool = crate::db::Db::temp().await;
         let status = |status: &str| {
             format!(
                 r#"printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"codex-recovered","update":{{"sessionUpdate":"session_info_update","_meta":{{"codex":{{"threadStatus":{{"type":"{status}"}}}}}}}}}}}}'"#
@@ -5926,7 +6108,7 @@ mod tests {
             error = status("systemError"),
             idle = status("idle"),
         );
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let outcome = declining_process(&script, None)
             .run_session("gatherer", "", "gather", &archive, Duration::from_secs(2))
             .await

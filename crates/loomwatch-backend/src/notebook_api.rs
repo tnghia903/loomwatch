@@ -5,7 +5,7 @@
 //!
 //! **Why this is not part of `GET /api/memory`.** The Brief half of the memory API lives in
 //! `api.rs`, whose router is built from a teams root and no database — a team's Brief is Markdown
-//! on disk and reading it must not depend on Postgres being up. The Notebook is rows. Axum cannot
+//! on disk and reading it must not depend on the database. The Notebook is rows. Axum cannot
 //! route one path from two routers, so the two halves are sibling paths (`/api/memory` and
 //! `/api/memory/notes`) rather than one endpoint that is half-broken whenever the archive is
 //! disabled. The UI reads both and presents one panel.
@@ -416,8 +416,9 @@ mod tests {
     /// Correct and Retire stay available under the same policy — they change this run's record,
     /// not what outlives it — and the second half of this test is what makes the first half mean
     /// something.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn keep_is_refused_when_the_team_file_says_never(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn keep_is_refused_when_the_team_file_says_never() {
+        let pool = crate::db::Db::temp().await;
         let root = std::env::temp_dir().join(format!("loomwatch-keep-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).expect("root");
         let root = std::fs::canonicalize(&root).expect("canonical root");
@@ -434,7 +435,7 @@ mod tests {
         team("locked.yaml", "never");
         team("open.yaml", "review");
 
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let app = router(Some(archive.clone()), root.clone());
         let note = |team_id: &str, key: &str| NoteWrite {
             team_id: team_id.to_owned(),
