@@ -1,3 +1,4 @@
+import { dirName, isAbsolutePath } from '../files/paths'
 import type { AgentConfig } from './types'
 
 /**
@@ -17,7 +18,7 @@ function segments(cwd: string): string[] {
 export function workFolder(cwd: string | undefined): WorkFolder {
   const path = (cwd ?? '').trim()
   const parts = segments(path)
-  if (parts.every((segment) => segment === '.') && !path.startsWith('/')) return { kind: 'team' }
+  if (parts.every((segment) => segment === '.') && !isAbsolutePath(path)) return { kind: 'team' }
   const name = parts.filter((segment) => segment !== '.').at(-1) ?? path
   return { kind: 'chosen', name, path }
 }
@@ -29,7 +30,7 @@ export function workFolder(cwd: string | undefined): WorkFolder {
  */
 export function holdsTeamFile(agent: Pick<AgentConfig, 'spawn'>): boolean {
   const cwd = (agent.spawn?.cwd ?? '').trim()
-  return !cwd.startsWith('/') && segments(cwd).every((segment) => segment === '.' || segment === '..')
+  return !isAbsolutePath(cwd) && segments(cwd).every((segment) => segment === '.' || segment === '..')
 }
 
 /**
@@ -53,7 +54,6 @@ export function ownFolderReason(agent: Pick<AgentConfig, 'capabilities' | 'allow
 /** The folder the team file is saved in, when the path names it: what "the team's folder" is. */
 export function teamFolderOf(teamPath: string | null | undefined): string | null {
   const path = (teamPath ?? '').trim()
-  if (!path.startsWith('/')) return null
-  const folder = path.replace(/\/[^/]*$/, '')
-  return folder || '/'
+  if (!isAbsolutePath(path)) return null
+  return dirName(path) || path
 }

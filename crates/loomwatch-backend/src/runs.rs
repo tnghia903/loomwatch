@@ -1483,7 +1483,7 @@ struct RunsState {
 /// editor uses (`main` canonicalises once and hands it to both); a non-canonical path is
 /// canonicalised here as a fallback. Every route is loopback-only and never cached.
 pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunRegistry) -> Router {
-    let teams_root = fs::canonicalize(&teams_root).unwrap_or(teams_root);
+    let teams_root = crate::platform::canonicalize(&teams_root).unwrap_or(teams_root);
     Router::new()
         .route("/api/runs", post(start_run).get(list_runs))
         .route("/api/runs/{id}", get(get_run))
@@ -3666,7 +3666,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         pub(crate) fn new() -> Self {
             let path = std::env::temp_dir().join(format!("loomwatch-runs-{}", Uuid::new_v4()));
             fs::create_dir(&path).expect("create temporary teams root");
-            Self(fs::canonicalize(&path).expect("canonical teams root"))
+            Self(crate::platform::canonicalize(&path).expect("canonical teams root"))
         }
 
         pub(crate) fn write_harness(&self, name: &str, script: &str) -> PathBuf {
@@ -3706,9 +3706,10 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
             let first = stage("stage-a", "a done", true);
             let second = stage("stage-b", "b done", false);
             let yaml = format!(
-                "schemaVersion: 1\nid: chain\nname: Two-stage chain\nentrypoint: a\nmemory:\n  notebook:\n    enabled: true\nagents:\n  - id: a\n    name: A\n    role: first\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n  - id: b\n    name: B\n    role: second\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\nedges:\n  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
-                first.display(),
-                second.display()
+                "schemaVersion: 1\nid: chain\nname: Two-stage chain\nentrypoint: a\nmemory:\n  notebook:\n    enabled: true\nagents:\n  - id: a\n    name: A\n    role: first\n    spawn:\n      cmd: {sh}\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n  - id: b\n    name: B\n    role: second\n    spawn:\n      cmd: {sh}\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\nedges:\n  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
+                crate::test_support::sh_path(&first),
+                crate::test_support::sh_path(&second),
+                sh = crate::test_support::SH
             );
             let path = self.0.join(name);
             fs::write(&path, yaml).expect("write pipeline team file");
@@ -3717,8 +3718,9 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
 
         fn write_team(&self, name: &str, harness: &Path) -> PathBuf {
             let yaml = format!(
-                "schemaVersion: 1\nid: fake\nname: Fake harness team\nentrypoint: solo\nagents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n",
-                harness.display()
+                "schemaVersion: 1\nid: fake\nname: Fake harness team\nentrypoint: solo\nagents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    spawn:\n      cmd: {sh}\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n",
+                crate::test_support::sh_path(harness),
+                sh = crate::test_support::SH
             );
             let path = self.0.join(name);
             fs::write(&path, yaml).expect("write team file");
@@ -5217,13 +5219,13 @@ exit 7
         let first = &body["review"][0];
         assert_eq!(
             first["warn"], true,
-            "a /bin/sh harness is not an app LoomWatch knows"
+            "a shell harness is not an app LoomWatch knows"
         );
         assert!(
             first["text"]
                 .as_str()
                 .unwrap()
-                .starts_with("Solo runs `/bin/sh ")
+                .starts_with(&format!("Solo runs `{} ", crate::test_support::SH))
         );
         assert!(registry.list().is_empty(), "a refused team starts no run");
 

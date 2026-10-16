@@ -28,6 +28,14 @@
 # Written for the bash 3.2 that ships with macOS: no associative arrays, no empty-array expansion.
 set -euo pipefail
 
+# Windows has its own launcher, loomwatch.cmd; this one needs lsof, ps and signals Git Bash lacks.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    printf '%s\n' "On Windows, start LoomWatch with loomwatch.cmd from PowerShell or Command Prompt (.\\loomwatch.cmd in this folder)." >&2
+    exit 1
+    ;;
+esac
+
 # Resolve symlinks so the script still finds its checkout when linked into a folder on PATH.
 script=${BASH_SOURCE[0]}
 while [ -L "$script" ]; do

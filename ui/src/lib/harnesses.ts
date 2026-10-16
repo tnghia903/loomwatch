@@ -85,7 +85,7 @@ export function harnessSaid(detail: string): string {
 /** Why an app cannot be used right now, in plain words, or `null` when nothing is known wrong. */
 export function harnessProblem(harness: DetectedHarness): string | null {
   if (harness.acpAvailable === false) return harness.unavailableReason ?? `${harness.spawn.cmd} not found on PATH`
-  if (harness.health === 'error') return harness.healthReason ?? `${harness.name}: sign-in or version problem — run "${harness.command}" in Terminal to fix`
+  if (harness.health === 'error') return harness.healthReason ?? `${harness.name}: sign-in or version problem — run "${harness.command}" in a terminal window to fix`
   if (harness.needsRestart) return `${harness.name} was installed after LoomWatch started. Restart LoomWatch to use it.`
   if (harness.connector?.state === 'failed' && harness.health !== 'ok') return `LoomWatch couldn’t get ${harness.name} ready: ${harness.connector.reason}`
   return null

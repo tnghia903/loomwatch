@@ -1,0 +1,5 @@
+# Batch files need Windows line ends; the shell scripts must keep Unix ones even in a Windows
+# checkout, where Git Bash, WSL and Docker read them.
+*.cmd text eol=crlf
+*.sh text eol=lf
+loomwatch text eol=lf

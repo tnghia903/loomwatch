@@ -29,9 +29,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 const SERVICE: &str = "LoomWatch.Notion";
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 const ACCOUNT: &str = "local-workspace";
 const VERSION: &str = "2026-03-11";
 /// Upstream bodies larger than this are refused, including ones without `Content-Length`.
@@ -133,7 +133,8 @@ impl Remembered {
     }
 }
 
-/// Where the connection is kept: the macOS Keychain, or memory in tests.
+/// Where the connection is kept: the macOS Keychain or Windows Credential Manager, or memory in
+/// tests.
 #[derive(Clone)]
 enum Store {
     Keychain,
@@ -145,10 +146,10 @@ enum Store {
 }
 
 impl Store {
-    /// Whether a connection can be kept here at all. Linux and Windows have no store yet.
+    /// Whether a connection can be kept here at all. Linux has no store yet.
     fn available(&self) -> bool {
         match self {
-            Self::Keychain => cfg!(target_os = "macos"),
+            Self::Keychain => cfg!(any(target_os = "macos", windows)),
             #[cfg(test)]
             Self::Memory(_) | Self::Refusing => true,
         }
@@ -494,7 +495,11 @@ fn credential() -> ApiResult<keyring::Entry> {
 fn storage_error() -> ApiError {
     failure(
         StatusCode::SERVICE_UNAVAILABLE,
-        "The secure credential store is unavailable. Unlock your macOS Keychain and retry. Nothing is saved in project files.",
+        if cfg!(windows) {
+            "Windows Credential Manager is unavailable. Sign in to Windows with your own account and retry. Nothing is saved in project files."
+        } else {
+            "The secure credential store is unavailable. Unlock your macOS Keychain and retry. Nothing is saved in project files."
+        },
     )
 }
 
@@ -508,7 +513,11 @@ async fn keychain_read() -> ApiResult<Option<String>> {
                 Err(_) => Err(storage_error()),
             }
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(windows)]
+        {
+            credential_manager::read()
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
         {
             Err(storage_error())
         }
@@ -531,7 +540,11 @@ async fn keychain_write(value: Option<String>) -> ApiResult<()> {
                 }
             }
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(windows)]
+        {
+            credential_manager::write(value.as_deref())
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
         {
             let _ = value;
             Err(storage_error())
@@ -539,6 +552,118 @@ async fn keychain_write(value: Option<String>) -> ApiResult<()> {
     })
     .await
     .map_err(|_| storage_error())?
+}
+
+/// The connection in Windows Credential Manager, which keeps at most 2,560 bytes in one saved
+/// credential. A longer connection is kept in several, `local-workspace`, `local-workspace#2`, …,
+/// the first of which says how many there are (see [`split_secret`]).
+#[cfg(windows)]
+mod credential_manager {
+    use super::{
+        ACCOUNT, ApiResult, MAX_SECRET_PARTS, SERVICE, join_secret, split_secret, storage_error,
+    };
+
+    fn entry(part: usize) -> ApiResult<keyring::Entry> {
+        let account = if part == 0 {
+            ACCOUNT.to_owned()
+        } else {
+            format!("{ACCOUNT}#{}", part + 1)
+        };
+        keyring::Entry::new(SERVICE, &account).map_err(|_| storage_error())
+    }
+
+    fn get(part: usize) -> ApiResult<Option<String>> {
+        match entry(part)?.get_secret() {
+            Ok(bytes) => String::from_utf8(bytes)
+                .map(Some)
+                .map_err(|_| storage_error()),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(_) => Err(storage_error()),
+        }
+    }
+
+    fn delete(part: usize) -> ApiResult<()> {
+        match entry(part)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(_) => Err(storage_error()),
+        }
+    }
+
+    pub(super) fn read() -> ApiResult<Option<String>> {
+        let Some(first) = get(0)? else {
+            return Ok(None);
+        };
+        join_secret(&first, |part| get(part).ok().flatten())
+            .map(Some)
+            .ok_or_else(storage_error)
+    }
+
+    pub(super) fn write(value: Option<&str>) -> ApiResult<()> {
+        let parts = value.map(split_secret).unwrap_or_default();
+        for (part, text) in parts.iter().enumerate() {
+            entry(part)?
+                .set_secret(text.as_bytes())
+                .map_err(|_| storage_error())?;
+        }
+        for part in parts.len()..MAX_SECRET_PARTS {
+            delete(part)?;
+        }
+        Ok(())
+    }
+}
+
+/// The most bytes kept in one saved credential: Windows Credential Manager refuses more than
+/// 2,560, and the first part also carries [`SECRET_PARTS_MARKER`].
+#[cfg_attr(not(windows), allow(dead_code))]
+const SECRET_PART_BYTES: usize = 2_400;
+/// How many saved credentials one connection may take, 24 KB in all: far more than a sign-in is.
+#[cfg_attr(not(windows), allow(dead_code))]
+const MAX_SECRET_PARTS: usize = 10;
+/// How the first of several parts begins: never the start of a stored connection, which is JSON.
+#[cfg_attr(not(windows), allow(dead_code))]
+const SECRET_PARTS_MARKER: &str = "loomwatch-parts:";
+
+/// `value` cut into parts no longer than [`SECRET_PART_BYTES`], on character boundaries. One part
+/// is `value` itself; the first of several starts with [`SECRET_PARTS_MARKER`], the count, and a
+/// newline.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn split_secret(value: &str) -> Vec<String> {
+    if value.len() <= SECRET_PART_BYTES {
+        return vec![value.to_owned()];
+    }
+    let mut parts = Vec::new();
+    let mut rest = value;
+    while !rest.is_empty() {
+        let mut cut = rest.len().min(SECRET_PART_BYTES - 64);
+        while !rest.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let (part, after) = rest.split_at(cut);
+        parts.push(part.to_owned());
+        rest = after;
+    }
+    let count = parts.len();
+    parts[0] = format!("{SECRET_PARTS_MARKER}{count}\n{}", parts[0]);
+    parts
+}
+
+/// The value [`split_secret`] cut into parts, given its first part and a way to read part `n`.
+/// `None` when a part it names is missing, or it names more than [`MAX_SECRET_PARTS`].
+#[cfg_attr(not(windows), allow(dead_code))]
+fn join_secret(first: &str, mut part: impl FnMut(usize) -> Option<String>) -> Option<String> {
+    let Some(rest) = first.strip_prefix(SECRET_PARTS_MARKER) else {
+        return Some(first.to_owned());
+    };
+    let (count, head) = rest.split_once('\n')?;
+    let count: usize = count.parse().ok()?;
+    if !(2..=MAX_SECRET_PARTS).contains(&count) {
+        return None;
+    }
+    let mut value = head.to_owned();
+    for index in 1..count {
+        value.push_str(&part(index)?);
+    }
+    Some(value)
 }
 
 fn public_status(connection: Option<&Connection>) -> Value {
@@ -1531,6 +1656,32 @@ mod tests {
     };
     use std::fmt::Write as _;
     use tower::ServiceExt;
+
+    /// A connection longer than one Windows credential holds is kept in several and read back
+    /// whole, on character boundaries; a short one is kept exactly as it was.
+    #[test]
+    fn a_long_connection_is_kept_in_parts_and_read_back_whole() {
+        let short = r#"{"token":"secret_abc","name":"Team"}"#;
+        assert_eq!(split_secret(short), vec![short.to_owned()]);
+        assert_eq!(join_secret(short, |_| None).as_deref(), Some(short));
+
+        let long = format!(r#"{{"token":"{}","name":"Tài liệu"}}"#, "é".repeat(4_000));
+        let parts = split_secret(&long);
+        assert!(parts.len() > 1);
+        assert!(parts.iter().all(|part| part.len() <= SECRET_PART_BYTES));
+        assert!(parts[0].starts_with(SECRET_PARTS_MARKER));
+        let read = join_secret(&parts[0], |index| parts.get(index).cloned());
+        assert_eq!(read.as_deref(), Some(long.as_str()));
+        assert_eq!(
+            join_secret(&parts[0], |_| None),
+            None,
+            "a missing part is an error"
+        );
+        assert_eq!(
+            join_secret(&format!("{SECRET_PARTS_MARKER}99\nx"), |_| None),
+            None
+        );
+    }
 
     fn kinds(blocks: &[Value]) -> Vec<&str> {
         blocks

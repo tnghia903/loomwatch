@@ -18,6 +18,7 @@ import { CONNECTIONS_HREF, NOTION_PAGE_SOURCE, type NotionConnection } from '../
 import { PALETTE_WIDTH } from '../../lib/library/paletteWidth'
 import { PaletteResizer } from './PaletteResizer'
 import { SectionHead } from '../ui/SectionHead'
+import { keys } from '../../lib/platform'
 
 const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn }
 
@@ -355,14 +356,14 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
   </section>
   const visible = <T,>(name: string, items: readonly T[]) => items.slice(0, query || expanded[name] ? undefined : limitFor(name))
 
-  if (collapsed) return <button className="palette-reopen" onClick={expand} title="Open the panel (⌘\)">
+  if (collapsed) return <button className="palette-reopen" onClick={expand} title={`Open the panel (${keys('⌘\\')})`}>
     <PanelLeftOpen size={16} />{used.length > 0 ? `${USED} · ${used.length}` : 'Add agents'}
   </button>
   const usedShown = used.filter(item => matches(`${item.name} ${usedDetail(item, agentName)}`))
   const scanned = capabilitiesScannedAt ? `Scanned this Mac at ${capabilitiesScannedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Scanning finds the skills and tools on this Mac'
   return <aside className="node-palette" aria-label="Add to your team" data-tour="palette">
     <div className="palette-body">
-    <div className="palette-head"><div><span className="eyebrow">Add to your team</span><p>Click + or drag onto the canvas, or onto an agent</p></div><button className="icon-button" onClick={() => setCollapsed(true)} aria-label="Collapse the library" title="Collapse (⌘\)"><PanelLeftClose size={16} /></button></div>
+    <div className="palette-head"><div><span className="eyebrow">Add to your team</span><p>Click + or drag onto the canvas, or onto an agent</p></div><button className="icon-button" onClick={() => setCollapsed(true)} aria-label="Collapse the library" title={`Collapse (${keys('⌘\\')})`}><PanelLeftClose size={16} /></button></div>
     <div className="palette-search"><Search size={12} /><input aria-label="Search agents, skills and tools" placeholder="Search" value={query} onChange={e => setQuery(e.target.value)} /><button className="icon-button" onClick={onRetryCapabilities} disabled={capabilitiesLoading} aria-label="Scan this computer again" title="Scan again"><RefreshCw size={12} /></button></div>
     <p className="palette-scan" role="status">{capabilitiesLoading ? 'Checking this Mac…' : scanned}</p>
     {capabilitiesError && !capabilitiesLoading && <div className="palette-alert" role="alert"><span>Couldn’t scan this Mac’s skills and tools.</span><small>{capabilitiesError}</small>{onRetryCapabilities && <button className="btn" onClick={onRetryCapabilities}>Try again</button>}</div>}

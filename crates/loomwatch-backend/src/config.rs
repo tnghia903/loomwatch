@@ -896,6 +896,16 @@ pub fn forbidden_spawn_env(key: &str) -> Option<&'static str> {
         "VISUAL",
         "PAGER",
         "BROWSER",
+        // Windows: where apps keep their settings, which programs a bare name finds, and which
+        // shell and system folder every program starts from.
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PATHEXT",
+        "COMSPEC",
+        "SYSTEMROOT",
+        "WINDIR",
+        "PSMODULEPATH",
     ]) || prefix(&["LD_", "DYLD_"])
     {
         return Some(LOADS_CODE);
@@ -1771,6 +1781,9 @@ mod tests {
             "node_options",
             "PATH",
             "HOME",
+            "USERPROFILE",
+            "appdata",
+            "ComSpec",
             "DYLD_INSERT_LIBRARIES",
             "LD_PRELOAD",
             "https_proxy",

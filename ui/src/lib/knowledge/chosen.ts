@@ -3,6 +3,7 @@
 import { CircleAlert, FileText, Folder, NotebookText, type LucideIcon } from 'lucide-react'
 
 import type { CapabilityRef } from '../team-file/types'
+import { baseName, isAbsolutePath } from '../files/paths'
 
 /**
  * How a knowledge entry reads in the list. Only an added file is written relative to the team
@@ -22,8 +23,8 @@ export function chosenKnowledge(capability: CapabilityRef): { Icon: LucideIcon; 
 
 /** Whether a chosen path is a file rather than a folder, by the rule {@link chosenKnowledge} states. */
 export function chosenIsFile(path: string): boolean {
-  const relative = !path.startsWith('/') && !path.startsWith('~')
-  return relative || /\.[A-Za-z0-9]{1,8}$/.test(path.split('/').pop() ?? '')
+  const relative = !isAbsolutePath(path) && !path.startsWith('~')
+  return relative || /\.[A-Za-z0-9]{1,8}$/.test(baseName(path))
 }
 
 /** What a folder or file card says it is, under its name (ADR 0042). */
@@ -33,5 +34,5 @@ export function chosenSource(path: string): 'Added file' | 'Linked folder' {
 
 /** The name a folder or file card shows: the last part of its path. */
 export function chosenName(path: string): string {
-  return path.replace(/\/+$/, '').split('/').pop() || path
+  return baseName(path)
 }

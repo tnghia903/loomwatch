@@ -706,7 +706,7 @@ pub(crate) fn resolve(path: &Path) -> PathBuf {
         missing.push(name);
         existing.pop();
     }
-    let mut resolved = std::fs::canonicalize(&existing).unwrap_or(existing);
+    let mut resolved = crate::platform::canonicalize(&existing).unwrap_or(existing);
     for name in missing.into_iter().rev() {
         resolved.push(name);
     }

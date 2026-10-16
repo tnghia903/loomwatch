@@ -23,6 +23,9 @@ cd loomwatch
 ./loomwatch
 ```
 
+On Windows, run `.\loomwatch.cmd` instead of `./loomwatch`; Rust's installer adds the Visual Studio
+C++ build tools it needs.
+
 `./loomwatch` builds the browser app and the program the first time and after every change to
 them, starts it and opens the app. See [the README](README.md#build-from-source) for the
 details and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit.
@@ -45,6 +48,10 @@ need a PostgreSQL they may create a database on; they are skipped unless you nam
 `LOOMWATCH_TEST_POSTGRES_URL=postgres://… cargo test --locked -p loomwatch-backend --lib import:: -- --include-ignored`.
 
 - Add a test that fails without your change.
+- Paths, programs and processes behave differently on Windows: go through `src/platform.rs` (and
+  `ui/src/lib/files/paths.ts` in the browser app) rather than `/`-only string handling, and expect
+  the **Windows** CI job to run your change there. Test fixtures that are shell scripts use
+  `test_support::SH` and `fake_program`, which run them with Git's `sh` on Windows.
 - Keep user-facing text plain: short sentences, the words a person who has never used LoomWatch
   would use, and labels that match what the app shows.
 - A change to how LoomWatch decides something (permissions, what an agent is given, where data

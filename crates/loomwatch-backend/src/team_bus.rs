@@ -2040,7 +2040,11 @@ mod tests {
             guards: GuardsConfig::default(),
             agents: vec![
                 test_agent("lead", "true", Vec::new()),
-                test_agent("worker", "/bin/sh", vec!["-c".into(), script.into()]),
+                test_agent(
+                    "worker",
+                    crate::test_support::SH,
+                    vec!["-c".into(), script.into()],
+                ),
             ],
             edges: Vec::new(),
         });
@@ -2273,7 +2277,11 @@ mod tests {
             },
             agents: vec![
                 test_agent("lead", "true", Vec::new()),
-                test_agent("worker", "/bin/sh", vec!["-c".into(), script.into()]),
+                test_agent(
+                    "worker",
+                    crate::test_support::SH,
+                    vec!["-c".into(), script.into()],
+                ),
             ],
             edges: Vec::new(),
         });
@@ -2866,8 +2874,16 @@ mod tests {
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                test_agent("a", "/bin/sh", vec!["-c".into(), sleeping.into()]),
-                test_agent("b", "/bin/sh", vec!["-c".into(), sleeping.into()]),
+                test_agent(
+                    "a",
+                    crate::test_support::SH,
+                    vec!["-c".into(), sleeping.into()],
+                ),
+                test_agent(
+                    "b",
+                    crate::test_support::SH,
+                    vec!["-c".into(), sleeping.into()],
+                ),
             ],
             edges: Vec::new(),
         });
@@ -3008,7 +3024,11 @@ mod tests {
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                test_agent("a", "/bin/sh", vec!["-c".into(), script.into()]),
+                test_agent(
+                    "a",
+                    crate::test_support::SH,
+                    vec!["-c".into(), script.into()],
+                ),
                 asker,
             ],
             edges: vec![crate::config::EdgeConfig {
@@ -3034,7 +3054,7 @@ mod tests {
 
         // Run the predecessor's own turn, then hand its still-open session to the bus.
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
@@ -3432,7 +3452,11 @@ mod tests {
             guards: GuardsConfig::default(),
             agents: vec![
                 test_agent("lead", "true", Vec::new()),
-                test_agent("helper", "/bin/sh", vec!["-c".into(), helper_script.into()]),
+                test_agent(
+                    "helper",
+                    crate::test_support::SH,
+                    vec!["-c".into(), helper_script.into()],
+                ),
             ],
             edges: Vec::new(),
         });

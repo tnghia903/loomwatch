@@ -27,7 +27,7 @@ use serde_json::Value;
 pub fn configured_home() -> Option<PathBuf> {
     select_home(
         std::env::var_os("LOOMWATCH_CAPABILITY_HOME"),
-        std::env::var_os("HOME"),
+        crate::platform::home_dir().map(PathBuf::into_os_string),
     )
 }
 
@@ -251,18 +251,18 @@ pub fn detect_capabilities(home: Option<&Path>, teams_root: &Path) -> Capability
     // Claude Code's whole state file, and grows with every project it has opened.
     let claude_json = home.and_then(|home| read_json(&home.join(".claude.json")));
     if let Some(home) = home {
-        scan_codex_mcp(&home.join(".codex/config.toml"), &mut tools);
+        scan_codex_mcp(&home.join(".codex").join("config.toml"), &mut tools);
         if let Some(claude_json) = &claude_json {
             collect_json_connector_keys(claude_json, "mcpServers", "Claude Code", &mut tools);
         }
         scan_json_connectors(
-            &home.join(".claude/settings.json"),
+            &home.join(".claude").join("settings.json"),
             "Claude Code",
             "mcpServers",
             &mut tools,
         );
         scan_json_connectors(
-            &home.join(".config/opencode/opencode.json"),
+            &home.join(".config").join("opencode").join("opencode.json"),
             "OpenCode",
             "mcp",
             &mut tools,
@@ -443,7 +443,7 @@ fn collect_matching_definitions(
         if !name.eq_ignore_ascii_case(&item.name) || !capability_has_source(&item.source, &source) {
             continue;
         }
-        let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        let canonical = crate::platform::canonicalize(&path).unwrap_or_else(|_| path.clone());
         if !seen.insert(canonical) {
             continue;
         }
@@ -530,7 +530,7 @@ fn add_keyed_capability(
 /// bug. The consequence is that a live team's kept-note count is not stated here — see
 /// [`MemorySourceRef::kept`].
 fn scan_team_memory_sources(teams_root: &Path, sources: &mut BTreeMap<String, CapabilityBuilder>) {
-    let Ok(root) = std::fs::canonicalize(teams_root) else {
+    let Ok(root) = crate::platform::canonicalize(teams_root) else {
         return;
     };
     let Ok(entries) = std::fs::read_dir(&root) else {
@@ -729,14 +729,17 @@ fn skill_roots(home: Option<&Path>, teams_root: &Path) -> Vec<SkillRoot> {
         let label = project_label(name);
         let home_paths = roots
             .iter()
-            .map(|root| fs::canonicalize(&root.path).unwrap_or_else(|_| root.path.clone()))
+            .map(|root| {
+                crate::platform::canonicalize(&root.path).unwrap_or_else(|_| root.path.clone())
+            })
             .collect::<BTreeSet<_>>();
         let position = usize::from(home.is_some()).min(roots.len());
         let project_roots = [".claude/skills", ".agents/skills"]
             .into_iter()
             .map(|relative| SkillRoot::new(project.join(relative), &label, RANK_PERSONAL, Skills))
             .filter(|root| {
-                let path = fs::canonicalize(&root.path).unwrap_or_else(|_| root.path.clone());
+                let path =
+                    crate::platform::canonicalize(&root.path).unwrap_or_else(|_| root.path.clone());
                 !home_paths.contains(&path)
             })
             .collect::<Vec<_>>();
@@ -752,13 +755,13 @@ fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
         return Vec::new();
     };
     let mut roots = vec![SkillRoot::new(
-        home.join(".claude/skills"),
+        home.join(".claude").join("skills"),
         "Claude Code",
         RANK_PERSONAL,
         Skills,
     )];
     roots.push(SkillRoot::new(
-        home.join(".codex/skills"),
+        home.join(".codex").join("skills"),
         "Codex",
         RANK_HARNESS,
         Skills,
@@ -773,7 +776,7 @@ fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
         ));
     }
     roots.push(SkillRoot::new(
-        home.join(".gemini/skills"),
+        home.join(".gemini").join("skills"),
         "Gemini",
         RANK_HARNESS,
         Skills,
@@ -782,12 +785,12 @@ fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
     // Its own source checkout and optional-skills catalog are not installed skills, so they are
     // not read.
     roots.push(SkillRoot::new(
-        home.join(".hermes/skills"),
+        home.join(".hermes").join("skills"),
         "Hermes",
         RANK_HARNESS,
         Skills,
     ));
-    for profile in subfolders(&home.join(".hermes/profiles")) {
+    for profile in subfolders(&home.join(".hermes").join("profiles")) {
         roots.push(SkillRoot::new(
             profile.join("skills"),
             "Hermes",
@@ -808,13 +811,13 @@ fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
         ));
     }
     roots.push(SkillRoot::new(
-        home.join(".pi/agent/skills"),
+        home.join(".pi").join("agent").join("skills"),
         "pi",
         RANK_HARNESS,
         Skills,
     ));
     roots.push(SkillRoot::new(
-        home.join(".agents/skills"),
+        home.join(".agents").join("skills"),
         "Shared",
         RANK_SHARED,
         Skills,
@@ -822,13 +825,13 @@ fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
     // Plugins last. Claude Code's `marketplaces/` is the catalog of every plugin a marketplace
     // offers, installed or not; listing it showed uninstalled plugins as ready to use.
     roots.push(SkillRoot::new(
-        home.join(".codex/plugins/cache"),
+        home.join(".codex").join("plugins").join("cache"),
         "Codex",
         RANK_INSTALLED,
         Plugins,
     ));
     let mut claude_plugins = SkillRoot::new(
-        home.join(".claude/plugins"),
+        home.join(".claude").join("plugins"),
         "Claude Code",
         RANK_INSTALLED,
         Plugins,
@@ -836,7 +839,7 @@ fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
     claude_plugins.exclude = &["marketplaces"];
     roots.push(claude_plugins);
     roots.push(SkillRoot::new(
-        home.join(".gemini/extensions"),
+        home.join(".gemini").join("extensions"),
         "Gemini",
         RANK_INSTALLED,
         Plugins,
@@ -912,7 +915,8 @@ fn find_skill_files(root: &Path, max_depth: usize, exclude: &[&str]) -> Vec<Path
             continue;
         }
         // Symlinks can point back up their own tree; canonical paths end the loop.
-        let canonical = fs::canonicalize(&directory).unwrap_or_else(|_| directory.clone());
+        let canonical =
+            crate::platform::canonicalize(&directory).unwrap_or_else(|_| directory.clone());
         if !seen.insert(canonical) {
             continue;
         }
@@ -1173,14 +1177,14 @@ pub fn tool_definitions_for(home: &Path, item: &DetectedCapability) -> Vec<ToolD
         };
     for path in [
         home.join(".claude.json"),
-        home.join(".claude/settings.json"),
+        home.join(".claude").join("settings.json"),
     ] {
         let servers = read_json(&path)
             .map(|value| json_definitions(&value, "mcpServers"))
             .unwrap_or_default();
         add("Claude Code", ToolFormat::Claude, path, servers);
     }
-    let codex = home.join(".codex/config.toml");
+    let codex = home.join(".codex").join("config.toml");
     let servers = fs::read_to_string(&codex)
         .ok()
         .and_then(|source| source.parse::<toml::Table>().ok())
@@ -1192,7 +1196,7 @@ pub fn tool_definitions_for(home: &Path, item: &DetectedCapability) -> Vec<ToolD
         })
         .unwrap_or_default();
     add("Codex", ToolFormat::Codex, codex, servers);
-    let opencode = home.join(".config/opencode/opencode.json");
+    let opencode = home.join(".config").join("opencode").join("opencode.json");
     let servers = read_json(&opencode)
         .map(|value| json_definitions(&value, "mcp"))
         .unwrap_or_default();
@@ -1310,7 +1314,7 @@ pub(crate) fn folder_contents(folder: &Path, provider: &str) -> Vec<CapabilityDe
 /// A live team's kept notes are rows in the database and this module never opens it, which is why
 /// the inspector points at the Memory panel for those rather than claiming there are none.
 fn memory_contents(teams_root: &Path, reference: &MemorySourceRef) -> Vec<CapabilityDefinition> {
-    let Ok(root) = fs::canonicalize(teams_root) else {
+    let Ok(root) = crate::platform::canonicalize(teams_root) else {
         return Vec::new();
     };
     if let Some(folder) = &reference.pack {

@@ -318,6 +318,8 @@ fn per_user_program_in(spec: &ProcessSpec, home: Option<&Path>) -> Option<PathBu
 /// Owns one ACP child and both sides of its line-delimited JSON-RPC stream.
 pub struct AcpProcess {
     child: Child,
+    /// Ends whatever the app started along with it (Windows; see [`crate::platform::ProcessTree`]).
+    _tree: crate::platform::ProcessTree,
     stdin: Option<ChildStdin>,
     stdout: Lines<BufReader<ChildStdout>>,
     stderr: JoinHandle<std::io::Result<String>>,
@@ -366,7 +368,21 @@ impl AcpProcess {
     /// Returns an error when the process cannot be spawned or its streams are unavailable.
     pub fn spawn(spec: &ProcessSpec) -> Result<Self> {
         let start = start_command(spec)?;
-        let mut command = Command::new(&start.program);
+        let inherited_path = spec
+            .env
+            .get("PATH")
+            .map(std::ffi::OsString::from)
+            .or_else(|| std::env::var_os("PATH"));
+        let child_path = start
+            .first_on_path
+            .as_ref()
+            .map(|first| crate::connectors::path_with(first, inherited_path.as_deref()));
+        let program = crate::platform::program_path(
+            &start.program,
+            &spec.cwd,
+            child_path.as_deref().or(inherited_path.as_deref()),
+        );
+        let mut command = Command::new(program);
         for (key, _) in std::env::vars_os() {
             if let Some(key) = key.to_str()
                 && daemon_only(key, spec)
@@ -382,18 +398,14 @@ impl AcpProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        if let Some(first) = &start.first_on_path {
-            let path = spec
-                .env
-                .get("PATH")
-                .map(std::ffi::OsString::from)
-                .or_else(|| std::env::var_os("PATH"));
-            command.env("PATH", crate::connectors::path_with(first, path.as_deref()));
+        if let Some(path) = child_path {
+            command.env("PATH", path);
         }
         if let Some(config) = withheld_app_config(spec)? {
             command.env(CODEX_CONFIG, config);
         }
         let mut child = command.spawn()?;
+        let tree = crate::platform::ProcessTree::adopt(&child);
         let stdin = child
             .stdin
             .take()
@@ -415,6 +427,7 @@ impl AcpProcess {
         });
         Ok(Self {
             child,
+            _tree: tree,
             stdin: Some(stdin),
             stdout: BufReader::new(stdout).lines(),
             stderr,
@@ -2069,7 +2082,15 @@ struct ExitReport {
 }
 
 /// Name the signal that killed the child, if one did. `SIGKILL` for the common
-/// timeout/OOM path; unrecognized numbers fall back to `SIG<n>`.
+/// timeout/OOM path; unrecognized numbers fall back to `SIG<n>`. Windows has no signals: a
+/// process ended from outside there reports the exit code it was given.
+#[cfg(not(unix))]
+#[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
+fn signal_death(_status: std::process::ExitStatus) -> Option<String> {
+    None
+}
+
+#[cfg(unix)]
 fn signal_death(status: std::process::ExitStatus) -> Option<String> {
     use std::os::unix::process::ExitStatusExt;
     status.signal().map(|number| {
@@ -3849,7 +3870,7 @@ mod tests {
             .replace("FIRST_ID", first_id)
             .replace("SECOND_ID", second_id);
             let spec = ProcessSpec {
-                cmd: "/bin/sh".into(),
+                cmd: crate::test_support::SH.into(),
                 args: vec!["-c".into(), script],
                 env: BTreeMap::new(),
                 cwd: std::env::current_dir().expect("cwd"),
@@ -3927,7 +3948,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4022,7 +4043,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4260,7 +4281,7 @@ mod tests {
             ..Default::default()
         };
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: cwd.clone(),
@@ -4317,7 +4338,7 @@ mod tests {
         let cwd = std::env::current_dir().expect("cwd");
         let archive = EventArchive::new(pool);
         let run = |args: String, permissions| ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), args],
             env: BTreeMap::new(),
             cwd: cwd.clone(),
@@ -4438,7 +4459,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into(), "claude-agent-acp".into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4501,7 +4522,7 @@ mod tests {
             ))
         };
         let run = |app: &str, script: String, permissions| ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script, app.into()],
             env: BTreeMap::from([("CODEX_CONFIG".to_owned(), teams.to_owned())]),
             cwd: cwd.clone(),
@@ -4734,7 +4755,7 @@ mod tests {
         let cwd = std::env::current_dir().expect("cwd");
         let archive = EventArchive::new(pool);
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: cwd.clone(),
@@ -4853,7 +4874,7 @@ mod tests {
         "#;
         let cwd = std::env::current_dir().expect("cwd");
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: cwd.clone(),
@@ -4923,7 +4944,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4980,7 +5001,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -5202,7 +5223,7 @@ mod tests {
         session: &str,
     ) -> Vec<crate::RunEvent> {
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.to_owned()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -5373,7 +5394,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -5453,7 +5474,7 @@ mod tests {
             exit 7
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -5553,7 +5574,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":3,"error":{"code":-32000,"message":"model rejected"}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -5604,7 +5625,7 @@ mod tests {
             kill -KILL $$
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -5633,8 +5654,19 @@ mod tests {
         let last = events.last().unwrap();
         assert_eq!(last.kind, EventKind::Process);
         assert_eq!(last.payload["phase"], "crashed");
-        assert_eq!(last.payload["exitCode"], -1);
-        assert_eq!(last.payload["signal"], "SIGKILL");
+        if cfg!(unix) {
+            assert_eq!(last.payload["exitCode"], -1);
+            assert_eq!(last.payload["signal"], "SIGKILL");
+        } else {
+            // Windows has no signals: an app ended from outside reports only its exit code, and
+            // the marker names no signal rather than inventing one.
+            assert_ne!(last.payload["exitCode"], 0);
+            assert!(
+                last.payload.get("signal").is_none_or(Value::is_null),
+                "{}",
+                last.payload
+            );
+        }
     }
 
     #[tokio::test]
@@ -5654,7 +5686,7 @@ mod tests {
             printf 'cancel-frame: %s\n' "$cancel" >&2
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -5663,9 +5695,12 @@ mod tests {
             asker: None,
         };
         let archive = EventArchive::new(pool);
+        // Every request has this long, the handshake included: Git's `sh` on a busy Windows runner
+        // can take longer than 200 ms just to start, and the handshake then timed out instead.
+        let request_timeout = Duration::from_millis(if cfg!(windows) { 3_000 } else { 200 });
         let mut process = AcpProcess::spawn(&spec)
             .expect("spawn")
-            .with_request_timeout(Duration::from_millis(200));
+            .with_request_timeout(request_timeout);
         let error = process
             .run_session(
                 "agent",
@@ -5815,7 +5850,7 @@ mod tests {
         "#;
         let cwd = std::env::current_dir().expect("cwd");
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: cwd.clone(),
@@ -5843,7 +5878,7 @@ mod tests {
     ) -> AcpProcess {
         let cwd = std::env::current_dir().expect("cwd");
         AcpProcess::spawn(&ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: cwd.clone(),

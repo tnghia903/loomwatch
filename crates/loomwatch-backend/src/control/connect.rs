@@ -270,7 +270,14 @@ fn plan(control: &Control, spec: &AppSpec, token: &str) -> Plan {
 /// A command as the panel shows it: the token replaced, every argument quoted as a shell would
 /// need it.
 fn shown(program: &str, args: &[String], token: &str) -> String {
-    let short = Path::new(program).file_name().map_or_else(
+    // The name as it is typed: `claude`, not the `claude.cmd` npm installs on Windows.
+    let path = Path::new(program);
+    let typed = if cfg!(windows) {
+        path.file_stem()
+    } else {
+        path.file_name()
+    };
+    let short = typed.map_or_else(
         || program.to_owned(),
         |name| name.to_string_lossy().into_owned(),
     );

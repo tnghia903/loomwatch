@@ -115,8 +115,10 @@ fn read(home: Option<&Path>, workspace: &Path, var: &dyn Fn(&str) -> Option<Stri
     let user_settings = home.join(".gemini").join("settings.json");
     let workspace_settings = workspace.join(".gemini").join("settings.json");
     // Started in the home folder, Gemini CLI reads that file once, as the person's settings.
-    let same_file =
-        || fs::canonicalize(&workspace_settings).ok() == fs::canonicalize(&user_settings).ok();
+    let same_file = || {
+        crate::platform::canonicalize(&workspace_settings).ok()
+            == crate::platform::canonicalize(&user_settings).ok()
+    };
     if system.exists() || system_defaults.exists() || (workspace_settings.exists() && !same_file())
     {
         return Reading::Unjudged;

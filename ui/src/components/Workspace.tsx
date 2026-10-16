@@ -127,6 +127,7 @@ import { AskButton } from './ask/AskButton'
 import type { CardActions } from './ask/AskCards'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './ask/useAskActions'
 import { answeringAgent, isCheckerRole } from '../lib/library/checker'
+import { baseName } from '../lib/files/paths'
 
 // The Ask panel is code-split like the Markdown stack: most visits never open it.
 const AskPanel = lazy(() => import('./ask/AskPanel').then((module) => ({ default: module.AskPanel })))
@@ -1574,7 +1575,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   }, [doc, setMemoryGeneration])
   const writeBriefNote = useCallback(async (body: string) => {
     if (!doc.path) throw new Error('Open a team first.')
-    const teamFile = doc.path.split('/').pop() ?? doc.path
+    const teamFile = baseName(doc.path)
     const file = briefFileNameFor(body, memory?.entries.map((entry) => entry.path) ?? [], `${teamFile.replace(/\.ya?ml$/i, '')}.brief`)
     // The file first, then the team-file entry: an entry pointing at a file that does not exist
     // would refuse the next run, which is a worse failure than a stray unreferenced Markdown file.
@@ -2229,7 +2230,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   }, [statusById])
 
   // ---- composer state ---------------------------------------------------------------------
-  const filename = doc.path?.split('/').pop() ?? 'team'
+  const filename = doc.path ? baseName(doc.path) : 'team'
   // §1.3: the blocker names the offending agents, so the preflight keeps their ids, not a count.
   const terminalIds = useMemo(
     () => (doc.mode === 'pipeline' ? doc.nodes.filter((node) => !doc.edges.some((edge) => edge.source === node.id)).map((node) => node.id) : []),
@@ -2741,7 +2742,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             delivery={{
               deliver: doc.teamDeliver,
               readOnly: !editable,
-              teamName: doc.teamName ?? (doc.path?.split('/').pop() ?? 'team').replace(/\.ya?ml$/i, ''),
+              teamName: doc.teamName ?? (doc.path ? baseName(doc.path) : 'team').replace(/\.ya?ml$/i, ''),
               routineTitle: doc.teamSchedule?.deliver?.notion ? doc.teamSchedule.deliver.notion.title ?? DEFAULT_ROUTINE_NOTION_TITLE : null,
               onChange: (deliver) => {
                 if (!editable) return
@@ -2979,7 +2980,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         {newTeamSheet && <NewTeamSheet harnesses={harnesses} openTeamUnsaved={['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)} onClose={() => setNewTeamSheet(false)} onCreateBlank={(name, path) => { doc.createNewDocument(name, path); setNewTeamSheet(false); showRun(null); showAgents(null); onDocumentOpen() }} />}
         {saveCopyOpen && <SaveCopySheet error={doc.saveError} onClose={() => setSaveCopyOpen(false)} onSave={doc.saveCopy} />}
         {/* Home, not the deleted team's empty canvas, is where the operator goes next. */}
-        {deleteTeamOpen && doc.path && <DeleteTeamDialog path={doc.path} name={doc.teamName ?? (doc.path.split('/').pop() ?? doc.path).replace(/\.ya?ml$/i, '')} onDeleted={() => window.location.assign('/')} onClose={() => setDeleteTeamOpen(false)} />}
+        {deleteTeamOpen && doc.path && <DeleteTeamDialog path={doc.path} name={doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, '')} onDeleted={() => window.location.assign('/')} onClose={() => setDeleteTeamOpen(false)} />}
         {/* ADR 0048: a team from outside LoomWatch is checked before its first run. */}
         {teamReview && <TeamReviewDialog review={teamReview} onTrust={trustAndRun} onClose={dismissReview} />}
         {chatReview && <TeamReviewDialog review={chatReview.review} onTrust={async () => { await approveTeam(chatReview.review.teamPath, chatReview.review.teamRevision); const { retry } = chatReview; setChatReview(null); retry() }} onClose={() => setChatReview(null)} />}

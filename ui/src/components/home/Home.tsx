@@ -22,6 +22,7 @@ import { DeleteTeamDialog } from './DeleteTeamDialog'
 import { NewTeamDialog } from './NewTeamDialog'
 import { TeamCardMenu } from './TeamCardMenu'
 import { YourAgentsShelf } from './YourAgentsShelf'
+import { keys } from '../../lib/platform'
 
 export interface HomeProps {
   /** Something the operator must know before choosing a team, e.g. a link that did not open. */
@@ -172,8 +173,8 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
           <UpdateBadge />
           <QuestsLink />
           <button type="button" className="home-feedback" onClick={() => openFeedback({ screen: 'home' })} aria-label="Send feedback" title="Report a problem or share an idea"><MessageSquareWarning size={15} aria-hidden="true" /><span className="home-feedback-label">Feedback</span></button>
-          <button type="button" className="iconbtn" onClick={onPalette} aria-label="Open the command palette" title="Commands (⌘K)"><Search size={15} aria-hidden="true" /></button>
-          <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title="Theme (⌘⇧L)">{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
+          <button type="button" className="iconbtn" onClick={onPalette} aria-label="Open the command palette" title={`Commands (${keys('⌘K')})`}><Search size={15} aria-hidden="true" /></button>
+          <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title={`Theme (${keys('⌘⇧L')})`}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
         </span>
       </header>
 

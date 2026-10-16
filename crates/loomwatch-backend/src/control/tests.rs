@@ -26,7 +26,7 @@ impl TempDirectory {
         let path =
             std::env::temp_dir().join(format!("loomwatch-ask-{label}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).expect("temporary directory");
-        Self(std::fs::canonicalize(&path).expect("canonical temporary directory"))
+        Self(crate::platform::canonicalize(&path).expect("canonical temporary directory"))
     }
 }
 
@@ -600,21 +600,14 @@ async fn the_tool_server_needs_a_live_token_and_lists_only_its_tools() {
 fn fake_app(bin: &Path, name: &str, record: &Path, fail: bool) {
     let script = format!(
         "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{}'\n{}",
-        record.display(),
+        crate::test_support::sh_path(record),
         if fail {
             "echo \"error: refused $*\" >&2\nexit 1\n"
         } else {
             "exit 0\n"
         }
     );
-    let path = bin.join(name);
-    std::fs::write(&path, script).expect("fake app");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-            .expect("executable");
-    }
+    crate::test_support::fake_program(&bin.join(name), &script);
 }
 
 #[tokio::test]

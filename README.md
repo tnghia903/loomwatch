@@ -17,7 +17,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/runs%20on-your%20computer-AD8A20" alt="Runs on your computer">
-  <img src="https://img.shields.io/badge/platform-macOS-56524A" alt="Platform: macOS">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-56524A" alt="Platform: macOS and Windows">
   <img src="https://img.shields.io/badge/first%20run-offline%20demo%2C%20no%20AI%20account-17724A" alt="First run: offline demo, no AI account">
   <img src="https://img.shields.io/badge/agents%20over-ACP-56524A" alt="Agents over ACP">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20React-56524A" alt="Built with Rust and React">
@@ -36,6 +36,13 @@ open it, drag LoomWatch to Applications, and open it. Then follow
 
 ```sh
 curl -fsSL https://loomwatch.github.io/install.sh | bash
+```
+
+**On Windows** (Windows 10 or 11, 64-bit, with [Docker Desktop](https://docs.docker.com/desktop/)),
+paste this into PowerShell:
+
+```powershell
+irm https://loomwatch.github.io/install.ps1 | iex
 ```
 
 ## Your AI apps are the threads. LoomWatch is the loom.
@@ -419,6 +426,17 @@ against the release's checksum, puts it in `~/LoomWatch/app`, and opens
 **<http://127.0.0.1:3000>** with an offline demo team ready to run. Nothing is compiled and no
 administrator password is needed. Then follow [Try your first run](#try-your-first-run).
 
+On Windows, paste this into PowerShell (from the Start menu, or Terminal) instead:
+
+```powershell
+irm https://loomwatch.github.io/install.ps1 | iex
+```
+
+It does the same with the Windows download, puts LoomWatch in `%USERPROFILE%\LoomWatch\app`, and
+adds that folder to your own `PATH`, so any terminal window opened afterwards knows the `loomwatch`
+command. If PowerShell says running scripts is disabled, run
+`powershell -ExecutionPolicy Bypass -c "irm https://loomwatch.github.io/install.ps1 | iex"` instead.
+
 > [!TIP]
 > No AI account yet? The offline demo needs no API key and no model usage, so you can learn the whole
 > app first.
@@ -437,6 +455,12 @@ It is [scripts/install.sh](scripts/install.sh) in this repository. It downloads
 [newest release](https://github.com/tnghia903/loomwatch/releases/latest), and changes nothing
 outside `~/LoomWatch` apart from a `loomwatch` shortcut in `~/.local/bin` when that folder is
 already on your `PATH`.
+
+On Windows, `irm https://loomwatch.github.io/install.ps1 -OutFile install.ps1`, then
+`notepad install.ps1`, then `powershell -ExecutionPolicy Bypass -File install.ps1`. It is
+[scripts/install.ps1](scripts/install.ps1): it downloads `loomwatch-windows-x86_64.zip` and its
+`.sha256`, and changes nothing outside `%USERPROFILE%\LoomWatch` apart from adding
+`%USERPROFILE%\LoomWatch\app` to your own `PATH`.
 
 </details>
 
@@ -457,7 +481,9 @@ account.
 
 The offline demo runs on Python 3. On a Mac without Apple's Command Line Tools, macOS offers to
 install them the first time the demo runs; say yes, or install them first with
-`xcode-select --install`.
+`xcode-select --install`. Windows has no Python of its own: install it with
+`winget install Python.Python.3.13` (or from [python.org](https://www.python.org/downloads/)),
+then start LoomWatch from a new terminal window.
 
 > [!NOTE]
 > Gemini CLI no longer works with a personal Google sign-in. Google now refuses it ("This client is
@@ -582,6 +608,12 @@ If you used a version that kept the run history in Docker, its database is still
 once you no longer need it, with `cd ~/LoomWatch/app && docker compose down -v` before step 3 (or
 in Docker Desktop, the `loomwatch-app_postgres-data` volume).
 
+On Windows the steps are the same, in PowerShell: `loomwatch stop`, then
+`cd ~\LoomWatch\app; docker compose down -v; cd ~`, then delete `%USERPROFILE%\LoomWatch\app`
+and remove that folder from your `PATH` (Start menu, "Edit environment variables for your
+account"). LoomWatch's approvals are in `%LOCALAPPDATA%\LoomWatch`, and a Notion sign-in is kept
+in Windows Credential Manager as `LoomWatch.Notion`.
+
 ### Change the defaults
 
 | Setting | Default | For example |
@@ -595,6 +627,7 @@ in Docker Desktop, the `loomwatch-app_postgres-data` volume).
 | Daily check for a newer version | On | `LOOMWATCH_UPDATE_CHECK=off ~/LoomWatch/app/loomwatch`, or turn it off in **Check for updates** |
 
 `loomwatch --no-open` starts without opening the browser, and `loomwatch help` lists everything.
+In PowerShell, set a setting for one start like this: `$env:LOOMWATCH_PORT=3001; loomwatch`.
 
 ### Build from source
 
@@ -614,6 +647,10 @@ git clone https://github.com/tnghia903/loomwatch.git
 cd loomwatch
 ./loomwatch
 ```
+
+On Windows, install Git, Node.js and Rust (`winget install Git.Git OpenJS.NodeJS.LTS
+Rustlang.Rustup`, and let Rust's installer add the Visual Studio C++ build tools it asks for), then
+run `.\loomwatch.cmd` in the cloned folder wherever this guide says `./loomwatch`.
 
 The first start builds the browser app and the program, which takes a few minutes, then does what
 the installed copy does. Use `./loomwatch` from that folder wherever this guide says
@@ -1105,6 +1142,9 @@ you can share it by copying it into another teams folder's `.jobs`.
 | macOS says “loomwatchd” can't be opened because Apple cannot check it for malicious software | The archive was downloaded with a web browser, which marks it for that check. Delete `~/LoomWatch/app` and install with the `curl` command in [Quickstart](#quickstart) instead. |
 | LoomWatch says something needs to be installed first | Install what it lists, open a new terminal window so it picks up the new `PATH`, then run `loomwatch` again. |
 | `zsh: no such file or directory: …/loomwatch` or `command not found: loomwatch` | The installer puts LoomWatch in `~/LoomWatch/app`, so start it with `~/LoomWatch/app/loomwatch`. In a copy of the source, run `./loomwatch` from its folder. |
+| Windows: `'loomwatch' is not recognized` or `The term 'loomwatch' is not recognized` | The window was open before LoomWatch was installed. Open a new terminal window, or start it with `~\LoomWatch\app\loomwatch.cmd`. In a copy of the source, run `.\loomwatch.cmd` from its folder. |
+| Windows: `running scripts is disabled on this system` while installing | Install with `powershell -ExecutionPolicy Bypass -c "irm https://loomwatch.github.io/install.ps1 \| iex"`. Starting LoomWatch afterwards needs no change: `loomwatch` allows its own script. |
+| Windows: the demo fails with "Python was not found; run without arguments to install from the Microsoft Store" | That message is Windows' stand-in for a missing Python. Install Python 3 (`winget install Python.Python.3.13`), open a new terminal window, and start LoomWatch again. |
 | `permission denied: ./loomwatch` (a copy of the source) | Run `chmod +x loomwatch` once, or start it with `bash loomwatch`. |
 | "Your run history from the earlier version is still in Docker" | The first start after updating could not read the Docker database an earlier version used. Start Docker Desktop, stop LoomWatch, and run `~/LoomWatch/app/loomwatch import`. Running it twice is safe: nothing is copied twice. |
 | "The database … was set up by a newer LoomWatch" | You went back to an older version by hand. Run the newer one again, or `loomwatch rollback`, which puts back the copy saved before the update. |

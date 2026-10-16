@@ -2,11 +2,13 @@ import { ChevronDown, Plus } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { AppProblem } from '../../lib/team-file/appChecks'
+import { baseName, dirName } from '../../lib/files/paths'
 import { fetchTeamsDiscovery, teamDisplayName, teamSummaries, type TeamSummary } from '../../lib/team-file/client'
 import { reviewProblems, shortenDirectory, type ReviewProblem } from '../../lib/team-file/problems'
 import type { EntrypointProblem, SaveState } from '../../lib/team-file/useTeamDocument'
 import type { AgentFieldProblems, DocumentProblem } from '../../lib/team-file/validation'
 import { ChipDot, type ChipState } from '../ui/glyphs'
+import { keys } from '../../lib/platform'
 
 export interface DocumentSwitcherProps {
   path: string | null
@@ -79,8 +81,8 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   }, [switcherOpen, problemsOpen, onProblemsOpenChange])
 
   if (!path) return null
-  const filename = path.split('/').pop() ?? path
-  const directory = path.includes('/') ? shortenDirectory(path.slice(0, path.lastIndexOf('/'))) : ''
+  const filename = baseName(path)
+  const directory = /[\\/]/.test(path) ? shortenDirectory(dirName(path)) : ''
   const dirty = ['dirty', 'invalid', 'conflict', 'new'].includes(saveState)
   // Leaving the page after a delete would stop on the browser's "unsaved changes" prompt.
   const unsaved = dirty || saveState === 'saving' || saveState === 'error'
@@ -89,7 +91,7 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   let l1 = teamName ?? filename
   let l2 = teamName ? filename : directory || 'teams'
   let action: React.ReactNode = null
-  const primarySave = <button type="button" className="btn btn-primary" onClick={onSave} disabled={!isValid || editingDisabled} title={!isValid ? (errors[0]?.message ?? incomplete[0]?.message) : editingDisabled ? 'Editing needs a wider window' : undefined}>Save <kbd className="t-mono-sm" style={{ opacity: .8 }}>⌘S</kbd></button>
+  const primarySave = <button type="button" className="btn btn-primary" onClick={onSave} disabled={!isValid || editingDisabled} title={!isValid ? (errors[0]?.message ?? incomplete[0]?.message) : editingDisabled ? 'Editing needs a wider window' : undefined}>Save <kbd className="t-mono-sm" style={{ opacity: .8 }}>{keys('⌘S')}</kbd></button>
   const review = <button type="button" className="btn" onClick={() => { onProblemsOpenChange(!problemsOpen); setSwitcherOpen(false) }} aria-expanded={problemsOpen} aria-controls="problems-pop">Review</button>
 
   // The first line is always the team, so the operator never loses track of what is open; the
@@ -175,7 +177,7 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
           <div className="pop-list">
             <button type="button" className="pop-row" onClick={() => { setSwitcherOpen(false); onNewTeam() }}>
               <Plus size={15} aria-hidden="true" />
-              <span className="name t-body">New team…</span><span className="kbd t-mono-sm">⌘N</span>
+              <span className="name t-body">New team…</span><span className="kbd t-mono-sm">{keys('⌘N')}</span>
             </button>
           </div>
           <div className="pop-sep" />
@@ -232,7 +234,7 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
           {problems.length === 0 && <p className="pop-empty t-meta">Nothing to fix.</p>}
           <div className="pop-sep" />
           <div className="pop-foot">
-            <span className="acts"><span className="pop-note t-meta">Next problem · F8 · Previous · ⇧F8</span></span>
+            <span className="acts"><span className="pop-note t-meta">Next problem · F8 · Previous · {keys('⇧F8')}</span></span>
           </div>
         </div>
       )}

@@ -585,7 +585,11 @@ fn prepare_root(
         .iter()
         .any(|capability| capability.kind == CapabilityKind::Skill)
     {
-        let directory = root.join(Harness::of(agent).delivery_directory());
+        // Joined part by part, so Windows reads `…\.claude\skills`, as the agent is told it.
+        let directory = Harness::of(agent)
+            .delivery_directory()
+            .split('/')
+            .fold(root.to_path_buf(), |path, part| path.join(part));
         fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
         Some(directory)
     } else {
@@ -595,7 +599,7 @@ fn prepare_root(
     // workspace does not allow. Carrying the declared cwd's settings across keeps that contract
     // with the operator's own file rather than inventing a policy here. An agent that starts in a
     // folder the operator chose reads that folder's settings itself (ADR 0042).
-    let managed_settings = root.join(".claude/settings.json");
+    let managed_settings = root.join(".claude").join("settings.json");
     if let Some(settings) = carried.and_then(read_settings) {
         fs::create_dir_all(root.join(".claude")).map_err(|error| error.to_string())?;
         fs::write(&managed_settings, settings).map_err(|error| error.to_string())?;
@@ -699,7 +703,8 @@ fn native_memory_file(agent: &AgentConfig, memory: &TeamMemory) -> Option<&'stat
 
 /// Whether `path` lies inside `folder`, both resolved as far as they exist.
 fn holds(folder: &Path, path: &Path) -> bool {
-    let resolved = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let resolved =
+        |path: &Path| crate::platform::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let folder = resolved(folder);
     let path = path.parent().map_or_else(
         || resolved(path),
@@ -709,7 +714,7 @@ fn holds(folder: &Path, path: &Path) -> bool {
 }
 
 fn read_settings(declared_cwd: &Path) -> Option<Vec<u8>> {
-    fs::read(declared_cwd.join(".claude/settings.json")).ok()
+    fs::read(declared_cwd.join(".claude").join("settings.json")).ok()
 }
 
 /// Copy the skill's whole directory, not just its `SKILL.md`: a skill may ship scripts, references
@@ -898,7 +903,7 @@ mod tests {
         .expect("delivered")
         .expect("a workspace");
         assert!(!workspace.cwd.join(".claude/skills").exists());
-        let folder = fs::canonicalize(&project).expect("canonical");
+        let folder = crate::platform::canonicalize(&project).expect("canonical");
         assert_eq!(
             workspace.delivery.knowledge[0].folders,
             [folder.to_string_lossy()]
@@ -906,7 +911,10 @@ mod tests {
         let settings = fs::read_to_string(workspace.cwd.join(".claude/settings.json"))
             .expect("the grant is written");
         assert!(
-            settings.contains(&format!("Read(/{}/**)", folder.display())),
+            settings.contains(&format!(
+                "Read(/{}/**)",
+                crate::delivery::rule_path(&folder.display().to_string(), cfg!(windows))
+            )),
             "{settings}"
         );
 
@@ -975,14 +983,17 @@ mod tests {
             panic!("two sources: {:?}", workspace.delivery.knowledge);
         };
         assert_eq!(folder.source, "Linked folder");
-        let memo = fs::canonicalize(teams.join("team.files/memo.md")).expect("memo");
+        let memo = crate::platform::canonicalize(teams.join("team.files/memo.md")).expect("memo");
         assert_eq!(file.source, "Added file");
         assert_eq!(file.files, [memo.to_string_lossy()]);
         assert_eq!(file.read_access, Some(crate::delivery::Permission::Granted));
         let settings =
             fs::read_to_string(workspace.cwd.join(".claude/settings.json")).expect("grants");
         assert!(
-            settings.contains(&format!("Read(/{})", memo.display())),
+            settings.contains(&format!(
+                "Read(/{})",
+                crate::delivery::rule_path(&memo.display().to_string(), cfg!(windows))
+            )),
             "{settings}"
         );
         assert!(
@@ -1103,7 +1114,7 @@ mod tests {
     fn a_claude_skill_is_delivered_to_a_codex_agents_shared_skill_directory() {
         let temp = TempDirectory::new();
         let home = temp.path().join("home");
-        let source = home.join(".claude/skills/claude-design");
+        let source = home.join(".claude").join("skills").join("claude-design");
         fs::create_dir_all(&source).expect("skill directory");
         fs::write(
             source.join("SKILL.md"),
@@ -1415,7 +1426,7 @@ mod tests {
                 r#"{"permissions":{}}"#,
             )
             .expect("project settings");
-            let project = fs::canonicalize(&project).expect("canonical");
+            let project = crate::platform::canonicalize(&project).expect("canonical");
             let mut writer = agent(
                 "npx",
                 &["@agentclientprotocol/claude-agent-acp"],
@@ -1508,7 +1519,12 @@ mod tests {
             &crate::NodeTask::goal("Summarise the memo"),
             Some(&workspace),
         );
-        let skill_file = workspace.root.join(".claude/skills/report-writer/SKILL.md");
+        let skill_file = workspace
+            .root
+            .join(".claude")
+            .join("skills")
+            .join("report-writer")
+            .join("SKILL.md");
         assert!(
             prompt
                 .text
@@ -1516,7 +1532,7 @@ mod tests {
             "{}",
             prompt.text
         );
-        let copy = workspace.root.join("knowledge/memo.md");
+        let copy = workspace.root.join("knowledge").join("memo.md");
         assert!(
             prompt
                 .text

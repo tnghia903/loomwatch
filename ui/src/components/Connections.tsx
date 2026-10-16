@@ -1,6 +1,7 @@
 import { ArrowLeft } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { credentialStore, isWindows } from '../lib/platform'
 import { ConnectAiApps } from './ask/ConnectAiApps'
 
 type Page = { id: string; title: string }
@@ -17,7 +18,7 @@ const SIGN_IN_OUTCOMES: Record<string, { notice?: string; error?: string }> = {
   denied: { error: 'Notion sign-in was canceled. Nothing changed.' },
   expired: { error: 'That sign-in took too long or was already used. Click Connect Notion to try again.' },
   failed: { error: 'Notion sign-in didn’t finish. Check your internet connection and try again.' },
-  storage: { error: 'The secure credential store is unavailable. Unlock your macOS Keychain and try again.' },
+  storage: { error: `The secure credential store is unavailable. ${isWindows() ? 'Sign in to Windows with your own account' : 'Unlock your macOS Keychain'} and try again.` },
 }
 const readSignInOutcome = () => new URLSearchParams(window.location.search).get('notion')
 
@@ -102,8 +103,8 @@ export default function Connections() {
           {connection?.connected ? <>
             <p className="t-body">Connected to <strong>{connection.name}</strong></p>
             <p className="t-meta lw-settings-quiet">{connection.via === 'signIn'
-              ? 'Connected with your Notion account. LoomWatch keeps the sign-in in this Mac’s Keychain and renews it on its own; if it ever lapses, connect again here. Disconnecting removes it; existing Notion pages remain.'
-              : 'Your token is stored in this Mac’s Keychain. Disconnecting removes LoomWatch’s saved credentials; existing Notion pages remain.'}</p>
+              ? `Connected with your Notion account. LoomWatch keeps the sign-in in ${credentialStore()} and renews it on its own; if it ever lapses, connect again here. Disconnecting removes it; existing Notion pages remain.`
+              : `Your token is stored in ${credentialStore()}. Disconnecting removes LoomWatch’s saved credentials; existing Notion pages remain.`}</p>
             <div className="e2 lw-settings-row">
               <span className="t-body-m">Destination page</span>
               <span className="t-meta">{connection.destination ? connection.destination.title : 'Choose the page your teams’ answers go under.'}</span>
@@ -148,7 +149,7 @@ export default function Connections() {
               }) }}>
                 <label className="t-meta" htmlFor="notion-token">Notion integration token</label>
                 <input id="notion-token" type="password" autoComplete="off" spellCheck={false} value={token} onChange={(event) => setToken(event.target.value)} maxLength={4096} className="input mono" />
-                <span className="hint t-meta">Stored securely in macOS Keychain, outside your team files. LoomWatch never displays the saved token.</span>
+                <span className="hint t-meta">Stored securely in {credentialStore()}, outside your team files. LoomWatch never displays the saved token.</span>
                 <button disabled={busy || !token.trim()} className="btn lw-settings-start">{busy ? 'Connecting…' : 'Connect with token'}</button>
               </form>
             </details>

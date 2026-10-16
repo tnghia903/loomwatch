@@ -77,11 +77,12 @@ pages, so the approval it asks for lists every Notion page it reads.
 
 ## Where it is kept
 
-Either kind of connection, and the destination, are stored in macOS Keychain under
-`LoomWatch.Notion`, not in YAML, localStorage or the event archive. Connecting replaces the prior
-connection. Only one workspace connection is supported per local OS user. Missing or locked
-Keychain access is an error; there is no plaintext fallback. Windows/Linux storage is not yet
-implemented.
+Either kind of connection, and the destination, are stored in macOS Keychain, or on Windows in
+Windows Credential Manager, under `LoomWatch.Notion`, not in YAML, localStorage or the event archive.
+Credential Manager keeps at most 2,560 bytes in one credential, so a longer connection is split
+across `local-workspace`, `local-workspace#2`, and so on. Connecting replaces the prior connection.
+Only one workspace connection is supported per local OS user. Missing or locked credential storage
+is an error; there is no plaintext fallback. Linux storage is not yet implemented.
 
 What Connections shows of it is also kept, with no token, in `notion-connection.json` in
 LoomWatch's state folder (`~/Library/Application Support/LoomWatch`, or `LOOMWATCH_STATE_DIR`):

@@ -3,6 +3,10 @@
 import json
 import sys
 
+# LoomWatch speaks UTF-8. Windows hands a program whose output is piped its ANSI code page instead.
+sys.stdin.reconfigure(encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
+
 agent = sys.argv[1]
 feedback = ""
 

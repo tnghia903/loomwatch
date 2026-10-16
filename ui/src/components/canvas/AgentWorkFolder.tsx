@@ -1,6 +1,7 @@
 import { Folder } from 'lucide-react'
 import { useState } from 'react'
 
+import { isAbsolutePath } from '../../lib/files/paths'
 import type { AgentConfig } from '../../lib/team-file/types'
 import { ownFolderReason, teamFolderOf, workFolder } from '../../lib/team-file/workFolder'
 import { SectionHead } from '../ui/SectionHead'
@@ -87,7 +88,7 @@ export function AgentWorkFolder({ agent, readOnly = false, onChange, problem, te
           title="Choose where it works"
           note="The agent starts in this folder and may read the files in it. It changes files or runs commands there only if you allow it."
           verb="Use"
-          start={chosen?.path.startsWith('/') ? chosen.path : undefined}
+          start={chosen && isAbsolutePath(chosen.path) ? chosen.path : undefined}
           onClose={() => setPicking(false)}
           onChoose={(picked) => {
             setPicking(false)
