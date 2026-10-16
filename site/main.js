@@ -386,10 +386,70 @@
     return ready ? Math.max(hiddenAt(), -window.scrollY) : hiddenAt()
   }
 
-  function flip(fromTouch) {
+  // The click you feel. Android has the Vibration API. iPhone Safari doesn't, but it taps the Taptic
+  // Engine when a switch control (iOS 18+) toggles, so clicking a hidden switch's label does it.
+  // Either only counts inside a gesture: a pull that clicks mid-drag, before the page has one,
+  // buzzes when the finger lifts instead.
+  let buzzLater = false
+  function buzz() {
+    if (navigator.userActivation && !navigator.userActivation.isActive) { buzzLater = true; return }
+    buzzLater = false
+    if (navigator.vibrate) { navigator.vibrate(12); return }
+    const label = document.createElement('label')
+    label.ariaHidden = 'true'
+    label.style.display = 'none'
+    const input = document.createElement('input')
+    input.type = 'checkbox'
+    input.setAttribute('switch', '')
+    label.append(input)
+    document.head.append(label)
+    label.click()
+    label.remove()
+  }
+  const buzzOnLift = () => { if (buzzLater) buzz() }
+
+  // A page can't reach a Mac's trackpad, so with a mouse or trackpad you hear the switch instead:
+  // a short, quiet tick, a burst of noise through a narrow band with a low knock under it.
+  let audio = null
+  let tickNoise = null
+  function tick() {
+    try {
+      audio ??= new AudioContext()
+      if (audio.state === 'suspended') audio.resume()
+      if (!tickNoise) {
+        const length = Math.floor(audio.sampleRate * 0.03)
+        tickNoise = audio.createBuffer(1, length, audio.sampleRate)
+        const data = tickNoise.getChannelData(0)
+        for (let i = 0; i < length; i += 1) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 6
+      }
+      const t = audio.currentTime
+      const noise = audio.createBufferSource()
+      noise.buffer = tickNoise
+      const band = audio.createBiquadFilter()
+      band.type = 'bandpass'
+      band.frequency.value = 3200
+      band.Q.value = 1.2
+      const noiseGain = audio.createGain()
+      noiseGain.gain.value = 0.3
+      noise.connect(band).connect(noiseGain).connect(audio.destination)
+      const knock = audio.createOscillator()
+      knock.frequency.setValueAtTime(180, t)
+      knock.frequency.exponentialRampToValueAtTime(80, t + 0.03)
+      const knockGain = audio.createGain()
+      knockGain.gain.setValueAtTime(0.18, t)
+      knockGain.gain.exponentialRampToValueAtTime(0.001, t + 0.04)
+      knock.connect(knockGain).connect(audio.destination)
+      noise.start(t)
+      knock.start(t)
+      knock.stop(t + 0.05)
+    } catch { /* no sound, no harm */ }
+  }
+
+  function flip() {
     switchTheme()
     figureScene?.flinch()
-    if (fromTouch) navigator.vibrate?.(8)
+    buzz()
+    if (!touchOnly) tick()
   }
 
   // A short pull down and back, to show a switch that has just clicked (from the button, or a tap).
@@ -551,16 +611,18 @@
     held.moved = Math.max(held.moved, Math.hypot(at.x - held.from.x, at.y - held.from.y))
     // The switch clicks as the cord comes out past the click, here rather than in a frame, so a
     // quick pull counts however few frames the page draws while it happens.
-    if (!clicked && Math.hypot(x, y - hang) - rest >= CLICK) { clicked = true; flip(held.touch) }
+    if (!clicked && Math.hypot(x, y - hang) - rest >= CLICK) { clicked = true; flip() }
   })
   function letGo(event) {
+    if (event.type === 'pointerup') buzzOnLift()
+    else buzzLater = false
     if (!held || event.pointerId !== held.id) return
     const { moved, vx, vy } = held
     held = null
     cordFigure.classList.remove('held')
     if (moved < 4 && event.type === 'pointerup') {
       // A tap is a short pull, and it switches as the button does.
-      flip(event.pointerType !== 'mouse')
+      flip()
       tug()
       return
     }
@@ -573,6 +635,8 @@
   }
   cordFigure.addEventListener('pointerup', letGo)
   cordFigure.addEventListener('pointercancel', letGo)
+  // iPhone Safari counts the lift as a gesture on touchend, which may come after pointerup.
+  cordFigure.addEventListener('touchend', buzzOnLift)
   cordFigure.addEventListener('pointerenter', () => { near = true; wakeCord() })
   cordFigure.addEventListener('pointerleave', () => { near = false })
   // Point at the bulb (or tab to it) while the cord is reeled up and it comes down to be pulled.
@@ -585,7 +649,7 @@
   lamp.addEventListener('pointerleave', () => showCord(false))
   themeButton.addEventListener('focus', () => { if (themeButton.matches(':focus-visible')) showCord(true) })
   themeButton.addEventListener('blur', () => showCord(false))
-  themeButton.addEventListener('click', () => { flip(false); tug() })
+  themeButton.addEventListener('click', () => { flip(); tug() })
   window.addEventListener('pointermove', (event) => { pointer = { x: event.clientX, y: event.clientY } }, { passive: true })
   document.documentElement.addEventListener('pointerleave', () => { pointer = null })
   window.addEventListener('scroll', wakeCord, { passive: true })
