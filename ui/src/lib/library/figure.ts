@@ -22,8 +22,8 @@ import type { AllowSwitch } from '../team-file/types'
  * - `reply`: the tray where what it hands back lands.
  *
  * Its scarf is woven in its mark (lib/story/mark.ts), the swatch it wears on the canvas. Its
- * motion is a reaction to a change you just made, or what the test bench's run record says: every
- * pose is something the record shows, never a feeling it guesses.
+ * motion is a reaction to a change you just made, or what the run in its chat says: every pose is
+ * something the run shows, never a feeling it guesses.
  */
 export type FigurePart = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'tools' | 'keys' | 'reply'
 
@@ -84,20 +84,20 @@ export const READ_SLOTS = 4
 export const TOOL_SLOTS = 4
 
 /**
- * What the figure is doing, from the test bench's run record only.
+ * What the figure is doing, from the run in its chat only: its record, and when it last moved.
  *
  * - `still`: no run on the bench.
  * - `starting`: the run is starting.
- * - `working`: the run is live and its record moved in the last few seconds (it types).
- * - `quiet`: the run is live and its record has not moved for a while: its hands rest on the keys.
- *   A quiet record says nothing about why (the model may be thinking, or waiting on the network),
+ * - `working`: the run is live and one of its events arrived in the last few seconds (it types).
+ * - `quiet`: the run is live and no event has arrived for a while: its hands rest on the keys.
+ *   A quiet run says nothing about why (the model may be thinking, or waiting on the network),
  *   so the figure doesn't act out thinking.
  * - `asking`: it waits on you, for a permission or an answer (a hand up).
  * - `done`, `failed`, `stopped`: how the run ended.
  */
 export type FigureMood = 'still' | 'starting' | 'working' | 'quiet' | 'asking' | 'done' | 'failed' | 'stopped'
 
-/** A record that moved this recently counts as working; quieter than that, it is quiet. */
+/** A run that moved this recently counts as working; quieter than that, it is quiet. */
 export const WORKING_WINDOW_MS = 3000
 
 export function figureMood(record: Pick<RunRecord, 'status' | 'permissionRequests' | 'waitingOn'> | null, lastMoveAt: number | null, now: number): FigureMood {

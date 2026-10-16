@@ -120,7 +120,7 @@ export async function fetchJobVersions(id: string): Promise<JobVersion[]> {
   return ((await response.json()) as { versions: JobVersion[] }).versions
 }
 
-/** The folder the test bench writes its one-agent teams to (`.jobs/.bench`), made when missing. */
+/** The folder agents' chats keep their one-agent teams in (`.jobs/.bench`), made when missing. */
 export async function benchFolder(): Promise<string> {
   const response = await daemonFetch('/api/bench', { method: 'POST', cache: 'no-store' })
   if (!response.ok) throw await failure(response)

@@ -149,6 +149,26 @@ describe('a team’s agents, the first of its views', () => {
     expect(screen.getByRole('region', { name: 'What it reads' })).toHaveTextContent('The drawer has room for 4, so inbox isn’t in it. It still reads it.')
   })
 
+  it('chats with a team’s own agent on its own, in a Chat tab beside its bench', async () => {
+    const json = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }))
+    const fetched = vi.fn((url: string) => (url === '/api/bench' ? json({ folder: '.jobs/.bench' }) : url.startsWith('/api/team?') ? json({ error: 'not found' }, 404) : Promise.reject(new Error('no daemon'))))
+    vi.stubGlobal('fetch', fetched)
+    renderTeamAgents({ agents: [scoper], selected: 'scope' })
+    const tabs = screen.getByRole('navigation', { name: 'Agent view' })
+    expect(within(tabs).getByRole('button', { name: 'Build' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('region', { name: 'Try it' })).toBeNull()
+
+    fireEvent.click(within(tabs).getByRole('button', { name: 'Chat' }))
+    expect(within(tabs).getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-pressed', 'true')
+    // Its blocks give way to its chat, kept under this team and this agent.
+    expect(screen.queryByRole('region', { name: 'What it reads' })).toBeNull()
+    expect(await screen.findByRole('heading', { name: 'Talk to Project scope' })).toBeInTheDocument()
+    expect(fetched).toHaveBeenCalledWith(`/api/team?${new URLSearchParams({ path: '.jobs/.bench/team-digest-scope.yaml' })}`)
+
+    fireEvent.click(within(tabs).getByRole('button', { name: 'Build' }))
+    expect(screen.getByRole('region', { name: 'What it reads' })).toBeInTheDocument()
+  })
+
   it('shows the version’s tools on the bench of an agent placed from Your agents, and the team’s reads', async () => {
     // Its bench loads the agent from Your agents; nothing else is asked of the daemon here.
     const tooled = { ...reader, tools: ['linear'] }
@@ -160,5 +180,8 @@ describe('a team’s agents, the first of its views', () => {
     // Its tools are the version's, like its skills: saving there moves this team to them.
     expect(within(within(block).getByRole('list', { name: 'Wrenches in its tool drawer' })).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['linear'])
     expect(screen.getByRole('region', { name: 'What it reads' })).toHaveTextContent('Reads 1 folder, 1 file and 1 Notion page the team gives it')
+    // It has its Chat here too: the one it has in Your agents.
+    expect(within(screen.getByRole('navigation', { name: 'Agent view' })).getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByRole('region', { name: 'Try it' })).toBeNull()
   })
 })

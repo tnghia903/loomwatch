@@ -13,9 +13,10 @@ import type { RunRecord } from '../../lib/runs/client'
 import type { AgentConfig } from '../../lib/team-file/types'
 import { agentFigure, figureFor } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
-import { AgentBuilder } from '../agents/AgentBuilder'
+import { AgentAnswer, AgentChat } from '../agents/AgentChat'
+import { AgentBuilder, AgentViewTabs } from '../agents/AgentBuilder'
 import { ByHand } from '../agents/ByHand'
-import { TestBench } from '../agents/TestBench'
+import type { AgentView } from '../agents/route'
 import { LinkedAgent } from '../canvas/LinkedAgent'
 
 export interface TeamAgentsProps {
@@ -132,7 +133,10 @@ function AddAgents({ jobs, inTeam, harnesses, teamPath, first, onAdd, onClose, o
   )
 }
 
-/** A team's own agent on the workbench, written straight into the team file. */
+/**
+ * A team's own agent on the workbench, written straight into the team file, with the same two tabs
+ * as one of Your agents: Build, and Chat, where you talk to it on its own.
+ */
 function OwnAgent({ agent, teamPath, editable, harnesses, harnessesLoading, skills, skillsLoading, onEdit, reads, tools, onShowWorkflow }: { agent: AgentConfig; teamPath: string | null; editable: boolean; harnesses: DetectedHarness[]; harnessesLoading: boolean; skills: readonly DetectedCapability[]; skillsLoading: boolean; onEdit: TeamAgentsProps['onEdit']; reads: readonly ReadSource[]; tools: readonly DetectedCapability[]; onShowWorkflow: () => void }) {
   const draft = useMemo(() => draftFromTeamAgent(agent, harnesses), [agent, harnesses])
   const harness = harnesses.find((candidate) => candidate.id === draft.appId) ?? null
@@ -149,15 +153,26 @@ function OwnAgent({ agent, teamPath, editable, harnesses, harnessesLoading, skil
   const appModels = models?.app === draft.appId ? models : null
   const resolvedModel = draft.model || appModels?.list?.currentModelId || ''
   const modelName = appModels?.list?.models.find((model) => model.id === resolvedModel)?.name
-  // The bench team is named for this team and agent, so trying one never touches another's.
-  const benchId = `team-${(teamPath ?? 'new').replace(/^.*\//, '').replace(/\.ya?ml$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${agent.id}`.slice(0, 80)
+  // Its chat is named for this team and agent, so talking to one never touches another's. It is the
+  // name its test bench had, so what was tried there before is in its chat.
+  const chatId = `team-${(teamPath ?? 'new').replace(/^.*\//, '').replace(/\.ya?ml$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${agent.id}`.slice(0, 80)
+  const [view, setView] = useState<AgentView>('build')
+  // A long answer from the chat, read in full over the bench.
+  const [answerRun, setAnswerRun] = useState<string | null>(null)
+  const figure = figureFor(agent.id)
+  const name = draft.name.trim() || agent.name
   return (
     <div className="team-agents-own">
-      <p className="t-meta team-agents-note">{editable ? 'This team’s own agent: what you change here is saved with the team, like a change on the canvas.' : 'This team can’t be changed here, so the bench shows it as it is.'}</p>
-      <ByHand draft={draft} set={(key, value) => onEdit(agent.id, key, value)} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={agent.id} figure={figureFor(agent.id)} record={record} hideDoes readOnly={!editable} tools={tools} toolsLoading={skillsLoading} reads={reads} onShowWorkflow={onShowWorkflow} />
-      <div className="team-agents-bench">
-        <TestBench draft={draft} harness={harness} model={resolvedModel} benchId={benchId} onAllow={(key) => onEdit(agent.id, 'allow', { ...draft.allow, [key]: true })} onRecord={setRecord} />
+      <div className="team-agents-own-head">
+        <p className="t-meta team-agents-note">{editable ? 'This team’s own agent: what you change here is saved with the team, like a change on the canvas.' : 'This team can’t be changed here, so the bench shows it as it is.'}</p>
+        <AgentViewTabs view={view} onView={setView} />
       </div>
+      <ByHand
+        draft={draft} set={(key, value) => onEdit(agent.id, key, value)} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={agent.id} figure={figure} record={record} hideDoes readOnly={!editable} tools={tools} toolsLoading={skillsLoading} reads={reads} onShowWorkflow={onShowWorkflow}
+        chat={view === 'chat' ? <AgentChat draft={draft} harness={harness} model={resolvedModel} chatId={chatId} figure={figure} onAllow={(key) => onEdit(agent.id, 'allow', { ...draft.allow, [key]: true })} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} /> : undefined}
+        onBuild={() => setView('build')}
+        cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
+      />
     </div>
   )
 }
