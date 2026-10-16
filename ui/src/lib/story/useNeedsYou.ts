@@ -4,6 +4,7 @@ import { keepIfSame } from '../keepIfSame'
 import { answerPermission, answerRun, fetchRuns, type PermissionDecision, type RunRecord } from '../runs/client'
 import { teamDisplayName } from '../team-file/client'
 import { useTeamList } from '../team-file/useTeamList'
+import { useLoomMarkState } from './loomMark'
 import { ticketsFrom, type Ticket } from './needsYou'
 
 const DISMISSED_KEY = 'loomwatch.needsYou.dismissed'
@@ -15,7 +16,8 @@ function loadDismissed(): Set<string> {
 /**
  * Polls the run registry for the needs-you tray, and shows the result where the operator looks
  * when they are not looking at LoomWatch: the tab title counts what waits on them, and the tab
- * icon carries a dot — red when something needs them, blue while a team is working.
+ * icon carries a dot — red when something needs them, blue while a team is working. The header's
+ * mark says the same from inside the app (`mark`, lib/story/loomMark.ts).
  */
 export function useNeedsYou() {
   const [records, setRecords] = useState<RunRecord[]>([])
@@ -77,8 +79,9 @@ export function useNeedsYou() {
   }, [refresh])
 
   usePresence(tickets.length, working)
+  const mark = useLoomMarkState(records, tickets.length, working)
   const teamList = useMemo(() => [...names].map(([path, name]) => ({ path, name })), [names])
-  return { records, tickets, working, error, dismiss, answer, answerPermission: answerPermissionTicket, refresh, teams: teamList }
+  return { records, tickets, working, mark, error, dismiss, answer, answerPermission: answerPermissionTicket, refresh, teams: teamList }
 }
 
 /** Tab title and tab icon carry the count, so a waiting team is visible from another tab. */
