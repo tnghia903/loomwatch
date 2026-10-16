@@ -91,6 +91,36 @@ export function harnessProblem(harness: DetectedHarness): string | null {
   return null
 }
 
+async function postSetup(path: string, body?: unknown): Promise<void> {
+  const response = await daemonFetch(path, {
+    method: 'POST',
+    ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  })
+  if (!response.ok) {
+    let message = response.statusText
+    try {
+      const said = (await response.json()) as { error?: unknown }
+      if (typeof said.error === 'string') message = said.error
+    } catch { /* the status text will do */ }
+    throw new HarnessesApiError(message, response.status)
+  }
+}
+
+/** `POST /api/harnesses/:id/sign-in` — start the app's own sign-in; its page opens in the browser. */
+export function signInHarness(id: string): Promise<void> {
+  return postSetup(`/api/harnesses/${encodeURIComponent(id)}/sign-in`)
+}
+
+/** `POST /api/harnesses/:id/sign-in/code` — the code Claude's sign-in page shows at the end. */
+export function sendSignInCode(id: string, code: string): Promise<void> {
+  return postSetup(`/api/harnesses/${encodeURIComponent(id)}/sign-in/code`, { code })
+}
+
+/** `POST /api/harnesses/:id/install` — run the app's own installer (OpenCode). */
+export function installHarness(id: string): Promise<void> {
+  return postSetup(`/api/harnesses/${encodeURIComponent(id)}/install`)
+}
+
 /** `POST /api/harnesses/:id/prepare` — start installing an app's connector; answers at once. */
 export async function prepareHarness(id: string): Promise<ConnectorStatus> {
   const response = await daemonFetch(`/api/harnesses/${encodeURIComponent(id)}/prepare`, { method: 'POST' })
@@ -109,6 +139,22 @@ export interface HarnessReport {
   searchedPath: string[]
   knownIds: string[]
   runnerError?: string
+  /** Every app LoomWatch keeps a connector for, by id, including one not on this computer yet. */
+  connectors?: Record<string, ConnectorStatus>
+  /** Each app's latest sign-in or install started from the Home panel, by id. */
+  setup?: Record<string, SetupJob>
+}
+
+/** A sign-in or install the Home panel started (backend app_setup::SetupJob). */
+export interface SetupJob {
+  kind: 'sign_in' | 'install'
+  state: 'running' | 'done' | 'failed'
+  /** The vendor's sign-in page, when the app printed it. */
+  url?: string
+  /** Claude's sign-in is waiting for the code its page shows at the end. */
+  needsCode?: boolean
+  /** Why it failed, in the app's own words when it said. */
+  reason?: string
 }
 
 export interface HarnessModels {

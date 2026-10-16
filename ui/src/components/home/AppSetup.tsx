@@ -1,13 +1,15 @@
 import { Check, Copy, ExternalLink } from 'lucide-react'
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { APP_SETUP_GUIDES, appSetupState, checkSignature, type AppSetupGuide, type AppSetupState } from '../../lib/appSetup'
 import { listNames } from '../../lib/format'
-import { fetchHarnesses, fetchHarnessModels, prepareHarness, type DetectedHarness } from '../../lib/harnesses'
+import { fetchHarnesses, fetchHarnessModels, installHarness, prepareHarness, sendSignInCode, signInHarness, type DetectedHarness, type HarnessReport } from '../../lib/harnesses'
 import { ChipDot, type ChipState } from '../ui/glyphs'
 
 /** How often the panel asks the daemon what is installed. A PATH scan, never an app start. */
 export const SETUP_POLL_MS = 4000
+/** How often while something the panel started is under way: a download, a sign-in, an install. */
+export const SETUP_BUSY_POLL_MS = 1000
 /**
  * How soon the panel may check an app again on its own when the daemon holds no verdict for it:
  * after a check that recorded nothing, or once the daemon's 10-minute record has lapsed.
@@ -35,6 +37,9 @@ const STATUS: Record<AppSetupState['kind'], { chip: ChipState; text: string }> =
   restart: { chip: 'incomplete', text: 'Restart LoomWatch' },
   preparing: { chip: 'saving', text: 'Getting ready…' },
   connector_failed: { chip: 'failed', text: 'Couldn’t get ready' },
+  installing: { chip: 'saving', text: 'Installing…' },
+  signing_in: { chip: 'saving', text: 'Signing in…' },
+  setup_failed: { chip: 'failed', text: 'Didn’t finish' },
   ready: { chip: 'saved', text: 'Ready' },
 }
 
@@ -66,9 +71,66 @@ function CommandLine({ command }: { command: string }) {
  */
 type CardGuide = Pick<AppSetupGuide, 'id' | 'name'> & Partial<AppSetupGuide>
 
-function AppCard({ guide, state, connector, onCheck, onPrepare }: { guide: CardGuide; state: AppSetupState; connector: boolean; onCheck: () => void; onPrepare: () => void }) {
+interface CardActions {
+  onCheck: () => void
+  /** Install the app's connector, which carries the app (Claude, Codex). */
+  onPrepare: () => void
+  onInstall: () => void
+  onSignIn: () => void
+  /** Hand a running sign-in the code its page showed; rejects with the daemon's reason. */
+  onCode: (code: string) => Promise<void>
+}
+
+/** The Terminal way, kept for anyone who prefers it, folded away under the button. */
+function ByHand({ children }: { children: ReactNode }) {
+  return (
+    <details className="hs-detail">
+      <summary className="t-meta">Or do it in Terminal</summary>
+      {children}
+    </details>
+  )
+}
+
+function SignInCode({ name, onCode }: { name: string; onCode: (code: string) => Promise<void> }) {
+  const [code, setCode] = useState('')
+  const [problem, setProblem] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
+  async function send() {
+    setSending(true)
+    setProblem(null)
+    try {
+      await onCode(code)
+      setCode('')
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSending(false)
+    }
+  }
+  return (
+    <form className="hs-code" onSubmit={(event) => { event.preventDefault(); void send() }}>
+      <label className="t-meta" htmlFor={`code-${name}`}>At the end, the page shows a code. Paste it here:</label>
+      <span className="hs-fix-acts">
+        <input id={`code-${name}`} className="input" value={code} onChange={(event) => setCode(event.target.value)} autoComplete="off" spellCheck={false} disabled={sending} />
+        <button type="submit" className="btn btn-primary" disabled={sending || code.trim() === ''}>Finish signing in</button>
+      </span>
+      {problem && <span role="alert" className="hs-problem">{problem}</span>}
+    </form>
+  )
+}
+
+function AppCard({ guide, state, connector, actions }: { guide: CardGuide; state: AppSetupState; connector: boolean; actions: CardActions }) {
+  const { onCheck, onPrepare, onInstall, onSignIn, onCode } = actions
   const status = STATUS[state.kind]
   const checkAgain = <button type="button" className="btn" onClick={onCheck}>Check again</button>
+  const terminalSteps = guide.install && (
+    <ol className="hs-steps">
+      <li><span>Install it. Paste this into Terminal and press Return:</span><CommandLine command={guide.install} /></li>
+      {guide.signIn
+        ? <li><span>Then sign in. This opens your browser:</span><CommandLine command={guide.signIn} /></li>
+        : <li><span>That’s all. LoomWatch notices it here on its own.</span></li>}
+    </ol>
+  )
   return (
     <li className={`hs-app ${state.kind}`} aria-label={`${guide.name}: ${status.text}`}>
       <div className="hs-app-head">
@@ -77,13 +139,44 @@ function AppCard({ guide, state, connector, onCheck, onPrepare }: { guide: CardG
       </div>
       {guide.account && <p className="hs-app-account">{guide.account}</p>}
 
-      {state.kind === 'missing' && guide.install && (
-        <ol className="hs-steps">
-          <li><span>Install it. Paste this into Terminal and press Return:</span><CommandLine command={guide.install} /></li>
-          {guide.signIn
-            ? <li><span>Then sign in. This opens your browser:</span><CommandLine command={guide.signIn} /></li>
-            : <li><span>That’s all. LoomWatch notices it here on its own.</span></li>}
-        </ol>
+      {state.kind === 'missing' && guide.setup && (
+        <div className="hs-fix">
+          <span>
+            {guide.setup === 'connector'
+              ? `LoomWatch downloads ${guide.name} into its own folder (${guide.size}, once).${guide.signIn ? ' Then you sign in.' : ''}`
+              : `LoomWatch runs ${guide.name}’s own installer (${guide.size}, once).`}
+          </span>
+          <span className="hs-fix-acts">
+            <button type="button" className="btn btn-primary" onClick={guide.setup === 'connector' ? onPrepare : onInstall}>
+              {guide.setup === 'connector' ? `Set up ${guide.name}` : `Install ${guide.name}`}
+            </button>
+          </span>
+          {terminalSteps && <ByHand>{terminalSteps}</ByHand>}
+        </div>
+      )}
+      {state.kind === 'missing' && !guide.setup && terminalSteps}
+      {state.kind === 'installing' && (
+        <p className="hs-note t-meta">Running {guide.name}’s installer. This page notices on its own when it’s done.</p>
+      )}
+      {state.kind === 'signing_in' && (
+        <div className="hs-fix">
+          <span>Your browser opened {guide.name}’s sign-in page. Sign in there.{state.needsCode ? '' : ' This page notices on its own when you’re done.'}</span>
+          {state.needsCode && <SignInCode name={guide.id} onCode={onCode} />}
+          {state.url && (
+            <span className="hs-fix-acts">
+              <a className="link" href={state.url} target="_blank" rel="noreferrer">Open the sign-in page again<ExternalLink size={12} aria-hidden="true" /></a>
+            </span>
+          )}
+        </div>
+      )}
+      {state.kind === 'setup_failed' && (
+        <div className="hs-fix">
+          <span role="alert" className="hs-problem">{state.retry === 'sign_in' ? 'Signing in didn’t finish' : 'Installing didn’t finish'}: {state.reason}</span>
+          <span className="hs-fix-acts">
+            <button type="button" className="btn btn-primary" onClick={state.retry === 'sign_in' ? onSignIn : onInstall}>Try again</button>
+          </span>
+          {terminalSteps && <ByHand>{terminalSteps}</ByHand>}
+        </div>
       )}
       {state.kind === 'checking' && (
         <p className="hs-note t-meta">
@@ -100,8 +193,19 @@ function AppCard({ guide, state, connector, onCheck, onPrepare }: { guide: CardG
       )}
       {state.kind === 'signed_out' && (
         <div className="hs-fix">
-          {guide.signIn ? <><span>Sign in. This opens your browser:</span><CommandLine command={guide.signIn} /></> : <span>{state.reason}</span>}
-          <span className="hs-fix-acts">{checkAgain}<span className="t-meta">LoomWatch also checks again when you come back to this window.</span></span>
+          {guide.signIn
+            ? <>
+                <span>Sign in with your {guide.name} account. Your browser opens its sign-in page.</span>
+                <span className="hs-fix-acts">
+                  <button type="button" className="btn btn-primary" onClick={onSignIn}>Sign in to {guide.name}</button>
+                  {checkAgain}
+                </span>
+                <ByHand><span>Paste this into Terminal and press Return:</span><CommandLine command={guide.signIn} /></ByHand>
+              </>
+            : <>
+                <span>{state.reason}</span>
+                <span className="hs-fix-acts">{checkAgain}<span className="t-meta">LoomWatch also checks again when you come back to this window.</span></span>
+              </>}
         </div>
       )}
       {state.kind === 'needs_key' && (
@@ -136,7 +240,7 @@ function AppCard({ guide, state, connector, onCheck, onPrepare }: { guide: CardG
       {state.kind === 'connector_failed' && (
         <div className="hs-fix">
           <span role="alert" className="hs-problem">LoomWatch couldn’t get {guide.name} ready: {state.reason}</span>
-          <span className="hs-fix-acts"><button type="button" className="btn" onClick={onPrepare}>Try again</button></span>
+          <span className="hs-fix-acts"><button type="button" className="btn btn-primary" onClick={onPrepare}>Try again</button></span>
         </div>
       )}
       {state.kind === 'ready' && guide.optionalSignIn && (
@@ -156,6 +260,10 @@ function AppCard({ guide, state, connector, onCheck, onPrepare }: { guide: CardG
  */
 export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: AppSetupProps) {
   const [report, setReport] = useState<readonly DetectedHarness[]>(harnesses)
+  const [extras, setExtras] = useState<Pick<HarnessReport, 'connectors' | 'setup'>>({})
+  const busy = Object.values(extras.setup ?? {}).some((job) => job.state === 'running')
+    || Object.values(extras.connectors ?? {}).some((connector) => connector.state === 'preparing')
+    || report.some((harness) => harness.connector?.state === 'preparing')
   const [checking, setChecking] = useState<ReadonlySet<string>>(() => new Set())
   const attempted = useRef(new Map<string, { signature: string; at: number; sawVerdict: boolean }>())
   const titleId = useId()
@@ -169,7 +277,9 @@ export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: Ap
 
   const refresh = useCallback(async () => {
     try {
-      setReport((await fetchHarnesses()).harnesses ?? [])
+      const latest = await fetchHarnesses()
+      setReport(latest.harnesses ?? [])
+      setExtras({ connectors: latest.connectors, setup: latest.setup })
     } catch {
       // The footer reports an unreachable daemon; the panel keeps what it last saw.
     }
@@ -182,7 +292,7 @@ export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: Ap
     const tick = () => { if (visible()) void refresh() }
     const back = () => { void refresh() }
     const shown = () => { if (visible()) void refresh() }
-    const timer = window.setInterval(tick, SETUP_POLL_MS)
+    const timer = window.setInterval(tick, busy ? SETUP_BUSY_POLL_MS : SETUP_POLL_MS)
     window.addEventListener('focus', back)
     document.addEventListener('visibilitychange', shown)
     return () => {
@@ -190,7 +300,7 @@ export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: Ap
       window.removeEventListener('focus', back)
       document.removeEventListener('visibilitychange', shown)
     }
-  }, [refresh])
+  }, [refresh, busy])
 
   const check = useCallback(async (harness: DetectedHarness) => {
     attempted.current.set(harness.id, { signature: checkSignature(harness), at: Date.now(), sawVerdict: false })
@@ -215,12 +325,35 @@ export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: Ap
       .map((harness) => ({ guide: { id: harness.id, name: harness.name }, harness })),
   ]
 
-  const prepare = useCallback(async (harness: DetectedHarness) => {
+  const prepare = useCallback(async (id: string) => {
     try {
-      await prepareHarness(harness.id)
+      await prepareHarness(id)
     } catch {
       // The next poll shows where it stands.
     }
+    await refresh()
+  }, [refresh])
+
+  const signIn = useCallback(async (id: string) => {
+    try {
+      await signInHarness(id)
+    } catch {
+      // The next poll shows where it stands.
+    }
+    await refresh()
+  }, [refresh])
+
+  const install = useCallback(async (id: string) => {
+    try {
+      await installHarness(id)
+    } catch {
+      // The next poll shows where it stands.
+    }
+    await refresh()
+  }, [refresh])
+
+  const sendCode = useCallback(async (id: string, code: string) => {
+    await sendSignInCode(id, code)
     await refresh()
   }, [refresh])
 
@@ -231,7 +364,7 @@ export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: Ap
     for (const harness of report) {
       if (harness.connector?.state !== 'needed' || asked.current.has(harness.id)) continue
       asked.current.add(harness.id)
-      void prepare(harness)
+      void prepare(harness.id)
     }
   }, [report, prepare])
 
@@ -258,7 +391,10 @@ export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: Ap
   const states = cards.map(({ guide, harness }) => ({
     guide,
     harness,
-    state: appSetupState(harness, harness ? checking.has(harness.id) : false),
+    state: appSetupState(harness, harness ? checking.has(harness.id) : false, {
+      ...(extras.connectors?.[guide.id] ? { connector: extras.connectors[guide.id] } : {}),
+      ...(extras.setup?.[guide.id] ? { job: extras.setup[guide.id] } : {}),
+    }),
   }))
   const ready = states.filter(({ state }) => state.kind === 'ready')
 
@@ -295,8 +431,13 @@ export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: Ap
             guide={guide}
             state={state}
             connector={harness?.spawn.cmd === 'npx' && harness.connector?.state !== 'ready'}
-            onCheck={() => { if (harness) void check(harness) }}
-            onPrepare={() => { if (harness) void prepare(harness) }}
+            actions={{
+              onCheck: () => { if (harness) void check(harness) },
+              onPrepare: () => { void prepare(guide.id) },
+              onInstall: () => { void install(guide.id) },
+              onSignIn: () => { void signIn(guide.id) },
+              onCode: (code) => sendCode(guide.id, code),
+            }}
           />
         ))}
       </ul>

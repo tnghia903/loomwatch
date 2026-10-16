@@ -1,5 +1,9 @@
-// What someone without a working AI app needs to get one: the vendor's own install command, how to
-// sign in, and what the app costs. Shown by Home's "Set up an AI app" panel (ADR 0045).
+// What someone without a working AI app needs to get one: how LoomWatch sets it up, how to sign in,
+// and what the app costs. Shown by Home's "Set up an AI app" panel (ADR 0045).
+//
+// The panel's buttons do the work: Claude and Codex come inside the connector LoomWatch installs
+// for them (connectors.rs), and their sign-in and OpenCode's installer are the vendors' own commands,
+// run by the daemon (app_setup.rs). The Terminal commands below stay for anyone who prefers them.
 //
 // Commands are the vendors' own, checked against their install pages on 2026-10-03:
 //   Claude Code  https://code.claude.com/docs/en/setup   (native installer → ~/.local/bin/claude)
@@ -7,7 +11,7 @@
 //   OpenCode     https://opencode.ai/docs/                (install script → ~/.opencode/bin/opencode)
 // The daemon finds all three install folders without a restart (api.rs EXTRA_HARNESS_DIRECTORIES).
 // The sign-in commands match the daemon's own "isn’t signed in" sentence (api.rs SignInCheck).
-import { harnessSaid, type DetectedHarness } from './harnesses'
+import { harnessSaid, type ConnectorStatus, type DetectedHarness, type SetupJob } from './harnesses'
 
 export interface AppSetupGuide {
   /** The daemon's harness id. */
@@ -26,6 +30,13 @@ export interface AppSetupGuide {
   badge?: string
   /** The vendor's own install page, for anyone whose install command fails. */
   docs: string
+  /**
+   * How the panel's button sets it up: `connector` installs LoomWatch's connector, which carries
+   * the app itself; `installer` runs the vendor's own installer.
+   */
+  setup: 'connector' | 'installer'
+  /** About how much the button downloads, once. */
+  size: string
 }
 
 export const APP_SETUP_GUIDES: readonly AppSetupGuide[] = [
@@ -37,6 +48,8 @@ export const APP_SETUP_GUIDES: readonly AppSetupGuide[] = [
     install: 'curl -fsSL https://claude.ai/install.sh | bash',
     signIn: 'claude auth login',
     docs: 'https://code.claude.com/docs/en/setup',
+    setup: 'connector',
+    size: 'about 300 MB',
   },
   {
     id: 'codex',
@@ -45,6 +58,8 @@ export const APP_SETUP_GUIDES: readonly AppSetupGuide[] = [
     install: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
     signIn: 'codex login',
     docs: 'https://learn.chatgpt.com/docs/codex/cli',
+    setup: 'connector',
+    size: 'about 350 MB',
   },
   {
     id: 'opencode',
@@ -55,6 +70,8 @@ export const APP_SETUP_GUIDES: readonly AppSetupGuide[] = [
     optionalSignIn: 'opencode auth login',
     badge: 'No account needed',
     docs: 'https://opencode.ai/docs/',
+    setup: 'installer',
+    size: 'about 100 MB',
   },
 ]
 
@@ -77,11 +94,30 @@ export type AppSetupState =
   /** LoomWatch is installing the app's connector (once); `step` says what it is doing. */
   | { kind: 'preparing'; step: string }
   | { kind: 'connector_failed'; reason: string }
+  /** The vendor's installer is running. */
+  | { kind: 'installing' }
+  /** The app's own sign-in is waiting for the person in the browser. */
+  | { kind: 'signing_in'; url?: string; needsCode: boolean }
+  /** A sign-in or install the panel started failed; `retry` is what the button does again. */
+  | { kind: 'setup_failed'; reason: string; retry: 'sign_in' | 'install' }
   | { kind: 'ready' }
 
+/** What the daemon reports beside an app: its connector, and a sign-in or install the panel started. */
+export interface AppSetupExtras {
+  /** For an app not on this computer yet; a listed app carries its own. */
+  connector?: ConnectorStatus
+  job?: SetupJob
+}
+
 /** Judge one app from what the daemon reported. */
-export function appSetupState(harness: DetectedHarness | undefined, checking: boolean): AppSetupState {
-  if (!harness) return { kind: 'missing' }
+export function appSetupState(harness: DetectedHarness | undefined, checking: boolean, { connector: unlisted, job }: AppSetupExtras = {}): AppSetupState {
+  if (!harness) {
+    if (job?.kind === 'install' && job.state === 'running') return { kind: 'installing' }
+    if (job?.kind === 'install' && job.state === 'failed') return { kind: 'setup_failed', reason: job.reason ?? 'The installer stopped.', retry: 'install' }
+    if (unlisted?.state === 'preparing') return { kind: 'preparing', step: unlisted.step }
+    if (unlisted?.state === 'failed') return { kind: 'connector_failed', reason: unlisted.reason }
+    return { kind: 'missing' }
+  }
   if (checking) return { kind: 'checking' }
   if (harness.acpAvailable === false) return { kind: 'no_bridge', reason: harness.unavailableReason ?? `${harness.name} can’t be started by LoomWatch.` }
   // An app already checked through npx works while its connector installs in the background.
@@ -91,7 +127,11 @@ export function appSetupState(harness: DetectedHarness | undefined, checking: bo
     return { kind: 'preparing', step: connector.state === 'preparing' ? connector.step : 'Waiting to start' }
   }
   if (harness.health === 'error') {
-    if (harness.healthCause === 'signed_out') return { kind: 'signed_out', reason: harness.healthReason ?? `${harness.name} isn’t signed in.` }
+    if (harness.healthCause === 'signed_out') {
+      if (job?.kind === 'sign_in' && job.state === 'running') return { kind: 'signing_in', ...(job.url ? { url: job.url } : {}), needsCode: job.needsCode === true }
+      if (job?.kind === 'sign_in' && job.state === 'failed') return { kind: 'setup_failed', reason: job.reason ?? 'The sign-in stopped.', retry: 'sign_in' }
+      return { kind: 'signed_out', reason: harness.healthReason ?? `${harness.name} isn’t signed in.` }
+    }
     if (harness.healthCause === 'needs_api_key') return { kind: 'needs_key', reason: harness.healthReason ?? `${harness.name} needs an API key to work with other apps.` }
     return { kind: 'failed', reason: harness.healthReason ?? `${harness.name} couldn’t start.`, ...(harness.healthDetail ? { detail: harnessSaid(harness.healthDetail) } : {}) }
   }

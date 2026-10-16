@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ConnectorStatus, DetectedHarness } from '../../lib/harnesses'
+import type { ConnectorStatus, DetectedHarness, SetupJob } from '../../lib/harnesses'
 import { AppSetup } from './AppSetup'
 
 const opencode: DetectedHarness = { id: 'opencode', name: 'OpenCode', command: 'opencode', executablePath: '/home/u/.opencode/bin/opencode', acpAvailable: true, spawn: { cmd: 'opencode', args: ['acp'] } }
@@ -26,6 +26,12 @@ function fakeDaemon() {
     /** Each app's connector, for an app LoomWatch starts through one. */
     connectors: new Map<string, ConnectorStatus>(),
     prepareCalls: [] as string[],
+    /** Sign-ins and installs the panel started, as the daemon reports them. */
+    jobs: new Map<string, SetupJob>(),
+    codes: [] as string[],
+    /** What happens when the panel starts a sign-in or install, for a test to set. */
+    onSignIn: (_id: string) => {},
+    onInstall: (_id: string) => {},
   }
   const listed = () => daemon.installed.map((installed): DetectedHarness => {
     const restarted = daemon.needsRestart.has(installed.id) ? { ...installed, needsRestart: true } : installed
@@ -38,8 +44,20 @@ function fakeDaemon() {
     if (verdict === 'needs_api_key') return { ...harness, health: 'error', healthCause: 'needs_api_key', healthReason: needsKeyReason }
     return { ...harness, health: 'error', healthReason: `${harness.name}: sign-in or version problem`, healthDetail: verdict }
   })
-  const fetchMock = vi.fn((url: string) => {
-    if (url === '/api/harnesses') return respond({ harnesses: listed(), searchedPath: [], knownIds: [] })
+  const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+    if (url === '/api/harnesses') {
+      // A connector for an app that isn't listed yet is reported beside the list.
+      const unlisted = [...daemon.connectors].filter(([id]) => !daemon.installed.some((app) => app.id === id))
+      return respond({ harnesses: listed(), searchedPath: [], knownIds: [], connectors: Object.fromEntries(unlisted), setup: Object.fromEntries(daemon.jobs) })
+    }
+    const setup = /^\/api\/harnesses\/([^/]+)\/(sign-in|sign-in\/code|install)$/.exec(url)
+    if (setup && init?.method === 'POST') {
+      const [, id, what] = setup
+      if (what === 'sign-in') daemon.onSignIn(id)
+      if (what === 'install') daemon.onInstall(id)
+      if (what === 'sign-in/code') daemon.codes.push((JSON.parse(String(init.body)) as { code: string }).code)
+      return what === 'sign-in/code' ? Promise.resolve(new Response(null, { status: 204 })) : respond(daemon.jobs.get(id) ?? {}, 202)
+    }
     const prepare = /^\/api\/harnesses\/([^/]+)\/prepare$/.exec(url)
     if (prepare) {
       daemon.prepareCalls.push(prepare[1])
@@ -92,6 +110,69 @@ describe('AppSetup', () => {
     expect(within(openCodeCard).getByText('No account needed')).toBeInTheDocument()
     expect(within(openCodeCard).getByText(/That’s all/)).toBeInTheDocument()
     expect(within(openCodeCard).getByRole('button', { name: 'Copy curl -fsSL https://opencode.ai/install | bash' })).toBeInTheDocument()
+  })
+
+  it('sets up Claude with one button, signs in with the code its page shows, and says it is ready', async () => {
+    const daemon = fakeDaemon()
+    daemon.connectors.set('claude', { state: 'needed' })
+    renderSetup([], true)
+    fireEvent(window, new Event('focus'))
+
+    const missing = await waitFor(() => card(/^Claude Code: Not installed/))
+    expect(missing).toHaveTextContent('LoomWatch downloads Claude Code into its own folder (about 300 MB, once). Then you sign in.')
+    fireEvent.click(within(missing).getByRole('button', { name: 'Set up Claude Code' }))
+    await waitFor(() => expect(card(/^Claude Code: Getting ready/)).toBeInTheDocument())
+    expect(daemon.prepareCalls).toEqual(['claude'])
+
+    // The connector is in and carries Claude Code: it is listed, and its check says signed out.
+    daemon.connectors.set('claude', { state: 'ready' })
+    daemon.installed = [{ ...claude, executablePath: '/state/connectors/claude/claude' }]
+    daemon.verdicts.set('claude', 'signed_out')
+    fireEvent(window, new Event('focus'))
+    const signedOut = await waitFor(() => card(/^Claude Code: Not signed in/))
+
+    daemon.onSignIn = (id) => { daemon.jobs.set(id, { kind: 'sign_in', state: 'running', url: 'https://claude.com/cai/oauth/authorize?code=true', needsCode: true }) }
+    fireEvent.click(within(signedOut).getByRole('button', { name: 'Sign in to Claude Code' }))
+    const signingIn = await waitFor(() => card(/^Claude Code: Signing in/))
+    expect(within(signingIn).getByRole('link', { name: 'Open the sign-in page again' })).toHaveAttribute('href', 'https://claude.com/cai/oauth/authorize?code=true')
+
+    fireEvent.change(within(signingIn).getByLabelText('At the end, the page shows a code. Paste it here:'), { target: { value: 'abc#123' } })
+    // The sign-in finishes once it has the code; the daemon drops the stale "signed out" verdict.
+    daemon.jobs.set('claude', { kind: 'sign_in', state: 'done' })
+    daemon.verdicts.set('claude', 'ok')
+    daemon.checked.delete('claude')
+    fireEvent.click(within(signingIn).getByRole('button', { name: 'Finish signing in' }))
+    await waitFor(() => expect(card(/^Claude Code: Ready/)).toBeInTheDocument())
+    expect(daemon.codes).toEqual(['abc#123'])
+  })
+
+  it('installs OpenCode with its own installer', async () => {
+    const daemon = fakeDaemon()
+    renderSetup([], true)
+    daemon.onInstall = (id) => { daemon.jobs.set(id, { kind: 'install', state: 'running' }) }
+    fireEvent.click(within(card(/^OpenCode: Not installed/)).getByRole('button', { name: 'Install OpenCode' }))
+    await waitFor(() => expect(card(/^OpenCode: Installing/)).toBeInTheDocument())
+
+    daemon.jobs.set('opencode', { kind: 'install', state: 'done' })
+    daemon.installed = [opencode]
+    fireEvent(window, new Event('focus'))
+    await waitFor(() => expect(card(/^OpenCode: Ready/)).toBeInTheDocument())
+  })
+
+  it('says why a sign-in didn’t finish, and tries again on request', async () => {
+    const daemon = fakeDaemon()
+    daemon.installed = [claude]
+    daemon.verdicts.set('claude', 'signed_out')
+    daemon.jobs.set('claude', { kind: 'sign_in', state: 'failed', reason: 'OAuth error: invalid code' })
+    let started = 0
+    daemon.onSignIn = () => { started += 1 }
+    renderSetup([], true)
+    fireEvent(window, new Event('focus'))
+
+    const failed = await waitFor(() => card(/^Claude Code: Didn’t finish/))
+    expect(within(failed).getByRole('alert')).toHaveTextContent('Signing in didn’t finish: OAuth error: invalid code')
+    fireEvent.click(within(failed).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(started).toBe(1))
   })
 
   it('gets an app’s connector ready before checking it, and checks it once it is in', async () => {

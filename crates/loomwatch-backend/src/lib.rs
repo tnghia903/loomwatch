@@ -4,6 +4,7 @@
 
 pub mod acp;
 pub mod api;
+pub mod app_setup;
 pub mod approvals;
 pub mod archive;
 pub mod auto_mode;

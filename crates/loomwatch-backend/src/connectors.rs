@@ -38,6 +38,9 @@ struct Bridge {
     entry: &'static str,
     manifest: &'static str,
     lockfile: &'static str,
+    /// Where the app itself sits under `node_modules`: each bridge's packages carry their own
+    /// Claude Code or Codex program. `*` matches the one platform folder npm installed.
+    engine: &'static [&'static str],
 }
 
 const BRIDGES: &[Bridge] = &[
@@ -49,6 +52,7 @@ const BRIDGES: &[Bridge] = &[
         entry: "dist/index.js",
         manifest: include_str!("../connectors/claude/package.json"),
         lockfile: include_str!("../connectors/claude/package-lock.json"),
+        engine: &["@anthropic-ai", "claude-agent-sdk-*", "claude"],
     },
     Bridge {
         app: "codex",
@@ -58,6 +62,7 @@ const BRIDGES: &[Bridge] = &[
         entry: "dist/index.js",
         manifest: include_str!("../connectors/codex/package.json"),
         lockfile: include_str!("../connectors/codex/package-lock.json"),
+        engine: &["@openai", "codex-*", "vendor", "*", "bin", "codex"],
     },
 ];
 
@@ -143,7 +148,8 @@ struct NodeProgram {
 #[derive(Debug)]
 pub struct Connectors {
     root: PathBuf,
-    /// The `PATH` the daemon started with: where the computer's own Node.js and npx are looked for.
+    /// The `PATH` the daemon started with, plus the per-user install folders: where the computer's
+    /// own Node.js and npx are looked for.
     search_path: Option<OsString>,
     node_dist: String,
     /// Only the in-between states: `Ready` and `Needed` are read from the disk.
@@ -156,8 +162,13 @@ static CONNECTORS: OnceLock<Connectors> = OnceLock::new();
 
 /// Keep connectors in `state_dir` for the rest of this process. The first call wins.
 pub fn init(state_dir: &Path) -> &'static Connectors {
-    CONNECTORS
-        .get_or_init(|| Connectors::new(state_dir.join("connectors"), std::env::var_os("PATH")))
+    CONNECTORS.get_or_init(|| {
+        // The per-user folders too: Node.js and npx installed there count, as apps there do.
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let search_path =
+            crate::api::augment_search_path(std::env::var_os("PATH"), home.as_deref());
+        Connectors::new(state_dir.join("connectors"), search_path)
+    })
 }
 
 /// The connectors [`init`] set up, or `None` in a process that never did (the CLI and tests).
@@ -220,6 +231,41 @@ impl Connectors {
             .join(bridge.package)
             .join(bridge.entry);
         (marker.node.is_file() && entry.is_file()).then_some((marker.node, entry))
+    }
+
+    /// The app's own program, as its installed connector carries it: what a computer without
+    /// Claude Code or Codex installed signs in with and is listed by.
+    #[must_use]
+    pub fn engine(&self, app: &str) -> Option<PathBuf> {
+        let bridge = bridge_for(app)?;
+        self.ready(bridge)?;
+        let mut found = self.dir(bridge).join("node_modules");
+        for segment in bridge.engine {
+            found = match segment.split_once('*') {
+                None => found.join(segment),
+                Some((prefix, suffix)) => std::fs::read_dir(&found)
+                    .ok()?
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .filter(|path| {
+                        path.file_name()
+                            .and_then(OsStr::to_str)
+                            .is_some_and(|name| name.starts_with(prefix) && name.ends_with(suffix))
+                    })
+                    .min()?,
+            };
+        }
+        found.is_file().then_some(found)
+    }
+
+    /// The apps that have a connector, and where each stands: what the Home panel shows for an
+    /// app that isn't on this computer yet.
+    #[must_use]
+    pub fn all_status(&self) -> Vec<(&'static str, ConnectorStatus)> {
+        BRIDGES
+            .iter()
+            .filter_map(|bridge| Some((bridge.app, self.status(bridge.app)?)))
+            .collect()
     }
 
     /// Where `app`'s connector stands, or `None` for an app that needs none.
@@ -775,6 +821,25 @@ mod tests {
             connectors.resolve("npx", &spawn),
             Resolved::NotReady { .. }
         ));
+    }
+
+    #[test]
+    fn the_app_itself_is_found_inside_its_installed_connector() {
+        let temp = Scratch::new();
+        let connectors = connectors(temp.path());
+        let codex = bridge_for("codex").unwrap();
+        let node = temp.path().join("node");
+        std::fs::write(&node, "").unwrap();
+        assert_eq!(connectors.engine("codex"), None);
+        fake_install(&connectors, codex, &node);
+        assert_eq!(connectors.engine("codex"), None, "no program inside yet");
+        let program = connectors
+            .dir(codex)
+            .join("node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex");
+        std::fs::create_dir_all(program.parent().unwrap()).unwrap();
+        std::fs::write(&program, "").unwrap();
+        assert_eq!(connectors.engine("codex"), Some(program));
+        assert_eq!(connectors.engine("opencode"), None);
     }
 
     #[test]
