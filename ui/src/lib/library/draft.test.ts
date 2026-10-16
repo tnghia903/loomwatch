@@ -91,6 +91,17 @@ describe('the agent builder’s draft', () => {
     })
   })
 
+  it('chats inside a team with what the team gives it to read, beside its own skills and tools', () => {
+    const draft = { name: 'Researcher', does: '', instructions: 'Find sources.', appId: 'claude', model: '', effort: '', skills: ['source-check'], tools: ['github'], doneWhen: [], allow: {}, figure: null }
+    const knowledge = [{ kind: 'knowledge' as const, name: 'notes', path: '/Users/me/notes' }, { kind: 'knowledge' as const, name: 'Hub', notion: { page: 'abc' } }]
+    const team = parse(chatTeamYaml(draft, claude, 'sonnet', 'researcher', knowledge)) as { agents: Record<string, unknown>[] }
+    expect(team.agents[0].capabilities).toEqual([...knowledge, { kind: 'skill', name: 'source-check' }, { kind: 'tool', name: 'github' }])
+    const bare = parse(chatTeamYaml({ ...draft, skills: [], tools: [] }, claude, 'sonnet', 'researcher', knowledge)) as typeof team
+    expect(bare.agents[0].capabilities).toEqual(knowledge)
+    // In Your agents it reads nothing: that is a team's to give (ADR 0042).
+    expect(parse(chatTeamYaml({ ...draft, skills: [], tools: [] }, claude, 'sonnet', 'researcher'))).not.toHaveProperty('agents.0.capabilities')
+  })
+
   it('keeps its chat’s agent under the chat’s id, whatever the agent is called', () => {
     const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', appId: 'claude', model: '', effort: '', skills: [], tools: [], doneWhen: [], allow: {}, figure: null }
     const before = parse(chatTeamYaml(draft, claude, 'sonnet', 'notes')) as { id: string; name: string; entrypoint: string; agents: { id: string; name: string }[] }

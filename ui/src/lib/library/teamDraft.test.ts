@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { DetectedHarness } from '../harnesses'
 import type { AgentConfig } from '../team-file/types'
-import { draftFromTeamAgent, readsOf, teamAgentEdit, toolsOf } from './teamDraft'
+import { draftFromTeamAgent, knowledgeForChat, readsOf, teamAgentEdit, teamKnowledge, toolsOf } from './teamDraft'
 
 const claude: DetectedHarness = { id: 'claude', name: 'Claude Code', command: 'claude-agent-acp', executablePath: '/bin/claude-agent-acp', acpAvailable: true, spawn: { cmd: 'claude-agent-acp', args: [] } }
 const codex: DetectedHarness = { id: 'codex', name: 'Codex', command: 'codex-acp', executablePath: '/bin/codex-acp', acpAvailable: true, spawn: { cmd: 'codex-acp', args: ['--quiet'] } }
@@ -79,6 +79,34 @@ describe('a team’s own agent on the workbench', () => {
       { kind: 'folder', name: 'unnamed', where: '/Users/me/unnamed/' },
     ])
     expect(readsOf({})).toEqual([])
+  })
+
+  it('gives its chat in the team what the team gives it to read, naming the same files from the chat’s folder', () => {
+    const knowledge = teamKnowledge({ capabilities: [
+      { kind: 'skill', name: 'house-style' },
+      { kind: 'knowledge', name: 'notes', path: '/Users/me/notes' },
+      { kind: 'tool', name: 'github' },
+      { kind: 'knowledge', name: 'brief.md', path: 'digest.files/brief.md' },
+      { kind: 'knowledge', name: 'Hub', notion: { page: 'abc' } },
+      { kind: 'knowledge', name: 'home', path: '~/Documents/home' },
+      { kind: 'knowledge', name: 'shared', path: './../shared' },
+      // What the drawer doesn't list, the chat isn't given either (ADR 0036).
+      { kind: 'knowledge', name: 'nowhere' },
+    ] }, 'digest.yaml')
+    expect(knowledge.capabilities.map((capability) => capability.name)).toEqual(['notes', 'brief.md', 'Hub', 'home', 'shared'])
+    expect(knowledgeForChat(knowledge, '.jobs/.bench/team-digest-writer.yaml')).toEqual([
+      { kind: 'knowledge', name: 'notes', path: '/Users/me/notes' },
+      // A file added beside the team is read from the team file's folder, not the chat's.
+      { kind: 'knowledge', name: 'brief.md', path: '../../digest.files/brief.md' },
+      { kind: 'knowledge', name: 'Hub', notion: { page: 'abc' } },
+      { kind: 'knowledge', name: 'home', path: '~/Documents/home' },
+      { kind: 'knowledge', name: 'shared', path: '../../../shared' },
+    ])
+    // A team in a folder of its own, and one named by its full path.
+    const nested = teamKnowledge({ capabilities: [{ kind: 'knowledge', name: 'brief.md', path: 'digest.files/brief.md' }] }, 'news/digest.yaml')
+    expect(knowledgeForChat(nested, '.jobs/.bench/chat.yaml')[0].path).toBe('../../news/digest.files/brief.md')
+    expect(knowledgeForChat({ ...nested, teamPath: '/Users/me/teams/news/digest.yaml' }, '.jobs/.bench/chat.yaml')[0].path).toBe('/Users/me/teams/news/digest.files/brief.md')
+    expect(teamKnowledge({}, 'digest.yaml').capabilities).toEqual([])
   })
 
   it('takes the tools the team gives it, for its tool drawer: each MCP server once, in order', () => {

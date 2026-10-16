@@ -10,6 +10,7 @@ import { fetchJobVersions, JobApiError, jobIdFor, removeJob, saveJob, useSavedJo
 import { effortFor } from '../../lib/library/effort'
 import { modelForJob } from '../../lib/library/jobModel'
 import { ROLE_PRESETS } from '../../lib/library/roles'
+import type { TeamKnowledge } from '../../lib/library/teamDraft'
 import { useAgentUses } from '../../lib/library/uses'
 import { relativeTime } from '../../lib/format'
 import type { RunRecord } from '../../lib/runs/client'
@@ -39,10 +40,11 @@ export interface AgentBuilderProps {
   /**
    * Shown inside a team's Agents tab, for an agent placed from Your agents: there is no page to
    * go back to, and every save is followed by moving that team to the version just saved. What it
-   * reads stays the team's own (lib/library/link.ts), so its file drawer shows the team's; its
-   * tools are the version's, like its skills.
+   * reads stays the team's own (lib/library/link.ts), so its file drawer shows the team's, and
+   * what its chat sends from here reads the same (`knowledge`); its tools are the version's, like
+   * its skills.
    */
-  inTeam?: { name: string; onSaved: (job: SavedJob) => void; reads: readonly ReadSource[]; onShowWorkflow?: () => void }
+  inTeam?: { name: string; onSaved: (job: SavedJob) => void; reads: readonly ReadSource[]; knowledge: TeamKnowledge; onShowWorkflow?: () => void }
 }
 
 type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; version: number; bumped: boolean } | { kind: 'error'; message: string }
@@ -225,7 +227,7 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
 
       <ByHand
         draft={draft} set={set} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={markId} figure={figure} record={benchRecord} tools={tools} toolsLoading={skillsLoading} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
-        chat={view === 'chat' ? <AgentChat draft={draft} harness={harness} model={resolvedModel} chatId={chatId} figure={figure} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} /> : undefined}
+        chat={view === 'chat' ? <AgentChat draft={draft} harness={harness} model={resolvedModel} chatId={chatId} figure={figure} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={inTeam?.knowledge} /> : undefined}
         onBuild={() => showView('build')}
         cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={draft.name.trim() || 'New agent'} onClose={() => setAnswerRun(null)} /> : undefined}
       />
