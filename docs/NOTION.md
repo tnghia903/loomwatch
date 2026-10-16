@@ -32,7 +32,7 @@ destination you chose. It holds the sign-in itself; agents never receive it.
 Notion ends it after 30 days without use, or after 180 days in all; then Connections and every
 delivery say to connect again. Connecting again to the same workspace keeps the destination page.
 
-**Disconnect** removes the sign-in from this Mac and asks Notion to revoke it. You can also remove
+**Disconnect** removes the sign-in from this computer and asks Notion to revoke it. You can also remove
 LoomWatch in Notion's settings, under its connections.
 
 ## Advanced: connect with an integration token
