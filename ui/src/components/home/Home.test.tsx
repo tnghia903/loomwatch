@@ -50,6 +50,17 @@ describe('Home', () => {
     expect(assign).toHaveBeenCalledWith('/?path=new.yaml')
   })
 
+  // A newcomer coming back to use their agent landed on Build and had to look for Chat.
+  it('opens a saved agent from Home on its chat', async () => {
+    const helper = { id: 'reply-helper', file: 'reply-helper.yaml', name: 'Review reply helper', role: 'Reply to reviews.', version: 1 }
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/jobs'
+      ? { folder: '/teams/.jobs', jobs: [helper], problems: [] }
+      : { root: '/teams', files: [], teams: [] }))
+    renderHome()
+    const chip = await screen.findByRole('link', { name: /Review reply helper/ })
+    expect(chip).toHaveAttribute('href', '/agents/reply-helper?view=chat')
+  })
+
   // The work in the order it is done: build agents, put them in a team's workflow, then chat with it.
   it('starts with building an agent, lists your agents before your teams, and opens each team where it left off', async () => {
     fetchMock.mockImplementation((url: string) => respond(url === '/api/jobs'
@@ -230,14 +241,23 @@ describe('Home', () => {
   it('reads an app that needs an API key as a setup note, not an error, with Set it up', async () => {
     fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
     const keyReason = 'Gemini CLI needs a Gemini API key to work with other apps: set GEMINI_API_KEY, then restart LoomWatch.'
-    renderHome([claude, { ...brokenGemini, healthCause: 'needs_api_key', healthReason: keyReason }])
+    const needsKey = { ...brokenGemini, healthCause: 'needs_api_key' as const, healthReason: keyReason }
+    // With another app ready it is left to "Set up another app": most people have nothing to do about it.
+    renderHome([claude, needsKey])
     await screen.findByText(/No teams yet/)
+    expect(screen.queryByText(keyReason)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Set up another app' })).toBeInTheDocument()
+    cleanup()
+    // With none ready, it is the way to start.
+    renderHome([needsKey])
+    await screen.findByText(/No teams yet/)
+    fireEvent.click(within(screen.getByRole('region', { name: 'Set up an AI app' })).getByRole('button', { name: 'Hide' }))
     const note = within(screen.getByRole('list', { name: 'Apps that need attention' })).getByText(keyReason).closest('li')
     expect(note).toHaveClass('setup')
     expect(note).not.toHaveClass('failed')
     fireEvent.click(within(note as HTMLElement).getByRole('button', { name: 'Set it up' }))
     expect(screen.getByRole('region', { name: 'Set up an AI app' })).toBeInTheDocument()
-    // A failure with no step to take stays an alert.
+    // A failure with no step to take stays an alert, even with another app ready.
     cleanup()
     renderHome([claude, brokenGemini])
     await screen.findByText(/No teams yet/)

@@ -230,16 +230,33 @@ pub fn pdf_text(file: &Path) -> Option<String> {
 /// Run `program` as `pdftotext` over `file` for at most `deadline`, keeping at most `limit` bytes
 /// of what it writes. A program that writes more is stopped once the limit is read, and what was
 /// read is kept.
+/// Starts `command`, trying again for a moment while its program file is busy. Linux refuses to run a
+/// file that some process still holds open for writing ("text file busy"), and a process forked
+/// while the file was being written holds it until it execs. CI met this when a test wrote its
+/// stand-in `pdftotext` while other tests started processes, and the PDF read as having no text.
+fn spawn_when_not_busy(command: &mut Command) -> Option<std::process::Child> {
+    for _ in 0..20 {
+        match command.spawn() {
+            Ok(child) => return Some(child),
+            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
 fn extract_text(program: &Path, file: &Path, deadline: Duration, limit: usize) -> Option<String> {
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(["-enc", "UTF-8", "-q"])
         .arg(file)
         .arg("-")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+        .stderr(Stdio::null());
+    let mut child = spawn_when_not_busy(&mut command)?;
     let stdout = child.stdout.take()?;
     let full = Arc::new(AtomicBool::new(false));
     let reader = {

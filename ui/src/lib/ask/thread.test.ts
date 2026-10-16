@@ -47,14 +47,24 @@ describe('projectAskThread', () => {
     expect(JSON.stringify(thread)).not.toContain('instructions')
   })
 
-  it('names each tool call in plain words, with the failure the app was told about', () => {
+  it('names each tool call in plain words, and a refused draft it then fixed reads as fixed', () => {
     const turn = projectAskThread(proposeTurn()).items[1] as AssistantTurn
     expect(turn.steps.map((step) => [step.label, step.status])).toEqual([
       ['Checked your AI apps', 'done'],
-      ['Found a problem in the draft', 'failed'],
+      ['Fixed a problem in its draft', 'done'],
       ['Drafted the team', 'done'],
     ])
-    expect(turn.steps[1].detail).toContain('entrypoint agent "nobody" does not exist')
+    // The tool server's words were for the app; the person has nothing to do about them.
+    expect(turn.steps[1].detail).toBeNull()
+  })
+
+  it('keeps a failure the app never fixed, in the words it was told', () => {
+    const events = proposeTurn()
+    const lastDraft = events.map((event) => event.payload?.title).lastIndexOf('mcp__loomwatch__propose_team')
+    const turn = projectAskThread(events.filter((_, index) => index !== lastDraft)).items[1] as AssistantTurn
+    const failed = turn.steps.find((step) => step.status === 'failed')
+    expect(failed?.label).toBe('Found a problem in the draft')
+    expect(failed?.detail).toContain('entrypoint agent "nobody" does not exist')
   })
 
   it('keeps separate messages apart and puts the proposal with the turn that made it', () => {

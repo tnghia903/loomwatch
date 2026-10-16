@@ -127,3 +127,13 @@ export function relativeTime(iso: string, now = Date.now()): string {
   if (ms < 172_800_000) return 'yesterday'
   return `${Math.round(ms / 86_400_000)}d ago`
 }
+
+/**
+ * The runs of one team, oldest first, which is what "Run 3" counts: a team's own runs, not every run
+ * and Ask conversation on this computer. A newcomer's first run read "Run 3" because the count
+ * included another team's run and the Ask conversation that set this one up. A session with no team
+ * (an archive-only one) belongs to none.
+ */
+export function teamRunIds(entries: readonly Pick<HistoryEntry, 'id' | 'teamPath'>[], teamPath: string | null): string[] {
+  return entries.filter((entry) => Boolean(teamPath) && entry.teamPath === teamPath).map((entry) => entry.id).reverse()
+}

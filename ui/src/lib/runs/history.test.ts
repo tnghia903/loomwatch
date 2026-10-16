@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord } from './client'
-import { historyRunUrl, mergeHistory, threadHistory } from './history'
+import { historyRunUrl, mergeHistory, teamRunIds, threadHistory } from './history'
 
 const record = (overrides: Partial<RunRecord>): RunRecord => ({
   runId: 'r1',
@@ -97,5 +97,19 @@ describe('run history as a thread (Canvas B)', () => {
   it('opens a run against the team file it executed', () => {
     const [row] = mergeHistory([record({ runId: 'run 16', teamPath: 'daily-news.yaml' })], [])
     expect(historyRunUrl(row)).toBe('/?path=daily-news.yaml&run=run+16')
+  })
+})
+
+describe('teamRunIds', () => {
+  it('counts one team’s own runs, oldest first, not every run and conversation on the computer', () => {
+    // Newest first, as the history comes.
+    const entries = [
+      { id: 'mine-2', teamPath: 'python.yaml' },
+      { id: 'ask-session', teamPath: null },
+      { id: 'other-1', teamPath: 'flowers.yaml' },
+      { id: 'mine-1', teamPath: 'python.yaml' },
+    ]
+    expect(teamRunIds(entries, 'python.yaml')).toEqual(['mine-1', 'mine-2'])
+    expect(teamRunIds(entries, null)).toEqual([])
   })
 })

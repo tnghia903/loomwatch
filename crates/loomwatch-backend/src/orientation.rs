@@ -134,12 +134,33 @@ pub fn for_stage(
             names(&after, ids)
         );
     }
+    if let Some(checked) = agent
+        .checks
+        .as_deref()
+        .and_then(|id| team.agents.iter().find(|other| other.id == id))
+    {
+        // ADR 0062: the verdict is read from this block whatever the role says, so a check step
+        // whose instructions were written by hand or by Ask LoomWatch is told it here; without
+        // it, every item reads Not sure and nothing can be sent back.
+        let _ = write!(
+            text,
+            "
+You check {}'s work: it is in the sections above the task, with what it must              satisfy. {CHECK_BLOCK}",
+            checked.name
+        );
+    }
     if responder == agent.id {
         text.push('\n');
         text.push_str(FINAL_ANSWER);
     }
     Some(text)
 }
+
+/// How a check step reports, wherever its instructions came from: the block the daemon reads its
+/// verdict from (`read_checks`).
+const CHECK_BLOCK: &str = "Do not rewrite the work. End your reply with this block, one line \
+     for each item it must satisfy (or for the request, when nothing was set):\n## Check\n- Met | \
+     Not met | Not sure — the item — your evidence";
 
 /// An agent the operator wrote to directly with an @mention (ADR 0051).
 ///
@@ -355,6 +376,22 @@ mod tests {
 
     fn order() -> Vec<String> {
         ["research", "check", "write"].map(str::to_owned).to_vec()
+    }
+
+    #[test]
+    fn a_check_step_is_told_the_block_its_verdict_is_read_from_whatever_its_role_says() {
+        let mut team = pipeline();
+        team.agents[1].checks = Some("research".to_owned());
+        let text = for_stage(&team, &team.agents[1], &order(), 1, "write").unwrap();
+        assert!(text.contains("You check Researcher's work"), "{text}");
+        assert!(
+            text.ends_with("## Check\n- Met | Not met | Not sure — the item — your evidence"),
+            "{text}"
+        );
+        // A stage that checks nothing is not told to.
+        let plain = pipeline();
+        let text = for_stage(&plain, &plain.agents[1], &order(), 1, "write").unwrap();
+        assert!(!text.contains("## Check"), "{text}");
     }
 
     #[test]
