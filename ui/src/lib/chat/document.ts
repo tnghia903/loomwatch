@@ -45,9 +45,12 @@ export function describeDocument(answer: string, previewChars = 220): DocumentFa
   return { title: title || 'The team’s answer', preview: cut(prose, previewChars), words, sections }
 }
 
+/** Made once: `toLocaleString` with a locale builds a formatter on every call. */
+const COUNT = new Intl.NumberFormat('en-US')
+
 /** "1,240 words · 4 sections". */
 export function documentSize({ words, sections }: Pick<DocumentFacts, 'words' | 'sections'>): string {
-  const parts = [`${words.toLocaleString('en-US')} ${words === 1 ? 'word' : 'words'}`]
+  const parts = [`${COUNT.format(words)} ${words === 1 ? 'word' : 'words'}`]
   if (sections > 1) parts.push(`${sections} sections`)
   return parts.join(' · ')
 }

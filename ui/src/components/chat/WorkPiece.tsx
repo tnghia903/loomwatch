@@ -145,6 +145,9 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   const responder = session.projection.agents.find((agent) => agent.id === run.responder)
   const streamed = live ? responder?.reply ?? '' : ''
   const answer = isTerminalRun(record.status) ? record.reply ?? '' : streamed
+  // The files the answer names, for its tools: a scan of the whole text, so once per answer.
+  const finishedAnswer = isTerminalRun(record.status)
+  const answerFiles = useMemo(() => (finishedAnswer ? fileRefsIn(answer) : []), [finishedAnswer, answer])
   // Your review lasts while this chat is open, and only for the answer you reviewed.
   const [reviewedText, setReviewedText] = useState<string | null>(null)
   const streaming = live && responder?.taskState === 'STREAMING'
@@ -325,7 +328,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
           run={record}
           answer={answer}
           check={check}
-          files={isTerminalRun(record.status) ? fileRefsIn(answer) : []}
+          files={answerFiles}
           makers={team.parties.filter((party) => !party.operator).map((party) => ({ id: party.id, name: party.name }))}
           finished={isTerminalRun(record.status)}
           reviewed={reviewedText === answer}

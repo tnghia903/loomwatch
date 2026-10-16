@@ -27,11 +27,16 @@ export const dayKey = (iso: string): string => {
   return Number.isNaN(time) ? '' : String(startOfDay(time))
 }
 
+// Made once: `toLocaleTimeString` with options builds a formatter on every call, and every message
+// of the chat says its time on every render.
+let clock: Intl.DateTimeFormat | null = null
+
 /** "09:40". */
 export function clockTime(iso: string | null | undefined): string {
   if (!iso) return ''
   const time = Date.parse(iso)
-  return Number.isNaN(time) ? '' : new Date(time).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  clock ??= new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' })
+  return Number.isNaN(time) ? '' : clock.format(time)
 }
 
 /** "12 s", "4 min", "1 h 5 min". */
