@@ -357,8 +357,8 @@ impl EventArchive {
 pub(crate) fn decode_payload_and_raw(row: &SqliteRow) -> Result<(Value, Option<Value>)> {
     let payload: Value = row.try_get("payload")?;
     let raw = row
-        .try_get::<Option<Vec<u8>>, _>("raw")?
-        .map(|stored| codec::decode(&payload, &stored))
+        .try_get::<Option<&[u8]>, _>("raw")?
+        .map(|stored| codec::decode(&payload, stored))
         .transpose()?;
     Ok((payload, raw))
 }

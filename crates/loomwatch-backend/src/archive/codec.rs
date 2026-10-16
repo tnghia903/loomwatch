@@ -123,9 +123,7 @@ pub(crate) fn decode(payload: &Value, stored: &[u8]) -> Result<Value> {
     let text = if flags & COMPRESSED == 0 {
         std::borrow::Cow::Borrowed(body)
     } else {
-        std::borrow::Cow::Owned(
-            zstd::stream::decode_all(body).context("cannot decompress a raw frame")?,
-        )
+        std::borrow::Cow::Owned(decompress(body)?)
     };
     let Value::Object(mut body) =
         serde_json::from_slice(&text).context("a stored raw frame is not JSON")?
@@ -163,6 +161,19 @@ pub(crate) fn decode(payload: &Value, stored: &[u8]) -> Result<Value> {
         }
     }
     Ok(raw)
+}
+
+/// A compressed body, into one buffer of exactly its size: `encode`'s frames record it. A frame
+/// that does not, or claims an implausible size, is grown as it is read instead.
+fn decompress(body: &[u8]) -> Result<Vec<u8>> {
+    const PLAUSIBLE: u64 = 256 * 1024 * 1024;
+    match zstd::zstd_safe::get_frame_content_size(body) {
+        Ok(Some(size)) if size <= PLAUSIBLE => {
+            let size = usize::try_from(size).context("a raw frame is too large to read")?;
+            zstd::bulk::decompress(body, size).context("cannot decompress a raw frame")
+        }
+        _ => zstd::stream::decode_all(body).context("cannot decompress a raw frame"),
+    }
 }
 
 /// Take the value at `pointer` out of `value`. Only called with pointers that exist.
