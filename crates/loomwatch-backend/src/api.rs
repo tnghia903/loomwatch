@@ -3355,8 +3355,8 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             json!({
                 "harnessId": "opencode",
                 "models": [
-                    {"id": "provider/fast", "name": "Fast", "thinkingEfforts": []},
-                    {"id": "provider/reasoning", "name": "Reasoning", "thinkingEfforts": []}
+                    {"id": "provider/fast", "name": "Fast", "thinkingEfforts": [], "effortsKnown": false},
+                    {"id": "provider/reasoning", "name": "Reasoning", "thinkingEfforts": [], "effortsKnown": false}
                 ]
             })
         );

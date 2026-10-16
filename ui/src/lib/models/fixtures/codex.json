@@ -4,7 +4,8 @@
   {
    "id": "gpt-6.1-sol",
    "name": "6.1 Sol",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "gpt-6-luna",
@@ -31,7 +32,8 @@
      "id": "max",
      "name": "Max"
     }
-   ]
+   ],
+   "effortsKnown": true
   },
   {
    "id": "gpt-5.6-terra",
@@ -62,7 +64,8 @@
      "id": "ultra",
      "name": "Ultra"
     }
-   ]
+   ],
+   "effortsKnown": true
   },
   {
    "id": "gpt-5.6-luna",
@@ -89,8 +92,10 @@
      "id": "max",
      "name": "Max"
     }
-   ]
+   ],
+   "effortsKnown": true
   }
  ],
- "currentModelId": "gpt-6.1-sol"
+ "currentModelId": "gpt-6.1-sol",
+ "currentThinkingEffort": "medium"
 }

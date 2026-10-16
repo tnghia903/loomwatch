@@ -42,6 +42,12 @@ pub struct DiscoveredModel {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub thinking_efforts: Vec<DiscoveredThinkingEffort>,
+    /// Whether `thinking_efforts` is what this model offers. An app lists one effort option for
+    /// the model its session runs on, and some list one selector per model and effort; any
+    /// other model's efforts are learnt only by switching to it, so they are not known, its list
+    /// is empty, and it runs at its own default. Claude offers Low to Max on Sonnet and nothing
+    /// on Haiku 4.5, yet a session on Sonnet does not say so.
+    pub efforts_known: bool,
 }
 
 /// The live model/configuration state reported by a newly-created ACP session.
@@ -1678,11 +1684,6 @@ fn model_catalog_from_session(session: &Value) -> DiscoveredModelCatalog {
             description: choice.description,
         })
         .collect::<Vec<_>>();
-    let effort_by_id = global_efforts
-        .iter()
-        .cloned()
-        .map(|effort| (effort.id.clone(), effort))
-        .collect::<HashMap<_, _>>();
 
     let available = session
         .pointer("/models/availableModels")
@@ -1700,15 +1701,11 @@ fn model_catalog_from_session(session: &Value) -> DiscoveredModelCatalog {
         for choice in select_choices(options, "value") {
             if seen.insert(choice.id.clone()) {
                 models.push(DiscoveredModel {
-                    thinking_efforts: efforts_for_model(
-                        &choice.id,
-                        &supported_efforts,
-                        &global_efforts,
-                        &effort_by_id,
-                    ),
                     id: choice.id,
                     name: choice.name,
                     description: choice.description,
+                    thinking_efforts: Vec::new(),
+                    efforts_known: false,
                 });
             }
         }
@@ -1740,23 +1737,80 @@ fn model_catalog_from_session(session: &Value) -> DiscoveredModelCatalog {
                 .get("description")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
-            thinking_efforts: efforts_for_model(
-                model_id,
-                &supported_efforts,
-                &global_efforts,
-                &effort_by_id,
-            ),
+            thinking_efforts: Vec::new(),
+            efforts_known: false,
         });
     }
 
     let (current_model_id, current_thinking_effort) =
         current_selection(session, model_config, effort_config);
 
+    // The session's own effort option belongs to the model it runs on. With no such option the
+    // current model offers none, unless its selector names an effort: Codex runs
+    // `gpt-6.1-sol[medium]` and lists no selector for it, so that model's efforts are not known.
+    let current_efforts = if effort_config.is_some() {
+        Some(&global_efforts[..])
+    } else if current_thinking_effort.is_none() {
+        Some(&[][..])
+    } else {
+        None
+    };
+    attach_efforts(
+        &mut models,
+        current_model_id.as_deref(),
+        current_efforts,
+        &supported_efforts,
+        &global_efforts,
+    );
+
     DiscoveredModelCatalog {
         models,
         current_model_id,
         current_thinking_effort,
     }
+}
+
+/// Each model's efforts where they are known: its own `model[effort]` selectors (named as the
+/// session's effort option names them), else `current_efforts` for the model the session runs on
+/// and an alias for it. Any other model's are learnt only by switching to it, so its list stays
+/// empty and unknown.
+fn attach_efforts(
+    models: &mut [DiscoveredModel],
+    current_model_id: Option<&str>,
+    current_efforts: Option<&[DiscoveredThinkingEffort]>,
+    supported: &HashMap<String, Vec<String>>,
+    named: &[DiscoveredThinkingEffort],
+) {
+    let by_id = named
+        .iter()
+        .map(|effort| (effort.id.clone(), effort.clone()))
+        .collect::<HashMap<_, _>>();
+    let current = current_model_id
+        .and_then(|id| models.iter().find(|model| model.id == id))
+        .cloned();
+    for model in models {
+        let efforts = if let Some(ids) = supported.get(&model.id) {
+            Some(listed_efforts(ids, &by_id))
+        } else if current
+            .as_ref()
+            .is_some_and(|current| same_model(model, current))
+        {
+            current_efforts.map(<[_]>::to_vec)
+        } else {
+            None
+        };
+        model.efforts_known = efforts.is_some();
+        model.thinking_efforts = efforts.unwrap_or_default();
+    }
+}
+
+/// Two entries for one model: the same id, or an alias and its model. An alias names its model
+/// in its description: Claude lists `default` as "Opus 5.5", the name of `opus`.
+fn same_model(a: &DiscoveredModel, b: &DiscoveredModel) -> bool {
+    let names = |alias: &DiscoveredModel, model: &DiscoveredModel| {
+        alias.description.as_deref().map(str::trim) == Some(model.name.as_str())
+    };
+    a.id == b.id || names(a, b) || names(b, a)
 }
 
 /// Modern model state may enumerate one id per model/effort pair. Keep that information so the
@@ -1785,19 +1839,26 @@ fn current_selection(
     model_config: Option<&Value>,
     effort_config: Option<&Value>,
 ) -> (Option<String>, Option<String>) {
+    let state_selector = session
+        .pointer("/models/currentModelId")
+        .and_then(Value::as_str);
     let current_selector = model_config
         .and_then(|option| option.get("currentValue"))
         .and_then(Value::as_str)
-        .or_else(|| {
-            session
-                .pointer("/models/currentModelId")
-                .and_then(Value::as_str)
-        });
-    let (current_model_id, selector_effort) = current_selector
+        .or(state_selector);
+    let (current_model_id, mut selector_effort) = current_selector
         .map(split_reasoning_selector)
         .map_or((None, None), |(model, effort)| {
             (Some(model.to_owned()), effort.map(str::to_owned))
         });
+    // The config option can name the bare model while the model state carries its effort: Codex
+    // reports `gpt-6.1-sol` there and `gpt-6.1-sol[medium]` here.
+    if selector_effort.is_none()
+        && let Some((model, Some(effort))) = state_selector.map(split_reasoning_selector)
+        && current_model_id.as_deref() == Some(model)
+    {
+        selector_effort = Some(effort.to_owned());
+    }
     let current_thinking_effort = effort_config
         .and_then(|option| option.get("currentValue"))
         .and_then(Value::as_str)
@@ -1841,15 +1902,11 @@ fn select_choices(options: &[Value], value_key: &str) -> Vec<SelectChoice> {
     choices
 }
 
-fn efforts_for_model(
-    model_id: &str,
-    supported: &HashMap<String, Vec<String>>,
-    global: &[DiscoveredThinkingEffort],
+/// A model's efforts from its `model[effort]` selectors.
+fn listed_efforts(
+    ids: &[String],
     by_id: &HashMap<String, DiscoveredThinkingEffort>,
 ) -> Vec<DiscoveredThinkingEffort> {
-    let Some(ids) = supported.get(model_id) else {
-        return global.to_vec();
-    };
     ids.iter()
         .map(|id| {
             by_id
@@ -3194,6 +3251,83 @@ mod tests {
                 .map(|effort| effort.id.as_str())
                 .collect::<Vec<_>>(),
             ["high"]
+        );
+        assert!(catalog.models.iter().all(|model| model.efforts_known));
+    }
+
+    /// Each model's efforts as `id: effort ids`, `?` for a model whose efforts are not known.
+    fn efforts_by_model(catalog: &DiscoveredModelCatalog) -> Vec<String> {
+        catalog
+            .models
+            .iter()
+            .map(|model| {
+                let efforts = model
+                    .thinking_efforts
+                    .iter()
+                    .map(|effort| effort.id.as_str())
+                    .collect::<Vec<_>>();
+                let efforts = if model.efforts_known {
+                    efforts.join(" ")
+                } else {
+                    assert!(efforts.is_empty(), "{} lists unknown efforts", model.id);
+                    "?".to_owned()
+                };
+                format!("{}: {efforts}", model.id)
+            })
+            .collect()
+    }
+
+    fn recorded(text: &str) -> Value {
+        serde_json::from_str(text).expect("recorded ACP answers are JSON")
+    }
+
+    #[test]
+    fn claude_offers_efforts_only_on_the_model_its_session_runs_on() {
+        let claude = recorded(include_str!(
+            "../tests/fixtures/acp/claude-agent-acp-0.85.1.json"
+        ));
+        let all = "default low medium high xhigh max";
+
+        // The session runs on Sonnet: its effort option is Sonnet's, not every model's.
+        let catalog = model_catalog_from_session(&claude["sessionNew"]);
+        assert_eq!(catalog.current_model_id.as_deref(), Some("sonnet"));
+        assert_eq!(catalog.current_thinking_effort.as_deref(), Some("xhigh"));
+        let efforts = efforts_by_model(&catalog);
+        assert_eq!(efforts.len(), 12);
+        assert!(efforts.contains(&format!("sonnet: {all}")));
+        for unknown in ["default: ?", "opus: ?", "haiku: ?", "claude-opus-4-8: ?"] {
+            assert!(efforts.iter().any(|line| line == unknown), "{efforts:?}");
+        }
+
+        // What Claude answered when switched to each model: Haiku 4.5 has no effort at all.
+        let haiku = model_catalog_from_session(&claude["setModel"]["haiku"]);
+        assert_eq!(haiku.current_thinking_effort, None);
+        assert!(efforts_by_model(&haiku).contains(&"haiku: ".to_owned()));
+        let opus = model_catalog_from_session(&claude["setModel"]["opus"]);
+        assert!(efforts_by_model(&opus).contains(&format!("opus: {all}")));
+
+        // `default` is described as "Opus 5.5", the name of `opus`: the same model's efforts.
+        let default = efforts_by_model(&model_catalog_from_session(&claude["setModel"]["default"]));
+        assert!(default.contains(&format!("default: {all}")));
+        assert!(default.contains(&format!("opus: {all}")));
+        assert!(default.contains(&"sonnet: ?".to_owned()));
+    }
+
+    #[test]
+    fn codex_keeps_the_efforts_it_lists_for_each_model() {
+        let codex = recorded(include_str!("../tests/fixtures/acp/codex-acp-2.1.1.json"));
+        let catalog = model_catalog_from_session(&codex["sessionNew"]);
+        assert_eq!(catalog.current_model_id.as_deref(), Some("gpt-6.1-sol"));
+        assert_eq!(catalog.current_thinking_effort.as_deref(), Some("medium"));
+        assert_eq!(
+            efforts_by_model(&catalog),
+            [
+                // It runs at medium, yet Codex lists no selector for it.
+                "gpt-6.1-sol: ?",
+                "gpt-6-luna: low medium high xhigh max",
+                "gpt-5.6-terra: low medium high xhigh max ultra",
+                "gpt-5.6-luna: low medium high xhigh max",
+            ]
         );
     }
 

@@ -109,6 +109,12 @@ export interface HarnessModel {
   name: string
   description?: string
   thinkingEfforts: HarnessThinkingEffort[]
+  /**
+   * Whether `thinkingEfforts` is what this model offers. An app lists efforts for the model its
+   * session runs on, and Codex for each model it lists them for; any other model's are not known
+   * until a run switches to it, so its list is empty and it runs at its own default effort.
+   */
+  effortsKnown: boolean
 }
 
 export class HarnessesApiError extends Error {

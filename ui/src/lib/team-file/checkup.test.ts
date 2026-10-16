@@ -5,6 +5,7 @@ import type { DetectedHarness } from '../harnesses'
 import { modelForRole } from '../library/jobModel'
 import { ROLE_PRESETS } from '../library/roles'
 import claude from '../models/fixtures/claude.json'
+import { claudeOn } from '../models/fixtures/claudeOn'
 import codex from '../models/fixtures/codex.json'
 import hermes from '../models/fixtures/hermes.json'
 import opencode from '../models/fixtures/opencode.json'
@@ -66,11 +67,14 @@ describe('checkup', () => {
     expect(run({ agents: team('sonnet'), edges, catalogFor: () => claude })[0].why).not.toContain('%')
 
     // Codex lists no mini; it calls one model fast and affordable.
-    expect(run({ agents: team('gpt-6.1-sol'), edges, catalogFor: () => codex })[0].fix?.change).toEqual({ kind: 'model', agentId: 'researcher', model: 'gpt-6-luna' })
+    // Codex lists 6 Luna's efforts, so it gathers at the Researcher's.
+    expect(run({ agents: team('gpt-6.1-sol'), edges, catalogFor: () => codex })[0].fix?.change).toEqual({ kind: 'model', agentId: 'researcher', model: 'gpt-6-luna', thinkingEffort: 'medium' })
     // Where the current model is already the smallest, the fast tier is less thinking.
-    const haiku = { ...claude, currentModelId: 'haiku' }
-    expect(run({ agents: team('haiku'), edges, catalogFor: () => haiku })[0]).toMatchObject({ title: 'Researcher could gather at medium effort', fix: { label: 'Use medium effort', change: { kind: 'model', model: 'haiku', thinkingEffort: 'medium' } } })
-    expect(run({ agents: team('haiku', { thinkingEffort: 'low' }), edges, catalogFor: () => haiku })).toEqual([])
+    const luna = { ...codex, currentModelId: 'gpt-6-luna', currentThinkingEffort: 'high' }
+    expect(run({ agents: team('gpt-6-luna'), edges, catalogFor: () => luna })[0]).toMatchObject({ title: 'Researcher could gather at medium effort', fix: { label: 'Use medium effort', change: { kind: 'model', model: 'gpt-6-luna', thinkingEffort: 'medium' } } })
+    expect(run({ agents: team('gpt-6-luna', { thinkingEffort: 'low' }), edges, catalogFor: () => luna })).toEqual([])
+    // Haiku 4.5 has no effort to lower, and nothing is faster.
+    expect(run({ agents: team('haiku'), edges, catalogFor: () => claudeOn('haiku') })).toEqual([])
   })
 
   it('leaves alone a gatherer whose reply is the answer, one it cannot judge, and one with nothing faster', () => {

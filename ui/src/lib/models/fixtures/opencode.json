@@ -4,1962 +4,2354 @@
   {
    "id": "openrouter/aion-labs/aion-3.5",
    "name": "OpenRouter/Aion 3.5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/aion-labs/aion-3.5-mini",
    "name": "OpenRouter/Aion 3.5 Mini",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/aion-labs/aion-2.0",
    "name": "OpenRouter/Aion-2.0",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/aion-labs/aion-3.0",
    "name": "OpenRouter/Aion-3.0",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/aion-labs/aion-3.0-mini",
    "name": "OpenRouter/Aion-3.0-Mini",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/aion-labs/aion-rp-llama-3.1-8b",
    "name": "OpenRouter/Aion-RP 1.0 (8B)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openrouter/auto",
    "name": "OpenRouter/Auto Router",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openrouter/bodybuilder",
    "name": "OpenRouter/Body Builder (beta)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-fable-5",
    "name": "OpenRouter/Claude Fable 5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-fable-5.1",
    "name": "OpenRouter/Claude Fable 5.1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~anthropic/claude-fable-latest",
    "name": "OpenRouter/Claude Fable Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-haiku-4.5",
    "name": "OpenRouter/Claude Haiku 4.5 (latest)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-haiku-5.5",
    "name": "OpenRouter/Claude Haiku 5.5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~anthropic/claude-haiku-latest",
    "name": "OpenRouter/Claude Haiku Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-opus-4.1",
    "name": "OpenRouter/Claude Opus 4.1 (latest)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-opus-4.5",
    "name": "OpenRouter/Claude Opus 4.5 (latest)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-opus-4.6",
    "name": "OpenRouter/Claude Opus 4.6",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-opus-4.7",
    "name": "OpenRouter/Claude Opus 4.7",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-opus-4.8",
    "name": "OpenRouter/Claude Opus 4.8",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-opus-5",
    "name": "OpenRouter/Claude Opus 5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-opus-5.5",
    "name": "OpenRouter/Claude Opus 5.5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~anthropic/claude-opus-latest",
    "name": "OpenRouter/Claude Opus Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-sonnet-4",
    "name": "OpenRouter/Claude Sonnet 4",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-sonnet-4.5",
    "name": "OpenRouter/Claude Sonnet 4.5 (latest)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-sonnet-4.6",
    "name": "OpenRouter/Claude Sonnet 4.6",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-sonnet-5",
    "name": "OpenRouter/Claude Sonnet 5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthropic/claude-sonnet-5.5",
    "name": "OpenRouter/Claude Sonnet 5.5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~anthropic/claude-sonnet-latest",
    "name": "OpenRouter/Claude Sonnet Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/codestral-2508",
    "name": "OpenRouter/Codestral 25.08",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/cohere/command-a",
    "name": "OpenRouter/Command A",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/cohere/command-a-plus",
    "name": "OpenRouter/Command A+",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/cohere/command-r-08-2024",
    "name": "OpenRouter/Command R",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/cohere/command-r-plus-08-2024",
    "name": "OpenRouter/Command R+",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/cohere/command-r7b-12-2024",
    "name": "OpenRouter/Command R7B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/thedrummer/cydonia-24b-v4.1",
    "name": "OpenRouter/Cydonia 24B V4.1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-chat",
    "name": "OpenRouter/DeepSeek Chat",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~deepseek/deepseek-flash-latest",
    "name": "OpenRouter/DeepSeek Flash Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~deepseek/deepseek-pro-latest",
    "name": "OpenRouter/DeepSeek Pro Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-r1-0528",
    "name": "OpenRouter/DeepSeek R1 0528",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-chat-v3-0324",
    "name": "OpenRouter/DeepSeek V3 0324",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-chat-v3.1",
    "name": "OpenRouter/DeepSeek V3.1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-v3.1-terminus",
    "name": "OpenRouter/DeepSeek V3.1 Terminus",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-v3.2",
    "name": "OpenRouter/DeepSeek V3.2",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-v3.2-exp",
    "name": "OpenRouter/DeepSeek V3.2 Exp",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-v4-flash",
    "name": "OpenRouter/DeepSeek V4 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-v4-flash-0731",
    "name": "OpenRouter/DeepSeek V4 Flash 0731",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~deepseek/deepseek-v4-flash-latest",
    "name": "OpenRouter/DeepSeek V4 Flash Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-v4-flash-vision-exp",
    "name": "OpenRouter/DeepSeek V4 Flash Vision Exp",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-v4-pro",
    "name": "OpenRouter/DeepSeek V4 Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-v4-pro-0813",
    "name": "OpenRouter/DeepSeek V4 Pro 0813",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-v4.1-flash",
    "name": "OpenRouter/DeepSeek V4.1 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/deepseek/deepseek-r1",
    "name": "OpenRouter/DeepSeek-R1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/devstral-2512",
    "name": "OpenRouter/Devstral 2",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/dots-studio/dots-3-note-preview:free",
    "name": "OpenRouter/Dots3-Note Preview (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/fireworks/ember-1",
    "name": "OpenRouter/Ember-1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/scaledown/extract",
    "name": "OpenRouter/Extract",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openrouter/free",
    "name": "OpenRouter/Free Models Router",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/sakana/fugu-max",
    "name": "OpenRouter/Fugu Max",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/sakana/fugu-ultra",
    "name": "OpenRouter/Fugu Ultra",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/sakana/fugu-ultra-v2",
    "name": "OpenRouter/Fugu Ultra v2",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openrouter/fusion",
    "name": "OpenRouter/Fusion",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-2.5-flash",
    "name": "OpenRouter/Gemini 2.5 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-2.5-flash-lite",
    "name": "OpenRouter/Gemini 2.5 Flash-Lite",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-2.5-pro",
    "name": "OpenRouter/Gemini 2.5 Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-2.5-pro-preview",
    "name": "OpenRouter/Gemini 2.5 Pro Preview 06-05",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3-flash-preview",
    "name": "OpenRouter/Gemini 3 Flash Preview",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3.1-flash-lite",
    "name": "OpenRouter/Gemini 3.1 Flash Lite",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3.1-flash-lite-preview",
    "name": "OpenRouter/Gemini 3.1 Flash Lite Preview",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3.1-pro-preview",
    "name": "OpenRouter/Gemini 3.1 Pro Preview",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3.1-pro-preview-customtools",
    "name": "OpenRouter/Gemini 3.1 Pro Preview Custom Tools",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3.5-flash",
    "name": "OpenRouter/Gemini 3.5 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3.5-flash-lite",
    "name": "OpenRouter/Gemini 3.5 Flash Lite",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3.6-flash",
    "name": "OpenRouter/Gemini 3.6 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3.7-flash",
    "name": "OpenRouter/Gemini 3.7 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3.8-flash",
    "name": "OpenRouter/Gemini 3.8 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-4-argon",
    "name": "OpenRouter/Gemini 4 Argon",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~google/gemini-flash-latest",
    "name": "OpenRouter/Gemini Flash Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~google/gemini-pro-latest",
    "name": "OpenRouter/Gemini Pro Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemma-2-27b-it",
    "name": "OpenRouter/Gemma 2 27B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemma-3-12b-it",
    "name": "OpenRouter/Gemma 3 12B IT",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemma-3-27b-it",
    "name": "OpenRouter/Gemma 3 27B IT",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemma-3-4b-it",
    "name": "OpenRouter/Gemma 3 4B IT",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemma-4-26b-a4b-it:free",
    "name": "OpenRouter/Gemma 4 26B A4B  (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemma-4-26b-a4b-it",
    "name": "OpenRouter/Gemma 4 26B A4B IT",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemma-4-31b-it:free",
    "name": "OpenRouter/Gemma 4 31B (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemma-4-31b-it",
    "name": "OpenRouter/Gemma 4 31B IT",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-5.3-flashx",
    "name": "OpenRouter/GLM 5.3 FlashX",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-5.3-prime",
    "name": "OpenRouter/GLM 5.3 Prime",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~z-ai/glm-flash-latest",
    "name": "OpenRouter/GLM Flash Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~z-ai/glm-latest",
    "name": "OpenRouter/GLM Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-4.5",
    "name": "OpenRouter/GLM-4.5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-4.5-air",
    "name": "OpenRouter/GLM-4.5-Air",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-4.5v",
    "name": "OpenRouter/GLM-4.5V",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-4.6",
    "name": "OpenRouter/GLM-4.6",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-4.6v",
    "name": "OpenRouter/GLM-4.6V",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-4.7",
    "name": "OpenRouter/GLM-4.7",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-4.7-flash",
    "name": "OpenRouter/GLM-4.7-Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-5",
    "name": "OpenRouter/GLM-5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-5-turbo",
    "name": "OpenRouter/GLM-5-Turbo",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-5.1",
    "name": "OpenRouter/GLM-5.1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-5.2",
    "name": "OpenRouter/GLM-5.2",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-5.3",
    "name": "OpenRouter/GLM-5.3",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-5.3-flash",
    "name": "OpenRouter/GLM-5.3-Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/z-ai/glm-5v-turbo",
    "name": "OpenRouter/GLM-5V-Turbo",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~openai/gpt-astra-latest",
    "name": "OpenRouter/GPT Astra Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-audio",
    "name": "OpenRouter/GPT Audio",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-audio-mini",
    "name": "OpenRouter/GPT Audio Mini",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-chat-latest",
    "name": "OpenRouter/GPT Chat Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~openai/gpt-luna-latest",
    "name": "OpenRouter/GPT Luna Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~openai/gpt-mini-latest",
    "name": "OpenRouter/GPT Mini Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-oss-120b",
    "name": "OpenRouter/GPT OSS 120B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-oss-20b",
    "name": "OpenRouter/GPT OSS 20B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-oss-safeguard-20b",
    "name": "OpenRouter/GPT OSS Safeguard 20B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~openai/gpt-sol-latest",
    "name": "OpenRouter/GPT Sol Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~openai/gpt-terra-latest",
    "name": "OpenRouter/GPT Terra Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-3.5-turbo-0613",
    "name": "OpenRouter/GPT-3.5 Turbo (older v0613)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-3.5-turbo-16k",
    "name": "OpenRouter/GPT-3.5 Turbo 16k",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-3.5-turbo-instruct",
    "name": "OpenRouter/GPT-3.5 Turbo Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-3.5-turbo",
    "name": "OpenRouter/GPT-3.5-turbo",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-4",
    "name": "OpenRouter/GPT-4",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-4-turbo",
    "name": "OpenRouter/GPT-4 Turbo",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-4.1",
    "name": "OpenRouter/GPT-4.1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-4.1-mini",
    "name": "OpenRouter/GPT-4.1 mini",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-4.1-nano",
    "name": "OpenRouter/GPT-4.1 nano",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-4o",
    "name": "OpenRouter/GPT-4o",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-4o-2024-05-13",
    "name": "OpenRouter/GPT-4o (2024-05-13)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-4o-2024-08-06",
    "name": "OpenRouter/GPT-4o (2024-08-06)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-4o-2024-11-20",
    "name": "OpenRouter/GPT-4o (2024-11-20)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-4o-mini",
    "name": "OpenRouter/GPT-4o mini",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-4o-mini-2024-07-18",
    "name": "OpenRouter/GPT-4o-mini (2024-07-18)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5",
    "name": "OpenRouter/GPT-5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5-image",
    "name": "OpenRouter/GPT-5 Image",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5-image-mini",
    "name": "OpenRouter/GPT-5 Image Mini",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5-mini",
    "name": "OpenRouter/GPT-5 Mini",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5-nano",
    "name": "OpenRouter/GPT-5 Nano",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5-pro",
    "name": "OpenRouter/GPT-5 Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.1",
    "name": "OpenRouter/GPT-5.1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.1-codex",
    "name": "OpenRouter/GPT-5.1 Codex",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.1-codex-max",
    "name": "OpenRouter/GPT-5.1 Codex Max",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.1-codex-mini",
    "name": "OpenRouter/GPT-5.1 Codex mini",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.2",
    "name": "OpenRouter/GPT-5.2",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.2-chat",
    "name": "OpenRouter/GPT-5.2 Chat",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.2-codex",
    "name": "OpenRouter/GPT-5.2 Codex",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.2-pro",
    "name": "OpenRouter/GPT-5.2 Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.3-codex",
    "name": "OpenRouter/GPT-5.3 Codex",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.4",
    "name": "OpenRouter/GPT-5.4",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.4-image-2",
    "name": "OpenRouter/GPT-5.4 Image 2",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.4-mini",
    "name": "OpenRouter/GPT-5.4 mini",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.4-nano",
    "name": "OpenRouter/GPT-5.4 nano",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.4-pro",
    "name": "OpenRouter/GPT-5.4 Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.5",
    "name": "OpenRouter/GPT-5.5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.5-pro",
    "name": "OpenRouter/GPT-5.5 Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.6-luna",
    "name": "OpenRouter/GPT-5.6 Luna",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.6-luna-pro",
    "name": "OpenRouter/GPT-5.6 Luna Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.6-sol",
    "name": "OpenRouter/GPT-5.6 Sol",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.6-sol-pro",
    "name": "OpenRouter/GPT-5.6 Sol Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.6-terra",
    "name": "OpenRouter/GPT-5.6 Terra",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-5.6-terra-pro",
    "name": "OpenRouter/GPT-5.6 Terra Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-6-astra",
    "name": "OpenRouter/GPT-6 Astra",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-6-astra-pro",
    "name": "OpenRouter/GPT-6 Astra Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-6-luna",
    "name": "OpenRouter/GPT-6 Luna",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-6-luna-pro",
    "name": "OpenRouter/GPT-6 Luna Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-6-sol",
    "name": "OpenRouter/GPT-6 Sol",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-6-sol-pro",
    "name": "OpenRouter/GPT-6 Sol Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-6.1-sol",
    "name": "OpenRouter/GPT-6.1 Sol",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/gpt-6.1-sol-pro",
    "name": "OpenRouter/GPT-6.1 Sol Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/ibm-granite/granite-4.0-h-micro",
    "name": "OpenRouter/Granite 4.0 Micro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/ibm-granite/granite-4.2-8b",
    "name": "OpenRouter/Granite 4.2 8B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/x-ai/grok-4.20",
    "name": "OpenRouter/Grok 4.20",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/x-ai/grok-4.20-multi-agent",
    "name": "OpenRouter/Grok 4.20 Multi-Agent",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/x-ai/grok-4.3",
    "name": "OpenRouter/Grok 4.3",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/x-ai/grok-4.5",
    "name": "OpenRouter/Grok 4.5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/x-ai/grok-4.6",
    "name": "OpenRouter/Grok 4.6",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/x-ai/grok-4.7",
    "name": "OpenRouter/Grok 4.7",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/x-ai/grok-build-0.1",
    "name": "OpenRouter/Grok Build 0.1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~x-ai/grok-latest",
    "name": "OpenRouter/Grok Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nousresearch/hermes-3-llama-3.1-405b",
    "name": "OpenRouter/Hermes 3 405B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nousresearch/hermes-3-llama-3.1-70b",
    "name": "OpenRouter/Hermes 3 70B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nousresearch/hermes-4-405b",
    "name": "OpenRouter/Hermes 4 405B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/tencent/hunyuan-a13b-instruct",
    "name": "OpenRouter/Hunyuan A13B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/tencent/hy-mt2-1.8b",
    "name": "OpenRouter/Hy-MT2-1.8B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/tencent/hy-mt2-30b-a3b",
    "name": "OpenRouter/Hy-MT2-30B-A3B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/tencent/hy-mt2-7b",
    "name": "OpenRouter/Hy-MT2-7B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/tencent/hy3",
    "name": "OpenRouter/Hy3",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/tencent/hy3-preview",
    "name": "OpenRouter/Hy3 preview",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/tencent/hy4-preview",
    "name": "OpenRouter/Hy4 preview",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/thinkingmachines/inkling",
    "name": "OpenRouter/Inkling",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/thinkingmachines/inkling:free",
    "name": "OpenRouter/Inkling (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/thinkingmachines/inkling-small",
    "name": "OpenRouter/Inkling Small",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/thinkingmachines/inkling-small:free",
    "name": "OpenRouter/Inkling Small (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/moonshotai/kimi-k2",
    "name": "OpenRouter/Kimi K2 0711",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/moonshotai/kimi-k2-0905",
    "name": "OpenRouter/Kimi K2 Instruct 0905",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/moonshotai/kimi-k2-thinking",
    "name": "OpenRouter/Kimi K2 Thinking",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/moonshotai/kimi-k2.5",
    "name": "OpenRouter/Kimi K2.5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/moonshotai/kimi-k2.6",
    "name": "OpenRouter/Kimi K2.6",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/moonshotai/kimi-k2.7-code",
    "name": "OpenRouter/Kimi K2.7 Code",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/moonshotai/kimi-k3",
    "name": "OpenRouter/Kimi K3",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~moonshotai/kimi-latest",
    "name": "OpenRouter/Kimi Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/poolside/laguna-s-2.1",
    "name": "OpenRouter/Laguna S 2.1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/poolside/laguna-s-2.1:free",
    "name": "OpenRouter/Laguna S 2.1 (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/poolside/laguna-xs-2.1",
    "name": "OpenRouter/Laguna XS 2.1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/poolside/laguna-xs-2.1:free",
    "name": "OpenRouter/Laguna XS 2.1 (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/liquid/lfm-2.5-2.6b:free",
    "name": "OpenRouter/LFM2.5-2.6B (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/liquid/lfm-2.5-24b-a2b",
    "name": "OpenRouter/LFM2.5-24B-A2B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/inclusionai/ling-3.0-flash",
    "name": "OpenRouter/Ling 3.0 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/inclusionai/ling-3.0-flash-vl",
    "name": "OpenRouter/Ling 3.0 Flash VL",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/inclusionai/ling-3.1-flash",
    "name": "OpenRouter/Ling 3.1 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/sao10k/l3-lunaris-8b",
    "name": "OpenRouter/Llama 3 8B Lunaris",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/sao10k/l3.1-euryale-70b",
    "name": "OpenRouter/Llama 3.1 Euryale 70B v2.2",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta-llama/llama-3.2-1b-instruct",
    "name": "OpenRouter/Llama 3.2 1B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta-llama/llama-3.2-3b-instruct",
    "name": "OpenRouter/Llama 3.2 3B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/sao10k/l3.3-euryale-70b",
    "name": "OpenRouter/Llama 3.3 Euryale 70B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta-llama/llama-4-maverick",
    "name": "OpenRouter/Llama 4 Maverick",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta-llama/llama-4-scout",
    "name": "OpenRouter/Llama 4 Scout",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta-llama/llama-guard-4-12b",
    "name": "OpenRouter/Llama Guard 4 12B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta-llama/llama-3.1-70b-instruct",
    "name": "OpenRouter/Llama-3.1-70B-Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta-llama/llama-3.1-8b-instruct",
    "name": "OpenRouter/Llama-3.1-8B-Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta-llama/llama-3.3-70b-instruct",
    "name": "OpenRouter/Llama-3.3-70B-Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meituan/longcat-2.0",
    "name": "OpenRouter/LongCat 2.0",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/lyria-3-clip-preview",
    "name": "OpenRouter/Lyria 3 Clip Preview",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/lyria-3-pro-preview",
    "name": "OpenRouter/Lyria 3 Pro Preview",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/anthracite-org/magnum-v4-72b",
    "name": "OpenRouter/Magnum v4 72B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/inception/mercury-2",
    "name": "OpenRouter/Mercury 2",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/inception/mercury-2.5",
    "name": "OpenRouter/Mercury 2.5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/xiaomi/mimo-v2.5",
    "name": "OpenRouter/MiMo-V2.5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/xiaomi/mimo-v2.5-pro",
    "name": "OpenRouter/MiMo-V2.5-Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/xiaomi/mimo-v2.6-flash",
    "name": "OpenRouter/MiMo-V2.6-Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/xiaomi/mimo-v2.6-pro",
    "name": "OpenRouter/MiMo-V2.6-Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/xiaomi/mimo-v2.6-pro-ultraspeed",
    "name": "OpenRouter/MiMo-V2.6-Pro-UltraSpeed",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/minimax/minimax-m1",
    "name": "OpenRouter/MiniMax M1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/minimax/minimax-01",
    "name": "OpenRouter/MiniMax-01",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/minimax/minimax-m2",
    "name": "OpenRouter/MiniMax-M2",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/minimax/minimax-m2-her",
    "name": "OpenRouter/MiniMax-M2 Her",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/minimax/minimax-m2.1",
    "name": "OpenRouter/MiniMax-M2.1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/minimax/minimax-m2.5",
    "name": "OpenRouter/MiniMax-M2.5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/minimax/minimax-m2.7",
    "name": "OpenRouter/MiniMax-M2.7",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/minimax/minimax-m3",
    "name": "OpenRouter/MiniMax-M3",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/ministral-14b-2512",
    "name": "OpenRouter/Ministral 3 14B 2512",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/ministral-3b-2512",
    "name": "OpenRouter/Ministral 3 3B 2512",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/ministral-8b-2512",
    "name": "OpenRouter/Ministral 3 8B 2512",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mistral-large",
    "name": "OpenRouter/Mistral Large",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mistral-large-2407",
    "name": "OpenRouter/Mistral Large 2407",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mistral-large-2512",
    "name": "OpenRouter/Mistral Large 3",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mistral-large-4-0",
    "name": "OpenRouter/Mistral Large 4",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mistral-medium-3",
    "name": "OpenRouter/Mistral Medium 3",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mistral-medium-3.1",
    "name": "OpenRouter/Mistral Medium 3.1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mistral-medium-3-5",
    "name": "OpenRouter/Mistral Medium 3.5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mistral-nemo",
    "name": "OpenRouter/Mistral Nemo",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mistral-small-24b-instruct-2501",
    "name": "OpenRouter/Mistral Small 3",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mistral-small-3.1-24b-instruct",
    "name": "OpenRouter/Mistral Small 3.1 24B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mistral-small-3.2-24b-instruct",
    "name": "OpenRouter/Mistral Small 3.2 24B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mistral-small-2603",
    "name": "OpenRouter/Mistral Small 4",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mixtral-8x22b-instruct",
    "name": "OpenRouter/Mixtral 8x22B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/morph/morph-v3-fast",
    "name": "OpenRouter/Morph V3 Fast",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/morph/morph-v3-large",
    "name": "OpenRouter/Morph V3 Large",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta/muse-glimmer-30b",
    "name": "OpenRouter/Muse Glimmer 30B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta/muse-spark-1.1",
    "name": "OpenRouter/Muse Spark 1.1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta/muse-spark-1.2",
    "name": "OpenRouter/Muse Spark 1.2",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta/muse-spark-1.2-contributor",
    "name": "OpenRouter/Muse Spark 1.2 Contributor",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta/muse-spark-1.3",
    "name": "OpenRouter/Muse Spark 1.3",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta/muse-spark-1.3-contributor",
    "name": "OpenRouter/Muse Spark 1.3 Contributor",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/meta/muse-wonder",
    "name": "OpenRouter/Muse Wonder",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/gryphe/mythomax-l2-13b",
    "name": "OpenRouter/MythoMax 13B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-2.5-flash-image",
    "name": "OpenRouter/Nano Banana",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3.1-flash-image",
    "name": "OpenRouter/Nano Banana 2",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3.1-flash-lite-image",
    "name": "OpenRouter/Nano Banana 2 Lite",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3.1-flash-image-preview",
    "name": "OpenRouter/Nano Banana 2 Preview",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-nano-banana-2.1",
    "name": "OpenRouter/Nano Banana 2.1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3-pro-image",
    "name": "OpenRouter/Nano Banana Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/google/gemini-3-pro-image-preview",
    "name": "OpenRouter/Nano Banana Pro Preview",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nvidia/nemotron-3-nano-30b-a3b",
    "name": "OpenRouter/Nemotron 3 Nano 30B A3B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
    "name": "OpenRouter/Nemotron 3 Nano Omni (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
    "name": "OpenRouter/Nemotron 3 Super (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nvidia/nemotron-3-super-120b-a12b",
    "name": "OpenRouter/Nemotron 3 Super 120B A12B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
    "name": "OpenRouter/Nemotron 3 Ultra (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nvidia/nemotron-3-ultra-550b-a55b",
    "name": "OpenRouter/Nemotron 3 Ultra 550B A55B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nvidia/nemotron-3.5-content-safety",
    "name": "OpenRouter/Nemotron 3.5 Content Safety",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nvidia/nemotron-3.5-content-safety:free",
    "name": "OpenRouter/Nemotron 3.5 Content Safety (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nvidia/nemotron-3.5-lightning:free",
    "name": "OpenRouter/Nemotron 3.5 Lightning (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nvidia/nemotron-3.5-lightning",
    "name": "OpenRouter/Nemotron 3.5 Lightning 30B A3B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nex-agi/nex-n2.5-mini",
    "name": "OpenRouter/Nex-N2.5-Mini",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/nex-agi/nex-n2.5-pro",
    "name": "OpenRouter/Nex-N2.5-Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/cohere/north-mini-code:free",
    "name": "OpenRouter/North Mini Code (free)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/amazon/nova-2-lite-v1",
    "name": "OpenRouter/Nova 2 Lite",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/amazon/nova-lite-v1",
    "name": "OpenRouter/Nova Lite 1.0",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/amazon/nova-micro-v1",
    "name": "OpenRouter/Nova Micro 1.0",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/amazon/nova-premier-v1",
    "name": "OpenRouter/Nova Premier 1.0",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/amazon/nova-pro-v1",
    "name": "OpenRouter/Nova Pro 1.0",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/o1",
    "name": "OpenRouter/o1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/o1-pro",
    "name": "OpenRouter/o1-pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/o3",
    "name": "OpenRouter/o3",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/o3-mini-high",
    "name": "OpenRouter/o3 Mini High",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/o3-mini",
    "name": "OpenRouter/o3-mini",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/o3-pro",
    "name": "OpenRouter/o3-pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/o4-mini-high",
    "name": "OpenRouter/o4 Mini High",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openai/o4-mini",
    "name": "OpenRouter/o4-mini",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/writer/palmyra-x5",
    "name": "OpenRouter/Palmyra X5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/unbiased/pareto-26.10-preview",
    "name": "OpenRouter/Pareto 26.10 Preview",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/unbiased/pareto-26.9",
    "name": "OpenRouter/Pareto 26.9",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/openrouter/pareto-code",
    "name": "OpenRouter/Pareto Code Router",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/~unbiased/pareto-latest",
    "name": "OpenRouter/Pareto Latest",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/perceptron/perceptron-mk1",
    "name": "OpenRouter/Perceptron Mk1",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/perceptron/perceptron-mk1.5",
    "name": "OpenRouter/Perceptron Mk1.5",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/microsoft/phi-4",
    "name": "OpenRouter/Phi 4",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.8-max-prime",
    "name": "OpenRouter/Qwen 3.8 Max Prime",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen-plus",
    "name": "OpenRouter/Qwen Plus",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen-2.5-72b-instruct",
    "name": "OpenRouter/Qwen2.5 72B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen-2.5-7b-instruct",
    "name": "OpenRouter/Qwen2.5 7B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen-2.5-coder-32b-instruct",
    "name": "OpenRouter/Qwen2.5 Coder 32B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen2.5-vl-72b-instruct",
    "name": "OpenRouter/Qwen2.5 VL 72B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-14b",
    "name": "OpenRouter/Qwen3 14B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-235b-a22b-2507",
    "name": "OpenRouter/Qwen3 235B A22B Instruct 2507",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-235b-a22b-thinking-2507",
    "name": "OpenRouter/Qwen3 235B A22B Thinking 2507",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-30b-a3b",
    "name": "OpenRouter/Qwen3 30B A3B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-30b-a3b-instruct-2507",
    "name": "OpenRouter/Qwen3 30B A3B Instruct 2507",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-32b",
    "name": "OpenRouter/Qwen3 32B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-coder",
    "name": "OpenRouter/Qwen3 Coder 480B A35B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-coder-flash",
    "name": "OpenRouter/Qwen3 Coder Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-coder-next",
    "name": "OpenRouter/Qwen3 Coder Next",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-vl-235b-a22b-instruct",
    "name": "OpenRouter/Qwen3 VL 235B A22B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-vl-30b-a3b-instruct",
    "name": "OpenRouter/Qwen3 VL 30B A3B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-vl-30b-a3b-thinking",
    "name": "OpenRouter/Qwen3 VL 30B A3B Thinking",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-vl-8b-instruct",
    "name": "OpenRouter/Qwen3 VL 8B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-coder-30b-a3b-instruct",
    "name": "OpenRouter/Qwen3-Coder 30B-A3B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-next-80b-a3b-thinking",
    "name": "OpenRouter/Qwen3-Next 80B-A3B (Thinking)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3-next-80b-a3b-instruct",
    "name": "OpenRouter/Qwen3-Next 80B-A3B Instruct",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.5-122b-a10b",
    "name": "OpenRouter/Qwen3.5 122B-A10B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.5-27b",
    "name": "OpenRouter/Qwen3.5 27B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.5-35b-a3b",
    "name": "OpenRouter/Qwen3.5 35B-A3B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.5-397b-a17b",
    "name": "OpenRouter/Qwen3.5 397B-A17B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.5-9b",
    "name": "OpenRouter/Qwen3.5 9B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.5-plus-02-15",
    "name": "OpenRouter/Qwen3.5 Plus 2026-02-15",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.5-plus-20260420",
    "name": "OpenRouter/Qwen3.5 Plus 2026-04-20",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.5-flash-02-23",
    "name": "OpenRouter/Qwen3.5-Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.6-27b",
    "name": "OpenRouter/Qwen3.6 27B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.6-35b-a3b",
    "name": "OpenRouter/Qwen3.6 35B-A3B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.6-flash",
    "name": "OpenRouter/Qwen3.6 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.6-plus",
    "name": "OpenRouter/Qwen3.6 Plus",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.7-flash",
    "name": "OpenRouter/Qwen3.7 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.7-max",
    "name": "OpenRouter/Qwen3.7 Max",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.7-plus",
    "name": "OpenRouter/Qwen3.7 Plus",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.8-2.4t-a95b",
    "name": "OpenRouter/Qwen3.8 2.4T A95B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.8-27b",
    "name": "OpenRouter/Qwen3.8 27B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.8-flash",
    "name": "OpenRouter/Qwen3.8 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.8-max-0902",
    "name": "OpenRouter/Qwen3.8 Max 0902",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/qwen/qwen3.8-omni-flash",
    "name": "OpenRouter/Qwen3.8 Omni Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/rekaai/reka-edge",
    "name": "OpenRouter/Reka Edge",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/rekaai/reka-flash-3",
    "name": "OpenRouter/Reka Flash 3",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/relace/relace-apply-3",
    "name": "OpenRouter/Relace Apply 3",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/relace/relace-search",
    "name": "OpenRouter/Relace Search",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/undi95/remm-slerp-l2-13b",
    "name": "OpenRouter/ReMM SLERP 13B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/mistral-saba",
    "name": "OpenRouter/Saba",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/sakana/sakana-namazu",
    "name": "OpenRouter/Sakana Namazu",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/inference-net/schematron-v2-small",
    "name": "OpenRouter/Schematron V2 Small",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/inference-net/schematron-v2-turbo",
    "name": "OpenRouter/Schematron V2 Turbo",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/bytedance-seed/seed-1.6",
    "name": "OpenRouter/Seed 1.6",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/bytedance-seed/seed-1.6-flash",
    "name": "OpenRouter/Seed 1.6 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/bytedance-seed/seed-2.0-code",
    "name": "OpenRouter/Seed 2.0 Code",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/bytedance-seed/seed-2.0-lite",
    "name": "OpenRouter/Seed 2.0 Lite",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/bytedance-seed/seed-2.0-mini",
    "name": "OpenRouter/Seed 2.0 Mini",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/bytedance-seed/seed-2-1-turbo",
    "name": "OpenRouter/Seed 2.1 Turbo",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/thedrummer/skyfall-36b-v2",
    "name": "OpenRouter/Skyfall 36B V2",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/upstage/solar-mini4",
    "name": "OpenRouter/Solar Mini 4",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/upstage/solar-pro-3",
    "name": "OpenRouter/Solar Pro 3",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/upstage/solar-pro4",
    "name": "OpenRouter/Solar Pro 4",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/perplexity/sonar",
    "name": "OpenRouter/Sonar",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/perplexity/sonar-deep-research",
    "name": "OpenRouter/Sonar Deep Research",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/perplexity/sonar-pro",
    "name": "OpenRouter/Sonar Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/perplexity/sonar-pro-search",
    "name": "OpenRouter/Sonar Pro Search",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/perplexity/sonar-reasoning-pro",
    "name": "OpenRouter/Sonar Reasoning Pro",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/stepfun/step-3.5-flash",
    "name": "OpenRouter/Step 3.5 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/stepfun/step-3.7-flash",
    "name": "OpenRouter/Step 3.7 Flash",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/stepfun/step-5-preview",
    "name": "OpenRouter/Step 5 Preview",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/scaledown/summarize",
    "name": "OpenRouter/Summarize",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/prism-ml/ternary-bonsai-2-27b",
    "name": "OpenRouter/Ternary Bonsai 2 27B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/arcee-ai/trinity-large-thinking",
    "name": "OpenRouter/Trinity Large Thinking",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/bytedance/ui-tars-1.5-7b",
    "name": "OpenRouter/UI-TARS 7B ",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/cognitivecomputations/dolphin-mistral-24b-venice-edition",
    "name": "OpenRouter/Uncensored",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/thedrummer/unslopnemo-12b",
    "name": "OpenRouter/UnslopNemo 12B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mistralai/voxtral-small-24b-2507",
    "name": "OpenRouter/Voxtral Small 24B 2507",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/mancer/weaver",
    "name": "OpenRouter/Weaver (alpha)",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "openrouter/microsoft/wizardlm-2-8x22b",
    "name": "OpenRouter/WizardLM-2 8x22B",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "opencode/big-pickle",
    "name": "OpenCode/Big Pickle",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": true
   },
   {
    "id": "opencode/cat-jam-free",
    "name": "OpenCode/Cat Jam Free",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "opencode/deepseek-v4.1-flash-free",
    "name": "OpenCode/DeepSeek V4.1 Flash Free",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "opencode/longcat-2.5-preview-free",
    "name": "OpenCode/LongCat 2.5 Preview Free",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "opencode/mimo-v2.6-flash-free",
    "name": "OpenCode/MiMo-V2.6-Flash Free",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "opencode/muse-spark-1.3-contributor-free",
    "name": "OpenCode/Muse Spark 1.3 Free",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "opencode/nemotron-3-ultra-free",
    "name": "OpenCode/Nemotron 3 Ultra Free",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "opencode/nemotron-3.5-lightning-free",
    "name": "OpenCode/Nemotron 3.5 Lightning Free",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "opencode/space-bunny-free",
    "name": "OpenCode/Space Bunny Free",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   },
   {
    "id": "opencode/step-5-preview-free",
    "name": "OpenCode/Step 5 Preview Free",
-   "thinkingEfforts": []
+   "thinkingEfforts": [],
+   "effortsKnown": false
   }
  ],
  "currentModelId": "opencode/big-pickle"

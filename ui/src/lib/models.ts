@@ -76,7 +76,7 @@ export function modelOptionsForAgent(agent: AgentConfig, agents: readonly AgentC
     agent.model,
   ]) {
     const { modelId } = splitModelSelector(selector ?? '')
-    if (modelId && !options.has(modelId)) options.set(modelId, { id: modelId, name: modelId, thinkingEfforts: [] })
+    if (modelId && !options.has(modelId)) options.set(modelId, { id: modelId, name: modelId, thinkingEfforts: [], effortsKnown: false })
   }
   return [...options.values()]
 }

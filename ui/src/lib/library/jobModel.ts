@@ -1,4 +1,4 @@
-import { modelTiers, sameModel, type ModelCatalog, type TierChoice } from '../models/tiers'
+import { modelTiers, type ModelCatalog, type TierChoice } from '../models/tiers'
 import { effortFor } from './effort'
 import { ROLE_PRESETS, type RolePreset } from './roles'
 
@@ -8,17 +8,15 @@ import { ROLE_PRESETS, type RolePreset } from './roles'
  * effort on the same model. `current` is the strong model, the app's current one unless given.
  * `null` when the app listed no model.
  *
- * The job's effort is set only on the app's current model. The efforts in a catalog are the ones
- * the app offered for the model its session started on, and an app may copy them onto every model:
- * Claude lists Low to Max on Haiku 4.5, which has no effort at all, and refuses one sent to it. A
- * smaller model runs at its own default instead.
+ * Only efforts the catalog knows for that model are used. Claude lists them only for the model its
+ * session runs on, so Haiku 4.5 as the fast tier runs at its own default: it has no effort, and
+ * refuses one sent to it. Codex lists each model's own, so its fast model gets the job's effort.
  */
 export function modelForJob(job: Pick<RolePreset, 'tier' | 'effort'>, catalog: ModelCatalog, current?: string): TierChoice | null {
   const tiers = modelTiers(catalog, current)
   if (!tiers) return null
   const choice = tiers[job.tier ?? 'strong']
-  const onCurrent = sameModel(choice.model, tiers.strong.model, catalog.models)
-  const thinkingEffort = choice.thinkingEffort ?? (job.effort && onCurrent ? effortFor(job.effort, catalog.models.find((model) => model.id === choice.model)) : undefined)
+  const thinkingEffort = choice.thinkingEffort ?? (job.effort ? effortFor(job.effort, catalog.models.find((model) => model.id === choice.model)) : undefined)
   return { model: choice.model, ...(thinkingEffort ? { thinkingEffort } : {}) }
 }
 

@@ -4,6 +4,7 @@ import { hasFastTier, modelTiers, onStrongTier, resolveModel, type ModelCatalog 
 // Recorded on 2026-10-15 from `GET /api/harnesses/{id}/models` on a trial daemon: claude-agent-acp
 // 0.85.1, codex-acp 2.1.1, OpenCode 1.18 (OpenRouter signed in) and Hermes, as their apps listed them.
 import claude from './fixtures/claude.json'
+import { claudeOn } from './fixtures/claudeOn'
 import codex from './fixtures/codex.json'
 import hermes from './fixtures/hermes.json'
 import opencode from './fixtures/opencode.json'
@@ -30,7 +31,7 @@ describe('model tiers', () => {
     expect(resolveModel('default', claude.models)).toBe('opus')
     expect(fast(claude, 'default')).toBe('sonnet')
     // The family step reads the alias, not the first model described as fast.
-    const pick = (...ids: string[]) => ids.map((id) => claude.models.find((model) => model.id === id) ?? { id, name: id, thinkingEfforts: [] })
+    const pick = (...ids: string[]) => ids.map((id) => claude.models.find((model) => model.id === id) ?? { id, name: id, thinkingEfforts: [], effortsKnown: false })
     expect(fast({ models: pick('default', 'opus', 'haiku', 'sonnet') }, 'default')).toBe('sonnet')
     expect(fast(claude, 'claude-opus-5')).toBe('claude-sonnet-5')
     // No Opus 5.1 is listed under Fable 5.1, so it takes the model Claude itself calls efficient.
@@ -56,9 +57,12 @@ describe('model tiers', () => {
   })
 
   it('falls back to the lowest-but-one effort, only when it is below the app’s default', () => {
-    expect(fast(claude, 'haiku')).toBe('haiku[medium]')
-    expect(fast(codex, 'gpt-6-luna')).toBe('gpt-6-luna[medium]')
-    expect(fast({ ...claude, currentModelId: 'haiku', currentThinkingEffort: 'low' })).toBe('haiku')
+    expect(fast({ ...codex, currentThinkingEffort: 'high' }, 'gpt-6-luna')).toBe('gpt-6-luna[medium]')
+    // Codex runs at medium, and 6 Luna's lowest-but-one is medium: nothing lighter.
+    expect(fast(codex, 'gpt-6-luna')).toBe('gpt-6-luna')
+    // Haiku 4.5 has no effort at all, so it has nothing lighter.
+    expect(fast(claudeOn('haiku'))).toBe('haiku')
+    expect(fast(claude, 'haiku')).toBe('haiku')
   })
 
   it('keeps the strong tier when the app lists nothing faster', () => {
@@ -89,13 +93,18 @@ describe('model tiers', () => {
     // A stronger model than the app's own is the operator's choice, not the strong tier.
     expect(onStrongTier({ model: 'opus' }, sonnet, claude)).toBe(false)
 
-    const haiku = { ...claude, currentModelId: 'haiku' }
-    const effortOnly = modelTiers(haiku)
+    const luna = { ...codex, currentModelId: 'gpt-6-luna', currentThinkingEffort: 'high' }
+    const effortOnly = modelTiers(luna)
     if (!effortOnly) throw new Error('no tiers')
-    expect(onStrongTier({ model: 'haiku' }, effortOnly, haiku)).toBe(true)
-    expect(onStrongTier({ model: 'haiku', thinkingEffort: 'high' }, effortOnly, haiku)).toBe(true)
-    expect(onStrongTier({ model: 'haiku', thinkingEffort: 'medium' }, effortOnly, haiku)).toBe(false)
+    expect(onStrongTier({ model: 'gpt-6-luna' }, effortOnly, luna)).toBe(true)
+    expect(onStrongTier({ model: 'gpt-6-luna', thinkingEffort: 'high' }, effortOnly, luna)).toBe(true)
+    expect(onStrongTier({ model: 'gpt-6-luna', thinkingEffort: 'medium' }, effortOnly, luna)).toBe(false)
     // The app did not say what it runs by default, so an agent with no effort cannot be judged.
-    expect(onStrongTier({ model: 'haiku' }, effortOnly, { ...haiku, currentThinkingEffort: undefined })).toBe(false)
+    expect(onStrongTier({ model: 'gpt-6-luna' }, effortOnly, { ...luna, currentThinkingEffort: undefined })).toBe(false)
+    // Haiku 4.5, Claude's smallest, has no effort: no faster tier to be above.
+    const haiku = claudeOn('haiku')
+    const none = modelTiers(haiku)
+    if (!none) throw new Error('no tiers')
+    expect(onStrongTier({ model: 'haiku' }, none, haiku)).toBe(false)
   })
 })
