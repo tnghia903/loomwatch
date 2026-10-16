@@ -853,7 +853,9 @@
   }
   async function mountBench() {
     const scenes = await loadLive()
-    const { WorkbenchScene, markPattern, placeFace } = scenes
+    // The bench's code is a module of its own (bench()); a live.js cached from before has it in itself.
+    const { WorkbenchScene, placeFace } = scenes.bench ? await scenes.bench() : scenes
+    const { markPattern } = scenes
     benchPattern = (name) => markPattern(name.toLowerCase()).over
     const scene = new WorkbenchScene(benchCanvas, {
       // Clicking a thing on the bench takes you to the block that changes it.
@@ -894,6 +896,8 @@
   // The bench loads when Step 1 is near, and after the crew and the cord are on the screen, so the
   // first screen only waits for the crew and the GPU readies one scene at a time.
   if ('IntersectionObserver' in window) {
+    // Its code comes down once the cord's figure is up, so it is here by the time Step 1 is.
+    cordMounted.then(loadLive).then((scenes) => scenes.bench?.()).catch(() => {})
     const near = new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting)) return
       near.disconnect()

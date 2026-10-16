@@ -21,6 +21,7 @@ on:
       - ui/public/agent/**
       - ui/src/site/**
       - ui/src/components/agents/workbenchScene.ts
+      - ui/src/components/agents/workbenchModel.ts
       - ui/src/components/agents/benchTextures.ts
       - ui/vite.site.config.ts
       - examples/skills/**

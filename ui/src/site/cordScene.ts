@@ -13,7 +13,7 @@ import {
 } from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
-import { fitCanvas, readModel, readyToDraw } from '../components/agents/workbenchScene'
+import { fitCanvas, readModel, readyToDraw } from '../components/agents/workbenchModel'
 import { woundTexture } from '../components/agents/benchTextures'
 import { dressFigure, figureEyes, figurePart, type CrewMember } from './crewScene'
 

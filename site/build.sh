@@ -36,7 +36,8 @@ cp "$root"/site/assets/app/*.webp "$out/assets/app/"
 cp "$root"/site/assets/crew/*.webp "$out/assets/crew/"
 cp "$root"/ui/public/agent/figures/*.webp "$out/assets/figures/"
 # The live figures: the app's own 3D figure code (ui/src/site/landingLive.ts), built with three.js
-# into one module, and the model it draws. Needs ui's packages (pnpm install in ui/).
+# into live.js and a module of the bench's own, and the model it draws. Needs ui's packages (pnpm
+# install in ui/).
 (cd "$root/ui" && LANDING_LIVE_OUT="$out/assets/live" pnpm exec vite build --config vite.site.config.ts --logLevel warn)
 # The model, compressed for the download (311 KB gzipped → 104 KB) with meshopt; readModel decodes it.
 # Positions and UVs stay floats (-vpf -vtf): quantized positions move each mesh under a new unnamed
