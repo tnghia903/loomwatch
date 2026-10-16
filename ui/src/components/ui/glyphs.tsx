@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 
+import { LOOM_MARK_SAYS, loomMarkPose, usePrefersReducedMotion, type LoomMarkState } from '../../lib/story/loomMark'
 import type { AgentStatus } from '../../lib/team-file/types'
 
 // DESIGN_LANGUAGE §12: shape is the primary channel; colour and motion are second and
@@ -118,22 +119,44 @@ export function EntityGlyph({ kind, size = 14, style }: { kind: EntityKind; size
  * a mouth, sewn onto a dark tile with a gold running stitch (docs/assets/brand). At 40 px and below it
  * draws mark-small.svg, whose face is bigger and whose stitch is coarser, so both still read. The
  * tile stays dark in both themes, like an app icon.
+ *
+ * Given a `state` (from useNeedsYou), the face says what the app is doing, the way the crew's
+ * figures do (lib/story/loomMark.ts): still when ready, glancing with a blue glow while a team
+ * works, a small gold "o" and a gold glow when something needs you, one blink when a run is done.
+ * Its accessible name stays the link's; only the tooltip says the state.
  */
-export function LoomMark({ size = 28 }: { size?: number }) {
+export function LoomMark({ size = 28, state = 'ready' }: { size?: number; state?: LoomMarkState }) {
+  const pose = loomMarkPose(state, { reducedMotion: usePrefersReducedMotion() })
+  const says = LOOM_MARK_SAYS[state]
+  const small = size <= 40
   return (
-    <svg className="fr-mark" width={size} height={size} viewBox="0 0 512 512" aria-hidden="true" style={{ flex: 'none' }}>
+    <svg
+      className="fr-mark lw-mark" width={size} height={size} viewBox="0 0 512 512" aria-hidden="true" style={{ flex: 'none' }}
+      data-state={state} data-mouth={pose.mouth} data-glow={pose.glow}
+      data-glance={pose.glance || undefined} data-blink={pose.blink || undefined} data-breathe={pose.breathe || undefined}
+    >
+      {says && <title>{says}</title>}
       <rect width="512" height="512" rx="112" fill="#08080A" />
-      {size <= 40 ? <>
-        <path d="M256 40H384A88 88 0 0 1 472 128V384A88 88 0 0 1 384 472H128A88 88 0 0 1 40 384V128A88 88 0 0 1 128 40Z" fill="none" stroke="#D8A93C" strokeWidth="26" strokeLinecap="round" strokeDasharray="49.28 49.28" strokeDashoffset="24.64" />
-        <rect x="152" y="146" width="70" height="150" rx="35" fill="#F5F3EE" />
-        <rect x="290" y="146" width="70" height="150" rx="35" fill="#F5F3EE" />
-        <path d="M222 354Q256 382 290 354" fill="none" stroke="#E9C46A" strokeWidth="40" strokeLinecap="round" />
-      </> : <>
-        <path d="M256 44H382A86 86 0 0 1 468 130V382A86 86 0 0 1 382 468H130A86 86 0 0 1 44 382V130A86 86 0 0 1 130 44Z" fill="none" stroke="#D8A93C" strokeWidth="10" strokeLinecap="round" strokeDasharray="16.26 22.45" strokeDashoffset="8.13" />
-        <rect x="170" y="170" width="52" height="112" rx="26" fill="#F5F3EE" />
-        <rect x="290" y="170" width="52" height="112" rx="26" fill="#F5F3EE" />
-        <path d="M230 330Q256 352 282 330" fill="none" stroke="#E9C46A" strokeWidth="28" strokeLinecap="round" />
-      </>}
+      {small
+        ? <path d="M256 40H384A88 88 0 0 1 472 128V384A88 88 0 0 1 384 472H128A88 88 0 0 1 40 384V128A88 88 0 0 1 128 40Z" fill="none" stroke="#D8A93C" strokeWidth="26" strokeLinecap="round" strokeDasharray="49.28 49.28" strokeDashoffset="24.64" />
+        : <path d="M256 44H382A86 86 0 0 1 468 130V382A86 86 0 0 1 382 468H130A86 86 0 0 1 44 382V130A86 86 0 0 1 130 44Z" fill="none" stroke="#D8A93C" strokeWidth="10" strokeLinecap="round" strokeDasharray="16.26 22.45" strokeDashoffset="8.13" />}
+      <g className="lw-mark-face">
+        {small ? <>
+          <g className="lw-mark-eyes">
+            <rect x="152" y="146" width="70" height="150" rx="35" fill="#F5F3EE" />
+            <rect x="290" y="146" width="70" height="150" rx="35" fill="#F5F3EE" />
+          </g>
+          <path className="lw-mark-stitch" d="M222 354Q256 382 290 354" fill="none" stroke="#E9C46A" strokeWidth="40" strokeLinecap="round" />
+          <circle className="lw-mark-o" cx="256" cy="362" r="26" fill="none" stroke="#E9C46A" strokeWidth="30" />
+        </> : <>
+          <g className="lw-mark-eyes">
+            <rect x="170" y="170" width="52" height="112" rx="26" fill="#F5F3EE" />
+            <rect x="290" y="170" width="52" height="112" rx="26" fill="#F5F3EE" />
+          </g>
+          <path className="lw-mark-stitch" d="M230 330Q256 352 282 330" fill="none" stroke="#E9C46A" strokeWidth="28" strokeLinecap="round" />
+          <circle className="lw-mark-o" cx="256" cy="340" r="17" fill="none" stroke="#E9C46A" strokeWidth="24" />
+        </>}
+      </g>
     </svg>
   )
 }

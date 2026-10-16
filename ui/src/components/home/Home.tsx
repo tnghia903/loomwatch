@@ -10,6 +10,7 @@ import { useTheme } from '../../lib/theme'
 import { offerTourIfFirstRun, startTour } from '../../lib/tour/store'
 import { ChipDot, LoomMark, LoomWordmark } from '../ui/glyphs'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
+import type { LoomMarkState } from '../../lib/story/loomMark'
 import { chatPreview, listTime } from '../../lib/chat/preview'
 import { isUnread } from '../../lib/chat/seen'
 import { fabricFor } from '../../lib/story/fabric'
@@ -36,6 +37,8 @@ export interface HomeProps {
   topActions?: ReactNode
   /** Every run the daemon knows, for each team card's run fabric. */
   runs?: readonly RunRecord[]
+  /** What the header's mark says, from the same poll as the needs-you tray. */
+  mark?: LoomMarkState
   /** Ask LoomWatch: describe the job and the assistant sets the team up (ADR 0033). */
   ask?: { unavailable: string | null; onAsk: (text: string) => void }
   children?: ReactNode
@@ -87,7 +90,7 @@ function describeTeam(team: TeamSummary): string {
  * it is done. First your agents (build each one and chat with it on its own), then your teams (put agents
  * in a workflow, then give the team work in its chat). One obvious way to start: build an agent.
  */
-export function Home({ notice = null, harnesses, harnessesLoading, harnessesError, onRetryHarnesses, onCreateBlank, onPalette, topActions, runs = [], ask, children }: HomeProps) {
+export function Home({ notice = null, harnesses, harnessesLoading, harnessesError, onRetryHarnesses, onCreateBlank, onPalette, topActions, runs = [], mark, ask, children }: HomeProps) {
   const { resolved, toggle } = useTheme()
   const { teams, trashed, error, retry: retryTeams, forget } = useTeamList()
   const [creating, setCreating] = useState(false)
@@ -163,7 +166,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
     <div className="lw-home" data-tour="home">
       <div className="ground" aria-hidden="true" />
       <header className="home-top">
-        <span className="home-brand"><LoomMark size={28} /><LoomWordmark height={19} /></span>
+        <span className="home-brand"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></span>
         <span className="home-top-acts">
           {topActions}
           <UpdateBadge />

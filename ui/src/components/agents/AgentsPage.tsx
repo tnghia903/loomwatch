@@ -8,6 +8,7 @@ import { figureFor } from '../../lib/library/figures'
 import { useSavedJobs, versionOf } from '../../lib/library/jobs'
 import { ROLE_PRESETS } from '../../lib/library/roles'
 import { useAgentUses } from '../../lib/library/uses'
+import type { LoomMarkState } from '../../lib/story/loomMark'
 import { useTheme } from '../../lib/theme'
 import { QuestsLink } from '../quests/QuestsLink'
 import { LoomMark, LoomWordmark } from '../ui/glyphs'
@@ -21,6 +22,8 @@ export interface AgentsPageProps {
   skills: DetectedCapability[]
   tools: DetectedCapability[]
   skillsLoading: boolean
+  /** What the header's mark says, from the needs-you poll. */
+  mark?: LoomMarkState
 }
 
 /**
@@ -35,7 +38,7 @@ export function AgentsPage(props: AgentsPageProps) {
     <div className="lw-home lw-agents" data-tour="agents">
       <div className="ground" aria-hidden="true" />
       <header className="home-top">
-        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} /><LoomWordmark height={19} /></a>
+        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={props.mark} /><LoomWordmark height={19} /></a>
         <span className="home-top-acts">
           <QuestsLink />
           <a className="btn" href="/" data-tour="your-teams">Your teams</a>
