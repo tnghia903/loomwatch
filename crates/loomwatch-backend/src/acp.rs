@@ -753,10 +753,10 @@ impl AcpProcess {
                 exit.stderr
             );
         }
-        let events = context.archive.verify_session(&archive_session_id).await?;
+        let event_count = context.archive.verify_session(&archive_session_id).await?;
         Ok(SessionOutcome {
             session_id: archive_session_id,
-            event_count: events.len(),
+            event_count,
             exit_code: exit.code,
             reply: last_reply,
         })
@@ -823,7 +823,7 @@ impl AcpProcess {
                         None,
                     )
                     .await?;
-                let events = context.archive.verify_session(&session_id).await?;
+                let event_count = context.archive.verify_session(&session_id).await?;
                 if !exit.success {
                     bail!(
                         "ACP session {session_id} child exited with code {}; stderr: {}",
@@ -833,7 +833,7 @@ impl AcpProcess {
                 }
                 Ok(SessionOutcome {
                     session_id,
-                    event_count: events.len(),
+                    event_count,
                     exit_code: exit.code,
                     reply,
                 })
@@ -1303,8 +1303,8 @@ impl AcpProcess {
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = answer;
         }
         self.close_session(&mut recorder).await?;
-        let events = context.archive.verify_session(&archive_session_id).await?;
-        Ok((archive_session_id, events.len(), reply))
+        let event_count = context.archive.verify_session(&archive_session_id).await?;
+        Ok((archive_session_id, event_count, reply))
     }
 
     /// One `session/prompt` round trip on an already-negotiated session, archived exactly as a
@@ -3521,7 +3521,14 @@ mod tests {
             recorder.record_frame(&json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "phase-test", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}, "_meta": {"codex": {"phase": phase}}}}})).await.unwrap();
         }
         assert_eq!(recorder.reply.as_str(), "Final report");
-        assert_eq!(archive.verify_session("phase-test").await.unwrap().len(), 6);
+        assert_eq!(
+            archive
+                .load_verified_session("phase-test")
+                .await
+                .unwrap()
+                .len(),
+            6
+        );
     }
 
     #[tokio::test]
@@ -3868,7 +3875,7 @@ mod tests {
             );
             // The archive still holds every chunk exactly as the harness sent it.
             let chunks: Vec<String> = archive
-                .verify_session(&outcome.session_id)
+                .load_verified_session(&outcome.session_id)
                 .await
                 .expect("archived")
                 .iter()
@@ -3943,7 +3950,7 @@ mod tests {
         drop(archive);
         let reopened = EventArchive::new(pool);
         let events = reopened
-            .verify_session(&outcome.session_id)
+            .load_verified_session(&outcome.session_id)
             .await
             .expect("recover session");
         assert_eq!(outcome.exit_code, 0);
@@ -5474,7 +5481,7 @@ mod tests {
         );
 
         let events = archive
-            .verify_session("partial-session")
+            .load_verified_session("partial-session")
             .await
             .expect("recover partial session");
         assert_eq!(events.len(), 6);
@@ -5571,7 +5578,7 @@ mod tests {
         );
 
         let events = archive
-            .verify_session("session-1")
+            .load_verified_session("session-1")
             .await
             .expect("the partial session must still be reachable via show");
         assert_eq!(
@@ -5620,7 +5627,7 @@ mod tests {
         assert!(format!("{error:#}").contains("session_id=signal-session"));
 
         let events = archive
-            .verify_session("signal-session")
+            .load_verified_session("signal-session")
             .await
             .expect("recover partial session");
         let last = events.last().unwrap();
@@ -5675,7 +5682,7 @@ mod tests {
         );
 
         let events = archive
-            .verify_session("cancel-session")
+            .load_verified_session("cancel-session")
             .await
             .expect("recover stalled session");
         let last = events.last().unwrap();

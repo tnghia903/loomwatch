@@ -686,7 +686,7 @@ mod tests {
                 .bind(session)
                 .fetch_all(&pool)
                 .await?;
-                let events = archive.verify_session(session).await?;
+                let events = archive.load_verified_session(session).await?;
                 assert_eq!(events.len(), rows.len());
                 for (event, row) in events.iter().zip(&rows) {
                     assert_eq!(event.id, row.try_get::<String, _>("id")?);
@@ -893,7 +893,7 @@ mod tests {
             rate(20_000, started),
             archive.db().events().commits()
         );
-        assert_eq!(archive.verify_session("rate").await?.len(), 20_000);
+        assert_eq!(archive.load_verified_session("rate").await?.len(), 20_000);
         Ok(())
     }
 

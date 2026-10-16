@@ -2116,7 +2116,7 @@ mod tests {
 
         bus.wait_for_tasks().await?;
         bus.shutdown().await?;
-        let events = archive.verify_session("team-run").await?;
+        let events = archive.load_verified_session("team-run").await?;
         let bus_calls: Vec<_> = events
             .iter()
             .filter(|event| event.agent_id == "lead" && event.kind == EventKind::ToolCall)
@@ -2228,7 +2228,7 @@ mod tests {
         );
         bus.shutdown().await?;
 
-        let events = archive.verify_session("guard-run").await?;
+        let events = archive.load_verified_session("guard-run").await?;
         let failures: Vec<_> = events
             .iter()
             .filter(|event| {
@@ -2308,7 +2308,7 @@ mod tests {
         bus.wait_for_tasks().await?;
         bus.shutdown().await?;
 
-        let events = archive.verify_session("fanout-run").await?;
+        let events = archive.load_verified_session("fanout-run").await?;
         assert_eq!(
             events
                 .iter()
@@ -2472,7 +2472,7 @@ mod tests {
         bus.guard_delegation(&session, "d")?;
         bus.shutdown().await?;
 
-        let events = archive.verify_session("warning-run").await?;
+        let events = archive.load_verified_session("warning-run").await?;
         assert_eq!(
             events.len(),
             2,
@@ -3345,7 +3345,7 @@ mod tests {
         assert_eq!(answered.await??, "footnotes checked");
 
         let raw = archive
-            .verify_session("follow-up-run")
+            .load_verified_session("follow-up-run")
             .await?
             .into_iter()
             .find(|event| event.agent_id == crate::config::RESERVED_OPERATOR_ID)
@@ -3569,7 +3569,7 @@ mod tests {
             "thought hard"
         );
         bus.shutdown().await?;
-        let events = archive.verify_session("effort-run").await?;
+        let events = archive.load_verified_session("effort-run").await?;
         assert!(
             events.iter().any(|event| {
                 event.agent_id == "helper"

@@ -348,30 +348,112 @@ impl EventArchive {
         rows.iter().map(decode_event).collect()
     }
 
-    /// Assert that a session is non-empty and has a contiguous sequence.
+    /// Assert that a session is non-empty and has a contiguous sequence, and say how many events
+    /// it has.
+    ///
+    /// Counted, not loaded: `seq` is unique per session and never negative, so the session is
+    /// whole exactly when its lowest `seq` is 0 and its highest is one less than its count. A run
+    /// checks this as it ends, and loading every frame it archived only to count them was most of
+    /// what ending a long run cost.
     ///
     /// # Errors
     ///
-    /// Returns an error when loading fails or the archived sequence is incomplete.
-    pub async fn verify_session(&self, session_id: &str) -> Result<Vec<RunEvent>> {
-        let events = self.load_session(session_id).await?;
+    /// Returns an error when the archive cannot be read or the archived sequence is incomplete.
+    pub async fn verify_session(&self, session_id: &str) -> Result<usize> {
+        self.flush().await;
+        let (count, first, last): (i64, Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT count(*), min(seq), max(seq) FROM run_events WHERE session_id = $1",
+        )
+        .bind(session_id)
+        .fetch_one(self.db.reader())
+        .await
+        .with_context(|| format!("failed to load session {session_id}"))?;
         if let Some(reason) = self.db.events().lost(session_id) {
             anyhow::bail!(
                 "session {session_id} lost an event that could not be archived: {reason}"
             );
         }
-        ensure!(
-            !events.is_empty(),
-            "session {session_id} has no archived events"
-        );
-        for (expected, event) in events.iter().enumerate() {
-            ensure!(
-                event.seq == expected as u64,
-                "session {session_id} has a sequence gap at event {}",
-                event.id
-            );
+        ensure!(count > 0, "session {session_id} has no archived events");
+        if first != Some(0) || last != Some(count - 1) {
+            let id = self.first_out_of_place(session_id).await?;
+            anyhow::bail!("session {session_id} has a sequence gap at event {id}");
         }
-        Ok(events)
+        usize::try_from(count).context("archive contains a negative event count")
+    }
+
+    /// How many events a session has archived, whole or not.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the archive cannot be read.
+    pub(crate) async fn event_count(&self, session_id: &str) -> Result<usize> {
+        self.flush().await;
+        let count: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM run_events WHERE session_id = $1")
+                .bind(session_id)
+                .fetch_one(self.db.reader())
+                .await
+                .with_context(|| format!("failed to load session {session_id}"))?;
+        usize::try_from(count).context("archive contains a negative event count")
+    }
+
+    /// [`Self::verify_session`], then the session itself, for a caller that reads the events.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when loading fails or the archived sequence is incomplete.
+    pub async fn load_verified_session(&self, session_id: &str) -> Result<Vec<RunEvent>> {
+        self.verify_session(session_id).await?;
+        self.load_session(session_id).await
+    }
+
+    /// The id of a session's first event, in `seq` order, whose `seq` is not its position: the
+    /// event a gap is reported at. Only asked once a gap is known to be there.
+    async fn first_out_of_place(&self, session_id: &str) -> Result<String> {
+        sqlx::query_scalar(
+            "SELECT id FROM (
+                 SELECT id, seq, row_number() OVER (ORDER BY seq) - 1 AS position
+                 FROM run_events WHERE session_id = $1
+             )
+             WHERE seq <> position ORDER BY seq LIMIT 1",
+        )
+        .bind(session_id)
+        .fetch_one(self.db.reader())
+        .await
+        .with_context(|| format!("failed to load session {session_id}"))
+    }
+
+    /// The `payload` of a session's `kind` events, newest first, optionally only `agent_id`'s and
+    /// at most `limit` of them.
+    ///
+    /// For a question about the last few events of one kind, such as how the run's process ended,
+    /// that would otherwise load and decode the whole session. The raw frames are not read.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for database failures or a payload that is not JSON.
+    pub(crate) async fn latest_payloads(
+        &self,
+        session_id: &str,
+        kind: EventKind,
+        agent_id: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<Vec<Value>> {
+        self.flush().await;
+        let rows: Vec<Value> = sqlx::query_scalar(
+            "SELECT payload FROM run_events
+             WHERE session_id = $1 AND kind = $2 AND ($3 IS NULL OR agent_id = $3)
+             ORDER BY seq DESC LIMIT $4",
+        )
+        .bind(session_id)
+        .bind(kind.as_str())
+        .bind(agent_id)
+        // SQLite reads a negative LIMIT as none.
+        .bind(limit.map_or(-1, i64::from))
+        .fetch_all(self.db.reader())
+        .await
+        .with_context(|| format!("failed to load session {session_id}"))?;
+        Ok(rows)
     }
 }
 
@@ -828,7 +910,7 @@ mod tests {
         assert_eq!(second[0].seq, 2);
         assert_eq!(
             first.into_iter().chain(second).collect::<Vec<_>>(),
-            archive.verify_session("page").await?
+            archive.load_verified_session("page").await?
         );
         assert!(archive.event_page("page", 2, 2).await?.is_empty());
         assert!(archive.event_page("page", -2, 2).await.is_err());
@@ -1097,7 +1179,7 @@ mod tests {
         archive.append(&event).await?;
         drop(archive);
         let reopened = EventArchive::open(db.path()).await?;
-        assert_eq!(reopened.verify_session("session").await?, [event]);
+        assert_eq!(reopened.load_verified_session("session").await?, [event]);
         Ok(())
     }
 
@@ -1148,7 +1230,7 @@ mod tests {
             archive.enqueue(next, &failure).await?;
         }
         // Without waiting for any window: the read itself flushes.
-        let events = archive.verify_session("burst").await?;
+        let events = archive.load_verified_session("burst").await?;
         assert_eq!(events.len(), 600);
         assert!(events.iter().enumerate().all(|(i, e)| e.seq == i as u64));
         assert_eq!(events[7], {
@@ -1203,6 +1285,51 @@ mod tests {
             .await
             .expect_err("lost an event");
         assert!(format!("{error:#}").contains("lost an event"), "{error:#}");
+        Ok(())
+    }
+
+    /// The check counts rather than loads, and still finds what loading found: a session with no
+    /// events, a hole in the middle, and one that does not start at 0, each named at the first
+    /// event out of place.
+    #[tokio::test]
+    async fn verifying_counts_the_session_and_names_the_first_event_after_a_gap() -> Result<()> {
+        let archive = EventArchive::new(Db::temp().await);
+        for seq in 0..4 {
+            archive.append(&event("whole", seq)).await?;
+        }
+        for seq in [0, 1, 3, 4] {
+            archive.append(&event("holed", seq)).await?;
+        }
+        for seq in [1, 2] {
+            archive.append(&event("late", seq)).await?;
+        }
+        assert_eq!(archive.verify_session("whole").await?, 4);
+        assert_eq!(archive.load_verified_session("whole").await?.len(), 4);
+        let error = |session: &'static str| {
+            let archive = archive.clone();
+            async move {
+                format!(
+                    "{:#}",
+                    archive
+                        .verify_session(session)
+                        .await
+                        .expect_err("not whole")
+                )
+            }
+        };
+        assert_eq!(
+            error("holed").await,
+            "session holed has a sequence gap at event holed:3"
+        );
+        assert_eq!(
+            error("late").await,
+            "session late has a sequence gap at event late:1"
+        );
+        assert_eq!(
+            error("missing").await,
+            "session missing has no archived events"
+        );
+        assert!(archive.load_verified_session("holed").await.is_err());
         Ok(())
     }
 
