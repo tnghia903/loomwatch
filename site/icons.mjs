@@ -1,7 +1,9 @@
-// Renders the favicon fallbacks from site/favicon.svg through headless Chrome (DevTools protocol; no npm install):
-//   favicon.ico           16, 32 and 48 px, for browsers and tools that skip SVG icons or ask for /favicon.ico
-//   apple-touch-icon.png  180 px and full bleed, for Safari's Favorites and the iOS home screen
-// Run it after changing favicon.svg, and commit what it writes:
+// Renders the favicon fallbacks through headless Chrome (DevTools protocol; no npm install):
+//   favicon.ico           16, 32 and 48 px from site/favicon.svg (the small mark), for browsers and tools that skip
+//                         SVG icons or ask for /favicon.ico
+//   apple-touch-icon.png  180 px and full bleed from docs/assets/brand/mark.svg (the large mark, whose stitch is finer),
+//                         for Safari's Favorites and the iOS home screen
+// Run it after changing either SVG, and commit what it writes:
 //   node site/icons.mjs
 // Set CHROME_BIN when Chrome is not at the standard macOS path.
 import { spawn } from 'node:child_process'
@@ -12,8 +14,9 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const site = dirname(fileURLToPath(import.meta.url))
-const svg = readFileSync(join(site, 'favicon.svg')).toString('base64')
-// favicon.svg's tile colour. The touch icon paints it edge to edge, because iOS and Safari round the corners themselves.
+const favicon = readFileSync(join(site, 'favicon.svg')).toString('base64')
+const mark = readFileSync(join(site, '../docs/assets/brand/mark.svg')).toString('base64')
+// The mark's tile colour. The touch icon paints it edge to edge, because iOS and Safari round the corners themselves.
 const tile = '#08080A'
 
 const chromeBin = process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
@@ -43,7 +46,7 @@ ws.addEventListener('message', ({ data }) => {
 const send = (method, params = {}) => new Promise((ok, fail) => { const n = ++id; pending.set(n, { ok, fail }); ws.send(JSON.stringify({ id: n, method, params })) })
 
 // Chrome draws the vector at each size, so the small icons are rasterised for their own pixel grid rather than shrunk.
-async function render(size, { inset = 0, fill } = {}) {
+async function render(size, { svg = favicon, inset = 0, fill } = {}) {
   const { result, exceptionDetails } = await send('Runtime.evaluate', { awaitPromise: true, returnByValue: true, expression: `new Promise((ok, fail) => {
     const img = new Image()
     img.onload = () => {
@@ -53,7 +56,7 @@ async function render(size, { inset = 0, fill } = {}) {
       g.drawImage(img, ${inset}, ${inset}, ${size - 2 * inset}, ${size - 2 * inset})
       ok(c.toDataURL('image/png').split(',')[1])
     }
-    img.onerror = () => fail(new Error('favicon.svg did not load'))
+    img.onerror = () => fail(new Error('the SVG did not load'))
     img.src = 'data:image/svg+xml;base64,${svg}'
   })` })
   if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text)
@@ -79,7 +82,7 @@ function ico(images) {
 try {
   const sizes = [16, 32, 48]
   writeFileSync(join(site, 'favicon.ico'), ico(await Promise.all(sizes.map(async (s) => [s, await render(s)]))))
-  writeFileSync(join(site, 'apple-touch-icon.png'), await render(180, { inset: 18, fill: tile }))
+  writeFileSync(join(site, 'apple-touch-icon.png'), await render(180, { svg: mark, inset: 18, fill: tile }))
   console.log(`Wrote site/favicon.ico (${sizes.join(', ')} px) and site/apple-touch-icon.png (180 px)`)
 } finally {
   ws.close(); chrome.kill()

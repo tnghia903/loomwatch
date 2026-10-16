@@ -47,7 +47,7 @@ export function RunReceipt({ receipt, onInspectEvidence, onAllow, earned = [] }:
         {/* A letterhead: which run on the left, how it ended stamped on the right. */}
         <div className="receipt-top">
           <div className="receipt-name">
-            <header className="receipt-head"><LoomMark width={30} height={13} /><span>Run receipt</span></header>
+            <header className="receipt-head"><LoomMark size={16} /><span>Run receipt</span></header>
             <p className="receipt-title">{receipt.run}</p>
           </div>
           <ReceiptStamp outcome={receipt.outcome} endedAt={receipt.endedAt} />

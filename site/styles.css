@@ -153,8 +153,9 @@ em { font-style: italic; }
 
 .top { position: fixed; inset: 0 0 auto 0; z-index: 30; background: var(--glass); backdrop-filter: blur(24px) saturate(150%); -webkit-backdrop-filter: blur(24px) saturate(150%); border-bottom: 1px solid var(--hairline); }
 .top-row { max-width: 1240px; margin: 0 auto; padding: 0 var(--gutter); height: 58px; display: flex; align-items: center; gap: 28px; }
-.brand { display: inline-flex; align-items: center; gap: 10px; font: 600 16px/1 var(--sans); letter-spacing: -.01em; text-decoration: none; color: var(--ink); }
-.brand svg { width: 30px; height: 13px; color: var(--accent); }
+.brand { display: inline-flex; align-items: center; gap: 9px; text-decoration: none; color: var(--ink); }
+.brand .brand-mark { width: 26px; height: 26px; flex: none; }
+.brand .brand-name { width: 98px; height: 18px; flex: none; }
 .top-nav { display: flex; gap: 22px; margin-left: 8px; }
 .top-nav a { color: var(--ink-2); text-decoration: none; font: 500 13px/1 var(--sans); }
 .top-nav a:hover { color: var(--ink); }
@@ -226,7 +227,7 @@ em { font-style: italic; }
 /* The window every panel shares, so it reads as one app moving forward. */
 .win { background: var(--panel-solid); border: 1px solid var(--hairline-2); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
 .win-bar { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 16px; border-bottom: 1px solid var(--hairline); }
-.win-bar > svg { width: 24px; height: 11px; color: var(--accent); flex: none; }
+.win-bar > svg { width: 18px; height: 18px; flex: none; }
 .win-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; font-size: 13.5px; }
 .win-title b { font-weight: 600; white-space: nowrap; }
 .win-title .mono { color: var(--ink-3); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -579,9 +579,9 @@
   }
   /* Details turning to another piece settles into place rather than snapping. */
   .tc-details .delivery-lane { animation: tc-settle-in var(--t-move) var(--ease-out) both; }
-  /* The empty chat weaves LoomWatch's mark: the weft first, then the warp over it. */
-  .tc-weave path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: tc-weave 1100ms var(--ease-out) forwards; }
-  .tc-weave .tc-weave-warp { animation-delay: 380ms; }
+  /* The empty chat sews LoomWatch's mark on: the stitch runs round the tile, then the face looks up. */
+  .tc-sewn .tc-sewn-run { stroke-dasharray: 1; stroke-dashoffset: 1; animation: tc-sew 1100ms var(--ease-out) forwards; }
+  .tc-sewn .tc-sewn-face { transform-box: fill-box; transform-origin: center bottom; animation: tc-look-up 420ms var(--ease-out) 820ms both; }
   .tc-member em, .tc-where { transition: color var(--t-move) var(--ease-out); }
   .tc-note .chat-bubble { transition: border-color var(--t-move) var(--ease-out), background-color var(--t-move) var(--ease-out); }
   .tc-picker, .tc-jump { animation: tc-pop var(--t-quick) var(--ease-out) both; }
@@ -608,16 +608,15 @@
 @keyframes tc-ripple { from { opacity: .7; scale: 1; } to { opacity: 0; scale: 1.035 1.18; } }
 @keyframes tc-sweep { from { scale: 0 1; } to { scale: 1 1; opacity: .55; } }
 @keyframes tc-settle-in { from { opacity: 0; translate: 10px 0; } }
-@keyframes tc-weave { to { stroke-dashoffset: 0; } }
+@keyframes tc-sew { to { stroke-dashoffset: 0; } }
+@keyframes tc-look-up { from { opacity: 0; transform: translateY(24px) scaleY(.6); } }
 @keyframes tc-attention {
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent); }
   100% { box-shadow: 0 0 0 12px color-mix(in srgb, var(--color-accent) 0%, transparent); }
 }
 
-/* The mark at rest, and where motion is reduced: drawn, not woven. */
-.tc-weave { color: var(--color-accent); }
-.tc-weave .tc-weave-weft { stroke: var(--color-accent); }
-.tc-weave .tc-weave-warp { stroke: var(--color-ink-3); opacity: .55; }
+/* Where motion is reduced the mark is simply there, already sewn on. */
+.tc-sewn { flex: none; }
 
 /* ---------- What the agents said, inside the chat ---------- */
 .tc-said .chat.bare { margin: 2px 0 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }
