@@ -1,8 +1,9 @@
 import { stringify } from 'yaml'
 
-import { isHarnessRunnable, type DetectedHarness, type HarnessModel } from '../harnesses'
-import { effortFor } from '../library/effort'
+import { isHarnessRunnable, type DetectedHarness } from '../harnesses'
+import { modelForJob } from '../library/jobModel'
 import { ROLE_PRESETS } from '../library/roles'
+import type { ModelCatalog } from '../models/tiers'
 import type { AgentConfig, EdgeConfig } from './types'
 import { slugifyTeamName } from './useTeamDocument'
 
@@ -122,18 +123,19 @@ function jobRole(id: 'researcher' | 'writer' | 'checker'): string {
   return preset.role
 }
 
-function agent(id: string, name: string, role: string, harness: DetectedHarness, model: string, catalog?: HarnessModel): AgentConfig {
+function agent(id: string, name: string, role: string, harness: DetectedHarness, model: string, catalog?: ModelCatalog): AgentConfig {
   // The Researcher job's own switches (ADR 0037), so a template's researcher can search the web
-  // like one hired from the palette; and each job's effort, as its model lists it (ADR 0062).
+  // like one hired from the palette; each job's model tier, from the app's own list (ADR 0057),
+  // and its effort, as that model lists it (ADR 0062).
   const preset = ROLE_PRESETS.find((candidate) => candidate.id === id)
-  const thinkingEffort = preset?.effort ? effortFor(preset.effort, catalog) : undefined
+  const choice = preset && catalog ? modelForJob(preset, catalog, model) : null
   return {
     id,
     name,
     role,
     spawn: { cmd: harness.spawn.cmd, args: [...harness.spawn.args], env: {}, cwd: '.' },
-    model,
-    ...(thinkingEffort ? { thinkingEffort } : {}),
+    model: choice?.model ?? model,
+    ...(choice?.thinkingEffort ? { thinkingEffort: choice.thinkingEffort } : {}),
     ...(preset?.doneWhen?.length ? { doneWhen: [...preset.doneWhen] } : {}),
     ...(preset?.allow ? { allow: { ...preset.allow } } : {}),
   }
@@ -151,9 +153,9 @@ function sequence(from: string, to: string, ts: string): EdgeConfig {
  */
 /** `id` should come from the file the team is saved as (`teamIdForPath`), so a second team with
  * the same name does not share the first one's id, and with it the first one's Notebook.
- * `catalog` is that model's catalog entry, which decides each job's effort; without it every agent
- * keeps the app's default effort. */
-export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, name: string, harness: DetectedHarness, model: string, now = new Date(), id = slugifyTeamName(name), catalog?: HarnessModel): string {
+ * `catalog` is the app's model list, which decides each job's model tier and effort; `model` is its
+ * strong tier. Without it every agent runs on `model` at the app's default effort. */
+export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, name: string, harness: DetectedHarness, model: string, now = new Date(), id = slugifyTeamName(name), catalog?: ModelCatalog): string {
   const ts = now.toISOString()
   let agents: AgentConfig[]
   let edges: EdgeConfig[]

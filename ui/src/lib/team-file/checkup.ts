@@ -11,8 +11,11 @@
 // Pure and framework-free like agentPlace.ts, so every rule is testable without a canvas.
 
 import { OVERTHINKING_EFFORTS } from '../library/effort'
+import { modelForJob } from '../library/jobModel'
 import { ROLE_PRESETS, type RolePreset } from '../library/roles'
+import { effortName, modelName, modelTiers, onStrongTier, sameModel, type ModelCatalog } from '../models/tiers'
 import { actsWithoutAsking } from './allow'
+import type { TeamUsage } from './runLessons'
 import type { AgentAllow, AgentConfig, AllowSwitch } from './types'
 
 export interface CheckupEdge {
@@ -29,6 +32,10 @@ export interface CheckupInput {
   responder: string | null
   /** Runs on a schedule, so nobody may be there to answer a permission request. */
   scheduled?: boolean
+  /** The model list of each agent's app, once read (ADR 0057's tiers); absent, no tier is judged. */
+  catalogFor?: (agent: AgentConfig) => ModelCatalog | null | undefined
+  /** Where the team's tokens went in its recent runs (`teamUsage`), quoted beside a tier finding. */
+  usage?: TeamUsage | null
 }
 
 export type CheckupRule =
@@ -46,6 +53,7 @@ export type CheckupRule =
   | 'shouting'
   | 'overthinking'
   | 'long-instructions'
+  | 'strong-gatherer'
   // Read from the team's recent runs (runLessons.ts).
   | 'heavy-agent'
   | 'idle-teammate'
@@ -59,6 +67,8 @@ export type CheckupFix =
   /** A built-in job's instructions, with the switches the job cannot work without (roles.ts). */
   | { kind: 'replace-role'; agentId: string; text: string; allow?: AgentAllow }
   | { kind: 'effort'; agentId: string; value: string }
+  /** A model the agent's app listed, with the effort to run it at; none means the app's default. */
+  | { kind: 'model'; agentId: string; model: string; thinkingEffort?: string }
 
 export interface CheckupFinding {
   /** Stable across edits that do not change the finding, so a dismissal sticks. */
@@ -200,7 +210,14 @@ export const bySeverity = (a: CheckupFinding, b: CheckupFinding) => (a.severity 
 /** The instructions name this agent, which is how a lead is told when to use it. */
 export const mentions = (role: string, name: string) => name.trim() !== '' && role.toLowerCase().includes(name.trim().toLowerCase())
 
-export function checkup({ agents, edges, entrypoint, responder, scheduled = false }: CheckupInput): CheckupFinding[] {
+/** "In the last 3 runs it used 41% of the team's tokens.", from its app's own reports; empty without them. */
+function shareOfTeam(usage: TeamUsage | null | undefined, agentId: string): string {
+  const mine = usage?.agents.find((candidate) => candidate.id === agentId)
+  if (!usage || !mine || usage.agents.length < 2) return ''
+  return ` In ${usage.runs === 1 ? 'the last run' : `the last ${usage.runs} runs`} it used ${Math.round(mine.share * 100)}% of the team’s tokens.`
+}
+
+export function checkup({ agents, edges, entrypoint, responder, scheduled = false, catalogFor, usage }: CheckupInput): CheckupFinding[] {
   const findings: CheckupFinding[] = []
   const workers = agents.filter((agent) => agent.kind !== 'operator')
   const byId = new Map(agents.map((agent) => [agent.id, agent]))
@@ -286,9 +303,32 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
       })
     }
 
+    // A gatherer on the strong tier (ADR 0057): it feeds the agent that writes the answer, so the
+    // app's faster model, or the same model thinking less, does its work. Judged only against the
+    // app's own list, and never for the agent whose reply is the team's answer.
+    const job = jobFor(agent)
+    const catalog = job?.tier === 'fast' && !final ? catalogFor?.(agent) : null
+    const tiers = catalog ? modelTiers(catalog) : null
+    const fast = catalog && job && tiers && onStrongTier(agent, tiers, catalog) ? modelForJob(job, catalog) : null
+    if (catalog && fast && agent.model) {
+      const newModel = !sameModel(fast.model, agent.model, catalog.models)
+      const writer = responder ? name(responder) : 'the next step'
+      const level = fast.thinkingEffort ? effortName(fast.model, fast.thinkingEffort, catalog).toLowerCase() : ''
+      add({
+        rule: 'strong-gatherer', severity: 'improve', agentId: agent.id,
+        title: newModel ? `${agent.name} could gather on ${modelName(fast.model, catalog)}` : `${agent.name} could gather at ${level} effort`,
+        why: `${newModel
+          ? `It collects facts for ${writer} to write up. A faster model does that well, and leaves ${modelName(agent.model, catalog)} for the step that writes the answer.`
+          : `It collects facts for ${writer} to write up, which takes less thinking than writing the answer.`}${shareOfTeam(usage, agent.id)}`,
+        fix: {
+          label: newModel ? `Use ${modelName(fast.model, catalog)}` : `Use ${level} effort`,
+          change: { kind: 'model', agentId: agent.id, model: fast.model, ...(fast.thinkingEffort ? { thinkingEffort: fast.thinkingEffort } : {}) },
+        },
+      })
+    }
+
     if (count === 0) continue
     if (count < THIN_WORDS) {
-      const job = jobFor(agent)
       add({
         rule: 'thin-instructions', severity: 'improve', agentId: agent.id,
         title: `${agent.name}'s instructions are very short`,

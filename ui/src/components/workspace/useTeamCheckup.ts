@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from 'react'
 
+import type { DetectedHarness } from '../../lib/harnesses'
 import { appendToRole, checkup, type CheckupFinding, type CheckupInput } from '../../lib/team-file/checkup'
 import { mergeFindings, runLessons, teamUsage, type LessonRun, type TeamUsage } from '../../lib/team-file/runLessons'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import type { useTeamDocument } from '../../lib/team-file/useTeamDocument'
+import { useTierCatalogs } from './useTierCatalogs'
 
 type TeamDocumentController = ReturnType<typeof useTeamDocument>
 
@@ -49,38 +51,43 @@ export interface TeamCheckup {
  * applied through the document's own edits, so each is one undo step and is saved with ⌘S like any
  * other change.
  */
-export function useTeamCheckup(doc: TeamDocumentController, responder: string | null, announce: (text: string) => void, lessons: readonly LessonRun[] = []): TeamCheckup {
+export function useTeamCheckup(doc: TeamDocumentController, responder: string | null, announce: (text: string) => void, lessons: readonly LessonRun[] = [], harnesses: readonly DetectedHarness[] = []): TeamCheckup {
   const teamKey = doc.path ?? ''
   const [hidden, setHidden] = useState(readHidden)
+  const agents = useMemo(() => doc.nodes.map((node) => node.data.agent), [doc.nodes])
+  const catalogFor = useTierCatalogs(agents, harnesses)
+  const usage = useMemo(() => teamUsage(lessons, agents), [lessons, agents])
   const input = useMemo<CheckupInput>(() => ({
-    agents: doc.nodes.map((node) => node.data.agent),
+    agents,
     edges: doc.edges.map((edge) => ({ from: edge.source, to: edge.target })),
     entrypoint: doc.entrypoint,
     responder,
     scheduled: Boolean(doc.teamSchedule && doc.teamSchedule.enabled !== false),
-  }), [doc.nodes, doc.edges, doc.entrypoint, responder, doc.teamSchedule])
+    catalogFor,
+    usage,
+  }), [agents, doc.edges, doc.entrypoint, responder, doc.teamSchedule, catalogFor, usage])
   const all = useMemo(() => mergeFindings(checkup(input), runLessons(lessons, input)), [input, lessons])
-  const usage = useMemo(() => teamUsage(lessons, input.agents), [lessons, input.agents])
   const hiddenHere = useMemo(() => new Set(hidden[teamKey] ?? []), [hidden, teamKey])
   const findings = useMemo(() => all.filter((finding) => !hiddenHere.has(finding.id)), [all, hiddenHere])
   const hiddenCount = all.length - findings.length
 
   const forAgent = useCallback((agentId: string) => findings.filter((finding) => finding.agentIds.includes(agentId)), [findings])
 
-  const { nodes, updateAgentAllow, renameAgent, updateAgentThinkingEffort } = doc
+  const { nodes, updateAgentAllow, renameAgent, updateAgentThinkingEffort, applyAgentFields } = doc
   const apply = useCallback((finding: CheckupFinding) => {
     const change = finding.fix?.change
     if (!change) return
     const agent = nodes.find((node) => node.id === change.agentId)?.data.agent
     if (change.kind === 'allow') updateAgentAllow(change.agentId, change.key, true)
     else if (change.kind === 'effort') updateAgentThinkingEffort(change.agentId, change.value)
+    else if (change.kind === 'model') applyAgentFields(change.agentId, { model: change.model, thinkingEffort: change.thinkingEffort })
     else if (change.kind === 'append-role') renameAgent(change.agentId, 'role', appendToRole(agent?.role ?? '', change.text))
     else {
       renameAgent(change.agentId, 'role', change.text)
       for (const [key, on] of Object.entries(change.allow ?? {})) if (on && !agent?.allow?.[key as AllowSwitch]) updateAgentAllow(change.agentId, key as AllowSwitch, true)
     }
     announce(`${finding.fix?.label}: done for ${agent?.name ?? change.agentId}. Save the team to keep this change.`)
-  }, [nodes, updateAgentAllow, renameAgent, updateAgentThinkingEffort, announce])
+  }, [nodes, updateAgentAllow, renameAgent, updateAgentThinkingEffort, applyAgentFields, announce])
 
   const dismiss = useCallback((finding: CheckupFinding) => {
     setHidden((current) => {

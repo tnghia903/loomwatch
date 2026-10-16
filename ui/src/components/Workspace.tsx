@@ -428,7 +428,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     : doc.entrypoint
   const responderFromDoc = doc.responder ?? inferredResponder
   const runLessons = useRunLessons(doc.saveState === 'new' ? null : doc.path)
-  const teamCheckup = useTeamCheckup(doc, responderFromDoc, setStatusAnnouncement, runLessons)
+  const teamCheckup = useTeamCheckup(doc, responderFromDoc, setStatusAnnouncement, runLessons, harnesses)
   const session = useRunSession(activeRunId, responderFromDoc)
   const record = session.record
   const waiting = record?.status === 'running' ? record.waitingOn ?? null : null

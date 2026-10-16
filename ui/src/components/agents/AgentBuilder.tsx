@@ -8,6 +8,7 @@ import type { ReadSource } from '../../lib/library/figure'
 import { figureFor, freshFigure } from '../../lib/library/figures'
 import { fetchJobVersions, JobApiError, jobIdFor, removeJob, saveJob, useSavedJobs, versionOf, type JobVersion, type SavedJob } from '../../lib/library/jobs'
 import { effortFor } from '../../lib/library/effort'
+import { modelForJob } from '../../lib/library/jobModel'
 import { ROLE_PRESETS } from '../../lib/library/roles'
 import { useAgentUses } from '../../lib/library/uses'
 import { relativeTime } from '../../lib/format'
@@ -104,16 +105,18 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
     return () => { cancelled = true }
   }, [draft.appId])
   const appModels = models?.app === draft.appId ? models : null
-  // A built-in job starts at the effort its job needs, once its app's models are known, with the
-  // model it belongs to pinned as the effort slider pins it (ADR 0062). Once per start, so moving
-  // the slider back to the app's default sticks.
+  // A built-in job starts on its tier's model (ADR 0057) at the effort its job needs (ADR 0062),
+  // once its app's models are known, with the model pinned as the effort slider pins it. Once per
+  // start, so moving the slider back to the app's default sticks.
   const [tieredFor, setTieredFor] = useState<string | null>(null)
-  const startTier = !id ? ROLE_PRESETS.find((candidate) => candidate.id === startFrom)?.effort : undefined
-  if (startTier && startedFor === startKey && tieredFor !== startKey && appModels?.list && !draft.effort) {
+  const startJob = !id ? ROLE_PRESETS.find((candidate) => candidate.id === startFrom) : undefined
+  if (startJob && startedFor === startKey && tieredFor !== startKey && appModels?.list && !draft.effort) {
     setTieredFor(startKey)
-    const model = draft.model || appModels.list.currentModelId || ''
-    const effort = effortFor(startTier, appModels.list.models.find((entry) => entry.id === model))
-    if (model && effort) setDraft((current) => ({ ...current, model: current.model || model, effort }))
+    const current = appModels.list.currentModelId ?? ''
+    const choice = draft.model
+      ? { model: draft.model, thinkingEffort: startJob.effort ? effortFor(startJob.effort, appModels.list.models.find((entry) => entry.id === draft.model)) : undefined }
+      : modelForJob(startJob, appModels.list)
+    if (choice && (choice.thinkingEffort || choice.model !== current)) setDraft((now) => ({ ...now, model: now.model || choice.model, effort: choice.thinkingEffort ?? '' }))
   }
   const resolvedModel = draft.model || appModels?.list?.currentModelId || ''
   const modelName = appModels?.list?.models.find((model) => model.id === resolvedModel)?.name

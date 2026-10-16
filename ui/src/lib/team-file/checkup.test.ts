@@ -2,7 +2,13 @@ import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 
 import type { DetectedHarness } from '../harnesses'
+import { modelForRole } from '../library/jobModel'
 import { ROLE_PRESETS } from '../library/roles'
+import claude from '../models/fixtures/claude.json'
+import codex from '../models/fixtures/codex.json'
+import hermes from '../models/fixtures/hermes.json'
+import opencode from '../models/fixtures/opencode.json'
+import type { ModelCatalog } from '../models/tiers'
 import { appendToRole, canUseTeamBus, checkup, jobFor, LONG_WORDS, type CheckupFinding, type CheckupInput } from './checkup'
 import { templateTeamYaml } from './templates'
 import type { AgentConfig, TeamDocument } from './types'
@@ -25,8 +31,11 @@ function run(input: Partial<CheckupInput> & Pick<CheckupInput, 'agents'>) {
 
 const rules = (findings: ReturnType<typeof checkup>) => findings.map((finding) => `${finding.rule}:${finding.agentIds.join('+')}`)
 
+// As the apps listed their models on 2026-10-15 (lib/models/fixtures).
+const CATALOGS: Record<string, ModelCatalog> = { claude, codex, opencode, hermes }
+
 describe('checkup', () => {
-  it('finds nothing to improve in the starter teams', () => {
+  it('finds nothing to improve in the starter teams, on every app’s own model list', () => {
     const harness = { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/x', spawn: { cmd: 'claude-agent-acp', args: [] } } as DetectedHarness
     for (const template of ['single', 'research-write', 'research-write-check', 'research-review-write'] as const) {
       const doc = parse(templateTeamYaml(template, 'Starter', harness, 'm')) as TeamDocument
@@ -35,6 +44,53 @@ describe('checkup', () => {
       const terminal = edges.length ? edges.find((edge) => !edges.some((other) => other.from === edge.to))?.to ?? null : doc.entrypoint
       const responder = doc.agents.find((agent) => agent.id === terminal)?.checks ?? terminal
       expect(rules(run({ agents: doc.agents, edges, entrypoint: doc.entrypoint, responder })), template).toEqual([])
+      for (const [app, catalog] of Object.entries(CATALOGS)) {
+        const tiered = parse(templateTeamYaml(template, 'Starter', harness, catalog.currentModelId ?? '', undefined, undefined, catalog)) as TeamDocument
+        expect(rules(run({ agents: tiered.agents, edges, entrypoint: tiered.entrypoint, responder, catalogFor: () => catalog })), `${template} on ${app}`).toEqual([])
+      }
+    }
+  })
+
+  it('suggests the fast tier for a gatherer on the strong one, with its share of the team’s tokens', () => {
+    const team = (model: string, extra: Partial<AgentConfig> = {}) => [agent('researcher', preset('researcher'), { model, ...extra }), agent('writer', preset('writer'), { model })]
+    const edges = [{ from: 'researcher', to: 'writer' }]
+    const usage = { runs: 3, perRun: 90_000, agents: [{ id: 'writer', name: 'Writer', perRun: 53_000, share: 0.59, opening: null }, { id: 'researcher', name: 'Researcher', perRun: 37_000, share: 0.41, opening: null }] }
+    const [finding, ...others] = run({ agents: team('sonnet'), edges, catalogFor: () => claude, usage })
+    expect(others).toEqual([])
+    expect(finding).toMatchObject({
+      rule: 'strong-gatherer', severity: 'improve', agentId: 'researcher', title: 'Researcher could gather on Haiku 4.5',
+      fix: { label: 'Use Haiku 4.5', change: { kind: 'model', agentId: 'researcher', model: 'haiku' } },
+    })
+    expect(finding.why).toBe('It collects facts for Writer to write up. A faster model does that well, and leaves Sonnet 5.5 for the step that writes the answer. In the last 3 runs it used 41% of the team’s tokens.')
+    // Before any run it says so without a figure: facts from runs only.
+    expect(run({ agents: team('sonnet'), edges, catalogFor: () => claude })[0].why).not.toContain('%')
+
+    // Codex lists no mini; it calls one model fast and affordable.
+    expect(run({ agents: team('gpt-6.1-sol'), edges, catalogFor: () => codex })[0].fix?.change).toEqual({ kind: 'model', agentId: 'researcher', model: 'gpt-6-luna' })
+    // Where the current model is already the smallest, the fast tier is less thinking.
+    const haiku = { ...claude, currentModelId: 'haiku' }
+    expect(run({ agents: team('haiku'), edges, catalogFor: () => haiku })[0]).toMatchObject({ title: 'Researcher could gather at medium effort', fix: { label: 'Use medium effort', change: { kind: 'model', model: 'haiku', thinkingEffort: 'medium' } } })
+    expect(run({ agents: team('haiku', { thinkingEffort: 'low' }), edges, catalogFor: () => haiku })).toEqual([])
+  })
+
+  it('leaves alone a gatherer whose reply is the answer, one it cannot judge, and one with nothing faster', () => {
+    const researcher = agent('researcher', preset('researcher'), { model: 'sonnet' })
+    expect(run({ agents: [researcher], catalogFor: () => claude })).toEqual([])
+    expect(run({ agents: [researcher, agent('writer', preset('writer'), { model: 'sonnet' })], edges: [{ from: 'researcher', to: 'writer' }] })).toEqual([])
+    const pickle = [agent('researcher', preset('researcher'), { model: 'opencode/big-pickle' }), agent('writer', preset('writer'), { model: 'opencode/big-pickle' })]
+    expect(run({ agents: pickle, edges: [{ from: 'researcher', to: 'writer' }], catalogFor: () => opencode })).toEqual([])
+    // The writer on the strong tier is where it belongs.
+    expect(run({ agents: [agent('researcher', preset('researcher'), { model: 'haiku' }), agent('writer', preset('writer'), { model: 'sonnet' })], edges: [{ from: 'researcher', to: 'writer' }], catalogFor: () => claude })).toEqual([])
+  })
+
+  it('stays silent on every built-in job as the canvas places it, on every app', () => {
+    for (const [app, catalog] of Object.entries(CATALOGS)) {
+      const placed = ROLE_PRESETS.map((job) => agent(job.id, job.role, { ...modelForRole(job.role, catalog) }))
+      const edges = placed.filter((one) => one.id !== 'researcher').map((one) => ({ from: 'researcher', to: one.id }))
+      for (const responder of placed.filter((one) => one.id !== 'researcher').map((one) => one.id)) {
+        const findings = checkup({ agents: placed, edges, entrypoint: 'researcher', responder, catalogFor: () => catalog })
+        expect(findings.filter((finding) => finding.rule === 'strong-gatherer').map((finding) => finding.id), `${app} → ${responder}`).toEqual([])
+      }
     }
   })
 
@@ -133,6 +189,7 @@ function applyFix(agents: readonly AgentConfig[], finding: CheckupFinding): Agen
     if (change.kind === 'allow') return { ...one, allow: { ...one.allow, [change.key]: true } }
     if (change.kind === 'append-role') return { ...one, role: appendToRole(one.role, change.text) }
     if (change.kind === 'effort') return { ...one, thinkingEffort: change.value }
+    if (change.kind === 'model') return { ...one, model: change.model, thinkingEffort: change.thinkingEffort }
     return { ...one, role: change.text, ...(change.allow ? { allow: { ...one.allow, ...change.allow } } : {}) }
   })
 }
@@ -153,6 +210,13 @@ describe('checkup fixes', () => {
       { agents: [agent('writer', preset('writer')), agent('reviewer', preset('reviewer'))], edges: [{ from: 'writer', to: 'reviewer' }] },
       { agents: [agent('researcher', preset('researcher')), agent('coder', preset('coder'), { allow: { edits: true, commands: true } })], edges: [{ from: 'researcher', to: 'coder' }] },
       { agents: [agent('writer', `${preset('writer')}\nIMPORTANT: NEVER skip a source.`, { thinkingEffort: 'max' })] },
+      // A gatherer on the strong tier: a faster model, or the same model thinking less, by app.
+      ...Object.values(CATALOGS).map((catalog) => ({
+        agents: [agent('researcher', preset('researcher'), { model: catalog.currentModelId, thinkingEffort: 'max' }), agent('writer', preset('writer'), { model: catalog.currentModelId })],
+        edges: [{ from: 'researcher', to: 'writer' }],
+        catalogFor: () => catalog,
+      })),
+      { agents: [agent('researcher', preset('researcher'), { model: 'haiku' }), agent('writer', preset('writer'), { model: 'haiku' })], edges: [{ from: 'researcher', to: 'writer' }], catalogFor: () => ({ ...claude, currentModelId: 'haiku' }) },
     ]
     let fixed = 0
     for (const scenario of scenarios) {

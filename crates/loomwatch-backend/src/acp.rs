@@ -1019,6 +1019,12 @@ impl AcpProcess {
     /// negotiation and must stay in this order — the effort option's id can appear for the first
     /// time in the *response* to setting the model, which is why `updated_options` is consulted
     /// before the `session/new` result.
+    ///
+    /// When that response lists the options at all, it is the only list that counts: they belong
+    /// to the model now set, and an effort missing from them means this model has none (Claude's
+    /// Haiku 4.5). The `session/new` effort belonged to the model the session started on, and the
+    /// app rejects it ("Unknown config option: effort"), which used to fail the whole run. Only a
+    /// response without its options falls back to `session/new`'s.
     async fn configure_thinking_effort(
         &mut self,
         effort: &str,
@@ -1026,9 +1032,10 @@ impl AcpProcess {
         negotiated: &NegotiatedSession,
         recorder: &mut Recorder,
     ) -> Result<()> {
-        let effort_config_id = updated_options
-            .and_then(find_effort_config_id)
-            .or_else(|| find_effort_config_id(&negotiated.created.result));
+        let effort_config_id = match updated_options {
+            Some(options) => find_effort_config_id(options),
+            None => find_effort_config_id(&negotiated.created.result),
+        };
         let Some(config_id) = effort_config_id else {
             recorder
                 .append(
@@ -1036,7 +1043,11 @@ impl AcpProcess {
                     json!({
                         "phase": "set_thinking_effort_skipped",
                         "value": effort,
-                        "reason": "harness did not advertise a reasoning-effort config option"
+                        "reason": if updated_options.is_some() {
+                            "the model set has no reasoning-effort config option"
+                        } else {
+                            "harness did not advertise a reasoning-effort config option"
+                        }
                     }),
                     Some(json!({
                         "source": "loomwatch",
@@ -3718,6 +3729,176 @@ mod tests {
             .expect("set_model metadata");
         assert_eq!(configured.payload["value"], "vendor/deep");
         assert_eq!(configured.raw.as_ref().unwrap()["id"], 3);
+    }
+
+    /// ADR 0057 decision 6: model and effort are set once, when the session opens, and a later
+    /// turn of the same session (a send-back, a note, an `ask`) reuses them as they were. Providers
+    /// cache prompts per model, so a switch mid-session would re-read the whole context uncached.
+    /// The fake app exits 9, failing the turn, on any model or config change after a prompt.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn model_and_effort_are_fixed_when_the_session_opens(pool: PgPool) {
+        let script = r#"
+            set -eu
+            n=0
+            prompted=0
+            while IFS= read -r request; do
+              n=$((n + 1))
+              case "$request" in
+                *'"method":"initialize"'*)
+                  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$n,\"result\":{\"protocolVersion\":1}}" ;;
+                *'"method":"session/new"'*)
+                  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$n,\"result\":{\"sessionId\":\"fixed-per-session\",\"configOptions\":[{\"id\":\"model\",\"type\":\"select\",\"currentValue\":\"vendor/deep\",\"options\":[{\"value\":\"vendor/deep\",\"name\":\"Deep\"},{\"value\":\"vendor/fast\",\"name\":\"Fast\"}]},{\"id\":\"reasoning_effort\",\"type\":\"select\",\"currentValue\":\"high\",\"options\":[{\"value\":\"low\",\"name\":\"Low\"},{\"value\":\"medium\",\"name\":\"Medium\"},{\"value\":\"high\",\"name\":\"High\"}]}]}}" ;;
+                *'"method":"session/set_model"'*|*'"method":"session/set_config_option"'*|*'"method":"session/set_mode"'*)
+                  if [ "$prompted" -ne 0 ]; then exit 9; fi
+                  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$n,\"result\":{}}" ;;
+                *'"method":"session/prompt"'*)
+                  prompted=$((prompted + 1))
+                  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"fixed-per-session\",\"update\":{\"sessionUpdate\":\"agent_message_chunk\",\"messageId\":\"m$prompted\",\"content\":{\"type\":\"text\",\"text\":\"turn $prompted\"}}}}"
+                  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$n,\"result\":{\"stopReason\":\"end_turn\"}}" ;;
+                *'"method":"session/close"'*)
+                  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$n,\"result\":{}}"
+                  exit 0 ;;
+                *) exit 8 ;;
+              esac
+            done
+        "#;
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        };
+        let archive = EventArchive::from_pool(pool);
+        let mut process = AcpProcess::spawn(&spec).expect("spawn");
+        let mut context = TeamSessionContext {
+            archive: &archive,
+            exit_timeout: Duration::from_secs(2),
+            bus: None,
+            event_log: None,
+            packet: None,
+            composed: None,
+            boundary: None,
+        };
+        let mut recorder = process
+            .open_live("gatherer", "vendor/fast[medium]", &mut context)
+            .await
+            .expect("open");
+        let first = process
+            .prompt_turn(&mut recorder, "gather the facts")
+            .await
+            .expect("first turn");
+        let second = process
+            .prompt_turn(&mut recorder, "the writer sent this back: add a source")
+            .await
+            .expect("a later turn reuses the session as it was opened");
+        assert_eq!((first.as_str(), second.as_str()), ("turn 1", "turn 2"));
+        process
+            .finish_live(&mut recorder, second, &context)
+            .await
+            .expect("finish");
+
+        let events = archive
+            .load_session("fixed-per-session")
+            .await
+            .expect("events");
+        let first_prompt = events
+            .iter()
+            .find(|event| event.payload["role"] == "user")
+            .expect("prompt")
+            .seq;
+        let configured: Vec<(&str, &str, u64)> = events
+            .iter()
+            .filter_map(|event| {
+                let phase = event.payload["phase"].as_str()?;
+                matches!(
+                    phase,
+                    "set_config_option" | "set_thinking_effort" | "set_model"
+                )
+                .then(|| {
+                    (
+                        phase,
+                        event.payload["value"].as_str().unwrap_or(""),
+                        event.seq,
+                    )
+                })
+            })
+            .collect();
+        assert_eq!(
+            configured
+                .iter()
+                .map(|(phase, value, _)| (*phase, *value))
+                .collect::<Vec<_>>(),
+            vec![
+                ("set_config_option", "vendor/fast"),
+                ("set_thinking_effort", "medium")
+            ]
+        );
+        assert!(configured.iter().all(|(_, _, seq)| *seq < first_prompt));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.kind == EventKind::TurnEnd)
+                .count(),
+            2
+        );
+    }
+
+    /// A model with no effort of its own (Claude's Haiku 4.5) runs at its default, and the run goes
+    /// on: the app's answer to the model switch lists that model's options without an effort, so
+    /// the effort the session started with is never sent. The fake app exits 9 if it is.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn an_effort_the_set_model_does_not_offer_is_skipped_not_sent(pool: PgPool) {
+        let script = r#"
+            set -eu
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"no-effort","configOptions":[{"id":"model","type":"select","currentValue":"sonnet","options":[{"value":"sonnet","name":"Sonnet"},{"value":"haiku","name":"Haiku"}]},{"id":"effort","type":"select","currentValue":"xhigh","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"xhigh","name":"Xhigh"}]}]}}'
+            IFS= read -r request
+            case "$request" in *'"configId":"model"'*'"value":"haiku"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"configOptions":[{"id":"model","type":"select","currentValue":"haiku","options":[{"value":"sonnet","name":"Sonnet"},{"value":"haiku","name":"Haiku"}]}]}}'
+            IFS= read -r request
+            case "$request" in *'"method":"session/prompt"'*) ;; *) exit 9 ;; esac
+            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
+            IFS= read -r _
+            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
+        "#;
+        let spec = ProcessSpec {
+            cmd: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            env: BTreeMap::new(),
+            cwd: std::env::current_dir().expect("cwd"),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        };
+        let archive = EventArchive::from_pool(pool);
+        let mut process = AcpProcess::spawn(&spec).expect("spawn");
+        let outcome = process
+            .run_session(
+                "gatherer",
+                "haiku[medium]",
+                "gather",
+                &archive,
+                Duration::from_secs(2),
+            )
+            .await
+            .expect("the run goes on at the model's default effort");
+        assert_eq!(outcome.exit_code, 0);
+
+        let events = archive.load_session("no-effort").await.expect("events");
+        let skipped = events
+            .iter()
+            .find(|event| event.payload["phase"] == "set_thinking_effort_skipped")
+            .expect("the skip is recorded");
+        assert_eq!(skipped.payload["value"], "medium");
+        assert_eq!(
+            skipped.payload["reason"],
+            "the model set has no reasoning-effort config option"
+        );
     }
 
     /// ADR 0037: a run agent's app is moved to its ask-first mode before the prompt, and what it

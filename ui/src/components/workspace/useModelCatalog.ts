@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { fetchHarnessModels, type HarnessModels } from '../../lib/harnesses'
-import { jobEffort } from '../../lib/library/effort'
+import { modelForRole } from '../../lib/library/jobModel'
 
 type CatalogRead = Omit<HarnessModels, 'harnessId'> & { error: string | null }
 
@@ -12,7 +12,7 @@ interface ModelCatalogInput {
   agentId: string | null
   /** The inspected agent is not the operator and has no model yet. */
   agentNeedsModel: boolean
-  /** Its instructions, so a built-in job placed just now gets its job's effort with the model. */
+  /** Its instructions, so a built-in job placed just now gets its job's model tier and effort. */
   agentRole?: string
   editable: boolean
   /** Writes the model, and the effort when there is one, as one edit. */
@@ -60,12 +60,13 @@ export function useModelCatalog({ harnessId, agentId, agentNeedsModel, agentRole
   // A newly placed agent has no model, and an empty model blocks the run behind a "Required" field
   // the operator did not know to look for. Once this harness's catalog is in hand, adopt the model
   // the harness itself would use — its current model — so the agent can run as soon as it is placed.
-  // A built-in job also gets the effort its job needs, from what that model lists (ADR 0062).
+  // A built-in job gets its tier's model instead (ADR 0057), at the effort its job needs on that
+  // model (ADR 0062).
   useEffect(() => {
     if (!editable || !agentId || !agentNeedsModel) return
     if (catalog.harnessId !== harnessId || catalog.error) return
-    const model = catalog.currentModelId ?? catalog.models[0]?.id
-    if (model) updateAgentModel(agentId, model, jobEffort(agentRole, catalog.models.find((entry) => entry.id === model)))
+    const choice = modelForRole(agentRole, catalog)
+    if (choice) updateAgentModel(agentId, choice.model, choice.thinkingEffort)
   }, [editable, agentId, agentNeedsModel, agentRole, harnessId, catalog, updateAgentModel])
 
   const retry = useCallback(() => {
