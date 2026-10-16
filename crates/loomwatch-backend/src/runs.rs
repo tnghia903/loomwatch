@@ -3304,7 +3304,8 @@ async fn answer_run(
         OperatorAnswer {
             text: request.text,
             send_back: request.send_back,
-            answer_event_id: Uuid::new_v4().to_string(),
+            // The id of the `message` event the run is about to archive the answer as.
+            answer_event_id: crate::acp::new_event_id(),
         },
     )
     .await
