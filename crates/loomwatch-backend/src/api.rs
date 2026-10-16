@@ -3932,12 +3932,14 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         assert_eq!(line_count(&directory.0.join("claude.calls")), calls);
     }
 
-    /// A vendor CLI that answers only `status_args`, slowly, with whatever `<itself>.answer`
-    /// holds, so a test can change its answer without changing the program. Each call is counted
-    /// in `<itself>.calls`.
-    fn slow_status_cli(status_args: &str) -> String {
+    /// A vendor CLI that answers only `status_args`, with whatever `<itself>.answer` holds, so a
+    /// test can change its answer without changing the program. Each call is counted in
+    /// `<itself>.calls`. Before answering it waits up to three seconds for `other` to have started
+    /// too, and notes in `<itself>.met` when it has: two that run side by side always meet, two
+    /// run one after another never do, however busy the computer is.
+    fn meeting_status_cli(status_args: &str, other: &str) -> String {
         format!(
-            "#!/bin/sh\n[ \"$1 $2\" = '{status_args}' ] || exit 64\nsleep 0.5\nprintf 'status\\n' >> \"$0.calls\"\ncat \"$0.answer\"\n"
+            "#!/bin/sh\n[ \"$1 $2\" = '{status_args}' ] || exit 64\nprintf 'status\\n' >> \"$0.calls\"\n: > \"$0.started\"\nother=\"$(dirname \"$0\")/{other}.started\"\ni=0\nwhile [ ! -e \"$other\" ] && [ $i -lt 30 ]; do sleep 0.1; i=$((i+1)); done\nif [ -e \"$other\" ]; then printf 'met\\n' >> \"$0.met\"; fi\ncat \"$0.answer\"\n"
         )
     }
 
@@ -3948,13 +3950,21 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
     #[tokio::test]
     async fn the_list_asks_every_app_at_once_and_reuses_only_a_signed_in_answer() {
         let directory = TempDirectory::new();
-        create_executable_with_contents(&directory.0, "claude", &slow_status_cli("auth status"));
+        create_executable_with_contents(
+            &directory.0,
+            "claude",
+            &meeting_status_cli("auth status", "codex"),
+        );
         create_executable_with_contents(
             &directory.0,
             "claude-agent-acp",
             SESSION_OPENING_CLAUDE_BRIDGE,
         );
-        create_executable_with_contents(&directory.0, "codex", &slow_status_cli("login status"));
+        create_executable_with_contents(
+            &directory.0,
+            "codex",
+            &meeting_status_cli("login status", "claude"),
+        );
         create_executable_with_contents(&directory.0, "codex-acp", "#!/bin/sh\nexit 1\n");
         let answer = |app: &str, text: &str| {
             fs::write(directory.0.join(format!("{app}.answer")), text).expect("write answer");
@@ -3968,21 +3978,17 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         let search_path = std::env::join_paths([&directory.0]).expect("join search path");
         let router = test_router_with_path(&directory.0, Some(search_path));
 
-        // Each command takes half a second: one after another would take a whole one.
-        let started = Instant::now();
         let (_, report) = get_json(&router, "/api/harnesses").await;
-        let took = started.elapsed();
-        assert!(took < Duration::from_millis(900), "listing took {took:?}");
         assert!(
             listed(&report, "claude").get("health").is_none(),
             "{report}"
         );
         assert!(listed(&report, "codex").get("health").is_none(), "{report}");
         assert_eq!((calls("claude"), calls("codex")), (1, 1));
+        let met = |app: &str| line_count(&directory.0.join(format!("{app}.met")));
+        assert_eq!((met("claude"), met("codex")), (1, 1), "asked one at a time");
 
-        let started = Instant::now();
         get_json(&router, "/api/harnesses").await;
-        assert!(started.elapsed() < Duration::from_millis(400));
         assert_eq!((calls("claude"), calls("codex")), (1, 1), "asked again");
 
         // Signed out behind the list's back, then checked: the list stops saying signed in.
