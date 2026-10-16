@@ -354,8 +354,13 @@ export async function runScheduleNow(teamPath: string): Promise<RunRecord> {
   return readRun<RunRecord>(response)
 }
 
+/**
+ * Every run the daemon knows, newest first, each `reply` cut to its opening: replies are nearly all
+ * of a long history's bytes and the list is read every few seconds. A run's whole reply is at
+ * [`fetchRun`].
+ */
 export async function fetchRuns(signal?: AbortSignal): Promise<RunRecord[]> {
-  const response = await daemonFetch('/api/runs', { signal, cache: 'no-store' })
+  const response = await daemonFetch('/api/runs?preview=true', { signal, cache: 'no-store' })
   return readRun<RunRecord[]>(response)
 }
 

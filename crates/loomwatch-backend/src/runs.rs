@@ -3119,6 +3119,21 @@ fn classify_failure_code(
 #[serde(rename_all = "camelCase")]
 struct RunsQuery {
     start_key: Option<String>,
+    /// `preview=true` cuts each reply to its opening ([`REPLY_PREVIEW_CHARS`]), which is all a
+    /// list shows: replies are nearly all of a long history's bytes, and the browser reads the
+    /// list every few seconds. The whole reply stays at `GET /api/runs/{id}`.
+    #[serde(default)]
+    preview: bool,
+}
+
+/// How much of each reply `GET /api/runs?preview=true` keeps, in characters.
+const REPLY_PREVIEW_CHARS: usize = 400;
+
+/// `reply` cut to its first [`REPLY_PREVIEW_CHARS`] characters.
+fn reply_preview(reply: &mut String) {
+    if let Some((end, _)) = reply.char_indices().nth(REPLY_PREVIEW_CHARS) {
+        reply.truncate(end);
+    }
 }
 
 async fn list_runs(
@@ -3143,7 +3158,13 @@ async fn list_runs(
                 )
             });
     }
-    Ok(Json(state.registry.list()).into_response())
+    let mut runs = state.registry.list();
+    if query.preview {
+        runs.iter_mut()
+            .filter_map(|run| run.reply.as_mut())
+            .for_each(reply_preview);
+    }
+    Ok(Json(runs).into_response())
 }
 
 async fn get_run(
@@ -5036,6 +5057,17 @@ exit 7
         );
     }
 
+    /// A list's preview keeps a reply's opening whole characters, and leaves a short one alone.
+    #[test]
+    fn a_reply_preview_keeps_the_opening_characters() {
+        let mut long = "é".repeat(REPLY_PREVIEW_CHARS + 50);
+        reply_preview(&mut long);
+        assert_eq!(long.chars().count(), REPLY_PREVIEW_CHARS);
+        let mut short = "done".to_owned();
+        reply_preview(&mut short);
+        assert_eq!(short, "done");
+    }
+
     /// What a finished run reads back from the archive, now asked of a few events instead of the
     /// whole run, is what the scan backwards through every event found: the newest `process`
     /// marker that has an exit code (a signal leaves none), the responder's own last `turn_end`,
@@ -5605,6 +5637,18 @@ exit 7
         let listed = json_body(app.clone().oneshot(get_local("/api/runs")).await.unwrap()).await;
         assert_eq!(listed[0]["runId"], accepted.run_id);
         assert_eq!(listed[0]["status"], "succeeded");
+        assert_eq!(listed[0]["reply"], "done");
+        let previewed = json_body(
+            app.clone()
+                .oneshot(get_local("/api/runs?preview=true"))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            previewed[0]["reply"], "done",
+            "a short reply is its own preview"
+        );
         let fetched = json_body(
             app.oneshot(get_local(&format!("/api/runs/{}", accepted.run_id)))
                 .await

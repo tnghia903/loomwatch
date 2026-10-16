@@ -318,17 +318,17 @@ describe('Home and the getting-started guide', () => {
   const demoTeam = { root: '/teams', files: ['operator-stop.yaml'], teams: [{ path: 'operator-stop.yaml', name: 'Review stop demo', agentCount: 3, modifiedAt: null }] }
 
   it('offers the guide to someone who has never run a team, though the demo team is there', async () => {
-    fetchMock.mockImplementation((url: string) => respond(url === '/api/runs' ? [] : demoTeam))
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/runs?preview=true' ? [] : demoTeam))
     renderHome()
     await screen.findByText('Review stop demo')
     await waitFor(() => expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' }))
   })
 
   it('leaves someone who has run a team alone, but lets them start it', async () => {
-    fetchMock.mockImplementation((url: string) => respond(url === '/api/runs' ? [{ runId: 'run-1', teamPath: 'operator-stop.yaml', status: 'succeeded' }] : demoTeam))
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/runs?preview=true' ? [{ runId: 'run-1', teamPath: 'operator-stop.yaml', status: 'succeeded' }] : demoTeam))
     renderHome()
     await screen.findByText('Review stop demo')
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/runs')).toBe(true))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/runs?preview=true')).toBe(true))
     expect(readTourState()).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /Take the 3-minute guide/ }))
     expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' })
