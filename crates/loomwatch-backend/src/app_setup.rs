@@ -157,6 +157,18 @@ impl Jobs {
             .flatten()
     }
 
+    /// Whether `app` has had a sign-in or install running, or finishing, since `since`, however
+    /// it went: what the app's own sign-in status said before then may no longer be so.
+    #[must_use]
+    pub fn changed_since(&self, app: &str, since: Instant) -> bool {
+        let Some(job) = self.lock().get(app).cloned() else {
+            return false;
+        };
+        lock(&job)
+            .finished_at
+            .is_none_or(|finished| finished >= since)
+    }
+
     /// Start `app`'s own sign-in with its program at `executable`. A sign-in already running is
     /// left to finish and reported instead of being started twice (Codex's waits on a fixed port).
     ///

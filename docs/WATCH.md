@@ -123,10 +123,17 @@ These are legacy **session** endpoints, separate from the proposed immutable **r
 | `GET /api/session/events?session=ID&afterSeq=-1&limit=200` | Ordered array of exact `RunEvent`s; exclusive cursor, limit 1–500 |
 | `GET /api/session/stream?session=ID&afterSeq=-1` | WebSocket, one unwrapped `RunEvent` per text frame |
 
+Both take `lean=true`, which leaves out each event's `raw` frame except on `message`,
+`session_meta` and `turn_end` events, the only ones whose frame the browser reads; without it
+every frame is sent. On a long run the frames of tool output are most of the trace.
+
 A session with no matching events returns an empty page; its stream can wait for future
-archive entries. The server reads the archive every 500 ms after catching up; each read first
-flushes the batching writer, so it sees every event appended before it. Database failure closes
-the stream; the client retries with bounded backoff and archive recovery.
+archive entries. A page read first flushes the batching writer, so it sees every event appended
+before it. After catching up, the stream waits for the writer to commit a batch and sends what it
+committed (within the writer's 100 ms window), with a 30 s re-read as a safety net; it never makes
+the writer commit early. Database failure closes the stream; the client retries with bounded
+backoff and archive recovery. The browser opens one read and one stream per session however many
+views show it, and none for a finished run once its recorded `eventCount` has arrived.
 All evidence routes validate loopback Host and same-origin Origin/Fetch Metadata headers,
 return no CORS grants, and disable HTTP caching. The service worker never caches API data.
 
@@ -146,7 +153,7 @@ always has its archive; a router built without one (tests) answers 503.
 | Route | Result |
 |---|---|
 | `POST /api/runs` | Start a run; `202 Accepted` with the run record |
-| `GET /api/runs` | Every run since the daemon started, newest first |
+| `GET /api/runs` | Every run since the daemon started, newest first; `?preview=true` cuts each `reply` to its first 400 characters, which is what the browser's lists read |
 | `GET /api/runs/{id}` | One run record, or 404 |
 | `POST /api/runs/{id}/cancel` | Abort a live run: 200 with the record; 409 with the record when it already finished; 404 when unknown |
 

@@ -13,7 +13,10 @@ export type ViewMode = 'live' | 'replay'
  */
 export function useRunSession(runId: string | null, responder: string | null) {
   const { record, missing, apply: applyRecord } = useRunRecord(runId)
-  const { events, error, connected, loading } = useSessionEvents(runId ?? '')
+  // A finished run's evidence is all in the archive: it is followed live only until the count it
+  // recorded has arrived, and a run the daemon no longer knows is not followed at all.
+  const finalCount = missing ? 0 : record && isTerminalRun(record.status) ? record.eventCount ?? 0 : null
+  const { events, error, connected, loading } = useSessionEvents(runId ?? '', finalCount)
   const [cursor, setCursorState] = useState<number | null>(null)
   const previousRun = useRef(runId)
 
@@ -34,7 +37,10 @@ export function useRunSession(runId: string | null, responder: string | null) {
     : missing
   const context = useMemo(() => ({ responder: record?.responder ?? responder, status: record?.status ?? null, error: record?.error ?? null, evidenceComplete }), [responder, record?.responder, record?.status, record?.error, evidenceComplete])
   const projection: RunProjection = useMemo(() => projectRun(events, through, context), [events, through, context])
-  const latest: RunProjection = useMemo(() => (cursor === null ? projection : projectRun(events, Infinity, context)), [cursor, projection, events, context])
+  // The newest state does not move with the replay cursor, so dragging it projects once per step.
+  const replaying = cursor !== null
+  const whole: RunProjection | null = useMemo(() => (replaying ? projectRun(events, Infinity, context) : null), [replaying, events, context])
+  const latest: RunProjection = whole ?? projection
 
   const registryTerminal = isTerminalRun(record?.status)
   const eventsTerminal = ['succeeded', 'partial', 'failed', 'cancelled'].includes(latest.phase)

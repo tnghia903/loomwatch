@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
 import { LESSON_RUNS, lessonRun, type LessonRun } from '../../lib/team-file/runLessons'
 import { appendEvents, parseEvents, projectRun, type RunEvent } from '../../lib/watch/events'
-import { readArchive } from '../../lib/watch/useSessionEvents'
+import { eventsQuery, readArchive } from '../../lib/watch/useSessionEvents'
 import { sameTeamFile } from '../ask/useAskActions'
 
 /** A finished run never changes, so each is read and projected once per page load. */
@@ -15,9 +15,11 @@ const PAGE = 500
 const POLL_MS = 30_000
 
 async function readRun(record: RunRecord): Promise<LessonRun | null> {
+  // The record counts a finished run's events, so a run too long to read is known before reading.
+  if (record.eventCount !== null && record.eventCount > MAX_EVENTS) return null
   let events: RunEvent[] = []
   while (events.length < MAX_EVENTS) {
-    const query = new URLSearchParams({ session: record.sessionId, afterSeq: String(events.at(-1)?.seq ?? -1), limit: String(PAGE) })
+    const query = eventsQuery(record.sessionId, events.at(-1)?.seq ?? -1, PAGE)
     const page = parseEvents(await readArchive(`/api/session/events?${query}`))
     events = appendEvents(events, page, record.sessionId)
     if (page.length < PAGE) return lessonRun(record, projectRun(events, Infinity, { responder: record.responder, status: record.status }), events)

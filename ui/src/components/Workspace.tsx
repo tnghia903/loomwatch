@@ -1032,8 +1032,10 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   // CONTRACT §4: only the canonical responder's reply is the answer; other agents' messages
   // are evidence. The fallback exists solely for archived sessions whose team is unknown.
   const responderAgent = projection.agents.find((agent) => agent.id === responderId) ?? (responderId ? undefined : [...projection.agents].reverse().find((agent) => agent.reply))
-  const responseText = session.cursor === null && record?.reply != null
-    ? recordedReplyText(session.events, responderId, record.reply) : responderAgent?.reply ?? ''
+  // It walks every event, so it is worked out again only when they or the saved reply change.
+  const recordedReply = record?.reply ?? null
+  const recordedText = useMemo(() => (recordedReply != null ? recordedReplyText(session.events, responderId, recordedReply) : null), [session.events, responderId, recordedReply])
+  const responseText = session.cursor === null && recordedText != null ? recordedText : responderAgent?.reply ?? ''
   const phase: RunPhase = projection.phase
   const live = session.mode === 'live'
   const attempt = useMemo(() => {

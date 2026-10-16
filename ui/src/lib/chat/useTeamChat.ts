@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { keepIfSame } from '../keepIfSame'
 import { isTerminalRun, RunApiError, type RunRecord } from '../runs/client'
 import { fetchChatPage, itemAt, itemKey, type ChatItem, type ChatMessage, type ChatTarget, type SendResult } from './client'
 
@@ -76,9 +77,20 @@ export function useTeamChat(teamPath: string | null) {
         if (cancelled) return
         setState((previous) => {
           if (previous.teamPath !== teamPath) return previous
+          // An item that reads as it did keeps its object, so its piece is not drawn again; a page
+          // with nothing new leaves the chat as it was.
+          let changed = false
           const byKey = new Map(previous.byKey)
-          for (const item of page.items) byKey.set(itemKey(item), item)
-          return { ...previous, byKey, loaded: true, error: null, more: previous.loaded ? previous.more : page.more, relativePath: page.teamPath }
+          for (const item of page.items) {
+            const key = itemKey(item)
+            const before = byKey.get(key)
+            if (before && keepIfSame(before, item) === before) continue
+            byKey.set(key, item)
+            changed = true
+          }
+          const more = previous.loaded ? previous.more : page.more
+          if (!changed && previous.loaded && previous.error === null && previous.more === more && previous.relativePath === page.teamPath) return previous
+          return { ...previous, byKey: changed ? byKey : previous.byKey, loaded: true, error: null, more, relativePath: page.teamPath }
         })
       } catch (caught) {
         if (cancelled || (caught instanceof DOMException && caught.name === 'AbortError')) return

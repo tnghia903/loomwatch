@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
+import { keepIfSame } from '../keepIfSame'
 
 export type RunStatus = 'queued' | 'starting' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 export type RunTrigger = 'manual' | 'schedule'
@@ -353,8 +354,13 @@ export async function runScheduleNow(teamPath: string): Promise<RunRecord> {
   return readRun<RunRecord>(response)
 }
 
+/**
+ * Every run the daemon knows, newest first, each `reply` cut to its opening: replies are nearly all
+ * of a long history's bytes and the list is read every few seconds. A run's whole reply is at
+ * [`fetchRun`].
+ */
 export async function fetchRuns(signal?: AbortSignal): Promise<RunRecord[]> {
-  const response = await daemonFetch('/api/runs', { signal, cache: 'no-store' })
+  const response = await daemonFetch('/api/runs?preview=true', { signal, cache: 'no-store' })
   return readRun<RunRecord[]>(response)
 }
 
@@ -375,7 +381,11 @@ export function useRunRecord(runId: string | null) {
       try {
         const next = await fetchRun(runId!, controller.signal)
         if (controller.signal.aborted) return
-        setState({ runId, record: next, error: null, missing: false })
+        // A live run is read every second; a record that did not change keeps its object, so
+        // nothing that depends on it works again for the same answer.
+        setState((previous) => (previous.runId === runId && !previous.error && !previous.missing && previous.record && keepIfSame(previous.record, next) === previous.record
+          ? previous
+          : { runId, record: next, error: null, missing: false }))
         if (!isTerminalRun(next.status)) timer = setTimeout(() => void tick(), 1000)
       } catch (caught) {
         if (controller.signal.aborted) return

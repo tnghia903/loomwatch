@@ -263,7 +263,7 @@ describe('Update and restart', () => {
 
   it('asks first, naming the teams at work that updating stops', async () => {
     const dialog = await openOn(supervised)
-    routes['GET /api/runs'] = () => json([run('r1', 'trips/japan.yaml', 'running'), run('r2', 'digest.yaml', 'succeeded')])
+    routes['GET /api/runs?preview=true'] = () => json([run('r1', 'trips/japan.yaml', 'running'), run('r2', 'digest.yaml', 'succeeded')])
     routes['GET /api/teams'] = () => json({ root: '/teams', files: ['trips/japan.yaml', 'digest.yaml'], teams: [{ path: 'trips/japan.yaml', name: 'Japan trip', agentCount: 2 }] })
     routes['POST /api/updates/install'] = () => json({ from: '0.1.5', to: '0.1.6', startedAt: OLD_START, stoppedRuns: 1 }, 202)
     routes['GET /api/about'] = () => about('0.1.5', OLD_START)
@@ -288,7 +288,7 @@ describe('Update and restart', () => {
 
   it('names a team that started working after the question, and asks again', async () => {
     const dialog = await openOn(supervised)
-    routes['GET /api/runs'] = () => json([])
+    routes['GET /api/runs?preview=true'] = () => json([])
     routes['POST /api/updates/install'] = () => json({ error: 'A team is working. Updating stops it.', code: 'runs_live', liveRuns: [{ runId: 'r3', teamPath: 'news.yaml', status: 'starting' }] }, 409)
     fireEvent.click(within(dialog).getByRole('button', { name: 'Update and restart' }))
     expect(await within(dialog).findByText(/No team is working/)).toBeInTheDocument()
@@ -302,7 +302,7 @@ describe('Update and restart', () => {
 
   it('waits for LoomWatch to start again and says which version it updated to', async () => {
     const dialog = await openOn(supervised)
-    routes['GET /api/runs'] = () => json([])
+    routes['GET /api/runs?preview=true'] = () => json([])
     routes['POST /api/updates/install'] = () => json({ from: '0.1.5', to: '0.1.6', startedAt: OLD_START, stoppedRuns: 0 }, 202)
     routes['GET /api/about'] = () => about('0.1.6', NEW_START)
     routes['GET /api/updates'] = () => json({ ...upToDate, current: '0.1.6', latest: newer.latest, canInstall: true })
@@ -318,7 +318,7 @@ describe('Update and restart', () => {
 
   it('says why when the launcher started the same version again', async () => {
     const dialog = await openOn(supervised)
-    routes['GET /api/runs'] = () => json([])
+    routes['GET /api/runs?preview=true'] = () => json([])
     routes['POST /api/updates/install'] = () => json({ from: '0.1.5', to: '0.1.6', startedAt: OLD_START, stoppedRuns: 0 }, 202)
     routes['GET /api/about'] = () => about('0.1.5', NEW_START)
     routes['GET /api/updates'] = () => json({ ...supervised, installError: 'the download did not finish, and LoomWatch 0.1.5 was left as it was.' })
@@ -340,7 +340,7 @@ describe('Update and restart', () => {
 
   it('shows a refusal it cannot act on', async () => {
     const dialog = await openOn(supervised)
-    routes['GET /api/runs'] = () => json([])
+    routes['GET /api/runs?preview=true'] = () => json([])
     routes['POST /api/updates/install'] = () => json({ error: 'LoomWatch 0.1.5 is the newest version.', code: 'nothing_newer' }, 409)
     fireEvent.click(within(dialog).getByRole('button', { name: 'Update and restart' }))
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Update and restart' }))

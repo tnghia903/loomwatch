@@ -58,7 +58,7 @@ function daemon(run: RunRecord, file: { yaml: string; revision: string }) {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
-    if (url === '/api/runs') return json([run])
+    if (url === '/api/runs?preview=true') return json([run])
     if (url === `/api/team?${new URLSearchParams({ path: run.teamPath })}`) return json({ path: run.teamPath, ...file })
     if (url === '/api/wardrobe') return json({ earned: wardrobe })
     if (url === '/api/wardrobe/earned') {

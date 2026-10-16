@@ -23,7 +23,7 @@ beforeEach(() => {
   runs = []
   deleteAnswer = () => respond(trashed)
   fetchMock = vi.fn((url: string, init?: RequestInit) => {
-    if (url === '/api/runs') return respond(runs)
+    if (url === '/api/runs?preview=true') return respond(runs)
     if (url === '/api/teams') return respond({ root: '/teams/', files: [] })
     if (url.startsWith('/api/team?') && init?.method === 'DELETE') return deleteAnswer()
     return respond({ error: 'unexpected' }, 404)

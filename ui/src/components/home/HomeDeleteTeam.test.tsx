@@ -44,7 +44,7 @@ describe('Deleting a team from Home', () => {
         ],
         trashed: [],
       })
-      if (url === '/api/runs') return respond([])
+      if (url === '/api/runs?preview=true') return respond([])
       if (url === '/api/team?path=old-desk.yaml' && init?.method === 'DELETE') {
         return respond({ path: 'old-desk.yaml', name: 'Old desk', trash: '.trash/2026-10-01T090000Z-old-desk', moved: ['old-desk.yaml'], deletedAt: '2026-10-01T09:00:00Z' })
       }

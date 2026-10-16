@@ -529,7 +529,7 @@ async fn run_team_mode(
     delegated?;
     shutdown?;
     set_aside_answer_notes(event_log.as_ref(), &agent.id, &mut outcome).await?;
-    outcome.event_count = archive.verify_session(&outcome.session_id).await?.len();
+    outcome.event_count = archive.verify_session(&outcome.session_id).await?;
     if let (Some(turn), Some(run_id)) = (checkpoint_turn.as_ref(), run_id.as_deref()) {
         StageBoundary {
             archive: &archive,
@@ -592,7 +592,7 @@ async fn run_pipeline_mode(
     let mut outcome = run?;
     delegated?;
     shutdown?;
-    outcome.event_count = archive.verify_session(&outcome.session_id).await?.len();
+    outcome.event_count = archive.verify_session(&outcome.session_id).await?;
     Ok(outcome)
 }
 
@@ -3384,7 +3384,7 @@ mod tests {
         )
         .await?;
 
-        let events = archive.verify_session(&outcome.session_id).await?;
+        let events = archive.load_verified_session(&outcome.session_id).await?;
         assert_eq!(
             outcome.reply, "node a done",
             "the configured responder owns the canonical output even when later stages still run"
@@ -3490,7 +3490,7 @@ mod tests {
         )
         .await?;
         assert_eq!(outcome.reply, "draft");
-        let events = archive.verify_session(&outcome.session_id).await?;
+        let events = archive.load_verified_session(&outcome.session_id).await?;
         assert_eq!(outcome.event_count, events.len());
         let notes = events
             .iter()
@@ -3640,7 +3640,7 @@ mod tests {
         .await?;
         // What the writer kept against the check is set aside from the answer it was ending.
         assert_eq!(outcome.reply, "second draft, every claim linked");
-        let events = archive.verify_session(&outcome.session_id).await?;
+        let events = archive.load_verified_session(&outcome.session_id).await?;
         let notes = events
             .iter()
             .find(|event| event.payload["phase"] == "answer_notes")
@@ -3899,7 +3899,7 @@ mod tests {
         )
         .await?;
 
-        let events = archive.verify_session(&outcome.session_id).await?;
+        let events = archive.load_verified_session(&outcome.session_id).await?;
         let spawn_order: Vec<&str> = events
             .iter()
             .filter(|event| event.kind == EventKind::Process && event.payload["phase"] == "spawned")
@@ -4055,7 +4055,7 @@ mod tests {
             "{message}"
         );
 
-        let events = archive.verify_session(session_id).await?;
+        let events = archive.load_verified_session(session_id).await?;
         assert!(
             events.iter().all(|event| event.agent_id == "gatherer"),
             "the reader never started"
@@ -4132,7 +4132,7 @@ mod tests {
 
         assert_eq!(outcome.session_id, session_id);
         assert_eq!(outcome.reply, "node b done");
-        let events = archive.verify_session(session_id).await?;
+        let events = archive.load_verified_session(session_id).await?;
         assert_eq!(outcome.event_count, events.len());
         assert!(
             events.iter().all(|event| event.session_id == session_id),
@@ -4202,7 +4202,7 @@ mod tests {
         .await?;
         assert_eq!(outcome.session_id, "pre-minted-team-run");
         assert_eq!(outcome.reply, "solo done");
-        let events = archive.verify_session("pre-minted-team-run").await?;
+        let events = archive.load_verified_session("pre-minted-team-run").await?;
         assert_eq!(events.len(), outcome.event_count);
         assert_eq!(events[0].payload["phase"], "spawned");
         assert_eq!(events.last().unwrap().payload["phase"], "exited");
@@ -4291,7 +4291,7 @@ IFS= read -r _
         )
         .await?;
         assert_eq!(outcome.reply, "final: 42 sources");
-        let events = archive.verify_session(&run_id).await?;
+        let events = archive.load_verified_session(&run_id).await?;
         let returned = events
             .iter()
             .find(|event| {
@@ -4342,7 +4342,7 @@ IFS= read -r _
             format!("{error:#}").contains("session_id=pre-minted-crash"),
             "{error:#}"
         );
-        let events = archive.verify_session("pre-minted-crash").await?;
+        let events = archive.load_verified_session("pre-minted-crash").await?;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, EventKind::Process);
         assert_eq!(events[0].payload["phase"], "crashed");
@@ -4504,7 +4504,7 @@ IFS= read -r _
             );
         }
         // And the archive says what was about to be supplied, before the prompt it opened.
-        let events = archive.verify_session(&outcome.session_id).await?;
+        let events = archive.load_verified_session(&outcome.session_id).await?;
         let packet_meta: Vec<&RunEvent> = events
             .iter()
             .filter(|event| {
@@ -4853,7 +4853,7 @@ IFS= read -r _
 
         // Stage 2's handover is what stage 3 was pushed, and it does not carry the decision. This
         // is the half that makes stage 3's packet meaningful.
-        let events = archive.verify_session("notebook-run").await?;
+        let events = archive.load_verified_session("notebook-run").await?;
         let sections_for = |agent: &str| -> Vec<memory::PromptSection> {
             let event = events
                 .iter()
@@ -5326,7 +5326,7 @@ IFS= read -r _
         .await?;
         assert_eq!(outcome.reply, "node b answered the follow-up");
 
-        let events = archive.verify_session("follow-up-run").await?;
+        let events = archive.load_verified_session("follow-up-run").await?;
         let spawned: Vec<&str> = events
             .iter()
             .filter(|event| event.kind == EventKind::Process && event.payload["phase"] == "spawned")
@@ -5501,7 +5501,7 @@ IFS= read -r _
         )
         .await?;
         assert_eq!(outcome.reply, "node b started from its checkpoint");
-        let events = archive.verify_session("follow-failed-run").await?;
+        let events = archive.load_verified_session("follow-failed-run").await?;
         let sections: Vec<memory::PromptSection> = serde_json::from_value(
             events
                 .iter()
@@ -5781,7 +5781,7 @@ IFS= read -r _
             "the stop shows the predecessor's stored handover"
         );
 
-        let events = archive.verify_session(&run_id).await?;
+        let events = archive.load_verified_session(&run_id).await?;
         let exited = events
             .iter()
             .find(|event| {
@@ -5890,7 +5890,7 @@ IFS= read -r _
         answering.await?;
         assert_eq!(outcome.reply, "wrote it");
 
-        let events = archive.verify_session(&run_id).await?;
+        let events = archive.load_verified_session(&run_id).await?;
         let sections: Vec<memory::PromptSection> = events
             .iter()
             .find(|event| {
@@ -6045,7 +6045,7 @@ IFS= read -r _
         assert_eq!(second.context.as_deref(), Some("HANDOVER TWO"));
         // Each answer says whose review it closed; only the first was sent back, and to `a`.
         let answers: Vec<serde_json::Value> = archive
-            .verify_session(&run_id)
+            .load_verified_session(&run_id)
             .await?
             .into_iter()
             .filter_map(|event| event.raw)
@@ -6188,7 +6188,7 @@ IFS= read -r _
         let _ = std::fs::remove_file(&marker);
         assert_eq!(outcome.reply, "wrote it");
 
-        let events = archive.verify_session(&run_id).await?;
+        let events = archive.load_verified_session(&run_id).await?;
         let loaded = events
             .iter()
             .find(|event| {
@@ -6442,7 +6442,7 @@ IFS= read -r _
             .clone()
             .expect("the row names the event its answer produced");
 
-        let events = archive.verify_session(&run_id).await?;
+        let events = archive.load_verified_session(&run_id).await?;
         let archived = events
             .iter()
             .find(|event| event.id == answer_event_id)

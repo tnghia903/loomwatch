@@ -126,7 +126,9 @@ export function useAsk(context: AskContext): AskController {
   const contextRef = useRef(context)
   useEffect(() => { contextRef.current = context })
 
-  const { events } = useSessionEvents(conversationId ?? '')
+  // Followed live while you can see it or wait on it; a conversation kept from an earlier page is
+  // read from the archive, with no socket held open for it while the panel is shut.
+  const { events } = useSessionEvents(conversationId ?? '', !ended && (open || pending !== null) ? null : 0)
   const thread = useMemo(() => (conversationId ? projectAskThread(events) : EMPTY_THREAD), [conversationId, events])
   const personCount = thread.items.filter((item) => item.kind === 'person').length
   const shownPending = pending && personCount <= pending.after ? pending.text : null
