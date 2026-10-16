@@ -781,6 +781,22 @@ em { font-style: italic; }
 .crew-tag { position: absolute; left: 0; top: 0; margin: 0; white-space: nowrap; translate: -50% calc(-100% - 10px); padding: 6px 12px; border-radius: 999px; background: var(--slip); color: var(--slip-ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), var(--shadow); font-size: 13px; animation: tag-in .25s var(--ease) 1; }
 .crew-tag b { font-weight: 600; }
 @keyframes tag-in { from { opacity: 0; translate: -50% calc(-100% - 2px); } }
+/* The crew's conversation: one bubble over the one talking, its tail pointing at its head. */
+.crew-say { position: absolute; left: 0; top: 0; margin: 0; width: max-content; max-width: min(360px, calc(100% - 12px)); text-wrap: balance; translate: -50% calc(-100% - 16px); padding: 7px 13px; border-radius: 14px; background: var(--slip); color: var(--slip-ink); box-shadow: 0 0 0 1px var(--hairline-2), var(--shadow); font-size: 13.5px; line-height: 1.35; animation: tag-in .25s var(--ease) 1; }
+.crew-say::after { content: ''; position: absolute; left: calc(50% + var(--tail, 0px)); bottom: -6px; width: 12px; height: 12px; background: inherit; border-radius: 0 0 3px 0; transform: translateX(-50%) rotate(45deg); }
+.crew-say b { font-weight: 600; }
+.crew-say.waiting { border-radius: 999px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), var(--shadow); font-weight: 500; }
+.say-dots { display: inline-flex; gap: 3px; vertical-align: middle; }
+.say-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--slip-ink-2); opacity: .45; animation: tc-dot 1s infinite; }
+.say-dots i:nth-child(2) { animation-delay: .15s; }
+.say-dots i:nth-child(3) { animation-delay: .3s; }
+.say-dot { display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 50%; background: var(--accent-fill); vertical-align: 1px; animation: takes 1.4s infinite; }
+.crew-play { position: absolute; right: 6px; bottom: 2px; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border: 1px solid var(--hairline-2); border-radius: 999px; background: var(--glass); color: var(--ink-2); font: 500 12.5px/1 var(--sans); cursor: pointer; transition: color .2s var(--ease), border-color .2s var(--ease); }
+.crew-play:hover { color: var(--ink); border-color: var(--accent-dim); }
+.crew-play:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.crew-play[hidden], .crew:not(.live) .crew-play { display: none; }
+.crew-play-icon { width: 9px; height: 10px; background: currentColor; clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.crew-play[data-status="playing"] .crew-play-icon { clip-path: none; background: linear-gradient(90deg, currentColor 0 35%, transparent 35% 65%, currentColor 65%); }
 .crew-hint { margin: 0; font: 400 15px/1.4 var(--serif); font-style: italic; color: var(--ink-3); }
 .crew-hint span { color: var(--ink-2); }
 .crew:not(.live) ~ .crew-hint { visibility: hidden; }

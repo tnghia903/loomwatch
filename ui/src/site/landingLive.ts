@@ -3,7 +3,8 @@
  * vite.site.config.ts into site's assets/live/live.js, which the page imports when it can draw
  * WebGL. The page keeps still pictures underneath for when it can't.
  *
- * - CrewScene: six figures on the first screen, holding one thread, looking where you point.
+ * - CrewScene: six figures on the first screen, holding one thread, looking where you point. Given
+ *   a script (crewTalk.ts), they pass a job along the thread to each other, and then to you.
  * - CordScene: one more of them, hanging on the theme button's pull cord.
  * - WorkbenchScene: the agent's bench from Build by hand, driven by the page's agent builder, and
  *   placeFace, which lays the words on its nameplate, job sheet and laptop lid over them as text.
