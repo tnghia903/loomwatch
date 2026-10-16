@@ -8,8 +8,10 @@
  * - CordScene: one more of them, hanging on the theme button's pull cord.
  * - WorkbenchScene: the agent's bench from Build by hand, driven by the page's agent builder, and
  *   placeFace, which lays the words on its nameplate, job sheet and laptop lid over them as text.
+ * - readModel: each scene's load() takes the model's bytes as well as its URL, so the page fetches
+ *   workbench.glb once, alongside this module, for all three.
  */
 export { CrewScene, type CrewMember } from './crewScene'
 export { CordScene } from './cordScene'
-export { placeFace, WorkbenchScene, type BenchView } from '../components/agents/workbenchScene'
+export { placeFace, readModel, WorkbenchScene, type BenchView } from '../components/agents/workbenchScene'
 export { markPattern } from '../lib/story/mark'

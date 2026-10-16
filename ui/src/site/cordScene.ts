@@ -11,10 +11,9 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
-import { fitCanvas } from '../components/agents/workbenchScene'
+import { fitCanvas, readModel, readyToDraw } from '../components/agents/workbenchScene'
 import { woundTexture } from '../components/agents/benchTextures'
 import { dressFigure, figureEyes, figurePart, type CrewMember } from './crewScene'
 
@@ -86,8 +85,9 @@ export class CordScene {
     this.scene.add(key, rim)
   }
 
-  async load(url: string): Promise<void> {
-    const gltf = await new GLTFLoader().loadAsync(url)
+  /** Build the figure from workbench.glb: its URL, or its bytes when the page has fetched them already. */
+  async load(model: string | ArrayBuffer): Promise<void> {
+    const gltf = await readModel(model)
     const root = gltf.scene.getObjectByName('figure')
     if (!root) throw new Error('The model has no figure.')
     root.removeFromParent()
@@ -109,6 +109,8 @@ export class CordScene {
     this.root = root
     root.updateMatrixWorld(true)
     this.box.setFromObject(root, true)
+    // Its shaders compiled before the page draws it (readyToDraw).
+    await readyToDraw(this.renderer, this.scene, this.camera)
     this.loaded = true
     this.fit()
   }
