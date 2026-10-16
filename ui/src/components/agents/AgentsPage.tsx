@@ -18,6 +18,7 @@ export interface AgentsPageProps {
   harnesses: DetectedHarness[]
   harnessesLoading: boolean
   skills: DetectedCapability[]
+  tools: DetectedCapability[]
   skillsLoading: boolean
 }
 

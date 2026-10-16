@@ -8,7 +8,7 @@ import type { AgentDraft } from '../../lib/library/draft'
 import { savedJobPreset, type SavedJob } from '../../lib/library/jobs'
 import { roleSource } from '../../lib/library/roles'
 import { linkState } from '../../lib/library/link'
-import { draftFromTeamAgent, readsOf, toolsOf } from '../../lib/library/teamDraft'
+import { draftFromTeamAgent, readsOf } from '../../lib/library/teamDraft'
 import type { RunRecord } from '../../lib/runs/client'
 import type { AgentConfig } from '../../lib/team-file/types'
 import { agentFigure, figureFor } from '../../lib/library/figures'
@@ -30,6 +30,8 @@ export interface TeamAgentsProps {
   harnesses: DetectedHarness[]
   harnessesLoading: boolean
   skills: readonly DetectedCapability[]
+  /** The tools (MCP servers) on this computer, from the same capability scan as the skills. */
+  tools: readonly DetectedCapability[]
   skillsLoading: boolean
   savedJobs: readonly SavedJob[]
   /** One workbench change on a team's own agent, written into the team file. */
@@ -49,12 +51,11 @@ export interface TeamAgentsProps {
  * team, like a canvas edit. One placed from Your agents opens its saved version: saving it makes the
  * next version and moves this team to it.
  */
-export function TeamAgents({ agents, selected, onSelect, teamName, teamPath, editable, harnesses, harnessesLoading, skills, skillsLoading, savedJobs, onEdit, onApplyVersion, onUnlink, onShowWorkflow, onAdd }: TeamAgentsProps) {
+export function TeamAgents({ agents, selected, onSelect, teamName, teamPath, editable, harnesses, harnessesLoading, skills, tools, skillsLoading, savedJobs, onEdit, onApplyVersion, onUnlink, onShowWorkflow, onAdd }: TeamAgentsProps) {
   const agent = agents.find((candidate) => candidate.id === selected) ?? agents[0] ?? null
   const link = agent ? linkState(agent, savedJobs) : null
   // What the team gives it to read, kept the same list while the team file doesn't change it.
   const reads = useMemo(() => (agent ? readsOf(agent) : []), [agent])
-  const tools = useMemo(() => (agent ? toolsOf(agent) : []), [agent])
   const [adding, setAdding] = useState(false)
   // An empty team has nothing else to show: choosing its first agents is the whole page.
   const choosing = Boolean(onAdd) && (adding || !agent)
@@ -86,7 +87,7 @@ export function TeamAgents({ agents, selected, onSelect, teamName, teamPath, edi
         <div className="team-agents-linked" key={agent.id}>
           <LinkedAgent agent={agent} link={link} readOnly={!editable} onApply={(job) => onApplyVersion(agent.id, job)} onUnlink={() => onUnlink(agent.id)} teamPath={teamPath} headClassName="agent-section-head" showEdit={false} />
           {link.job
-            ? <AgentBuilder id={link.job.id} harnesses={harnesses} harnessesLoading={harnessesLoading} skills={[...skills]} skillsLoading={skillsLoading} inTeam={{ name: teamName, onSaved: (job) => { if (editable) onApplyVersion(agent.id, job) }, reads, tools, onShowWorkflow }} />
+            ? <AgentBuilder id={link.job.id} harnesses={harnesses} harnessesLoading={harnessesLoading} skills={[...skills]} tools={[...tools]} skillsLoading={skillsLoading} inTeam={{ name: teamName, onSaved: (job) => { if (editable) onApplyVersion(agent.id, job) }, reads, onShowWorkflow }} />
             : <p className="t-meta">Its agent is gone from Your agents. Make it this team’s own to change it here.</p>}
         </div>
       )}
@@ -132,7 +133,7 @@ function AddAgents({ jobs, inTeam, harnesses, teamPath, first, onAdd, onClose, o
 }
 
 /** A team's own agent on the workbench, written straight into the team file. */
-function OwnAgent({ agent, teamPath, editable, harnesses, harnessesLoading, skills, skillsLoading, onEdit, reads, tools, onShowWorkflow }: { agent: AgentConfig; teamPath: string | null; editable: boolean; harnesses: DetectedHarness[]; harnessesLoading: boolean; skills: readonly DetectedCapability[]; skillsLoading: boolean; onEdit: TeamAgentsProps['onEdit']; reads: readonly ReadSource[]; tools: readonly string[]; onShowWorkflow: () => void }) {
+function OwnAgent({ agent, teamPath, editable, harnesses, harnessesLoading, skills, skillsLoading, onEdit, reads, tools, onShowWorkflow }: { agent: AgentConfig; teamPath: string | null; editable: boolean; harnesses: DetectedHarness[]; harnessesLoading: boolean; skills: readonly DetectedCapability[]; skillsLoading: boolean; onEdit: TeamAgentsProps['onEdit']; reads: readonly ReadSource[]; tools: readonly DetectedCapability[]; onShowWorkflow: () => void }) {
   const draft = useMemo(() => draftFromTeamAgent(agent, harnesses), [agent, harnesses])
   const harness = harnesses.find((candidate) => candidate.id === draft.appId) ?? null
   const roleField = useRef<HTMLTextAreaElement>(null)
@@ -153,7 +154,7 @@ function OwnAgent({ agent, teamPath, editable, harnesses, harnessesLoading, skil
   return (
     <div className="team-agents-own">
       <p className="t-meta team-agents-note">{editable ? 'This team’s own agent: what you change here is saved with the team, like a change on the canvas.' : 'This team can’t be changed here, so the bench shows it as it is.'}</p>
-      <ByHand draft={draft} set={(key, value) => onEdit(agent.id, key, value)} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={agent.id} figure={figureFor(agent.id)} record={record} hideDoes readOnly={!editable} reads={reads} tools={tools} onShowWorkflow={onShowWorkflow} />
+      <ByHand draft={draft} set={(key, value) => onEdit(agent.id, key, value)} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={agent.id} figure={figureFor(agent.id)} record={record} hideDoes readOnly={!editable} tools={tools} toolsLoading={skillsLoading} reads={reads} onShowWorkflow={onShowWorkflow} />
       <div className="team-agents-bench">
         <TestBench draft={draft} harness={harness} model={resolvedModel} benchId={benchId} onAllow={(key) => onEdit(agent.id, 'allow', { ...draft.allow, [key]: true })} onRecord={setRecord} />
       </div>

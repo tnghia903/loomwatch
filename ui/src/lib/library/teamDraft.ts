@@ -22,6 +22,7 @@ export function draftFromTeamAgent(agent: AgentConfig, harnesses: readonly Detec
     model: agent.model ?? '',
     effort: agent.thinkingEffort ?? '',
     skills: (agent.capabilities ?? []).filter((capability) => capability.kind === 'skill').map((capability) => capability.name),
+    tools: toolsOf(agent),
     doneWhen: [...(agent.doneWhen ?? [])],
     allow: { ...(agent.allow ?? {}) },
     // A team's own agent wears the figure its id picks: the figure belongs to Your agents.
@@ -57,7 +58,7 @@ export function toolsOf(agent: Pick<AgentConfig, 'capabilities'>): string[] {
 /** What one workbench change does to the team file. */
 export type TeamAgentEdit =
   | { kind: 'rename'; field: 'name' | 'role'; value: string }
-  | { kind: 'fields'; fields: Partial<Pick<AgentConfig, 'model' | 'thinkingEffort' | 'spawn' | 'capabilities' | 'allow' | 'doneWhen'>> }
+  | { kind: 'fields'; fields: Partial<Pick<AgentConfig, 'model' | 'thinkingEffort' | 'spawn' | 'capabilities' | 'turnedOff' | 'allow' | 'doneWhen'>> }
 
 /** The team-file change for setting `key` to `value` on the workbench, or `null` when there is none. */
 export function teamAgentEdit<K extends keyof AgentDraft>(agent: AgentConfig, key: K, value: AgentDraft[K], harnesses: readonly DetectedHarness[]): TeamAgentEdit | null {
@@ -77,6 +78,18 @@ export function teamAgentEdit<K extends keyof AgentDraft>(agent: AgentConfig, ke
       const others = (agent.capabilities ?? []).filter((capability) => capability.kind !== 'skill')
       const capabilities = [...others, ...(value as string[]).map((name) => ({ kind: 'skill' as const, name }))]
       return { kind: 'fields', fields: { capabilities: capabilities.length ? capabilities : undefined } }
+    }
+    case 'tools': {
+      // Its skills, folders and files stay. Each tool given is a capability, which the Workflow
+      // canvas draws as a card wired to this agent, and giving one turns it back on if it was
+      // turned off there (ADR 0060), as drawing its line would.
+      const tools = value as string[]
+      const others = (agent.capabilities ?? []).filter((capability) => capability.kind !== 'tool')
+      const capabilities = [...others, ...tools.map((name) => ({ kind: 'tool' as const, name }))]
+      const given = new Set(tools.map((name) => name.toLowerCase()))
+      const off = agent.turnedOff ?? []
+      const stillOff = off.filter((entry) => entry.kind !== 'tool' || !given.has(entry.name.toLowerCase()))
+      return { kind: 'fields', fields: { capabilities: capabilities.length ? capabilities : undefined, ...(stillOff.length !== off.length ? { turnedOff: stillOff.length ? stillOff : undefined } : {}) } }
     }
     case 'allow': return { kind: 'fields', fields: { allow: onlyOn(value as AgentDraft['allow']) } }
     case 'doneWhen': {

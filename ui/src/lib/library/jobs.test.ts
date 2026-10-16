@@ -65,6 +65,14 @@ describe('placing a saved job', () => {
     expect(placed.model).toBe('gpt-5.6')
   })
 
+  it('keeps its tools, and places them as tools a team’s canvas draws wired to it', () => {
+    const tooled: AgentConfig = { ...agent, capabilities: [...(agent.capabilities ?? []), { kind: 'tool', name: 'github' }, { kind: 'tool', name: 'github' }] }
+    expect(jobFromAgent(tooled, { name: 'Release notes', appId: 'codex' }).tools).toEqual(['github'])
+    const source = roleSource(savedJobPreset({ ...saved, tools: ['github'] }), [claude, codex])
+    const placed = buildAgentFromSource(source!, [])
+    expect(placed.capabilities).toEqual([{ kind: 'skill', name: 'release-style' }, { kind: 'tool', name: 'github' }])
+  })
+
   it('runs on the best app there is when its own is missing, without the other app’s model', () => {
     const source = roleSource(savedJobPreset(saved), [claude])
     expect(source?.spawn.cmd).toBe('claude')

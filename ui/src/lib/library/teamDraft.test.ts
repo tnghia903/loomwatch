@@ -16,7 +16,7 @@ const writer: AgentConfig = {
 describe('a team’s own agent on the workbench', () => {
   it('reads the team agent as the workbench shows it', () => {
     expect(draftFromTeamAgent(writer, [claude, codex])).toEqual({
-      name: 'Writer', does: '', instructions: 'Write the digest.', appId: 'claude', model: 'sonnet', effort: 'high', skills: ['house-style'], doneWhen: [], allow: { web: true }, figure: null,
+      name: 'Writer', does: '', instructions: 'Write the digest.', appId: 'claude', model: 'sonnet', effort: 'high', skills: ['house-style'], tools: [], doneWhen: [], allow: { web: true }, figure: null,
     })
   })
 
@@ -44,6 +44,20 @@ describe('a team’s own agent on the workbench', () => {
     expect(teamAgentEdit({ ...writer, capabilities: [{ kind: 'skill', name: 'house-style' }] }, 'skills', [], [claude])).toEqual({ kind: 'fields', fields: { capabilities: undefined } })
     expect(teamAgentEdit(writer, 'effort', '', [claude])).toEqual({ kind: 'fields', fields: { thinkingEffort: undefined } })
     expect(teamAgentEdit(writer, 'allow', { web: false, commands: true }, [claude])).toEqual({ kind: 'fields', fields: { allow: { commands: true } } })
+  })
+
+  it('gives it tools from the workbench as capabilities the canvas draws, keeping its other sources', () => {
+    const tooled: AgentConfig = { ...writer, capabilities: [...(writer.capabilities ?? []), { kind: 'tool', name: 'github' }] }
+    expect(draftFromTeamAgent(tooled, [claude]).tools).toEqual(['github'])
+    expect(teamAgentEdit(tooled, 'tools', ['github', 'linear'], [claude])).toEqual({ kind: 'fields', fields: { capabilities: [
+      { kind: 'folder', name: 'notes', path: 'notes' }, { kind: 'skill', name: 'house-style' }, { kind: 'tool', name: 'github' }, { kind: 'tool', name: 'linear' },
+    ] } })
+    expect(teamAgentEdit({ ...writer, capabilities: [{ kind: 'tool', name: 'github' }] }, 'tools', [], [claude])).toEqual({ kind: 'fields', fields: { capabilities: undefined } })
+    // Giving it a tool turned off for it on the canvas turns it back on, as drawing its line would.
+    const off: AgentConfig = { ...writer, turnedOff: [{ kind: 'tool', name: 'Linear' }, { kind: 'skill', name: 'pdf' }] }
+    expect(teamAgentEdit(off, 'tools', ['linear'], [claude])).toMatchObject({ kind: 'fields', fields: { turnedOff: [{ kind: 'skill', name: 'pdf' }] } })
+    expect(teamAgentEdit({ ...writer, turnedOff: [{ kind: 'tool', name: 'linear' }] }, 'tools', ['linear'], [claude])).toMatchObject({ kind: 'fields', fields: { turnedOff: undefined } })
+    expect(teamAgentEdit(off, 'tools', ['github'], [claude])).not.toHaveProperty('fields.turnedOff')
   })
 
   it('reads what the team gives it to read, for its drawer: folders, files and Notion pages, in order', () => {

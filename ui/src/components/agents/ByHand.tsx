@@ -51,6 +51,9 @@ export interface ByHandProps {
   modelName?: string
   skills: readonly DetectedCapability[]
   skillsLoading: boolean
+  /** The tools (MCP servers) on this computer it can be given: the capability scan's tools. */
+  tools: readonly DetectedCapability[]
+  toolsLoading: boolean
   roleField: RefObject<HTMLTextAreaElement | null>
   /** The id its woven mark is made from, so its scarf is the swatch it wears everywhere. */
   markId: string
@@ -66,15 +69,11 @@ export interface ByHandProps {
   readOnly?: boolean
   /**
    * In a team: the folders, files and Notion pages the team gives it to read (teamDraft.ts
-   * readsOf), filed in the bench's file drawer. Absent in Your agents, where an agent reads nothing yet.
+   * readsOf), filed in the bench's file drawer. Absent in Your agents, where its file drawer stays
+   * shut and its block says each team it joins gives it what it reads.
    */
   reads?: readonly ReadSource[]
-  /**
-   * In a team: the tools (MCP servers) the team gives it (teamDraft.ts toolsOf), standing in the
-   * bench's tool drawer. Absent in Your agents, where an agent is given no tools yet.
-   */
-  tools?: readonly string[]
-  /** In a team: open its Workflow, where what it reads and the tools it uses are given with a line. */
+  /** In a team: open its Workflow, where what it reads is given with a line. */
   onShowWorkflow?: () => void
   /**
    * Its chat (Your agents' Chat tab), shown beside the bench instead of the blocks: the figure
@@ -100,7 +99,7 @@ const BLOCKS: readonly { part: FigurePart; title: string; where: string }[] = [
   { part: 'reply', title: 'What it hands back', where: 'the tray' },
 ]
 
-export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading, models, modelsError = null, modelName, skills, skillsLoading, roleField, markId, figure, onFigure, record, hideDoes = false, readOnly = false, reads, tools, onShowWorkflow, chat, onBuild, cover }: ByHandProps) {
+export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading, models, modelsError = null, modelName, skills, skillsLoading, roleField, markId, figure, onFigure, record, hideDoes = false, readOnly = false, tools, toolsLoading, reads, onShowWorkflow, chat, onBuild, cover }: ByHandProps) {
   const chatting = chat !== undefined
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
@@ -149,9 +148,10 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
     asked,
     open: focus,
     dropping: dragging === 'skill',
-    reads: reads ?? null,
-    tools: tools ?? null,
-  }), [draft, figure, pattern, harness, mood, events, asked, focus, dragging, reads, tools])
+    // Outside a team its file drawer stays shut: what it reads is given by each team it joins.
+    reads: reads ?? [],
+    tools: draft.tools,
+  }), [draft, figure, pattern, harness, mood, events, asked, focus, dragging, reads])
 
   /** From the bench: go to the block for what was picked, and start working in it. */
   const goTo = (part: FigurePart) => {
@@ -171,8 +171,8 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   const asking = asked && !draft.allow[asked] ? FIGURE_KEYS.find(({ key }) => key === asked)?.word : null
   const dishText = asking ? `It’s asking you for the ${asking} key` : wild ? `${wild} doesn’t ask before it acts` : kept.length ? `You keep: ${kept.map((item) => item.word).join(', ')} · it asks you first` : 'You keep no keys'
   const parts = INSTRUCTION_PARTS.filter((part) => shape[part]).length
-  const readsText = !reads?.length ? 'Reads · nothing yet' : reads.length === 1 ? `Reads · ${reads[0].name}` : `Reads · ${readCount(reads)}`
-  const toolsText = !tools?.length ? 'Tools · none yet' : tools.length === 1 ? `Tools · ${tools[0]}` : `Tools · ${tools.length}`
+  const readsText = !reads ? 'Reads · what a team gives' : !reads.length ? 'Reads · nothing yet' : reads.length === 1 ? `Reads · ${reads[0].name}` : `Reads · ${readCount(reads)}`
+  const toolsText = !draft.tools.length ? 'Tools · none yet' : draft.tools.length === 1 ? `Tools · ${draft.tools[0]}` : `Tools · ${draft.tools.length}`
   // What each setting adds up to, in words: the line under each block's title.
   const says: Record<FigurePart, string> = {
     name: hideDoes || !draft.does.trim() ? name : `${name} · ${draft.does.trim()}`,
@@ -180,8 +180,8 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
     app: harness ? `Works in ${harness.name}, on this computer, signed in as you` : 'No app chosen yet',
     mind: `Thinks with ${thinks}`,
     skills: draft.skills.length ? `${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'} it opens when the work calls for one` : 'No skills yet',
-    reads: reads?.length ? `Reads ${readCount(reads)} the team gives it` : 'The team gives it nothing to read yet',
-    tools: tools?.length ? `Can use ${toolCount(tools)} the team gives it, while it works` : 'The team gives it no tools yet',
+    reads: !reads ? 'Each team it joins gives it what it reads' : reads.length ? `Reads ${readCount(reads)} the team gives it` : 'The team gives it nothing to read yet',
+    tools: draft.tools.length ? `Can use ${toolCount(draft.tools)} while it works` : 'No tools yet',
     keys: wild ? `${wild} doesn’t ask before it acts, so every door is open` : given.length ? `Goes ahead with ${given.map((item) => item.word.toLowerCase()).join(' and ')}${kept.length ? `; asks you first for ${kept.map((item) => item.word.toLowerCase()).join(' and ')}` : ''}` : 'Asks you before it searches the web, changes files or runs a command',
     reply: reply ?? 'Its instructions don’t say yet',
   }
@@ -192,9 +192,9 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
     { anchor: 'keys', part: 'keys', place: 'above', text: keysText, short: `Keys · ${wild ? 'all' : given.length}`, label: `The key hooks: ${keysText}` },
     { anchor: 'dish', part: 'keys', place: 'below', text: dishText, short: asking ? `Asking for ${asking}` : `You keep ${wild ? 0 : kept.length}`, label: `Your dish: ${dishText}` },
     { anchor: 'reply', part: 'reply', place: 'above', text: `Hands back · ${reply ? 'see the tray' : 'not said yet'}`, short: 'Hands back', label: 'The tray: what it hands back' },
-    // Under the bench's two drawers, on its face: what the team gives it, apart from the work on top.
-    ...(reads ? [{ anchor: 'reads', part: 'reads', place: 'below', text: readsText, short: `Reads · ${reads.length}`, label: `The file drawer: ${says.reads}` } satisfies BenchLabel] : []),
-    ...(tools ? [{ anchor: 'tools', part: 'tools', place: 'below', text: toolsText, short: `Tools · ${tools.length}`, label: `The tool drawer: ${says.tools}` } satisfies BenchLabel] : []),
+    // Under the bench's two drawers, on its face: what it works with, apart from the work on top.
+    { anchor: 'reads', part: 'reads', place: 'below', text: readsText, short: `Reads · ${reads?.length ?? 0}`, label: `The file drawer: ${says.reads}` },
+    { anchor: 'tools', part: 'tools', place: 'below', text: toolsText, short: `Tools · ${draft.tools.length}`, label: `The tool drawer: ${says.tools}` },
     { anchor: 'name', part: 'name', place: 'plate', label: `The nameplate: ${name}` },
     { anchor: 'app', part: 'app', place: 'plate', label: `The laptop, the app it works in: ${harness?.name ?? 'none chosen'}` },
   ]
@@ -227,7 +227,7 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
 
   return (
     <div className={`byhand${chatting ? ' chatting' : ''}`}>
-      {!chatting && <p className="byhand-say" aria-live="polite">{sentence(draft, harness, model, wild, reads, tools)}</p>}
+      {!chatting && <p className="byhand-say" aria-live="polite">{sentence(draft, harness, model, wild, reads)}</p>}
       <div className="byhand-main">
         <div className="byhand-stage">
           {failed
@@ -313,9 +313,9 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
             <p className="t-meta">{harness ? <>The models {harness.name} offers. </> : <>Choose its app first. </>}A bigger model can think more through, and costs more of your plan per run.</p>
           </>)}
 
-          {block('skills', <SkillShelf chosen={draft.skills} available={skills} loading={skillsLoading} onAdd={addSkill} onRemove={(skill) => set('skills', draft.skills.filter((item) => item !== skill))} onDrag={setDragging} />)}
+          {block('skills', <Shelf kind="skill" chosen={draft.skills} available={skills} loading={skillsLoading} onAdd={addSkill} onRemove={(skill) => set('skills', draft.skills.filter((item) => item !== skill))} onDrag={setDragging} />)}
 
-          {reads && block('reads', <>
+          {block('reads', !reads ? <p className="t-meta">A folder, file or Notion page is given in a team: draw a line from it to this agent in the team’s Workflow.</p> : <>
             {reads.length > 0 && <ul className="byhand-reads" aria-label="In its file drawer">
               {reads.map((source, index) => {
                 const Icon = source.kind === 'page' ? NotebookText : source.kind === 'file' ? FileText : Folder
@@ -326,12 +326,9 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
             {onShowWorkflow && <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />{reads.length ? 'Change it in Workflow' : 'Give it something in Workflow'}</button>}
           </>)}
 
-          {tools && block('tools', <>
-            {tools.length > 0 && <ul className="byhand-reads" aria-label="In its tool drawer">
-              {tools.map((tool) => <li key={tool}><Wrench size={15} aria-hidden="true" /><span><b>{tool}</b><em>Tool · an MCP server it can use while it works</em></span></li>)}
-            </ul>}
-            <p className="t-meta">The tools it uses are the team’s to give: draw a line from a tool to this agent in Workflow.</p>
-            {onShowWorkflow && <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />{tools.length ? 'Change it in Workflow' : 'Give it a tool in Workflow'}</button>}
+          {block('tools', <>
+            <Shelf kind="tool" chosen={draft.tools} available={tools} loading={toolsLoading} onAdd={(tool) => { if (!draft.tools.includes(tool)) set('tools', [...draft.tools, tool]) }} onRemove={(tool) => set('tools', draft.tools.filter((item) => item !== tool))} />
+            <p className="t-meta">{reads ? 'Each tool it has shows on the Workflow canvas as a card wired to this agent.' : 'In a team, each tool it has shows on the Workflow canvas as a card wired to this agent.'}</p>
           </>)}
 
           {block('keys', <ul className="byhand-keys">
@@ -376,26 +373,57 @@ function useFigureMood(record: RunRecord | null) {
   return figureMood(record, moved && moved.run === run ? moved.at : null, now)
 }
 
-function SkillShelf({ chosen, available, loading, onAdd, onRemove, onDrag }: { chosen: readonly string[]; available: readonly DetectedCapability[]; loading: boolean; onAdd: (name: string) => void; onRemove: (name: string) => void; onDrag: (kind: 'skill' | null) => void }) {
+/** What a shelf says, for skills (recipe cards on the pegboard) and tools (wrenches in the tool drawer). */
+const SHELF = {
+  skill: {
+    Icon: Puzzle,
+    chosen: 'Recipe cards on its pegboard',
+    none: 'None yet. A skill is a recipe card: instructions it opens when the work calls for it. Press + on one below, or drag it onto the bench.',
+    looking: 'Looking for recipe cards on this computer…',
+    find: (count: number) => `Find a recipe card (${count} on this computer)`,
+    findLabel: 'Find a skill',
+    list: 'Recipe cards you can add',
+    take: (name: string) => `Take ${name} down`,
+    give: (name: string) => `Pin ${name} up`,
+  },
+  tool: {
+    Icon: Wrench,
+    chosen: 'Wrenches in its tool drawer',
+    none: 'None yet. A tool is an MCP server set up on this computer, like GitHub or a database, that it can use while it works. Press + on one below.',
+    looking: 'Looking for tools on this computer…',
+    find: (count: number) => `Find a tool (${count} on this computer)`,
+    findLabel: 'Find a tool',
+    list: 'Tools you can add',
+    take: (name: string) => `Take ${name} out`,
+    give: (name: string) => `Give it ${name}`,
+  },
+} as const
+
+/**
+ * What it has of one kind, each with a way to take it off, and what else this computer has to give
+ * it. Skills can also be dragged onto the bench, where they are pinned up as recipe cards.
+ */
+function Shelf({ kind, chosen, available, loading, onAdd, onRemove, onDrag }: { kind: 'skill' | 'tool'; chosen: readonly string[]; available: readonly DetectedCapability[]; loading: boolean; onAdd: (name: string) => void; onRemove: (name: string) => void; onDrag?: (kind: 'skill' | null) => void }) {
+  const words = SHELF[kind]
   const [query, setQuery] = useState('')
   const found = useMemo(() => {
     const needle = query.trim().toLowerCase()
     const seen = new Set<string>()
-    return available.filter((skill) => !chosen.includes(skill.name) && (!needle || `${skill.name} ${skill.detail}`.toLowerCase().includes(needle))).filter((skill) => (seen.has(skill.name) ? false : (seen.add(skill.name), true))).slice(0, 12)
+    return available.filter((item) => !chosen.includes(item.name) && (!needle || `${item.name} ${item.detail}`.toLowerCase().includes(needle))).filter((item) => (seen.has(item.name) ? false : (seen.add(item.name), true))).slice(0, 12)
   }, [available, chosen, query])
   return (
     <div className="byhand-shelf">
       {chosen.length > 0
-        ? <ul className="skill-picker-chosen" aria-label="Recipe cards on its pegboard">{chosen.map((name) => <li key={name}><Puzzle size={12} aria-hidden="true" />{name}<button type="button" className="iconbtn" aria-label={`Take ${name} down`} onClick={() => onRemove(name)}><X size={12} aria-hidden="true" /></button></li>)}</ul>
-        : <p className="t-meta">None yet. A skill is a recipe card: instructions it opens when the work calls for it. Press + on one below, or drag it onto the bench.</p>}
-      <label className="skill-picker-find"><Search size={13} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={loading ? 'Looking for recipe cards on this computer…' : `Find a recipe card (${available.length} on this computer)`} aria-label="Find a skill" /></label>
-      <ul className="byhand-cards" aria-label="Recipe cards you can add">
-        {found.map((skill) => (
-          <li key={skill.id} draggable onDragStart={(event) => { event.dataTransfer.setData(SKILL_MIME, skill.name); event.dataTransfer.effectAllowed = 'copy'; onDrag('skill') }} onDragEnd={() => onDrag(null)} title="Drag it onto the bench">
+        ? <ul className="skill-picker-chosen" aria-label={words.chosen}>{chosen.map((name) => <li key={name}><words.Icon size={12} aria-hidden="true" />{name}<button type="button" className="iconbtn" aria-label={words.take(name)} onClick={() => onRemove(name)}><X size={12} aria-hidden="true" /></button></li>)}</ul>
+        : <p className="t-meta">{words.none}</p>}
+      <label className="skill-picker-find"><Search size={13} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={loading ? words.looking : words.find(available.length)} aria-label={words.findLabel} /></label>
+      <ul className={`byhand-cards${onDrag ? '' : ' still'}`} aria-label={words.list}>
+        {found.map((item) => (
+          <li key={item.id} draggable={Boolean(onDrag)} onDragStart={onDrag && ((event) => { event.dataTransfer.setData(SKILL_MIME, item.name); event.dataTransfer.effectAllowed = 'copy'; onDrag('skill') })} onDragEnd={onDrag && (() => onDrag(null))} title={onDrag ? 'Drag it onto the bench' : undefined}>
             <span className="byhand-card-tab" aria-hidden="true" />
-            <b>{skill.name}</b>
-            <span>{skill.detail || skill.source}</span>
-            <button type="button" className="iconbtn" aria-label={`Pin ${skill.name} up`} onClick={() => onAdd(skill.name)}><Plus size={13} aria-hidden="true" /></button>
+            <b>{item.name}</b>
+            <span>{item.detail || item.source}</span>
+            <button type="button" className="iconbtn" aria-label={words.give(item.name)} onClick={() => onAdd(item.name)}><Plus size={13} aria-hidden="true" /></button>
           </li>
         ))}
       </ul>
@@ -404,16 +432,15 @@ function SkillShelf({ chosen, available, loading, onAdd, onRemove, onDrag }: { c
 }
 
 /** The bench in one sentence, for anyone who reads rather than looks, and for screen readers. */
-function sentence(draft: AgentDraft, harness: DetectedHarness | null, model: string, wild: string | null, reads?: readonly ReadSource[], tools?: readonly string[]): ReactNode {
+function sentence(draft: AgentDraft, harness: DetectedHarness | null, model: string, wild: string | null, reads?: readonly ReadSource[]): ReactNode {
   const name = draft.name.trim() || 'This agent'
   const has = FIGURE_KEYS.filter(({ key }) => draft.allow[key]).map(({ word }) => word.toLowerCase())
   const keys = wild ? `${wild} doesn’t ask before it acts, so every door is open.` : has.length ? `It has the ${has.join(' and ')} key${has.length === 1 ? '' : 's'}; for anything else it asks you first.` : 'It has no keys, so it asks you before it searches the web, changes files or runs a command.'
   const skills = draft.skills.length ? `${draft.skills.length} recipe card${draft.skills.length === 1 ? '' : 's'}` : 'no recipe cards yet'
   const works = harness ? `in ${harness.name}` : 'in no app yet'
-  const uses = tools && (tools.length ? toolCount(tools) : 'no tools yet')
-  if (reads && uses) return <><b>{name}</b> thinks with {model}, works {works}, has {skills}, reads {reads.length ? readCount(reads) : 'nothing yet'}, and uses {uses}. {keys}</>
-  if (reads) return <><b>{name}</b> thinks with {model}, works {works}, has {skills}, and reads {reads.length ? readCount(reads) : 'nothing yet'}. {keys}</>
-  return <><b>{name}</b> thinks with {model}, works {works}, and has {skills}. {keys}</>
+  const uses = draft.tools.length ? toolCount(draft.tools) : 'no tools yet'
+  if (reads) return <><b>{name}</b> thinks with {model}, works {works}, has {skills}, reads {reads.length ? readCount(reads) : 'nothing yet'}, and uses {uses}. {keys}</>
+  return <><b>{name}</b> thinks with {model}, works {works}, has {skills}, and uses {uses}. {keys}</>
 }
 
 /** What it reads, counted in words: "1 folder", "2 folders and 1 Notion page". */
