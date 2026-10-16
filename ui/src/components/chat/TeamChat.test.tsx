@@ -266,6 +266,28 @@ describe('the team’s chat', () => {
     expect(posted).toHaveLength(0)
   })
 
+  it('Run team starts the box with @team, so what you write starts the team rather than leaving a note', async () => {
+    const onStartTeamTaken = vi.fn()
+    renderChat({ startTeam: true, onStartTeamTaken })
+    await waitFor(() => expect(box()).toHaveValue('@team '))
+    expect(onStartTeamTaken).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Starts the team · 3 steps')).toBeInTheDocument()
+    expect(posted).toHaveLength(0)
+  })
+
+  it('Run team leaves a box that cannot send yet empty', async () => {
+    const onStartTeamTaken = vi.fn()
+    renderChat({ startTeam: true, onStartTeamTaken, blocked: 'Researcher’s app isn’t installed.' })
+    await waitFor(() => expect(onStartTeamTaken).toHaveBeenCalled())
+    expect(box()).toHaveValue('')
+  })
+
+  it('opening the chat any other way starts with an empty box', async () => {
+    renderChat()
+    await screen.findByRole('heading', { name: 'Talk to News desk' })
+    expect(box()).toHaveValue('')
+  })
+
   it('hands a team that needs checking to the review, holding the message', async () => {
     answer = () => new Response(JSON.stringify({ error: 'review it', code: 'team_needs_review', teamPath: 'news.yaml', teamName: 'News desk', teamRevision: 'sha256:2', review: [] }), { status: 409 })
     const { props } = renderChat()

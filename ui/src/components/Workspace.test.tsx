@@ -1584,6 +1584,8 @@ describe('an agent whose app is not on this computer', () => {
     expect(await screen.findByRole('heading', { name: 'Your team is ready' })).toBeInTheDocument()
     expect(document.querySelector('.build-node-app-problem')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+    // Run team means start the team: the box starts with @team, not as a note that starts nothing.
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message the team' })).toHaveValue('@team '))
     fireEvent.change(screen.getByRole('textbox', { name: 'Message the team' }), { target: { value: '@team Summarise the repo' } })
     // Ready, the box says where the message goes and starts the team with it.
     expect(screen.getByText(/^Starts the team/)).toBeInTheDocument()
