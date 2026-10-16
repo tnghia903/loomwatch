@@ -1307,7 +1307,9 @@ impl TeamBus {
             operator: self.state.operator.clone(),
             ..crate::RunLineage::default()
         };
-        crate::run_answerable_session(
+        // Boxed: on Windows, where a child process takes more room, the session's future is over
+        // Clippy's 16 KB `large_futures` limit, and everything that awaits it would be too.
+        Box::pin(crate::run_answerable_session(
             crate::AskedQuestion {
                 team: &self.state.team,
                 agent,
@@ -1333,7 +1335,7 @@ impl TeamBus {
                 composed: Some(&composed),
                 boundary: None,
             },
-        )
+        ))
         .await
     }
 
@@ -3189,7 +3191,11 @@ mod tests {
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                test_agent("a", "/bin/sh", vec!["-c".into(), script.clone()]),
+                test_agent(
+                    "a",
+                    crate::test_support::SH,
+                    vec!["-c".into(), script.clone()],
+                ),
                 test_agent("b", "true", Vec::new()),
             ],
             edges: vec![crate::config::EdgeConfig {
@@ -3213,7 +3219,7 @@ mod tests {
         )
         .await?;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script],
             env: BTreeMap::new(),
             cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
@@ -3305,7 +3311,11 @@ mod tests {
             permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
-            agents: vec![test_agent("a", "/bin/sh", vec!["-c".into(), script.into()])],
+            agents: vec![test_agent(
+                "a",
+                crate::test_support::SH,
+                vec!["-c".into(), script.into()],
+            )],
             edges: Vec::new(),
         });
         let archive = EventArchive::new(pool);
@@ -3321,7 +3331,7 @@ mod tests {
         )
         .await?;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
@@ -3542,7 +3552,11 @@ mod tests {
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":6,"result":{}}'
         "#;
-        let mut helper = test_agent("helper", "/bin/sh", vec!["-c".into(), helper_script.into()]);
+        let mut helper = test_agent(
+            "helper",
+            crate::test_support::SH,
+            vec!["-c".into(), helper_script.into()],
+        );
         helper.thinking_effort = Some("high".into());
         let team = Arc::new(TeamConfig {
             schema_version: 1,
@@ -3723,10 +3737,18 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
                 memory: None,
                 guards: GuardsConfig::default(),
                 agents: vec![
-                    test_agent("a", "/bin/sh", vec!["-c".into(), live_script.clone()]),
+                    test_agent(
+                        "a",
+                        crate::test_support::SH,
+                        vec!["-c".into(), live_script.clone()],
+                    ),
                     test_agent("b", "true", Vec::new()),
-                    test_agent("c", "/bin/sh", vec!["-c".into(), never("c")]),
-                    test_agent("h", "/bin/sh", vec!["-c".into(), helper_script.clone()]),
+                    test_agent("c", crate::test_support::SH, vec!["-c".into(), never("c")]),
+                    test_agent(
+                        "h",
+                        crate::test_support::SH,
+                        vec!["-c".into(), helper_script.clone()],
+                    ),
                 ],
                 edges: mode_edges,
             })
@@ -3755,7 +3777,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
         let event_log = EventLog::new(archive.clone(), "answering-run".into());
         let a_connection = bus.connection("a").await?;
         let mut process = AcpProcess::spawn(&ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), live_script.clone()],
             env: BTreeMap::new(),
             cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
@@ -3892,8 +3914,16 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                test_agent("a", "/bin/sh", vec!["-c".into(), predecessor.clone()]),
-                test_agent("b", "/bin/sh", vec!["-c".into(), asking_script.clone()]),
+                test_agent(
+                    "a",
+                    crate::test_support::SH,
+                    vec!["-c".into(), predecessor.clone()],
+                ),
+                test_agent(
+                    "b",
+                    crate::test_support::SH,
+                    vec!["-c".into(), asking_script.clone()],
+                ),
             ],
             edges: vec![crate::config::EdgeConfig {
                 from: "a".into(),
@@ -3917,7 +3947,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
         .await?;
         let event_log = EventLog::new(archive.clone(), "withdrawn-run".into());
         let spec = |script: &str| ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.to_owned()],
             env: BTreeMap::new(),
             cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
@@ -4006,11 +4036,13 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
 IFS= read -r _
 printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"helper-h","configOptions":[]}}}}'
 IFS= read -r _
-echo $$ > '{pid}.tmp' && mv '{pid}.tmp' '{pid}'
+{{ cat /proc/$$/winpid 2>/dev/null || echo $$; }} > '{pid}.tmp' && mv '{pid}.tmp' '{pid}'
 IFS= read -r never
 exit 0
 "#,
-            pid = pid.display(),
+            // Git's sh on Windows numbers its processes its own way; /proc/$$/winpid is the
+            // Windows process id that `process_is_alive` asks about.
+            pid = crate::test_support::sh_path(&pid),
         );
         let lead = format!(
             r#"set -eu
@@ -4044,8 +4076,12 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                test_agent("lead", "/bin/sh", vec!["-c".into(), lead.clone()]),
-                test_agent("h", "/bin/sh", vec!["-c".into(), helper]),
+                test_agent(
+                    "lead",
+                    crate::test_support::SH,
+                    vec!["-c".into(), lead.clone()],
+                ),
+                test_agent("h", crate::test_support::SH, vec!["-c".into(), helper]),
             ],
             edges: Vec::new(),
         });
@@ -4063,7 +4099,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
         .await?;
         let connection = bus.connection("lead").await?;
         let mut process = AcpProcess::spawn(&ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), lead],
             env: BTreeMap::new(),
             cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),

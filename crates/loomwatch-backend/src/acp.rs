@@ -292,7 +292,7 @@ fn start_command(spec: &ProcessSpec) -> Result<StartCommand> {
 /// (`api::augment_search_path`), so a run finds them there too, instead of asking for a restart
 /// after an app is installed while `LoomWatch` runs.
 fn per_user_program(spec: &ProcessSpec) -> Option<PathBuf> {
-    per_user_program_in(spec, std::env::var_os("HOME").map(PathBuf::from).as_deref())
+    per_user_program_in(spec, crate::platform::home_dir().as_deref())
 }
 
 fn per_user_program_in(spec: &ProcessSpec, home: Option<&Path>) -> Option<PathBuf> {
@@ -4107,7 +4107,7 @@ mod tests {
             done
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4212,7 +4212,7 @@ mod tests {
             printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
         "#;
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: std::env::current_dir().expect("cwd"),
@@ -4611,7 +4611,7 @@ mod tests {
         let cwd = std::env::current_dir().expect("cwd");
         let archive = EventArchive::new(pool);
         let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
+            cmd: crate::test_support::SH.into(),
             args: vec!["-c".into(), script.into()],
             env: BTreeMap::new(),
             cwd: cwd.clone(),

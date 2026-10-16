@@ -280,8 +280,10 @@ async fn run_loaded_team(
     for agent in &team.agents {
         memory.packet_for(agent)?;
     }
+    // Boxed, as `run_team_mode` boxes the session: on Windows either run's future is over Clippy's
+    // 16 KB `large_futures` limit, and so would be everything that awaits this.
     if team.edges.is_empty() {
-        run_team_mode(
+        Box::pin(run_team_mode(
             team,
             team_path,
             archive,
@@ -290,10 +292,10 @@ async fn run_loaded_team(
             event_log,
             &memory,
             lineage,
-        )
+        ))
         .await
     } else {
-        run_pipeline_mode(
+        Box::pin(run_pipeline_mode(
             team,
             team_path,
             archive,
@@ -302,7 +304,7 @@ async fn run_loaded_team(
             event_log,
             &memory,
             lineage,
-        )
+        ))
         .await
     }
 }
@@ -498,7 +500,8 @@ async fn run_team_mode(
         .as_ref()
         .map(EventLog::session_id)
         .map(str::to_owned);
-    let root = run_answerable_session(
+    // Boxed: see `TeamBus::run_agent_inner`.
+    let root = Box::pin(run_answerable_session(
         AskedQuestion {
             team,
             agent,
@@ -522,7 +525,7 @@ async fn run_team_mode(
             composed: Some(&composed),
             boundary: checkpoint_turn.as_ref(),
         },
-    )
+    ))
     .await;
     let delegated = bus.wait_for_tasks().await;
     let shutdown = bus.shutdown().await;

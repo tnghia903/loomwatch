@@ -841,7 +841,7 @@ struct ChatState {
 
 /// The chat's routes. Loopback-only and never cached, like run control.
 pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunRegistry) -> Router {
-    let teams_root = std::fs::canonicalize(&teams_root).unwrap_or(teams_root);
+    let teams_root = crate::platform::canonicalize(&teams_root).unwrap_or(teams_root);
     Router::new()
         .route("/api/chat", get(chat_page))
         .route("/api/chat/messages", post(send_message))
@@ -1670,7 +1670,7 @@ mod tests {
         let hold = match (gate, cancellable) {
             (Some(gate), _) => format!(
                 "if [ \"$work\" = 1 ]; then while [ ! -f '{}' ]; do sleep 0.05; done; fi\n",
-                gate.display()
+                crate::test_support::sh_path(gate)
             ),
             (None, true) => "if [ \"$work\" = 1 ] && [ -z \"$held\" ]; then\n  held=1\n  printf '%s\\n' \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"session/update\\\",\\\"params\\\":{\\\"sessionId\\\":\\\"s\\\",\\\"update\\\":{\\\"sessionUpdate\\\":\\\"agent_message_chunk\\\",\\\"content\\\":{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"partial\\\"}}}}\"\n  while IFS= read -r stop; do case \"$stop\" in *session/cancel*) break ;; esac; done\n  printf '%s\\n' \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":$id,\\\"result\\\":{\\\"stopReason\\\":\\\"cancelled\\\"}}\"\n  continue\nfi\n".to_owned(),
             (None, false) => String::new(),
@@ -1707,9 +1707,10 @@ done
         let researcher = dir.write_harness("researcher.sh", researcher);
         let writer = dir.write_harness("writer.sh", &agent_script("writer", None, false));
         let yaml = format!(
-            "schemaVersion: 1\nid: news-desk\nname: News desk\nentrypoint: researcher\nagents:\n  - id: researcher\n    name: Researcher\n    role: find the news\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n  - id: writer\n    name: Writer\n    role: write the digest\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\nedges:\n  - from: researcher\n    to: writer\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
-            researcher.display(),
-            writer.display()
+            "schemaVersion: 1\nid: news-desk\nname: News desk\nentrypoint: researcher\nagents:\n  - id: researcher\n    name: Researcher\n    role: find the news\n    spawn:\n      cmd: {sh}\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n  - id: writer\n    name: Writer\n    role: write the digest\n    spawn:\n      cmd: {sh}\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\nedges:\n  - from: researcher\n    to: writer\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
+            crate::test_support::sh_path(&researcher),
+            crate::test_support::sh_path(&writer),
+            sh = crate::test_support::SH
         );
         let path = dir.0.join("news.yaml");
         std::fs::write(&path, yaml).unwrap();
@@ -2088,9 +2089,10 @@ done
         let lead = dir.write_harness("lead.sh", &agent_script("lead", None, false));
         let helper = dir.write_harness("helper.sh", &agent_script("helper", None, false));
         let yaml = format!(
-            "schemaVersion: 1\nid: studio\nname: Studio\nentrypoint: lead\nagents:\n  - id: lead\n    name: Lead\n    role: run the studio\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n  - id: helper\n    name: Helper\n    role: help\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\nedges: []\n",
-            lead.display(),
-            helper.display()
+            "schemaVersion: 1\nid: studio\nname: Studio\nentrypoint: lead\nagents:\n  - id: lead\n    name: Lead\n    role: run the studio\n    spawn:\n      cmd: {sh}\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n  - id: helper\n    name: Helper\n    role: help\n    spawn:\n      cmd: {sh}\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\nedges: []\n",
+            crate::test_support::sh_path(&lead),
+            crate::test_support::sh_path(&helper),
+            sh = crate::test_support::SH
         );
         std::fs::write(dir.0.join("news.yaml"), yaml).unwrap();
         let rig = rig(pool, &dir);

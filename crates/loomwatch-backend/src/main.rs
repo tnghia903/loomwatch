@@ -164,7 +164,30 @@ async fn recovered_registry(archive: &EventArchive) -> RunRegistry {
 /// force-quit app never leaves `LoomWatch` running where nobody can see or stop it. An orphaned
 /// process is adopted by launchd (or init), whose pid is 1. As on a signal, the archive writes
 /// what it holds first.
+///
+/// On Windows, which has neither, `LoomWatch.exe` holds the other end of this process's standard
+/// input: it closes when the app quits (its way of asking this to stop, as a signal does on a Mac)
+/// or ends any other way.
 fn exit_with_parent(archive: EventArchive) {
+    #[cfg(windows)]
+    if std::env::var_os("LOOMWATCH_EXIT_WITH_PARENT").is_some_and(|value| value == "1") {
+        let (gone, app_gone) = tokio::sync::oneshot::channel::<()>();
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut stdin = std::io::stdin();
+            let mut buffer = [0_u8; 256];
+            while matches!(stdin.read(&mut buffer), Ok(read) if read > 0) {}
+            let _ = gone.send(());
+        });
+        tokio::spawn(async move {
+            if app_gone.await.is_ok() {
+                eprintln!("LoomWatch quit, so loomwatchd is stopping too");
+                let _ = tokio::time::timeout(Duration::from_secs(5), archive.flush()).await;
+                std::process::exit(0);
+            }
+        });
+        return;
+    }
     #[cfg(unix)]
     if std::env::var_os("LOOMWATCH_EXIT_WITH_PARENT").is_some_and(|value| value == "1") {
         tokio::spawn(async move {
@@ -179,7 +202,7 @@ fn exit_with_parent(archive: EventArchive) {
         });
     }
     #[cfg(not(unix))]
-    let _ = archive;
+    drop(archive);
 }
 
 /// `~/Library/Application Support/LoomWatch` on macOS, `%LOCALAPPDATA%\LoomWatch` on Windows,
@@ -227,7 +250,28 @@ async fn stop_signal() -> i32 {
     }
 }
 
-#[cfg(not(unix))]
+/// Ctrl+C or Ctrl+Break, or the console window closing, or Windows signing out or shutting down.
+/// After the last three Windows ends the process a few seconds later anyway, which is enough for
+/// the archive's last batch.
+#[cfg(windows)]
+async fn stop_signal() -> i32 {
+    use tokio::signal::windows::{ctrl_break, ctrl_close, ctrl_logoff, ctrl_shutdown};
+    let (Ok(mut close), Ok(mut brk), Ok(mut logoff), Ok(mut shutdown)) =
+        (ctrl_close(), ctrl_break(), ctrl_logoff(), ctrl_shutdown())
+    else {
+        let _ = tokio::signal::ctrl_c().await;
+        return 130;
+    };
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => 130,
+        _ = brk.recv() => 130,
+        _ = close.recv() => 143,
+        _ = logoff.recv() => 143,
+        _ = shutdown.recv() => 143,
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 async fn stop_signal() -> i32 {
     let _ = tokio::signal::ctrl_c().await;
     130

@@ -76,6 +76,9 @@ const NODE_DIST: &str = "https://nodejs.org/dist";
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
 const MARKER: &str = "loomwatch-ready.json";
 
+/// How nodejs.org packs a build for this computer: a zip for Windows, a gzipped tarball elsewhere.
+const NODE_ARCHIVE: &str = if cfg!(windows) { "zip" } else { "tar.gz" };
+
 /// The nodejs.org build for this computer and its SHA-256, from that release's `SHASUMS256.txt`.
 fn node_build() -> Option<(&'static str, &'static str)> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
@@ -94,6 +97,15 @@ fn node_build() -> Option<(&'static str, &'static str)> {
         ("linux", "x86_64") => Some((
             "linux-x64",
             "6e1db87ef58b8819e5d5402eff1536491b18edd8eb7bee5ef7897876e88dc5ff",
+        )),
+        // Windows builds come as .zip (see [`NODE_ARCHIVE`]).
+        ("windows", "x86_64") => Some((
+            "win-x64",
+            "158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541",
+        )),
+        ("windows", "aarch64") => Some((
+            "win-arm64",
+            "8779b1bde1d39f8d420e3b57aa657b39891af434d3de44a919044cec06785921",
         )),
         _ => None,
     }
@@ -164,7 +176,7 @@ static CONNECTORS: OnceLock<Connectors> = OnceLock::new();
 pub fn init(state_dir: &Path) -> &'static Connectors {
     CONNECTORS.get_or_init(|| {
         // The per-user folders too: Node.js and npx installed there count, as apps there do.
-        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let home = crate::platform::home_dir();
         let search_path =
             crate::api::augment_search_path(std::env::var_os("PATH"), home.as_deref());
         Connectors::new(state_dir.join("connectors"), search_path)
@@ -184,7 +196,21 @@ fn bridge_for(app: &str) -> Option<&'static Bridge> {
 /// The bridge `npx -y <package>` or `npx -y <package>@<its pinned version>` starts. Any other
 /// version is what someone asked for on purpose, so it is started as written.
 fn requested_bridge(cmd: &str, args: &[String]) -> Option<&'static Bridge> {
-    if Path::new(cmd).file_name() != Some(OsStr::new("npx")) {
+    let program = Path::new(cmd);
+    // On Windows also `npx.cmd`, the npx a search of the PATH finds there.
+    let npx = if cfg!(windows) {
+        program
+            .file_stem()
+            .is_some_and(|stem| stem.eq_ignore_ascii_case("npx"))
+            && program.extension().is_none_or(|extension| {
+                ["cmd", "exe", "bat"]
+                    .iter()
+                    .any(|known| extension.eq_ignore_ascii_case(known))
+            })
+    } else {
+        program.file_name() == Some(OsStr::new("npx"))
+    };
+    if !npx {
         return None;
     }
     let [flag, requested] = args else {
@@ -226,10 +252,7 @@ impl Connectors {
     fn ready(&self, bridge: &Bridge) -> Option<(PathBuf, PathBuf)> {
         let dir = self.dir(bridge);
         let marker: Marker = serde_json::from_slice(&std::fs::read(dir.join(MARKER)).ok()?).ok()?;
-        let entry = dir
-            .join("node_modules")
-            .join(bridge.package)
-            .join(bridge.entry);
+        let entry = entry_script(&dir, bridge);
         (marker.node.is_file() && entry.is_file()).then_some((marker.node, entry))
     }
 
@@ -255,7 +278,10 @@ impl Connectors {
                     .min()?,
             };
         }
-        found.is_file().then_some(found)
+        // `claude.exe` and `codex.exe` on Windows.
+        crate::platform::program_candidates(&found)
+            .into_iter()
+            .find(|candidate| candidate.is_file())
     }
 
     /// The apps that have a connector, and where each stands: what the Home panel shows for an
@@ -407,10 +433,7 @@ impl Connectors {
             let _ = std::fs::remove_dir_all(&staging);
             return Err(error.context(format!("couldn't install what {} needs", bridge.name)));
         }
-        let entry = staging
-            .join("node_modules")
-            .join(bridge.package)
-            .join(bridge.entry);
+        let entry = entry_script(&staging, bridge);
         ensure!(
             entry.is_file(),
             "npm finished but {} is missing from {}",
@@ -423,7 +446,7 @@ impl Connectors {
         )?;
         // A folder left by an install that stopped half way has no marker: replace it.
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::rename(&staging, &dir)
+        rename_dir(&staging, &dir)
             .with_context(|| format!("couldn't move the install into {}", dir.display()))?;
         Ok(())
     }
@@ -472,11 +495,7 @@ impl Connectors {
     }
 
     fn own_node(&self) -> Option<NodeProgram> {
-        let dir = self.own_node_dir()?;
-        let program = NodeProgram {
-            node: dir.join("bin/node"),
-            npm_cli: dir.join("lib/node_modules/npm/bin/npm-cli.js"),
-        };
+        let program = node_layout(&self.own_node_dir()?);
         (program.node.is_file() && program.npm_cli.is_file()).then_some(program)
     }
 
@@ -516,8 +535,8 @@ impl Connectors {
         let dir = self.own_node_dir().context("no folder for Node.js")?;
         let name = format!("node-v{NODE_VERSION}-{platform}");
         std::fs::create_dir_all(&self.root)?;
-        let archive = self.root.join(format!("{name}.tar.gz.part"));
-        let url = format!("{}/v{NODE_VERSION}/{name}.tar.gz", self.node_dist);
+        let archive = self.root.join(format!("{name}.{NODE_ARCHIVE}.part"));
+        let url = format!("{}/v{NODE_VERSION}/{name}.{NODE_ARCHIVE}", self.node_dist);
         fetch_verified(&url, sha256, &archive)
             .await
             .context("couldn't download Node.js")?;
@@ -525,17 +544,13 @@ impl Connectors {
         let _ = std::fs::remove_dir_all(&staging);
         let unpack_into = staging.clone();
         let unpack_from = archive.clone();
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            let file = std::fs::File::open(&unpack_from)?;
-            tar::Archive::new(flate2::read::GzDecoder::new(file)).unpack(&unpack_into)?;
-            Ok(())
-        })
-        .await
-        .context("unpacking Node.js stopped")?
-        .context("couldn't unpack Node.js")?;
+        tokio::task::spawn_blocking(move || unpack(&unpack_from, &unpack_into))
+            .await
+            .context("unpacking Node.js stopped")?
+            .context("couldn't unpack Node.js")?;
         let _ = std::fs::remove_file(&archive);
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::rename(staging.join(&name), &dir)
+        rename_dir(&staging.join(&name), &dir)
             .with_context(|| format!("couldn't move Node.js into {}", dir.display()))?;
         let _ = std::fs::remove_dir_all(&staging);
         self.own_node()
@@ -553,20 +568,75 @@ impl Connectors {
     }
 }
 
+/// Where a Node.js install keeps `node` and npm's script, under its own folder: `bin/node` and
+/// `lib/node_modules/npm` on macOS and Linux, `node.exe` and `node_modules\npm` on Windows.
+fn node_layout(prefix: &Path) -> NodeProgram {
+    let npm_cli = |modules: PathBuf| modules.join("npm").join("bin").join("npm-cli.js");
+    if cfg!(windows) {
+        NodeProgram {
+            node: prefix.join("node.exe"),
+            npm_cli: npm_cli(prefix.join("node_modules")),
+        }
+    } else {
+        NodeProgram {
+            node: prefix.join("bin").join("node"),
+            npm_cli: npm_cli(prefix.join("lib").join("node_modules")),
+        }
+    }
+}
+
+/// The script `bridge`'s package names as its program, inside the install in `dir`.
+fn entry_script(dir: &Path, bridge: &Bridge) -> PathBuf {
+    // Joined one name at a time: a `/` inside one `join` stays a `/` on Windows.
+    bridge
+        .package
+        .split('/')
+        .chain(bridge.entry.split('/'))
+        .fold(dir.join("node_modules"), |path, name| path.join(name))
+}
+
 /// npm's own script for the `node` found on the `PATH`: the `npm` beside it is a link to that
 /// script for nodejs.org installs, Homebrew and nvm. A shim (Volta, asdf) is not, and gets `None`.
+/// On Windows, nodejs.org's installer (and nvm-windows) keeps it in `node_modules` beside
+/// `node.exe`.
 fn npm_cli_beside(node: &Path) -> Option<PathBuf> {
     let beside = node.parent()?.join("npm");
-    let linked = std::fs::canonicalize(&beside).ok();
-    let under_prefix = std::fs::canonicalize(node)
-        .ok()?
-        .parent()?
-        .parent()?
-        .join("lib/node_modules/npm/bin/npm-cli.js");
+    let linked = crate::platform::canonicalize(&beside).ok();
+    let resolved = crate::platform::canonicalize(node).ok()?;
+    let installed = if cfg!(windows) {
+        node_layout(resolved.parent()?).npm_cli
+    } else {
+        node_layout(resolved.parent()?.parent()?).npm_cli
+    };
     linked
         .into_iter()
-        .chain(std::iter::once(under_prefix))
+        .chain(std::iter::once(installed))
         .find(|candidate| candidate.is_file() && candidate.extension() == Some(OsStr::new("js")))
+}
+
+/// Move the folder `from` to `to`. On Windows a virus scanner often still has a file just written
+/// open, and the move is refused for a moment, so it is tried again for a few seconds.
+fn rename_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut tries = if cfg!(windows) { 20 } else { 1 };
+    loop {
+        match std::fs::rename(from, to) {
+            Err(error) if tries > 1 && error.kind() == std::io::ErrorKind::PermissionDenied => {
+                tries -= 1;
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            done => return done,
+        }
+    }
+}
+
+/// Unpack nodejs.org's `archive` into `into`.
+fn unpack(archive: &Path, into: &Path) -> Result<()> {
+    let file = std::fs::File::open(archive)?;
+    #[cfg(windows)]
+    zip::ZipArchive::new(std::io::BufReader::new(file))?.extract(into)?;
+    #[cfg(not(windows))]
+    tar::Archive::new(flate2::read::GzDecoder::new(file)).unpack(into)?;
+    Ok(())
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -691,10 +761,7 @@ mod tests {
     /// Lay out a finished install for `bridge` the way [`Connectors::install`] leaves one.
     fn fake_install(connectors: &Connectors, bridge: &Bridge, node: &Path) {
         let dir = connectors.dir(bridge);
-        let entry = dir
-            .join("node_modules")
-            .join(bridge.package)
-            .join(bridge.entry);
+        let entry = entry_script(&dir, bridge);
         std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
         std::fs::write(&entry, "").unwrap();
         std::fs::write(
@@ -770,6 +837,12 @@ mod tests {
             .is_none()
         );
         assert!(requested_bridge("npx", &args(&[&pinned])).is_none());
+        // What a search of the PATH finds on Windows.
+        assert_eq!(
+            requested_bridge(r"C:\Program Files\nodejs\npx.cmd", &args(&["-y", &pinned])).is_some(),
+            cfg!(windows)
+        );
+        assert!(requested_bridge("npx.js", &args(&["-y", &pinned])).is_none());
         assert!(requested_bridge("claude-agent-acp", &args(&[])).is_none());
         assert!(
             requested_bridge(
@@ -801,9 +874,11 @@ mod tests {
         std::fs::write(&node, "").unwrap();
         fake_install(&connectors, codex, &node);
 
-        let entry = connectors
-            .dir(codex)
-            .join("node_modules/@agentclientprotocol/codex-acp/dist/index.js");
+        let entry = ["@agentclientprotocol", "codex-acp", "dist", "index.js"]
+            .iter()
+            .fold(connectors.dir(codex).join("node_modules"), |path, name| {
+                path.join(name)
+            });
         assert_eq!(
             connectors.resolve("npx", &spawn),
             Resolved::Direct {
@@ -833,9 +908,19 @@ mod tests {
         assert_eq!(connectors.engine("codex"), None);
         fake_install(&connectors, codex, &node);
         assert_eq!(connectors.engine("codex"), None, "no program inside yet");
+        // As npm lays it out on Windows, with the program's `.exe`, or elsewhere.
+        let (platform, program) = if cfg!(windows) {
+            ("codex-win32-x64/vendor/x86_64-pc-windows-msvc", "codex.exe")
+        } else {
+            ("codex-darwin-arm64/vendor/aarch64-apple-darwin", "codex")
+        };
         let program = connectors
             .dir(codex)
-            .join("node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex");
+            .join("node_modules")
+            .join("@openai")
+            .join(platform)
+            .join("bin")
+            .join(program);
         std::fs::create_dir_all(program.parent().unwrap()).unwrap();
         std::fs::write(&program, "").unwrap();
         assert_eq!(connectors.engine("codex"), Some(program));
@@ -847,11 +932,7 @@ mod tests {
         let temp = Scratch::new();
         let connectors = connectors(temp.path());
         let claude = bridge_for("claude").unwrap();
-        let entry = connectors
-            .dir(claude)
-            .join("node_modules")
-            .join(claude.package)
-            .join(claude.entry);
+        let entry = entry_script(&connectors.dir(claude), claude);
         std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
         std::fs::write(&entry, "").unwrap();
         assert_eq!(connectors.status("claude"), Some(ConnectorStatus::Needed));
@@ -885,15 +966,50 @@ mod tests {
 
     #[test]
     fn the_childs_path_starts_with_its_node() {
-        let joined = path_with(
-            Path::new("/lw/node/bin"),
-            Some(OsStr::new("/usr/bin:/lw/node/bin:/bin")),
-        );
-        assert_eq!(joined, OsString::from("/lw/node/bin:/usr/bin:/bin"));
+        let node = Path::new("/lw/node/bin");
+        let path = std::env::join_paths(["/usr/bin", "/lw/node/bin", "/bin"]).unwrap();
+        let joined = path_with(node, Some(&path));
         assert_eq!(
-            path_with(Path::new("/lw/node/bin"), None),
-            OsString::from("/lw/node/bin")
+            joined,
+            std::env::join_paths(["/lw/node/bin", "/usr/bin", "/bin"]).unwrap()
         );
+        assert_eq!(path_with(node, None), OsString::from("/lw/node/bin"));
+    }
+
+    /// nodejs.org's Windows builds are zips: one unpacks into the folder it names.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_node_zip_unpacks() {
+        use std::io::Write;
+        let temp = Scratch::new();
+        let archive = temp.path().join("node.zip");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+        let stored = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("node-v1-win-x64/node.exe", stored).unwrap();
+        zip.write_all(b"node").unwrap();
+        zip.start_file("node-v1-win-x64/node_modules/npm/bin/npm-cli.js", stored)
+            .unwrap();
+        zip.finish().unwrap();
+        let into = temp.path().join("out");
+        unpack(&archive, &into).unwrap();
+        let program = node_layout(&into.join("node-v1-win-x64"));
+        assert_eq!(std::fs::read(&program.node).unwrap(), b"node");
+        assert!(program.npm_cli.is_file());
+    }
+
+    /// nodejs.org's Windows installer: `npm.cmd` beside `node.exe`, npm's script in `node_modules`.
+    #[cfg(windows)]
+    #[test]
+    fn npm_is_found_beside_node_exe() {
+        let temp = Scratch::new();
+        let nodejs = crate::platform::canonicalize(temp.path()).unwrap();
+        let cli = nodejs.join("node_modules\\npm\\bin\\npm-cli.js");
+        std::fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        std::fs::write(&cli, "").unwrap();
+        std::fs::write(nodejs.join("node.exe"), "").unwrap();
+        std::fs::write(nodejs.join("npm.cmd"), "").unwrap();
+        assert_eq!(npm_cli_beside(&nodejs.join("node.exe")), Some(cli));
     }
 
     #[cfg(unix)]

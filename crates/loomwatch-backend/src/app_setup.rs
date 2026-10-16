@@ -116,11 +116,18 @@ fn sign_in_args(app: &str) -> Option<&'static [&'static str]> {
     }
 }
 
-/// The vendor's own installer for `app`, or `None` for an app the panel does not install. Claude
-/// and Codex need none: their connectors carry them (`crate::connectors`).
-fn installer(app: &str) -> Option<&'static str> {
+/// The vendor's own installer for `app`, as a program and its arguments, or `None` for an app the
+/// panel does not install. Claude and Codex need none: their connectors carry them
+/// (`crate::connectors`).
+fn installer(app: &str) -> Option<(&'static str, &'static [&'static str])> {
     match app {
-        "opencode" => Some("curl -fsSL https://opencode.ai/install | bash"),
+        // OpenCode's install script is for macOS and Linux. For Windows its own guide installs the
+        // npm package, which puts `opencode` on the PATH npm's other programs are on.
+        "opencode" if cfg!(windows) => Some(("npm", &["install", "--global", "opencode-ai"])),
+        "opencode" => Some((
+            "/bin/bash",
+            &["-c", "curl -fsSL https://opencode.ai/install | bash"],
+        )),
         _ => None,
     }
 }
@@ -183,15 +190,27 @@ impl Jobs {
         self.start(app, JobKind::SignIn, command)
     }
 
-    /// Run `app`'s own installer.
+    /// Run `app`'s own installer, found on `search_path` when it is a bare name (npm).
     ///
     /// # Errors
     ///
     /// Returns an error for an app the panel does not install, or when the installer cannot start.
-    pub fn install(&self, app: &str) -> Result<SetupJob> {
-        let script = installer(app).with_context(|| format!("LoomWatch can't install {app}"))?;
-        let mut command = Command::new("/bin/bash");
-        command.args(["-c", script]);
+    pub fn install(&self, app: &str, search_path: Option<&std::ffi::OsStr>) -> Result<SetupJob> {
+        let (program, args) =
+            installer(app).with_context(|| format!("LoomWatch can't install {app}"))?;
+        let program = if Path::new(program).is_absolute() {
+            program.into()
+        } else {
+            search_path
+                .and_then(|path| crate::platform::find_program(path, program))
+                .with_context(|| {
+                    format!(
+                        "Installing {app} on this computer needs Node.js, and none was found. Install it from https://nodejs.org, then try again."
+                    )
+                })?
+        };
+        let mut command = Command::new(program);
+        command.args(args);
         self.start(app, JobKind::Install, command)
     }
 
@@ -253,6 +272,9 @@ impl Jobs {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         let mut child = command.spawn().context("couldn't start it")?;
+        // On Windows npm is cmd.exe running Node: stopping an install ends both. Not a sign-in,
+        // whose browser may be started by it and must stay open after it is done.
+        let tree = (kind == JobKind::Install).then(|| crate::platform::ProcessTree::adopt(&child));
         let job = Arc::new(Mutex::new(Job {
             kind,
             state: JobState::Running,
@@ -316,6 +338,9 @@ impl Jobs {
                     job.reason = Some(error.to_string());
                 }
                 Err(_) => {
+                    if let Some(tree) = tree {
+                        tree.end();
+                    }
                     let _ = child.start_kill();
                     job.state = JobState::Failed;
                     job.reason = Some("It waited 15 minutes without finishing, so LoomWatch stopped it. Try again.".to_owned());
@@ -444,6 +469,7 @@ mod tests {
         let _ = std::fs::remove_file(script);
     }
 
+    #[cfg(unix)]
     async fn wait_for(jobs: &Jobs, ready: impl Fn(&SetupJob) -> bool) -> SetupJob {
         for _ in 0..200 {
             if let Some(job) = jobs.snapshot().remove("claude")

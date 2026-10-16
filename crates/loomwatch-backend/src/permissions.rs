@@ -349,9 +349,7 @@ impl PermissionPolicy {
         path.strip_prefix(&self.folder).is_ok_and(|inside| {
             inside.components().next().is_some()
                 && inside.components().all(|component| match component {
-                    Component::Normal(name) => {
-                        !PROTECTED_FOLDERS.iter().any(|folder| name == *folder)
-                    }
+                    Component::Normal(name) => !is_protected(name),
                     _ => false,
                 })
         })
@@ -362,6 +360,17 @@ impl PermissionPolicy {
             && (path.starts_with(&self.folder)
                 || self.readable.iter().any(|root| path.starts_with(root)))
     }
+}
+
+/// Whether `name` is one of [`PROTECTED_FOLDERS`] as the file system sees it: in any case (Windows
+/// and macOS do not tell `.Claude` from `.claude`) and with Windows' trailing dots and spaces
+/// dropped, which it drops when it makes the folder.
+fn is_protected(name: &std::ffi::OsStr) -> bool {
+    let name = name.to_string_lossy();
+    let name = name.trim_end_matches(['.', ' ']);
+    PROTECTED_FOLDERS
+        .iter()
+        .any(|folder| name.eq_ignore_ascii_case(folder))
 }
 
 /// A file no agent reads without asking, wherever its folder or knowledge reaches: the keys the AI
@@ -775,6 +784,22 @@ mod tests {
         edits: true,
         commands: true,
     };
+
+    /// An app's settings folder is protected however the edit spells it: Windows and macOS make
+    /// `.Claude` or `.claude.` the same folder as `.claude` when it does not exist yet.
+    #[test]
+    fn a_settings_folder_is_protected_in_any_case_and_with_trailing_dots() {
+        let scratch = Scratch::new();
+        let policy = policy(&scratch, ALL);
+        let agent = scratch.0.join("agent");
+        for folder in [".claude", ".Claude", ".CODEX", ".claude.", ".git. ."] {
+            assert!(
+                !policy.may_write(&agent.join(folder).join("settings.json")),
+                "{folder}"
+            );
+        }
+        assert!(policy.may_write(&agent.join("claude-notes").join("a.md")));
+    }
 
     /// ADR 0040: "Allow for this run" covers a kind for the app's own tools, but exactly one MCP
     /// tool, however the app labels it. Codex calls every MCP tool `execute`, so allowing a tool for

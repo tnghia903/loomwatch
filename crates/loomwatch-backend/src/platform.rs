@@ -45,6 +45,19 @@ pub fn canonicalize(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
     dunce::canonicalize(path)
 }
 
+/// Whether Windows refuses `name` as a file or folder name, with or without an extension: the
+/// device names `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9` and `LPT1`–`LPT9`, in any case.
+#[must_use]
+pub fn is_reserved_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).trim_end();
+    let upper = stem.to_ascii_uppercase();
+    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((upper.starts_with("COM") || upper.starts_with("LPT"))
+            && upper.len() == 4
+            && upper.as_bytes()[3].is_ascii_digit()
+            && upper.as_bytes()[3] != b'0')
+}
+
 /// The extensions a program file can have on Windows, in the order a terminal tries them: those in
 /// `PATHEXT` that can be started directly (`.com`, `.exe`) or through cmd.exe (`.bat`, `.cmd`).
 /// A `.js` or `.vbs` in `PATHEXT` is opened by another program, never started, so it is left out.
@@ -105,7 +118,11 @@ pub fn program_candidates(path: &Path) -> Vec<PathBuf> {
 /// path such as `bin\agent` against the agent's own folder. A program not found is returned as
 /// written, so starting it fails with the system's own "not found".
 #[must_use]
-pub fn program_path(program: impl AsRef<OsStr>, cwd: &Path, search_path: Option<&OsStr>) -> PathBuf {
+pub fn program_path(
+    program: impl AsRef<OsStr>,
+    cwd: &Path,
+    search_path: Option<&OsStr>,
+) -> PathBuf {
     let program = program.as_ref();
     #[cfg(windows)]
     {
@@ -243,6 +260,20 @@ impl ProcessTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_device_names_are_reserved_with_any_extension_or_case() {
+        for name in [
+            "con", "CON", "nul.yaml", "Aux", "prn.txt", "com1", "LPT9.log", "con .",
+        ] {
+            assert!(is_reserved_name(name), "{name}");
+        }
+        for name in [
+            "console", "com0", "com10", "lpt", "nullable", "team", "my-con", "",
+        ] {
+            assert!(!is_reserved_name(name), "{name}");
+        }
+    }
 
     #[test]
     fn the_home_folder_is_home_except_on_windows_where_it_is_the_user_profile() {

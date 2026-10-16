@@ -404,7 +404,7 @@ async fn models_for(control: &Control, app: &crate::api::DetectedHarness) -> App
         .inner
         .search_path
         .as_deref()
-        .and_then(|path| crate::api::find_executable(path, &app.spawn.cmd))
+        .and_then(|path| crate::platform::find_program(path, &app.spawn.cmd))
         .map_or_else(
             || app.spawn.cmd.clone(),
             |path| path.to_string_lossy().into_owned(),

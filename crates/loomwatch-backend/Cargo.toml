@@ -63,3 +63,5 @@ keyring = { version = "3", default-features = false, features = ["apple-native"]
 keyring = { version = "3", default-features = false, features = ["windows-native"] }
 # Ends an app's whole process tree with it: an npm-installed app is cmd.exe running node.
 win32job = "2.0"
+# nodejs.org's Windows builds come as .zip, which `connectors` unpacks (tar.gz elsewhere).
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }

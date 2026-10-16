@@ -1152,6 +1152,7 @@ async fn post_harness_sign_in_code(
 
 /// Run an app's own installer (`crate::app_setup`); `/api/harnesses` reports how it went.
 async fn post_harness_install(
+    State(state): State<ApiState>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<(StatusCode, Json<crate::app_setup::SetupJob>), ApiError> {
     if !crate::app_setup::can_install(&id) {
@@ -1161,7 +1162,7 @@ async fn post_harness_install(
         ));
     }
     crate::app_setup::jobs()
-        .install(&id)
+        .install(&id, state.search_path.as_deref())
         .map(|job| (StatusCode::ACCEPTED, Json(job)))
         .map_err(|error| ApiError::new(StatusCode::BAD_GATEWAY, format!("{error:#}")))
 }
