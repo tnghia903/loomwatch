@@ -1,10 +1,12 @@
 import {
+  BackSide,
   Box3,
   BoxGeometry,
   Color,
   DirectionalLight,
   ExtrudeGeometry,
   Group,
+  HalfFloatType,
   HemisphereLight,
   MathUtils,
   Mesh,
@@ -26,13 +28,15 @@ import {
   ShadowMaterial,
   Shape,
   SphereGeometry,
+  Texture,
   Vector2,
   Vector3,
   WebGLRenderer,
+  WebGLRenderTarget,
+  type Camera,
   type Material,
-  type Texture,
 } from 'three'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
 import { CARD_SLOTS, FIGURE_KEYS, partOfNode, reactionsBetween, READ_SLOTS, TOOL_SLOTS, type FigureLook, type FigureMood, type FigurePart, type FigureReaction, type ReadSource } from '../../lib/library/figure'
@@ -279,8 +283,9 @@ export class WorkbenchScene {
     this.disposables.push(floorGeometry, floorMaterial)
   }
 
-  async load(url: string): Promise<void> {
-    const gltf = await new GLTFLoader().loadAsync(url)
+  /** Build the bench from workbench.glb: its URL, or its bytes when they are fetched already (readModel). */
+  async load(source: string | ArrayBuffer): Promise<void> {
+    const gltf = await readModel(source)
     const model = gltf.scene
     this.wound = this.own(woundTexture())
     model.traverse((object) => {
@@ -310,6 +315,8 @@ export class WorkbenchScene {
       this.keyDish.set(key, middle.multiplyScalar(-DISH_KEY_SCALE))
     }
     this.lights()
+    // Every shader it draws with, the hidden parts' too, compiled before its first frame (readyToDraw).
+    await readyToDraw(this.renderer, this.scene, this.camera)
     this.loaded = true
     this.frame()
     if (this.view) this.apply(null, this.view)
@@ -800,8 +807,10 @@ export class WorkbenchScene {
   }
 
   private frame() {
+    // Nothing shows until it has loaded, and a frame drawn while its shaders compile would wait for them.
+    if (!this.loaded) return
     this.renderer.render(this.scene, this.camera)
-    if (this.loaded) this.callbacks.onFrame(this.anchors(), this.facesOnScreen())
+    this.callbacks.onFrame(this.anchors(), this.facesOnScreen())
   }
 
   private update(dt: number) {
@@ -1205,6 +1214,87 @@ export function fitCanvas(renderer: WebGLRenderer, width: number, height: number
   renderer.domElement.style.width = `${across / ratio}px`
   renderer.domElement.style.height = `${down / ratio}px`
   return { width: across / ratio, height: down / ratio }
+}
+
+/**
+ * workbench.glb, from its URL, or from its bytes when the caller has fetched them already: the
+ * landing page fetches the model once, alongside the code that draws it, and builds each of its
+ * scenes from the same bytes.
+ */
+export function readModel(source: string | ArrayBuffer): Promise<GLTF> {
+  const loader = new GLTFLoader()
+  return typeof source === 'string' ? loader.loadAsync(source) : loader.parseAsync(source, '')
+}
+
+/**
+ * Compile every shader `object` draws with, its hidden parts' too, and resolve once they can be
+ * used; `scene` is the scene it draws in, when it is only part of one. A shader compiles the first
+ * time a frame needs it, and that frame waits: on a visitor's first look, before the browser has
+ * cached any of them, the bench's took seconds and held up the whole page. Where the browser can
+ * compile in the background (KHR_parallel_shader_compile, in Chrome and Safari), this waits without
+ * holding anything up; elsewhere it costs what the first frame would have.
+ */
+export async function readyToDraw(renderer: WebGLRenderer, object: Object3D, camera: Camera, scene: Scene | null = null): Promise<void> {
+  const materials = renderer.compile(object, camera, scene)
+  const programs = new Set([...materials].flatMap((material) => (renderer.properties.get(material) as Compiled).currentProgram ?? []))
+  // What compileAsync() waits for; it doesn't say which programs it compiled.
+  while (![...programs].every((program) => program.isReady())) await new Promise((resolve) => setTimeout(resolve, 10))
+  // three asks after a program's uniforms the first time it draws with it, and the answer waits for
+  // everything sent to the GPU before it: in a first frame, the textures going up and the draws
+  // before it. Asked now, nothing is ahead of it. The textures go up now too: the first asks the
+  // GPU how finely it may filter, and that answer waits the same way.
+  for (const program of programs) program.getUniforms()
+  for (const material of materials) for (const value of Object.values(material)) if (value instanceof Texture) renderer.initTexture(value)
+}
+
+/**
+ * The room the figures are lit by (RoomEnvironment) as an environment map, its shaders compiled
+ * first (readyToDraw): PMREMGenerator compiles the room's as it draws it, and waits for them. It
+ * draws the room, and a backdrop behind it, into a picture, so theirs are compiled with one current.
+ */
+export async function roomEnvironment(renderer: WebGLRenderer, sigma: number): Promise<Texture> {
+  const room = new RoomEnvironment()
+  const backdrop = new Mesh(new BoxGeometry(), new MeshBasicMaterial({ side: BackSide }))
+  const camera = new PerspectiveCamera(90, 1, 0.1, 100)
+  const picture = new WebGLRenderTarget(1, 1, { type: HalfFloatType })
+  const current = renderer.getRenderTarget()
+  renderer.setRenderTarget(picture)
+  const compiled = Promise.all([readyToDraw(renderer, room, camera), readyToDraw(renderer, backdrop, camera)])
+  renderer.setRenderTarget(current)
+  await compiled
+  const pmrem = new PMREMGenerator(renderer)
+  const map = pmrem.fromScene(room, sigma).texture
+  // The backdrop's shader stays compiled while PMREMGenerator's own backdrop uses it.
+  for (const item of [room, pmrem, picture, backdrop.geometry, backdrop.material]) item.dispose()
+  return map
+}
+
+/**
+ * Resolve once the GPU has drawn everything asked of it so far, checking now and then rather than
+ * waiting on it (a WebGL2 fence). A first frame leaves the GPU busy for a while after it is sent,
+ * making the shaders' pipelines; anything that asks the GPU a question meanwhile, as making another
+ * WebGL context does, waits for all of it.
+ */
+export function drawn(renderer: WebGLRenderer): Promise<void> {
+  const gl = renderer.getContext()
+  if (!(gl instanceof WebGL2RenderingContext)) return Promise.resolve()
+  const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)
+  if (!fence) return Promise.resolve()
+  gl.flush()
+  return new Promise((resolve) => {
+    const check = () => {
+      if (gl.isContextLost() || gl.getSyncParameter(fence, gl.SYNC_STATUS) === gl.SIGNALED) {
+        gl.deleteSync(fence)
+        resolve()
+      } else setTimeout(check, 16)
+    }
+    setTimeout(check, 16)
+  })
+}
+
+/** What WebGLRenderer keeps for a material it has compiled (its `properties`). */
+interface Compiled {
+  currentProgram?: { isReady: () => boolean; getUniforms: () => unknown }
 }
 
 /**

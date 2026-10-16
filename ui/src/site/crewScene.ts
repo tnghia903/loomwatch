@@ -14,7 +14,6 @@ import {
   PCFShadowMap,
   PerspectiveCamera,
   PlaneGeometry,
-  PMREMGenerator,
   Raycaster,
   Scene,
   ShaderMaterial,
@@ -28,10 +27,7 @@ import {
   type Texture,
   type Vector4,
 } from 'three'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
-
-import { benchMaterial, fitCanvas } from '../components/agents/workbenchScene'
+import { benchMaterial, drawn, fitCanvas, readModel, readyToDraw, roomEnvironment } from '../components/agents/workbenchScene'
 import { pegboardTexture, swatchTextures, woundTexture } from '../components/agents/benchTextures'
 import { COLOR_HEX, FIGURE_KINDS, type FigureChoice } from '../lib/library/figures'
 import { markPattern } from '../lib/story/mark'
@@ -113,6 +109,8 @@ export class CrewScene {
   private height = 1
   private running = false
   private loaded = false
+  /** Loaded, and its shaders compiled: it draws, and answers the pointer. */
+  private ready = false
   private frameId = 0
   private last = 0
   private now = 0
@@ -155,13 +153,6 @@ export class CrewScene {
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = PCFShadowMap
 
-    const pmrem = new PMREMGenerator(this.renderer)
-    const room = new RoomEnvironment()
-    this.scene.environment = pmrem.fromScene(room, 0.04).texture
-    this.scene.environmentIntensity = 0.55
-    room.dispose()
-    pmrem.dispose()
-
     this.scene.add(new HemisphereLight('#FFF6E8', '#2A2A32', 0.75))
     const key = new DirectionalLight('#FFF3E2', 2.3)
     key.position.set(-1.6, 4.2, 3.4)
@@ -193,8 +184,14 @@ export class CrewScene {
     this.glow = this.own(new CrewGlow(this.renderer, 0.9))
   }
 
-  async load(url: string): Promise<void> {
-    const gltf = await new GLTFLoader().loadAsync(url)
+  /** Build the crew from workbench.glb: its URL, or its bytes when the page has fetched them already. */
+  async load(model: string | ArrayBuffer): Promise<void> {
+    // The room it is lit by: made here rather than with its WebGL context, so a page that loads it a
+    // moment after making it (main.js) waits on one of the two at a time.
+    this.scene.environment = await roomEnvironment(this.renderer, 0.04)
+    this.scene.environmentIntensity = 0.55
+
+    const gltf = await readModel(model)
     const source = gltf.scene.getObjectByName('figure')
     if (!source) throw new Error('The model has no figure.')
     source.removeFromParent()
@@ -236,7 +233,12 @@ export class CrewScene {
     this.scene.add(this.bead)
     this.loaded = true
     this.layout()
+    // Every shader the crew and its glow draw with, compiled before the first frame (readyToDraw).
+    await Promise.all([readyToDraw(this.renderer, this.scene, this.camera), this.glow.compile(() => this.compileFlat())])
+    this.ready = true
     this.frame()
+    // Loaded once that frame is drawn: the page shows it then, and only then makes its other scenes.
+    await drawn(this.renderer)
   }
 
   /**
@@ -317,7 +319,7 @@ export class CrewScene {
   /** The pointer, in this canvas's CSS pixels; null when it leaves the page. */
   pointerMove(x: number | null, y: number | null) {
     this.pointer = x === null || y === null ? null : new Vector2(x, y)
-    const over = this.pointer && this.loaded ? this.pick(this.pointer.x, this.pointer.y) : null
+    const over = this.pointer && this.ready ? this.pick(this.pointer.x, this.pointer.y) : null
     if (over !== this.hovered) {
       this.hovered = over
       this.callbacks.onHover(over)
@@ -326,7 +328,7 @@ export class CrewScene {
 
   /** A click or tap at this point: the figure there, if any, is picked. */
   pointerUp(x: number, y: number) {
-    const picked = this.loaded ? this.pick(x, y) : null
+    const picked = this.ready ? this.pick(x, y) : null
     if (picked !== null) this.callbacks.onPick(picked)
   }
 
@@ -381,13 +383,15 @@ export class CrewScene {
   }
 
   private frame() {
-    if (this.loaded) this.glow.draw(() => this.drawFlat())
-    else {
+    // Until its shaders are compiled (load()), a frame would wait for them: it only clears.
+    if (!this.ready) {
       this.renderer.setRenderTarget(null)
       this.renderer.clear()
+      return
     }
+    this.glow.draw(() => this.drawFlat())
     this.renderer.render(this.scene, this.camera)
-    if (this.loaded) this.callbacks.onFrame(this.figures.map((figure) => this.screen(figure.head.getWorldPosition(new Vector3()).setY(this.headTop + 0.04))), this.hovered === null ? this.talkState : null)
+    this.callbacks.onFrame(this.figures.map((figure) => this.screen(figure.head.getWorldPosition(new Vector3()).setY(this.headTop + 0.04))), this.hovered === null ? this.talkState : null)
   }
 
   private update(dt: number) {
@@ -516,6 +520,15 @@ export class CrewScene {
     this.renderer.shadowMap.autoUpdate = true
     for (const figure of this.figures) for (const mesh of figure.meshes) mesh.material = mesh.userData.material as Material
     for (const object of shown) object.visible = true
+  }
+
+  /** Compile a figure as drawFlat draws it, for the glow (CrewGlow.compile); they all draw alike. */
+  private compileFlat(): Promise<unknown> {
+    const figure = this.figures[0]
+    for (const mesh of figure.meshes) mesh.material = figure.tint
+    const compiled = readyToDraw(this.renderer, figure.root, this.camera, this.scene)
+    for (const mesh of figure.meshes) mesh.material = mesh.userData.material as Material
+    return compiled
   }
 
   /**

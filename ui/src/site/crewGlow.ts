@@ -11,6 +11,8 @@ import {
   type WebGLRenderer,
 } from 'three'
 
+import { readyToDraw } from '../components/agents/workbenchScene'
+
 /** Taps each side of the centre in one blur pass. */
 const TAPS = 8
 
@@ -129,6 +131,23 @@ export class CrewGlow {
     renderer.clear()
     this.quad.material = this.lay
     renderer.render(this.quad, this.camera)
+  }
+
+  /**
+   * Compile the glow's shaders before its first frame, as readyToDraw (workbenchScene.ts) does the
+   * scene's. `compileFlat` compiles the figures as `drawFlat` draws them. A shader is compiled for
+   * where it draws, a picture or the canvas, so each is compiled with that target current.
+   */
+  compile(compileFlat: () => Promise<unknown>): Promise<unknown> {
+    const renderer = this.renderer
+    renderer.setRenderTarget(this.flat)
+    const flat = compileFlat()
+    renderer.setRenderTarget(this.ping)
+    this.quad.material = this.blur
+    const blur = readyToDraw(renderer, this.quad, this.camera)
+    renderer.setRenderTarget(null)
+    const lay = readyToDraw(renderer, new Mesh(this.quad.geometry, this.lay), this.camera)
+    return Promise.all([flat, blur, lay])
   }
 
   dispose() {
