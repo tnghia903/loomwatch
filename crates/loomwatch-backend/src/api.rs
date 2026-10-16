@@ -1309,8 +1309,18 @@ pub fn system_harness_report() -> HarnessReport {
     }
 }
 
+/// Run `scan` on a thread that may block, not on one of the async workers every other request
+/// is served from: the capability scan reads a few hundred skill files, one by one.
+async fn scan_off_the_workers<T: Send + 'static>(scan: impl FnOnce() -> T + Send + 'static) -> T {
+    tokio::task::spawn_blocking(scan)
+        .await
+        .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()))
+}
+
 async fn get_capabilities(State(state): State<ApiState>) -> Json<CapabilityInventory> {
-    let mut inventory = detect_capabilities(state.home_dir.as_deref(), &state.teams_root);
+    let (home, teams_root) = (state.home_dir.clone(), state.teams_root.clone());
+    let mut inventory =
+        scan_off_the_workers(move || detect_capabilities(home.as_deref(), &teams_root)).await;
     // `detect_capabilities` is a filesystem scan and cannot count rows, so every live team's
     // memory source comes back with `kept: None`. Where the daemon has a database, fill it in
     // here — in one statement for every team at once — and leave it absent where it does not,
@@ -1341,7 +1351,9 @@ async fn get_capability_details(
     State(state): State<ApiState>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<Json<CapabilityDetails>, ApiError> {
-    detect_capability_details(state.home_dir.as_deref(), &state.teams_root, &id)
+    let (home, teams_root, wanted) = (state.home_dir.clone(), state.teams_root.clone(), id.clone());
+    scan_off_the_workers(move || detect_capability_details(home.as_deref(), &teams_root, &wanted))
+        .await
         .map(Json)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, format!("unknown capability {id:?}")))
 }
