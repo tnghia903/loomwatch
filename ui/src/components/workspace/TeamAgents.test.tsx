@@ -5,7 +5,13 @@ import type { DetectedHarness } from '../../lib/harnesses'
 import type { DetectedCapability } from '../../lib/library/client'
 import type { SavedJob } from '../../lib/library/jobs'
 import type { AgentConfig } from '../../lib/team-file/types'
+import type { AgentFigureProps } from '../agents/AgentFigure'
 import { TeamAgents, type TeamAgentsProps } from './TeamAgents'
+
+// The bench is drawn with WebGL, which jsdom has none of: here it is only its labels, as buttons.
+vi.mock('../agents/AgentFigure', () => ({
+  default: ({ labels }: AgentFigureProps) => <div>{labels.map((tag) => <button key={tag.anchor} type="button" aria-label={tag.label}>{tag.text}</button>)}</div>,
+}))
 
 const claude: DetectedHarness = { id: 'claude', name: 'Claude Code', command: 'claude-agent-acp', executablePath: '/bin/claude-agent-acp', acpAvailable: true, spawn: { cmd: 'claude-agent-acp', args: [] } }
 const reader: SavedJob = { id: 'reader', file: '.jobs/reader.yaml', name: 'Reader', does: 'Checks each story', instructions: 'Check every story.', apps: ['claude'], figure: { kind: 'button', color: 'sage' } }
@@ -116,6 +122,31 @@ describe('a team’s agents, the first of its views', () => {
     expect(within(block).queryByRole('list', { name: 'Wrenches in its tool drawer' })).toBeNull()
     expect(within(block).getAllByRole('button', { name: /^Give it / })).toHaveLength(3)
     expect(screen.getByText(/and uses no tools yet\./)).toBeInTheDocument()
+  })
+
+  it('says on the bench, and in its block, which tools don’t fit in the tool drawer', async () => {
+    const many = (count: number): AgentConfig => ({ ...scoper, capabilities: ['github', 'notion', 'linear', 'memory', 'browser', 'sentry'].slice(0, count).map((name) => ({ kind: 'tool' as const, name })) })
+    renderTeamAgents({ agents: [many(6)], selected: 'scope' })
+    expect(await screen.findByRole('button', { name: 'The tool drawer: Can use 6 tools while it works (2 not in the drawer)' })).toHaveTextContent('Tools · 6 (2 not in the drawer)')
+    expect(screen.getByRole('region', { name: 'Tools it can use' })).toHaveTextContent('The drawer has room for 4, so browser and sentry aren’t in it. It can still use them.')
+    cleanup()
+
+    renderTeamAgents({ agents: [many(5)], selected: 'scope' })
+    expect(await screen.findByRole('button', { name: /^The tool drawer:/ })).toHaveTextContent('Tools · 5 (1 not in the drawer)')
+    expect(screen.getByRole('region', { name: 'Tools it can use' })).toHaveTextContent('The drawer has room for 4, so browser isn’t in it. It can still use it.')
+    cleanup()
+
+    // Four fit: every one is in the drawer, and nothing is said.
+    renderTeamAgents({ agents: [many(4)], selected: 'scope' })
+    expect(await screen.findByRole('button', { name: 'The tool drawer: Can use 4 tools while it works' })).toHaveTextContent(/^Tools · 4$/)
+    expect(screen.getByRole('region', { name: 'Tools it can use' })).not.toHaveTextContent('room for')
+  })
+
+  it('says on the bench, and in its block, what doesn’t fit in the file drawer', async () => {
+    const folders = ['notes', 'drafts', 'sources', 'archive', 'inbox'].map((name) => ({ kind: 'knowledge' as const, name, path: `/Users/me/${name}` }))
+    renderTeamAgents({ agents: [{ ...scoper, capabilities: folders }], selected: 'scope' })
+    expect(await screen.findByRole('button', { name: 'The file drawer: Reads 5 folders the team gives it (1 not in the drawer)' })).toHaveTextContent('Reads · 5 (1 not in the drawer)')
+    expect(screen.getByRole('region', { name: 'What it reads' })).toHaveTextContent('The drawer has room for 4, so inbox isn’t in it. It still reads it.')
   })
 
   it('shows the version’s tools on the bench of an agent placed from Your agents, and the team’s reads', async () => {
