@@ -2510,7 +2510,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           <>
           <TeamChat
             teamPath={doc.path}
-            teamName={doc.teamName ?? (doc.path.split('/').pop() ?? doc.path).replace(/\.ya?ml$/i, '')}
+            teamName={doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, '')}
             agents={chatAgents}
             team={chatTeam}
             steps={doc.pipelineSteps.length || doc.nodes.length}

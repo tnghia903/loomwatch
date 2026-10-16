@@ -1,3 +1,4 @@
+import { baseName } from '../files/paths'
 import type { RunRecord } from '../runs/client'
 import { plainRunError } from '../runs/errors'
 import { permissionSentence, permissionWhat } from '../runs/permissionRequests'
@@ -37,7 +38,7 @@ export interface Ticket {
 export const FAILED_WINDOW_MS = 24 * 60 * 60 * 1000
 
 export function teamLabel(path: string, names: ReadonlyMap<string, string>): string {
-  return names.get(path) ?? path.replace(/\.ya?ml$/, '').split('/').at(-1) ?? path
+  return names.get(path) ?? baseName(path).replace(/\.ya?ml$/, '')
 }
 
 export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<string, string>, dismissed: ReadonlySet<string>, now = Date.now()): Ticket[] {

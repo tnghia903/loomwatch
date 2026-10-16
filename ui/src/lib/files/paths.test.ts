@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import { absoluteTeamPath } from '../team-file/useTeamDocument'
+import { absoluteTeamPath, slugifyTeamName } from '../team-file/useTeamDocument'
+import { buildAgentFromSource } from '../library/createAgent'
+import { jobIdFor } from '../library/jobs'
+import { briefFileNameFor } from '../memory/client'
 import { teamPathUnderRoot } from '../team-file/client'
 import { chosenIsFile, chosenName } from '../knowledge/chosen'
 import { teamFolderOf } from '../team-file/workFolder'
 import { shortenDirectory } from '../team-file/problems'
 import { filePathFrom } from './fileRefs'
-import { baseName, dirName, isAbsolutePath, joinUnderRoot, pathFromFileUrl, relativeUnder } from './paths'
+import { baseName, dirName, isAbsolutePath, joinUnderRoot, pathFromFileUrl, relativeUnder, safeFileStem } from './paths'
 
 // The daemon sends `C:\Users\ana\…` on Windows. Every helper that reads a path must read it as the
 // same file a Mac path names, or a team saved on Windows reloads from the wrong place.
@@ -66,5 +69,21 @@ describe('paths from a Mac and from Windows', () => {
     expect(shortenDirectory('C:\\Users\\ana\\LoomWatch\\teams')).toBe('~\\LoomWatch\\teams')
     expect(shortenDirectory('/Users/ana/LoomWatch/teams')).toBe('~/LoomWatch/teams')
     expect(shortenDirectory('C:\\Users\\ana\\Developer\\clients\\northwind\\automation\\teams')).toBe('~\\…\\automation\\teams')
+  })
+
+  // Windows keeps CON, NUL, COM1 and the like for its devices: `con.yaml` cannot be saved there.
+  it('never names a file after one of the names Windows keeps for itself', () => {
+    for (const name of ['con', 'PRN', 'aux', 'Nul', 'com1', 'COM9', 'lpt1', 'lpt9']) expect(safeFileStem(name)).toBe(`${name}-1`)
+    for (const name of ['console', 'com', 'com10', 'lpt0', 'nul-team', 'icon']) expect(safeFileStem(name)).toBe(name)
+    expect(slugifyTeamName('Con')).toBe('con-1')
+    expect(jobIdFor('NUL')).toBe('nul-1')
+    expect(buildAgentFromSource({ group: 'detected', id: 'x', label: 'Aux', spawn: { cmd: 'x', args: [] } }, []).id).toBe('aux-1')
+    expect(briefFileNameFor('# COM1\nSerial port notes', [], 'trip.brief')).toBe('trip.brief/com1-1.md')
+  })
+
+  it('keeps a team’s file name as short as a job’s', () => {
+    const slug = slugifyTeamName(`${'very '.repeat(20)}long team`)
+    expect(slug.length).toBeLessThanOrEqual(64)
+    expect(slug).toMatch(/^very-very-.*[a-z]$/)
   })
 })

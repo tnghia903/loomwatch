@@ -2,9 +2,9 @@
  * Which computer the browser runs on, for the few things people read differently there. The page is
  * always opened on the computer LoomWatch runs on, so the browser's platform is LoomWatch's too.
  *
- * Shortcuts are written once, the Mac way (`⌘S`, `⌥⌘L`, `⌘⇧L`, `⌘↵`), and {@link keys} writes them
- * the way Windows and Linux do (`Ctrl+S`, `Ctrl+Alt+L`, `Ctrl+Shift+L`, `Ctrl+Enter`). The key
- * handlers already accept Ctrl wherever they accept ⌘.
+ * Shortcuts are written once, the Mac way (`⌘S`, `⌥⌘L`, `⌘⇧L`, `⌘↵`, `↵`), and {@link keys} writes
+ * them the way Windows and Linux do (`Ctrl+S`, `Ctrl+Alt+L`, `Ctrl+Shift+L`, `Ctrl+Enter`, `Enter`).
+ * The key handlers already accept Ctrl wherever they accept ⌘.
  */
 
 type NavigatorWithHints = Navigator & { userAgentData?: { platform?: string } }
@@ -37,8 +37,15 @@ export function keys(mac: string, onMac = isMac()): string {
     held.add(MODIFIERS[rest[0]])
     rest = rest.slice(1)
   }
-  if (held.size === 0) return mac
+  // A key on its own: only the Mac's symbols (↵, ⌫) need a name; F8 or Esc stays as it is.
+  if (held.size === 0) return KEYS[rest] ?? mac
   return [...ORDER.filter((name) => held.has(name)), KEYS[rest] ?? rest].join('+')
+}
+
+/** What to call the computer LoomWatch runs on: "this Mac", "this PC" on Windows, "this computer" elsewhere. */
+export function thisComputer(): string {
+  if (isMac()) return 'this Mac'
+  return isWindows() ? 'this PC' : 'this computer'
 }
 
 /** Where macOS keeps a secret, or Windows: the name a person knows it by. */

@@ -2,7 +2,7 @@ import { ChevronDown, Plus } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { AppProblem } from '../../lib/team-file/appChecks'
-import { baseName, dirName } from '../../lib/files/paths'
+import { baseName, dirName, relativeUnder, splitPath } from '../../lib/files/paths'
 import { fetchTeamsDiscovery, teamDisplayName, teamSummaries, type TeamSummary } from '../../lib/team-file/client'
 import { reviewProblems, shortenDirectory, type ReviewProblem } from '../../lib/team-file/problems'
 import type { EntrypointProblem, SaveState } from '../../lib/team-file/useTeamDocument'
@@ -117,7 +117,9 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   // Two teams may share a name; their files never do, so a shared name shows its file beside it.
   const nameCounts = new Map<string, number>()
   for (const team of files ?? []) nameCounts.set(teamDisplayName(team), (nameCounts.get(teamDisplayName(team)) ?? 0) + 1)
-  const isCurrent = (file: string) => (root ? `${root.replace(/\/+$/, '')}/${file}` : file) === path || file === path
+  // The list names files under the root; the open team has its full path, `C:\…` on Windows.
+  const openUnderRoot = root && path ? relativeUnder(root, path) : null
+  const isCurrent = (file: string) => file === path || (openUnderRoot !== null && splitPath(file).join('/') === openUnderRoot)
 
   function switchTo(file: string) {
     if (dirty && saveState !== 'new') { setPendingSwitch(file); return }

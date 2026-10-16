@@ -1,3 +1,4 @@
+import { safeFileStem } from '../files/paths'
 import type { AgentConfig } from '../team-file/types'
 import type { LibrarySource } from './types'
 
@@ -8,7 +9,7 @@ function slugify(label: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-  return slug.length > 0 ? slug : 'agent'
+  return safeFileStem(slug.length > 0 ? slug : 'agent')
 }
 
 function uniqueId(base: string, existingIds: ReadonlySet<string>): string {

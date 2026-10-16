@@ -23,6 +23,12 @@ describe('keys', () => {
     expect(keys('F8', false)).toBe('F8')
     expect(keys('Esc', false)).toBe('Esc')
   })
+
+  it('names the Mac’s own key symbols when they stand alone', () => {
+    expect(keys('↵', true)).toBe('↵')
+    expect(keys('↵', false)).toBe('Enter')
+    expect(keys('⌫', false)).toBe('Backspace')
+  })
 })
 
 describe('installCommand', () => {

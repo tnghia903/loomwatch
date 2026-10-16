@@ -18,7 +18,7 @@ import { CONNECTIONS_HREF, NOTION_PAGE_SOURCE, type NotionConnection } from '../
 import { PALETTE_WIDTH } from '../../lib/library/paletteWidth'
 import { PaletteResizer } from './PaletteResizer'
 import { SectionHead } from '../ui/SectionHead'
-import { keys } from '../../lib/platform'
+import { keys, thisComputer } from '../../lib/platform'
 
 const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn }
 
@@ -220,8 +220,8 @@ function usedRefusal(row: UsedInRun, name: (id: string) => string): string | nul
 const EXPLAIN: Record<string, ReactNode> = {
   [BUILT_IN]: 'Each job is placed with working instructions on the best AI app you have.',
   [APPS]: 'The same agents without a job: an AI app and an empty brief, for when you write the instructions yourself.',
-  Skills: 'Skills found on this Mac. Drag one onto an agent to supply its instructions there; skills you connect work with any AI app.',
-  Tools: <>Tools found on this Mac. Web search, commands and file edits are built into each AI app instead: switch them on per agent, under <b>Allowed without asking</b>.</>,
+  Skills: `Skills found on ${thisComputer()}. Drag one onto an agent to supply its instructions there; skills you connect work with any AI app.`,
+  Tools: <>Tools found on {thisComputer()}. Web search, commands and file edits are built into each AI app instead: switch them on per agent, under <b>Allowed without asking</b>.</>,
   [CONNECTIONS]: <>Services you connected in Connections. Drag <b>Notion</b> onto an agent and choose a page: the agent is given the page’s text each time the team runs. The pages this team reads are listed under it.</>,
   [FILES]: <>This team’s folders and files. Add one from an agent’s panel, with <b>Folder</b> or <b>File</b> under Given. Then drag it onto another agent to share it, or click it to find its card.</>,
   [MEMORY]: 'Other teams’ memory and imported packs. Drag one onto an agent to supply it there.',
@@ -360,13 +360,13 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
     <PanelLeftOpen size={16} />{used.length > 0 ? `${USED} · ${used.length}` : 'Add agents'}
   </button>
   const usedShown = used.filter(item => matches(`${item.name} ${usedDetail(item, agentName)}`))
-  const scanned = capabilitiesScannedAt ? `Scanned this Mac at ${capabilitiesScannedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Scanning finds the skills and tools on this Mac'
+  const scanned = capabilitiesScannedAt ? `Scanned ${thisComputer()} at ${capabilitiesScannedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : `Scanning finds the skills and tools on ${thisComputer()}`
   return <aside className="node-palette" aria-label="Add to your team" data-tour="palette">
     <div className="palette-body">
     <div className="palette-head"><div><span className="eyebrow">Add to your team</span><p>Click + or drag onto the canvas, or onto an agent</p></div><button className="icon-button" onClick={() => setCollapsed(true)} aria-label="Collapse the library" title={`Collapse (${keys('⌘\\')})`}><PanelLeftClose size={16} /></button></div>
     <div className="palette-search"><Search size={12} /><input aria-label="Search agents, skills and tools" placeholder="Search" value={query} onChange={e => setQuery(e.target.value)} /><button className="icon-button" onClick={onRetryCapabilities} disabled={capabilitiesLoading} aria-label="Scan this computer again" title="Scan again"><RefreshCw size={12} /></button></div>
-    <p className="palette-scan" role="status">{capabilitiesLoading ? 'Checking this Mac…' : scanned}</p>
-    {capabilitiesError && !capabilitiesLoading && <div className="palette-alert" role="alert"><span>Couldn’t scan this Mac’s skills and tools.</span><small>{capabilitiesError}</small>{onRetryCapabilities && <button className="btn" onClick={onRetryCapabilities}>Try again</button>}</div>}
+    <p className="palette-scan" role="status">{capabilitiesLoading ? `Checking ${thisComputer()}…` : scanned}</p>
+    {capabilitiesError && !capabilitiesLoading && <div className="palette-alert" role="alert"><span>Couldn’t scan {thisComputer()}’s skills and tools.</span><small>{capabilitiesError}</small>{onRetryCapabilities && <button className="btn" onClick={onRetryCapabilities}>Try again</button>}</div>}
     {removeError && <p role="alert">{removeError}</p>}
     {/* A run's own record first, while one is shown: what it used, one row per tool, not per call. */}
     {used.length > 0 && usedShown.length > 0 && section(USED, visible(USED, usedShown).map(usedRow), usedShown.length, undefined,
@@ -386,13 +386,13 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
         {/* An empty group is one dashed slot, the shape its first row will fill; why it is empty is behind the heading's "?". */}
         {group.name === FILES && !query && group.items.length === 0 && <p className="palette-empty"><Folder size={13} aria-hidden="true" />None yet</p>}
         {group.name === MEMORY && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty"><Box size={13} aria-hidden="true" />None yet</p>}
-        {(group.name === 'Skills' || group.name === 'Tools') && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty">{group.name === 'Skills' ? <Puzzle size={13} aria-hidden="true" /> : <Wrench size={13} aria-hidden="true" />}None found on this Mac</p>}
+        {(group.name === 'Skills' || group.name === 'Tools') && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty">{group.name === 'Skills' ? <Puzzle size={13} aria-hidden="true" /> : <Wrench size={13} aria-hidden="true" />}None found on {thisComputer()}</p>}
       </>, group.name === BUILT_IN && saved.available
         ? <><div>{EXPLAIN[BUILT_IN]}</div><div>To reuse an agent that worked, select it and choose <b>Add to Your agents</b>, or build one in <a href="/agents">Your agents</a>.</div></>
         : EXPLAIN[group.name])
     })}
     {query && usedShown.length === 0 && groups.every(group => !group.items.some(item => matches(`${item.name} ${item.detail}`))) && <p className="palette-hint">Nothing matches “{query}”.</p>}
-    <p className="palette-foot" title="Only names and compatibility are scanned; private contents stay on this Mac."><Lock size={10} aria-hidden="true" />Names only. Contents stay on this Mac.</p>
+    <p className="palette-foot" title={`Only names and compatibility are scanned; private contents stay on ${thisComputer()}.`}><Lock size={10} aria-hidden="true" />Names only. Contents stay on {thisComputer()}.</p>
     </div>
     {onResize && <PaletteResizer width={width ?? PALETTE_WIDTH.default} onResize={onResize} />}
   </aside>
@@ -407,7 +407,7 @@ function AppsFooter({ loading, error, onRetry, found, notInstalled, notInstalled
   if (loading) return <span className="visually-hidden">Looking for AI apps…</span>
   if (error) return <div className="palette-alert" role="alert"><span>Couldn’t read the list of AI apps.</span><small>{error}</small>{onRetry && <button className="btn" onClick={onRetry}>Retry</button>}</div>
   const disclosure = <SearchPathDisclosure open={searchPathOpen} onToggle={onToggleSearchPath} knownIds={knownIds} searchPath={searchPath} />
-  if (found === 0) return <div className="palette-hint"><p>No AI apps found on this Mac.</p>{disclosure}</div>
+  if (found === 0) return <div className="palette-hint"><p>No AI apps found on {thisComputer()}.</p>{disclosure}</div>
   if (notInstalled.length === 0) return null
   return <div className="palette-hint">
     <button className="palette-more" aria-expanded={notInstalledOpen} onClick={onToggleNotInstalled}>Not installed · {notInstalled.length}</button>

@@ -9,6 +9,7 @@
 // returns instructions that do not unchanged.
 
 import { notionPageKey, type CapabilityNodeConfig } from '../composer-layout/types'
+import { baseName } from '../files/paths'
 import { chosenIsFile } from '../knowledge/chosen'
 import type { AgentConfig } from './types'
 
@@ -56,7 +57,7 @@ function sourceTerms(source: RemovedSource): Term[] {
   const texts = [name]
   const short = name.split(/\s+[—–-]\s+|:\s+|\s+\|\s+/)[0]?.trim()
   if (short && short !== name) texts.push(short)
-  if (source.path) texts.push(source.path, source.path.replace(/\/+$/, '').split('/').pop() ?? '')
+  if (source.path) texts.push(source.path, baseName(source.path))
   return [...new Set(texts)].filter((text) => text.length >= MIN_TERM).map((text) => ({ text, loose }))
 }
 

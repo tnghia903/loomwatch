@@ -10,7 +10,7 @@ export function isAbsolutePath(path: string): boolean {
 }
 
 /** Whether `path` is written the Windows way: a drive or a network share, or only backslashes. */
-function isWindowsPath(path: string): boolean {
+export function isWindowsPath(path: string): boolean {
   return /^(?:[A-Za-z]:|\\\\)/.test(path) || (path.includes('\\') && !path.includes('/'))
 }
 
@@ -53,6 +53,17 @@ export function relativeUnder(root: string, path: string): string | null {
     : (a: string, b: string) => a === b
   if (!rootParts.every((part, index) => same(part, parts[index]))) return null
   return parts.slice(rootParts.length).join('/')
+}
+
+/** Names Windows keeps for its devices. */
+const RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
+
+/**
+ * `stem`, the part of a file name before its ending, safe on every computer: Windows refuses a file
+ * named `con`, `nul`, `com1` and the like, even as `con.yaml`, so those get `-1` after them.
+ */
+export function safeFileStem(stem: string): string {
+  return RESERVED_NAMES.test(stem) ? `${stem}-1` : stem
 }
 
 /** The path a `file://` URL names: `C:\…` for `file:///C:/…`, `/…` otherwise. `null` if malformed. */

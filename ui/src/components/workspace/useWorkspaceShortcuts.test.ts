@@ -132,4 +132,25 @@ describe('useWorkspaceShortcuts', () => {
     expect(context.setSolo).not.toHaveBeenCalled()
     unmount()
   })
+
+  // Windows apps redo on Ctrl+Y as well as Ctrl+Shift+Z; a Mac has no such shortcut.
+  it('redoes on Ctrl+Y on Windows, and not on a Mac', () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get')
+    try {
+      platform.mockReturnValue('Win32')
+      const windows = shortcuts()
+      fireEvent.keyDown(window, { key: 'y', code: 'KeyY', ctrlKey: true })
+      expect(windows.context.doc.redo).toHaveBeenCalledTimes(1)
+      expect(windows.context.doc.undo).not.toHaveBeenCalled()
+      windows.unmount()
+
+      platform.mockReturnValue('MacIntel')
+      const mac = shortcuts()
+      fireEvent.keyDown(window, { key: 'y', code: 'KeyY', ctrlKey: true })
+      expect(mac.context.doc.redo).not.toHaveBeenCalled()
+      mac.unmount()
+    } finally {
+      platform.mockRestore()
+    }
+  })
 })

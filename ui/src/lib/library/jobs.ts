@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
+import { safeFileStem } from '../files/paths'
 import type { AgentAllow, AgentConfig } from '../team-file/types'
 import type { FigureChoice } from './figures'
 import { ROLE_ICON_IDS, type RoleIcon, type RolePreset } from './roles'
@@ -144,7 +145,7 @@ export function jobIdFor(name: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 64)
     .replace(/-+$/g, '')
-  return slug || 'job'
+  return safeFileStem(slug || 'job')
 }
 
 const ICON_WORDS: ReadonlyArray<readonly [RoleIcon, RegExp]> = [

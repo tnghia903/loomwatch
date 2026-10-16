@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DetectedHarness } from '../../lib/harnesses'
 import type { CapabilityInventory } from '../../lib/library/client'
+import { thisComputer } from '../../lib/platform'
 import { projectRun, type RunEvent } from '../../lib/watch/events'
 import { ComponentPalette } from './ComponentPalette'
 import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
@@ -89,7 +90,7 @@ describe('ComponentPalette in Build and in a run', () => {
     expect(within(section('Skills')).getByRole('button', { name: /notebooklm.*Claude Code \+ Codex.*Ready/ })).toBeInTheDocument()
     expect(within(section('Tools')).getByRole('button', { name: /Agent Memory.*Compatible/ })).toBeInTheDocument()
     expect(within(section('Team memory')).getByRole('button', { name: /Research team · memory/ })).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent(/Scanned this Mac at/)
+    expect(screen.getByRole('status')).toHaveTextContent(`Scanned ${thisComputer()} at`)
   })
 
   it('makes every row a real drag source with the payload the canvas reads', () => {
@@ -131,8 +132,8 @@ describe('ComponentPalette in Build and in a run', () => {
   // An empty group is one dashed slot, not a paragraph; why it is empty is behind its "?".
   it('shows an empty group as a single slot', () => {
     render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} capabilityInventory={{ skills: [], tools: [], sources: [] }} />)
-    expect(section('Skills').querySelector('.palette-empty')).toHaveTextContent('None found on this Mac')
-    expect(section('Tools').querySelector('.palette-empty')).toHaveTextContent('None found on this Mac')
+    expect(section('Skills').querySelector('.palette-empty')).toHaveTextContent(`None found on ${thisComputer()}`)
+    expect(section('Tools').querySelector('.palette-empty')).toHaveTextContent(`None found on ${thisComputer()}`)
     expect(section('Team memory').querySelector('.palette-empty')).toHaveTextContent('None yet')
   })
 
@@ -289,7 +290,7 @@ describe('ComponentPalette in Build and in a run', () => {
 
   it('shows the search path when no app was found, and says so when there was no PATH at all', () => {
     render(<ComponentPalette harnesses={[]} harnessesLoading={false} harnessesError={null} harnessSearchPath={[]} />)
-    expect(section('AI apps')).toHaveTextContent('No AI apps found on this Mac.')
+    expect(section('AI apps')).toHaveTextContent(`No AI apps found on ${thisComputer()}.`)
     fireEvent.click(screen.getByRole('button', { name: 'Show search path' }))
     expect(screen.getByText(/started without a PATH/)).toBeInTheDocument()
   })

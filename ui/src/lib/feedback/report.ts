@@ -70,11 +70,19 @@ export function browserName(userAgent: string): string {
 }
 
 /**
+ * A Windows home folder however a message writes it: `C:\Users\ana`, `c:\users\ana`, `C:/Users/ana`,
+ * or `C:\\Users\\ana` inside JSON. A name with spaces (`Ana Maria`) counts whole when a folder
+ * follows it, so no part of it is left behind.
+ */
+const WINDOWS_HOME = /[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s'"`)]+(?:(?: +[^\\/\s'"`)]+)+(?=[\\/]))?/gi
+
+/**
  * Replace the operator's home folder with `~`, so a path inside an error message does not carry
  * their account name into a report others can read.
  */
 export function withoutHomeFolder(text: string): string {
-  return text.replace(/\/(Users|home)\/[^/\s'"`)]+/g, '~').replace(/[A-Za-z]:\\Users\\[^\\\s'"`)]+/g, '~')
+  // Windows first: `C:/Users/ana` would otherwise read as a Mac's `/Users/ana` behind a stray `C:`.
+  return text.replace(WINDOWS_HOME, '~').replace(/\/(Users|home)\/[^/\s'"`)]+/g, '~')
 }
 
 /**

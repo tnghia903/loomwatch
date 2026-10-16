@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 
+import { joinUnderRoot } from '../../lib/files/paths'
 import type { DetectedHarness } from '../../lib/harnesses'
 import { agentFromDraft, chatAgentId, chatTeamYaml, type AgentDraft } from '../../lib/library/draft'
 import { figureHue, type FigureChoice } from '../../lib/library/figures'
@@ -88,7 +89,7 @@ export function AgentChat({ draft, harness, model, chatId, figure, onAllow, onRe
     let cancelled = false
     void (async () => {
       try {
-        const path = `${await benchFolder()}/${chatId}.yaml`
+        const path = joinUnderRoot(await benchFolder(), `${chatId}.yaml`)
         const exists = () => fetchTeamFile(path).then(() => true, () => false)
         const there = await exists()
         if (!there && !writable) { if (!cancelled) setHome({ chatId, path: null, error: null }); return }

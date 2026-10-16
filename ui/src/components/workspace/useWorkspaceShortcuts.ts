@@ -4,6 +4,7 @@ import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { CapabilityEdgeConfig, CapabilityNodeConfig } from '../../lib/composer-layout/types'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import type { useRunSession } from '../../lib/runs/useRunSession'
+import { isMac } from '../../lib/platform'
 import type { ConfiguredEdge, useTeamDocument } from '../../lib/team-file/useTeamDocument'
 import { setThemeMode, type ResolvedTheme } from '../../lib/theme'
 import type { InspectedCapability } from '../canvas/CapabilityInspector'
@@ -143,6 +144,8 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
     }
     if (editingText) return
     if (mod && key === 'z') { event.preventDefault(); if (event.shiftKey) doc.redo(); else doc.undo(); return }
+    // Windows and Linux apps also redo on Ctrl+Y.
+    if (event.ctrlKey && key === 'y' && !isMac()) { event.preventDefault(); doc.redo(); return }
     if (mod && key === '\\') { event.preventDefault(); if (windowWidth >= 768) toggleLibrary(); return }
     if (mod && key === '0') { event.preventDefault(); void flow.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 300 }); return }
     if (mod && (key === '+' || key === '=')) { event.preventDefault(); void flow.zoomIn({ duration: 200 }); return }

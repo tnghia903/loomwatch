@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { RunEvent } from '../lib/watch/events'
 import type { AgentConfig } from '../lib/team-file/types'
+import { keys } from '../lib/platform'
 import { Workspace } from './Workspace'
+
+// The Run button shows its key as this computer writes it: ↵ on a Mac, Enter elsewhere.
+const RUN_BUTTON = new RegExp(`^Run ${keys('↵')}`)
 
 const flowRuntime = vi.hoisted(() => ({
   onNodesChange: null as ((...args: unknown[]) => void) | null,
@@ -284,7 +288,7 @@ describe('Workspace', () => {
     expect(screen.getByRole('application', { name: 'Team canvas' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /demo.yaml, .*open team switcher/ })).toBeInTheDocument()
     expect(screen.getByText('2 steps in order')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Run ↵/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: RUN_BUTTON })).toBeDisabled()
     expect(screen.getByText('sequence from Researcher to Reviewer')).toBeInTheDocument()
   })
 
@@ -557,7 +561,7 @@ describe('Workspace', () => {
   it('starts a run from the composer and rewires the canvas into the prompt-to-output story', async () => {
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
+    fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
     if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
     const post = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')!
     // §1.4/§1.6: the run is pinned to the revision on screen and carries one start key per attempt.
@@ -602,7 +606,7 @@ describe('Workspace', () => {
     }))
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
+    fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
     expect(await screen.findByRole('button', { name: 'Starting…' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Saving…' })).not.toBeInTheDocument()
     expect(screen.queryByText(/Saving demo.yaml/)).not.toBeInTheDocument()
@@ -628,11 +632,11 @@ describe('Workspace', () => {
     }))
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
+    fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
     // A dropped connection is said in plain words, not as the browser's TypeError.
     expect(await screen.findByRole('alert')).toHaveTextContent('Can’t reach the LoomWatch server')
     expect(screen.getByLabelText('What should the team do?')).toHaveValue('Summarise the repo')
-    fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
+    fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
     await waitFor(() => expect(startKeys).toHaveLength(2))
     expect(startKeys[1]).toBe(startKeys[0])
     expect(startKeys[0]).toMatch(/\S/)
@@ -656,7 +660,7 @@ describe('Workspace', () => {
     }))
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
+    fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
     if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByLabelText('What should the team do?')).toHaveValue('')
@@ -674,7 +678,7 @@ describe('Workspace', () => {
     }))
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
+    fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
     expect(await screen.findByRole('alert')).toHaveTextContent('changed before the run could start')
     await waitFor(() => expect(documentState.checkDiskRevision).toHaveBeenCalled())
     expect(screen.queryByRole('application', { name: 'Run graph' })).not.toBeInTheDocument()
@@ -919,7 +923,7 @@ describe('Workspace', () => {
       expect(positionOf('Reviewer')).toBe('300x0')
 
       fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-      fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
+      fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
       if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
 
       expect(positionOf('Researcher')).toBe('0x0')
@@ -932,7 +936,7 @@ describe('Workspace', () => {
       expect(nodeKinds(container).at(-1)).toBe('response')
 
       fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-      fireEvent.click(screen.getByRole('button', { name: /^Run ↵/ }))
+      fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
       if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
 
       const kinds = nodeKinds(container)

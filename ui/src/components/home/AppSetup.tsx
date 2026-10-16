@@ -82,11 +82,11 @@ interface CardActions {
   onCode: (code: string) => Promise<void>
 }
 
-/** The Terminal way, kept for anyone who prefers it, folded away under the button. */
+/** The Terminal way (PowerShell on Windows), kept for anyone who prefers it, folded away under the button. */
 function ByHand({ children }: { children: ReactNode }) {
   return (
     <details className="hs-detail">
-      <summary className="t-meta">Or do it in Terminal</summary>
+      <summary className="t-meta">{isWindows() ? 'Or do it in PowerShell' : 'Or do it in Terminal'}</summary>
       {children}
     </details>
   )
@@ -126,9 +126,10 @@ function AppCard({ guide, state, connector, actions }: { guide: CardGuide; state
   // The launcher as it is typed here: `loomwatch` on Windows, where the installer puts it on PATH.
   const launcher = isWindows() ? 'loomwatch' : './loomwatch'
   const checkAgain = <button type="button" className="btn" onClick={onCheck}>Check again</button>
-  const terminalSteps = guide.install && (
+  const install = installCommand(guide)
+  const terminalSteps = install && (
     <ol className="hs-steps">
-      <li><span>Install it. Paste this into Terminal and press Return:</span><CommandLine command={guide.install} /></li>
+      <li><span>{isWindows() ? 'Install it. Paste this into PowerShell and press Enter:' : 'Install it. Paste this into Terminal and press Return:'}</span><CommandLine command={install} /></li>
       {guide.signIn
         ? <li><span>Then sign in. This opens your browser:</span><CommandLine command={guide.signIn} /></li>
         : <li><span>That’s all. LoomWatch notices it here on its own.</span></li>}
@@ -203,7 +204,7 @@ function AppCard({ guide, state, connector, actions }: { guide: CardGuide; state
                   <button type="button" className="btn btn-primary" onClick={onSignIn}>Sign in to {guide.name}</button>
                   {checkAgain}
                 </span>
-                <ByHand><span>Paste this into Terminal and press Return:</span><CommandLine command={guide.signIn} /></ByHand>
+                <ByHand><span>{isWindows() ? 'Paste this into PowerShell and press Enter:' : 'Paste this into Terminal and press Return:'}</span><CommandLine command={guide.signIn} /></ByHand>
               </>
             : <>
                 <span>{state.reason}</span>

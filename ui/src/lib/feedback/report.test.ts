@@ -60,6 +60,20 @@ describe('withoutHomeFolder', () => {
   it('replaces macOS, Linux and Windows home folders', () => {
     expect(withoutHomeFolder('/Users/ann/a and /home/bob/b and C:\\Users\\cat\\c')).toBe('~/a and ~/b and ~\\c')
   })
+
+  // Windows paths reach a report in more than one spelling; none of them may carry the name.
+  it('finds a Windows home folder in any case, with forward slashes, or escaped in JSON', () => {
+    expect(withoutHomeFolder('c:\\users\\ana\\LoomWatch')).toBe('~\\LoomWatch')
+    expect(withoutHomeFolder('C:/Users/ana/LoomWatch')).toBe('~/LoomWatch')
+    expect(withoutHomeFolder('{"path":"C:\\\\Users\\\\ana\\\\LoomWatch\\\\teams"}')).toBe('{"path":"~\\\\LoomWatch\\\\teams"}')
+    expect(withoutHomeFolder('D:\\USERS\\Ana\\x')).toBe('~\\x')
+    for (const text of ['c:\\users\\ana', 'C:/Users/ana', 'C:\\\\Users\\\\ana', 'cannot open C:\\Users\\ana\\x.yaml']) expect(withoutHomeFolder(text)).not.toMatch(/ana/i)
+  })
+
+  it('takes a Windows name with spaces whole, without eating the words after it', () => {
+    expect(withoutHomeFolder('C:\\Users\\Ana Maria\\LoomWatch')).toBe('~\\LoomWatch')
+    expect(withoutHomeFolder('in C:\\Users\\ana failed to open')).toBe('in ~ failed to open')
+  })
 })
 
 describe('issueUrl', () => {

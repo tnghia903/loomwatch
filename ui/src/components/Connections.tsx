@@ -135,7 +135,7 @@ export default function Connections() {
           </> : connection && <>
             <p className="t-body lw-settings-quiet">Connect your Notion account to send your teams’ answers to a Notion page, and to give agents Notion pages to read.</p>
             <button type="button" className="btn btn-primary lw-settings-start" disabled={busy} onClick={() => void act(signIn)}>{busy ? 'Opening Notion…' : 'Connect Notion'}</button>
-            <p className="t-meta lw-settings-quiet">Notion asks you to allow LoomWatch. Because it sends you back to this computer, it also asks you to tick <strong>I recognize and trust this URL</strong> first. The sign-in is kept in this Mac’s Keychain, outside your team files.</p>
+            <p className="t-meta lw-settings-quiet">Notion asks you to allow LoomWatch. Because it sends you back to this computer, it also asks you to tick <strong>I recognize and trust this URL</strong> first. The sign-in is kept in {credentialStore()}, outside your team files.</p>
             <details className="lw-settings-advanced">
               <summary className="t-meta">Advanced: connect with an integration token</summary>
               <p className="t-meta lw-settings-quiet">For workspaces that only allow AI apps an admin has approved.</p>

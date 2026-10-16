@@ -2,7 +2,7 @@ import { applyEdgeChanges, applyNodeChanges } from '@xyflow/react'
 import { MarkerType, type Connection, type Edge, type EdgeChange, type NodeChange } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { baseName, isAbsolutePath, joinUnderRoot, splitPath } from '../files/paths'
+import { baseName, isAbsolutePath, joinUnderRoot, safeFileStem, splitPath } from '../files/paths'
 import type { AgentNode } from '../library/nodeFromDrop'
 import { nodeFromDrop } from '../library/nodeFromDrop'
 import { fetchConfigSchema, fetchTeamFile, fetchTeamsDiscovery, saveTeamFile, TeamFileApiError } from './client'
@@ -130,16 +130,18 @@ function withoutChecks(agent: AgentConfig): AgentConfig {
   return next
 }
 
+/** A team's id and file name: the name in lowercase letters, digits and single hyphens, at most 64. */
 export function slugifyTeamName(name: string): string {
-  return (
-    name
-      .normalize('NFKD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '') || 'new-team'
-  )
+  const slug = name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 64)
+    .replace(/-+$/g, '')
+  return safeFileStem(slug || 'new-team')
 }
 
 /**
@@ -460,7 +462,7 @@ export function useTeamDocument() {
       try {
         const [{ yaml, revision }, discovery] = await Promise.all([
           fetchTeamFile(requestedPath),
-          requestedPath.startsWith('/') ? Promise.resolve(null) : fetchTeamsDiscovery(),
+          isAbsolutePath(requestedPath) ? Promise.resolve(null) : fetchTeamsDiscovery(),
         ])
         source = yaml
         const loadedRevision = revision ?? await hashTeamYaml(yaml)
@@ -683,7 +685,7 @@ export function useTeamDocument() {
       }
       const yaml = modelRef.current.toYaml()
       let root = teamsRoot
-      if (!targetPath.startsWith('/') && !root) {
+      if (!isAbsolutePath(targetPath) && !root) {
         const discovery = await fetchTeamsDiscovery()
         root = discovery.root
         setTeamsRoot(root)
