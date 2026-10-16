@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use loomwatch_backend::archive::EventArchive;
 use loomwatch_backend::runs::RunRegistry;
 
@@ -19,15 +19,43 @@ struct Cli {
     command: Commands,
 }
 
+/// Where the run archive is: one SQLite file.
+#[derive(Debug, Args)]
+struct DatabaseArgs {
+    /// The database file `LoomWatch` keeps its run history in. Defaults to `loomwatch.db` in the
+    /// state folder.
+    #[arg(long, env = "LOOMWATCH_DATABASE", value_name = "PATH")]
+    database: Option<PathBuf>,
+    /// Where `LoomWatch` keeps its own state, such as which team files you approved to run.
+    /// Defaults to `~/Library/Application Support/LoomWatch` on macOS and
+    /// `$XDG_STATE_HOME/loomwatch` (or `~/.local/state/loomwatch`) elsewhere.
+    #[arg(long, env = "LOOMWATCH_STATE_DIR")]
+    state_dir: Option<PathBuf>,
+}
+
+impl DatabaseArgs {
+    fn state_dir(&self) -> Result<PathBuf> {
+        self.state_dir.clone().or_else(default_state_dir).context(
+            "set LOOMWATCH_STATE_DIR: there is no home folder to keep LoomWatch's state in",
+        )
+    }
+
+    fn database(&self) -> Result<PathBuf> {
+        match &self.database {
+            Some(path) => Ok(path.clone()),
+            None => Ok(loomwatch_backend::db::default_path(&self.state_dir()?)),
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Serve the embedded web UI.
     Serve {
         #[arg(long, default_value = "127.0.0.1:3000")]
         listen: SocketAddr,
-        /// Enable local archive watching using this PostgreSQL database.
-        #[arg(long, env = "DATABASE_URL")]
-        database_url: Option<String>,
+        #[command(flatten)]
+        database: DatabaseArgs,
         /// Directory containing team YAML files accessible through the web UI.
         #[arg(long, default_value = ".")]
         teams_root: PathBuf,
@@ -42,18 +70,13 @@ enum Commands {
             default_value_t = false
         )]
         allow_container_listener: bool,
-        /// Where `LoomWatch` keeps its own state, such as which team files you approved to run.
-        /// Defaults to `~/Library/Application Support/LoomWatch` on macOS and
-        /// `$XDG_STATE_HOME/loomwatch` (or `~/.local/state/loomwatch`) elsewhere.
-        #[arg(long, env = "LOOMWATCH_STATE_DIR")]
-        state_dir: Option<PathBuf>,
     },
     /// Run one turn through the configured entrypoint ACP harness.
     Run {
         #[arg(long)]
         team: PathBuf,
-        #[arg(long, env = "DATABASE_URL")]
-        database_url: String,
+        #[command(flatten)]
+        database: DatabaseArgs,
         #[arg(long)]
         prompt: String,
         #[arg(long, default_value_t = 10)]
@@ -61,10 +84,41 @@ enum Commands {
     },
     /// Recover one archived session as ordered JSON lines.
     Show {
-        #[arg(long, env = "DATABASE_URL")]
-        database_url: String,
+        #[command(flatten)]
+        database: DatabaseArgs,
         #[arg(long)]
         session: String,
+    },
+    /// Write a consistent copy of the run history to a new file. Safe while `LoomWatch` runs.
+    Backup {
+        #[command(flatten)]
+        database: DatabaseArgs,
+        /// The copy to write. It must not exist yet.
+        dest: PathBuf,
+    },
+    /// Copy the run history an earlier `LoomWatch` kept in PostgreSQL into the database file.
+    ///
+    /// Safe to run again: rows already in the file are left as they are and counted as skipped.
+    /// Nothing in PostgreSQL is changed.
+    ImportPostgres {
+        #[command(flatten)]
+        database: DatabaseArgs,
+        /// The PostgreSQL database, as `postgres://user:password@host:port/name`.
+        #[arg(long, env = "LOOMWATCH_IMPORT_FROM", hide_env_values = true)]
+        from: String,
+    },
+    /// Print the database file this `LoomWatch` uses.
+    #[command(hide = true)]
+    DatabasePath {
+        #[command(flatten)]
+        database: DatabaseArgs,
+    },
+    /// Print the newest table layout the database was brought up to, or nothing when there is no
+    /// database yet. Changes nothing.
+    #[command(hide = true)]
+    DatabaseLayout {
+        #[command(flatten)]
+        database: DatabaseArgs,
     },
     /// Expose this machine's native ACP harnesses to an authenticated `LoomWatch` container.
     HostRunner {
@@ -91,18 +145,12 @@ enum Commands {
     },
 }
 
-/// A durable registry when there is an archive to be durable in, with its cache already filled
-/// from the `runs` table.
+/// A durable registry with its cache already filled from the `runs` table.
 ///
-/// Without an archive the daemon has no evidence store either, so an in-memory registry is the
-/// honest shape rather than a degraded one. A recovery that fails warns and continues: the daemon
-/// starting is worth more than its history list being complete, and the failure must not be
-/// silent.
-async fn recovered_registry(archive: Option<&EventArchive>) -> RunRegistry {
-    let registry = match archive {
-        Some(archive) => RunRegistry::durable(archive.run_store()),
-        None => RunRegistry::default(),
-    };
+/// A recovery that fails warns and continues: the daemon starting is worth more than its history
+/// list being complete, and the failure must not be silent.
+async fn recovered_registry(archive: &EventArchive) -> RunRegistry {
+    let registry = RunRegistry::durable(archive.run_store());
     match registry.reload().await {
         Ok(0) => {}
         Ok(recovered) => println!("recovered {recovered} run records"),
@@ -127,6 +175,36 @@ fn default_state_dir() -> Option<PathBuf> {
     Some(state.join("loomwatch"))
 }
 
+/// Exit on Ctrl-C or a termination request, after the archive has written what it holds.
+///
+/// Without this the signal ends the process at once, as it always did; the difference now is that
+/// run events are written in batches, so the last fraction of a second would be lost with it.
+async fn flush_then_exit_on_signal(archive: EventArchive) {
+    let code = stop_signal().await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), archive.flush()).await;
+    std::process::exit(code);
+}
+
+/// The exit status a shell reports for the signal that arrived: 128 plus its number.
+#[cfg(unix)]
+async fn stop_signal() -> i32 {
+    use tokio::signal::unix::{SignalKind, signal};
+    let Ok(mut terminate) = signal(SignalKind::terminate()) else {
+        let _ = tokio::signal::ctrl_c().await;
+        return 130;
+    };
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => 130,
+        _ = terminate.recv() => 143,
+    }
+}
+
+#[cfg(not(unix))]
+async fn stop_signal() -> i32 {
+    let _ = tokio::signal::ctrl_c().await;
+    130
+}
+
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
@@ -134,10 +212,9 @@ async fn main() -> Result<()> {
         Commands::Serve {
             listen,
             teams_root,
-            database_url,
+            database,
             mut allowed_hosts,
             allow_container_listener,
-            state_dir,
         } => {
             // Fixed now, so `/api/about` tells this start from the next one (ADR 0052).
             let _ = loomwatch_backend::updates::started_at();
@@ -154,13 +231,16 @@ async fn main() -> Result<()> {
                 listen.ip().to_string(),
             ]);
             anyhow::ensure!(
-                database_url.is_none() || listen.ip().is_loopback() || allow_container_listener,
-                "archive watching exposes exact execution evidence and requires a loopback listener (or --allow-container-listener behind a loopback-only published port)"
+                listen.ip().is_loopback() || allow_container_listener,
+                "the run archive exposes exact execution evidence and requires a loopback listener (or --allow-container-listener behind a loopback-only published port)"
             );
-            let archive = match database_url {
-                Some(url) => Some(EventArchive::connect(&url).await?),
-                None => None,
-            };
+            let state_dir = database.state_dir()?;
+            let database = database.database()?;
+            let opened = EventArchive::open(&database).await?;
+            println!("run history: {}", database.display());
+            // Every router takes an optional archive, which tests leave out. The daemon always
+            // has one.
+            let archive = Some(opened.clone());
             // One canonical root for both the team editor and run control, so a team the
             // editor can open is exactly a team a run may start, and vice versa.
             let teams_root = std::fs::canonicalize(&teams_root).with_context(|| {
@@ -168,9 +248,6 @@ async fn main() -> Result<()> {
             })?;
             // Which team files may run (ADR 0048), kept outside the teams folder. Opened before
             // anything can start a run, and the first time, it approves the teams already there.
-            let state_dir = state_dir.or_else(default_state_dir).context(
-                "set LOOMWATCH_STATE_DIR: there is no home folder to keep LoomWatch's state in",
-            )?;
             let approvals =
                 loomwatch_backend::approvals::TeamApprovals::open(&state_dir, &teams_root)
                     .with_context(|| {
@@ -182,7 +259,10 @@ async fn main() -> Result<()> {
             let listener = tokio::net::TcpListener::bind(listen).await?;
             let address = listener.local_addr()?;
             println!("loomwatchd listening on http://{address}");
-            let registry = recovered_registry(archive.as_ref()).await;
+            let registry = recovered_registry(&opened).await;
+            // Ctrl-C (and the launcher's stop) ends the daemon. The archive's writer may still
+            // hold the last fraction of a second of events; they are written before it exits.
+            tokio::spawn(flush_then_exit_on_signal(opened.clone()));
             registry.set_approvals(std::sync::Arc::new(approvals));
             // The archive is handed to the REST router for exactly one reason: the capability
             // inventory's kept-note counts are rows, not files. Everything else it serves is disk.
@@ -268,26 +348,28 @@ async fn main() -> Result<()> {
                     stopping.restart_requested().await;
                 })
                 .into_future();
-            tokio::select! {
-                outcome = serving => outcome?,
+            let served = tokio::select! {
+                outcome = serving => outcome,
                 () = async {
                     updates.restart_requested().await;
                     tokio::time::sleep(loomwatch_backend::updates::STOP_GRACE).await;
-                } => {}
-            }
+                } => Ok(()),
+            };
+            opened.flush().await;
+            served?;
             if updates.restarting() {
                 std::process::exit(loomwatch_backend::updates::EXIT_TO_UPDATE);
             }
         }
         Commands::Run {
             team,
-            database_url,
+            database,
             prompt,
             exit_timeout_seconds,
         } => {
             let outcome = loomwatch_backend::run_team_session(
                 &team,
-                &database_url,
+                &database.database()?,
                 &prompt,
                 Duration::from_secs(exit_timeout_seconds),
             )
@@ -297,13 +379,28 @@ async fn main() -> Result<()> {
                 outcome.session_id, outcome.event_count, outcome.exit_code
             );
         }
-        Commands::Show {
-            database_url,
-            session,
-        } => {
-            let archive = EventArchive::connect(&database_url).await?;
+        Commands::Show { database, session } => {
+            let archive = EventArchive::open(&database.database()?).await?;
             for event in archive.verify_session(&session).await? {
                 println!("{}", serde_json::to_string(&event)?);
+            }
+        }
+        Commands::Backup { database, dest } => {
+            let source = database.database()?;
+            loomwatch_backend::db::backup(&source, &dest).await?;
+            println!("Saved a copy of {} in {}", source.display(), dest.display());
+        }
+        Commands::ImportPostgres { database, from } => {
+            let report =
+                loomwatch_backend::import::import_postgres(&from, &database.database()?).await?;
+            println!("{report}");
+        }
+        Commands::DatabasePath { database } => {
+            println!("{}", database.database()?.display());
+        }
+        Commands::DatabaseLayout { database } => {
+            if let Some(layout) = loomwatch_backend::db::layout(&database.database()?).await? {
+                println!("{layout}");
             }
         }
         Commands::HostRunner {

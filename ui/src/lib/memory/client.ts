@@ -195,7 +195,7 @@ export async function writeMemoryFile(teamPath: string, file: string, body: stri
  * One team's Notebook: its own notes and what it inherits.
  *
  * A sibling endpoint to `GET /api/memory` rather than part of it: the Brief is Markdown on disk
- * and the Notebook is Postgres rows, and one endpoint would be half-broken whenever the archive
+ * and the Notebook is database rows, and one endpoint would be half-broken whenever the archive
  * is disabled. The panel reads both and shows one thing.
  */
 export async function fetchNotes(teamPath: string, filter: NoteQuery = {}): Promise<NotebookView> {

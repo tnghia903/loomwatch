@@ -44,7 +44,7 @@ struct ApiState {
     /// Present only when the daemon has a database, and read by exactly one handler:
     /// `GET /api/capabilities`, to fill each memory source's kept-note count.
     ///
-    /// This router deliberately does **not** depend on Postgres for anything else — reading a
+    /// This router deliberately does **not** depend on the database for anything else — reading a
     /// team's Brief is reading Markdown off disk and must work with the archive down. The
     /// inventory is the one place where a number lives in rows, and `None` there means "not
     /// counted", never "zero" (see `capabilities::MemorySourceRef::kept`).

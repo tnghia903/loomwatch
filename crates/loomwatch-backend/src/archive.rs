@@ -1,16 +1,25 @@
+use std::path::Path;
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
+
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
-use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
-use sqlx::{Row, migrate::Migrator};
+use serde_json::Value;
+use sqlx::Row;
+use sqlx::sqlite::{SqlitePool, SqliteRow};
+use tokio::sync::{mpsc, oneshot};
 
+use crate::db::{self, Db};
 use crate::{EventKind, RunEvent};
 
-static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
+pub(crate) mod codec;
 
-/// Postgres-backed, ordered event archive.
+/// The ordered event archive, in the SQLite database.
 #[derive(Clone, Debug)]
 pub struct EventArchive {
-    pool: PgPool,
+    db: Db,
 }
 
 /// Bounded session discovery for the local evidence viewer.
@@ -55,86 +64,98 @@ pub struct StoredContextPacket {
     pub used_chars: u32,
 }
 
+const EVENT_COLUMNS: &str = "id, session_id, agent_id, seq, ts, kind, payload, raw";
+
 impl EventArchive {
-    /// Connect to Postgres and apply all pending versioned migrations.
+    /// Open the archive in the database file at `path`, creating it when it is not there.
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres cannot be reached or migrated.
-    pub async fn connect(database_url: &str) -> Result<Self> {
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(database_url)
-            .await
-            .context("failed to connect to Postgres event archive")?;
-        MIGRATOR
-            .run(&pool)
-            .await
-            .context("failed to migrate Postgres event archive")?;
-        Ok(Self { pool })
+    /// Returns an error when the database cannot be opened or brought up to date.
+    pub async fn open(path: &Path) -> Result<Self> {
+        Ok(Self::new(Db::open(path).await?))
     }
 
-    #[cfg(test)]
-    pub(crate) fn from_pool(pool: PgPool) -> Self {
-        Self { pool }
+    #[must_use]
+    pub fn new(db: Db) -> Self {
+        Self { db }
     }
 
-    /// The Notebook on the same pool.
+    /// The database the archive is in.
+    #[must_use]
+    pub fn db(&self) -> &Db {
+        &self.db
+    }
+
+    /// The Notebook on the same database.
     ///
-    /// The archive owns the connection pool, so this is where a caller gets one — but every note
+    /// The archive owns the database handle, so this is where a caller gets one — but every note
     /// read and write lives in [`crate::memory::Notebook`], not here. That split is the "one write
     /// authority" rule in `docs/TEAM_MEMORY.md` §9: `run_events` is append-only evidence and
     /// `memory_notes` is revisioned state, and mixing their SQL in one type is how the second set
     /// of rules gets quietly broken by a convenience method on the first.
     #[must_use]
     pub fn notebook(&self) -> crate::memory::Notebook {
-        crate::memory::Notebook::new(self.pool.clone())
+        crate::memory::Notebook::new(self.db.clone())
     }
 
-    /// The `runs` table on the same pool.
+    /// The `runs` table on the same database.
     ///
-    /// Like [`Self::notebook`], this is only where the pool comes from: the run record's SQL lives
-    /// in [`crate::runs::RunStore`], because `run_events` is append-only evidence and a run record
-    /// is mutable state, and one type holding both is how the append-only rule gets broken by a
-    /// convenience method.
+    /// Like [`Self::notebook`], this is only where the handle comes from: the run record's SQL
+    /// lives in [`crate::runs::RunStore`], because `run_events` is append-only evidence and a run
+    /// record is mutable state, and one type holding both is how the append-only rule gets broken
+    /// by a convenience method.
     #[must_use]
     pub fn run_store(&self) -> crate::runs::RunStore {
-        crate::runs::RunStore::new(self.pool.clone())
+        crate::runs::RunStore::new(self.db.clone())
     }
 
-    /// The `operator_questions` table on the same pool — the queue behind "waiting for you".
+    /// The `operator_questions` table on the same database — the queue behind "waiting for you".
     ///
     /// Same split again: an open question is mutable state with an `answered_at` that gets
     /// stamped, and the *answer* is evidence that lands in `run_events` as a user `message`.
     #[must_use]
     pub fn questions(&self) -> crate::operator::OperatorQuestions {
-        crate::operator::OperatorQuestions::new(self.pool.clone())
+        crate::operator::OperatorQuestions::new(self.db.clone())
     }
 
-    /// Append one event while enforcing the session sequence constraint.
+    /// Append one event and wait until it is written, enforcing the session sequence constraint.
+    ///
+    /// A run's own events go through [`crate::acp::EventLog`], which hands them to the writer
+    /// without waiting; this is for a caller that has to know the row is there.
     ///
     /// # Errors
     ///
-    /// Returns an error for sequence conversion or Postgres failures.
+    /// Returns an error for sequence conversion or database failures, including a `seq` the
+    /// session already has.
     pub async fn append(&self, event: &RunEvent) -> Result<()> {
-        let sequence = i64::try_from(event.seq).context("event sequence exceeds BIGINT")?;
-        sqlx::query(
-            "INSERT INTO run_events
-             (id, session_id, agent_id, seq, ts, kind, payload, raw)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-        )
-        .bind(&event.id)
-        .bind(&event.session_id)
-        .bind(&event.agent_id)
-        .bind(sequence)
-        .bind(&event.ts)
-        .bind(event.kind.as_str())
-        .bind(&event.payload)
-        .bind(&event.raw)
-        .execute(&self.pool)
-        .await
-        .context("failed to append event to Postgres archive")?;
-        Ok(())
+        let (done, written) = oneshot::channel();
+        self.db
+            .events()
+            .send(event.clone(), Done::Wait(done))
+            .await?;
+        written
+            .await
+            .map_err(|_| anyhow::anyhow!("the archive writer stopped before writing the event"))?
+            .map_err(anyhow::Error::msg)
+            .context("failed to append event to the archive")
+    }
+
+    /// Hand one event to the writer without waiting for it to be written.
+    ///
+    /// Events are written in the order they are handed over, so a log that hands them over in
+    /// `seq` order has them written in `seq` order. A write that fails is recorded in `failure`,
+    /// which the log reports on its next append.
+    pub(crate) async fn enqueue(&self, event: RunEvent, failure: &Arc<WriteFailure>) -> Result<()> {
+        self.db
+            .events()
+            .send(event, Done::Report(Arc::clone(failure)))
+            .await
+    }
+
+    /// Wait until every event handed over before this call is written.
+    pub async fn flush(&self) {
+        self.db.flush_events().await;
     }
 
     /// Record what one agent was supplied from team memory, before it is sent.
@@ -143,25 +164,25 @@ impl EventArchive {
     /// agent was given" is a stored fact rather than something reconstructed from the prompt
     /// afterwards.
     ///
-    /// The invocation number is allocated by Postgres from the rows already there, so the caller
-    /// does not have to track how many times an agent has been started in this run — the Team Bus
-    /// can start the same helper more than once, concurrently. Two concurrent allocations can pick
-    /// the same number under `READ COMMITTED`; the unique constraint catches that and the insert
-    /// is retried, which is why the invariant is worth keeping rather than dropping.
+    /// The invocation number is allocated from the rows already there, so the caller does not
+    /// have to track how many times an agent has been started in this run — the Team Bus can
+    /// start the same helper more than once, concurrently. The database has one writer, so two
+    /// allocations cannot pick the same number; the unique constraint and the retry stay as the
+    /// guarantee should that ever change.
     ///
     /// # Errors
     ///
-    /// Returns an error for conversion or Postgres failures, including a unique violation that
+    /// Returns an error for conversion or database failures, including a unique violation that
     /// persists after the bounded retries.
     pub async fn store_context_packet(
         &self,
         session_id: &str,
         packet: &crate::memory::ContextPacket,
     ) -> Result<()> {
-        let budget = i32::try_from(packet.budget_chars).context("budgetChars exceeds INTEGER")?;
-        let used = i32::try_from(packet.used_chars).context("usedChars exceeds INTEGER")?;
+        let budget = i64::from(packet.budget_chars);
+        let used = i64::try_from(packet.used_chars).context("usedChars exceeds INTEGER")?;
         let sections =
-            serde_json::to_value(&packet.sections).context("failed to encode packet sections")?;
+            serde_json::to_string(&packet.sections).context("failed to encode packet sections")?;
         let mut last_error = None;
         for _ in 0..5 {
             let result = sqlx::query(
@@ -180,11 +201,11 @@ impl EventArchive {
             .bind(&sections)
             .bind(budget)
             .bind(used)
-            .execute(&self.pool)
+            .execute(self.db.writer())
             .await;
             match result {
                 Ok(_) => return Ok(()),
-                Err(error) if is_unique_violation(&error) => last_error = Some(error),
+                Err(error) if db::is_unique_violation(&error) => last_error = Some(error),
                 Err(error) => {
                     return Err(
                         anyhow::Error::new(error).context("failed to store the context packet")
@@ -207,7 +228,7 @@ impl EventArchive {
     ///
     /// # Errors
     ///
-    /// Returns an error for Postgres or decoding failures.
+    /// Returns an error for database or decoding failures.
     pub async fn context_packets(
         &self,
         session_id: &str,
@@ -216,12 +237,12 @@ impl EventArchive {
         let rows = sqlx::query(
             "SELECT agent_id, invocation, created_at, text, sections, budget_chars, used_chars
              FROM context_packets
-             WHERE session_id = $1 AND ($2::TEXT IS NULL OR agent_id = $2)
+             WHERE session_id = $1 AND ($2 IS NULL OR agent_id = $2)
              ORDER BY agent_id ASC, invocation ASC",
         )
         .bind(session_id)
         .bind(agent_id)
-        .fetch_all(&self.pool)
+        .fetch_all(self.db.reader())
         .await
         .with_context(|| format!("failed to load context packets for session {session_id}"))?;
         rows.iter().map(decode_packet).collect()
@@ -231,72 +252,36 @@ impl EventArchive {
     ///
     /// # Errors
     ///
-    /// Returns an error for Postgres, conversion, or event-kind failures.
+    /// Returns an error for database, conversion, or event-kind failures.
     pub async fn load_session(&self, session_id: &str) -> Result<Vec<RunEvent>> {
-        let rows = sqlx::query(
-            "SELECT id, session_id, agent_id, seq, ts, kind, payload, raw
-             FROM run_events WHERE session_id = $1 ORDER BY seq ASC",
-        )
+        self.flush().await;
+        let rows = sqlx::query(&format!(
+            "SELECT {EVENT_COLUMNS} FROM run_events WHERE session_id = $1 ORDER BY seq ASC"
+        ))
         .bind(session_id)
-        .fetch_all(&self.pool)
+        .fetch_all(self.db.reader())
         .await
-        .with_context(|| format!("failed to load Postgres session {session_id}"))?;
+        .with_context(|| format!("failed to load session {session_id}"))?;
         rows.iter().map(decode_event).collect()
     }
 
     /// List the most recently active archive sessions.
     ///
+    /// Read from `run_sessions`, which the database keeps as events are written, so this costs
+    /// the same at ten events or ten million.
+    ///
     /// # Errors
     /// Returns an error if the archive cannot be queried or decoded.
     pub async fn list_sessions(&self) -> Result<Vec<SessionSummary>> {
-        // The prompt and first agent come from two lateral lookups per session, each bounded
-        // to one row by the `(session_id, seq)` index, so listing never loads whole sessions.
-        // A user message's `content` is normally `{type, text}` but may also be a bare string.
+        self.flush().await;
         let rows = sqlx::query(
-            "SELECT summary.session_id, summary.started_at, summary.updated_at,
-                    summary.event_count, summary.agent_count,
-                    first_event.agent_id AS first_agent_id,
-                    prompt_event.prompt,
-                    task_event.task
-             FROM (
-                 SELECT session_id, MIN(ts) AS started_at, MAX(ts) AS updated_at,
-                        COUNT(*) AS event_count, COUNT(DISTINCT agent_id) AS agent_count
-                 FROM run_events GROUP BY session_id
-             ) AS summary
-             LEFT JOIN LATERAL (
-                 SELECT agent_id FROM run_events AS e
-                 WHERE e.session_id = summary.session_id
-                 ORDER BY e.seq ASC LIMIT 1
-             ) AS first_event ON TRUE
-             LEFT JOIN LATERAL (
-                 SELECT COALESCE(
-                            e.payload #>> '{content,text}',
-                            CASE WHEN jsonb_typeof(e.payload -> 'content') = 'string'
-                                 THEN e.payload ->> 'content' END
-                        ) AS prompt
-                 FROM run_events AS e
-                 WHERE e.session_id = summary.session_id
-                   AND e.kind = 'message'
-                   AND e.payload ->> 'role' = 'user'
-                 ORDER BY e.seq ASC LIMIT 1
-             ) AS prompt_event ON TRUE
-             LEFT JOIN LATERAL (
-                 SELECT (
-                            SELECT section ->> 'text'
-                            FROM jsonb_array_elements(e.payload -> 'sections') AS section
-                            WHERE section ->> 'kind' = 'task'
-                            LIMIT 1
-                        ) AS task
-                 FROM run_events AS e
-                 WHERE e.session_id = summary.session_id
-                   AND e.kind = 'session_meta'
-                   AND e.payload ->> 'phase' = 'prompt_sections'
-                 ORDER BY e.seq ASC LIMIT 1
-             ) AS task_event ON TRUE
-             ORDER BY summary.updated_at DESC, summary.session_id
+            "SELECT session_id, started_at, updated_at, event_count, agent_count,
+                    first_agent_id, prompt, task
+             FROM run_sessions
+             ORDER BY updated_at DESC, session_id
              LIMIT 100",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(self.db.reader())
         .await?;
         rows.iter()
             .map(|row| {
@@ -328,14 +313,15 @@ impl EventArchive {
             after_seq >= -1 && (1..=500).contains(&limit),
             "invalid event page bounds"
         );
-        let rows = sqlx::query(
-            "SELECT id, session_id, agent_id, seq, ts, kind, payload, raw
-             FROM run_events WHERE session_id = $1 AND seq > $2 ORDER BY seq LIMIT $3",
-        )
+        self.flush().await;
+        let rows = sqlx::query(&format!(
+            "SELECT {EVENT_COLUMNS} FROM run_events
+             WHERE session_id = $1 AND seq > $2 ORDER BY seq LIMIT $3"
+        ))
         .bind(session_id)
         .bind(after_seq)
         .bind(limit)
-        .fetch_all(&self.pool)
+        .fetch_all(self.db.reader())
         .await?;
         rows.iter().map(decode_event).collect()
     }
@@ -347,6 +333,11 @@ impl EventArchive {
     /// Returns an error when loading fails or the archived sequence is incomplete.
     pub async fn verify_session(&self, session_id: &str) -> Result<Vec<RunEvent>> {
         let events = self.load_session(session_id).await?;
+        if let Some(reason) = self.db.events().lost(session_id) {
+            anyhow::bail!(
+                "session {session_id} lost an event that could not be archived: {reason}"
+            );
+        }
         ensure!(
             !events.is_empty(),
             "session {session_id} has no archived events"
@@ -362,34 +353,39 @@ impl EventArchive {
     }
 }
 
-fn decode_event(row: &PgRow) -> Result<RunEvent> {
+/// An archived event's `payload` and `raw`, as stored.
+pub(crate) fn decode_payload_and_raw(row: &SqliteRow) -> Result<(Value, Option<Value>)> {
+    let payload: Value = row.try_get("payload")?;
+    let raw = row
+        .try_get::<Option<Vec<u8>>, _>("raw")?
+        .map(|stored| codec::decode(&payload, &stored))
+        .transpose()?;
+    Ok((payload, raw))
+}
+
+fn decode_event(row: &SqliteRow) -> Result<RunEvent> {
     let sequence: i64 = row.try_get("seq")?;
     let kind: String = row.try_get("kind")?;
+    let id: String = row.try_get("id")?;
+    let (payload, raw) = decode_payload_and_raw(row)
+        .with_context(|| format!("archived event {id} cannot be read"))?;
     Ok(RunEvent {
-        id: row.try_get("id")?,
+        id,
         session_id: row.try_get("session_id")?,
         agent_id: row.try_get("agent_id")?,
         seq: u64::try_from(sequence).context("archive contains a negative event sequence")?,
         ts: row.try_get("ts")?,
         kind: parse_event_kind(&kind)?,
-        payload: row.try_get("payload")?,
-        raw: row.try_get("raw")?,
+        payload,
+        raw,
     })
 }
 
-/// Postgres SQLSTATE 23505 — two concurrent packet inserts picked the same invocation number.
-fn is_unique_violation(error: &sqlx::Error) -> bool {
-    error
-        .as_database_error()
-        .and_then(sqlx::error::DatabaseError::code)
-        .is_some_and(|code| code == "23505")
-}
-
-fn decode_packet(row: &PgRow) -> Result<StoredContextPacket> {
-    let invocation: i32 = row.try_get("invocation")?;
-    let budget: i32 = row.try_get("budget_chars")?;
-    let used: i32 = row.try_get("used_chars")?;
-    let sections: serde_json::Value = row.try_get("sections")?;
+fn decode_packet(row: &SqliteRow) -> Result<StoredContextPacket> {
+    let invocation: i64 = row.try_get("invocation")?;
+    let budget: i64 = row.try_get("budget_chars")?;
+    let used: i64 = row.try_get("used_chars")?;
+    let sections: Value = row.try_get("sections")?;
     Ok(StoredContextPacket {
         agent_id: row.try_get("agent_id")?,
         invocation: u32::try_from(invocation)
@@ -419,29 +415,371 @@ fn parse_event_kind(kind: &str) -> Result<EventKind> {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The run event writer
+// ---------------------------------------------------------------------------------------------
+
+/// How long the writer gathers events before it writes them in one transaction.
+///
+/// An agent streaming its reply sends a frame per few tokens, and a busy team peaks near two
+/// hundred a second. One transaction per event was most of what writing them cost; one per tenth
+/// of a second, or per [`BATCH_MAX`] events, makes a burst a handful of commits. Nothing waits for
+/// the window to close: readers flush first ([`Db::flush_events`]), so a live view still sees an
+/// event as soon as it polls.
+pub(crate) const BATCH_WINDOW: Duration = Duration::from_millis(100);
+/// Events in one transaction, at most.
+pub(crate) const BATCH_MAX: usize = 256;
+/// Events handed over and not yet written, at most, before appending waits for the writer.
+const QUEUE: usize = 4096;
+
+/// A write that failed after the log that asked for it had moved on, kept for its next append.
+#[derive(Debug, Default)]
+pub(crate) struct WriteFailure(Mutex<Option<String>>);
+
+impl WriteFailure {
+    fn record(&self, message: String) {
+        let mut first = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        first.get_or_insert(message);
+    }
+
+    /// The first write that failed, if one did.
+    ///
+    /// # Errors
+    ///
+    /// Returns that failure, every time it is asked: a run with a hole in its archive must not
+    /// carry on as if it had none.
+    pub(crate) fn check(&self) -> Result<()> {
+        match &*self.0.lock().unwrap_or_else(PoisonError::into_inner) {
+            Some(message) => Err(anyhow::anyhow!(
+                "an earlier event could not be archived: {message}"
+            )),
+            None => Ok(()),
+        }
+    }
+}
+
+/// What to do once an event is written, or is not.
+pub(crate) enum Done {
+    /// Someone is waiting for the result.
+    Wait(oneshot::Sender<Result<(), String>>),
+    /// Nobody waits; a failure is recorded for the log's next append.
+    Report(Arc<WriteFailure>),
+}
+
+enum Command {
+    Append(RunEvent, Done),
+    Flush(oneshot::Sender<()>),
+}
+
+/// The one path run events take into the database: a task that writes them in batches, in the
+/// order they were handed over, on the database's one writing connection.
+#[derive(Debug)]
+pub(crate) struct EventWriter {
+    commands: mpsc::Sender<Command>,
+    shared: Arc<WriterShared>,
+}
+
+/// What the writer task and the handles to it both see.
+#[derive(Debug, Default)]
+struct WriterShared {
+    /// Sessions that lost an event nobody was waiting on, with the first reason. Checked when a
+    /// session is verified, so a run whose last events were never written cannot pass for whole:
+    /// a missing tail leaves no gap in `seq` to notice.
+    lost: Mutex<std::collections::HashMap<String, String>>,
+    /// Transactions committed, which the batching test counts.
+    #[cfg(test)]
+    commits: AtomicU64,
+}
+
+impl WriterShared {
+    #[cfg_attr(not(test), allow(clippy::unused_self))]
+    fn committed(&self) {
+        #[cfg(test)]
+        self.commits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn lost(&self, session_id: &str, message: &str) {
+        self.lost
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(session_id.to_owned())
+            .or_insert_with(|| message.to_owned());
+    }
+}
+
+impl EventWriter {
+    pub(crate) fn spawn(pool: SqlitePool) -> Self {
+        let (commands, receiver) = mpsc::channel(QUEUE);
+        let shared = Arc::new(WriterShared::default());
+        tokio::spawn(run_writer(pool, receiver, Arc::clone(&shared)));
+        Self { commands, shared }
+    }
+
+    /// How many transactions the writer has committed.
+    #[cfg(test)]
+    pub(crate) fn commits(&self) -> u64 {
+        self.shared.commits.load(Ordering::Relaxed)
+    }
+
+    /// Why `session_id` lost an event, if it did.
+    fn lost(&self, session_id: &str) -> Option<String> {
+        self.shared
+            .lost
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(session_id)
+            .cloned()
+    }
+
+    async fn send(&self, event: RunEvent, done: Done) -> Result<()> {
+        self.commands
+            .send(Command::Append(event, done))
+            .await
+            .map_err(|_| anyhow::anyhow!("the archive writer has stopped"))
+    }
+
+    /// Resolve once everything handed over before this call is written (or has failed).
+    pub(crate) async fn flush(&self) {
+        let (done, flushed) = oneshot::channel();
+        if self.commands.send(Command::Flush(done)).await.is_ok() {
+            let _ = flushed.await;
+        }
+    }
+}
+
+async fn run_writer(
+    pool: SqlitePool,
+    mut commands: mpsc::Receiver<Command>,
+    shared: Arc<WriterShared>,
+) {
+    let mut open = true;
+    while open {
+        let Some(first) = commands.recv().await else {
+            break;
+        };
+        let mut batch = Vec::new();
+        let mut flushed = Vec::new();
+        // A flush, or someone waiting on an append, writes now rather than at the window's end.
+        let mut now = take(first, &mut batch, &mut flushed);
+        let deadline = tokio::time::Instant::now() + BATCH_WINDOW;
+        while !now && batch.len() < BATCH_MAX {
+            match tokio::time::timeout_at(deadline, commands.recv()).await {
+                Ok(Some(command)) => now = take(command, &mut batch, &mut flushed),
+                Ok(None) => {
+                    open = false;
+                    break;
+                }
+                Err(_) => break,
+            }
+        }
+        if !batch.is_empty() && write_batch(&pool, batch, &shared).await {
+            shared.committed();
+        }
+        for done in flushed {
+            let _ = done.send(());
+        }
+    }
+}
+
+/// Add one command to the batch. True when it asks for the batch to be written now.
+fn take(
+    command: Command,
+    batch: &mut Vec<(RunEvent, Done)>,
+    flushed: &mut Vec<oneshot::Sender<()>>,
+) -> bool {
+    match command {
+        Command::Append(event, done) => {
+            let now = matches!(done, Done::Wait(_));
+            batch.push((event, done));
+            now
+        }
+        Command::Flush(done) => {
+            flushed.push(done);
+            true
+        }
+    }
+}
+
+/// One event as its row is written.
+struct EncodedEvent {
+    seq: i64,
+    payload: String,
+    raw: Option<Vec<u8>>,
+}
+
+fn encode_event(event: &RunEvent) -> Result<EncodedEvent, String> {
+    let seq = i64::try_from(event.seq).map_err(|_| "event sequence exceeds INTEGER".to_owned())?;
+    let payload = serde_json::to_string(&event.payload).map_err(|error| error.to_string())?;
+    let raw = event
+        .raw
+        .as_ref()
+        .map(|raw| codec::encode(&event.payload, raw))
+        .transpose()
+        .map_err(|error| format!("{error:#}"))?;
+    Ok(EncodedEvent { seq, payload, raw })
+}
+
+/// Write a batch in one transaction, then tell each event's caller how it went. True when the
+/// transaction committed.
+///
+/// An event the database refuses (a `seq` its session already has) fails alone and the rest are
+/// written: SQLite undoes only the refused statement. Anything else fails the whole batch.
+async fn write_batch(
+    pool: &SqlitePool,
+    batch: Vec<(RunEvent, Done)>,
+    shared: &WriterShared,
+) -> bool {
+    // Serializing and compressing a large frame takes milliseconds; not on the async threads.
+    let encoded = tokio::task::spawn_blocking(move || {
+        batch
+            .into_iter()
+            .map(|(event, done)| {
+                let row = encode_event(&event);
+                (event, done, row)
+            })
+            .collect::<Vec<_>>()
+    })
+    .await;
+    let Ok(encoded) = encoded else {
+        // Encoding panicked. The callers' completions went with it: a waiting caller hears the
+        // writer stopped, a log never hears, and the session's sequence check catches the hole.
+        eprintln!("loomwatchd: the archive writer could not encode a batch of events");
+        return false;
+    };
+    let mut outcomes = Vec::with_capacity(encoded.len());
+    let mut transaction = match pool.begin_with("BEGIN IMMEDIATE").await {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            let message = error.to_string();
+            for (event, done, _) in encoded {
+                outcomes.push((event, done, Err(message.clone())));
+            }
+            report(outcomes, shared);
+            return false;
+        }
+    };
+    let mut failed_batch = None;
+    for (event, done, row) in encoded {
+        if let Some(message) = &failed_batch {
+            outcomes.push((event, done, Err(String::clone(message))));
+            continue;
+        }
+        let result = match row {
+            Err(message) => Err(message),
+            Ok(row) => match insert(&mut transaction, &event, row).await {
+                Ok(()) => Ok(()),
+                Err(error) if refused(&error) => Err(error.to_string()),
+                Err(error) => {
+                    failed_batch = Some(error.to_string());
+                    Err(error.to_string())
+                }
+            },
+        };
+        outcomes.push((event, done, result));
+    }
+    let failure = match failed_batch {
+        Some(message) => {
+            let _ = transaction.rollback().await;
+            Some(message)
+        }
+        None => transaction
+            .commit()
+            .await
+            .err()
+            .map(|error| error.to_string()),
+    };
+    let committed = failure.is_none();
+    if let Some(message) = failure {
+        for (_, _, result) in &mut outcomes {
+            if result.is_ok() {
+                *result = Err(message.clone());
+            }
+        }
+    }
+    report(outcomes, shared);
+    committed
+}
+
+async fn insert(
+    transaction: &mut sqlx::Transaction<'static, sqlx::Sqlite>,
+    event: &RunEvent,
+    row: EncodedEvent,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO run_events (id, session_id, agent_id, seq, ts, kind, payload, raw)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    )
+    .bind(&event.id)
+    .bind(&event.session_id)
+    .bind(&event.agent_id)
+    .bind(row.seq)
+    .bind(&event.ts)
+    .bind(event.kind.as_str())
+    .bind(row.payload)
+    .bind(row.raw)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+/// A constraint refused this one row; the transaction is still good.
+fn refused(error: &sqlx::Error) -> bool {
+    use sqlx::error::ErrorKind;
+    error.as_database_error().is_some_and(|error| {
+        matches!(
+            error.kind(),
+            ErrorKind::UniqueViolation
+                | ErrorKind::ForeignKeyViolation
+                | ErrorKind::NotNullViolation
+                | ErrorKind::CheckViolation
+        )
+    })
+}
+
+fn report(outcomes: Vec<(RunEvent, Done, Result<(), String>)>, shared: &WriterShared) {
+    for (event, done, result) in outcomes {
+        match done {
+            Done::Wait(waiting) => {
+                let _ = waiting.send(result);
+            }
+            Done::Report(failure) => {
+                if let Err(message) = result {
+                    eprintln!(
+                        "loomwatchd: could not archive event {} (seq {}) of session {}: {message}",
+                        event.id, event.seq, event.session_id
+                    );
+                    shared.lost(&event.session_id, &message);
+                    failure.record(message);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
-    use sqlx::postgres::PgConnectOptions;
 
     use super::*;
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn session_discovery_and_pages_preserve_exact_evidence(pool: PgPool) -> Result<()> {
-        let archive = EventArchive::from_pool(pool);
+    fn event(session: &str, seq: u64) -> RunEvent {
+        RunEvent {
+            id: format!("{session}:{seq}"),
+            session_id: session.into(),
+            agent_id: "lead".into(),
+            seq,
+            ts: format!("2026-09-10T00:00:{:02}Z", seq % 60),
+            kind: EventKind::Message,
+            payload: json!({"role":"agent", "content":{"type":"text","text":"chunk"}}),
+            raw: Some(json!({"jsonrpc":"2.0", "method":"session/update"})),
+        }
+    }
+
+    #[tokio::test]
+    async fn session_discovery_and_pages_preserve_exact_evidence() -> Result<()> {
+        let archive = EventArchive::new(Db::temp().await);
         for seq in 0..3 {
-            archive
-                .append(&RunEvent {
-                    id: format!("page:{seq}"),
-                    session_id: "page".into(),
-                    agent_id: "lead".into(),
-                    seq,
-                    ts: format!("2026-09-10T00:00:0{seq}Z"),
-                    kind: EventKind::Message,
-                    payload: json!({"role":"agent", "content":{"type":"text","text":"chunk"}}),
-                    raw: Some(json!({"jsonrpc":"2.0", "method":"session/update"})),
-                })
-                .await?;
+            archive.append(&event("page", seq)).await?;
         }
         let sessions = archive.list_sessions().await?;
         assert_eq!(sessions.len(), 1);
@@ -465,11 +803,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn session_listing_reports_the_first_user_prompt_and_first_agent(
-        pool: PgPool,
-    ) -> Result<()> {
-        let archive = EventArchive::from_pool(pool);
+    #[tokio::test]
+    async fn session_listing_reports_the_first_user_prompt_and_first_agent() -> Result<()> {
+        let archive = EventArchive::new(Db::temp().await);
         let event =
             |session: &str, seq: u64, agent: &str, kind: EventKind, payload: Value| RunEvent {
                 id: format!("{session}:{seq}"),
@@ -552,6 +888,8 @@ mod tests {
             by_id("structured").first_agent_id.as_deref(),
             Some("researcher")
         );
+        assert_eq!(by_id("structured").agent_count, 2);
+        assert_eq!(by_id("structured").event_count, 4);
         assert_eq!(by_id("plain").prompt.as_deref(), Some("plain prompt"));
         assert_eq!(by_id("plain").first_agent_id.as_deref(), Some("lead"));
         assert_eq!(by_id("silent").prompt, None);
@@ -569,9 +907,9 @@ mod tests {
     /// reconstructed it client-side. Reading the `prompt_sections` record the daemon already
     /// archives is the same move phase 1 made for the packet inspector: the daemon composed the
     /// prompt, so the daemon says what it was made of.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn session_listing_reports_the_recorded_task_section(pool: PgPool) -> Result<()> {
-        let archive = EventArchive::from_pool(pool);
+    #[tokio::test]
+    async fn session_listing_reports_the_recorded_task_section() -> Result<()> {
+        let archive = EventArchive::new(Db::temp().await);
         let event = |session: &str, seq: u64, kind: EventKind, payload: Value| RunEvent {
             id: format!("{session}:{seq}"),
             session_id: session.into(),
@@ -645,40 +983,67 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = false)]
-    async fn connect_migrates_and_round_trips(
-        _pool_options: PgPoolOptions,
-        connect_options: PgConnectOptions,
-    ) -> Result<()> {
-        let database = connect_options
-            .get_database()
-            .context("SQLx test database has no name")?;
-        let mut database_url = url::Url::parse(
-            &std::env::var("DATABASE_URL").context("DATABASE_URL must be set for SQLx tests")?,
-        )
-        .context("DATABASE_URL is not a valid URL")?;
-        database_url.set_path(database);
-
-        let archive = EventArchive::connect(database_url.as_str()).await?;
-        let event = RunEvent {
-            id: "connected-session:0".into(),
-            session_id: "connected-session".into(),
-            agent_id: "agent".into(),
-            seq: 0,
-            ts: "2026-09-06T00:00:00Z".into(),
-            kind: EventKind::Message,
-            payload: json!({"role": "user", "content": "hello"}),
+    /// The summary the listing reads is the same as one computed from every event, whatever
+    /// order the events arrive in: an import copies rows in no particular order.
+    #[tokio::test]
+    async fn the_session_summary_agrees_with_the_events_in_any_insert_order() -> Result<()> {
+        let archive = EventArchive::new(Db::temp().await);
+        let make = |seq: u64, agent: &str, kind: EventKind, payload: Value| RunEvent {
+            id: format!("mixed:{seq}"),
+            session_id: "mixed".into(),
+            agent_id: agent.into(),
+            seq,
+            ts: format!("2026-09-14T00:00:{seq:02}Z"),
+            kind,
+            payload,
             raw: None,
         };
-
-        archive.append(&event).await?;
-        assert_eq!(archive.verify_session("connected-session").await?, [event]);
+        for event in [
+            make(
+                4,
+                "b",
+                EventKind::Message,
+                json!({"role":"user","content":{"type":"text","text":"later"}}),
+            ),
+            make(
+                3,
+                "c",
+                EventKind::SessionMeta,
+                json!({"phase":"prompt_sections","sections":[{"kind":"task","text":"t3"}]}),
+            ),
+            make(
+                1,
+                "a",
+                EventKind::Message,
+                json!({"role":"user","content":{"type":"text","text":"earliest"}}),
+            ),
+            make(
+                0,
+                "a",
+                EventKind::SessionMeta,
+                json!({"phase":"prompt_sections","sections":[{"kind":"role","text":"r"},{"kind":"task","text":"t0"}]}),
+            ),
+            make(2, "b", EventKind::Process, json!({"phase":"spawned"})),
+        ] {
+            archive.append(&event).await?;
+        }
+        let sessions = archive.list_sessions().await?;
+        assert_eq!(sessions.len(), 1);
+        let summary = &sessions[0];
+        assert_eq!(summary.started_at, "2026-09-14T00:00:00Z");
+        assert_eq!(summary.updated_at, "2026-09-14T00:00:04Z");
+        assert_eq!(summary.event_count, 5);
+        assert_eq!(summary.agent_count, 3);
+        assert_eq!(summary.first_agent_id.as_deref(), Some("a"));
+        assert_eq!(summary.prompt.as_deref(), Some("earliest"));
+        assert_eq!(summary.task.as_deref(), Some("t0"));
         Ok(())
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn persists_and_recovers_events(pool: PgPool) -> Result<()> {
-        let archive = EventArchive::from_pool(pool.clone());
+    #[tokio::test]
+    async fn persists_and_recovers_events() -> Result<()> {
+        let db = Db::temp().await;
+        let archive = EventArchive::new(db.clone());
         let event = RunEvent {
             id: "session:0".into(),
             session_id: "session".into(),
@@ -699,14 +1064,14 @@ mod tests {
 
         archive.append(&event).await?;
         drop(archive);
-        let reopened = EventArchive::from_pool(pool);
+        let reopened = EventArchive::open(db.path()).await?;
         assert_eq!(reopened.verify_session("session").await?, [event]);
         Ok(())
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn rejects_duplicate_session_sequences(pool: PgPool) -> Result<()> {
-        let archive = EventArchive::from_pool(pool);
+    #[tokio::test]
+    async fn rejects_duplicate_session_sequences() -> Result<()> {
+        let archive = EventArchive::new(Db::temp().await);
         let event = RunEvent {
             id: "event-1".into(),
             session_id: "session".into(),
@@ -729,9 +1094,98 @@ mod tests {
         assert!(
             error
                 .chain()
-                .any(|cause| cause.to_string().contains("duplicate key value")),
+                .any(|cause| cause.to_string().contains("UNIQUE constraint failed")),
             "unexpected duplicate error: {error:#}"
         );
+        Ok(())
+    }
+
+    /// The batching contract: events handed over without waiting are written in the order they
+    /// were handed over, many to a transaction, and a reader that asks sees all of them at once.
+    #[tokio::test]
+    async fn queued_events_are_written_in_order_in_few_transactions_and_seen_by_the_next_read()
+    -> Result<()> {
+        let db = Db::temp().await;
+        let archive = EventArchive::new(db.clone());
+        let failure = Arc::new(WriteFailure::default());
+        let total = 600u64;
+        for seq in 0..total {
+            let mut next = event("burst", seq);
+            next.raw = Some(json!({"jsonrpc": "2.0", "method": "session/update",
+                                   "params": {"update": next.payload.clone()}}));
+            archive.enqueue(next, &failure).await?;
+        }
+        // Without waiting for any window: the read itself flushes.
+        let events = archive.verify_session("burst").await?;
+        assert_eq!(events.len(), 600);
+        assert!(events.iter().enumerate().all(|(i, e)| e.seq == i as u64));
+        assert_eq!(events[7], {
+            let mut expected = event("burst", 7);
+            expected.raw = Some(json!({"jsonrpc": "2.0", "method": "session/update",
+                                       "params": {"update": expected.payload.clone()}}));
+            expected
+        });
+        // Rows went in in seq order: rowid order is insertion order.
+        let order: Vec<i64> = sqlx::query_scalar(
+            "SELECT seq FROM run_events WHERE session_id = 'burst' ORDER BY rowid",
+        )
+        .fetch_all(db.reader())
+        .await?;
+        assert_eq!(order, (0..600).collect::<Vec<i64>>());
+        failure.check()?;
+        let commits = db.events().commits();
+        assert!(
+            commits <= total / 100,
+            "600 queued events took {commits} transactions"
+        );
+        Ok(())
+    }
+
+    /// A queued event the database refuses fails alone, is reported on the log's next append,
+    /// and does not take the rest of its batch with it.
+    #[tokio::test]
+    async fn a_refused_queued_event_fails_alone_and_is_reported_next_time() -> Result<()> {
+        let archive = EventArchive::new(Db::temp().await);
+        let failure = Arc::new(WriteFailure::default());
+        archive.enqueue(event("dup", 0), &failure).await?;
+        archive
+            .enqueue(
+                RunEvent {
+                    id: "another".into(),
+                    ..event("dup", 0)
+                },
+                &failure,
+            )
+            .await?;
+        archive.enqueue(event("dup", 1), &failure).await?;
+        let events = archive.load_session("dup").await?;
+        assert_eq!(events.iter().map(|e| e.seq).collect::<Vec<_>>(), [0, 1]);
+        let error = failure.check().expect_err("the refusal is kept");
+        assert!(
+            format!("{error:#}").contains("UNIQUE constraint failed"),
+            "{error:#}"
+        );
+        // Even with no gap in `seq` to see, the session is not passed off as whole.
+        let error = archive
+            .verify_session("dup")
+            .await
+            .expect_err("lost an event");
+        assert!(format!("{error:#}").contains("lost an event"), "{error:#}");
+        Ok(())
+    }
+
+    /// Without a reader asking, a lone event is still written within the window.
+    #[tokio::test]
+    async fn a_lone_queued_event_is_written_within_the_window() -> Result<()> {
+        let db = Db::temp().await;
+        let archive = EventArchive::new(db.clone());
+        let failure = Arc::new(WriteFailure::default());
+        archive.enqueue(event("lone", 0), &failure).await?;
+        tokio::time::sleep(BATCH_WINDOW * 3).await;
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM run_events")
+            .fetch_one(db.reader())
+            .await?;
+        assert_eq!(count, 1);
         Ok(())
     }
 }

@@ -23,9 +23,10 @@ use std::fmt;
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{PgPool, Row, postgres::PgRow};
+use sqlx::{Row, sqlite::SqliteRow};
 use tokio::sync::oneshot;
 
+use crate::db::Db;
 use crate::runs::{RunRecord, RunRegistry};
 
 /// Why an answer could not be accepted, or a question could not be recorded.
@@ -226,13 +227,13 @@ pub struct OperatorQuestion {
 /// evidence and a question is mutable state with an `answered_at` that gets stamped.
 #[derive(Clone)]
 pub struct OperatorQuestions {
-    pool: PgPool,
+    db: Db,
 }
 
 impl OperatorQuestions {
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(db: Db) -> Self {
+        Self { db }
     }
 
     /// Record a question and return its id.
@@ -245,7 +246,7 @@ impl OperatorQuestions {
     /// # Errors
     ///
     /// Returns a conflict when that agent already has an open question, and a server fault when
-    /// Postgres fails.
+    /// the database fails.
     pub async fn open(
         &self,
         run_id: &str,
@@ -264,7 +265,7 @@ impl OperatorQuestions {
         .bind(question.trim())
         .bind(context.map(str::trim).filter(|value| !value.is_empty()))
         .bind(now_rfc3339())
-        .execute(&self.pool)
+        .execute(self.db.writer())
         .await;
         match result {
             Ok(_) => Ok(id),
@@ -285,7 +286,7 @@ impl OperatorQuestions {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails.
+    /// Returns an error when the database fails.
     pub async fn close(
         &self,
         run_id: &str,
@@ -300,7 +301,7 @@ impl OperatorQuestions {
         .bind(answer_event_id)
         .bind(run_id)
         .bind(agent_id)
-        .execute(&self.pool)
+        .execute(self.db.writer())
         .await
         .map_err(|error| OperatorError {
             message: format!("cannot close the question: {error}"),
@@ -313,14 +314,14 @@ impl OperatorQuestions {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails.
+    /// Returns an error when the database fails.
     pub async fn list(&self, run_id: &str) -> Result<Vec<OperatorQuestion>, OperatorError> {
         let rows = sqlx::query(
             "SELECT id, run_id, agent_id, question, context, asked_at, answered_at, answer_event_id
              FROM operator_questions WHERE run_id = $1 ORDER BY asked_at ASC, id ASC",
         )
         .bind(run_id)
-        .fetch_all(&self.pool)
+        .fetch_all(self.db.reader())
         .await
         .map_err(|error| OperatorError {
             message: format!("cannot read the questions for run {run_id}: {error}"),
@@ -330,7 +331,7 @@ impl OperatorQuestions {
     }
 }
 
-fn decode_question(row: &PgRow) -> Result<OperatorQuestion, OperatorError> {
+fn decode_question(row: &SqliteRow) -> Result<OperatorQuestion, OperatorError> {
     let decode = |error: sqlx::Error| OperatorError {
         message: format!("cannot decode a question row: {error}"),
         conflict: false,
@@ -347,12 +348,9 @@ fn decode_question(row: &PgRow) -> Result<OperatorQuestion, OperatorError> {
     })
 }
 
-/// Postgres SQLSTATE 23505 — the partial unique index that enforces one open question per agent.
+/// The partial unique index that enforces one open question per agent.
 fn is_unique_violation(error: &sqlx::Error) -> bool {
-    error
-        .as_database_error()
-        .and_then(sqlx::error::DatabaseError::code)
-        .is_some_and(|code| code == "23505")
+    crate::db::is_unique_violation(error)
 }
 
 /// One clock for everything this module stamps, so "waiting since" and `asked_at` cannot disagree.

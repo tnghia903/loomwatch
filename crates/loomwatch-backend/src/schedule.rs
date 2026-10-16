@@ -1215,8 +1215,9 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn run_now_fires_the_routine_and_records_a_not_connected_delivery(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn run_now_fires_the_routine_and_records_a_not_connected_delivery() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
         // A nested root so `../outside.yaml` names a real file that escapes it.
@@ -1237,7 +1238,7 @@ mod tests {
             "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
         )
         .unwrap();
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
         let app = router(
             Scheduler::disconnected(),
@@ -1323,8 +1324,9 @@ mod tests {
         assert_eq!(listed[0]["problem"], Value::Null);
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn run_now_refuses_to_overlap_a_live_scheduled_run(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn run_now_refuses_to_overlap_a_live_scheduled_run() {
+        let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         let harness = dir.write_harness("sleepy.sh", SLEEPING_HARNESS);
         fs::write(
@@ -1332,7 +1334,7 @@ mod tests {
             scheduled_team_yaml(&harness, DAILY),
         )
         .unwrap();
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
         let app = router(
             Scheduler::disconnected(),

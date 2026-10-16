@@ -70,7 +70,8 @@ fn error(status: StatusCode, message: &str) -> Response {
 }
 
 /// Shared with run control so both surfaces explain a missing archive the same way.
-pub(crate) const ARCHIVE_DISABLED_MESSAGE: &str = "Archive watching is disabled. Start loomwatchd serve with --database-url or DATABASE_URL on a loopback address.";
+pub(crate) const ARCHIVE_DISABLED_MESSAGE: &str =
+    "This LoomWatch has no run archive open. Start it with loomwatchd serve on a loopback address.";
 
 fn disabled() -> Response {
     error(StatusCode::SERVICE_UNAVAILABLE, ARCHIVE_DISABLED_MESSAGE)
@@ -84,7 +85,7 @@ async fn sessions(State(archive): State<Option<EventArchive>>) -> Response {
         Ok(sessions) => Json(sessions).into_response(),
         Err(_) => error(
             StatusCode::SERVICE_UNAVAILABLE,
-            "The event archive is unavailable. Retry when PostgreSQL is connected.",
+            "The run archive could not be read. The window running LoomWatch says why.",
         ),
     }
 }
@@ -129,7 +130,7 @@ async fn events(
         Ok(events) => Json(events).into_response(),
         Err(_) => error(
             StatusCode::SERVICE_UNAVAILABLE,
-            "The event archive is unavailable. Retry when PostgreSQL is connected.",
+            "The run archive could not be read. The window running LoomWatch says why.",
         ),
     }
 }
@@ -204,11 +205,12 @@ mod tests {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn websocket_replays_and_follows_exact_events(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn websocket_replays_and_follows_exact_events() {
         use crate::{EventKind, RunEvent};
         use futures_util::StreamExt;
-        let archive = EventArchive::from_pool(pool);
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
         let make_event = |seq| RunEvent {
             id: format!("stream:{seq}"),
             session_id: "stream".into(),

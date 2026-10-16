@@ -13,9 +13,11 @@ pub mod chosen_knowledge;
 pub mod composer;
 pub mod config;
 pub mod control;
+pub mod db;
 pub mod delivery;
 mod files;
 pub mod host_runner;
+pub mod import;
 mod jobs;
 pub mod memory;
 pub mod notebook_api;
@@ -116,12 +118,12 @@ pub struct SessionOutcome {
 /// Returns an error when configuration, process, protocol, or archive handling fails.
 pub async fn run_team_session(
     team_path: &Path,
-    database_url: &str,
+    database: &Path,
     prompt: &str,
     exit_timeout: Duration,
 ) -> Result<SessionOutcome> {
     let team = Arc::new(TeamConfig::load(team_path)?);
-    let archive = EventArchive::connect(database_url).await?;
+    let archive = EventArchive::open(database).await?;
     run_loaded_team(
         &team,
         team_path,
@@ -3280,8 +3282,10 @@ mod tests {
     const CHECKPOINT_ANSWER: &str =
         "## Done\\nthe stage finished its turn\\n\\n## Next\\nnothing further from this stage";
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn pipeline_mode_runs_two_nodes_in_declared_order(pool: sqlx::PgPool) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn pipeline_mode_runs_two_nodes_in_declared_order() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let first_script = r#"
             set -eu
             IFS= read -r _
@@ -3364,7 +3368,7 @@ mod tests {
             vec!["a".to_owned(), "b".to_owned()]
         );
 
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let outcome = run_pipeline_mode(
             &team,
@@ -3430,10 +3434,9 @@ mod tests {
     /// a miss it could not fix). Its report is set aside from the answer into the run's record,
     /// where the verdict shows it. The script exits 61 if the prompt does not state the items, and
     /// 62 if it is prompted again rather than closed.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_reported_miss_is_reported_and_no_second_turn_is_taken(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[tokio::test]
+    async fn a_reported_miss_is_reported_and_no_second_turn_is_taken() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let script = r#"
             set -eu
             IFS= read -r _
@@ -3471,7 +3474,7 @@ mod tests {
             agents: vec![agent],
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let outcome = run_team_mode(
             &team,
@@ -3544,10 +3547,10 @@ mod tests {
     /// checks), may send it back once, checks the revision, and the revised work is the answer.
     /// The writer exits 81 if it is asked for a handover; the checker exits 82 if it is not handed
     /// the work and its Done when, 83 if its second round lacks the revised work.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_check_step_sends_the_work_back_once_and_the_revision_is_the_answer(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_check_step_sends_the_work_back_once_and_the_revision_is_the_answer() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let writer = r#"
             set -eu
             IFS= read -r _
@@ -3620,7 +3623,7 @@ mod tests {
             }],
         });
         assert_eq!(team.responder_id()?, "writer");
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let outcome = run_pipeline_mode(
             &team,
@@ -3665,10 +3668,9 @@ mod tests {
     /// The counterpart: a team with a notebook still asks every stage where its work stands, as
     /// its last turn, and stores what it says. The scripts exit 41/42 if the checkpoint request
     /// does not come exactly where it should.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_team_with_a_notebook_still_checkpoints_every_stage(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[tokio::test]
+    async fn a_team_with_a_notebook_still_checkpoints_every_stage() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let stage = |session: &str, handover: bool| {
             let handover_turn = if handover {
                 format!(
@@ -3723,7 +3725,7 @@ mod tests {
                 ts: "2026-10-12T00:00:00Z".into(),
             }],
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let run_id = "notebook-checkpoints-run";
         run_pipeline_mode(
@@ -3759,8 +3761,10 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn pipeline_mode_joins_diamond_predecessor_outputs(pool: sqlx::PgPool) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn pipeline_mode_joins_diamond_predecessor_outputs() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         // Every stage but the last is asked for a handover once its own turn ends, so it takes a
         // second prompt before `session/close`.
         let node_script = |session_id: &str, own_reply: &str, checks: &str, writes_brief: bool| {
@@ -3879,7 +3883,7 @@ mod tests {
             ]
         );
 
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let outcome = run_pipeline_mode(
             &team,
@@ -3980,10 +3984,10 @@ mod tests {
     /// handover. A stage whose turn its app reported as failed stops the pipeline instead: no
     /// handover is asked for, and the next stage never starts. Each fake app exits non-zero if it
     /// is prompted when it should not be, so this cannot pass by the run merely failing.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_stage_codex_refused_stops_the_pipeline_instead_of_handing_on_the_refusal(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[tokio::test]
+    async fn a_stage_codex_refused_stops_the_pipeline_instead_of_handing_on_the_refusal()
+    -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let gatherer = format!(
             r#"
             set -eu
@@ -4025,7 +4029,7 @@ mod tests {
                 ts: "2026-10-14T00:00:00Z".into(),
             }],
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let session_id = "run-refused-pipeline";
         let error = run_pipeline_mode(
@@ -4070,10 +4074,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn pipeline_mode_archives_every_node_under_a_pre_minted_session_id(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[tokio::test]
+    async fn pipeline_mode_archives_every_node_under_a_pre_minted_session_id() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             schema_version: 1,
             id: "pre-minted-pipeline".into(),
@@ -4110,7 +4113,7 @@ mod tests {
                 ts: "2026-09-06T00:00:00Z".into(),
             }],
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let session_id = "run-7d1c4b0e-pre-minted";
         let outcome = run_pipeline_mode(
@@ -4161,8 +4164,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn team_mode_archives_under_a_pre_minted_session_id(pool: sqlx::PgPool) -> Result<()> {
+    #[tokio::test]
+    async fn team_mode_archives_under_a_pre_minted_session_id() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             schema_version: 1,
             id: "pre-minted-team".into(),
@@ -4181,7 +4185,7 @@ mod tests {
             )],
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let outcome = run_team_mode(
             &team,
@@ -4209,10 +4213,9 @@ mod tests {
     /// for the work and answered without it. The lead's script dispatches over the real bus with
     /// `curl` and ends its turn; it exits 52 unless its next prompt carries what the worker
     /// replied, and the run's answer is the reply it gives to that.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn what_a_lead_dispatched_comes_back_to_it_before_it_answers(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[tokio::test]
+    async fn what_a_lead_dispatched_comes_back_to_it_before_it_answers() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let lead = format!(
             r#"set -eu
 IFS= read -r _
@@ -4268,7 +4271,7 @@ IFS= read -r _
             ],
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let (_registry, desk, run_id) = operator_desk(&team, &archive);
         let outcome = run_team_mode(
@@ -4300,10 +4303,10 @@ IFS= read -r _
         Ok(())
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn pre_minted_session_records_a_crash_marker_when_the_harness_never_negotiates(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[tokio::test]
+    async fn pre_minted_session_records_a_crash_marker_when_the_harness_never_negotiates()
+    -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             schema_version: 1,
             id: "broken".into(),
@@ -4319,7 +4322,7 @@ IFS= read -r _
             agents: vec![pipeline_agent("solo", vec!["-c".into(), "exit 3".into()])],
             edges: Vec::new(),
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let error = run_team_mode(
             &team,
@@ -4352,10 +4355,11 @@ IFS= read -r _
     /// cannot pass by the run merely completing. The delegated-helper half of the criterion is
     /// `team_bus::tests::a_delegated_helper_is_supplied_the_team_brief`, because a helper is
     /// started by the bus rather than by the pipeline.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_constraint_written_once_reaches_the_entrypoint_and_a_downstream_stage(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_constraint_written_once_reaches_the_entrypoint_and_a_downstream_stage() -> Result<()>
+    {
+        let pool = crate::db::Db::temp().await;
         let scratch =
             std::env::temp_dir().join(format!("loomwatch-brief-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(scratch.join("brief")).expect("scratch");
@@ -4455,7 +4459,7 @@ IFS= read -r _
             }],
         });
 
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let memory = Arc::new(memory::TeamMemory::load(
             &memory::MemoryRoots::for_team(&team_path, None),
             &team_path,
@@ -4630,12 +4634,13 @@ IFS= read -r _
     ///   asserts that. Without it, stage 3 seeing the decision would prove nothing.
     /// * Stage 3 exits 23 if the decision is not in its opening prompt. The run therefore fails if
     ///   selection regresses, rather than passing quietly with a smaller packet.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_decision_recorded_by_stage_one_reaches_stage_three_without_stage_two_restating_it(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_decision_recorded_by_stage_one_reaches_stage_three_without_stage_two_restating_it()
+    -> Result<()> {
         const DECISION_TITLE: &str = "Hermes adapter is out of scope";
         const DECISION_BODY: &str = "Its OAuth path fails on this machine before session/new.";
+        let pool = crate::db::Db::temp().await;
 
         let scratch =
             std::env::temp_dir().join(format!("loomwatch-notes-{}", uuid::Uuid::new_v4()));
@@ -4811,7 +4816,7 @@ IFS= read -r _
             ],
         });
 
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let memory = Arc::new(memory::TeamMemory::load(
             &memory::MemoryRoots::for_team(&team_path, None),
             &team_path,
@@ -4918,10 +4923,9 @@ IFS= read -r _
     ///
     /// The two harness scripts exit 99 if they are started at all, so this cannot pass by the run
     /// merely failing somewhere: it passes only if nothing runs.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn an_oversized_brief_scoped_to_a_later_stage_refuses_the_whole_run(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[tokio::test]
+    async fn an_oversized_brief_scoped_to_a_later_stage_refuses_the_whole_run() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let scratch =
             std::env::temp_dir().join(format!("loomwatch-oversize-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(scratch.join("brief")).expect("scratch");
@@ -4970,7 +4974,7 @@ IFS= read -r _
             }],
         });
 
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let error = run_loaded_team(
             &team,
             &team_path,
@@ -5206,12 +5210,13 @@ IFS= read -r _
     /// Phase two is the counterfactual, in the same test: the *same team* with an empty lineage
     /// runs `a`, which exits 99 and fails the run. That is "retry still starts from zero" —
     /// nothing about the team file skipped a stage, the lineage did.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_follow_up_from_one_stage_executes_only_it_and_is_given_the_output_and_checkpoint(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_follow_up_from_one_stage_executes_only_it_and_is_given_the_output_and_checkpoint()
+    -> Result<()> {
         const REPLAYED: &str = "node a handed this over in the run being followed";
         const OUTPUT: &str = "the answer the followed run produced";
+        let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             schema_version: 1,
             id: "follow-up-team".into(),
@@ -5276,7 +5281,7 @@ IFS= read -r _
             }],
         });
 
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let lineage = RunLineage {
             operator: None,
@@ -5395,10 +5400,11 @@ IFS= read -r _
     /// Stage `b` exits 46 if a `## Previous output` heading appears, so this cannot pass by the run
     /// completing — and the archived prompt record is checked for the section's absence too,
     /// because a heading could appear without the record naming it.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn following_a_run_that_produced_no_output_gives_the_stage_no_output_section(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn following_a_run_that_produced_no_output_gives_the_stage_no_output_section()
+    -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             schema_version: 1,
             id: "follow-failed-team".into(),
@@ -5448,7 +5454,7 @@ IFS= read -r _
                 ts: "2026-09-13T00:00:00Z".into(),
             }],
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let outcome = run_pipeline_mode(
             &team,
@@ -5691,10 +5697,10 @@ IFS= read -r _
     /// * `a`'s script exits **67** if it receives one more frame after `session/close` — a
     ///   re-prompt or a `session/cancel` would fail the run rather than be absorbed;
     /// * the answer is deliberately withheld for 600 ms, and the run still succeeds.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_review_stop_holds_with_nothing_in_flight_and_never_re_prompts(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_review_stop_holds_with_nothing_in_flight_and_never_re_prompts() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let researcher = format!(
             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{work_done}\n\
              IFS= read -r _\n{handover}\n{handover_done}\nIFS= read -r _\n{closed}\n\
@@ -5722,7 +5728,7 @@ IFS= read -r _
             pipeline_agent("b", vec!["-c".into(), writer]),
             15,
         );
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let (_registry, desk, run_id) = operator_desk(&team, &archive);
 
@@ -5815,12 +5821,13 @@ IFS= read -r _
     /// the stop passed through, not in the memory packet, not in the task. The harness asserts the
     /// ordering the composer promises ("above the results it reads as source material") and exits
     /// 51/52/53 if the heading, the ordering or the pass-through handover is missing.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn the_operator_answer_reaches_the_next_stage_as_direction_and_not_as_source_material(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn the_operator_answer_reaches_the_next_stage_as_direction_and_not_as_source_material()
+    -> Result<()> {
         const ANSWER: &str = "Recommend it. Drop the Gemini section.";
         const HANDOVER: &str = "## Summary\\nthree harnesses auto-approve";
+        let pool = crate::db::Db::temp().await;
         let researcher = format!(
             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
              IFS= read -r _\n{handover}\n{done4}\nIFS= read -r _\n{closed}\n",
@@ -5851,7 +5858,7 @@ IFS= read -r _
             pipeline_agent("b", vec!["-c".into(), writer]),
             15,
         );
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let (_registry, desk, run_id) = operator_desk(&team, &archive);
         let answering = tokio::spawn({
@@ -5941,11 +5948,12 @@ IFS= read -r _
     /// the run. The second handover is a different string from the first, and the stop's second
     /// question carries it — which is what "runs the stop again" means — and stage `b` exits 62 if
     /// it is handed the *first* handover instead of the second.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn sending_an_answer_back_re_prompts_the_predecessor_and_runs_the_stop_again(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn sending_an_answer_back_re_prompts_the_predecessor_and_runs_the_stop_again()
+    -> Result<()> {
         const NOTE: &str = "cut the Gemini section";
+        let pool = crate::db::Db::temp().await;
         let researcher = format!(
             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
              IFS= read -r _\n{handover}\n{done4}\nIFS= read -r _\n{checkpoint}\n{done5}\n\
@@ -5987,7 +5995,7 @@ IFS= read -r _
             pipeline_agent("b", vec!["-c".into(), writer]),
             15,
         );
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let (_registry, desk, run_id) = operator_desk(&team, &archive);
         let answering = tokio::spawn({
@@ -6072,10 +6080,11 @@ IFS= read -r _
     ///
     /// The reload also replays two frames, which is what the `session_loaded` / `session_replayed`
     /// bracket exists to let the projection ignore.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_parked_harness_that_advertises_load_session_is_closed_and_reopened_on_the_same_id(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_parked_harness_that_advertises_load_session_is_closed_and_reopened_on_the_same_id()
+    -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let marker = std::env::temp_dir().join(format!("loomwatch-load-{}", uuid::Uuid::new_v4()));
         let researcher = format!(
             "set -eu\n{init}IFS= read -r second\n\
@@ -6132,7 +6141,7 @@ IFS= read -r _
             pipeline_agent("b", vec!["-c".into(), writer]),
             15,
         );
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let (_registry, desk, run_id) = operator_desk(&team, &archive);
         let answering = tokio::spawn({
@@ -6209,10 +6218,10 @@ IFS= read -r _
     ///
     /// Expiry records a coordinator checkpoint from the boundary without another model turn.
     /// The fake exits 92 if it is re-prompted instead of closed. Send-back is then withdrawn.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_kept_alive_stage_past_its_window_is_checkpointed_released_and_withdraws_send_back(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[tokio::test]
+    async fn a_kept_alive_stage_past_its_window_is_checkpointed_released_and_withdraws_send_back()
+    -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let researcher = format!(
             "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
              IFS= read -r _\n{handover}\n{done4}\n\
@@ -6240,7 +6249,7 @@ IFS= read -r _
             pipeline_agent("b", vec!["-c".into(), writer]),
             0,
         );
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let (_registry, desk, run_id) = operator_desk(&team, &archive);
         let answering = tokio::spawn({
@@ -6307,10 +6316,10 @@ IFS= read -r _
     /// — which is the whole contract: a tool that waited for a person would have hung here until
     /// the ACP request timeout cancelled the turn. It then ends its turn, exactly as the tool's
     /// instruction says, and exits 82 if the operator's answer does not arrive as its next prompt.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn ask_user_returns_at_once_and_the_answer_arrives_as_the_next_turn(
-        pool: sqlx::PgPool,
-    ) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn ask_user_returns_at_once_and_the_answer_arrives_as_the_next_turn() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
         let asking = format!(
             "set -eu\n{init}IFS= read -r new\n{new}\n\
              url=$(printf '%s' \"$new\" | sed -n 's/.*\"url\":\"\\([^\"]*\\)\".*/\\1/p')\n\
@@ -6381,7 +6390,7 @@ IFS= read -r _
                 ts: "2026-09-13T00:00:00Z".into(),
             }],
         });
-        let archive = EventArchive::from_pool(pool);
+        let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let (_registry, desk, run_id) = operator_desk(&team, &archive);
         let answering = tokio::spawn({

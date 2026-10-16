@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use sqlx::PgPool;
 
 use super::{Control, ControlOptions};
 use crate::archive::EventArchive;
@@ -200,9 +199,11 @@ fn said(events: &[crate::RunEvent]) -> String {
         .collect()
 }
 
-#[sqlx::test(migrations = "../../migrations")]
-async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note(pool: PgPool) {
-    let fixture = Fixture::start(Some(EventArchive::from_pool(pool)), None).await;
+#[allow(clippy::too_many_lines)]
+#[tokio::test]
+async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() {
+    let pool = crate::db::Db::temp().await;
+    let fixture = Fixture::start(Some(EventArchive::new(pool)), None).await;
     let (status, started) = fixture.post("/api/ask/conversations", &json!({})).await;
     assert_eq!(status, 201, "{started}");
     assert_eq!(started["appName"], "Offline assistant");
@@ -368,9 +369,10 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note(po
     let _ = fixture.registry.cancel(&run_id);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
-async fn the_person_chooses_the_app_and_model_a_conversation_uses(pool: PgPool) {
-    let fixture = Fixture::start(Some(EventArchive::from_pool(pool)), None).await;
+#[tokio::test]
+async fn the_person_chooses_the_app_and_model_a_conversation_uses() {
+    let pool = crate::db::Db::temp().await;
+    let fixture = Fixture::start(Some(EventArchive::new(pool)), None).await;
 
     let (status, refused) = fixture
         .post("/api/ask/conversations", &json!({"app": "nope"}))
@@ -447,9 +449,10 @@ async fn the_person_chooses_the_app_and_model_a_conversation_uses(pool: PgPool) 
 /// the daemon returns each changed agent's instructions with them made: every sentence the app didn't
 /// name, and the spacing between, stays as it was. Nothing is written and no conversation is left
 /// open.
-#[sqlx::test(migrations = "../../migrations")]
-async fn removing_a_source_rewrites_the_instructions_that_named_it(pool: PgPool) {
-    let fixture = Fixture::start(Some(EventArchive::from_pool(pool)), None).await;
+#[tokio::test]
+async fn removing_a_source_rewrites_the_instructions_that_named_it() {
+    let pool = crate::db::Db::temp().await;
+    let fixture = Fixture::start(Some(EventArchive::new(pool)), None).await;
     let removed = |name: &str| json!({"name": name, "kind": "Notion page"});
     let agents = json!([
         {"id": "scope", "name": "Project scope", "role": "Establish the project's problem from the EKIS page. Locate the EKIS page through the connected Notion tools.\n\nReply with a brief.  Keep it short.\n"},
@@ -504,10 +507,11 @@ async fn removing_a_source_rewrites_the_instructions_that_named_it(pool: PgPool)
     assert_eq!(status, 422, "{refused}");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
-async fn the_tool_server_needs_a_live_token_and_lists_only_its_tools(pool: PgPool) {
+#[tokio::test]
+async fn the_tool_server_needs_a_live_token_and_lists_only_its_tools() {
+    let pool = crate::db::Db::temp().await;
     let fixture = Fixture::start(
-        Some(EventArchive::from_pool(pool)),
+        Some(EventArchive::new(pool)),
         Some(std::ffi::OsString::new()),
     )
     .await;

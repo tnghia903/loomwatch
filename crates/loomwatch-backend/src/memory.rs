@@ -1,8 +1,8 @@
 //! Team memory: the Brief on disk, and the context packet an agent is actually handed.
 //!
 //! `docs/TEAM_MEMORY.md` is the design this implements, and decision 1 is why the Brief is not in
-//! Postgres: it is the operator's own writing, so it lives as Markdown beside the team YAML where
-//! it is diffable and reviewable like the rest of the design. Postgres holds only what agents
+//! the database: it is the operator's own writing, so it lives as Markdown beside the team YAML where
+//! it is diffable and reviewable like the rest of the design. The database holds only what agents
 //! write (phase 2) and the exact bytes each agent was handed (`context_packets`, here).
 //!
 //! Phase 1 covers the Brief and the packet. Notebook selection, checkpoints and inheritance join
@@ -27,6 +27,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::config::{AgentConfig, BriefEntryConfig, DeliverAs, KeepPolicy, MemoryConfig};
+use crate::db::Db;
 
 /// The heading the packet is rendered under. One constant, referenced by the renderer, the
 /// section record, and the tests, so the daemon and the UI cannot disagree about it.
@@ -1497,7 +1498,7 @@ fn canonical_root(root: &Path) -> Result<PathBuf, MemoryError> {
 //
 // * A stored `context_packets` row keeps naming the exact revision it supplied. Correcting a note
 //   afterwards cannot rewrite what an agent was given, because the row it points at still exists.
-// * Optimistic concurrency is the `UNIQUE (note_key, revision)` index in Postgres, not a
+// * Optimistic concurrency is the `UNIQUE (note_key, revision)` index in the database, not a
 //   read-then-write in Rust. Two corrections racing from the same revision cannot both land.
 // * A `memory_write` retried with the same idempotency key hits a partial unique index and the
 //   note already stored is returned, so a harness retrying a timed-out tool call cannot duplicate
@@ -2004,20 +2005,22 @@ pub const SEARCH_MAX_LIMIT: usize = 25;
 /// Every read and write of the Notebook, the audit trail, and checkpoints.
 #[derive(Clone)]
 pub struct Notebook {
-    pool: sqlx::PgPool,
+    db: Db,
 }
 
 /// The SQL predicate that keeps only the current revision of each note.
 ///
 /// A revision is current when nothing supersedes it. Deriving that rather than storing a mutable
 /// `is_head` flag is what keeps every row immutable — the property a stored packet depends on.
+/// `memory_notes_supersedes_idx` makes it one index probe per row.
 const HEAD_ONLY: &str =
     "NOT EXISTS (SELECT 1 FROM memory_notes AS newer WHERE newer.supersedes = n.id)";
 
-/// The SQL predicate for a [`NoteScope`]. `$1` is the team, `$2` the run, `$3` inherited teams.
+/// The SQL predicate for a [`NoteScope`]. `$1` is the team, `$2` the run, `$3` inherited teams
+/// as a JSON array ([`crate::db::json_list`]).
 const IN_SCOPE: &str = "(\
-    (n.team_id = $1 AND (($2::TEXT IS NOT NULL AND n.run_id = $2) OR n.state = 'kept')) \
-    OR (n.team_id = ANY($3::TEXT[]) AND n.state = 'kept')\
+    (n.team_id = $1 AND (($2 IS NOT NULL AND n.run_id = $2) OR n.state = 'kept')) \
+    OR (n.team_id IN (SELECT value FROM json_each($3)) AND n.state = 'kept')\
 )";
 
 const NOTE_COLUMNS: &str = "n.id, n.note_key, n.team_id, n.run_id, n.author_agent_id, \
@@ -2032,8 +2035,18 @@ const NOTE_RETURNING: &str = "id, note_key, team_id, run_id, author_agent_id, or
 
 impl Notebook {
     #[must_use]
-    pub fn new(pool: sqlx::PgPool) -> Self {
-        Self { pool }
+    pub fn new(db: Db) -> Self {
+        Self { db }
+    }
+
+    /// A transaction on the writing connection, holding the write lock from its first statement,
+    /// so a read inside it cannot go stale before the write that depends on it.
+    async fn begin(&self) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>, MemoryError> {
+        self.db
+            .writer()
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(db("cannot open a Notebook transaction"))
     }
 
     /// Record a new observation, attributed to the caller's agent, scoped to its run.
@@ -2044,7 +2057,7 @@ impl Notebook {
     /// # Errors
     ///
     /// Returns an error when the note is malformed (empty title, oversized body, too many
-    /// sources) or Postgres fails. A retry with the same idempotency key is **not** an error: the
+    /// sources) or the database fails. A retry with the same idempotency key is **not** an error: the
     /// note already stored is returned unchanged.
     pub async fn write(&self, request: &NoteWrite) -> Result<Note, MemoryError> {
         let (title, body) = validate_note(&request.title, &request.body, request.sources.len())?;
@@ -2056,11 +2069,7 @@ impl Notebook {
         }
         let sources = encode_sources(&request.sources)?;
         let id = uuid::Uuid::new_v4().to_string();
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(db("cannot open a Notebook transaction"))?;
+        let mut tx = self.begin().await?;
         // `ON CONFLICT DO NOTHING` can only fire on the idempotency index here: the id is a fresh
         // UUID and revision 1 of a fresh `note_key` cannot collide. `None` therefore means "this
         // exact call already landed", which is the one case that must not insert a second note.
@@ -2134,7 +2143,7 @@ impl Notebook {
     ///
     /// Returns an error when the note is not in `team_id`, when `id` is not current, when
     /// `expected_revision` disagrees with the current one, when the transition is already done, or
-    /// when Postgres fails — including a lost race on the `UNIQUE (note_key, revision)` index.
+    /// when the database fails — including a lost race on the `UNIQUE (note_key, revision)` index.
     pub async fn revise(
         &self,
         team_id: &str,
@@ -2143,11 +2152,7 @@ impl Notebook {
         actor: &str,
         change: &NoteRevision,
     ) -> Result<Note, MemoryError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(db("cannot open a Notebook transaction"))?;
+        let mut tx = self.begin().await?;
         let head = self
             .current_revision(&mut tx, team_id, id, expected_revision)
             .await?;
@@ -2209,7 +2214,7 @@ impl Notebook {
     /// The current revision of the note `id` names, refusing a stale reference.
     async fn current_revision(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         team_id: &str,
         id: &str,
         expected_revision: Option<i32>,
@@ -2257,16 +2262,16 @@ impl Notebook {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails or a row cannot be decoded.
+    /// Returns an error when the database fails or a row cannot be decoded.
     pub async fn read(&self, scope: &NoteScope, id: &str) -> Result<Option<Note>, MemoryError> {
         let row = sqlx::query(&format!(
             "SELECT {NOTE_COLUMNS} FROM memory_notes AS n WHERE n.id = $4 AND {IN_SCOPE}"
         ))
         .bind(&scope.team_id)
         .bind(&scope.run_id)
-        .bind(&scope.inherited_teams)
+        .bind(crate::db::json_list(&scope.inherited_teams))
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.db.reader())
         .await
         .map_err(db("cannot read the note"))?;
         row.as_ref().map(decode_note).transpose()
@@ -2274,9 +2279,14 @@ impl Notebook {
 
     /// Full-text search within `scope`: current revisions only, retired notes excluded.
     ///
+    /// The query reads like a web search (`websearch_to_tsquery`, which the Postgres archive
+    /// used): words must all appear, in any form English stems them to, `"quoted words"` must
+    /// appear together, `or` between two terms takes either, and `-word` leaves out notes with it.
+    /// Common words such as "the" are ignored. The best matches come first (BM25), then the newest.
+    ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails or a row cannot be decoded.
+    /// Returns an error when the database fails or a row cannot be decoded.
     pub async fn search(
         &self,
         scope: &NoteScope,
@@ -2284,26 +2294,46 @@ impl Notebook {
         kind: Option<NoteKind>,
         limit: usize,
     ) -> Result<Vec<Note>, MemoryError> {
-        let limit = limit.clamp(1, SEARCH_MAX_LIMIT);
-        let rows = sqlx::query(&format!(
-            "SELECT {NOTE_COLUMNS} FROM memory_notes AS n
-             WHERE {IN_SCOPE} AND {HEAD_ONLY} AND n.state <> 'retired'
-               AND ($5::TEXT IS NULL OR n.kind = $5)
-               AND ($4::TEXT = '' OR n.search @@ websearch_to_tsquery('english', $4))
-             ORDER BY
-               CASE WHEN $4::TEXT = '' THEN 0::REAL
-                    ELSE ts_rank(n.search, websearch_to_tsquery('english', $4)) END DESC,
-               n.created_at DESC, n.id
-             LIMIT $6"
-        ))
-        .bind(&scope.team_id)
-        .bind(&scope.run_id)
-        .bind(&scope.inherited_teams)
-        .bind(query.trim())
-        .bind(kind.map(NoteKind::as_str))
-        .bind(i64::try_from(limit).unwrap_or(8))
-        .fetch_all(&self.pool)
-        .await
+        let limit = i64::try_from(limit.clamp(1, SEARCH_MAX_LIMIT)).unwrap_or(8);
+        let inherited = crate::db::json_list(&scope.inherited_teams);
+        let rows = match search_expression(query) {
+            Search::Everything => {
+                sqlx::query(&format!(
+                    "SELECT {NOTE_COLUMNS} FROM memory_notes AS n
+                 WHERE {IN_SCOPE} AND {HEAD_ONLY} AND n.state <> 'retired'
+                   AND ($4 IS NULL OR n.kind = $4)
+                 ORDER BY n.created_at DESC, n.id
+                 LIMIT $5"
+                ))
+                .bind(&scope.team_id)
+                .bind(&scope.run_id)
+                .bind(&inherited)
+                .bind(kind.map(NoteKind::as_str))
+                .bind(limit)
+                .fetch_all(self.db.reader())
+                .await
+            }
+            Search::Nothing => return Ok(Vec::new()),
+            Search::Match(expression) => {
+                sqlx::query(&format!(
+                    "SELECT {NOTE_COLUMNS} FROM memory_notes_search
+                 JOIN memory_notes AS n ON n.id = memory_notes_search.note_id
+                 WHERE memory_notes_search MATCH $6
+                   AND {IN_SCOPE} AND {HEAD_ONLY} AND n.state <> 'retired'
+                   AND ($4 IS NULL OR n.kind = $4)
+                 ORDER BY bm25(memory_notes_search), n.created_at DESC, n.id
+                 LIMIT $5"
+                ))
+                .bind(&scope.team_id)
+                .bind(&scope.run_id)
+                .bind(&inherited)
+                .bind(kind.map(NoteKind::as_str))
+                .bind(limit)
+                .bind(expression)
+                .fetch_all(self.db.reader())
+                .await
+            }
+        }
         .map_err(db("cannot search the Notebook"))?;
         rows.iter().map(decode_note).collect()
     }
@@ -2312,21 +2342,21 @@ impl Notebook {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails or a row cannot be decoded.
+    /// Returns an error when the database fails or a row cannot be decoded.
     pub async fn list(&self, team_id: &str, filter: &NoteFilter) -> Result<Vec<Note>, MemoryError> {
         let rows = sqlx::query(&format!(
             "SELECT {NOTE_COLUMNS} FROM memory_notes AS n
              WHERE n.team_id = $1 AND {HEAD_ONLY}
-               AND ($2::TEXT IS NULL OR n.kind = $2)
-               AND ($3::TEXT IS NULL OR n.state = $3)
-               AND ($4::TEXT IS NULL OR n.run_id = $4)
+               AND ($2 IS NULL OR n.kind = $2)
+               AND ($3 IS NULL OR n.state = $3)
+               AND ($4 IS NULL OR n.run_id = $4)
              ORDER BY n.created_at DESC, n.id"
         ))
         .bind(team_id)
         .bind(filter.kind.map(NoteKind::as_str))
         .bind(filter.state.map(NoteState::as_str))
         .bind(&filter.run_id)
-        .fetch_all(&self.pool)
+        .fetch_all(self.db.reader())
         .await
         .map_err(db("cannot list the Notebook"))?;
         rows.iter().map(decode_note).collect()
@@ -2336,18 +2366,19 @@ impl Notebook {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails or a row cannot be decoded.
+    /// Returns an error when the database fails or a row cannot be decoded.
     pub async fn kept_for_teams(&self, team_ids: &[String]) -> Result<Vec<Note>, MemoryError> {
         if team_ids.is_empty() {
             return Ok(Vec::new());
         }
         let rows = sqlx::query(&format!(
             "SELECT {NOTE_COLUMNS} FROM memory_notes AS n
-             WHERE n.team_id = ANY($1::TEXT[]) AND n.state = 'kept' AND {HEAD_ONLY}
+             WHERE n.team_id IN (SELECT value FROM json_each($1))
+               AND n.state = 'kept' AND {HEAD_ONLY}
              ORDER BY n.created_at DESC, n.id"
         ))
-        .bind(team_ids)
-        .fetch_all(&self.pool)
+        .bind(crate::db::json_list(team_ids))
+        .fetch_all(self.db.reader())
         .await
         .map_err(db("cannot read inherited notes"))?;
         rows.iter().map(decode_note).collect()
@@ -2357,7 +2388,7 @@ impl Notebook {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails or a row cannot be decoded.
+    /// Returns an error when the database fails or a row cannot be decoded.
     pub async fn history(&self, team_id: &str, id: &str) -> Result<Vec<Note>, MemoryError> {
         let rows = sqlx::query(&format!(
             "SELECT {NOTE_COLUMNS} FROM memory_notes AS n
@@ -2367,7 +2398,7 @@ impl Notebook {
         ))
         .bind(team_id)
         .bind(id)
-        .fetch_all(&self.pool)
+        .fetch_all(self.db.reader())
         .await
         .map_err(db("cannot read the note's history"))?;
         rows.iter().map(decode_note).collect()
@@ -2380,7 +2411,7 @@ impl Notebook {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails.
+    /// Returns an error when the database fails.
     pub async fn import_kept(
         &self,
         team_id: &str,
@@ -2392,11 +2423,7 @@ impl Notebook {
             let sources = encode_sources(&note.sources)?;
             let id = uuid::Uuid::new_v4().to_string();
             let key = format!("pack:{origin_team_id}:{}", note.note_key);
-            let mut tx = self
-                .pool
-                .begin()
-                .await
-                .map_err(db("cannot open a Notebook transaction"))?;
+            let mut tx = self.begin().await?;
             let row = sqlx::query(&format!(
                 "INSERT INTO memory_notes
                  (id, note_key, team_id, run_id, author_agent_id, origin_team_id, kind, title,
@@ -2445,12 +2472,12 @@ impl Notebook {
         Ok(inserted)
     }
 
-    /// Record one agent's checkpoint. Postgres allocates the invocation number from the rows
+    /// Record one agent's checkpoint. The database allocates the invocation number from the rows
     /// already there, the same way `context_packets` allocates its own.
     ///
     /// # Errors
     ///
-    /// Returns an error when `done` or `next` is empty, or when Postgres fails.
+    /// Returns an error when `done` or `next` is empty, or when the database fails.
     pub async fn write_checkpoint(
         &self,
         request: &CheckpointWrite,
@@ -2500,7 +2527,7 @@ impl Notebook {
             .bind(request.source.as_str())
             .bind(&request.team_revision)
             .bind(now_rfc3339())
-            .fetch_one(&self.pool)
+            .fetch_one(self.db.writer())
             .await;
             match result {
                 Ok(row) => return decode_checkpoint(&row),
@@ -2518,7 +2545,7 @@ impl Notebook {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails or a row cannot be decoded.
+    /// Returns an error when the database fails or a row cannot be decoded.
     pub async fn checkpoints(
         &self,
         run_id: &str,
@@ -2528,12 +2555,12 @@ impl Notebook {
             "SELECT id, run_id, agent_id, invocation, done, next, blockers, artifacts,
                     seq_high_water, source, team_revision, ts
              FROM checkpoints
-             WHERE run_id = $1 AND ($2::TEXT IS NULL OR agent_id = $2)
+             WHERE run_id = $1 AND ($2 IS NULL OR agent_id = $2)
              ORDER BY ts ASC, invocation ASC",
         )
         .bind(run_id)
         .bind(agent_id)
-        .fetch_all(&self.pool)
+        .fetch_all(self.db.reader())
         .await
         .map_err(db("cannot read the run's checkpoints"))?;
         rows.iter().map(decode_checkpoint).collect()
@@ -2547,7 +2574,7 @@ impl Notebook {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails or a row cannot be decoded.
+    /// Returns an error when the database fails or a row cannot be decoded.
     pub async fn checkpoint(&self, id: &str) -> Result<Option<Checkpoint>, MemoryError> {
         let row = sqlx::query(
             "SELECT id, run_id, agent_id, invocation, done, next, blockers, artifacts,
@@ -2555,7 +2582,7 @@ impl Notebook {
              FROM checkpoints WHERE id = $1",
         )
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.db.reader())
         .await
         .map_err(db("cannot read that checkpoint"))?;
         row.as_ref().map(decode_checkpoint).transpose()
@@ -2564,12 +2591,12 @@ impl Notebook {
     /// The newest checkpoint one agent left in one run, or `None` when it left none.
     ///
     /// "Newest" is the highest invocation, not the latest timestamp: two checkpoints written inside
-    /// the same millisecond are ordered by the number Postgres allocated, which is the only
+    /// the same millisecond are ordered by the number the database allocated, which is the only
     /// tiebreak that cannot be wrong.
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails or a row cannot be decoded.
+    /// Returns an error when the database fails or a row cannot be decoded.
     pub async fn latest_checkpoint(
         &self,
         run_id: &str,
@@ -2584,7 +2611,7 @@ impl Notebook {
         )
         .bind(run_id)
         .bind(agent_id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.db.reader())
         .await
         .map_err(db("cannot read this agent's latest checkpoint"))?;
         row.as_ref().map(decode_checkpoint).transpose()
@@ -2597,7 +2624,7 @@ impl Notebook {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails.
+    /// Returns an error when the database fails.
     pub async fn kept_counts(
         &self,
         team_ids: &[String],
@@ -2608,11 +2635,12 @@ impl Notebook {
         }
         let rows = sqlx::query(&format!(
             "SELECT n.team_id, COUNT(*) AS kept FROM memory_notes AS n
-             WHERE n.team_id = ANY($1::TEXT[]) AND n.state = 'kept' AND {HEAD_ONLY}
+             WHERE n.team_id IN (SELECT value FROM json_each($1))
+               AND n.state = 'kept' AND {HEAD_ONLY}
              GROUP BY n.team_id"
         ))
-        .bind(team_ids)
-        .fetch_all(&self.pool)
+        .bind(crate::db::json_list(team_ids))
+        .fetch_all(self.db.reader())
         .await
         .map_err(db("cannot count kept notes"))?;
         rows.iter()
@@ -2633,12 +2661,12 @@ impl Notebook {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails.
+    /// Returns an error when the database fails.
     pub async fn agents_with_checkpoints(&self, run_id: &str) -> Result<Vec<String>, MemoryError> {
         use sqlx::Row as _;
         let rows = sqlx::query("SELECT DISTINCT agent_id FROM checkpoints WHERE run_id = $1")
             .bind(run_id)
-            .fetch_all(&self.pool)
+            .fetch_all(self.db.reader())
             .await
             .map_err(db("cannot read which agents checkpointed"))?;
         rows.iter()
@@ -2668,7 +2696,7 @@ impl Notebook {
     ///
     /// # Errors
     ///
-    /// Returns an error when Postgres fails or a row cannot be decoded.
+    /// Returns an error when the database fails or a row cannot be decoded.
     pub async fn select_for(
         &self,
         selection: &NotebookSelection<'_>,
@@ -2681,8 +2709,8 @@ impl Notebook {
         ))
         .bind(selection.team_id)
         .bind(Some(selection.run_id))
-        .bind(&selection.inherited_teams)
-        .fetch_all(&self.pool)
+        .bind(crate::db::json_list(&selection.inherited_teams))
+        .fetch_all(self.db.reader())
         .await
         .map_err(db("cannot read the Notebook for this packet"))?;
         let candidates = rows
@@ -3242,7 +3270,7 @@ fn encode_sources(sources: &[String]) -> Result<serde_json::Value, MemoryError> 
 }
 
 async fn audit(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     note: &Note,
     action: &str,
     actor: &str,
@@ -3266,7 +3294,7 @@ async fn audit(
     Ok(())
 }
 
-fn decode_note(row: &sqlx::postgres::PgRow) -> Result<Note, MemoryError> {
+fn decode_note(row: &sqlx::sqlite::SqliteRow) -> Result<Note, MemoryError> {
     use sqlx::Row as _;
     let column = |name: &str, error: sqlx::Error| {
         MemoryError::new(format!("stored note column {name}: {error}"))
@@ -3302,7 +3330,7 @@ fn decode_note(row: &sqlx::postgres::PgRow) -> Result<Note, MemoryError> {
     })
 }
 
-fn decode_checkpoint(row: &sqlx::postgres::PgRow) -> Result<Checkpoint, MemoryError> {
+fn decode_checkpoint(row: &sqlx::sqlite::SqliteRow) -> Result<Checkpoint, MemoryError> {
     use sqlx::Row as _;
     let column = |name: &str, error: sqlx::Error| {
         MemoryError::new(format!("stored checkpoint column {name}: {error}"))
@@ -3349,7 +3377,217 @@ fn db(context: &'static str) -> impl Fn(sqlx::Error) -> MemoryError {
 }
 
 fn is_unique_violation(error: &sqlx::Error) -> bool {
-    matches!(error, sqlx::Error::Database(inner) if inner.code().as_deref() == Some("23505"))
+    crate::db::is_unique_violation(error)
+}
+
+/// What [`Notebook::search`] asks the full-text index for.
+#[derive(Debug, PartialEq, Eq)]
+enum Search {
+    /// No query: every note in scope, newest first.
+    Everything,
+    /// A query of nothing but common words or exclusions, which no note can match.
+    Nothing,
+    /// An FTS5 query expression.
+    Match(String),
+}
+
+/// Words a web-style query ignores, as Postgres's `english` configuration did.
+const STOP_WORDS: &[&str] = &[
+    "a",
+    "about",
+    "above",
+    "after",
+    "again",
+    "against",
+    "all",
+    "am",
+    "an",
+    "and",
+    "any",
+    "are",
+    "as",
+    "at",
+    "be",
+    "because",
+    "been",
+    "before",
+    "being",
+    "below",
+    "between",
+    "both",
+    "but",
+    "by",
+    "can",
+    "did",
+    "do",
+    "does",
+    "doing",
+    "down",
+    "during",
+    "each",
+    "few",
+    "for",
+    "from",
+    "further",
+    "had",
+    "has",
+    "have",
+    "having",
+    "he",
+    "her",
+    "here",
+    "hers",
+    "herself",
+    "him",
+    "himself",
+    "his",
+    "how",
+    "i",
+    "if",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "itself",
+    "just",
+    "me",
+    "more",
+    "most",
+    "my",
+    "myself",
+    "no",
+    "nor",
+    "not",
+    "now",
+    "of",
+    "off",
+    "on",
+    "once",
+    "only",
+    "or",
+    "other",
+    "our",
+    "ours",
+    "ourselves",
+    "out",
+    "over",
+    "own",
+    "s",
+    "same",
+    "she",
+    "should",
+    "so",
+    "some",
+    "such",
+    "t",
+    "than",
+    "that",
+    "the",
+    "their",
+    "theirs",
+    "them",
+    "themselves",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "through",
+    "to",
+    "too",
+    "under",
+    "until",
+    "up",
+    "very",
+    "was",
+    "we",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "who",
+    "whom",
+    "why",
+    "will",
+    "with",
+    "you",
+    "your",
+    "yours",
+    "yourself",
+    "yourselves",
+];
+
+/// Translate a web-style search into an FTS5 expression.
+///
+/// Every word becomes a quoted FTS5 string, so nothing the operator or an agent types can be read
+/// as FTS5 syntax: `"quoted words"` become a phrase, `or` joins the terms on either side, and a
+/// leading `-` excludes a term. FTS5 cannot ask for "everything without X", so exclusions only
+/// apply beside at least one wanted term.
+fn search_expression(query: &str) -> Search {
+    let query = query.trim();
+    if query.is_empty() {
+        return Search::Everything;
+    }
+    // (negated, words) per term, and whether `or` came before it.
+    let mut terms: Vec<(bool, bool, Vec<String>)> = Vec::new();
+    let mut or_next = false;
+    let mut rest = query;
+    while let Some(start) = rest.find(|c: char| !c.is_whitespace()) {
+        rest = &rest[start..];
+        let negated = rest.starts_with('-');
+        if negated {
+            rest = &rest[1..];
+        }
+        let (text, quoted) = if let Some(inner) = rest.strip_prefix('"') {
+            let end = inner.find('"').unwrap_or(inner.len());
+            let text = &inner[..end];
+            rest = inner.get(end + 1..).unwrap_or("");
+            (text, true)
+        } else {
+            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            let text = &rest[..end];
+            rest = &rest[end..];
+            (text, false)
+        };
+        if !quoted && !negated && text.eq_ignore_ascii_case("or") {
+            or_next = !terms.is_empty();
+            continue;
+        }
+        let words = text
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|word| !word.is_empty())
+            .map(str::to_lowercase)
+            .filter(|word| quoted || !STOP_WORDS.contains(&word.as_str()))
+            .collect::<Vec<_>>();
+        if words.is_empty() {
+            continue;
+        }
+        terms.push((negated, std::mem::take(&mut or_next), words));
+    }
+    let phrase = |words: &[String]| format!("\"{}\"", words.join(" "));
+    let mut expression = String::new();
+    let mut excluded = Vec::new();
+    for (negated, or, words) in &terms {
+        if *negated {
+            excluded.push(phrase(words));
+            continue;
+        }
+        if !expression.is_empty() {
+            expression.push_str(if *or { " OR " } else { " AND " });
+        }
+        expression.push_str(&phrase(words));
+    }
+    if expression.is_empty() {
+        return Search::Nothing;
+    }
+    if !excluded.is_empty() {
+        expression = format!("({expression}) NOT {}", excluded.join(" NOT "));
+    }
+    Search::Match(expression)
 }
 
 fn now_rfc3339() -> String {
@@ -3684,8 +3922,9 @@ mod tests {
     /// A harness that retried a timed-out `memory_write` must not leave two notes behind. Two
     /// agreeing observations and one duplicated observation are indistinguishable once stored,
     /// which is why the key is required rather than optional.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_retried_memory_write_with_the_same_key_does_not_duplicate(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn a_retried_memory_write_with_the_same_key_does_not_duplicate() {
+        let pool = crate::db::Db::temp().await;
         let notebook = Notebook::new(pool);
         let request = note_write(
             "team-a",
@@ -3729,8 +3968,9 @@ mod tests {
     /// against anything the caller said. A guessed id reads as *not found* — not as refused —
     /// because a caller that could tell the difference could use the error to discover that
     /// another team's note exists.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_forged_id_from_another_team_or_run_reads_as_not_found(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn a_forged_id_from_another_team_or_run_reads_as_not_found() {
+        let pool = crate::db::Db::temp().await;
         let notebook = Notebook::new(pool);
         let theirs = notebook
             .write(&note_write(
@@ -3799,9 +4039,10 @@ mod tests {
 
     /// Correcting a note must not rewrite what an agent was given. Rows are immutable and a
     /// packet records the revision it supplied, so the two facts stay separately true.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn correcting_a_note_does_not_rewrite_a_stored_packet(pool: sqlx::PgPool) {
-        let archive = crate::archive::EventArchive::from_pool(pool);
+    #[tokio::test]
+    async fn correcting_a_note_does_not_rewrite_a_stored_packet() {
+        let pool = crate::db::Db::temp().await;
+        let archive = crate::archive::EventArchive::new(pool);
         let notebook = archive.notebook();
         let note = notebook
             .write(&note_write(
@@ -3891,8 +4132,9 @@ mod tests {
 
     /// A stale panel is told so rather than silently winning. The check is the
     /// `UNIQUE (note_key, revision)` index, so it holds against a concurrent writer too.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_revision_written_against_a_stale_revision_is_refused(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn a_revision_written_against_a_stale_revision_is_refused() {
+        let pool = crate::db::Db::temp().await;
         let notebook = Notebook::new(pool);
         let note = notebook
             .write(&note_write(
@@ -3955,8 +4197,9 @@ mod tests {
 
     /// Inherited memory is read-only by construction: the receiving team's scope can read another
     /// team's kept note and has no path to change it, because `revise` is scoped by team id.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn an_inherited_note_is_readable_and_never_writable(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn an_inherited_note_is_readable_and_never_writable() {
+        let pool = crate::db::Db::temp().await;
         let notebook = Notebook::new(pool);
         let note = notebook
             .write(&note_write(
@@ -4029,10 +4272,9 @@ mod tests {
     /// Selection is lineage-first. A decision reaches every stage in the run; a finding from a
     /// sibling branch does not, and the recorded rationale says so rather than leaving the
     /// operator to guess.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn selection_supplies_decisions_and_lineage_but_never_a_sibling_branch(
-        pool: sqlx::PgPool,
-    ) {
+    #[tokio::test]
+    async fn selection_supplies_decisions_and_lineage_but_never_a_sibling_branch() {
+        let pool = crate::db::Db::temp().await;
         let notebook = Notebook::new(pool);
         notebook
             .write(&note_write(
@@ -4135,8 +4377,9 @@ mod tests {
 
     /// An agent is never handed its own notes back. They are already in its context, and
     /// re-supplying them is how a packet fills with nothing.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn an_agent_is_not_supplied_its_own_notes_from_this_run(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn an_agent_is_not_supplied_its_own_notes_from_this_run() {
+        let pool = crate::db::Db::temp().await;
         let notebook = Notebook::new(pool);
         notebook
             .write(&note_write(
@@ -4172,8 +4415,9 @@ mod tests {
 
     /// The budget still fails closed: notes that do not fit are left out, and the rationale
     /// reports what was supplied rather than what was eligible.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn the_packet_budget_bounds_the_notebook_too(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn the_packet_budget_bounds_the_notebook_too() {
+        let pool = crate::db::Db::temp().await;
         let notebook = Notebook::new(pool);
         for index in 0..6 {
             let mut request = note_write(
@@ -4219,9 +4463,10 @@ mod tests {
         assert!(section.rationale.contains(" of 6"), "{}", section.rationale);
     }
 
-    /// A checkpoint is one row per agent per boundary, numbered by Postgres.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn checkpoints_are_numbered_per_agent_and_per_run(pool: sqlx::PgPool) {
+    /// A checkpoint is one row per agent per boundary, numbered by the database.
+    #[tokio::test]
+    async fn checkpoints_are_numbered_per_agent_and_per_run() {
+        let pool = crate::db::Db::temp().await;
         let notebook = Notebook::new(pool);
         let request = CheckpointWrite {
             run_id: "run-1".to_owned(),
@@ -4303,10 +4548,9 @@ mod tests {
     /// A `coordinator` row records "the run died and nothing said what came next"; an `agent` row
     /// is a stage's own statement and must be complete. Storing the first as if it were the second
     /// is the one way this mechanism could lie.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_coordinator_checkpoint_may_have_no_next_and_an_agent_one_may_not(
-        pool: sqlx::PgPool,
-    ) {
+    #[tokio::test]
+    async fn a_coordinator_checkpoint_may_have_no_next_and_an_agent_one_may_not() {
+        let pool = crate::db::Db::temp().await;
         let notebook = Notebook::new(pool);
         let base = CheckpointWrite {
             run_id: "dead-run".to_owned(),
@@ -4751,8 +4995,9 @@ mod tests {
 
     /// A pack round-trips: export writes the folder and its hashes, import verifies them and
     /// copies the kept notes into the receiving team's scope, attributed to the origin.
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn a_pack_round_trips_export_then_import_with_hashes_verified(pool: sqlx::PgPool) {
+    #[tokio::test]
+    async fn a_pack_round_trips_export_then_import_with_hashes_verified() {
+        let pool = crate::db::Db::temp().await;
         let notebook = Notebook::new(pool);
         let directory = TempDirectory::new();
         let root = directory.0.join("teams");

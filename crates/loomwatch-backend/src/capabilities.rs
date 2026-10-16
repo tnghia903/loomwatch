@@ -87,8 +87,8 @@ pub struct MemorySourceRef {
     /// Kept notes, when the source states them.
     ///
     /// A pack's manifest counts its own notes, so a pack knows. A live team's kept notes are rows
-    /// in Postgres and this inventory is a filesystem scan with no pool, so a team reports `None`
-    /// rather than `0` — the Memory panel reads the real count over
+    /// in the database and this inventory is a filesystem scan that never opens it, so a team
+    /// reports `None` rather than `0` — the Memory panel reads the real count over
     /// `GET /api/memory/notes`, and a zero here would be a claim the scan cannot make.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kept: Option<usize>,
@@ -524,7 +524,7 @@ fn add_keyed_capability(
 
 /// List every team with memory, and every imported pack, as knowledge sources.
 ///
-/// Read from the filesystem, not from Postgres: this inventory is what the Library shows before
+/// Read from the filesystem, not from the database: this inventory is what the Library shows before
 /// anything has run, and a source that only appeared once the archive was up would look like a
 /// bug. The consequence is that a live team's kept-note count is not stated here — see
 /// [`MemorySourceRef::kept`].
@@ -1306,7 +1306,7 @@ pub(crate) fn folder_contents(folder: &Path, provider: &str) -> Vec<CapabilityDe
 
 /// A memory source's pinned Brief and, for a pack, its kept notes.
 ///
-/// A live team's kept notes are rows in Postgres and this module never opens a pool, which is why
+/// A live team's kept notes are rows in the database and this module never opens it, which is why
 /// the inspector points at the Memory panel for those rather than claiming there are none.
 fn memory_contents(teams_root: &Path, reference: &MemorySourceRef) -> Vec<CapabilityDefinition> {
     let Ok(root) = fs::canonicalize(teams_root) else {
