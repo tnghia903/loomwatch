@@ -2631,27 +2631,10 @@
   const cmds = $('#cmds')
   $('#copy-cmds').addEventListener('click', async (event) => {
     const button = event.currentTarget
-    const text = $$('.cmd', cmds).map((c) => c.dataset.full || c.textContent).join('\n')
+    const text = $$('.cmd', cmds).map((c) => c.textContent).join('\n')
     try { await navigator.clipboard.writeText(text); button.textContent = 'Copied' } catch { button.textContent = 'Select and copy' }
     window.setTimeout(() => { button.textContent = 'Copy' }, 1600)
   })
-  let typed = false
-  async function typeCommands() {
-    if (typed || reduced) return
-    typed = true
-    const lines = $$('.cmd', cmds)
-    const comment = $('.c', cmds)
-    lines.forEach((line) => { line.dataset.full = line.textContent; line.textContent = '' })
-    comment.style.visibility = 'hidden'
-    for (const line of lines) {
-      line.classList.add('typing')
-      for (let i = 1; i <= line.dataset.full.length; i++) { line.textContent = line.dataset.full.slice(0, i); await new Promise((r) => window.setTimeout(r, 22)) }
-      await new Promise((r) => window.setTimeout(r, 260))
-      line.classList.remove('typing')
-    }
-    await new Promise((r) => window.setTimeout(r, 300))
-    comment.style.visibility = ''
-  }
 
   const SCREENS = {
     home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as a team, a gold Build an agent button beside New team, a box to describe the job in plain words, the three steps Agents, Workflow and Chat, a row of your saved agents each with its little figure and version, and your teams as cards below.', cap: 'Home: start with an agent, then a team. Your agents sit in a row, each with its figure and its version.' },
@@ -2695,7 +2678,6 @@
         if (!entry.isIntersecting) continue
         const target = entry.target
         target.classList.add('seen')
-        if (target.id === 'start') typeCommands()
       }
     }, { rootMargin: '0px 0px -30% 0px' })
     $$('.chapter, .act, #start').forEach((node) => seen.observe(node))
