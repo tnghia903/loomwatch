@@ -56,6 +56,22 @@ it('retains good evidence and recovers a missing WebSocket frame through REST', 
   unmount()
 })
 
+it('reads the whole archive before showing it, so a long run opens as it ended', async () => {
+  const pages = [Array.from({ length: 500 }, (_, seq) => event(seq)), [event(500), event(501)]]
+  const fetchMock = vi.fn().mockImplementation(async () => response(pages.shift() ?? []))
+  vi.stubGlobal('fetch', fetchMock)
+  const seen: number[] = []
+  const { result, unmount } = renderHook(() => { const state = useSessionEvents('s'); seen.push(state.events.length); return state })
+  expect(result.current.loading).toBe(true)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  expect(String(fetchMock.mock.calls[1]?.[0])).toContain('afterSeq=499')
+  expect(seen).not.toContain(500)
+  expect(result.current.events).toHaveLength(502)
+  expect(result.current.loading).toBe(false)
+  expect(MockSocket.all[0].url.searchParams.get('afterSeq')).toBe('501')
+  unmount()
+})
+
 it('aborts a pending archive request when changing sessions', async () => {
   let signal: AbortSignal | undefined
   vi.stubGlobal('fetch', vi.fn().mockImplementation((_url, options) => {
