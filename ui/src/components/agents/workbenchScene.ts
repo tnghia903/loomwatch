@@ -59,19 +59,18 @@ export interface BenchView {
   /** A skill card is being dragged over the bench. */
   dropping: boolean
   /**
-   * What it reads, standing in the file holder. Only a team's agent has one: what an agent reads
-   * is the team's to give, so without a team (Your agents, the landing page) there is no holder.
+   * What it reads, filed in the bench's drawer. Only a team's agent has one: what an agent reads
+   * is the team's to give, so without a team (Your agents, the landing page) there is no drawer.
    */
   reads?: readonly ReadSource[] | null
   /**
-   * The tools (MCP servers) it is given, hanging on the tool rack. Only a team's agent has one, as
-   * with what it reads: without a team (Your agents, the landing page) there is no rack.
+   * The tools (MCP servers) it is given, standing in the bench's tool drawer. Only a team's agent
+   * has one, as with what it reads: without a team (Your agents, the landing page) there is none.
    */
   tools?: readonly string[] | null
 }
 
-/** `reply` is above the tray, `tray` below it: the file holder stands behind the tray. */
-export type BenchAnchor = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'tools' | 'keys' | 'dish' | 'reply' | 'tray'
+export type BenchAnchor = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'tools' | 'keys' | 'dish' | 'reply'
 export type BenchAnchors = Record<BenchAnchor, { x: number; y: number }>
 /** The faces that carry words: the nameplate, the job sheet and the laptop's lid. */
 export type BenchFace = 'name' | 'job' | 'app'
@@ -114,21 +113,20 @@ const KEY_NODE: Record<AllowSwitch, string> = { web: 'web', edits: 'files', comm
 const FACE_MESH: Record<BenchFace, string> = { name: 'nameplate_face', job: 'job_sheet', app: 'laptop_face' }
 const DISH_KEY_SCALE = 0.72
 /**
- * The file holder: a step sorter at the back right of the bench, behind the tray and clear of the
- * figure's arm. Its first slot is the lowest, at the front; each one behind is a step higher, so
- * every folder in it shows. It stands on a plinth, so the tray in front hides less of it.
+ * The bench's two drawers, either side of the nameplate, hold what the team gives it with a line in
+ * Workflow: what it reads on the left, its tools on the right. What is its own (its keys and
+ * skills) hangs on the wall, and the work (the job, the laptop, the tray) is on top. `front` is the
+ * bench's front face; open, a drawer slides out past the bench top's overhang so what is in it
+ * shows, and with nothing in it, it stays shut.
  */
-const HOLDER = { at: new Vector3(0.7, 0.62, -0.255), width: 0.36, depth: 0.18, step: 0.045, floor: 0.06 }
-/**
- * Where the holder's label goes: just over the front slot's folder and its tab, where the first
- * thing it reads stands. Any higher and it runs into the label beside the figure's head.
- */
-const HOLDER_LABEL = new Vector3(0, HOLDER.floor + 0.23, HOLDER.depth / 2 - HOLDER.depth / READ_SLOTS / 2)
-/**
- * The tool rack: a rail on the pegboard under the key hooks, with a peg for each tool to hang on,
- * clear of the keys above it and of the figure's head to its right.
- */
-const RACK = { at: new Vector3(-0.72, 1.03, -1.075), width: 0.5, pitch: 0.115 }
+const DRAWER = { bottom: 0.27, width: 0.42, height: 0.18, depth: 0.32, front: 0.26, open: 0.28 }
+type DrawerName = 'reads' | 'tools'
+const DRAWER_X: Record<DrawerName, number> = { reads: -0.7, tools: 0.7 }
+/** Where each folder is filed, front first, and where each wrench stands, side by side. */
+const DRAWER_SLOTS: Record<DrawerName, Vector3[]> = {
+  reads: Array.from({ length: READ_SLOTS }, (_, slot) => new Vector3(0, 0.016, -0.035 - slot * 0.042)),
+  tools: Array.from({ length: TOOL_SLOTS }, (_, slot) => new Vector3((slot - (TOOL_SLOTS - 1) / 2) * 0.085, 0.016, -0.06 - (slot % 2) * 0.03)),
+}
 /** Each wrench's grip, so tools side by side read apart. */
 const GRIP_TINTS = ['#C0342E', '#2F7DD3', '#D8A93C', '#6E9C6A']
 const FOLDER_TINTS = ['#E6CD97', '#DCC08A', '#E9D5AA', '#D9BC80']
@@ -192,10 +190,12 @@ export class WorkbenchScene {
   /** Where each key lies in your dish: flat, a little smaller, its middle on its spot. */
   private readonly keyDish = new Map<AllowSwitch, Vector3>()
   private readonly cards: { group: Group | null; skill: string | null }[] = Array.from({ length: CARD_SLOTS }, () => ({ group: null, skill: null }))
-  /** What stands in each slot of the file holder, by what it is and where. */
+  /** What is filed in each slot of the drawer, by what it is and where. */
   private readonly files: { group: Group | null; source: string | null }[] = Array.from({ length: READ_SLOTS }, () => ({ group: null, source: null }))
-  /** Which tool hangs on each peg of the rack. */
-  private readonly racked: { group: Group | null; tool: string | null }[] = Array.from({ length: TOOL_SLOTS }, () => ({ group: null, tool: null }))
+  /** Whether each drawer is open, or `null` before the first view: it opens only with something in it. */
+  private readonly drawerOpen: Record<DrawerName, boolean | null> = { reads: null, tools: null }
+  /** Which tool stands in each slot of the tool drawer. */
+  private readonly stocked: { group: Group | null; tool: string | null }[] = Array.from({ length: TOOL_SLOTS }, () => ({ group: null, tool: null }))
   private readonly faces = new Map<string, Mesh>()
   /** Each worded face's top left, top right and bottom left corners, in its own space. */
   private readonly faceCorners = new Map<BenchFace, Vector3[]>()
@@ -300,8 +300,8 @@ export class WorkbenchScene {
     for (const kind of FIGURE_KINDS) this.heads.set(kind, this.node(`head_${kind}`))
     for (const [face, name] of Object.entries(FACE_MESH) as [BenchFace, string][]) this.faceCorners.set(face, corners(this.node(name) as Mesh))
     this.scene.add(model)
-    this.buildHolder()
-    this.buildRack()
+    this.buildDrawer('reads')
+    this.buildDrawer('tools')
     model.updateMatrixWorld(true)
     for (const { key, node } of FIGURE_KEYS) {
       const found = this.node(`key_${node}`)
@@ -451,8 +451,10 @@ export class WorkbenchScene {
     this.node('envelope').visible = view.hasReply || view.mood === 'done'
     this.pinCards(look.skills, before !== null)
     this.node('reads').visible = Boolean(view.reads)
+    this.slideDrawer('reads', Boolean(view.reads?.length), before !== null)
     this.fileSources(view.reads ?? [], before !== null)
     this.node('tools').visible = Boolean(view.tools)
+    this.slideDrawer('tools', Boolean(view.tools?.length), before !== null)
     this.hangTools(view.tools ?? [], before !== null)
 
     for (const { key } of FIGURE_KEYS) {
@@ -561,55 +563,68 @@ export class WorkbenchScene {
   }
 
   /**
-   * The file holder, made here rather than in Blender, like the recipe cards: a graphite step
-   * sorter, with a slot node on each step (`reads_1` at the front, lowest) for a folder to stand in.
+   * A drawer, made here rather than in Blender, like the recipe cards: a card-catalog front (a
+   * brass frame with a card, and a brass pull), the dark mouth it slides out of, and a slot node
+   * for each thing in it (`reads_1`, `tools_1`…).
    */
-  private buildHolder() {
+  private buildDrawer(name: DrawerName) {
     const holder = new Group()
-    holder.name = 'reads'
-    holder.position.copy(HOLDER.at)
-    const graphite = () => this.material('graphite', 'reads')
-    const add = (mesh: Mesh, name: string) => {
-      mesh.name = name
+    holder.name = name
+    holder.position.set(DRAWER_X[name], DRAWER.bottom, DRAWER.front)
+    const drawer = new Group()
+    drawer.name = `${name}_drawer`
+    holder.add(drawer)
+    const add = (parent: Group, mesh: Mesh, part: string, x: number, y: number, z: number) => {
+      mesh.name = `${name}_${part}`
+      mesh.position.set(x, y, z)
       mesh.castShadow = true
       mesh.receiveShadow = true
-      holder.add(mesh)
+      parent.add(mesh)
       this.pickables.push(mesh)
-      this.roles.set(mesh, 'graphite')
+      this.roles.set(mesh, 'drawer')
       this.disposables.push(mesh.geometry)
+      return mesh
     }
-    const tier = HOLDER.depth / READ_SLOTS
-    for (let slot = 0; slot < READ_SLOTS; slot += 1) {
-      const floor = HOLDER.floor + slot * HOLDER.step
-      const z = HOLDER.depth / 2 - tier * (slot + 0.5)
-      const step = new Mesh(new BoxGeometry(HOLDER.width - 0.012, floor, tier), graphite())
-      step.position.set(0, floor / 2, z)
-      add(step, `reads_step_${slot + 1}`)
+    const box = (width: number, height: number, depth: number, material: Material) => new Mesh(new BoxGeometry(width, height, depth), material)
+    const { width, height, depth } = DRAWER
+    // The mouth it slides out of, dark, so an open drawer reads as coming out of the bench.
+    const mouth = add(holder, new Mesh(new PlaneGeometry(width + 0.02, height + 0.02), new MeshStandardMaterial({ color: '#0C0C10', roughness: 1 })), 'mouth', 0, height / 2, 0.001)
+    mouth.castShadow = false
+    // Its front, a shade lighter than the bench so it shows, with a card in a brass frame and a pull.
+    const front = add(drawer, box(width, height, 0.024, new MeshPhysicalMaterial({ color: '#3A3A44', roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.35 })), 'front', 0, height / 2, 0.012)
+    add(drawer, box(0.13, 0.054, 0.006, this.material('gold', name)), 'frame', 0, height * 0.68, 0.026)
+    add(drawer, box(0.11, 0.036, 0.004, this.material('paper', name)), 'card', 0, height * 0.68, 0.029)
+    add(drawer, box(0.12, 0.016, 0.014, this.material('gold', name)), 'pull', 0, height * 0.3, 0.044)
+    for (const x of [-0.05, 0.05]) add(drawer, box(0.012, 0.012, 0.022, this.material('gold', name)), `post_${x < 0 ? 'l' : 'r'}`, x, height * 0.3, 0.034)
+    // Its box: the floor, sides and back that hold what is in it, inside the bench while it is shut.
+    const inside = () => this.material('graphite', name)
+    add(drawer, box(width - 0.03, 0.008, depth, inside()), 'floor', 0, 0.012, -depth / 2)
+    for (const sign of [-1, 1]) add(drawer, box(0.008, height * 0.7, depth, inside()), `side_${sign < 0 ? 'l' : 'r'}`, sign * (width / 2 - 0.02), height * 0.35 + 0.008, -depth / 2)
+    add(drawer, box(width - 0.03, height * 0.7, 0.008, inside()), 'back', 0, height * 0.35 + 0.008, -depth)
+    DRAWER_SLOTS[name].forEach((place, slot) => {
       const at = new Group()
-      at.name = `reads_${slot + 1}`
-      at.position.set(0, floor, z)
-      holder.add(at)
+      at.name = `${name}_${slot + 1}`
+      at.position.copy(place)
+      drawer.add(at)
       this.nodes.set(at.name, at)
-    }
-    // Its sides: low at the front, tall at the back, so the folders lean on something.
-    const side = new Shape()
-    side.moveTo(HOLDER.depth / 2, 0)
-    side.lineTo(HOLDER.depth / 2, HOLDER.floor + 0.06)
-    side.lineTo(-HOLDER.depth / 2, HOLDER.floor + (READ_SLOTS - 1) * HOLDER.step + 0.14)
-    side.lineTo(-HOLDER.depth / 2, 0)
-    side.closePath()
-    for (const [name, sign] of [['l', -1], ['r', 1]] as const) {
-      const panel = new Mesh(new ExtrudeGeometry(side, { depth: 0.018, bevelEnabled: true, bevelThickness: 0.003, bevelSize: 0.003, bevelSegments: 2, curveSegments: 1 }), graphite())
-      panel.rotation.y = -Math.PI / 2
-      panel.position.x = sign * HOLDER.width / 2 + 0.009
-      add(panel, `reads_side_${name}`)
-    }
+    })
     this.scene.add(holder)
     holder.updateMatrixWorld(true)
-    this.nodes.set(holder.name, holder)
+    for (const node of [holder, drawer, front]) this.nodes.set(node.name, node)
   }
 
-  /** What it reads, standing in the holder, front first, in the order the team file lists them. */
+  /** Open a drawer when the team gives it something for it; shut it when there is nothing. */
+  private slideDrawer(name: DrawerName, open: boolean, animate: boolean) {
+    if (this.drawerOpen[name] === open) return
+    this.drawerOpen[name] = open
+    const drawer = this.node(`${name}_drawer`)
+    const to = new Vector3(0, 0, open ? DRAWER.open : 0)
+    this.tweens = this.tweens.filter((tween) => tween.node !== drawer)
+    if (!animate || this.reduced) { drawer.position.copy(to); return }
+    this.tween(drawer, to, drawer.quaternion.clone(), 0.45, 0)
+  }
+
+  /** What it reads, standing in the drawer, front first, in the order the team file lists them. */
   private fileSources(sources: readonly ReadSource[], animate: boolean) {
     for (let slot = 0; slot < READ_SLOTS; slot += 1) {
       const source = sources[slot] ?? null
@@ -652,54 +667,19 @@ export class WorkbenchScene {
     this.node(`reads_${slot + 1}`).add(group)
     for (const mesh of parts) { this.pickables.push(mesh); this.roles.set(mesh, 'file'); this.disposables.push(mesh.geometry) }
     if (animate && !this.reduced) {
-      // It drops in from above, the way a folder goes into a holder.
+      // It drops into the open drawer from in front, the way a folder is filed.
       group.scale.setScalar(0.01)
-      group.position.y = 0.35
+      group.position.set(0, 0.25, 0.2)
       this.tween(group, new Vector3(0, 0, 0), lean, 0.5, 0.04)
     }
     return group
   }
 
-  /**
-   * The tool rack, made here like the file holder: a graphite rail with a peg for each tool
-   * (`tools_1` at the left), on the pegboard under the key hooks.
-   */
-  private buildRack() {
-    const rack = new Group()
-    rack.name = 'tools'
-    rack.position.copy(RACK.at)
-    const add = (mesh: Mesh, name: string) => {
-      mesh.name = name
-      mesh.castShadow = true
-      mesh.receiveShadow = true
-      rack.add(mesh)
-      this.pickables.push(mesh)
-      this.roles.set(mesh, 'graphite')
-      this.disposables.push(mesh.geometry)
-    }
-    const rail = new Mesh(new BoxGeometry(RACK.width, 0.026, 0.022), this.material('graphite', 'tools'))
-    add(rail, 'tools_rail')
-    for (let slot = 0; slot < TOOL_SLOTS; slot += 1) {
-      const x = (slot - (TOOL_SLOTS - 1) / 2) * RACK.pitch
-      const peg = new Mesh(new BoxGeometry(0.008, 0.008, 0.05), this.material('graphite', 'tools'))
-      peg.position.set(x, -0.022, 0.03)
-      add(peg, `tools_peg_${slot + 1}`)
-      const at = new Group()
-      at.name = `tools_${slot + 1}`
-      at.position.set(x, -0.022, 0.03)
-      rack.add(at)
-      this.nodes.set(at.name, at)
-    }
-    this.scene.add(rack)
-    rack.updateMatrixWorld(true)
-    this.nodes.set(rack.name, rack)
-  }
-
-  /** The tools it is given, one on each peg from the left, in the order the team file lists them. */
+  /** The tools it is given, standing in the tool drawer from the left, in the order the team file lists them. */
   private hangTools(tools: readonly string[], animate: boolean) {
     for (let slot = 0; slot < TOOL_SLOTS; slot += 1) {
       const tool = tools[slot] ?? null
-      const hung = this.racked[slot]
+      const hung = this.stocked[slot]
       if (hung.tool === tool) continue
       if (hung.group) this.unpin(hung.group, animate)
       hung.group = tool ? this.wrench(slot, animate) : null
@@ -707,11 +687,11 @@ export class WorkbenchScene {
     }
   }
 
-  /** An open-ended wrench, hanging by the hole in its handle, its head down and a coloured grip. */
+  /** An open-ended wrench with a coloured grip, standing on its handle in the drawer, its head up. */
   private wrench(slot: number, animate: boolean): Group {
     const group = new Group()
     group.name = `tools_${slot + 1}_wrench`
-    // Drawn head up around its head's middle, then turned over to hang from the hole.
+    // Drawn head up around its head's middle.
     const head = 0.034
     const half = 0.011
     const length = 0.19
@@ -735,14 +715,14 @@ export class WorkbenchScene {
     steel.name = `tools_${slot + 1}_steel`
     const grip = new Mesh(new BoxGeometry(0.03, 0.085, 0.014), new MeshStandardMaterial({ color: GRIP_TINTS[slot % GRIP_TINTS.length], roughness: 0.55 }))
     grip.name = `tools_${slot + 1}_grip`
-    grip.position.set(0, -length + 0.07, 0.003)
+    // Just under its head, so its colour shows over the drawer's front.
+    grip.position.set(0, -0.08, 0.003)
     const body = new Group()
     body.add(steel, grip)
-    // Turned over, so the hole is at the top, on the peg, and the head hangs down.
-    body.rotation.z = Math.PI
-    body.position.y = -length + 0.002
+    // Standing on the end of its handle, so its head shows over the drawer's front.
+    body.position.y = length + half
     group.add(body)
-    group.rotation.z = MathUtils.degToRad(((slot * 29) % 5) - 2)
+    group.rotation.set(-0.16, 0, MathUtils.degToRad(((slot * 29) % 9) - 4))
     this.node(`tools_${slot + 1}`).add(group)
     for (const mesh of [steel, grip]) {
       mesh.castShadow = true
@@ -751,9 +731,9 @@ export class WorkbenchScene {
       this.disposables.push(mesh.geometry)
     }
     if (animate && !this.reduced) {
-      // It is hung on its peg, from in front of the board.
+      // It goes into the open drawer from in front, the way a tool is put away.
       group.scale.setScalar(0.01)
-      group.position.z = 0.25
+      group.position.set(0, 0.25, 0.2)
       this.tween(group, new Vector3(0, 0, 0), group.quaternion.clone(), 0.5, 0.06)
     }
     return group
@@ -964,14 +944,14 @@ export class WorkbenchScene {
           target.bodyY += 0.025 * bump(u * 2)
           break
         case 'file':
-          // Something to read went into the holder, or came out: it looks over.
-          towards(this.node('reads').getWorldPosition(new Vector3()).add(new Vector3(0, 0.15, 0)))
+          // Something to read was filed in the drawer, or taken out: it looks over.
+          towards(this.node('reads_drawer').getWorldPosition(new Vector3()).add(new Vector3(0, 0.15, 0.1)))
           target.bodyY += 0.025 * bump(u * 2)
           this.flashes.set('reads', 0.5 * (1 - u))
           break
         case 'tool':
-          // A tool went onto the rack, or came off it: it looks over.
-          towards(this.node('tools').getWorldPosition(new Vector3()).add(new Vector3(0, -0.1, 0)))
+          // A tool was put in its drawer, or taken out: it looks over.
+          towards(this.node('tools_drawer').getWorldPosition(new Vector3()).add(new Vector3(0, 0.15, 0.1)))
           target.bodyY += 0.025 * bump(u * 2)
           this.flashes.set('tools', 0.5 * (1 - u))
           break
@@ -1108,13 +1088,12 @@ export class WorkbenchScene {
       name: this.screen(world('nameplate', [0, 0, 0])),
       job: this.screen(world('job', [0, 0.3, -0.12])),
       skills: this.screen(cards),
-      reads: this.screen(world('reads', HOLDER_LABEL.toArray())),
-      // Under the wrenches' heads: above the rack are the keys, with their own label.
-      tools: this.screen(world('tools', [0, -0.25, 0.03])),
+      // Under each drawer's front, on the bench's face, so they follow the drawers as they slide.
+      reads: this.screen(world('reads_front', [0, -DRAWER.height / 2 - 0.012, 0.012])),
+      tools: this.screen(world('tools_front', [0, -DRAWER.height / 2 - 0.012, 0.012])),
       keys: this.screen(world('hooks', [0, 0.06, 0])),
       dish: this.screen(world('dish', [0, -0.01, 0.2])),
       reply: this.screen(world('tray', [0, 0.1, -0.05])),
-      tray: this.screen(world('tray', [0, -0.01, 0.2])),
     }
   }
 
@@ -1128,7 +1107,7 @@ export class WorkbenchScene {
   }
 
   private partPoint(part: FigurePart): Vector3 | null {
-    const name = { mind: null, app: 'laptop_lid', name: 'nameplate', job: 'job', skills: 'card_3', reads: 'reads', tools: 'tools', keys: 'hooks', reply: 'tray' }[part]
+    const name = { mind: null, app: 'laptop_lid', name: 'nameplate', job: 'job', skills: 'card_3', reads: 'reads_drawer', tools: 'tools_drawer', keys: 'hooks', reply: 'tray' }[part]
     return name ? this.node(name).getWorldPosition(new Vector3()) : null
   }
 

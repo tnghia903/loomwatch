@@ -15,12 +15,13 @@ describe('what each part of the workbench stands for', () => {
     expect(partOfNode(['card_2_face', 'card_2', 'pegboard', 'scene'])).toBe('skills')
     expect(partOfNode(['key_web_tag', 'key_web', 'hook_web', 'hooks', 'pegboard'])).toBe('keys')
     expect(partOfNode(['hooks_bar', 'hooks', 'pegboard'])).toBe('keys')
-    // The file holder is made on the page, not in the model: its steps, sides and what stands in it.
-    expect(partOfNode(['reads_1_folder', 'reads_1', 'reads'])).toBe('reads')
-    expect(partOfNode(['reads_step_3', 'reads'])).toBe('reads')
-    // So is the tool rack: its rail, its pegs and the wrenches on them.
-    expect(partOfNode(['tools_2_steel', 'tools_2_wrench', 'tools_2', 'tools'])).toBe('tools')
-    expect(partOfNode(['tools_rail', 'tools'])).toBe('tools')
+    // The drawer is made on the page, not in the model: its front, its box and what is filed in it.
+    expect(partOfNode(['reads_1_folder', 'reads_1', 'reads_drawer', 'reads'])).toBe('reads')
+    expect(partOfNode(['reads_pull', 'reads_drawer', 'reads'])).toBe('reads')
+    expect(partOfNode(['reads_mouth', 'reads'])).toBe('reads')
+    // So is the tool drawer, and the wrenches in it.
+    expect(partOfNode(['tools_2_steel', 'tools_2_wrench', 'tools_2', 'tools_drawer', 'tools'])).toBe('tools')
+    expect(partOfNode(['tools_front', 'tools_drawer', 'tools'])).toBe('tools')
     expect(partOfNode(['dish_bowl', 'dish', 'bench'])).toBe('keys')
     expect(partOfNode(['envelope_seal', 'envelope', 'tray', 'bench'])).toBe('reply')
   })

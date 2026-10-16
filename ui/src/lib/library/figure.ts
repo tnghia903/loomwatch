@@ -13,11 +13,12 @@ import type { AllowSwitch } from '../team-file/types'
  * - `name`: the nameplate on the front of the bench.
  * - `job`: the pattern on the clipboard, its instructions.
  * - `skills`: recipe cards pinned on the pegboard, one per skill.
- * - `reads`: the file holder at the back of the bench, with a folder, file or page standing in it
- *   for each one it reads. Only in a team: what an agent reads is the team's to give (ADR 0042), so
- *   an agent in Your agents has no holder.
- * - `tools`: wrenches on the tool rack under the key hooks, one per tool (MCP server) its team
- *   gives it. Only in a team, like what it reads: a tool is given with a line on the canvas.
+ * - `reads`: the file drawer, left of the nameplate, open with a folder, file or page filed in it
+ *   for each one it reads and shut when there is none.
+ * - `tools`: the tool drawer, right of the nameplate, with a wrench standing in it for each tool
+ *   (MCP server) it is given.
+ *   The drawers hold what the team gives it with a line on the canvas (ADR 0042), so only a team's
+ *   agent has them; what is its own (keys, skills) hangs on the wall.
  * - `keys`: keys on the pegboard hooks go ahead without asking; the ones in your dish ask you first.
  * - `reply`: the tray where what it hands back lands.
  *
@@ -69,7 +70,7 @@ export const FIGURE_KEYS: readonly { key: AllowSwitch; node: string; word: strin
 /** How many recipe cards fit on the pegboard; more skills than this still count, they just aren't pinned. */
 export const CARD_SLOTS = 6
 
-/** One thing it reads, as the file holder shows it: a linked folder, an added file, or a Notion page. */
+/** One thing it reads, as the drawer shows it: a linked folder, an added file, or a Notion page. */
 export interface ReadSource {
   kind: 'folder' | 'file' | 'page'
   name: string
@@ -77,10 +78,10 @@ export interface ReadSource {
   where: string
 }
 
-/** How many fit in the file holder; more still count, they just don't stand in it. */
+/** How many fit in the drawer; more still count, they just aren't filed in it. */
 export const READ_SLOTS = 4
 
-/** How many wrenches hang on the tool rack; more tools still count, they just don't hang there. */
+/** How many wrenches fit in the tool drawer; more tools still count, they just aren't in it. */
 export const TOOL_SLOTS = 4
 
 /**

@@ -46,7 +46,7 @@ describe('a team’s own agent on the workbench', () => {
     expect(teamAgentEdit(writer, 'allow', { web: false, commands: true }, [claude])).toEqual({ kind: 'fields', fields: { allow: { commands: true } } })
   })
 
-  it('reads what the team gives it to read, for its file holder: folders, files and Notion pages, in order', () => {
+  it('reads what the team gives it to read, for its drawer: folders, files and Notion pages, in order', () => {
     expect(readsOf({ capabilities: [
       { kind: 'skill', name: 'house-style' },
       { kind: 'knowledge', name: 'notes', path: '/Users/me/notes' },
@@ -67,7 +67,7 @@ describe('a team’s own agent on the workbench', () => {
     expect(readsOf({})).toEqual([])
   })
 
-  it('takes the tools the team gives it, for its tool rack: each MCP server once, in order', () => {
+  it('takes the tools the team gives it, for its tool drawer: each MCP server once, in order', () => {
     expect(toolsOf({ capabilities: [
       { kind: 'tool', name: 'github' },
       { kind: 'skill', name: 'house-style' },
