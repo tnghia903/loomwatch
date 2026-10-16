@@ -357,7 +357,7 @@
         <li><b>On your computer</b><span>Your files and history stay on your Mac. No account, no cloud of its own.</span></li>
         <li><b>The AI you already have</b><span>Claude Code, Codex and OpenCode, mixed on one team.</span></li>
         <li><b>Every step recorded</b><span>Calls, handovers and answers, kept so you can check them.</span></li>
-        <li><b>Free and open source</b><span>One command installs it; Update keeps it current.</span></li>
+        <li><b>Free and open source</b><span>One download installs it; it tells you when an update is out.</span></li>
       </ul>
     </div>
     <p class="footnote">To be exact about privacy: LoomWatch itself sends nothing anywhere unless you turn on Send to Notion. Each agent's own app still sends prompts and files to its model provider, as it does when you use it directly.</p>
@@ -370,27 +370,31 @@
     <div class="start-grid">
       <div class="band-head">
         <span class="act-tag">Start</span>
-        <h2 id="start-h">One command, and your first team is already waiting.</h2>
-        <p class="ch-body">Open Terminal on your Mac (it's in Applications → Utilities), paste this, and press Return. It downloads a ready-built LoomWatch, checks it, and opens it in your browser with a demo team that works offline, so you can try it before you connect any AI app. Nothing to compile.</p>
+        <h2 id="start-h">One download, and your first team is already waiting.</h2>
+        <p class="ch-body">Download LoomWatch, open it, and drag it to Applications. Open it from there and it opens in your browser with a demo team that works offline, so you can try it before you connect any AI app. It keeps an icon in the menu bar, so there's no window to keep open.</p>
+        <div class="cta start-get">
+          <a class="btn btn-primary btn-lg" href="https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-macos.dmg">Download for Mac</a>
+          <span class="start-meta">LoomWatch-macos.dmg · about 30 MB · Apple silicon and Intel</span>
+        </div>
+        <p class="start-note">The first time, macOS may say it can't check LoomWatch for malicious software, because Apple hasn't notarized it yet. Click <b>Done</b>, then <b>Open Anyway</b> in System Settings › Privacy &amp; Security. It asks only once.</p>
         <dl class="needs">
           <div><dt>A Mac</dt><dd>macOS 11 or newer, Apple silicon or Intel. Linux builds exist but are untested, and Windows isn't supported yet.</dd></div>
           <div><dt>Nothing else</dt><dd>Your team chats and their history are kept in one file on your Mac. There is no database to install.</dd></div>
-          <div><dt>An AI app for Terminal</dt><dd>For real runs: Claude Code, Codex or OpenCode. OpenCode has free models and needs no account. The demo team needs none.</dd></div>
-          <div><dt>No GitHub account needed</dt><dd>The installer fetches the public release, so anyone can install it.</dd></div>
+          <div><dt>An AI app</dt><dd>For real runs: Claude Code, Codex or OpenCode. Home has a button to set up each one, and OpenCode has free models with no account. The demo team needs none.</dd></div>
+          <div><dt>No GitHub account needed</dt><dd>The download is the public release, so anyone can install it.</dd></div>
         </dl>
         <p class="start-alt"><a href="https://github.com/tnghia903/loomwatch/blob/main/scripts/install.sh">Read the installer</a> before you run it, or <a href="https://github.com/tnghia903/loomwatch#build-from-source">build from source</a>.</p>
       </div>
       <div class="termbox">
-        <div class="termbox-bar"><span class="micro">Terminal</span><button class="btn" type="button" id="copy-cmds">Copy</button></div>
+        <div class="termbox-bar"><span class="micro">Or in Terminal</span><button class="btn" type="button" id="copy-cmds">Copy</button></div>
 <pre id="cmds"><span class="p">$ </span><span class="cmd">curl -fsSL https://loomwatch.github.io/install.sh | bash</span>
 <span class="c"><b>==&gt; Downloading LoomWatch for macOS</b>
 <b>==&gt; Installing LoomWatch in ~/LoomWatch/app</b>
 Installed. Start LoomWatch at any time with: ~/LoomWatch/app/loomwatch
 Created your teams folder at ~/LoomWatch/teams, with an offline demo team in it.
-<b>==&gt; Starting the database</b>
 <b>==&gt; LoomWatch is starting at http://127.0.0.1:3000</b>
 Keep this window open while you use LoomWatch. Press Ctrl-C to stop it.</span></pre>
-        <p class="termbox-foot"><code>~/LoomWatch/app/loomwatch</code> starts it again and lists anything missing. Add <code>stop</code> to also stop its database, <code>update</code> for the newest release, or <code>help</code> for the rest. Your teams and history are kept either way.</p>
+        <p class="termbox-foot"><code>~/LoomWatch/app/loomwatch</code> starts it again and lists anything missing. Add <code>stop</code> to stop it, <code>update</code> for the newest release, or <code>help</code> for the rest. Your teams and history are kept either way.</p>
       </div>
     </div>
 

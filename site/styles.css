@@ -580,6 +580,10 @@ em { font-style: italic; }
 .termbox .c b { color: var(--ink-2); font-weight: 400; }
 .termbox .typing::after { content: ''; display: inline-block; width: 8px; height: 15px; margin-left: 1px; background: var(--ink); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
 .termbox-foot { margin: 0; padding: 14px 20px 18px; border-top: 1px solid var(--hairline); font-size: 13px; line-height: 1.6; color: var(--ink-2); }
+.start-get { margin-top: 28px; gap: 16px; }
+.start-meta { font-size: 13px; color: var(--ink-3); }
+.start-note { margin: 14px 0 0; max-width: 560px; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+.start-note b { font-weight: 600; color: var(--ink); }
 .start-alt { margin: 18px 0 0; font-size: 13.5px; color: var(--ink-3); }
 .start-alt a { color: var(--accent); text-decoration: none; font-weight: 500; }
 .start-alt a:hover { text-decoration: underline; text-underline-offset: 3px; }
@@ -996,6 +1000,6 @@ em { font-style: italic; }
 }
 /* Start: what you need, in two short columns. */
 #start .needs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
-#start .needs div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+#start .needs div { grid-template-columns: minmax(0, 1fr); gap: 2px; align-content: start; }
 #start .needs dd { font-size: 13.5px; }
 @media (max-width: 640px) { #start .needs { grid-template-columns: minmax(0, 1fr); } }
