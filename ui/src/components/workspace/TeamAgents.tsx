@@ -11,7 +11,8 @@ import { linkState } from '../../lib/library/link'
 import { draftFromTeamAgent, readsOf, toolsOf } from '../../lib/library/teamDraft'
 import type { RunRecord } from '../../lib/runs/client'
 import type { AgentConfig } from '../../lib/team-file/types'
-import { agentFigure, figureFor, figureStill } from '../../lib/library/figures'
+import { agentFigure, figureFor } from '../../lib/library/figures'
+import { FigureStill } from '../agents/FigureStill'
 import { AgentBuilder } from '../agents/AgentBuilder'
 import { ByHand } from '../agents/ByHand'
 import { TestBench } from '../agents/TestBench'
@@ -64,7 +65,7 @@ export function TeamAgents({ agents, selected, onSelect, teamName, teamPath, edi
           const linked = linkState(candidate, savedJobs)
           return (
             <button key={candidate.id} type="button" className="team-agents-chip" aria-pressed={candidate.id === agent?.id} onClick={() => onSelect(candidate.id)}>
-              <img className="team-agents-figure" src={figureStill(agentFigure(candidate, savedJobs))} alt="" width={40} height={40} />
+              <FigureStill className="team-agents-figure" figure={agentFigure(candidate, savedJobs)} alt="" width={40} height={40} />
               <span><b>{candidate.name}</b><em>{linked ? `From Your agents · v${linked.version}${linked.behind ? ` · v${linked.latest} ready` : ''}` : 'This team’s own'}</em></span>
             </button>
           )
@@ -114,7 +115,7 @@ function AddAgents({ jobs, inTeam, harnesses, teamPath, first, onAdd, onClose, o
             const added = here.has(job.id)
             return (
               <li key={job.id}>
-                <img src={figureStill(figureFor(job.id, job.figure))} alt="" width={52} height={52} loading="lazy" decoding="async" />
+                <FigureStill figure={figureFor(job.id, job.figure)} alt="" width={52} height={52} loading="lazy" decoding="async" />
                 <span><b>{job.name}</b><em>{!runnable ? 'No AI app on this computer can run it' : added ? 'Already in this team' : job.does || 'One of your agents'}</em></span>
                 <button type="button" className="btn" disabled={!runnable} onClick={() => onAdd(job)}><Plus size={13} aria-hidden="true" />{added ? 'Add again' : 'Add'}</button>
               </li>

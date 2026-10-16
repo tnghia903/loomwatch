@@ -252,7 +252,10 @@ async fn main() -> Result<()> {
                 .merge(chat)
                 .merge(notebook)
                 .merge(routines)
-                .merge(updates_api);
+                .merge(updates_api)
+                .merge(loomwatch_backend::wardrobe::router(
+                    loomwatch_backend::wardrobe::Wardrobe::open(&state_dir),
+                ));
             if listen.ip().is_loopback() || allow_container_listener {
                 app = app.merge(loomwatch_backend::notion::router(&state_dir)?);
             }

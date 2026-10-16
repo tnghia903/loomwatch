@@ -1,0 +1,104 @@
+<!doctype html><html><body style="margin:0;background:transparent">
+<script type="importmap">{"imports":{"three":"./three/build/three.module.js","three/addons/":"./three/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { dress } from './lib/components/agents/accessoryMeshes.js'
+
+// mode=layer: one accessory, the figure hidden but hiding what is behind it and catching shadows.
+// mode=full: the figure and its accessories, for looking at. mode=icon: the accessory alone.
+const params = new URLSearchParams(location.search)
+const kind = params.get('kind') || 'yarn'
+const wear = (params.get('wear') || 'band').split(',').filter(Boolean)
+const mode = params.get('mode') || 'full'
+const size = Number(params.get('size') || 320)
+const color = params.get('color') || '#9EC3E6'
+const cam = JSON.parse(params.get('cam'))
+const nudgePx = JSON.parse(params.get('nudge') || '[0,0]')
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true })
+renderer.setPixelRatio(params.get('ss') ? Number(params.get('ss')) : 2); renderer.setSize(size, size)
+renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = cam.exp
+renderer.outputColorSpace = THREE.SRGBColorSpace
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap
+document.body.appendChild(renderer.domElement)
+const scene = new THREE.Scene()
+const pmrem = new THREE.PMREMGenerator(renderer)
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+scene.environmentIntensity = cam.env
+// Light from the upper left and in front, as in the stills.
+const key = new THREE.DirectionalLight('#fff', cam.key); key.position.set(-1.4, 3, 3); key.castShadow = true
+key.shadow.mapSize.set(2048, 2048); key.shadow.camera.left = -1; key.shadow.camera.right = 1; key.shadow.camera.top = 1.5; key.shadow.camera.bottom = -0.5
+key.shadow.bias = -0.0003; key.shadow.normalBias = 0.01; key.shadow.radius = 4
+scene.add(key)
+const gltf = await new GLTFLoader().loadAsync(params.get('glb') || './agent/workbench.glb')
+const fig = gltf.scene.getObjectByName('figure')
+fig.removeFromParent(); fig.position.set(0, 0, 0); fig.scale.setScalar(1)
+scene.add(fig)
+fig.rotation.y = cam.rot
+for (const side of ['arm_l', 'arm_r']) fig.getObjectByName(side).rotation.z = (side === 'arm_l' ? 1 : -1) * cam.arm
+const skin = new THREE.Color(color)
+const figureMeshes = []
+fig.traverse((o) => {
+  if (o.name.startsWith('head_')) o.visible = o.name === 'head_' + kind
+  if (!o.isMesh) return
+  figureMeshes.push(o)
+  const role = o.material.name
+  const m = {
+    skin: () => new THREE.MeshPhysicalMaterial({ color: skin, roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.4, sheen: 0.3, sheenRoughness: 0.6, sheenColor: '#FFFFFF' }),
+    skin_wound: () => new THREE.MeshStandardMaterial({ color: skin, roughness: 0.78 }),
+    skin_deep: () => new THREE.MeshStandardMaterial({ color: skin.clone().multiplyScalar(0.86), roughness: 0.62 }),
+    eye: () => new THREE.MeshPhysicalMaterial({ color: '#1E1E26', roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.08 }),
+    glint: () => new THREE.MeshBasicMaterial({ color: '#FFFFFF' }),
+    stitch: () => new THREE.MeshStandardMaterial({ color: '#D8A93C', roughness: 0.35, metalness: 0.6 }),
+    wood: () => new THREE.MeshPhysicalMaterial({ color: '#E9D5B1', roughness: 0.55, clearcoat: 0.3 }),
+    leaf: () => new THREE.MeshPhysicalMaterial({ color: '#6E9C6A', roughness: 0.5, clearcoat: 0.3 }),
+    steel: () => new THREE.MeshStandardMaterial({ color: '#C9CCD2', roughness: 0.3, metalness: 0.9 }),
+    pin_a: () => new THREE.MeshPhysicalMaterial({ color: '#E9C46A', roughness: 0.3, clearcoat: 0.6 }),
+    pin_b: () => new THREE.MeshPhysicalMaterial({ color: '#F4F1EA', roughness: 0.3, clearcoat: 0.6 }),
+    pin_c: () => new THREE.MeshPhysicalMaterial({ color: '#4A4A55', roughness: 0.3, clearcoat: 0.6 }),
+    scarf: () => new THREE.MeshStandardMaterial({ color: '#E9C46A', roughness: 0.82 }),
+  }[role]
+  o.material = m ? m() : new THREE.MeshStandardMaterial({ color: '#888' })
+  o.castShadow = true; o.receiveShadow = true
+})
+const camera = new THREE.PerspectiveCamera(cam.fov, 1, 0.01, 50)
+camera.position.set(cam.x ?? 0, cam.y, cam.z); camera.lookAt(cam.x ?? 0, cam.ty, 0)
+camera.updateMatrixWorld(); scene.updateMatrixWorld(true)
+
+// The face nudge: the pixel shift measured between the stills' eyes and this model's, at the eye's depth.
+const eye = fig.getObjectByName(`${kind}_eye_r`).getWorldPosition(new THREE.Vector3())
+const ndc = eye.clone().project(camera)
+const moved = new THREE.Vector3(ndc.x + (2 * nudgePx[0]) / 320, ndc.y - (2 * nudgePx[1]) / 320, ndc.z).unproject(camera)
+const faceNudge = moved.sub(eye)
+
+dress(fig, kind, wear, { faceNudge })
+const worn = new Set()
+scene.traverse((o) => { if (o.name.startsWith('wear_')) o.traverse((c) => { if (c.isMesh) { worn.add(c); c.castShadow = true } }) })
+
+if (mode === 'layer') {
+  // The figure writes depth and the accessory's shadow, nothing else.
+  for (const mesh of figureMeshes) {
+    mesh.material = new THREE.ShadowMaterial({ opacity: 0.26, transparent: false })
+    mesh.renderOrder = -1
+    // Only what it wears casts a shadow here: the figure's own shading is in the still already.
+    mesh.castShadow = false
+  }
+}
+if (mode === 'icon') {
+  for (const mesh of figureMeshes) mesh.visible = false
+  const box = new THREE.Box3()
+  for (const mesh of worn) box.expandByObject(mesh)
+  const centre = box.getCenter(new THREE.Vector3()); const radius = box.getSize(new THREE.Vector3()).length() / 2
+  const dir = new THREE.Vector3(0.15, 0.25, 1).normalize()
+  camera.fov = 30; camera.updateProjectionMatrix()
+  camera.position.copy(centre).addScaledVector(dir, radius / Math.sin((camera.fov * Math.PI) / 360) * 1.05)
+  camera.lookAt(centre)
+  key.castShadow = false
+}
+renderer.render(scene, camera)
+window.debug = {}
+scene.traverse((o) => { if (o.name.startsWith('wear_') || o.name === 'hand_l' || o.name === 'hand_r') { const b = new THREE.Box3().setFromObject(o); const c = b.isEmpty() ? o.getWorldPosition(new THREE.Vector3()) : b.getCenter(new THREE.Vector3()); const p = c.clone().project(camera); window.debug[o.name] = [Math.round((p.x + 1) * size / 2), Math.round((1 - p.y) * size / 2), +c.z.toFixed(3)] } })
+window.done = true
+</script></body></html>

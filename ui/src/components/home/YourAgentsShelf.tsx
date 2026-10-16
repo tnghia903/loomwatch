@@ -1,6 +1,7 @@
 import { ArrowRight, Plus, UserRound } from 'lucide-react'
 
-import { figureFor, figureStill } from '../../lib/library/figures'
+import { figureFor } from '../../lib/library/figures'
+import { FigureStill } from '../agents/FigureStill'
 import { useSavedJobs, versionOf } from '../../lib/library/jobs'
 
 /**
@@ -22,7 +23,7 @@ export function YourAgentsShelf() {
       {jobs.length > 0 && (
         <ul className="home-agents-row">
           {jobs.slice(0, 6).map((job) => (
-            <li key={job.id}><a className="home-agent-chip" href={`/agents/${encodeURIComponent(job.id)}`}><img className="home-agent-figure" src={figureStill(figureFor(job.id, job.figure))} alt="" width={30} height={30} loading="lazy" decoding="async" /><b>{job.name}</b><span>v{versionOf(job)}</span></a></li>
+            <li key={job.id}><a className="home-agent-chip" href={`/agents/${encodeURIComponent(job.id)}`}><FigureStill className="home-agent-figure" figure={figureFor(job.id, job.figure)} headOnly alt="" width={30} height={30} loading="lazy" decoding="async" /><b>{job.name}</b><span>v{versionOf(job)}</span></a></li>
           ))}
           <li><a className="home-agent-chip new" href="/agents/new"><Plus size={14} aria-hidden="true" />New agent</a></li>
         </ul>

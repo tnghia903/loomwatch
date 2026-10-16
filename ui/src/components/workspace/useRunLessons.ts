@@ -25,7 +25,8 @@ async function readRun(record: RunRecord): Promise<LessonRun | null> {
   return null
 }
 
-function lesson(record: RunRecord): Promise<LessonRun | null> {
+/** One finished run reduced to what the lessons read, read and projected once per page load. */
+export function lesson(record: RunRecord): Promise<LessonRun | null> {
   let pending = read.get(record.runId)
   if (!pending) {
     // An archive that cannot be read (no database, a gap) costs this run its lessons, nothing more.

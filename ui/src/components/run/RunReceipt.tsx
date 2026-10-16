@@ -1,9 +1,13 @@
 import { ArrowRight, Check, ChevronDown, ChevronRight, ClipboardCopy } from 'lucide-react'
 import { useId, useState } from 'react'
 
+import { figureStill, type FigureKind } from '../../lib/library/figures'
+import { isAccessory } from '../../lib/quests/catalog'
 import { RECEIPT_MARK, receiptMarkdown, type Receipt, type ReceiptOutcome, type ReceiptTokens } from '../../lib/story/receipt'
 import type { AllowSwitch } from '../../lib/team-file/types'
+import { AccessoryIcon } from '../agents/AccessoryArt'
 import { LoomMark } from '../ui/glyphs'
+import type { RunEarned } from './useRunQuests'
 
 interface RunReceiptProps {
   receipt: Receipt
@@ -11,6 +15,8 @@ interface RunReceiptProps {
   /** Switch on what a refused line names, for this agent's next runs (ADR 0037). Absent when the
       team cannot be changed from here. */
   onAllow?: (agentId: string, key: AllowSwitch) => void
+  /** What this run was the first to earn on a quest (lib/quests), with one sentence of why. */
+  earned?: readonly RunEarned[]
 }
 
 /**
@@ -18,7 +24,7 @@ interface RunReceiptProps {
  * it. A newcomer reads it top to bottom in ten seconds; an expert opens any line's evidence or
  * copies the slip into a pull request as proof of what ran.
  */
-export function RunReceipt({ receipt, onInspectEvidence, onAllow }: RunReceiptProps) {
+export function RunReceipt({ receipt, onInspectEvidence, onAllow, earned = [] }: RunReceiptProps) {
   const [copied, setCopied] = useState<string | null>(null)
   const [tokensOpen, setTokensOpen] = useState(false)
   const breakdown = useId()
@@ -98,11 +104,46 @@ export function RunReceipt({ receipt, onInspectEvidence, onAllow }: RunReceiptPr
             </div>
           </>
         )}
+        {earned.length > 0 && (
+          <>
+            <hr />
+            <ReceiptEarned earned={earned} />
+          </>
+        )}
         <footer className="receipt-foot">
           <button type="button" className="btn" onClick={() => void copy()}>{copied === 'Receipt copied' ? <Check size={14} aria-hidden="true" /> : <ClipboardCopy size={14} aria-hidden="true" />}Copy receipt</button>
           <span role="status" className="receipt-status">{copied && copied !== 'Receipt copied' ? copied : ''}</span>
         </footer>
       </div>
+    </section>
+  )
+}
+
+/**
+ * What the run earned (docs/QUESTS.md), under its lines: once, on the run that earned it. It says
+ * what this run did and, in one sentence, why that works: LoomWatch configures agents, it does not
+ * teach a course on them. No toast and no sound: the receipt is where you already look.
+ */
+function ReceiptEarned({ earned }: { earned: readonly RunEarned[] }) {
+  return (
+    <section className="receipt-earned" aria-label="Earned on this run">
+      {earned.map(({ quest, line }) => (
+        <div key={quest.item} className="receipt-earned-item">
+          <span className={`receipt-earned-art ${quest.reward}`}>
+            {isAccessory(quest.item)
+              ? <AccessoryIcon item={quest.item} />
+              : <img src={figureStill({ kind: quest.item as FigureKind, color: 'lilac' })} alt="" width={64} height={64} />}
+          </span>
+          <div>
+            <b>{quest.reward === 'accessory' ? 'New in the wardrobe' : 'A new figure'}</b>
+            <p><strong>{quest.name}.</strong> {line}</p>
+            <p className="receipt-why">{quest.why}</p>
+            <p className="receipt-earned-links">
+              <a className="link" href="/agents">{quest.reward === 'accessory' ? 'Any agent can wear it: choose in Your agents' : 'Any agent can be one: choose in Your agents'}</a>
+            </p>
+          </div>
+        </div>
+      ))}
     </section>
   )
 }

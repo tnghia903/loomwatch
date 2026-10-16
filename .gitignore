@@ -53,3 +53,11 @@ ds-bundle/
 docs/design-system/dist/
 # symlink to ui/node_modules so the converter resolves @types/react (recreate per clone; see .design-sync/NOTES.md)
 docs/design-system/node_modules
+
+# scripts/figures: the links and files its README's commands make
+scripts/figures/three
+scripts/figures/agent
+scripts/figures/*.glb
+scripts/figures/*.png
+scripts/figures/lib/
+scripts/figures/wear/

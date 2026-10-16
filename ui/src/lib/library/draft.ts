@@ -104,6 +104,7 @@ export function makesNewVersion(draft: AgentDraft, saved: AgentDraft): boolean {
 export function draftChanged(draft: AgentDraft, saved: AgentDraft): boolean {
   return makesNewVersion(draft, saved) || draft.does.trim() !== saved.does.trim()
     || draft.figure?.kind !== saved.figure?.kind || draft.figure?.color !== saved.figure?.color
+    || (draft.figure?.wear ?? []).join() !== (saved.figure?.wear ?? []).join()
 }
 
 // $defs.Identifier (schemas/team.schema.yaml): ^[A-Za-z0-9][A-Za-z0-9._-]*$

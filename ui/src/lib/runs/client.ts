@@ -129,6 +129,12 @@ export interface RunRecord {
   retryOfRunId?: string | null
   /** The team's chat this run belongs to (ADR 0051): its file's `id`, or `path:<path>`. */
   teamKey?: string
+  /**
+   * The `sha256:` revision of the team file bytes this run executed, fixed at launch, the same
+   * digest `GET /api/team` answers. Absent for a run recorded before the daemon kept it: unknown,
+   * never a match.
+   */
+  teamRevision?: string | null
   /** A one-agent turn (ADR 0051): the one agent the operator wrote to with an @mention. */
   onlyAgent?: string | null
   /** Agents in the middle of a turn of work right now, which the chat shows as working. */

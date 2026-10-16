@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { questFor, type Quest } from '../../lib/quests/catalog'
 import type { Receipt, ReceiptTokens } from '../../lib/story/receipt'
 import { RunReceipt } from './RunReceipt'
 
@@ -27,6 +28,23 @@ const tokens: ReceiptTokens = {
 }
 
 describe('RunReceipt', () => {
+  // docs/QUESTS.md: on the run that earned it, what the run did and one sentence of why. No lesson.
+  it('says what the run earned and, in one sentence, why it works, with no link but where to wear it', () => {
+    const monocle = questFor('monocle') as Quest
+    render(<RunReceipt receipt={receipt(false)} onInspectEvidence={vi.fn()} earned={[{ quest: monocle, agentId: 'checker', line: 'Checker sent Writer’s work back once, and the second pass met all 2 items it checks.' }]} />)
+    const earned = screen.getByRole('region', { name: 'Earned on this run' })
+    expect(earned).toHaveTextContent('New in the wardrobe')
+    expect(earned).toHaveTextContent('Button monocle. Checker sent Writer’s work back once')
+    expect(earned).toHaveTextContent(monocle.why)
+    expect(earned).not.toHaveTextContent('The practice')
+    expect(within(earned).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/agents'])
+  })
+
+  it('shows no earned block on a run that earned nothing', () => {
+    render(<RunReceipt receipt={receipt(false)} onInspectEvidence={vi.fn()} />)
+    expect(screen.queryByRole('region', { name: 'Earned on this run' })).toBeNull()
+  })
+
   // ADR 0037: a refused line offers its switch, and once it is on, says so instead.
   it('offers the switch a refusal names, then says it is allowed from the next run', () => {
     const onAllow = vi.fn()

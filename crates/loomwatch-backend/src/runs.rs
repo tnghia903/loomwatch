@@ -228,6 +228,12 @@ pub struct RunRecord {
     /// path when it has none. Stored, so a team whose file is renamed keeps its chat.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub team_key: String,
+    /// The `sha256:` digest of the team file bytes this run executes, fixed at launch: the same
+    /// revision `GET /api/team` and approvals name. A team file whose revision is still this one
+    /// holds exactly the settings this run ran with, which is how quests judge a run only against
+    /// those (docs/QUESTS.md). `None` for a run recorded before it was kept: unknown, never a match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_revision: Option<String>,
     /// A one-agent turn (ADR 0051): the one agent this run executed, after the operator wrote to
     /// it with an @mention. Its reply is the run's answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -366,6 +372,7 @@ impl RunRecord {
             waiting_on: None,
             permission_requests: Vec::new(),
             team_key,
+            team_revision: None,
             only_agent: None,
             working: Vec::new(),
             queued_notes: Vec::new(),
@@ -496,9 +503,10 @@ impl RunStore {
              (run_id, session_id, team_path, prompt, status, mode, entrypoint, responder,
               agent_ids, created_at, started_at, finished_at, error, exit_code, error_code,
               stop_reason, event_count, reply, trigger, delivery, follows_run_id, start_at,
-              retry_of_run_id, waiting_on, start_key, start_fingerprint, team_key, only_agent)
+              retry_of_run_id, waiting_on, start_key, start_fingerprint, team_key, only_agent,
+              team_revision)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-                     $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+                     $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
              ON CONFLICT (run_id) DO UPDATE SET
                status = EXCLUDED.status,
                started_at = EXCLUDED.started_at,
@@ -555,6 +563,7 @@ impl RunStore {
         .bind(start_fingerprint)
         .bind((!record.team_key.is_empty()).then_some(record.team_key.as_str()))
         .bind(&record.only_agent)
+        .bind(&record.team_revision)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -651,6 +660,7 @@ pub(crate) fn decode_run(row: &sqlx::postgres::PgRow) -> Result<StoredRun, sqlx:
             team_key: row
                 .try_get::<Option<String>, _>("team_key")?
                 .unwrap_or_default(),
+            team_revision: row.try_get("team_revision")?,
             only_agent: row.try_get("only_agent")?,
             working: Vec::new(),
             queued_notes: Vec::new(),
@@ -2481,6 +2491,7 @@ fn prepare_run(
     };
     let mut record = RunRecord::queued(relative, prompt.to_owned(), &team, trigger)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("{error:#}")))?;
+    record.team_revision = Some(current_revision.clone());
     // Fixed now, from the bytes this run executes: editing the team mid-run changes the next
     // run's delivery, not this one's.
     record.deliver_title = team.notion_delivery_title(
@@ -5203,6 +5214,53 @@ exit 7
             "the contract alias passes the revision guard and reaches the legacy archive check"
         );
         assert!(registry.list().is_empty());
+    }
+
+    /// Quests judge a run only against the settings it ran with (docs/QUESTS.md), so its record
+    /// keeps the revision of the bytes it executed: not the file as it is later, and not lost on a
+    /// restart.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_run_keeps_the_revision_of_the_team_file_it_ran(pool: sqlx::PgPool) {
+        let dir = TeamsDir::new();
+        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let team_path = dir.write_team("team.yaml", &harness);
+        let ran = team_revision(&fs::read(&team_path).unwrap());
+        let archive = EventArchive::from_pool(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let response = app
+            .oneshot(post_json(
+                "/api/runs",
+                &json!({"teamPath": "team.yaml", "prompt": "say done"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body = json_body(response).await;
+        assert_eq!(body["teamRevision"], ran.as_str());
+        let run_id = body["runId"].as_str().unwrap().to_owned();
+
+        // A setting added afterwards is the next run's, not this one's.
+        fs::write(
+            &team_path,
+            fs::read_to_string(&team_path).unwrap() + "# a Done when, added later\n",
+        )
+        .unwrap();
+        assert_ne!(team_revision(&fs::read(&team_path).unwrap()), ran);
+        let done = wait_for(&registry, &run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.team_revision.as_deref(), Some(ran.as_str()));
+
+        registry.persist(&run_id).await.expect("persist");
+        let next = RunRegistry::durable(archive.run_store());
+        next.reload().await.expect("reload");
+        assert_eq!(
+            next.get(&run_id)
+                .expect("recovered")
+                .team_revision
+                .as_deref(),
+            Some(ran.as_str()),
+            "the revision survives a restart"
+        );
     }
 
     #[tokio::test]

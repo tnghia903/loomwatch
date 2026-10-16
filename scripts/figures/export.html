@@ -1,0 +1,15 @@
+<!doctype html><html><body>
+<script type="importmap">{"imports":{"three":"./three/build/three.module.js","three/addons/":"./three/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js'
+import { bobbin, scissors } from './heads.js'
+const gltf = await new GLTFLoader().loadAsync('./agent/workbench.glb')
+const root = new THREE.Group(); root.name = 'new_heads'
+root.add(scissors(gltf)); root.add(bobbin(gltf))
+const out = await new GLTFExporter().parseAsync(root, { binary: true })
+const bytes = new Uint8Array(out); let text = ''
+for (let i = 0; i < bytes.length; i += 1) text += String.fromCharCode(bytes[i])
+window.glb = btoa(text); window.done = true
+</script></body></html>

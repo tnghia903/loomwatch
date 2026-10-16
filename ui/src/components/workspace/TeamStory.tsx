@@ -1,6 +1,7 @@
 import { CalendarClock, Wand2 } from 'lucide-react'
 
-import { figureStill, type FigureChoice } from '../../lib/library/figures'
+import { type FigureChoice } from '../../lib/library/figures'
+import { FigureStill } from '../agents/FigureStill'
 import { sentenceText, type SentencePart } from '../../lib/story/teamSentence'
 import { AgentMark } from '../ui/AgentMark'
 
@@ -32,7 +33,7 @@ export function TeamStory({ parts, onAgent, onSchedule, onConnect, figures }: Te
             const figure = part.operator ? undefined : figures?.get(part.id)
             return (
               <button key={index} type="button" className={`story-name ${part.operator ? 'you' : ''}`} aria-label={part.operator ? 'You, the review step' : part.name} title={part.title} onClick={() => onAgent(part.id)}>
-                {figure ? <img className="story-figure" src={figureStill(figure)} alt="" /> : <AgentMark id={part.id} size={14} operator={part.operator} />}
+                {figure ? <FigureStill className="story-figure" figure={figure} headOnly alt="" /> : <AgentMark id={part.id} size={14} operator={part.operator} />}
                 {part.name}
               </button>
             )
