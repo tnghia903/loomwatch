@@ -54,6 +54,9 @@ struct ApiState {
     /// /api/harnesses/{id}/models` and only read by `GET /api/harnesses` — so the list reports
     /// what a real ACP handshake last said without ever spawning one itself.
     harness_health: Arc<Mutex<HashMap<String, HealthRecord>>>,
+    /// What each harness's own sign-in status command last said, by the program's path, so
+    /// listing the harnesses does not run every one of them on every load of the app.
+    sign_in_statuses: Arc<Mutex<HashMap<String, KeptSignInStatus>>>,
     /// The run-control router's registry, read by exactly one handler: `DELETE /api/team` refuses
     /// while a run of the team has not finished, because that run is still reading its files.
     runs: crate::runs::RunRegistry,
@@ -86,6 +89,24 @@ struct HealthRecord {
 /// How long a harness's own sign-in status command may take before its answer is ignored.
 /// Both known commands answer from local state in well under a second.
 const SIGN_IN_CHECK_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long `GET /api/harnesses` reuses a sign-in status answer for the same program.
+///
+/// Every load of the app lists the harnesses, and running each vendor's status command was most
+/// of what that took. Only an answer that changes nothing the person is fixing is reused: "signed
+/// in", or nothing readable. "Signed out" is asked again every time, because it is what someone
+/// fixes in Terminal and then comes back to check.
+const SIGN_IN_STATUS_TTL: Duration = Duration::from_mins(1);
+
+/// One sign-in status answer, kept against the program that gave it.
+#[derive(Debug, Clone, Copy)]
+struct KeptSignInStatus {
+    /// The program's modification time: an update in place is a different program.
+    modified: Option<std::time::SystemTime>,
+    /// When the command was started, so a sign-in finishing while it ran makes it stale.
+    checked_at: Instant,
+    answer: Option<(SignInCheck, bool)>,
+}
 
 /// How to ask a harness's own CLI whether it is signed in, without starting a session.
 ///
@@ -639,6 +660,7 @@ fn router_with(
         archive,
         host_runner,
         harness_health: Arc::default(),
+        sign_in_statuses: Arc::default(),
         runs,
     };
     Ok(Router::new()
@@ -868,24 +890,37 @@ async fn gemini_unusable(
 /// state in well under a second and opens no session. The app itself is never started (an `ok`
 /// verdict already proves sign-in, so those are skipped). A verdict of "signed out" from an
 /// earlier check that the CLI now contradicts is dropped, so the harness reads as unchecked and
-/// the next check judges it afresh.
+/// the next check judges it afresh. The commands run side by side, and a "signed in" answer is
+/// reused for a minute ([`SIGN_IN_STATUS_TTL`]).
 async fn apply_sign_in_status(state: &ApiState, harnesses: &mut [DetectedHarness]) {
-    // One after another: only Claude and Codex have a status command, and each answers in a
-    // fraction of a second.
-    for harness in harnesses
-        .iter_mut()
-        .filter(|harness| harness.health != Some(HarnessHealth::Ok))
+    // All at once: each is its own program, and one after another the list waited for the sum
+    // of them on every load of the app.
+    let mut checks = tokio::task::JoinSet::new();
+    for (index, harness) in harnesses
+        .iter()
+        .enumerate()
+        .filter(|(_, harness)| harness.health != Some(HarnessHealth::Ok))
     {
-        // Gemini CLI has no status command; its settings answer the same question without
-        // starting it (at most a keychain lookup by `security`, on macOS).
-        if let Some(why) = gemini_unusable(state, harness).await {
-            mark_needs_api_key(harness, why);
-            harness.health_detail = None;
+        let state = state.clone();
+        let harness = harness.clone();
+        checks.spawn(async move { (index, listed_verdict(&state, &harness).await) });
+    }
+    while let Some(checked) = checks.join_next().await {
+        let Ok((index, verdict)) = checked else {
             continue;
-        }
-        match sign_in_status(harness, &state.teams_root).await {
-            Some((check, false)) => mark_signed_out(harness, check),
-            Some((_, true)) if harness.health_cause == Some(HealthCause::SignedOut) => {
+        };
+        let Some(harness) = harnesses.get_mut(index) else {
+            continue;
+        };
+        match verdict {
+            ListedVerdict::NeedsApiKey(why) => {
+                mark_needs_api_key(harness, why);
+                harness.health_detail = None;
+            }
+            ListedVerdict::SignIn(Some((check, false))) => mark_signed_out(harness, check),
+            ListedVerdict::SignIn(Some((_, true)))
+                if harness.health_cause == Some(HealthCause::SignedOut) =>
+            {
                 harness.health = None;
                 harness.health_cause = None;
                 harness.health_reason = None;
@@ -896,9 +931,100 @@ async fn apply_sign_in_status(state: &ApiState, harnesses: &mut [DetectedHarness
                     .unwrap_or_else(PoisonError::into_inner)
                     .remove(&harness.id);
             }
-            _ => {}
+            ListedVerdict::SignIn(_) => {}
         }
     }
+}
+
+/// What listing found out about one harness without starting it.
+enum ListedVerdict {
+    /// Gemini CLI's settings say it can't work with another app.
+    NeedsApiKey(gemini_auth::Unusable),
+    /// What the harness's own sign-in status command said ([`sign_in_status`]).
+    SignIn(Option<(SignInCheck, bool)>),
+}
+
+async fn listed_verdict(state: &ApiState, harness: &DetectedHarness) -> ListedVerdict {
+    // Gemini CLI has no status command; its settings answer the same question without
+    // starting it (at most a keychain lookup by `security`, on macOS).
+    if let Some(why) = gemini_unusable(state, harness).await {
+        return ListedVerdict::NeedsApiKey(why);
+    }
+    ListedVerdict::SignIn(listed_sign_in_status(state, harness).await)
+}
+
+/// [`sign_in_status`] for the list: an answer kept from the last [`SIGN_IN_STATUS_TTL`] for the
+/// same program is used again, unless the app has had a sign-in or install since.
+async fn listed_sign_in_status(
+    state: &ApiState,
+    harness: &DetectedHarness,
+) -> Option<(SignInCheck, bool)> {
+    sign_in_check(harness)?;
+    let modified = program_modified(&harness.executable_path);
+    let kept = state
+        .sign_in_statuses
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&harness.executable_path)
+        .copied();
+    if let Some(kept) = kept
+        && kept.modified == modified
+        && kept.checked_at.elapsed() < SIGN_IN_STATUS_TTL
+        && !crate::app_setup::jobs().changed_since(&harness.id, kept.checked_at)
+    {
+        return kept.answer;
+    }
+    fresh_sign_in_status(state, harness).await
+}
+
+/// [`sign_in_status`] asked now, its answer kept for the list ([`listed_sign_in_status`]).
+///
+/// The models check asks this way too, so a "signed out" it finds replaces a "signed in" the
+/// list still held.
+async fn fresh_sign_in_status(
+    state: &ApiState,
+    harness: &DetectedHarness,
+) -> Option<(SignInCheck, bool)> {
+    let modified = program_modified(&harness.executable_path);
+    let checked_at = Instant::now();
+    let answer = sign_in_status(harness, &state.teams_root).await;
+    if sign_in_check(harness).is_some() {
+        let mut kept = state
+            .sign_in_statuses
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if matches!(answer, Some((_, false))) {
+            kept.remove(&harness.executable_path);
+        } else {
+            kept.insert(
+                harness.executable_path.clone(),
+                KeptSignInStatus {
+                    modified,
+                    checked_at,
+                    answer,
+                },
+            );
+        }
+    }
+    answer
+}
+
+/// When the program at `path` was last changed, if that can be read.
+fn program_modified(path: &str) -> Option<std::time::SystemTime> {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+}
+
+/// How to ask a local harness's own CLI whether it is signed in: its catalog entry's check, for a
+/// harness with an ACP bridge whose program is on this computer (not proxied from the host
+/// runner, where `executable_path` is `host:…`).
+fn sign_in_check(harness: &DetectedHarness) -> Option<SignInCheck> {
+    let check = HARNESSES
+        .iter()
+        .find(|spec| spec.id == harness.id)?
+        .sign_in?;
+    (harness.acp_available && Path::new(&harness.executable_path).is_absolute()).then_some(check)
 }
 
 /// Ask a local harness's own CLI whether it is signed in, when its catalog entry says how.
@@ -908,14 +1034,8 @@ async fn apply_sign_in_status(state: &ApiState, harnesses: &mut [DetectedHarness
 /// that fails, hangs or answers in an unfamiliar shape all return `None`, and the ACP handshake
 /// judges the harness as before.
 async fn sign_in_status(harness: &DetectedHarness, cwd: &Path) -> Option<(SignInCheck, bool)> {
-    let check = HARNESSES
-        .iter()
-        .find(|spec| spec.id == harness.id)?
-        .sign_in?;
+    let check = sign_in_check(harness)?;
     let executable = Path::new(&harness.executable_path);
-    if !harness.acp_available || !executable.is_absolute() {
-        return None;
-    }
     let output = tokio::time::timeout(
         SIGN_IN_CHECK_TIMEOUT,
         tokio::process::Command::new(executable)
@@ -1075,7 +1195,7 @@ async fn get_harness_models(
 
     // A signed-out account is checked first: it is cheaper than the handshake, and the handshake
     // alone can pass for one (see `SignInCheck`).
-    if let Some((check, false)) = sign_in_status(&harness, &state.teams_root).await {
+    if let Some((check, false)) = fresh_sign_in_status(&state, &harness).await {
         let reason = signed_out_reason(&harness.name, check);
         state
             .harness_health
@@ -3810,6 +3930,75 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
         let (_, healthy) = get_json(&router, "/api/harnesses").await;
         assert_eq!(listed(&healthy, "claude")["health"], "ok");
         assert_eq!(line_count(&directory.0.join("claude.calls")), calls);
+    }
+
+    /// A vendor CLI that answers only `status_args`, slowly, with whatever `<itself>.answer`
+    /// holds, so a test can change its answer without changing the program. Each call is counted
+    /// in `<itself>.calls`.
+    fn slow_status_cli(status_args: &str) -> String {
+        format!(
+            "#!/bin/sh\n[ \"$1 $2\" = '{status_args}' ] || exit 64\nsleep 0.5\nprintf 'status\\n' >> \"$0.calls\"\ncat \"$0.answer\"\n"
+        )
+    }
+
+    /// Every load of the app lists the harnesses. The vendors' status commands run side by side,
+    /// not one after another, and a "signed in" answer is reused for the same program instead of
+    /// asked again on every load. "Signed out" is never reused, and an explicit check that finds
+    /// it replaces the "signed in" the list held.
+    #[tokio::test]
+    async fn the_list_asks_every_app_at_once_and_reuses_only_a_signed_in_answer() {
+        let directory = TempDirectory::new();
+        create_executable_with_contents(&directory.0, "claude", &slow_status_cli("auth status"));
+        create_executable_with_contents(
+            &directory.0,
+            "claude-agent-acp",
+            SESSION_OPENING_CLAUDE_BRIDGE,
+        );
+        create_executable_with_contents(&directory.0, "codex", &slow_status_cli("login status"));
+        create_executable_with_contents(&directory.0, "codex-acp", "#!/bin/sh\nexit 1\n");
+        let answer = |app: &str, text: &str| {
+            fs::write(directory.0.join(format!("{app}.answer")), text).expect("write answer");
+        };
+        let calls = |app: &str| line_count(&directory.0.join(format!("{app}.calls")));
+        answer(
+            "claude",
+            r#"{"loggedIn": true, "apiProvider": "firstParty"}"#,
+        );
+        answer("codex", "Logged in using ChatGPT\n");
+        let search_path = std::env::join_paths([&directory.0]).expect("join search path");
+        let router = test_router_with_path(&directory.0, Some(search_path));
+
+        // Each command takes half a second: one after another would take a whole one.
+        let started = Instant::now();
+        let (_, report) = get_json(&router, "/api/harnesses").await;
+        let took = started.elapsed();
+        assert!(took < Duration::from_millis(900), "listing took {took:?}");
+        assert!(
+            listed(&report, "claude").get("health").is_none(),
+            "{report}"
+        );
+        assert!(listed(&report, "codex").get("health").is_none(), "{report}");
+        assert_eq!((calls("claude"), calls("codex")), (1, 1));
+
+        let started = Instant::now();
+        get_json(&router, "/api/harnesses").await;
+        assert!(started.elapsed() < Duration::from_millis(400));
+        assert_eq!((calls("claude"), calls("codex")), (1, 1), "asked again");
+
+        // Signed out behind the list's back, then checked: the list stops saying signed in.
+        answer(
+            "claude",
+            r#"{"loggedIn": false, "apiProvider": "firstParty"}"#,
+        );
+        let (status, _) = get_json(&router, "/api/harnesses/claude/models").await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(calls("claude"), 2);
+        for asked in [3, 4] {
+            let (_, report) = get_json(&router, "/api/harnesses").await;
+            assert_eq!(listed(&report, "claude")["healthCause"], "signed_out");
+            assert_eq!(calls("claude"), asked, "a signed-out answer was reused");
+        }
+        assert_eq!(calls("codex"), 1);
     }
 
     /// Field report (2026-10-03): with Claude signed out, `initialize` and `session/new` both
