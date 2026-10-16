@@ -175,7 +175,8 @@ class SharedSession {
     const url = new URL('/api/session/stream', window.location.href)
     url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     url.search = eventsQuery(this.sessionId, this.events.at(-1)?.seq ?? -1).toString()
-    const socket = new WebSocket(url)
+    let socket: WebSocket
+    try { socket = new WebSocket(url) } catch (error) { this.failure(error); return }
     this.socket = socket
     socket.onopen = () => { this.live = true; this.retry = 1000; this.set({ events: this.events, error: null, connected: true, loading: false }) }
     socket.onmessage = (message) => {

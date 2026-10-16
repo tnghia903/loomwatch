@@ -1,7 +1,7 @@
 // The canvas's read of the Notion connection (docs/NOTION.md), so the Team response can say where
 // an answer will land without sending the operator to Connections to find out. Connections itself
 // stays the one place that changes it.
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
 
@@ -62,7 +62,7 @@ export async function fetchNotionConnection(signal?: AbortSignal): Promise<Notio
   return body.connected ? { state: 'connected', workspace: body.name ?? 'Notion', destination: body.destination ?? null } : { state: 'disconnected' }
 }
 
-let inFlight: Promise<NotionConnection> | null = null
+let inFlight: { read: Promise<NotionConnection>; startedAt: number } | null = null
 
 /**
  * The connection, read once for everything on the page that asks at the same time: every answer
@@ -70,13 +70,16 @@ let inFlight: Promise<NotionConnection> | null = null
  * daemon's first read can wait on macOS asking you about the Keychain, and the browser opens only
  * six connections to it, so a read per answer could leave the rest of the page queued behind them.
  */
-function readShared(): Promise<NotionConnection> {
-  if (inFlight) return inFlight
+function readShared(notBefore: number): Promise<NotionConnection> {
+  // A read asked for after something may have changed (the window came back from Connections) is
+  // never answered by one that started before it.
+  if (inFlight && inFlight.startedAt >= notBefore) return inFlight.read
   const read = fetchNotionConnection().catch((caught: unknown): NotionConnection => (
     { state: 'unavailable', message: caught instanceof Error ? caught.message : NOTION_UNAVAILABLE }
   ))
-  inFlight = read
-  void read.finally(() => { if (inFlight === read) inFlight = null })
+  const entry = { read, startedAt: Date.now() }
+  inFlight = entry
+  void read.finally(() => { if (inFlight === entry) inFlight = null })
   return read
 }
 
@@ -87,12 +90,13 @@ function readShared(): Promise<NotionConnection> {
 export function useNotionConnection(enabled = true): NotionConnection & { refresh: () => void } {
   const [connection, setConnection] = useState<NotionConnection>({ state: 'loading' })
   const [generation, setGeneration] = useState(0)
-  const refresh = useCallback(() => setGeneration((value) => value + 1), [])
+  const askedAt = useRef(0)
+  const refresh = useCallback(() => { askedAt.current = Date.now(); setGeneration((value) => value + 1) }, [])
 
   useEffect(() => {
     if (!enabled) return
     let current = true
-    void readShared().then((next) => { if (current) setConnection(next) })
+    void readShared(askedAt.current).then((next) => { if (current) setConnection(next) })
     return () => { current = false }
   }, [enabled, generation])
 

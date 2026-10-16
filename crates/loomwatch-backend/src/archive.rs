@@ -413,7 +413,11 @@ impl EventArchive {
         }
         ensure!(count > 0, "session {session_id} has no archived events");
         if first != Some(0) || last != Some(count - 1) {
-            let id = self.first_out_of_place(session_id).await?;
+            // Every sequence in place yet the counts disagree means a sequence held twice.
+            let id = self
+                .first_out_of_place(session_id)
+                .await?
+                .unwrap_or_else(|| "with a repeated sequence".to_owned());
             anyhow::bail!("session {session_id} has a sequence gap at event {id}");
         }
         usize::try_from(count).context("archive contains a negative event count")
@@ -447,7 +451,7 @@ impl EventArchive {
 
     /// The id of a session's first event, in `seq` order, whose `seq` is not its position: the
     /// event a gap is reported at. Only asked once a gap is known to be there.
-    async fn first_out_of_place(&self, session_id: &str) -> Result<String> {
+    async fn first_out_of_place(&self, session_id: &str) -> Result<Option<String>> {
         sqlx::query_scalar(
             "SELECT id FROM (
                  SELECT id, seq, row_number() OVER (ORDER BY seq) - 1 AS position
@@ -456,7 +460,7 @@ impl EventArchive {
              WHERE seq <> position ORDER BY seq LIMIT 1",
         )
         .bind(session_id)
-        .fetch_one(self.db.reader())
+        .fetch_optional(self.db.reader())
         .await
         .with_context(|| format!("failed to load session {session_id}"))
     }
