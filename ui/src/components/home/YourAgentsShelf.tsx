@@ -23,7 +23,9 @@ export function YourAgentsShelf() {
       {jobs.length > 0 && (
         <ul className="home-agents-row">
           {jobs.slice(0, 6).map((job) => (
-            <li key={job.id}><a className="home-agent-chip" href={`/agents/${encodeURIComponent(job.id)}`}><FigureStill className="home-agent-figure" figure={figureFor(job.id, job.figure)} headOnly alt="" width={30} height={30} loading="lazy" decoding="async" /><b>{job.name}</b><span>v{versionOf(job)}</span></a></li>
+            // Coming back from Home is coming back to use the agent, so it opens on its chat (a newcomer
+            // test went to Build and had to look for Chat); Build is the tab beside it.
+            <li key={job.id}><a className="home-agent-chip" href={`/agents/${encodeURIComponent(job.id)}?view=chat`}><FigureStill className="home-agent-figure" figure={figureFor(job.id, job.figure)} headOnly alt="" width={30} height={30} loading="lazy" decoding="async" /><b>{job.name}</b><span>v{versionOf(job)}</span></a></li>
           ))}
           <li><a className="home-agent-chip new" href="/agents/new"><Plus size={14} aria-hidden="true" />New agent</a></li>
         </ul>

@@ -50,6 +50,17 @@ describe('Home', () => {
     expect(assign).toHaveBeenCalledWith('/?path=new.yaml')
   })
 
+  // A newcomer coming back to use their agent landed on Build and had to look for Chat.
+  it('opens a saved agent from Home on its chat', async () => {
+    const helper = { id: 'reply-helper', file: 'reply-helper.yaml', name: 'Review reply helper', role: 'Reply to reviews.', version: 1 }
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/jobs'
+      ? { folder: '/teams/.jobs', jobs: [helper], problems: [] }
+      : { root: '/teams', files: [], teams: [] }))
+    renderHome()
+    const chip = await screen.findByRole('link', { name: /Review reply helper/ })
+    expect(chip).toHaveAttribute('href', '/agents/reply-helper?view=chat')
+  })
+
   // The work in the order it is done: build agents, put them in a team's workflow, then chat with it.
   it('starts with building an agent, lists your agents before your teams, and opens each team where it left off', async () => {
     fetchMock.mockImplementation((url: string) => respond(url === '/api/jobs'
