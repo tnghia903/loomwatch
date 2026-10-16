@@ -5,6 +5,7 @@ import type { DetectedHarness } from '../../lib/harnesses'
 import { agentFromDraft, chatAgentId, chatTeamYaml, type AgentDraft } from '../../lib/library/draft'
 import { figureHue, type FigureChoice } from '../../lib/library/figures'
 import { benchFolder } from '../../lib/library/jobs'
+import { knowledgeForChat, type TeamKnowledge } from '../../lib/library/teamDraft'
 import { isTerminalRun, type RunRecord } from '../../lib/runs/client'
 import { useRunSession } from '../../lib/runs/useRunSession'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
@@ -33,6 +34,11 @@ export interface AgentChatProps {
   /** The piece whose long answer is read in full over the bench, and opening or closing one. */
   answerRunId: string | null
   onOpenAnswer: (runId: string | null) => void
+  /**
+   * Inside a team: what the team gives it to read, so its chat reads the same. Absent in Your
+   * agents, where it reads nothing until a team gives it something (ADR 0042).
+   */
+  knowledge?: TeamKnowledge
 }
 
 const message = (failed: unknown) => (failed instanceof Error ? failed.message : String(failed))
@@ -47,7 +53,7 @@ const message = (failed: unknown) => (failed instanceof Error ? failed.message :
  * as it is on screen, saved or not, so a change made in Build is in its next answer. Every message
  * goes to the agent: it starts work when the agent is free and joins its turn while it works.
  */
-export function AgentChat({ draft, harness, model, chatId, figure, onAllow, onRecord, answerRunId, onOpenAnswer }: AgentChatProps) {
+export function AgentChat({ draft, harness, model, chatId, figure, onAllow, onRecord, answerRunId, onOpenAnswer, knowledge }: AgentChatProps) {
   const agentId = chatAgentId(chatId)
   const name = draft.name.trim() || 'New agent'
   // A new agent's chat is kept under its name, so one with no name yet has nowhere to keep it.
@@ -62,12 +68,13 @@ export function AgentChat({ draft, harness, model, chatId, figure, onAllow, onRe
     try {
       let revision: string | null = null
       try { revision = (await fetchTeamFile(path)).revision ?? null } catch { revision = null }
-      const saved = await saveTeamFile(path, chatTeamYaml(draft, harness, model, chatId), revision)
+      const reads = knowledge ? knowledgeForChat(knowledge, path) : []
+      const saved = await saveTeamFile(path, chatTeamYaml(draft, harness, model, chatId, reads), revision)
       return { ok: true, revision: saved.revision ?? null }
     } catch (failed) {
       return { ok: false, error: `Couldn’t set up ${name}’s chat: ${message(failed)}` }
     }
-  }, [draft, harness, model, chatId, name, blocked])
+  }, [draft, harness, model, chatId, name, blocked, knowledge])
 
   // Where the chat is kept. An agent you have never talked to has no file yet: it is written once
   // it can be, so the chat has something to open.

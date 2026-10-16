@@ -1,5 +1,6 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { parse } from 'yaml'
 
 import type { DetectedHarness } from '../../lib/harnesses'
 import type { DetectedCapability } from '../../lib/library/client'
@@ -167,6 +168,54 @@ describe('a team’s agents, the first of its views', () => {
 
     fireEvent.click(within(tabs).getByRole('button', { name: 'Build' }))
     expect(screen.getByRole('region', { name: 'What it reads' })).toBeInTheDocument()
+  })
+
+  // The daemon a chat opens on: the bench folder, no chat file yet, and every chat file it is sent.
+  function benchDaemon(jobs: SavedJob[] = []) {
+    const json = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }))
+    const written = new Map<string, { agents: AgentConfig[] }>()
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (url === '/api/bench') return json({ folder: '.jobs/.bench' })
+      if (url === '/api/team' && init?.method === 'PUT') {
+        const body = JSON.parse(String(init.body)) as { path: string; yaml: string }
+        written.set(body.path, parse(body.yaml) as { agents: AgentConfig[] })
+        return json({ ...body, revision: 'r1' })
+      }
+      if (url.startsWith('/api/team?')) return json({ error: 'not found' }, 404)
+      if (url.endsWith('/api/jobs')) return json({ jobs, problems: [] })
+      return Promise.reject(new Error('no daemon'))
+    }))
+    return written
+  }
+
+  // What the team gives it to read, as its team file writes it: a linked folder, a file added beside
+  // the team (read from the team file's folder, so named again from the chat's), and a Notion page.
+  const teamReads = [
+    { kind: 'knowledge', name: 'sutd-final-project', path: '/Users/me/Developer/sutd-final-project' },
+    { kind: 'knowledge', name: 'brief.md', path: '../../scope.files/brief.md' },
+    { kind: 'knowledge', name: 'EKIS hub', notion: { page: 'abc123' } },
+  ]
+
+  it('chats with a team’s own agent with what the team gives it to read', async () => {
+    const written = benchDaemon()
+    renderTeamAgents({ agents: [{ ...scoper, model: 'sonnet' }], selected: 'scope' })
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Agent view' })).getByRole('button', { name: 'Chat' }))
+    await waitFor(() => expect(written.has('.jobs/.bench/team-digest-scope.yaml')).toBe(true))
+    const capabilities = written.get('.jobs/.bench/team-digest-scope.yaml')!.agents[0].capabilities
+    expect(capabilities?.filter((capability) => capability.kind === 'knowledge')).toEqual(teamReads)
+    // Its skills and tools go with it as before.
+    expect(capabilities?.filter((capability) => capability.kind !== 'knowledge').map((capability) => capability.name)).toEqual(['algorithmic-art', 'github', 'notion'])
+  })
+
+  it('chats with an agent placed from Your agents with what this team gives it to read', async () => {
+    const versioned = { ...reader, model: 'sonnet' }
+    const written = benchDaemon([versioned])
+    renderTeamAgents({ agents: [{ ...scoper, from: { agent: 'reader', version: 1 } }], selected: 'scope', savedJobs: [versioned] })
+    await screen.findByRole('region', { name: 'What it reads' })
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Agent view' })).getByRole('button', { name: 'Chat' }))
+    // Its chat is the one it has in Your agents; from this team, it reads what this team gives it.
+    await waitFor(() => expect(written.has('.jobs/.bench/reader.yaml')).toBe(true))
+    expect(written.get('.jobs/.bench/reader.yaml')!.agents[0].capabilities?.filter((capability) => capability.kind === 'knowledge')).toEqual(teamReads)
   })
 
   it('shows the version’s tools on the bench of an agent placed from Your agents, and the team’s reads', async () => {

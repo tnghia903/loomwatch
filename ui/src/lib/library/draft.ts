@@ -1,7 +1,7 @@
 import { stringify } from 'yaml'
 
 import type { DetectedHarness } from '../harnesses'
-import type { AgentAllow, AgentConfig } from '../team-file/types'
+import type { AgentAllow, AgentConfig, CapabilityRef } from '../team-file/types'
 import { DEFAULT_AGENT_ROLE } from './createAgent'
 import { isFigureChoice, type FigureChoice } from './figures'
 import { guessIcon, onlyOn, versionOf, type JobSpec, type SavedJob } from './jobs'
@@ -148,8 +148,11 @@ export function chatAgentId(chatId: string): string {
  * it is on screen, in the hidden `.jobs/.bench/` folder so the team list and the scheduler never
  * see it. `model` must be one the app advertises. Its agent keeps `chatAgentId(chatId)` whatever it
  * is called, so the chat's history and a note written while it works still reach it after a rename.
+ * Inside a team it also reads what the team gives it (`knowledge`, from `knowledgeForChat`).
  */
-export function chatTeamYaml(draft: AgentDraft, harness: DetectedHarness, model: string, chatId: string): string {
-  const agent = { ...agentFromDraft(draft, harness, model), id: chatAgentId(chatId) }
+export function chatTeamYaml(draft: AgentDraft, harness: DetectedHarness, model: string, chatId: string, knowledge: readonly CapabilityRef[] = []): string {
+  const own = agentFromDraft(draft, harness, model)
+  const capabilities = [...knowledge, ...(own.capabilities ?? [])]
+  const agent = { ...own, id: chatAgentId(chatId), ...(capabilities.length ? { capabilities } : {}) }
   return stringify({ schemaVersion: 1, id: `bench-${chatId}`, name: `${agent.name} · chat`, entrypoint: agent.id, agents: [agent] }, { lineWidth: 0 })
 }
