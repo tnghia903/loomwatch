@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Packs a built loomwatchd into the file scripts/install.sh downloads from a release.
 #
-#   scripts/package-release.sh PLATFORM LOOMWATCHD OUT_DIR
+#   scripts/package-release.sh PLATFORM LOOMWATCHD OUT_DIR [APP]
 #
 # writes OUT_DIR/loomwatch-PLATFORM.tar.gz and OUT_DIR/loomwatch-PLATFORM.tar.gz.sha256. PLATFORM
 # is macos-universal, linux-x86_64 or linux-arm64, matching what install.sh asks for, or
@@ -14,13 +14,14 @@
 # releases/latest/download/loomwatch-PLATFORM.tar.gz (or .zip).
 set -euo pipefail
 
-if [ $# -ne 3 ]; then
-  echo "usage: scripts/package-release.sh PLATFORM LOOMWATCHD OUT_DIR" >&2
+if [ $# -lt 3 ] || [ $# -gt 4 ]; then
+  echo "usage: scripts/package-release.sh PLATFORM LOOMWATCHD OUT_DIR [APP]" >&2
   exit 2
 fi
 platform=$1
 program=$2
 out=$3
+app=${4:-}
 case $platform in
   macos-universal | linux-x86_64 | linux-arm64) windows=0 ;;
   windows-x86_64) windows=1 ;;
@@ -29,6 +30,10 @@ esac
 [ -f "$program" ] || { echo "package-release.sh: $program is not a file" >&2; exit 2; }
 if [ "$windows" = 0 ] && [ ! -x "$program" ]; then
   echo "package-release.sh: $program is not an executable" >&2
+  exit 2
+fi
+if [ "$windows" = 1 ] && [ ! -f "$app" ]; then
+  echo "package-release.sh: windows-x86_64 needs LoomWatch.exe as APP" >&2
   exit 2
 fi
 
@@ -52,15 +57,18 @@ if [ "$windows" = 1 ]; then
   # Notepad want Windows line ends.
   mkdir -p "$pkg/scripts"
   cp "$program" "$pkg/bin/loomwatchd.exe"
+  cp "$app" "$pkg/LoomWatch.exe"
   cp "$root/scripts/install.ps1" "$pkg/"
   cp "$root/scripts/loomwatch.ps1" "$pkg/scripts/"
   sed 's/\r*$/\r/' "$root/loomwatch.cmd" >"$pkg/loomwatch.cmd"
   sed 's/$/\r/' >"$pkg/README.txt" <<EOF
 LoomWatch $version
 
-Start LoomWatch with "loomwatch" in a new terminal window (or loomwatch.cmd in this folder), stop it
-with Ctrl+C, update it with "loomwatch update", and see every option with "loomwatch help". It
-needs Docker Desktop for its database and, for real runs, one of your AI apps.
+Open LoomWatch.exe to start LoomWatch: it opens in your browser and keeps an icon beside the clock,
+whose menu has Quit. Or start it with "loomwatch" in a new terminal window (loomwatch.cmd in this
+folder), stop it with Ctrl+C, update it with "loomwatch update", and see every option with
+"loomwatch help". It keeps its run history in one file on this computer and needs nothing else
+installed, apart from one of your AI apps for real runs.
 
 The guide, the FAQ and how to remove LoomWatch are at https://github.com/tnghia903/loomwatch.
 

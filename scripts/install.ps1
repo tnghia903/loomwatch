@@ -8,23 +8,32 @@
 # folder to your own PATH so a new terminal knows the `loomwatch` command. Running it again updates
 # LoomWatch and keeps your settings, teams and history.
 #
+# (Most people install LoomWatch-windows-setup.exe instead, the app that lives beside the clock.
+# This is the terminal way, as install.sh is on a Mac.)
+#
 # Optional settings, read from the environment:
 #   LOOMWATCH_APP_DIR    where to install (default: ~\LoomWatch\app)
 #   LOOMWATCH_VERSION    a release such as v0.2.0 (default: the newest)
 #   LOOMWATCH_NO_START   1 to install without starting LoomWatch
 #
 # Options when run as a file: -NoStart (install only), -Update and -Dir DIR (used by
-# `loomwatch update`). Everything runs from the call on the last line, so a download cut off halfway
-# never runs half a script. Kept to ASCII for Windows PowerShell 5.1, which reads a script without a
-# byte-order mark in the local code page.
+# `loomwatch update`), and -Latest, which only prints the newest release's tag, such as v0.5.0.
+#
+# An update keeps the version it replaces in .previous inside the install folder, for
+# `loomwatch rollback`, and replaces nothing at all when any part of it fails.
+#
+# Everything runs from the call on the last line, so a download cut off halfway never runs half a
+# script. Kept to ASCII for Windows PowerShell 5.1, which reads a script without a byte-order mark
+# in the local code page.
 param(
   [switch]$NoStart,
   [switch]$Update,
+  [switch]$Latest,
   [string]$Dir
 )
 
 function Install-LoomWatch {
-  param([switch]$NoStart, [switch]$Update, [string]$Dir)
+  param([switch]$NoStart, [switch]$Update, [switch]$Latest, [string]$Dir)
   $ErrorActionPreference = 'Stop'
   Set-StrictMode -Version 2.0
   # Invoke-WebRequest draws its progress bar so slowly in Windows PowerShell that it slows the
@@ -47,6 +56,31 @@ function Install-LoomWatch {
       return '~' + $Path.Substring($homeFolder.Length)
     }
     return $Path
+  }
+
+  # The newest published release's tag, from where GitHub's releases/latest page leads: a page,
+  # not the API, so it never meets the API's hourly limit.
+  function Get-LatestTag {
+    $request = [System.Net.HttpWebRequest]::Create("https://github.com/$repo/releases/latest")
+    $request.Method = 'HEAD'
+    $request.AllowAutoRedirect = $false
+    $request.Timeout = 30000
+    $response = $request.GetResponse()
+    try { $location = [string]$response.Headers['Location'] } finally { $response.Close() }
+    $marker = '/releases/tag/'
+    $at = $location.IndexOf($marker)
+    if ($at -lt 0) { return $null }
+    $tag = $location.Substring($at + $marker.Length)
+    if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$') { return $null }
+    return $tag
+  }
+
+  if ($Latest) {
+    $tag = $null
+    try { $tag = Get-LatestTag } catch { $tag = $null }
+    if (-not $tag) { Fail 'could not ask GitHub for the newest release.' }
+    Write-Output $tag
+    return
   }
 
   # One file runs on every Windows computer: Windows on Arm runs it through its x64 emulation.
@@ -126,7 +160,7 @@ function Install-LoomWatch {
       Fail 'the download could not be unpacked.'
     }
     $new = Join-Path $unpacked 'loomwatch'
-    foreach ($part in @('bin\loomwatchd.exe', 'loomwatch.cmd', 'scripts\loomwatch.ps1')) {
+    foreach ($part in @('bin\loomwatchd.exe', 'LoomWatch.exe', 'loomwatch.cmd', 'scripts\loomwatch.ps1')) {
       if (-not (Test-Path -LiteralPath (Join-Path $new $part))) { Fail 'the download is missing parts of LoomWatch.' }
     }
 
@@ -136,12 +170,29 @@ function Install-LoomWatch {
     Step "Installing LoomWatch $version in $(Pretty $appDir)"
     $replaced = Join-Path $tmp 'replaced'
     New-Item -ItemType Directory -Force -Path $appDir, $replaced | Out-Null
-    # Every packaged file and folder replaces its old copy. Anything else in the folder stays: your
-    # settings (.env) and the running state.
+    # Every packaged file and folder replaces its old copy. Anything else in the folder stays: the
+    # running state and the version kept from the last update. When one cannot be moved (a file
+    # still open, say), the ones already moved go back, so the copy there is left as it was.
+    $placed = New-Object System.Collections.Generic.List[string]
     foreach ($item in Get-ChildItem -LiteralPath $new -Force) {
       $target = Join-Path $appDir $item.Name
-      if (Test-Path -LiteralPath $target) { Move-Item -LiteralPath $target -Destination (Join-Path $replaced $item.Name) }
-      Move-Item -LiteralPath $item.FullName -Destination $target
+      try {
+        if (Test-Path -LiteralPath $target) { Move-Item -LiteralPath $target -Destination (Join-Path $replaced $item.Name) }
+        Move-Item -LiteralPath $item.FullName -Destination $target
+        $placed.Add($item.Name)
+      } catch {
+        foreach ($name in $placed) { Remove-Item -LiteralPath (Join-Path $appDir $name) -Recurse -Force -ErrorAction SilentlyContinue }
+        foreach ($old in Get-ChildItem -LiteralPath $replaced -Force) {
+          Move-Item -LiteralPath $old.FullName -Destination (Join-Path $appDir $old.Name) -ErrorAction SilentlyContinue
+        }
+        Fail "LoomWatch could not be put in place in $(Pretty $appDir), so the version there was left as it was. $($_.Exception.Message)"
+      }
+    }
+    # The version just replaced, kept whole for `loomwatch rollback` until the next update.
+    if (Get-ChildItem -LiteralPath $replaced -Force | Select-Object -First 1) {
+      $previous = Join-Path $appDir '.previous'
+      if (Test-Path -LiteralPath $previous) { Remove-Item -LiteralPath $previous -Recurse -Force }
+      Move-Item -LiteralPath $replaced -Destination $previous
     }
 
     # The `loomwatch` command, for the usual install only: its folder on this account's own PATH,
@@ -151,7 +202,7 @@ function Install-LoomWatch {
     if ($appDir -eq $usual) {
       $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
       $entries = @()
-      if ($userPath) { $entries = $userPath -split ';' | Where-Object { $_ } }
+      if ($userPath) { $entries = @($userPath -split ';' | Where-Object { $_ }) }
       if (-not ($entries | Where-Object { $_.TrimEnd('\') -eq $appDir })) {
         [Environment]::SetEnvironmentVariable('Path', (@($entries) + $appDir) -join ';', 'User')
         Say "Added $(Pretty $appDir) to your PATH, so new terminal windows know the loomwatch command."
@@ -175,4 +226,4 @@ function Install-LoomWatch {
   & (Join-Path $appDir 'loomwatch.cmd')
 }
 
-Install-LoomWatch -NoStart:$NoStart -Update:$Update -Dir $Dir
+Install-LoomWatch -NoStart:$NoStart -Update:$Update -Latest:$Latest -Dir $Dir

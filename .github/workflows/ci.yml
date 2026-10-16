@@ -147,8 +147,9 @@ jobs:
       - name: Import tests
         run: cargo test --locked -p loomwatch-backend --lib 'import::' -- --include-ignored
 
-  # Windows: the same checks, then the packed program installed, started and driven through the
-  # offline demo by scripts/smoke-windows.ps1. The archive is SQLite, so it needs no database
+  # Windows: the same checks, then the packed release and its installer tried the ways a person
+  # uses them by scripts/smoke-windows.ps1: the terminal install driven through the offline demo,
+  # LoomWatch.exe, and LoomWatch-windows-setup.exe. The archive is SQLite, so it needs no database
   # service either.
   windows:
     name: Windows
@@ -168,6 +169,20 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Windows PowerShell 5.1, which the launcher and installers are written for, must read them:
+      # every one parses, and is ASCII (5.1 reads a file without a byte-order mark in the local code
+      # page).
+      - name: PowerShell scripts parse
+        shell: powershell
+        run: |
+          $failed = $false
+          foreach ($file in Get-ChildItem -Path scripts -Filter *.ps1) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$errors)
+            foreach ($e in $errors) { Write-Host "::error file=scripts/$($file.Name),line=$($e.Extent.StartLineNumber)::$($e.Message)"; $failed = $true }
+            if ([IO.File]::ReadAllBytes($file.FullName) | Where-Object { $_ -gt 127 }) { Write-Host "::error file=scripts/$($file.Name)::not ASCII"; $failed = $true }
+          }
+          if ($failed) { exit 1 }
       - name: Clippy
         id: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -180,7 +195,11 @@ jobs:
         shell: bash
         run: |
           cargo build --locked --bin loomwatchd --bin LoomWatch
-          scripts/package-release.sh windows-x86_64 target/debug/loomwatchd.exe dist
+          scripts/package-release.sh windows-x86_64 target/debug/loomwatchd.exe dist target/debug/LoomWatch.exe
+      - name: Build the installer
+        if: ${{ !cancelled() && steps.clippy.outcome == 'success' }}
+        shell: pwsh
+        run: scripts/package-windows-app.ps1 -Zip dist/loomwatch-windows-x86_64.zip -Out dist
       - name: Install, start, and run the offline demo
         if: ${{ !cancelled() && steps.clippy.outcome == 'success' }}
         shell: pwsh

@@ -9,6 +9,8 @@
 //! closing its standard input, which also happens when this app ends any other way
 //! (`LOOMWATCH_EXIT_WITH_PARENT`); Start at sign-in is the Run key in the registry; and opening
 //! `LoomWatch.exe` again while it runs opens the browser instead of starting a second one.
+//! `LoomWatch.exe --quit` asks the running one to quit as its menu would, and waits until it has:
+//! what the installer runs before it replaces the files, and the uninstaller before it removes them.
 
 use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
@@ -42,6 +44,8 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 enum UserEvent {
     Menu(MenuEvent),
+    /// `LoomWatch.exe --quit` asked.
+    Quit,
     Tray(TrayIconEvent),
     /// `loomwatchd` answers at this address.
     Ready(String),
@@ -129,6 +133,10 @@ pub fn run() -> Result<()> {
     // Started at sign-in: stay beside the clock without opening the browser.
     let background = std::env::args().any(|arg| arg == "--background");
     let paths = Paths::find()?;
+    if std::env::args().any(|arg| arg == "--quit") {
+        quit_running(&paths.state);
+        return Ok(());
+    }
     // One LoomWatch.exe at a time. Opened again from the Start menu, it shows the one running.
     let Some(_only_one) = only_one(&paths.state) else {
         if !background && let Some(url) = running_loomwatch(FIRST_PORT..=LAST_PORT) {
@@ -151,6 +159,18 @@ pub fn run() -> Result<()> {
         TrayIconEvent::set_event_handler(Some(move |event| {
             let _ = proxy.send_event(UserEvent::Tray(event));
         }));
+    }
+    {
+        let proxy = proxy.clone();
+        let asked = quit_request(&paths.state);
+        let _ = std::fs::remove_file(&asked);
+        std::thread::spawn(move || {
+            while !asked.exists() {
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            let _ = std::fs::remove_file(&asked);
+            let _ = proxy.send_event(UserEvent::Quit);
+        });
     }
 
     let open_item = MenuItem::new("Open LoomWatch", true, None);
@@ -234,9 +254,40 @@ pub fn run() -> Result<()> {
                     *control_flow = ControlFlow::Exit;
                 }
             }
+            Event::UserEvent(UserEvent::Quit) => {
+                supervisor.stop();
+                tray.take();
+                *control_flow = ControlFlow::Exit;
+            }
             _ => {}
         }
     })
+}
+
+/// The file `LoomWatch.exe --quit` makes to ask the running one to quit.
+fn quit_request(state: &Path) -> PathBuf {
+    state.join("LoomWatch.exe.quit")
+}
+
+/// Ask the `LoomWatch.exe` running for this account to quit, and wait up to 20 seconds for it to
+/// have: its lock is free once it has stopped `loomwatchd` and ended.
+fn quit_running(state: &Path) {
+    // The lock is free: no LoomWatch.exe is running to ask.
+    if only_one(state).is_some() {
+        return;
+    }
+    let asked = quit_request(state);
+    if std::fs::write(&asked, b"").is_err() {
+        return;
+    }
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(250));
+        if only_one(state).is_some() {
+            break;
+        }
+    }
+    let _ = std::fs::remove_file(&asked);
 }
 
 /// Open `LoomWatch` in the browser, or as soon as it answers.

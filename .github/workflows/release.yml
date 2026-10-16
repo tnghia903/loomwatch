@@ -197,12 +197,17 @@ jobs:
           name: ui-dist
           path: ui/dist
       - name: Build
-        run: cargo build --release --locked --bin loomwatchd
+        run: cargo build --release --locked --bin loomwatchd --bin LoomWatch
       - name: Pack
         shell: bash
         run: |
           target/release/loomwatchd.exe --help >/dev/null
-          scripts/package-release.sh windows-x86_64 target/release/loomwatchd.exe dist
+          scripts/package-release.sh windows-x86_64 target/release/loomwatchd.exe dist target/release/LoomWatch.exe
+      # Unsigned until a code-signing certificate is set up: Windows then asks people once, in a
+      # "Windows protected your PC" box (More info, then Run anyway).
+      - name: Build the installer
+        shell: pwsh
+        run: scripts/package-windows-app.ps1 -Zip dist/loomwatch-windows-x86_64.zip -Out dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-windows-x86_64

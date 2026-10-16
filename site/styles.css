@@ -575,6 +575,11 @@ em { font-style: italic; }
 .start-meta { font-size: 13px; color: var(--ink-3); }
 .start-note { margin: 14px 0 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
 .start-note b { font-weight: 600; color: var(--ink); }
+/* The card shows one system: the one in `data-os` (main.js picks the visitor's), with a link to the other. */
+.get[data-os="mac"] [data-for="windows"], .get[data-os="windows"] [data-for="mac"] { display: none; }
+.start-switch { margin: 10px 0 0; font-size: 13px; }
+.start-switch a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.start-switch a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .get-term { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--hairline); }
 .get-term-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .get-term-head .btn { height: 28px; margin-left: auto; }

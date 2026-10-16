@@ -2662,10 +2662,19 @@
 
   /* ================================================================ 09 · Start */
 
+  const get = $('#get')
+  // A Windows browser sees the Windows download first; anyone can switch.
+  // "Windows" (Chrome, Edge) or "Win32" (Firefox).
+  const onWindows = /^win/i.test(navigator.userAgentData?.platform || navigator.platform || '')
+  if (onWindows) get.dataset.os = 'windows'
+  $$('[data-switch]', get).forEach((link) => link.addEventListener('click', (event) => {
+    event.preventDefault()
+    get.dataset.os = link.dataset.switch
+  }))
   const cmds = $('#cmds')
   $('#copy-cmds').addEventListener('click', async (event) => {
     const button = event.currentTarget
-    const text = $$('.cmd', cmds).map((c) => c.textContent).join('\n')
+    const text = $$('.cmd', cmds).filter((c) => c.dataset.for === get.dataset.os).map((c) => c.textContent).join('\n')
     try { await navigator.clipboard.writeText(text); button.textContent = 'Copied' } catch { button.textContent = 'Select and copy' }
     window.setTimeout(() => { button.textContent = 'Copy' }, 1600)
   })

@@ -409,6 +409,7 @@ pub fn list_folder(requested: Option<&Path>, home: Option<&Path>) -> Result<Fold
             name: name.to_owned(),
             path: path.to_string_lossy().into_owned(),
         })
+        .chain(drives())
         .collect();
     Ok(FolderListing {
         name: folder.file_name().map_or_else(
@@ -424,6 +425,24 @@ pub fn list_folder(requested: Option<&Path>, home: Option<&Path>) -> Result<Fold
         more_files,
         places,
     })
+}
+
+/// Each drive on a Windows computer, `C:` first: a folder on `D:\` is under no other place, and
+/// going up from one stops at its drive. None elsewhere, where everything is under `/`.
+fn drives() -> Vec<FolderEntry> {
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+    // A and B are floppy drives, which a computer of today doesn't have but may still answer for
+    // slowly.
+    (b'C'..=b'Z')
+        .map(|letter| format!("{}:\\", char::from(letter)))
+        .filter(|root| Path::new(root).is_dir())
+        .map(|root| FolderEntry {
+            name: root.trim_end_matches('\\').to_owned(),
+            path: root,
+        })
+        .collect()
 }
 
 /// A file the panel added to a team, and what an agent will be handed from it.
@@ -772,6 +791,11 @@ mod tests {
         );
         assert_eq!(listing.files, ["readme.txt"]);
         assert_eq!(listing.places[0].name, "Home");
+        // Windows lists its drives too, so a folder on another drive can be reached.
+        assert_eq!(
+            listing.places.iter().any(|place| place.path == "C:\\"),
+            cfg!(windows)
+        );
         assert!(list_folder(Some(Path::new("relative")), None).is_err());
     }
 

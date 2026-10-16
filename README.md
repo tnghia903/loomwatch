@@ -38,8 +38,9 @@ open it, drag LoomWatch to Applications, and open it. Then follow
 curl -fsSL https://loomwatch.github.io/install.sh | bash
 ```
 
-**On Windows** (Windows 10 or 11, 64-bit, with [Docker Desktop](https://docs.docker.com/desktop/)),
-paste this into PowerShell:
+**Install on Windows** (Windows 10 or 11, 64-bit; nothing else to install first): download
+**[LoomWatch-windows-setup.exe](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-windows-setup.exe)**
+and open it. Rather use PowerShell?
 
 ```powershell
 irm https://loomwatch.github.io/install.ps1 | iex
@@ -413,6 +414,22 @@ menu bar. Then follow [Try your first run](#try-your-first-run).
 > check it for malicious software. Click **Done**, open **System Settings › Privacy & Security**,
 > scroll down, and click **Open Anyway** beside LoomWatch. macOS asks only once.
 
+### The Windows app
+
+1. Download **[LoomWatch-windows-setup.exe](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-windows-setup.exe)**
+   (for 64-bit Windows 10 and 11) and open it.
+2. It installs LoomWatch for you alone (no administrator needed), adds it to the Start menu, and
+   opens it.
+
+LoomWatch opens in your browser with an offline demo team ready to run, and keeps an icon beside the
+clock (click the **^** there if it is hidden). Click the icon to open LoomWatch; right-click it for
+**Start at sign-in**, **Show log** and **Quit LoomWatch**. There is no window to keep open. Then
+follow [Try your first run](#try-your-first-run).
+
+> [!NOTE]
+> LoomWatch is not signed with a code-signing certificate yet, so the first time you open the
+> installer Windows may say it protected your PC. Click **More info**, then **Run anyway**.
+
 ### Or in Terminal
 
 On a Mac (or Linux), paste this into Terminal:
@@ -470,8 +487,8 @@ account.
 
 ### What you need
 
-- **A Mac** with macOS 11 or newer. Linux downloads exist for x86_64 and arm64 but are untested.
-  Windows is not supported yet.
+- **A Mac** with macOS 11 or newer, or **a Windows PC** with 64-bit Windows 10 or 11. Linux
+  downloads exist for x86_64 and arm64 but are untested.
 - **For real runs, one AI app** signed in: Claude Code, Codex or OpenCode, for example. OpenCode has
   free models and needs no account. You don't need any for the demo. The home screen's **Set up an
   AI app** has a button for each: **Set up Claude Code** and **Set up Codex** download the app into
@@ -499,8 +516,8 @@ your apps, skills and tools through it.
    does not exist yet.
 2. Starts LoomWatch and opens **<http://127.0.0.1:3000>** in your browser.
 3. Keeps your run history, notes and checkpoints in one file,
-   `~/Library/Application Support/LoomWatch/loomwatch.db` (`~/.local/state/loomwatch` on Linux), so
-   they survive restarts and reinstalling.
+   `~/Library/Application Support/LoomWatch/loomwatch.db` (`%LOCALAPPDATA%\LoomWatch` on Windows,
+   `~/.local/state/loomwatch` on Linux), so they survive restarts and reinstalling.
 
 Coming from a version that kept the run history in Docker? The first start after the update copies
 it into the file and leaves the Docker database as it was. If Docker is not running then, the
@@ -508,7 +525,8 @@ terminal says how to do it later: `~/LoomWatch/app/loomwatch import`.
 
 Started from Terminal, keep that window open while you use LoomWatch, and press
 <kbd>Ctrl</kbd>+<kbd>C</kbd> in it to stop LoomWatch. The Mac app needs no window: quit it from its
-menu-bar icon. Its log is in `~/Library/Logs/LoomWatch` (**Show log** opens it).
+menu-bar icon. Its log is in `~/Library/Logs/LoomWatch` (**Show log** opens it). The Windows app is
+the same beside the clock, with its log in `%LOCALAPPDATA%\LoomWatch\Logs`.
 
 Already used LoomWatch from Terminal? The Mac app uses the same teams and the same run history
 file. Run `~/LoomWatch/app/loomwatch update` once first if that copy still kept its history in
@@ -538,7 +556,10 @@ history are kept in every case.
 **The Mac app:** when **Update available** shows, download the new
 [LoomWatch-macos.dmg](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-macos.dmg),
 quit LoomWatch from its menu-bar icon, drag the new one to Applications and choose **Replace**.
-Your teams and history stay. The rest of this section is about the Terminal install.
+Your teams and history stay. **The Windows app:** download the new
+[LoomWatch-windows-setup.exe](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-windows-setup.exe)
+and open it; it closes LoomWatch, puts the new version in its place, and opens it again. The rest of
+this section is about the Terminal install.
 
 LoomWatch checks once a day, and again right after you update, whether a newer release is out.
 When one is, Home shows **Update available** and the terminal running LoomWatch says so too. Click
@@ -584,8 +605,11 @@ its runs. Scheduled teams run only while LoomWatch is running and the computer i
 
 **The Mac app:** turn off **Start at login** in its menu, choose **Quit LoomWatch**, and drag
 LoomWatch from Applications to the Trash. Your teams and history stay where steps 4 and 5 below
-say; delete those folders, and `~/Library/Logs/LoomWatch`, to leave nothing behind. The steps
-below are for the Terminal install.
+say; delete those folders, and `~/Library/Logs/LoomWatch`, to leave nothing behind. **The Windows
+app:** remove LoomWatch in **Settings › Apps › Installed apps** (it quits LoomWatch first and turns
+off Start at sign-in). Your teams stay in `%USERPROFILE%\LoomWatch` and your history in
+`%LOCALAPPDATA%\LoomWatch`; delete both to leave nothing behind. The steps below are for the
+Terminal install.
 
 1. If you connected LoomWatch to other AI apps, choose **Connections…** from the ☰ menu and click
    **Disconnect** beside each one. For Claude Code, Codex and Gemini CLI this also removes LoomWatch
@@ -608,11 +632,11 @@ If you used a version that kept the run history in Docker, its database is still
 once you no longer need it, with `cd ~/LoomWatch/app && docker compose down -v` before step 3 (or
 in Docker Desktop, the `loomwatch-app_postgres-data` volume).
 
-On Windows the steps are the same, in PowerShell: `loomwatch stop`, then
-`cd ~\LoomWatch\app; docker compose down -v; cd ~`, then delete `%USERPROFILE%\LoomWatch\app`
-and remove that folder from your `PATH` (Start menu, "Edit environment variables for your
-account"). LoomWatch's approvals are in `%LOCALAPPDATA%\LoomWatch`, and a Notion sign-in is kept
-in Windows Credential Manager as `LoomWatch.Notion`.
+On Windows the steps are the same, in PowerShell: `loomwatch stop`, then delete
+`%USERPROFILE%\LoomWatch\app` and remove that folder from your `PATH` (Start menu, "Edit
+environment variables for your account"). Your run history and LoomWatch's approvals are in
+`%LOCALAPPDATA%\LoomWatch`, and a Notion sign-in is kept in Windows Credential Manager under
+LoomWatch's name.
 
 ### Change the defaults
 
@@ -1084,8 +1108,8 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Files you add to an agent (**File** under **Given**) | `<team>.files/` beside the team file |
 | Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
 | AI apps you connected to LoomWatch | `.loomwatch/connections.json` in your teams folder. It holds each app's private key. |
-| Team chats (your messages and every run), recorded events, Notebook entries and Ask conversations | One file, `loomwatch.db`, in `~/Library/Application Support/LoomWatch` on macOS or `~/.local/state/loomwatch` on Linux. A copy of the source keeps its own in `.loomwatch/` in its folder; Compose deployments in the `loomwatch-home` volume. |
-| Which team files you approved to run, and your update-check choices | `~/Library/Application Support/LoomWatch` on macOS, `~/.local/state/loomwatch` on Linux |
+| Team chats (your messages and every run), recorded events, Notebook entries and Ask conversations | One file, `loomwatch.db`, in `~/Library/Application Support/LoomWatch` on macOS, `%LOCALAPPDATA%\LoomWatch` on Windows or `~/.local/state/loomwatch` on Linux. A copy of the source keeps its own in `.loomwatch/` in its folder; Compose deployments in the `loomwatch-home` volume. |
+| Which team files you approved to run, and your update-check choices | `~/Library/Application Support/LoomWatch` on macOS, `%LOCALAPPDATA%\LoomWatch` on Windows, `~/.local/state/loomwatch` on Linux |
 | Copies of the run history saved by `loomwatch update` | `~/LoomWatch/backups`, one folder per copy of LoomWatch, the three newest in each |
 | The version the last update replaced, for `loomwatch rollback` | `.previous` in `~/LoomWatch/app` |
 | Provider sign-in | Managed by each host agent app; Compose-only deployments use `loomwatch-home` |
