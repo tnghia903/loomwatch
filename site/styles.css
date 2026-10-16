@@ -196,6 +196,8 @@ em { font-style: italic; }
    pulled across (main.js sizes and places it). Vertical, so its track runs down the pull. */
 .buzz-switch { position: absolute; left: 0; top: 0; z-index: 2; margin: 0; opacity: 0; writing-mode: vertical-lr; pointer-events: auto; touch-action: none; cursor: grab; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .buzz-switch.held { cursor: grabbing; }
+/* And on a phone one lies over the bulb, which an iPhone buzzes for as it is tapped. */
+.bulb-switch { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; opacity: 0; touch-action: none; cursor: pointer; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 /* The new theme spreads out from the bulb (main.js animates the clip); nothing crossfades. */
 ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 
