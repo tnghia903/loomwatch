@@ -1,4 +1,5 @@
 import {
+  AdditiveBlending,
   Box3,
   CatmullRomCurve3,
   Color,
@@ -6,6 +7,7 @@ import {
   HemisphereLight,
   MathUtils,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   NeutralToneMapping,
   Object3D,
@@ -16,6 +18,7 @@ import {
   Raycaster,
   Scene,
   ShadowMaterial,
+  SphereGeometry,
   TubeGeometry,
   Vector2,
   Vector3,
@@ -30,6 +33,7 @@ import { benchMaterial, fitCanvas } from '../components/agents/workbenchScene'
 import { pegboardTexture, swatchTextures, woundTexture } from '../components/agents/benchTextures'
 import { COLOR_HEX, FIGURE_KINDS, type FigureChoice } from '../lib/library/figures'
 import { markPattern } from '../lib/story/mark'
+import { talkAt, type TalkLine, type TalkState } from './crewTalk'
 
 /** One figure in the crew: who it is (its scarf is woven from this) and what it wears. */
 export interface CrewMember {
@@ -41,8 +45,11 @@ export interface CrewCallbacks {
   /** The figure under the pointer, or null. */
   onHover: (index: number | null) => void
   onPick: (index: number) => void
-  /** Each frame: the top of each figure's head, in CSS pixels from the canvas's top left. */
-  onFrame: (heads: readonly { x: number; y: number }[]) => void
+  /**
+   * Each frame: the top of each figure's head, in CSS pixels from the canvas's top left, and where
+   * the conversation is (null when there is none, or while a figure is under the pointer).
+   */
+  onFrame: (heads: readonly { x: number; y: number }[], talk: TalkState | null) => void
 }
 
 interface Figure {
@@ -76,7 +83,10 @@ const HEAD_NOD = 0.24
  * Build by hand), six of them standing in a row and holding one gold thread. Alive the way the
  * figure on its bench is between runs: they breathe, blink, and look where you point. The one
  * under the pointer lets go of the thread with one mitten and waves, and the others look at it.
- * Reduced motion keeps the poses and drops the motion.
+ * Given a script (talk()), they act out a hand-off: the one talking bobs as it speaks, the others
+ * look at it, a gold bead carries the work along the thread to the next, and when it reaches you
+ * they all look out and the last one waves. Reduced motion keeps the poses and drops the motion,
+ * the conversation with it.
  */
 export class CrewScene {
   private readonly renderer: WebGLRenderer
@@ -105,6 +115,18 @@ export class CrewScene {
   private rows: number[][] = []
   private threads: Mesh<TubeGeometry, MeshStandardMaterial>[] = []
   private threadMaterial: MeshStandardMaterial | null = null
+  /** Each row's thread, and where along it each figure holds it (its curve's t, between the mittens). */
+  private curves: CatmullRomCurve3[] = []
+  private held: { row: number; t: number }[] = []
+  /** The conversation: its script, how many times it plays, and its own clock, which stops while paused. */
+  private script: readonly TalkLine[] | null = null
+  private loops = 1
+  private talkClock = 0
+  private talking = false
+  private talkState: TalkState | null = null
+  private passTo: number | null = null
+  /** The work on its way from one figure to the next: a glowing gold bead. */
+  private readonly bead = new Object3D()
 
   constructor(canvas: HTMLCanvasElement, members: readonly CrewMember[], callbacks: CrewCallbacks, reduced: boolean) {
     this.members = members
@@ -185,6 +207,13 @@ export class CrewScene {
     // Measured where it stands on the floor.
     this.headTop = new Box3().setFromObject(this.figures[0].root, true).max.y + this.standY
     this.threadMaterial = this.own(new MeshStandardMaterial({ color: '#E2B451', roughness: 0.32, metalness: 1, emissive: new Color('#E9C46A'), emissiveIntensity: 0.18 }))
+    const beadGeometry = this.own(new SphereGeometry(0.032, 20, 14))
+    const core = new Mesh(beadGeometry, this.own(new MeshStandardMaterial({ color: '#FFF1C9', roughness: 0.35, emissive: new Color('#F2C25B'), emissiveIntensity: 2.4 })))
+    const halo = new Mesh(beadGeometry, this.own(new MeshBasicMaterial({ color: '#F5CF72', transparent: true, opacity: 0.32, blending: AdditiveBlending, depthWrite: false })))
+    halo.scale.setScalar(2.6)
+    this.bead.add(core, halo)
+    this.bead.visible = false
+    this.scene.add(this.bead)
     this.loaded = true
     this.layout()
     this.frame()
@@ -228,8 +257,11 @@ export class CrewScene {
     this.rows.forEach((row, r) => {
       const thread = this.threads[r]
       if (!thread) return
+      const { curve, held } = this.threadCurve(row.map((index) => this.figures[index]))
+      this.curves[r] = curve
+      row.forEach((index, at) => { this.held[index] = { row: r, t: held[at] } })
       thread.geometry.dispose()
-      thread.geometry = new TubeGeometry(this.threadCurve(row.map((index) => this.figures[index])), 40 * row.length, 0.012, 6)
+      thread.geometry = new TubeGeometry(curve, 40 * row.length, 0.012, 6)
     })
   }
 
@@ -278,6 +310,27 @@ export class CrewScene {
     if (picked !== null) this.callbacks.onPick(picked)
   }
 
+  /**
+   * Play a conversation (crewTalk.ts) after `delay` seconds, `loops` times, from the start. It runs
+   * on the scene's own clock, so it waits while the stage is off screen, while a figure is under
+   * the pointer, and while it is paused. Reduced motion never plays it.
+   */
+  talk(script: readonly TalkLine[], { delay = 0, loops = 1 }: { delay?: number; loops?: number } = {}) {
+    if (this.reduced) return
+    this.script = script
+    this.loops = loops
+    this.talkClock = -delay
+    this.talking = true
+  }
+
+  pauseTalk() {
+    this.talking = false
+  }
+
+  playTalk() {
+    if (this.script && !this.talkState?.done) this.talking = true
+  }
+
   private pick(x: number, y: number): number | null {
     if (x < 0 || y < 0 || x > this.width || y > this.height) return null
     this.raycaster.setFromCamera(new Vector2((x / this.width) * 2 - 1, -(y / this.height) * 2 + 1), this.camera)
@@ -303,7 +356,7 @@ export class CrewScene {
 
   private frame() {
     this.renderer.render(this.scene, this.camera)
-    if (this.loaded) this.callbacks.onFrame(this.figures.map((figure) => this.screen(figure.head.getWorldPosition(new Vector3()).setY(this.headTop + 0.04))))
+    if (this.loaded) this.callbacks.onFrame(this.figures.map((figure) => this.screen(figure.head.getWorldPosition(new Vector3()).setY(this.headTop + 0.04))), this.hovered === null ? this.talkState : null)
   }
 
   private update(dt: number) {
@@ -311,8 +364,19 @@ export class CrewScene {
     const motion = this.reduced ? 0 : 1
     const hovered = this.hovered
 
-    // Now and then one of them hops, or turns to look at its neighbour, while nobody points.
-    if (!this.reduced && t > this.nextFidget && hovered === null) {
+    // The conversation waits while you point at one of them.
+    if (this.script && this.talking && hovered === null) this.talkClock += dt
+    const talk = this.script ? talkAt(this.script, this.talkClock, this.loops) : null
+    if (talk?.done) this.talking = false
+    // The one handed the work gives a little hop as it arrives.
+    const passTo = talk?.pass?.to ?? null
+    if (this.passTo !== null && passTo === null && talk?.speaker === this.passTo) this.figures[this.passTo].hop = t
+    this.passTo = passTo
+    this.talkState = talk
+    const live = hovered === null && talk !== null && (talk.speaker !== null || talk.waiting) ? talk : null
+
+    // Now and then one of them hops, or turns to look at its neighbour, while nobody points or talks.
+    if (!this.reduced && t > this.nextFidget && hovered === null && !live) {
       const which = Math.floor((t * 7.31) % this.figures.length)
       this.figures[which].hop = t
       this.nextFidget = t + 3.5 + ((t * 13.7) % 4)
@@ -326,12 +390,32 @@ export class CrewScene {
       target.armRRX += 0.04 * Math.sin(beat * 1.3 + 1.7) * motion
 
       const head = figure.head.getWorldPosition(new Vector3())
-      let look: Vector3 | null = null
-      if (hovered !== null && hovered !== index) look = this.figures[hovered].head.getWorldPosition(new Vector3())
-      if (look) {
-        const toward = look.sub(head)
+      const lookAt = (point: Vector3) => {
+        const toward = point.clone().sub(head)
         target.lookX = MathUtils.clamp(toward.x / 0.9, -1, 1)
         target.lookY = MathUtils.clamp(toward.y / 0.6, -1, 1) - 0.1
+      }
+      if (hovered !== null && hovered !== index) {
+        lookAt(this.figures[hovered].head.getWorldPosition(new Vector3()))
+      } else if (live?.waiting) {
+        // The work is yours now: they all look out at you.
+        target.lookX = MathUtils.clamp(-figure.root.position.x * 0.22, -0.5, 0.5)
+        target.lookY = 0.12
+      } else if (live?.pass) {
+        // Everyone watches the work go by.
+        lookAt(this.bead.position)
+      } else if (live && live.speaker !== null && live.speaker !== index) {
+        lookAt(this.figures[live.speaker].head.getWorldPosition(new Vector3()))
+      } else if (live && live.speaker === index) {
+        if (live.bubble?.says === null) {
+          // Thinking: it looks up and away.
+          target.lookX = 0.35
+          target.lookY = 0.38
+        } else {
+          if (typeof live.to === 'number') lookAt(this.figures[live.to].head.getWorldPosition(new Vector3()))
+          // It bobs as it speaks, and holds still while paused.
+          if (this.talking) target.bodyY += 0.01 * Math.abs(Math.sin(t * 9)) * motion
+        }
       } else if (this.pointer && !this.reduced) {
         // Everyone looks where you point, each from where it stands.
         const at = this.screen(head)
@@ -342,8 +426,8 @@ export class CrewScene {
         target.lookY = 0.1 * Math.sin(beat * 0.43)
       }
 
-      if (hovered === index) {
-        // It lets go with its right mitten and waves at you.
+      if (hovered === index || (live?.waiting && live.bubble?.by === index)) {
+        // It lets go with its right mitten and waves at you: you pointed at it, or it waits for you.
         target.wave = 1
         target.armRRX = -0.25
         target.armRRZ = -2.55 + 0.26 * Math.sin(t * 8) * motion
@@ -373,11 +457,37 @@ export class CrewScene {
 
     this.scene.updateMatrixWorld(true)
     this.weave()
+    this.placeBead(talk)
   }
 
-  /** Through every mitten that holds it, sagging between neighbours and trailing off at both ends. */
-  private threadCurve(figures: readonly Figure[]): CatmullRomCurve3 {
+  /**
+   * The bead runs along the thread between two figures in one row; between rows (on a phone, the
+   * crew stands in two) it is tossed over the front row's heads.
+   */
+  private placeBead(talk: TalkState | null) {
+    const pass = talk?.pass
+    const from = pass ? this.held[pass.from] : undefined
+    const to = pass ? this.held[pass.to] : undefined
+    this.bead.visible = Boolean(pass && from && to && this.hovered === null)
+    if (!pass || !from || !to) return
+    const s = MathUtils.smootherstep(pass.at, 0, 1)
+    if (from.row === to.row) this.bead.position.copy(this.curves[from.row].getPoint(MathUtils.lerp(from.t, to.t, s)))
+    else {
+      const start = this.curves[from.row].getPoint(from.t)
+      const end = this.curves[to.row].getPoint(to.t)
+      const lift = this.headTop + 0.15 - (start.y + end.y) / 2
+      this.bead.position.copy(start).lerp(end, s).add(new Vector3(0, lift * Math.sin(Math.PI * s), 0))
+    }
+    this.bead.scale.setScalar(this.talking ? 1 + 0.18 * Math.sin(this.now * 14) : 1)
+  }
+
+  /**
+   * Through every mitten that holds it, sagging between neighbours and trailing off at both ends.
+   * `held` is where along it each figure holds it, between its two mittens.
+   */
+  private threadCurve(figures: readonly Figure[]): { curve: CatmullRomCurve3; held: number[] } {
     const points: Vector3[] = []
+    const grips: number[] = []
     const mitten = (hand: Object3D) => hand.localToWorld(new Vector3(0, -0.05, 0.02))
     const t = this.now
     figures.forEach((figure, index) => {
@@ -391,10 +501,12 @@ export class CrewScene {
       }
       // A waving figure holds it with one mitten only: the thread slides from its left to its right.
       const waving = figure.pose.wave > 0.5
+      grips.push(points.length)
       points.push(waving ? left.clone().lerp(right, 0.5).add(new Vector3(0, -0.05, 0.05)) : right, left)
       if (index === figures.length - 1) points.push(left.clone().add(new Vector3(0.28, -0.07 + 0.01 * Math.sin(t * 1.1), 0.03)), left.clone().add(new Vector3(0.55, -0.12, 0.05)))
     })
-    return new CatmullRomCurve3(points, false, 'centripetal')
+    // A curve's t reaches its points evenly: point k is at k / (points - 1).
+    return { curve: new CatmullRomCurve3(points, false, 'centripetal'), held: grips.map((k) => (k + 0.5) / (points.length - 1)) }
   }
 
   private blink(figure: Figure) {

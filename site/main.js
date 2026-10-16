@@ -202,7 +202,7 @@
   /* ================================================================ Live figures */
 
   // The figures are the app's own (ui/src/site/landingLive.ts, built into assets/live/live.js with
-  // three.js): the crew on the first screen and the agent's bench in Act I. The module loads only
+  // three.js): the crew on the first screen and the agent's bench in Step 1. The module loads only
   // where WebGL works; everywhere else the still pictures under the canvases stay, and the page works.
   const canDraw = (() => {
     try { const probe = document.createElement('canvas'); return Boolean(probe.getContext('webgl2') || probe.getContext('webgl')) } catch { return false }
@@ -221,10 +221,12 @@
   }
   const local = (event, canvas) => { const r = canvas.getBoundingClientRect(); return [event.clientX - r.left, event.clientY - r.top] }
   // A label centred on a point of the picture, kept inside its stage so none runs off an edge.
+  // Returns where its centre went.
   function placeTag(tag, at, stage) {
     const half = tag.offsetWidth / 2
     const x = clamp(at.x, half + 6, Math.max(half + 6, stage.clientWidth - half - 6))
     tag.style.transform = `translate(${x.toFixed(1)}px, ${at.y.toFixed(1)}px)`
+    return x
   }
 
   /* ================================================================ The crew */
@@ -241,10 +243,53 @@
   const crewBox = $('#crew')
   const crewCanvas = $('#crew-canvas')
   const crewTags = $('#crew-tags')
+  const crewPlay = $('#crew-play')
   const touchOnly = window.matchMedia('(hover: none)').matches
   if (touchOnly) $('#crew-hint').replaceChildren('Tap one to build one like it.')
   let crewTag = null
   let crewHover = null
+
+  // What the crew says (ui/src/site/crewTalk.ts plays it): a job passed along the thread the way a
+  // team's run goes in the app, ending with the work waiting for you. A few words a line.
+  const crew = (id) => CREW.findIndex((member) => member.id === id)
+  const TALK = [
+    { by: crew('planner'), says: 'Scout, can you find sources?', to: crew('scout') },
+    { by: crew('scout'), says: 'Found five. Writer, over to you.', to: crew('writer') },
+    { by: crew('writer'), says: 'Brief drafted. Checker?', to: crew('checker') },
+    { by: crew('checker'), says: 'One claim has no source.', to: 'you' },
+  ]
+  let sayEl = null
+  let sayKey = ''
+  // off (reduced motion, or a live.js from before talk), playing, paused or done.
+  let sayStatus = 'off'
+  function showSayStatus(status) {
+    sayStatus = status
+    crewPlay.hidden = status === 'off'
+    crewPlay.dataset.status = status
+    crewPlay.replaceChildren(el('span', { class: 'crew-play-icon', 'aria-hidden': 'true' }), status === 'playing' ? 'Pause' : status === 'paused' ? 'Play' : 'Play again', el('span', { class: 'sr', text: ' the crew’s conversation' }))
+  }
+  // One bubble at a time, over the head of the one talking: its name and words, dots while it
+  // thinks, and a pill when the work waits for you. The same speaker's bubble changes in place.
+  function sayBubble(talk, heads) {
+    const bubble = talk?.bubble ?? null
+    const key = bubble ? `${bubble.by}|${bubble.says ?? ''}|${bubble.waiting}` : ''
+    if (key !== sayKey) {
+      sayKey = key
+      if (sayEl && (!bubble || sayEl.dataset.by !== String(bubble.by) || bubble.waiting)) { sayEl.remove(); sayEl = null }
+      if (bubble) {
+        if (!sayEl) sayEl = crewTags.appendChild(el('p', { class: 'crew-say', 'data-by': String(bubble.by) }))
+        sayEl.classList.toggle('waiting', bubble.waiting)
+        sayEl.replaceChildren(...(bubble.waiting
+          ? [el('span', { class: 'say-dot' }), bubble.says]
+          : [el('b', { text: CREW[bubble.by].name }), ' ', bubble.says ?? el('span', { class: 'say-dots' }, el('i'), el('i'), el('i'))]))
+      }
+    }
+    if (!sayEl || !bubble) return
+    const at = heads[bubble.by]
+    // Its tail still points at the head when the bubble is held in from an edge.
+    const reach = Math.max(0, sayEl.offsetWidth / 2 - 16)
+    sayEl.style.setProperty('--tail', `${clamp(at.x - placeTag(sayEl, at, crewCanvas), -reach, reach).toFixed(1)}px`)
+  }
 
   async function mountCrew() {
     const { CrewScene } = await loadLive()
@@ -257,7 +302,11 @@
         if (crewTag) crewTags.append(crewTag)
       },
       onPick: (index) => buildLike(CREW[index]),
-      onFrame: (heads) => {
+      onFrame: (heads, talk) => {
+        if (sayStatus !== 'off') {
+          sayBubble(talk, heads)
+          if (talk?.done && sayStatus === 'playing') showSayStatus('done')
+        }
         if (!crewTag || crewHover === null) return
         placeTag(crewTag, heads[crewHover], crewCanvas)
       },
@@ -269,6 +318,17 @@
     crewCanvas.addEventListener('pointerup', (event) => { const [x, y] = local(event, crewCanvas); scene.pointerUp(x, y) })
     await scene.load(MODEL)
     crewBox.classList.add('live')
+    // They start talking once the headline has had a moment, twice through, then stop; the button
+    // pauses them, and plays it again. A live.js or page cached from before the conversation has no
+    // talk() or no button.
+    if (reduced || !crewPlay || typeof scene.talk !== 'function') return
+    scene.talk(TALK, { delay: 2.2, loops: 2 })
+    showSayStatus('playing')
+    crewPlay.addEventListener('click', () => {
+      if (sayStatus === 'playing') { scene.pauseTalk(); showSayStatus('paused') }
+      else if (sayStatus === 'paused') { scene.playTalk(); showSayStatus('playing') }
+      else { scene.talk(TALK, { delay: 0.3, loops: 1 }); showSayStatus('playing') }
+    })
   }
   const crewMounted = mountCrew().catch(() => crewBox.classList.add('still'))
 
@@ -551,7 +611,7 @@
 
   window.addEventListener('resize', () => drawLanes())
 
-  /* ================================================================ Act I · Agents */
+  /* ================================================================ Step 1 · Agents */
 
   // The same crew as the app: six figures in seven colours (ui/src/lib/library/figures.ts).
   const KINDS = [
@@ -707,7 +767,7 @@
     paintFaces()
     benchScene?.set(benchView())
   }
-  // The bench loads when Act I is near, so the first screen only waits for the crew.
+  // The bench loads when Step 1 is near, so the first screen only waits for the crew.
   if ('IntersectionObserver' in window) {
     const near = new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting)) return
@@ -2256,7 +2316,7 @@
       reviewBody.replaceChildren(state.team.review
         ? quiet('', 'Nothing to review yet.', 'Write to the team in Ask, above. When Researcher hands over, the work stops here, in the chat, and waits for you.')
         : quiet('warn', 'This team has no review step.', "Researcher's findings would go straight to Writer, unchecked.",
-          el('a', { class: 'link', href: '#build', style: 'display:inline-block;margin-top:16px', text: 'Add one in the team sentence ↑' })))
+          el('a', { class: 'link', href: '#act-workflow', style: 'display:inline-block;margin-top:16px', text: 'Add one in the team sentence ↑' })))
       return
     }
     if (run.only) {
@@ -2271,7 +2331,7 @@
           : "This team has no review step, so Researcher's findings go straight to Writer, unchecked.",
         state.team.review
           ? el('p', { text: 'The review step is on the team now. @team again, and the work stops here.' })
-          : el('a', { class: 'link', href: '#build', style: 'display:inline-block;margin-top:16px', text: 'Add one in the team sentence ↑' })))
+          : el('a', { class: 'link', href: '#act-workflow', style: 'display:inline-block;margin-top:16px', text: 'Add one in the team sentence ↑' })))
       return
     }
     if (run.phase === 'review') {

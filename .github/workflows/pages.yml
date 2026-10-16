@@ -16,14 +16,12 @@ on:
       - site/**
       - scripts/install.sh
       - docs/assets/readme/**
-      - docs/assets/usecases/**
       - docs/design-system/fonts/**
       - ui/public/agent/**
       - ui/src/site/**
       - ui/src/components/agents/workbenchScene.ts
       - ui/src/components/agents/benchTextures.ts
       - ui/vite.site.config.ts
-      - examples/usecases/**
       - examples/skills/**
       - .github/workflows/pages.yml
   workflow_dispatch:
