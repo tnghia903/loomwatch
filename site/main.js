@@ -593,11 +593,13 @@
     lastTime = time
     // The top of the cord follows the page as it scrolls, and drops back when it is wanted.
     const target = hangTarget()
-    const drop = (target - hang) * (reduced ? 1 : 1 - Math.exp(-dt * (target > hang ? 9 : 16)))
-    hang += drop
-    // Without motion it goes all at once, and the rest of the cord goes with it. Its top alone would
-    // land below the thread, which would then stand on it, straight up, with the figure on top.
-    if (reduced) for (const p of links) { p.y += drop; p.py += drop }
+    const move = (target - hang) * (reduced ? 1 : 1 - Math.exp(-dt * (target > hang ? 9 : 16)))
+    hang += move
+    // The rest of the cord goes with its top, as one piece, so it leaves and arrives hanging. The top
+    // moves faster than the thread can fall or follow: alone, it would pass the thread on the way
+    // down, or fling it up past itself on the way up, and the thread would fold over it and turn the
+    // figure upside down.
+    for (const p of links) { p.y += move; p.py += move }
     pending += dt
     while (pending >= STEP) { stepCord(STEP); pending -= STEP }
     paintCord(dt)
