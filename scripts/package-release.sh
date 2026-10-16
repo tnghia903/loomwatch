@@ -47,7 +47,7 @@ trap 'rm -rf "$stage"' EXIT
 pkg=$stage/loomwatch
 mkdir -p "$pkg/bin" "$pkg/examples"
 
-cp "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$pkg/"
+cp "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$root/TRADEMARKS.md" "$pkg/"
 cp "$root/examples/operator-stop.yaml" "$root/examples/operator-stop-harness.py" "$pkg/examples/"
 # "<version> <commit>": the installer shows the first, and the launcher reports the second in
 # Send feedback, as a copy of the source reports its checkout.

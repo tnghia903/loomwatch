@@ -34,7 +34,7 @@ chmod 755 "$app/Contents/MacOS/LoomWatch" "$app/Contents/MacOS/loomwatchd"
 cp "$root/packaging/macos/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
 cp "$root/examples/operator-stop.yaml" "$root/examples/operator-stop-harness.py" "$app/Contents/Resources/examples/"
 chmod 755 "$app/Contents/Resources/examples/operator-stop-harness.py"
-cp "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$app/Contents/Resources/"
+cp "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$root/TRADEMARKS.md" "$app/Contents/Resources/"
 printf '%s %s\n' "$version" "$commit" >"$app/Contents/Resources/VERSION"
 
 cat >"$app/Contents/Info.plist" <<PLIST

@@ -963,7 +963,6 @@ em { font-style: italic; }
 .can-list b { font: 600 14px/1.35 var(--sans); color: var(--ink); }
 .can-list span { font-size: 13px; line-height: 1.45; color: var(--ink-2); }
 .can-list code { font: 500 12px/1 var(--mono); color: var(--accent); }
-.new { margin-left: 6px; padding: 2px 7px; border-radius: 999px; background: var(--accent-tint); color: var(--accent); font: 600 10px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; font-style: normal; vertical-align: 2px; }
 .can-under { margin-top: 16px; padding: 14px 18px; border: 1px dashed var(--hairline-2); border-radius: 16px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: start; }
 .can-under ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
 .can-under li { display: grid; gap: 2px; align-content: start; }
