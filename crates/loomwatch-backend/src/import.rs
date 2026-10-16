@@ -808,6 +808,90 @@ mod tests {
         outcome
     }
 
+    /// A measurement, not a check: how fast each archive takes a stream of message chunks, the
+    /// kind of event that is most of every run. Prints events per second for the PostgreSQL
+    /// archive (one statement per event, as it wrote them), for SQLite one transaction per event,
+    /// and for SQLite through the batching writer. Run with `--release --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore = "a measurement: needs LOOMWATCH_TEST_POSTGRES_URL, run with --release --nocapture"]
+    async fn write_rates() -> Result<()> {
+        use std::time::Instant;
+        let server_url = std::env::var("LOOMWATCH_TEST_POSTGRES_URL")
+            .context("set LOOMWATCH_TEST_POSTGRES_URL")?;
+        let chunk = |seq: u64| crate::RunEvent {
+            id: uuid::Uuid::new_v4().to_string(),
+            session_id: "rate".into(),
+            agent_id: "lead".into(),
+            seq,
+            ts: format!("2026-10-17T00:00:00.{seq:06}Z"),
+            kind: crate::EventKind::Message,
+            payload: json!({"role": "agent", "messageId": "m",
+                            "content": {"type": "text", "text": "a few tokens of reply"}}),
+            raw: Some(json!({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "019a1b2c-3d4e-5f60-7182-93a4b5c6d7e8",
+                "update": {"sessionUpdate": "agent_message_chunk", "messageId": "m",
+                           "content": {"type": "text", "text": "a few tokens of reply"}}}})),
+        };
+        let rate = |count: u64, started: Instant| {
+            #[allow(clippy::cast_precision_loss)]
+            let rate = count as f64 / started.elapsed().as_secs_f64();
+            rate
+        };
+
+        let (scratch, pool) = Scratch::create(&server_url).await?;
+        let postgres = async {
+            sqlx::raw_sql(POSTGRES_SCHEMA[0]).execute(&pool).await?;
+            let started = Instant::now();
+            for seq in 0..2_000u64 {
+                let event = chunk(seq);
+                sqlx::query(
+                    "INSERT INTO run_events (id, session_id, agent_id, seq, ts, kind, payload, raw)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                )
+                .bind(&event.id)
+                .bind(&event.session_id)
+                .bind(&event.agent_id)
+                .bind(i64::try_from(event.seq)?)
+                .bind(&event.ts)
+                .bind(event.kind.as_str())
+                .bind(&event.payload)
+                .bind(&event.raw)
+                .execute(&pool)
+                .await?;
+            }
+            Ok::<f64, anyhow::Error>(rate(2_000, started))
+        }
+        .await;
+        scratch.drop(pool).await?;
+        println!("PostgreSQL, one statement per event: {:.0} events/s", postgres?);
+
+        let archive = EventArchive::new(Db::temp().await);
+        let started = Instant::now();
+        for seq in 0..2_000u64 {
+            archive.append(&chunk(seq)).await?;
+        }
+        println!(
+            "SQLite, one transaction per event: {:.0} events/s",
+            rate(2_000, started)
+        );
+
+        let archive = EventArchive::new(Db::temp().await);
+        let failure = std::sync::Arc::new(crate::archive::WriteFailure::default());
+        let started = Instant::now();
+        for seq in 0..20_000u64 {
+            archive.enqueue(chunk(seq), &failure).await?;
+        }
+        archive.flush().await;
+        failure.check()?;
+        println!(
+            "SQLite, batching writer: {:.0} events/s ({} transactions for 20000 events)",
+            rate(20_000, started),
+            archive.db().events().commits()
+        );
+        assert_eq!(archive.verify_session("rate").await?.len(), 20_000);
+        Ok(())
+    }
+
     #[tokio::test]
     async fn a_database_with_no_loomwatch_history_is_refused_before_anything_is_written() {
         let db = Db::temp().await;
