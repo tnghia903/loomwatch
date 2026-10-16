@@ -75,15 +75,22 @@ depend on the document as a whole:
 - Optional `Agent.doneWhen` is up to five short statements (each at most 160 characters) that
   the finished result must satisfy. They are stated under the role as `## Done when`; the agent
   checks its result against them before it replies, fixes what it can, and lists any it could not
-  meet under `## Not met`, which reaches the operator and any check step. No second turn is taken
-  on the agent's own say-so: a check step with `sendBackOnce` is what sends work back.
+  meet under `## Not met`. A later stage and any check step read it with the work. On the team's
+  answer, the daemon takes it off the end, with a `## Missing` list (the Writer job's) and
+  `## Not changed` (below). It records them as a `session_meta` `answer_notes` event, which the
+  verdict beside the answer shows, so what is delivered is the work alone. No second turn
+  is taken on the agent's own say-so: a check step with `sendBackOnce` is what sends work back.
 - Optional `Agent.checks` makes a pipeline agent a check step: it names the agent whose work it
   checks, which must hand its work straight to it. That agent writes no summary for it; the check
   step is handed the work as written and its `doneWhen`, and ends its reply with a `## Check` block
   (`- Met | Not met | Not sure — item — evidence`). When the pipeline ends on a check step and no
   `responder` is set, the checked agent's reply is the team's answer, and the checks show beside it.
   With `sendBackOnce: true`, missed checks go back to the checked agent's open session once and the
-  checks run once more on the revised work. Operator nodes may not set either field.
+  checks run once more on the revised work. The findings go back as findings that can be wrong: the
+  agent changes a fact only when a finding's evidence is stronger than its own source, and lists
+  what it kept under `## Not changed`, which is set aside from the answer like `## Not met`. A verdict
+  word in the `## Check` block is read as a whole word, so "Metrics …" is not "Met". Operator nodes
+  may not set either field.
 - `budget` (team or agent level) is retired.
   Readers accept it in any shape and ignore it, so older team files still load; writers must not
   add it. LoomWatch neither tracks spend nor refuses a delegation because of it.

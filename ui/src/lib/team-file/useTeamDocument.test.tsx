@@ -971,6 +971,48 @@ describe('useTeamDocument', () => {
       expect(result.current.pendingEdgeRemoval).toBeNull()
     })
 
+    it('undo after deleting the last edge brings back the check step it ended (ADR 0062)', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+      )
+      const { result } = renderHook(() => useTeamDocument())
+      await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+      act(() => {
+        result.current.onConnect({ source: 'researcher', target: 'reviewer', sourceHandle: null, targetHandle: null })
+      })
+      act(() => result.current.applyAgentFields('reviewer', { checks: 'researcher', sendBackOnce: true }))
+      const reviewer = () => result.current.nodes.find((node) => node.id === 'reviewer')?.data.agent
+
+      act(() => result.current.removeEdgeBetween('researcher', 'reviewer'))
+      expect(reviewer()?.checks).toBeUndefined()
+      expect(result.current.yamlPreview).not.toContain('checks:')
+
+      act(() => result.current.undoLastEdgeRemoval())
+      expect(result.current.edges).toHaveLength(1)
+      expect(reviewer()).toMatchObject({ checks: 'researcher', sendBackOnce: true })
+      expect(result.current.yamlPreview).toContain('checks: researcher')
+    })
+
+    it('a newer edit closes the last-edge undo, so Undo cannot take back that edit instead', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })),
+      )
+      const { result } = renderHook(() => useTeamDocument())
+      await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+      act(() => {
+        result.current.onConnect({ source: 'researcher', target: 'reviewer', sourceHandle: null, targetHandle: null })
+      })
+      act(() => result.current.removeEdgeBetween('researcher', 'reviewer'))
+      expect(result.current.pendingEdgeRemoval).not.toBeNull()
+      act(() => result.current.applyAgentFields('reviewer', { doneWhen: ['Names its source'] }))
+      expect(result.current.pendingEdgeRemoval).toBeNull()
+      expect(result.current.yamlPreview).toContain('Names its source')
+    })
+
     it('offers the same undo when deleting a node removes the final edge', async () => {
       vi.stubGlobal(
         'fetch',

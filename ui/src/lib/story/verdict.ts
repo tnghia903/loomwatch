@@ -1,5 +1,5 @@
 import type { RunPhase } from '../watch/events'
-import type { CheckRound } from './checks'
+import type { AnswerNotes, CheckRound } from './checks'
 import { readPhrase, type ReadCount } from './reads'
 import type { Receipt, ReceiptLine } from './receipt'
 
@@ -41,6 +41,8 @@ export interface VerdictInput {
   read: ReadCount
   /** What the team's check steps found (ADR 0062): a missed or unsure check is worth a look. */
   checks?: readonly CheckRound[]
+  /** What the answer's author said it could not meet, or kept against a check (ADR 0062). */
+  notes?: AnswerNotes | null
 }
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
@@ -62,8 +64,20 @@ export function checkFindings(checks: readonly CheckRound[] = []): ReceiptLine[]
   ]
 }
 
+/** The notes the daemon took off the end of the answer, as findings: they are no longer in it. */
+export function noteFindings(notes?: AnswerNotes | null): ReceiptLine[] {
+  if (!notes) return []
+  return [
+    ...notes.notMet.map((text) => ({ tone: 'warn' as const, text: `Could not meet: ${text}`, agentId: notes.agentId })),
+    ...notes.missing.map((text) => ({ tone: 'warn' as const, text: `Missing: ${text}`, agentId: notes.agentId })),
+    ...notes.notChanged.map((text) => ({ tone: 'warn' as const, text: `Kept against the check: ${text}`, agentId: notes.agentId })),
+  ]
+}
+
 export function answerVerdict(input: VerdictInput): AnswerVerdict {
-  const findings = [...checkFindings(input.checks), ...findingsOf(input.receipt)]
+  // Worst first: a failure leads, then what the author itself could not meet, then the checks.
+  const findings = [...noteFindings(input.notes), ...checkFindings(input.checks), ...findingsOf(input.receipt)]
+    .sort((a, b) => Number(b.tone === 'bad') - Number(a.tone === 'bad'))
   const allMet = Boolean(input.checks?.length) && input.checks!.every((round) => round.items.every((item) => item.verdict === 'met'))
   const first = findings[0] ? `${findings[0].text}.` : ''
   if (input.streaming) return { tone: 'live', label: 'Writing', detail: 'The team is still writing this answer.', findings, reviewable: false }

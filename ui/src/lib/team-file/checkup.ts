@@ -330,7 +330,7 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
           change: {
             kind: 'append-role', agentId: agent.id,
             text: final
-              ? 'Reply with the finished result only, ready to use: lead with the answer, then the details, in short sections. No preamble and no notes about how you worked. If something was missing, end with a short list headed "Missing".'
+              ? 'Reply with the finished result only, ready to use: lead with the answer, then the details, in short sections. No preamble and no notes about how you worked. If something was missing, end with a short list headed "## Missing".'
               : `Reply to ${lead?.name} with what you found or made, in short sections, naming each source or file. Say plainly what you could not do.`,
           },
         },

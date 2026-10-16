@@ -104,7 +104,7 @@ export const ROLE_PRESETS: readonly RolePreset[] = [
       '- If something you need is missing, write around it rather than guessing.',
       '- Before you reply, check every fact, figure and link against the material you were given, and check the piece answers what the request asked.',
       '',
-      'Reply with the finished piece only, ready to use, with no preamble and no notes about how you wrote it. If anything was missing, end with a short list headed "Missing".',
+      'Reply with the finished piece only, ready to use, with no preamble and no notes about how you wrote it. If anything was missing, end with a short list headed "## Missing".',
     ),
   },
   {

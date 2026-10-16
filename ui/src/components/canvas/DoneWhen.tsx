@@ -15,8 +15,9 @@ export interface DoneWhenProps {
 /**
  * DONE WHEN, under the instructions (ADR 0062): what the finished result must have, as state. The
  * agent checks its result against these before it replies, fixes what it can, and lists any it
- * could not meet under "Not met", which reaches you and any check step. An item is written when the field is left, so a half-typed or
- * emptied line never lands in the team file; emptying one removes it.
+ * could not meet under "Not met": a check step reads it with the work, and on the answer it shows
+ * beside it, on the verdict, rather than in it. An item is written when the field is left, so a
+ * half-typed or emptied line never lands in the team file; emptying one removes it.
  */
 export function DoneWhen({ items, readOnly = false, onChange }: DoneWhenProps) {
   const [adding, setAdding] = useState('')

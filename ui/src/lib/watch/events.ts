@@ -2,7 +2,7 @@ import type { AgentStatus } from '../team-file/types'
 import { Correspondence, OPERATOR_ID, type TeamMessage } from './messages'
 import { ACTIVITY_KINDS, ReplyText } from './replyText'
 import { summarizeUsage, turnUsage, type TokenSummary } from './usage'
-import { checkRounds, type CheckRound } from '../story/checks'
+import { answerNotes, checkRounds, type AnswerNotes, type CheckRound } from '../story/checks'
 
 export const eventKinds = ['message', 'thought', 'tool_call', 'tool_update', 'plan', 'permission', 'session_meta', 'usage', 'turn_end', 'process'] as const
 export interface RunEvent {
@@ -379,6 +379,8 @@ export interface RunProjection {
   tokens?: TokenSummary | null
   /** What each check step found, its last round (ADR 0062). Absent on projections built by hand. */
   checks?: CheckRound[]
+  /** What the answer's author could not meet or kept against a check (ADR 0062). */
+  notes?: AnswerNotes | null
 }
 
 export interface RunContext {
@@ -1218,6 +1220,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
     },
     tokens: atRest ? summarizeUsage(turns) : null,
     checks: checkRounds(events, throughSeq),
+    notes: answerNotes(events, throughSeq),
   }
 }
 
