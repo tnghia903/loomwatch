@@ -175,7 +175,9 @@ fn writer_options(path: &Path) -> SqliteConnectOptions {
         .synchronous(SqliteSynchronous::Normal)
         .pragma("cache_size", (-WRITER_CACHE_KIB).to_string())
         .pragma("journal_size_limit", WAL_LIMIT_BYTES.to_string())
-        .optimize_on_close(true, None)
+        // Keeps the planner's statistics fresh as history grows, bounded so it stays quick: the
+        // pool replaces its connection every half hour, and the run events wait meanwhile.
+        .optimize_on_close(true, 400)
 }
 
 fn reader_options(path: &Path) -> SqliteConnectOptions {
@@ -221,6 +223,48 @@ fn create_private(path: &Path) -> Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         Err(error) => {
             Err(error).with_context(|| format!("cannot create the database {}", path.display()))
+        }
+    }
+}
+
+/// One `LoomWatch`'s hold on a database file, released when dropped or when the process ends.
+///
+/// Two daemons on one file would each believe they own every run in it: each would mark the
+/// other's live runs as interrupted when it starts, and their writes would wait on each other. The
+/// launcher gives every copy of `LoomWatch` its own file; this is the check that holds even when
+/// someone starts `loomwatchd` by hand.
+#[derive(Debug)]
+pub struct Claim {
+    _lock: std::fs::File,
+}
+
+/// Claim the database at `path` for this process, beside it in `<path>.lock`.
+///
+/// # Errors
+///
+/// Returns an error when another process holds it, naming what to do, or when the lock file
+/// cannot be made.
+pub fn claim(path: &Path) -> Result<Claim> {
+    create_private(path)?;
+    let mut lock_path = path.as_os_str().to_owned();
+    lock_path.push(".lock");
+    let lock_path = PathBuf::from(lock_path);
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let lock = options
+        .open(&lock_path)
+        .with_context(|| format!("cannot create {}", lock_path.display()))?;
+    match lock.try_lock() {
+        Ok(()) => Ok(Claim { _lock: lock }),
+        Err(std::fs::TryLockError::WouldBlock) => Err(anyhow::anyhow!(
+            "another LoomWatch is already using the run history in {}. Stop it first, or give \
+             this one a file of its own with --database (or LOOMWATCH_DATABASE).",
+            path.display()
+        )),
+        Err(std::fs::TryLockError::Error(error)) => {
+            Err(error).with_context(|| format!("cannot lock {}", lock_path.display()))
         }
     }
 }
@@ -387,6 +431,22 @@ mod tests {
                 0o600
             );
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn one_database_file_is_held_by_one_loomwatch_at_a_time() -> Result<()> {
+        let db = Db::temp().await;
+        let first = claim(db.path())?;
+        let refused = claim(db.path()).expect_err("a second claim is refused");
+        assert!(
+            format!("{refused:#}").contains("another LoomWatch is already using"),
+            "{refused:#}"
+        );
+        let elsewhere = db.path().with_file_name("other.db");
+        let _other = claim(&elsewhere)?;
+        drop(first);
+        let _again = claim(db.path())?;
         Ok(())
     }
 

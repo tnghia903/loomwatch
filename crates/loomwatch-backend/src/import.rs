@@ -827,10 +827,12 @@ mod tests {
             kind: crate::EventKind::Message,
             payload: json!({"role": "agent", "messageId": "m",
                             "content": {"type": "text", "text": "a few tokens of reply"}}),
-            raw: Some(json!({"jsonrpc": "2.0", "method": "session/update", "params": {
+            raw: Some(
+                json!({"jsonrpc": "2.0", "method": "session/update", "params": {
                 "sessionId": "019a1b2c-3d4e-5f60-7182-93a4b5c6d7e8",
                 "update": {"sessionUpdate": "agent_message_chunk", "messageId": "m",
-                           "content": {"type": "text", "text": "a few tokens of reply"}}}})),
+                           "content": {"type": "text", "text": "a few tokens of reply"}}}}),
+            ),
         };
         let rate = |count: u64, started: Instant| {
             #[allow(clippy::cast_precision_loss)]
@@ -863,7 +865,10 @@ mod tests {
         }
         .await;
         scratch.drop(pool).await?;
-        println!("PostgreSQL, one statement per event: {:.0} events/s", postgres?);
+        println!(
+            "PostgreSQL, one statement per event: {:.0} events/s",
+            postgres?
+        );
 
         let archive = EventArchive::new(Db::temp().await);
         let started = Instant::now();

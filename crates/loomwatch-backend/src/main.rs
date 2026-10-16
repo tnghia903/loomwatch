@@ -236,6 +236,8 @@ async fn main() -> Result<()> {
             );
             let state_dir = database.state_dir()?;
             let database = database.database()?;
+            // Held until the process ends: one LoomWatch per run history file.
+            let _claim = loomwatch_backend::db::claim(&database)?;
             let opened = EventArchive::open(&database).await?;
             println!("run history: {}", database.display());
             // Every router takes an optional archive, which tests leave out. The daemon always
@@ -391,8 +393,11 @@ async fn main() -> Result<()> {
             println!("Saved a copy of {} in {}", source.display(), dest.display());
         }
         Commands::ImportPostgres { database, from } => {
-            let report =
-                loomwatch_backend::import::import_postgres(&from, &database.database()?).await?;
+            let database = database.database()?;
+            // The import writes the whole history in one transaction; a LoomWatch using the file
+            // meanwhile would wait on it.
+            let _claim = loomwatch_backend::db::claim(&database)?;
+            let report = loomwatch_backend::import::import_postgres(&from, &database).await?;
             println!("{report}");
         }
         Commands::DatabasePath { database } => {
