@@ -548,7 +548,11 @@
     lastTime = time
     // The top of the cord follows the page as it scrolls, and drops back when it is wanted.
     const target = hangTarget()
-    hang += (target - hang) * (reduced ? 1 : 1 - Math.exp(-dt * (target > hang ? 9 : 16)))
+    const drop = (target - hang) * (reduced ? 1 : 1 - Math.exp(-dt * (target > hang ? 9 : 16)))
+    hang += drop
+    // Without motion it goes all at once, and the rest of the cord goes with it. Its top alone would
+    // land below the thread, which would then stand on it, straight up, with the figure on top.
+    if (reduced) for (const p of links) { p.y += drop; p.py += drop }
     pending += dt
     while (pending >= STEP) { stepCord(STEP); pending -= STEP }
     paintCord(dt)
