@@ -142,6 +142,13 @@ export interface RunRecord {
   working?: string[]
   /** Notes waiting for an agent's current turn to end (ADR 0051). */
   queuedNotes?: QueuedNote[]
+  /**
+   * The team's and each agent's names when the run started, so a client that has not read the
+   * team file can say who is working (the menu bar does). Absent on runs recorded before they
+   * were kept.
+   */
+  teamName?: string
+  agentNames?: Record<string, string>
 }
 
 /** A note sent to an agent at work, waiting for its current turn to end (ADR 0051). */

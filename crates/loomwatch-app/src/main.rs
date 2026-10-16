@@ -17,6 +17,10 @@
 mod mac;
 #[cfg(windows)]
 mod windows;
+// What the menu says about the teams' work. Built and tested everywhere, used by the Mac menu,
+// and without the face's moods by the Windows one.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod progress;
 
 #[cfg(target_os = "macos")]
 fn main() -> anyhow::Result<()> {

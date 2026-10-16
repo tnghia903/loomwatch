@@ -423,8 +423,9 @@ menu bar. Then follow [Try your first run](#try-your-first-run).
 
 LoomWatch opens in your browser with an offline demo team ready to run, and keeps an icon beside the
 clock (click the **^** there if it is hidden). Click the icon to open LoomWatch; right-click it for
-**Start at sign-in**, **Show log** and **Quit LoomWatch**. There is no window to keep open. Then
-follow [Try your first run](#try-your-first-run).
+what waits on you, who is working and what finished in the last hour (click one to open it), and
+for **Start at sign-in**, **Show log** and **Quit LoomWatch**. There is no window to keep open.
+Then follow [Try your first run](#try-your-first-run).
 
 > [!NOTE]
 > LoomWatch is not signed with a code-signing certificate yet, so the first time you open the

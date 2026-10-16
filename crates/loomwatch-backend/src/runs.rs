@@ -251,6 +251,15 @@ pub struct RunRecord {
     /// `deliver_title`, and not stored: a record read back after a restart runs nothing.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_mode: bool,
+    /// The team file's `name` when this run started, so a client that has not read the team file
+    /// can still name the team, as the menu bar's list of work does. Fixed at launch. `None` for a
+    /// team without one and for runs recorded before it was kept; a client falls back to the path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_name: Option<String>,
+    /// Each agent's name by id (its id when it has none), fixed at launch like `team_name`, so a
+    /// client can say who [`Self::working`] is without reading the team file.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub agent_names: BTreeMap<String, String>,
 }
 
 /// A note sent to an agent at work, waiting for its current turn to end (ADR 0051).
@@ -377,6 +386,18 @@ impl RunRecord {
             working: Vec::new(),
             queued_notes: Vec::new(),
             auto_mode: team.permissions.mode == crate::config::PermissionMode::Auto,
+            team_name: Some(team.name.trim())
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned),
+            agent_names: team
+                .agents
+                .iter()
+                .map(|agent| {
+                    let name = agent.name.trim();
+                    let name = if name.is_empty() { &agent.id } else { name };
+                    (agent.id.clone(), name.to_owned())
+                })
+                .collect(),
         })
     }
 }
@@ -498,15 +519,18 @@ impl RunStore {
             .delivery
             .as_ref()
             .and_then(|delivery| serde_json::to_value(delivery).ok());
+        let agent_names = (!record.agent_names.is_empty())
+            .then(|| serde_json::to_value(&record.agent_names).ok())
+            .flatten();
         sqlx::query(
             "INSERT INTO runs
              (run_id, session_id, team_path, prompt, status, mode, entrypoint, responder,
               agent_ids, created_at, started_at, finished_at, error, exit_code, error_code,
               stop_reason, event_count, reply, trigger, delivery, follows_run_id, start_at,
               retry_of_run_id, waiting_on, start_key, start_fingerprint, team_key, only_agent,
-              team_revision)
+              team_revision, team_name, agent_names)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-                     $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+                     $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
              ON CONFLICT (run_id) DO UPDATE SET
                status = EXCLUDED.status,
                started_at = EXCLUDED.started_at,
@@ -564,6 +588,8 @@ impl RunStore {
         .bind((!record.team_key.is_empty()).then_some(record.team_key.as_str()))
         .bind(&record.only_agent)
         .bind(&record.team_revision)
+        .bind(&record.team_name)
+        .bind(&agent_names)
         .execute(self.db.writer())
         .await?;
         Ok(())
@@ -665,6 +691,11 @@ pub(crate) fn decode_run(row: &sqlx::sqlite::SqliteRow) -> Result<StoredRun, sql
             working: Vec::new(),
             queued_notes: Vec::new(),
             auto_mode: false,
+            team_name: row.try_get("team_name")?,
+            agent_names: row
+                .try_get::<Option<Value>, _>("agent_names")?
+                .and_then(|names| serde_json::from_value(names).ok())
+                .unwrap_or_default(),
         },
         start_key: row.try_get("start_key")?,
         start_fingerprint: row.try_get("start_fingerprint")?,
@@ -3124,6 +3155,21 @@ struct RunsQuery {
     /// list every few seconds. The whole reply stays at `GET /api/runs/{id}`.
     #[serde(default)]
     preview: bool,
+    /// `finishedWithin=<seconds>` keeps the runs still under way and those that finished in the
+    /// last that many seconds: what the menu bar reads every few seconds, for as long as the app
+    /// runs, without reading all of the history each time.
+    finished_within: Option<u64>,
+}
+
+/// Whether `run` is still under way or finished at or after `cutoff`. A finish time that does not
+/// parse keeps the run: a filter must not hide a record it cannot read.
+fn finished_since(run: &RunRecord, cutoff: chrono::DateTime<Utc>) -> bool {
+    !run.status.is_terminal()
+        || run
+            .finished_at
+            .as_deref()
+            .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+            .is_none_or(|at| at >= cutoff)
 }
 
 /// How much of each reply `GET /api/runs?preview=true` keeps, in characters.
@@ -3159,6 +3205,13 @@ async fn list_runs(
             });
     }
     let mut runs = state.registry.list();
+    let cutoff = query.finished_within.and_then(|seconds| {
+        chrono::TimeDelta::try_seconds(i64::try_from(seconds).ok()?)
+            .and_then(|window| Utc::now().checked_sub_signed(window))
+    });
+    if let Some(cutoff) = cutoff {
+        runs.retain(|run| finished_since(run, cutoff));
+    }
     if query.preview {
         runs.iter_mut()
             .filter_map(|run| run.reply.as_mut())
@@ -5068,6 +5121,69 @@ exit 7
         let mut short = "done".to_owned();
         reply_preview(&mut short);
         assert_eq!(short, "done");
+    }
+
+    /// The menu bar's read: `finishedWithin` keeps what is under way and what finished inside the
+    /// window, and every record names its team and agents as they were at launch.
+    #[tokio::test]
+    async fn the_list_can_leave_out_runs_that_finished_long_ago() {
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nname: ' Research team '\nentrypoint: a\nagents:\n  - id: a\n    name: Researcher\n    spawn: {cmd: x, cwd: .}\n    model: m\n  - id: b\n    spawn: {cmd: x, cwd: .}\n    model: m\n",
+        )
+        .unwrap();
+        let dir = TeamsDir::new();
+        let registry = RunRegistry::default();
+        let mut runs = Vec::new();
+        for finished in [None, Some(10), Some(120)] {
+            let mut record =
+                RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+            record.status = RunStatus::Running;
+            if let Some(minutes_ago) = finished {
+                record.status = RunStatus::Succeeded;
+                record.finished_at = Some(
+                    (Utc::now() - chrono::TimeDelta::seconds(minutes_ago * 60))
+                        .to_rfc3339_opts(SecondsFormat::Millis, true),
+                );
+            }
+            runs.push(record.run_id.clone());
+            registry.insert(record);
+        }
+        let app = router(None, dir.0.clone(), registry);
+        let listed = |uri: &'static str| {
+            let app = app.clone();
+            async move {
+                let body = json_body(app.oneshot(get_local(uri)).await.unwrap()).await;
+                let mut ids: Vec<String> = body
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|run| run["runId"].as_str().unwrap().to_owned())
+                    .collect();
+                ids.sort();
+                (ids, body)
+            }
+        };
+        let sorted = |ids: &[&String]| {
+            let mut ids: Vec<String> = ids.iter().map(|id| (*id).clone()).collect();
+            ids.sort();
+            ids
+        };
+
+        let (all, body) = listed("/api/runs?preview=true").await;
+        assert_eq!(all, sorted(&runs.iter().collect::<Vec<_>>()));
+        assert_eq!(body[0]["teamName"], "Research team", "{body}");
+        assert_eq!(
+            body[0]["agentNames"],
+            json!({"a": "Researcher", "b": "b"}),
+            "an agent without a name goes by its id"
+        );
+
+        let (recent, _) = listed("/api/runs?preview=true&finishedWithin=3600").await;
+        assert_eq!(
+            recent,
+            sorted(&[&runs[0], &runs[1]]),
+            "the run that finished two hours ago is left out"
+        );
     }
 
     /// What a finished run reads back from the archive, now asked of a few events instead of the

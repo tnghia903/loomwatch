@@ -2,8 +2,9 @@
 //!
 //! What `mac.rs` does for a Mac, for Windows: `LoomWatch.exe` starts `loomwatchd.exe` from its own
 //! folder, opens `LoomWatch` in the browser, and stays beside the clock with Open, Start at sign-in,
-//! Show log and Quit. Clicking the icon opens `LoomWatch`; right-clicking shows the menu. No
-//! console window is ever shown.
+//! Show log and Quit. Clicking the icon opens `LoomWatch`; right-clicking shows the menu, which
+//! names what waits on you, who is working and what finished lately (`crate::progress`), as the
+//! Mac menu does; hovering the icon says the first of them. No console window is ever shown.
 //!
 //! Where it differs from the Mac: Windows has no signals, so `loomwatchd` is told to stop by
 //! closing its standard input, which also happens when this app ends any other way
@@ -18,15 +19,17 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+use crate::progress::{self, Progress, Row};
 
 /// The port a `LoomWatch` started from a terminal uses too, so the address people know keeps
 /// working.
@@ -41,14 +44,18 @@ const CRASHES_BEFORE_GIVING_UP: usize = 3;
 const RUN_VALUE: &str = "LoomWatch";
 /// Starts a console program, `loomwatchd.exe`, without a console window.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// How often the menu reads what the teams are doing, as the Mac menu does.
+const POLL: Duration = Duration::from_secs(2);
 
 enum UserEvent {
     Menu(MenuEvent),
     /// `LoomWatch.exe --quit` asked.
     Quit,
     Tray(TrayIconEvent),
-    /// `loomwatchd` answers at this address.
-    Ready(String),
+    /// `loomwatchd` answers on this port.
+    Ready(u16),
+    /// What the teams are doing changed.
+    Progress(Progress),
     /// What the menu's status line should say now.
     Status(String),
 }
@@ -189,7 +196,14 @@ pub fn run() -> Result<()> {
         &quit,
     ])?;
 
-    let supervisor = Supervisor::start(paths.clone(), proxy);
+    // Under "Open LoomWatch" and the status line.
+    let mut work = WorkSection::new(menu.clone(), 2);
+    let supervisor = Supervisor::start(paths.clone(), proxy.clone());
+    let watched = Arc::new(AtomicU16::new(0));
+    {
+        let watched = Arc::clone(&watched);
+        std::thread::spawn(move || watch_runs(&watched, &proxy));
+    }
     let mut menu = Some(menu);
     let mut tray = None;
     let mut address: Option<String> = None;
@@ -224,8 +238,10 @@ pub fn run() -> Result<()> {
                 button_state: MouseButtonState::Up,
                 ..
             })) => show(address.as_deref(), &mut open_when_ready),
-            Event::UserEvent(UserEvent::Ready(url)) => {
-                status.set_text("Running");
+            Event::UserEvent(UserEvent::Ready(port)) => {
+                let url = format!("http://127.0.0.1:{port}");
+                status.set_text("LoomWatch is running");
+                watched.store(port, Ordering::SeqCst);
                 if open_when_ready {
                     open(OsStr::new(&url));
                     open_when_ready = false;
@@ -233,8 +249,18 @@ pub fn run() -> Result<()> {
                 address = Some(url);
             }
             Event::UserEvent(UserEvent::Status(text)) => status.set_text(text),
+            Event::UserEvent(UserEvent::Progress(next)) => {
+                work.show(&next.rows());
+                if let Some(tray) = &tray {
+                    let _ = tray.set_tooltip(Some(next.summary()));
+                }
+            }
             Event::UserEvent(UserEvent::Menu(event)) => {
-                if event.id == *open_item.id() {
+                if let Some(link) = work.link_for(&event.id) {
+                    if let Some(url) = &address {
+                        open(OsStr::new(&format!("{url}{link}")));
+                    }
+                } else if event.id == *open_item.id() {
                     show(address.as_deref(), &mut open_when_ready);
                 } else if event.id == *at_login.id() {
                     let wanted = !login_item::enabled();
@@ -392,9 +418,9 @@ fn supervise(
     };
     // Another LoomWatch already answers, started from a terminal, say: open that one, and don't
     // start a second that would run the same scheduled teams twice.
-    if let Some(url) = running_loomwatch(first_port()..=first_port()) {
+    if running_loomwatch(first_port()..=first_port()).is_some() {
         say("Running (started elsewhere)");
-        let _ = proxy.send_event(UserEvent::Ready(url));
+        let _ = proxy.send_event(UserEvent::Ready(first_port()));
         return;
     }
     let path = sign_in_path();
@@ -418,9 +444,8 @@ fn supervise(
             }
         };
         *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(child);
-        let url = format!("http://127.0.0.1:{port}");
         if wait_until_healthy(port, slot) {
-            let _ = proxy.send_event(UserEvent::Ready(url));
+            let _ = proxy.send_event(UserEvent::Ready(port));
         } else if !stopping.load(Ordering::SeqCst) {
             say("Still starting… (see Show log)");
         }
@@ -450,6 +475,93 @@ fn supervise(
             return;
         }
         say("Restarting…");
+    }
+}
+
+/// Reads what the teams are doing from the `loomwatchd` on `watched` (0 until one answers), and
+/// tells the menu each time it changes. When `loomwatchd` doesn't answer, nothing is under way.
+fn watch_runs(watched: &AtomicU16, proxy: &EventLoopProxy<UserEvent>) {
+    let mut last: Option<Progress> = None;
+    loop {
+        let port = watched.load(Ordering::SeqCst);
+        if port != 0 {
+            let now = get(port, &progress::runs_path())
+                .and_then(|body| serde_json::from_str::<Vec<progress::Record>>(&body).ok())
+                .map(|runs| progress::progress(&runs, chrono::Utc::now()))
+                .unwrap_or_default();
+            if last.as_ref() != Some(&now) {
+                if proxy.send_event(UserEvent::Progress(now.clone())).is_err() {
+                    return;
+                }
+                last = Some(now);
+            }
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
+/// The menu's rows about the teams' work, between the status line and the settings, as the Mac
+/// menu has them.
+struct WorkSection {
+    menu: Menu,
+    /// Where the section starts in the menu.
+    at: usize,
+    separator: PredefinedMenuItem,
+    /// Each row's item and where it opens in the app.
+    shown: Vec<(MenuItem, Option<String>)>,
+}
+
+impl WorkSection {
+    fn new(menu: Menu, at: usize) -> Self {
+        Self {
+            menu,
+            at,
+            separator: PredefinedMenuItem::separator(),
+            shown: Vec::new(),
+        }
+    }
+
+    /// Show `rows`. Rows about the same runs as before only change their words, so a menu that is
+    /// open as the minutes tick over does not jump; anything else builds the section again.
+    fn show(&mut self, rows: &[Row]) {
+        let same = self.shown.len() == rows.len()
+            && self
+                .shown
+                .iter()
+                .zip(rows)
+                .all(|((_, link), row)| *link == row.link);
+        if same {
+            for ((item, _), row) in self.shown.iter().zip(rows) {
+                if item.text() != row.text {
+                    item.set_text(&row.text);
+                }
+            }
+            return;
+        }
+        if !self.shown.is_empty() {
+            let _ = self.menu.remove(&self.separator);
+        }
+        for (item, _) in self.shown.drain(..) {
+            let _ = self.menu.remove(&item);
+        }
+        if rows.is_empty() {
+            return;
+        }
+        let _ = self.menu.insert(&self.separator, self.at);
+        for (offset, row) in rows.iter().enumerate() {
+            // Headings are greyed out; a line about a run opens that run.
+            let item = MenuItem::new(&row.text, row.link.is_some(), None);
+            let _ = self.menu.insert(&item, self.at + 1 + offset);
+            self.shown.push((item, row.link.clone()));
+        }
+    }
+
+    /// Where a clicked row opens in the app.
+    fn link_for(&self, id: &MenuId) -> Option<&str> {
+        self.shown
+            .iter()
+            .find(|(item, _)| item.id() == id)
+            .and_then(|(_, link)| link.as_deref())
     }
 }
 

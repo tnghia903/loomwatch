@@ -1976,6 +1976,9 @@ name = "loomwatch-app"
 version = "0.5.0"
 dependencies = [
  "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
  "tao",
  "tray-icon",
  "winreg",

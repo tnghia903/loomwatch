@@ -402,13 +402,15 @@
   const PULL = 34 // how far the cord comes out of the switch
   const CLICK = 22 // and how far it comes out when the switch clicks
   const GRAVITY = 2200
-  // The light is felt as it changes, however it is changed, and at no other time. Phones that can
-  // vibrate do (flip, below). A page can't buzz a Mac's trackpad or an iPhone, but Safari does it
-  // for its own switch control: as the switch's thumb is dragged across, and on an iPhone as it is
-  // tapped. So where Safari has one, an unseen switch lies over the figure, and the figure is pulled
-  // by it; it is square and laid along the pull, so its thumb crosses down the pull, wherever it is
-  // pressed. Nothing can buzz a Mac's click, but a trackpad's click is felt anyway.
-  const BUZZ = 55 // the switch's side, about the figure's
+  // The light is felt as it changes. Phones that can vibrate do (flip, below). A page can't buzz a
+  // Mac's trackpad or an iPhone, but Safari does it for its own switch control: as the switch's
+  // thumb is dragged across, and on an iPhone as it is tapped. So where Safari has one, an unseen
+  // switch lies over the figure, and the figure is pulled by it. WebKit moves the thumb once the
+  // pointer has gone 40% of the track from where it was pressed (anywhere, in a square switch), so
+  // this one is square, laid along the pull, and long enough that a finger's thumb crosses as the
+  // cord clicks (a mouse's is made to, tickMore). Nothing can buzz a Mac's click, but a trackpad's
+  // click is felt anyway.
+  const BUZZ = CLICK / 0.4
   const buzzSwitch = 'switch' in HTMLInputElement.prototype ? el('input', { class: 'buzz-switch', type: 'checkbox', switch: true, tabindex: '-1', style: `width: ${BUZZ}px; height: ${BUZZ}px` }) : null
   if (buzzSwitch) cord.append(buzzSwitch)
   const handles = [cordFigure, buzzSwitch].filter(Boolean)
@@ -437,7 +439,6 @@
   let tilt = 0 // the figure's own lean on the thread, radians clockwise
   let tiltSpeed = 0
   let held = null
-  let lastHold = null // held, kept once it's let go, for Safari's switch (it hears the release after)
   let tugAt = -1
   let tie = { x: BOX / 2, y: BOX * 0.163 } // where the thread is tied: the spool's hole in the still
   let near = false
@@ -568,8 +569,8 @@
     cordPath.setAttribute('d', `${d}L${end.x.toFixed(2)} ${end.y.toFixed(2)}`)
     if (figureScene && shown()) tie = figureScene.draw(dt, { swing: tiltSpeed, pull: out / PULL, pointer: pointerOnFigure(), near: near || Boolean(held) })
     cordFigure.style.transform = `translate(${end.x.toFixed(2)}px, ${end.y.toFixed(2)}px) rotate(${tilt.toFixed(4)}rad) translate(${(-tie.x).toFixed(2)}px, ${(-tie.y).toFixed(2)}px)`
-    // The switch lies over the middle of the figure; held, it stays where it was taken hold of until
-    // the light changes (tickMore moves it then).
+    // The switch lies over the middle of the figure; held, it stays where it was taken hold of, so a
+    // finger's pull drags its thumb (a mouse's is moved once the light changes, tickMore).
     if (buzzSwitch && !held) {
       const mx = BOX / 2 - tie.x
       const my = BOX / 2 - tie.y
@@ -619,18 +620,18 @@
     event.currentTarget.setPointerCapture(event.pointerId)
     const at = cordPoint(event)
     held = { id: event.pointerId, dx: at.x - end.x, dy: at.y - end.y, x: end.x, y: end.y, from: at, moved: 0, vx: 0, vy: 0, t: event.timeStamp, flipped: false }
-    if (event.currentTarget === buzzSwitch) held.tick = { from: at.y - buzzAt.y, mouse: event.pointerType === 'mouse', count: 0, at: 0 }
-    lastHold = held
+    if (event.currentTarget === buzzSwitch && event.pointerType === 'mouse') held.tick = { from: at.y - buzzAt.y, count: 0, at: 0 }
     handles.forEach((h) => h.classList.add('held'))
     wakeCord()
   }
-  // Safari's thumb crosses once the pointer is 40% of the track past where it was pressed, then
-  // whenever it crosses the middle. Until the light changes Safari isn't let see the pull (below), so
-  // it can't cross early. As it changes, the switch jumps up a whole length, so the thumb crosses on
-  // that very move, and from then on the switch goes with the pointer. A mouse's thumb then crosses
-  // back and forth for each tick more, and stays across; a finger's just stays across.
+  // A mouse's pull: Safari's thumb crosses once the pointer is 40% of the track past where it was
+  // pressed, then whenever it crosses the middle. Until the light changes Safari isn't let see the
+  // pull (below), so it can't cross early. As it changes, the switch jumps up a whole length, so the
+  // thumb crosses on that very move, and from then on the switch goes with the pointer, the thumb
+  // crossing back and forth for each tick more, then staying across. A finger's pull is left to
+  // Safari: an iPhone stopped buzzing when the page held it back too.
   function tickMore(tick, y, time) {
-    if (!tick.count) { tick.count = 1; tick.at = time } else if (tick.mouse && tick.count < TICKS && time - tick.at >= TICK_GAP) { tick.count += 1; tick.at = time }
+    if (!tick.count) { tick.count = 1; tick.at = time } else if (tick.count < TICKS && time - tick.at >= TICK_GAP) { tick.count += 1; tick.at = time }
     const local = tick.count === 1 ? tick.from + BUZZ : BUZZ / 2 + (tick.count % 2 ? 10 : -10)
     placeSwitch(buzzAt.x, y - local)
     buzzSwitch.getBoundingClientRect() // so Safari measures the move against where it is now
@@ -686,14 +687,8 @@
   }
   // The switch's own click is undone, so it is off for the next pull.
   buzzSwitch?.addEventListener('click', (event) => event.preventDefault())
-  // Until the light changes, Safari isn't let see the pull (tickMore), nor a hover. A finger's
-  // release taps the switch, which an iPhone feels, so that is let through only for a tap (which
-  // switches) or after a pull that switched: if Safari felt the switch already, it doesn't again,
-  // and if the pull was quicker than it (it waits 200 ms into a hold), the release is felt instead.
-  const untilFlipped = (event) => { if (!held?.flipped) event.preventDefault() }
-  buzzSwitch?.addEventListener('mousemove', untilFlipped)
-  buzzSwitch?.addEventListener('touchmove', untilFlipped, { passive: false })
-  buzzSwitch?.addEventListener('touchend', (event) => { if (lastHold && !lastHold.flipped && lastHold.moved >= 4) event.preventDefault() }, { passive: false })
+  // Until the light changes, Safari isn't let see a mouse's pull (tickMore), nor a hover.
+  buzzSwitch?.addEventListener('mousemove', (event) => { if (!held?.flipped) event.preventDefault() })
   // The bulb's switch switches as the button does, as it's let go; Safari's own click, which an
   // iPhone feels, is undone, and it isn't let follow a finger, so nothing else is felt.
   bulbSwitch?.addEventListener('pointerup', () => { flip(); tug() })

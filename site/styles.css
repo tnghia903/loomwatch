@@ -246,7 +246,7 @@ em { font-style: italic; }
 
 /* 02 · Build */
 .sentence { margin: 0; font: 400 20px/1.75 var(--serif); color: var(--ink); text-wrap: pretty; }
-.sentence .chip { font-size: 13px; height: 28px; vertical-align: 3px; padding: 0 4px 0 10px; }
+.sentence .chip { font-size: 13px; height: 28px; vertical-align: middle; padding: 0 4px 0 10px; }
 .sentence .chip.dashed { padding: 0 4px 0 10px; }
 .chip select {
   appearance: none; -webkit-appearance: none; border: 0; border-left: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);

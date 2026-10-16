@@ -3,7 +3,8 @@
 //                         SVG icons or ask for /favicon.ico
 //   apple-touch-icon.png  180 px and full bleed from docs/assets/brand/mark.svg (the large mark, whose stitch is finer),
 //                         for Safari's Favorites and the iOS home screen
-// Run it after changing either SVG, and commit what it writes:
+// Run it after changing either SVG, commit what it writes, and bump the icons' ?v= in index.html (browsers
+// keep a favicon by its address):
 //   node site/icons.mjs
 // Set CHROME_BIN when Chrome is not at the standard macOS path.
 import { spawn } from 'node:child_process'
