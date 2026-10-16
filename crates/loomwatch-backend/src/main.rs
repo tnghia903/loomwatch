@@ -161,20 +161,24 @@ async fn recovered_registry(archive: &EventArchive) -> RunRegistry {
 
 /// Started by `LoomWatch.app` (`LOOMWATCH_EXIT_WITH_PARENT=1`): stop when the app is gone, so a
 /// force-quit app never leaves `LoomWatch` running where nobody can see or stop it. An orphaned
-/// process is adopted by launchd (or init), whose pid is 1.
-fn exit_with_parent() {
+/// process is adopted by launchd (or init), whose pid is 1. As on a signal, the archive writes
+/// what it holds first.
+fn exit_with_parent(archive: EventArchive) {
     #[cfg(unix)]
     if std::env::var_os("LOOMWATCH_EXIT_WITH_PARENT").is_some_and(|value| value == "1") {
-        tokio::spawn(async {
+        tokio::spawn(async move {
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                tokio::time::sleep(Duration::from_secs(2)).await;
                 if std::os::unix::process::parent_id() == 1 {
                     eprintln!("LoomWatch.app is gone, so loomwatchd is stopping too");
+                    let _ = tokio::time::timeout(Duration::from_secs(5), archive.flush()).await;
                     std::process::exit(0);
                 }
             }
         });
     }
+    #[cfg(not(unix))]
+    let _ = archive;
 }
 
 /// `~/Library/Application Support/LoomWatch` on macOS, `$XDG_STATE_HOME/loomwatch` or
@@ -236,7 +240,6 @@ async fn main() -> Result<()> {
         } => {
             // Fixed now, so `/api/about` tells this start from the next one (ADR 0052).
             let _ = loomwatch_backend::updates::started_at();
-            exit_with_parent();
             if !listen.ip().is_loopback() {
                 eprintln!(
                     "warning: serving on non-loopback address {}; use --allow-host for each trusted hostname",
@@ -288,6 +291,7 @@ async fn main() -> Result<()> {
             // Ctrl-C (and the launcher's stop) ends the daemon. The archive's writer may still
             // hold the last fraction of a second of events; they are written before it exits.
             tokio::spawn(flush_then_exit_on_signal(opened.clone()));
+            exit_with_parent(opened.clone());
             registry.set_approvals(std::sync::Arc::new(approvals));
             // The archive is handed to the REST router for exactly one reason: the capability
             // inventory's kept-note counts are rows, not files. Everything else it serves is disk.
