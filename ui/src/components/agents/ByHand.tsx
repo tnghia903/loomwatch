@@ -1,12 +1,12 @@
 import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { FileText, Folder, KeyRound, Network, NotebookText, Plus, Puzzle, Search, Wrench, X } from 'lucide-react'
 
-import { middleTruncate } from '../../lib/format'
+import { listNames, middleTruncate } from '../../lib/format'
 import { isHarnessRunnable, type DetectedHarness, type HarnessModels } from '../../lib/harnesses'
 import type { DetectedCapability } from '../../lib/library/client'
 import type { AgentDraft } from '../../lib/library/draft'
 import { replyLine } from '../../lib/library/desk'
-import { askedKey, CARD_SLOTS, FIGURE_KEYS, figureMood, type FigurePart, type ReadSource } from '../../lib/library/figure'
+import { askedKey, CARD_SLOTS, FIGURE_KEYS, figureMood, READ_SLOTS, TOOL_SLOTS, type FigurePart, type ReadSource } from '../../lib/library/figure'
 import type { FigureChoice } from '../../lib/library/figures'
 import type { RunRecord } from '../../lib/runs/client'
 import { markPattern } from '../../lib/story/mark'
@@ -171,8 +171,13 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   const asking = asked && !draft.allow[asked] ? FIGURE_KEYS.find(({ key }) => key === asked)?.word : null
   const dishText = asking ? `It’s asking you for the ${asking} key` : wild ? `${wild} doesn’t ask before it acts` : kept.length ? `You keep: ${kept.map((item) => item.word).join(', ')} · it asks you first` : 'You keep no keys'
   const parts = INSTRUCTION_PARTS.filter((part) => shape[part]).length
-  const readsText = !reads ? 'Reads · what a team gives' : !reads.length ? 'Reads · nothing yet' : reads.length === 1 ? `Reads · ${reads[0].name}` : `Reads · ${readCount(reads)}`
-  const toolsText = !draft.tools.length ? 'Tools · none yet' : draft.tools.length === 1 ? `Tools · ${draft.tools[0]}` : `Tools · ${draft.tools.length}`
+  // More than a drawer has room for still count, as skills past the pegboard's do: the label says
+  // how many aren't in it. It gives only the total then, so the two drawers' labels stay short
+  // enough to sit side by side.
+  const readsOff = reads && reads.length > READ_SLOTS ? ` (${reads.length - READ_SLOTS} not in the drawer)` : ''
+  const toolsOff = draft.tools.length > TOOL_SLOTS ? ` (${draft.tools.length - TOOL_SLOTS} not in the drawer)` : ''
+  const readsText = !reads ? 'Reads · what a team gives' : !reads.length ? 'Reads · nothing yet' : reads.length === 1 ? `Reads · ${reads[0].name}` : readsOff ? `Reads · ${reads.length}${readsOff}` : `Reads · ${readCount(reads)}`
+  const toolsText = !draft.tools.length ? 'Tools · none yet' : draft.tools.length === 1 ? `Tools · ${draft.tools[0]}` : `Tools · ${draft.tools.length}${toolsOff}`
   // What each setting adds up to, in words: the line under each block's title.
   const says: Record<FigurePart, string> = {
     name: hideDoes || !draft.does.trim() ? name : `${name} · ${draft.does.trim()}`,
@@ -193,8 +198,8 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
     { anchor: 'dish', part: 'keys', place: 'below', text: dishText, short: asking ? `Asking for ${asking}` : `You keep ${wild ? 0 : kept.length}`, label: `Your dish: ${dishText}` },
     { anchor: 'reply', part: 'reply', place: 'above', text: `Hands back · ${reply ? 'see the tray' : 'not said yet'}`, short: 'Hands back', label: 'The tray: what it hands back' },
     // Under the bench's two drawers, on its face: what it works with, apart from the work on top.
-    { anchor: 'reads', part: 'reads', place: 'below', text: readsText, short: `Reads · ${reads?.length ?? 0}`, label: `The file drawer: ${says.reads}` },
-    { anchor: 'tools', part: 'tools', place: 'below', text: toolsText, short: `Tools · ${draft.tools.length}`, label: `The tool drawer: ${says.tools}` },
+    { anchor: 'reads', part: 'reads', place: 'below', text: readsText, short: `Reads · ${reads?.length ?? 0}`, label: `The file drawer: ${says.reads}${readsOff}` },
+    { anchor: 'tools', part: 'tools', place: 'below', text: toolsText, short: `Tools · ${draft.tools.length}`, label: `The tool drawer: ${says.tools}${toolsOff}` },
     { anchor: 'name', part: 'name', place: 'plate', label: `The nameplate: ${name}` },
     { anchor: 'app', part: 'app', place: 'plate', label: `The laptop, the app it works in: ${harness?.name ?? 'none chosen'}` },
   ]
@@ -322,12 +327,14 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
                 return <li key={`${source.kind}:${source.where}:${index}`}><Icon size={15} aria-hidden="true" /><span><b>{source.name}</b><em title={source.where}>{source.kind === 'page' ? source.where : `${source.kind === 'file' ? 'File' : 'Folder'} · ${middleTruncate(source.where, 64)}`}</em></span></li>
               })}
             </ul>}
+            {reads.length > READ_SLOTS && <p className="t-meta">The drawer has room for {READ_SLOTS}, so {listNames(reads.slice(READ_SLOTS).map((source) => source.name))} {reads.length - READ_SLOTS === 1 ? 'isn’t' : 'aren’t'} in it. It still reads {reads.length - READ_SLOTS === 1 ? 'it' : 'them'}.</p>}
             <p className="t-meta">What it reads is the team’s to give: draw a line from a folder, file or Notion page to this agent in Workflow.</p>
             {onShowWorkflow && <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />{reads.length ? 'Change it in Workflow' : 'Give it something in Workflow'}</button>}
           </>)}
 
           {block('tools', <>
             <Shelf kind="tool" chosen={draft.tools} available={tools} loading={toolsLoading} onAdd={(tool) => { if (!draft.tools.includes(tool)) set('tools', [...draft.tools, tool]) }} onRemove={(tool) => set('tools', draft.tools.filter((item) => item !== tool))} />
+            {draft.tools.length > TOOL_SLOTS && <p className="t-meta">The drawer has room for {TOOL_SLOTS}, so {listNames(draft.tools.slice(TOOL_SLOTS))} {draft.tools.length - TOOL_SLOTS === 1 ? 'isn’t' : 'aren’t'} in it. It can still use {draft.tools.length - TOOL_SLOTS === 1 ? 'it' : 'them'}.</p>}
             <p className="t-meta">{reads ? 'Each tool it has shows on the Workflow canvas as a card wired to this agent.' : 'In a team, each tool it has shows on the Workflow canvas as a card wired to this agent.'}</p>
           </>)}
 
