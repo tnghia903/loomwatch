@@ -354,6 +354,22 @@ describe('who is on the team', () => {
     expect(screen.getByRole('list', { name: 'Who is on the team' })).toBeVisible()
   })
 
+  it('says the agent its newest piece of work stopped at has failed, until it works again', async () => {
+    const stopped = run({ status: 'failed', reply: null, error: 'pipeline node researcher failed: Codex reported an error instead of an answer: Quota exceeded.' })
+    page = [{ kind: 'work', run: stopped, request: message({}), notes: [] }]
+    const first = renderChat()
+    const list = await screen.findByRole('list', { name: 'Who is on the team' })
+    await waitFor(() => expect(memberRow('Researcher', list)).toHaveTextContent('Researcherfailed'))
+    expect(memberRow('Researcher', list)).toHaveClass('failed')
+    expect(memberRow('Writer', list)).toHaveTextContent('Writerready')
+    first.unmount()
+    // A newer piece the researcher is at clears it.
+    page = [...page, { kind: 'work', run: run({ runId: 'run-2', createdAt: '2026-10-06T03:00:00.000Z', status: 'running', reply: null, finishedAt: null, working: ['researcher'] }), request: message({ id: 'm-2' }), notes: [] }]
+    renderChat()
+    const again = await screen.findByRole('list', { name: 'Who is on the team' })
+    await waitFor(() => expect(memberRow('Researcher', again)).toHaveTextContent('Researcherworking'))
+  })
+
   it('says an agent that asked your permission is waiting for you, not working', async () => {
     const asked = { id: 'p1', agent: 'researcher', name: 'Researcher', title: 'mcp__claude_ai_Notion__notion-fetch', kind: 'other', switch: null, since: '2026-10-06T02:01:00.000Z', expiresAt: new Date(Date.now() + 9 * 60000).toISOString() }
     page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'], permissionRequests: [asked] }), request: message({}), notes: [] }]

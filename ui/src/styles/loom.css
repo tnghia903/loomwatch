@@ -193,11 +193,10 @@ span.story-schedule { cursor: default; }
 .hue-quiet { --hue: var(--color-ink-3); }
 .chat-avatar { position: relative; display: inline-grid; place-items: center; flex: none; border-radius: 50%; border: 2px solid var(--color-panel); background: color-mix(in srgb, var(--hue) 18%, var(--color-panel-solid)); color: var(--hue); font: 650 11px/1 var(--font-sans); letter-spacing: .01em; }
 .chat-avatar.hue-0 { font-size: 9px; }
-/* An agent's figure (AvatarFace): its head and shoulders, on the disc of its chat colour. */
-.chat-avatar.has-figure { background-repeat: no-repeat; background-size: 170%; background-position: 50% 20%; background-color: color-mix(in srgb, var(--hue) 20%, var(--color-panel-solid)); }
-/* What it wears from the wardrobe, cropped as the still is (170%, centred, 20% down) and cut to the disc. */
-.chat-avatar-worn { position: absolute; left: -35%; top: -14%; width: 170%; height: 170%; pointer-events: none; clip-path: circle(29.4% at 50% 37.6%); }
-.chat-avatar-worn > img { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* An agent's figure (AvatarFace): the figure alone, no disc or ring, with what it wears laid over it
+   (FigureStill). It is drawn a little larger than the slot, since the still has room around it. */
+.chat-avatar.has-figure { border-color: transparent; background: none; }
+.chat-avatar > .chat-avatar-figure { position: absolute; inset: -20%; width: 140%; height: 140%; object-fit: contain; pointer-events: none; -webkit-user-drag: none; }
 .chat-avatar-number { position: absolute; right: -4px; bottom: -4px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid); color: var(--color-ink-2); font: 600 9px/13px var(--font-sans); text-align: center; }
 
 .chat-msg { display: grid; grid-template-columns: 42px minmax(0, 1fr); margin-top: 14px; outline: none; }
