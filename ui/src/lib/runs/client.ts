@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
+import { keepIfSame } from '../keepIfSame'
 
 export type RunStatus = 'queued' | 'starting' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 export type RunTrigger = 'manual' | 'schedule'
@@ -375,7 +376,11 @@ export function useRunRecord(runId: string | null) {
       try {
         const next = await fetchRun(runId!, controller.signal)
         if (controller.signal.aborted) return
-        setState({ runId, record: next, error: null, missing: false })
+        // A live run is read every second; a record that did not change keeps its object, so
+        // nothing that depends on it works again for the same answer.
+        setState((previous) => (previous.runId === runId && !previous.error && !previous.missing && previous.record && keepIfSame(previous.record, next) === previous.record
+          ? previous
+          : { runId, record: next, error: null, missing: false }))
         if (!isTerminalRun(next.status)) timer = setTimeout(() => void tick(), 1000)
       } catch (caught) {
         if (controller.signal.aborted) return

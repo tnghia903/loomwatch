@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { keepIfSame } from '../keepIfSame'
 import { answerPermission, answerRun, fetchRuns, type PermissionDecision, type RunRecord } from '../runs/client'
 import { teamDisplayName } from '../team-file/client'
 import { useTeamList } from '../team-file/useTeamList'
@@ -28,7 +29,7 @@ export function useNeedsYou() {
     try {
       const runs = await fetchRuns(signal)
       if (signal?.aborted || mine !== generation.current) return
-      setRecords(runs)
+      setRecords((previous) => keepIfSame(previous, runs))
       setError(null)
     } catch (caught) {
       if (!signal?.aborted) setError(caught instanceof Error ? caught.message : String(caught))

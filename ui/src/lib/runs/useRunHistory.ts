@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { keepIfSame } from '../keepIfSame'
 import type { SessionSummary } from '../watch/events'
 import { readArchive } from '../watch/useSessionEvents'
 import { fetchRuns, isTerminalRun, RunApiError, type RunRecord } from './client'
@@ -25,8 +26,8 @@ export function useRunHistory(open: boolean) {
         readArchive<SessionSummary[]>('/api/sessions', signal).catch((caught: unknown) => { throw caught }),
       ])
       if (signal?.aborted || mine !== generation.current) return
-      setRecords(runs)
-      setSessions(archived)
+      setRecords((previous) => keepIfSame(previous, runs))
+      setSessions((previous) => keepIfSame(previous, archived))
       setError(null)
       setUnavailable(null)
     } catch (caught) {
