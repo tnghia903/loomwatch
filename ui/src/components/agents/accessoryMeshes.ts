@@ -35,7 +35,7 @@ import type { Accessory } from '../../lib/quests/catalog'
 /**
  * The wardrobe's accessories (lib/quests/catalog.ts), worn the way a tailor wears them and fitted
  * to the figure's own model: the tape measure lies over the shoulders and hangs down the chest, the
- * monocle is a button with a lens in it, tied to the scarf with red thread, the chalk is tucked
+ * monocle is a button with a lens in it, tied to the scarf with plum thread, the chalk is tucked
  * behind an ear and has drawn a cut line on the tummy, the patch is sewn onto the tummy's curve, a
  * safety pin fastens the scarf, the pincushion is strapped round a wrist and a shuttle is pushed
  * through the top of the head, as needles are stuck in a ball of yarn. Each is placed by casting
@@ -60,8 +60,14 @@ export interface DressOptions {
   faceNudge?: Vector3
 }
 
-/** A tailor's red thread: the one colour on a figure that is not its own. */
-const THREAD = '#B4473F'
+/**
+ * A tailor's plum thread: the one colour on a figure that is not its own. Like everything a figure
+ * wears, never one of the app's status colours (lib/library/figures.ts FIGURE_COLORS): a red thread
+ * read as trouble, and a gold pin as you.
+ */
+const THREAD = '#7B3F73'
+/** A pearl pin head's pink, beside a white one and one in the thread's plum. */
+const PEARL = '#EFB8CC'
 
 type Draw = (context: CanvasRenderingContext2D, width: number, height: number) => void
 
@@ -319,12 +325,11 @@ function tape(k: Kit, b: Body): Object3D {
   const group = new Group()
   group.name = 'wear_band'
   group.add(k.mesh(ribbon(points, normals, 0.034 * s), material))
-  // A brass tip on each end.
-  const brass = k.standard('#C9A24A', 0.35, 0.85)
+  // A nickel tip on each end: brass would read as your gold.
   for (const end of [0, points.length - 1]) {
     const next = points[end === 0 ? 1 : end - 1]
     const along = points[end].clone().sub(next).normalize()
-    const tip = k.mesh(new CylinderGeometry(0.021 * s, 0.021 * s, 0.012 * s, 4, 1), brass)
+    const tip = k.mesh(new CylinderGeometry(0.021 * s, 0.021 * s, 0.012 * s, 4, 1), k.steel)
     tip.position.copy(points[end]).addScaledVector(along, 0.004 * s)
     tip.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), along).multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Math.PI / 4))
     tip.scale.set(1, 1, 0.22)
@@ -333,7 +338,7 @@ function tape(k: Kit, b: Body): Object3D {
   return group
 }
 
-/** A lens set in a big four-hole button, on the eye, tied to the scarf with red thread. */
+/** A lens set in a big four-hole button, on the eye, tied to the scarf with plum thread. */
 function monocle(k: Kit, b: Body, nudge: Vector3): Object3D {
   const s = b.scale
   const eye = b.eye.getWorldPosition(new Vector3()).add(nudge)
@@ -373,9 +378,9 @@ function monocle(k: Kit, b: Body, nudge: Vector3): Object3D {
   const scarf = hit([b.scarf], below.clone().addScaledVector(front, 0.6), b.axis(below))
   const to = scarf ? scarf.point.addScaledVector(scarf.normal, 0.004 * s) : from.clone().add(new Vector3(0.03 * s, -0.16 * s, 0))
   const sag = from.clone().lerp(to, 0.5).addScaledVector(front, 0.04 * s).add(new Vector3(0.025 * s, -0.02 * s, 0))
-  const red = k.standard(THREAD, 0.7)
-  group.add(k.mesh(new TubeGeometry(new CatmullRomCurve3([from, sag, to]), 32, 0.0026 * s, 6, false), red))
-  const knot = k.mesh(new SphereGeometry(0.0075 * s, 10, 8), red)
+  const thread = k.standard(THREAD, 0.7)
+  group.add(k.mesh(new TubeGeometry(new CatmullRomCurve3([from, sag, to]), 32, 0.0026 * s, 6, false), thread))
+  const knot = k.mesh(new SphereGeometry(0.0075 * s, 10, 8), thread)
   knot.position.copy(to)
   group.add(knot)
   return group
@@ -489,7 +494,7 @@ function cushion(k: Kit, b: Body): Object3D {
   seat.position.copy(outward).multiplyScalar(0.058)
   seat.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), outward)
   seat.add(dome, tufts)
-  for (const [index, color] of ['#E9C46A', '#F4F1EA', THREAD].entries()) {
+  for (const [index, color] of [PEARL, '#F4F1EA', THREAD].entries()) {
     const angle = -0.55 + index * 0.55
     const stem = k.mesh(new CylinderGeometry(0.0022, 0.0022, 0.05, 6), k.steel)
     stem.position.set(Math.sin(angle) * 0.02, 0.048, (index - 1) * 0.008)

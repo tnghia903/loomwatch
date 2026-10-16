@@ -63,7 +63,7 @@ The summaries in the app are LoomWatch’s own words, not quotes from the source
   figure itself, it never makes a new version, and a team never copies it.
 - **The accessories are worn, not stuck on.** Each is a 3D object fitted to the figure by casting
   rays onto its body (`accessoryMeshes.ts`): the tailor's tape lies over the shoulders and down the
-  chest, the button monocle sits on the eye and is tied to the scarf with red thread, the chalk is
+  chest, the button monocle sits on the eye and is tied to the scarf with plum thread, the chalk is
   tucked behind an ear and has drawn a cut line on the tummy, the patch is sewn onto the tummy's
   curve, a safety pin fastens the scarf, the pincushion is strapped round a wrist, and a shuttle is
   pushed through the top of the head as needles are stuck in a ball of yarn. The 3D bench wears
