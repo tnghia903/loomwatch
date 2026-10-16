@@ -153,7 +153,10 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
   else if (runnable.length === 0 && failing.length > 0) status = { state: 'incomplete', text: 'None of your AI apps can start right now.', action: setupOpen ? undefined : <>{recheckAction}{setupAction}</> }
   else if (runnable.length === 0) status = { state: 'incomplete', text: 'No AI app is ready yet.', action: setupAction }
   else status = { state: 'saved', text: `Ready to use: ${runnable.map((harness) => harness.name).join(', ')}`, action: <>{failing.length > 0 && !setupOpen && recheckAction}{setupAction}</> }
-  const problems = harnessesLoading || harnessesError || setupOpen ? [] : failing
+  // With an app ready, another app waiting on a key or a sign-in is not a problem to show everyone
+  // who opens LoomWatch ("set GEMINI_API_KEY" means nothing to most of them): "Set up another app"
+  // is where it is. Before any app is ready, it is the way to start, so it is shown.
+  const problems = harnessesLoading || harnessesError || setupOpen ? [] : failing.filter((harness) => runnable.length === 0 || !isSetupStep(harness))
 
   return (
     <div className="lw-home" data-tour="home">

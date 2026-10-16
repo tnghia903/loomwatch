@@ -19,6 +19,8 @@ export interface AskStep {
   status: StepStatus
   /** What went wrong, in the tool's own words, when the step failed. */
   detail: string | null
+  /** The LoomWatch tool it called, when it was one. */
+  tool?: string | null
 }
 
 export interface ProposalCard {
@@ -102,11 +104,11 @@ export interface AskThread {
 export const EMPTY_THREAD: AskThread = { items: [], state: null, error: null, appName: null, appId: null, model: null }
 
 /** The tools LoomWatch's tool server offers, by the words the panel uses for them. */
-const STEP_WORDS: Record<string, { running: string; done: string; failed: string }> = {
+const STEP_WORDS: Record<string, { running: string; done: string; failed: string; fixed?: string }> = {
   list_teams: { running: 'Looking at your teams', done: 'Looked at your teams', failed: 'Couldn’t list your teams' },
   read_team: { running: 'Reading the team', done: 'Read the team', failed: 'Couldn’t read the team' },
   list_apps: { running: 'Checking your AI apps', done: 'Checked your AI apps', failed: 'Couldn’t check your AI apps' },
-  propose_team: { running: 'Drafting the team', done: 'Drafted the team', failed: 'Found a problem in the draft' },
+  propose_team: { running: 'Drafting the team', done: 'Drafted the team', failed: 'Found a problem in the draft', fixed: 'Fixed a problem in its draft' },
   start_run: { running: 'Getting the run ready', done: 'Got the run ready', failed: 'Couldn’t start the run' },
   get_run: { running: 'Checking the run', done: 'Checked the run', failed: 'Couldn’t read the run' },
   draft_review_note: { running: 'Drafting a review note', done: 'Drafted a review note', failed: 'Couldn’t draft the note' },
@@ -262,7 +264,7 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
         const title = text(payload.title) || text(payload.name) || 'a tool'
         const tool = toolOf(title, typeof payload.name === 'string' ? payload.name : null)
         const status: StepStatus = payload.status === 'completed' ? 'done' : payload.status === 'failed' ? 'failed' : 'running'
-        const step: AskStep = { id: `${building.turn.id}:${callId}`, label: stepLabel(tool, title, status, payload.rawInput), status, detail: status === 'failed' ? failureDetail(payload.rawOutput) : null }
+        const step: AskStep = { id: `${building.turn.id}:${callId}`, label: stepLabel(tool, title, status, payload.rawInput), status, detail: status === 'failed' ? failureDetail(payload.rawOutput) : null, tool }
         building.calls.set(callId, { step, tool, title, input: payload.rawInput })
         building.turn.steps.push(step)
         building.turn.thinking = false
@@ -292,7 +294,24 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
         break
     }
   }
+  for (const item of items) if (item.kind === 'assistant') settleFixed(item.steps)
   return { items, state, error, appName, appId, model }
+}
+
+/**
+ * A call the app got wrong and then made again successfully was a problem it fixed on its own, such
+ * as a draft the tool server refused: it reads as fixed, without the tool's words for what was
+ * wrong, which only alarm someone who has nothing to do about them. One never fixed stays a failure.
+ */
+function settleFixed(steps: AskStep[]) {
+  steps.forEach((step, index) => {
+    if (step.status !== 'failed' || !step.tool) return
+    if (!steps.slice(index + 1).some((later) => later.tool === step.tool && later.status === 'done')) return
+    const words = STEP_WORDS[step.tool]
+    step.status = 'done'
+    step.label = words?.fixed ?? words?.done ?? step.label
+    step.detail = null
+  })
 }
 
 /** What the assistant is doing right now, in a few words, or null when it is not working. */
