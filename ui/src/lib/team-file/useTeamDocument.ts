@@ -41,8 +41,6 @@ export type ExecutionMode = 'team' | 'pipeline'
 /** §8.3: the last-edge deletion is applied immediately, then offered a 5s undo window. */
 export interface PendingEdgeRemoval {
   edges: EdgeConfig[]
-  /** The final edge disappeared as part of a node deletion, so Undo restores that whole edit. */
-  restoreDocument?: boolean
 }
 
 export interface ExternalChange {
@@ -288,6 +286,8 @@ export function useTeamDocument() {
     undoRef.current.push(entry)
     redoRef.current = []
     setHistoryState({ undo: undoRef.current.length, redo: 0 })
+    // A newer edit closes the last-edge Undo offer, so that Undo can never take back the wrong edit.
+    setPendingEdgeRemoval(null)
   }, [currentHistoryEntry])
 
   const restoreHistoryEntry = useCallback((entry: HistoryEntry) => {
@@ -764,7 +764,6 @@ export function useTeamDocument() {
             kind: edge.data?.kind ?? 'sequence',
             ts: edge.data?.ts ?? new Date().toISOString(),
           })),
-          restoreDocument: true,
         })
       }
     },
@@ -1296,19 +1295,13 @@ export function useTeamDocument() {
   // §8.3: "Keep it" (or letting it time out) accepts a deletion that already happened.
   const keepLastEdgeRemoval = useCallback(() => setPendingEdgeRemoval(null), [])
 
-  // §8.3: "Undo restores the edge" — re-added with a fresh `ts`; nothing downstream reads it.
+  // §8.3: "Undo restores the edge" by undoing the whole edit that dropped it: a deleted node, a
+  // check step that stopped checking, or the reply moved to the entrypoint come back with it.
   const undoLastEdgeRemoval = useCallback(() => {
     if (!pendingEdgeRemoval) return
-    if (pendingEdgeRemoval.restoreDocument) {
-      undo()
-      setPendingEdgeRemoval(null)
-      return
-    }
-    pendingEdgeRemoval.edges.forEach((edge) => modelRef.current?.addEdge(edge))
-    setEdges((current) => [...current, ...pendingEdgeRemoval.edges.map(edgeFromConfig)])
-    markDirty()
+    undo()
     setPendingEdgeRemoval(null)
-  }, [markDirty, pendingEdgeRemoval, undo])
+  }, [pendingEdgeRemoval, undo])
 
   useEffect(() => {
     if (!pendingEdgeRemoval) {

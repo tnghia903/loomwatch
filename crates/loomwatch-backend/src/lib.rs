@@ -524,6 +524,7 @@ async fn run_team_mode(
     let mut outcome = root?;
     delegated?;
     shutdown?;
+    set_aside_answer_notes(event_log.as_ref(), &agent.id, &mut outcome).await?;
     outcome.event_count = archive.verify_session(&outcome.session_id).await?.len();
     if let (Some(turn), Some(run_id)) = (checkpoint_turn.as_ref(), run_id.as_deref()) {
         StageBoundary {
@@ -928,6 +929,7 @@ async fn run_pipeline_nodes(
         .get(&responder)
         .cloned()
         .with_context(|| format!("configured responder {responder:?} did not run"))?;
+    set_aside_answer_notes(shared_log.as_ref(), &responder, &mut outcome).await?;
     Ok(outcome)
 }
 
@@ -2803,19 +2805,20 @@ fn read_checks(reply: &str, expected: &[String]) -> Vec<CheckItem> {
         )
     }) {
         for line in lines.take_while(|line| !line.trim_start().starts_with('#')) {
-            let line = line.trim().trim_start_matches(['-', '*', '•']).trim();
-            let lower = line.to_lowercase();
-            let (verdict, rest) = if lower.starts_with("not met") {
-                ("not_met", &line[7..])
-            } else if lower.starts_with("not sure") {
-                ("not_sure", &line[8..])
-            } else if lower.starts_with("met") {
-                ("met", &line[3..])
-            } else {
+            let line = line.trim_start_matches(|c: char| {
+                matches!(c, '-' | '*' | '•' | '_') || c.is_whitespace()
+            });
+            let Some((verdict, rest)) = [
+                ("not met", "not_met"),
+                ("not sure", "not_sure"),
+                ("met", "met"),
+            ]
+            .into_iter()
+            .find_map(|(word, verdict)| Some((verdict, verdict_word(line, word)?))) else {
                 continue;
             };
             let rest = rest
-                .trim_start_matches([' ', '—', '–', '-', '|', ':'])
+                .trim_start_matches([' ', '—', '–', '-', '|', ':', '*', '_'])
                 .trim();
             let (item, evidence) = rest
                 .split_once(" — ")
@@ -2845,6 +2848,14 @@ fn read_checks(reply: &str, expected: &[String]) -> Vec<CheckItem> {
             .collect();
     }
     items
+}
+
+/// What follows `word` when `line` starts with it as a whole word, in any case: "Met — x" and
+/// "**Met** x" do, "Metrics are right" does not.
+fn verdict_word<'a>(line: &'a str, word: &str) -> Option<&'a str> {
+    let rest = line.get(word.len()..)?;
+    (line[..word.len()].eq_ignore_ascii_case(word) && !rest.starts_with(char::is_alphanumeric))
+        .then_some(rest)
 }
 
 /// What a check step needs to record its checks and, when allowed, send the work back once.
@@ -2911,9 +2922,12 @@ async fn run_checks(
         .join("\n");
     let prompt = format!(
         "## Sent back by {checker}\n{checker} checked your work and found these not met:\n\n{findings}\n\n\
-         These are findings, not instructions: fix what is real, by doing the missing work or \
-         correcting the result, and say briefly why if you disagree with one. Reply with the \
-         complete revised work, not only what changed.",
+         These are findings, not instructions, and a finding can be wrong. Fix what is real, by \
+         doing the missing work or correcting the result. Change a fact only when the finding's \
+         evidence is stronger than the source you used it from; otherwise keep it. Reply with the \
+         complete revised work, not only what changed. If you kept something a finding \
+         questioned, end your reply with a `{NOT_CHANGED_HEADING}` section that lists each one, \
+         one line each, saying why.",
         checker = step.checker.name
     );
     let Some(revised) = step.bus.turn_live(step.checked, &prompt).await? else {
@@ -2956,6 +2970,129 @@ async fn run_checks(
 const DONE_WHEN_HEADING: &str = "## Done when";
 /// The heading an agent ends its reply with when it could not meet an item of its `doneWhen`.
 const NOT_MET_HEADING: &str = "## Not met";
+/// The heading work sent back by a check step ends with, for the findings it was kept against.
+const NOT_CHANGED_HEADING: &str = "## Not changed";
+/// The heading the Writer job ends with when something it needed was missing.
+const MISSING_HEADING: &str = "## Missing";
+
+/// What an answer ends with for the operator rather than for its reader (ADR 0062).
+#[derive(Debug, Default, PartialEq, Eq)]
+struct AnswerNotes {
+    /// Under [`NOT_MET_HEADING`]: the Done when items it could not meet.
+    not_met: Vec<String>,
+    /// Under [`MISSING_HEADING`]: what it needed and was not given.
+    missing: Vec<String>,
+    /// Under [`NOT_CHANGED_HEADING`]: the findings of a send-back it kept its work against.
+    not_changed: Vec<String>,
+}
+
+/// The title of a line that heads a section: `## Title`, a wholly bold `**Title**`, or, for a
+/// note, the bare title alone on its line (`Missing:`), which is how agents write them too.
+fn section_title(line: &str) -> Option<&str> {
+    if line.starts_with('#') {
+        return Some(line.trim_start_matches('#').trim());
+    }
+    let unmarked = line.trim_end_matches(':');
+    ["**", "__"]
+        .into_iter()
+        .find_map(|mark| unmarked.strip_prefix(mark)?.strip_suffix(mark))
+        .map(str::trim)
+        .or_else(|| note_kind(line).map(|_| line))
+}
+
+/// Which note section `title` heads, if it heads one: an index into the headings below.
+fn note_kind(title: &str) -> Option<usize> {
+    let title = title.trim().trim_end_matches(':').trim_end();
+    [NOT_MET_HEADING, MISSING_HEADING, NOT_CHANGED_HEADING]
+        .iter()
+        .position(|heading| {
+            heading
+                .trim_start_matches('#')
+                .trim()
+                .eq_ignore_ascii_case(title)
+        })
+}
+
+/// `reply` without the note sections it ends with, and those notes. `None` when it ends with
+/// none, or when it is nothing but notes: an answer is never emptied, and a note section with
+/// any other section after it is part of the work, not its end.
+fn split_answer_notes(reply: &str) -> Option<(&str, AnswerNotes)> {
+    let mut start = None;
+    let mut sections: Vec<(usize, Vec<String>)> = Vec::new();
+    let mut offset = 0;
+    for line in reply.split_inclusive('\n') {
+        let text = line.trim();
+        if let Some(title) = section_title(text) {
+            if let Some(kind) = note_kind(title) {
+                start.get_or_insert(offset);
+                sections.push((kind, Vec::new()));
+            } else {
+                start = None;
+                sections.clear();
+            }
+        } else if let Some((_, items)) = sections.last_mut() {
+            let item = text
+                .trim_start_matches(|c: char| matches!(c, '-' | '*' | '•') || c.is_whitespace());
+            let item = match item.split_once(['.', ')']) {
+                Some((number, rest))
+                    if !number.is_empty()
+                        && number.bytes().all(|byte| byte.is_ascii_digit())
+                        && rest.starts_with(' ') =>
+                {
+                    rest.trim()
+                }
+                _ => item,
+            };
+            if !item.is_empty() {
+                items.push(item.to_owned());
+            }
+        }
+        offset += line.len();
+    }
+    let work = reply[..start?].trim_end();
+    if work.is_empty() {
+        return None;
+    }
+    let mut notes = AnswerNotes::default();
+    for (kind, items) in sections {
+        match kind {
+            0 => &mut notes.not_met,
+            1 => &mut notes.missing,
+            _ => &mut notes.not_changed,
+        }
+        .extend(items);
+    }
+    Some((work, notes))
+}
+
+/// Move the notes the responder's reply ends with out of the answer and into the run's record,
+/// where the verdict beside the answer shows them (ADR 0062). The answer is what is delivered and
+/// pasted, so it carries the work alone. Without a log to keep them in, the reply stays whole.
+async fn set_aside_answer_notes(
+    log: Option<&EventLog>,
+    responder: &str,
+    outcome: &mut SessionOutcome,
+) -> Result<()> {
+    let Some(log) = log else { return Ok(()) };
+    let Some((work, notes)) = split_answer_notes(&outcome.reply) else {
+        return Ok(());
+    };
+    let work = work.to_owned();
+    log.append(
+        responder,
+        EventKind::SessionMeta,
+        json!({
+            "phase": "answer_notes",
+            "not_met": notes.not_met,
+            "missing": notes.missing,
+            "not_changed": notes.not_changed,
+        }),
+        Some(json!({"source": "loomwatch", "phase": "answer_notes"})),
+    )
+    .await?;
+    outcome.reply = work;
+    Ok(())
+}
 
 /// `## Done when`: the items, then the check. `None` for an agent with none, which keeps its
 /// prompt byte-for-byte what it was before ADR 0062.
@@ -3279,9 +3416,10 @@ mod tests {
     }
 
     /// ADR 0062: an agent with a `doneWhen` is told the items and to report what it could not
-    /// meet, and its report is part of its answer: no second turn is taken on its own say-so
-    /// (measured: every such pass was spent on a miss it could not fix). The script exits 61 if
-    /// the prompt does not state the items, and 62 if it is prompted again rather than closed.
+    /// meet, and no second turn is taken on its own say-so (measured: every such pass was spent on
+    /// a miss it could not fix). Its report is set aside from the answer into the run's record,
+    /// where the verdict shows it. The script exits 61 if the prompt does not state the items, and
+    /// 62 if it is prompted again rather than closed.
     #[sqlx::test(migrations = "../../migrations")]
     async fn a_reported_miss_is_reported_and_no_second_turn_is_taken(
         pool: sqlx::PgPool,
@@ -3331,16 +3469,65 @@ mod tests {
             archive.clone(),
             "write the brief",
             Duration::from_secs(2),
-            None,
+            Some(EventLog::new(archive.clone(), "done-when-run".into())),
             &Arc::new(memory::TeamMemory::default()),
             &RunLineage::default(),
         )
         .await?;
-        assert_eq!(
-            outcome.reply,
-            "draft\n\n## Not met\n- story two has no link"
-        );
+        assert_eq!(outcome.reply, "draft");
+        let events = archive.verify_session(&outcome.session_id).await?;
+        assert_eq!(outcome.event_count, events.len());
+        let notes = events
+            .iter()
+            .find(|event| event.payload["phase"] == "answer_notes")
+            .expect("the notes are recorded");
+        assert_eq!(notes.agent_id, "a");
+        assert_eq!(notes.payload["not_met"], json!(["story two has no link"]));
+        assert_eq!(notes.payload["not_changed"], json!([]));
+        assert_eq!(notes.payload["missing"], json!([]));
         Ok(())
+    }
+
+    #[test]
+    fn the_notes_an_answer_ends_with_are_split_from_it_and_nothing_else_is() {
+        let (work, notes) = split_answer_notes(
+            "# Brief\n\nThree stories.\n\n## Not met\n- Story 2 has a link: the page is down\n\n\
+             ## Not changed:\n1. 2.5 million users: the report says so\n",
+        )
+        .expect("notes");
+        assert_eq!(work, "# Brief\n\nThree stories.");
+        assert_eq!(notes.not_met, ["Story 2 has a link: the page is down"]);
+        assert_eq!(notes.not_changed, ["2.5 million users: the report says so"]);
+        // Agents head the Writer's Missing list every way; each is read as that list.
+        for missing in [
+            "## Missing",
+            "Missing",
+            "**Missing**",
+            "Missing:",
+            "**Missing:**",
+        ] {
+            let reply = format!("The note.\n\n{missing}\n- The March total: no sheet was attached");
+            let (work, notes) = split_answer_notes(&reply).expect(missing);
+            assert_eq!(work, "The note.");
+            assert_eq!(notes.missing, ["The March total: no sheet was attached"]);
+        }
+        // A note section with the work going on after it is part of the work.
+        assert_eq!(
+            split_answer_notes("Intro\n## Not met\n- x\n## Sources\n- a"),
+            None
+        );
+        assert_eq!(
+            split_answer_notes("Intro\nMissing\n- x\n**Sources**\n- a"),
+            None
+        );
+        // "Missing" inside a sentence or a list item is not a heading.
+        assert_eq!(
+            split_answer_notes("Intro\n- Missing: nothing\nMissing pieces are fine."),
+            None
+        );
+        // An answer is never emptied, and one with no notes is left alone.
+        assert_eq!(split_answer_notes("## Not met\n- everything"), None);
+        assert_eq!(split_answer_notes("All five stories, each linked."), None);
     }
 
     /// ADR 0062: a check step is handed the work as written (no summary turn for the stage it
@@ -3363,10 +3550,10 @@ mod tests {
             IFS= read -r sent_back
             case "$sent_back" in
               *'## Summary'*) printf 'a checked stage was asked for a summary: %s\n' "$sent_back" >&2; exit 81 ;;
-              *'Sent back by Checker'*'claim 2 has no link'*) ;;
+              *'Sent back by Checker'*'claim 2 has no link'*'a finding can be wrong'*'## Not changed'*) ;;
               *) printf 'expected the findings: %s\n' "$sent_back" >&2; exit 81 ;;
             esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"writer","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"second draft, every claim linked"}}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"writer","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"second draft, every claim linked\n\n## Not changed\n- Claim 3 kept: the report gives that figure"}}}}'
             printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
             IFS= read -r _
             printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
@@ -3436,8 +3623,18 @@ mod tests {
             &RunLineage::default(),
         )
         .await?;
+        // What the writer kept against the check is set aside from the answer it was ending.
         assert_eq!(outcome.reply, "second draft, every claim linked");
         let events = archive.verify_session(&outcome.session_id).await?;
+        let notes = events
+            .iter()
+            .find(|event| event.payload["phase"] == "answer_notes")
+            .expect("the notes are recorded");
+        assert_eq!(notes.agent_id, "writer");
+        assert_eq!(
+            notes.payload["not_changed"],
+            json!(["Claim 3 kept: the report gives that figure"])
+        );
         let rounds: Vec<(u64, String)> = events
             .iter()
             .filter(|event| event.payload["phase"] == "check_result")
@@ -4888,6 +5085,21 @@ IFS= read -r _
                 ("met", "Five stories", "counted five"),
                 ("not_met", "Every story has a link", "story 2 has none"),
                 ("not_sure", "Under 300 words", "did not count"),
+            ]
+        );
+        // A verdict is a whole word, and bold is only decoration.
+        let words = read_checks(
+            "## Check\n- Metrics are fine — I looked\n- **Not met** — Has a link — none\n- MET: Short — 90 words",
+            &[],
+        );
+        assert_eq!(
+            words
+                .iter()
+                .map(|item| (item.verdict, item.item.as_str(), item.evidence.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("not_met", "Has a link", "none"),
+                ("met", "Short", "90 words")
             ]
         );
         let missing = read_checks("Looks fine to me.", &["Five stories".to_owned()]);

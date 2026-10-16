@@ -23,6 +23,26 @@ describe('answerVerdict', () => {
     expect(verdict.findings.map((line) => line.tone)).toEqual(['bad', 'warn'])
   })
 
+  it('shows what the answer’s author could not meet or kept against a check, beside the answer they were taken off', () => {
+    const verdict = answerVerdict({ ...finished, notes: { agentId: 'writer', notMet: ['Story 2 has a link: the page is down'], missing: ['The March total: no sheet was attached'], notChanged: ['2.5 million: the report says so'] } })
+    expect(verdict).toMatchObject({ tone: 'look', label: '3 things to check', detail: 'Could not meet: Story 2 has a link: the page is down.' })
+    expect(verdict.findings).toEqual([
+      { tone: 'warn', text: 'Could not meet: Story 2 has a link: the page is down', agentId: 'writer' },
+      { tone: 'warn', text: 'Missing: The March total: no sheet was attached', agentId: 'writer' },
+      { tone: 'warn', text: 'Kept against the check: 2.5 million: the report says so', agentId: 'writer' },
+    ])
+  })
+
+  it('leads with a failure even when a check step also missed something', () => {
+    const verdict = answerVerdict({
+      ...finished,
+      receipt: receipt([{ tone: 'bad', text: 'Researcher wasn’t allowed to search the web, and carried on without it' }]),
+      checks: [{ checker: 'checker', checked: 'writer', round: 1, items: [{ verdict: 'not_met', item: 'Every claim has a link', evidence: '' }] }],
+    })
+    expect(verdict.findings.map((line) => line.tone)).toEqual(['bad', 'warn'])
+    expect(verdict.detail).toBe('Researcher wasn’t allowed to search the web, and carried on without it.')
+  })
+
   it('calls an answer from a run that did not finish partial, whatever else it holds', () => {
     expect(answerVerdict({ ...finished, phase: 'partial', receipt: receipt([{ tone: 'bad', text: 'Researcher stopped (exit code 1)' }]) })).toMatchObject({ tone: 'bad', label: 'Partial answer', detail: 'Researcher stopped (exit code 1).' })
     expect(answerVerdict({ ...finished, phase: 'cancelled' })).toMatchObject({ label: 'Stopped early', detail: 'The team did not finish, so parts of this answer may be missing.' })
