@@ -64,6 +64,23 @@ pub struct StoredContextPacket {
 
 const EVENT_COLUMNS: &str = "id, session_id, agent_id, seq, ts, kind, payload, raw";
 
+/// [`EVENT_COLUMNS`] with `raw` only for the kinds a [`Frames::Lean`] page keeps it on. Decided
+/// in SQL, so a frame left out is not even read from the file, let alone decompressed.
+const LEAN_EVENT_COLUMNS: &str = "id, session_id, agent_id, seq, ts, kind, payload, \
+     CASE WHEN kind IN ('message', 'session_meta', 'turn_end') THEN raw END AS raw";
+
+/// Which events in a page of a trace carry their raw ACP frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Frames {
+    /// Every event's, as archived.
+    All,
+    /// Only those of the kinds the browser reads a frame of: `message`, `session_meta` and
+    /// `turn_end` (its token usage). Every other event goes without, exactly like an event that
+    /// never had one. Most of a real trace's bytes were frames of `tool_update` events, which
+    /// repeat the tool output their payload already holds.
+    Lean,
+}
+
 impl EventArchive {
     /// Open the archive in the database file at `path`, creating it when it is not there.
     ///
@@ -316,11 +333,27 @@ impl EventArchive {
         after_seq: i64,
         limit: i64,
     ) -> Result<Vec<RunEvent>> {
-        self.flush().await;
-        self.written_page(session_id, after_seq, limit).await
+        self.trace_page(session_id, after_seq, limit, Frames::All)
+            .await
     }
 
-    /// [`Self::event_page`] over what the writer has already committed, without asking it to
+    /// [`Self::event_page`], keeping the raw ACP frames `frames` says to.
+    ///
+    /// # Errors
+    /// Returns an error for invalid bounds, database failures, or invalid archived events.
+    pub(crate) async fn trace_page(
+        &self,
+        session_id: &str,
+        after_seq: i64,
+        limit: i64,
+        frames: Frames,
+    ) -> Result<Vec<RunEvent>> {
+        self.flush().await;
+        self.written_page(session_id, after_seq, limit, frames)
+            .await
+    }
+
+    /// [`Self::trace_page`] over what the writer has already committed, without asking it to
     /// write what it holds. A live view that follows [`Self::written`] reads this way, so following
     /// a run never makes the writer commit early.
     ///
@@ -331,13 +364,18 @@ impl EventArchive {
         session_id: &str,
         after_seq: i64,
         limit: i64,
+        frames: Frames,
     ) -> Result<Vec<RunEvent>> {
         ensure!(
             after_seq >= -1 && (1..=500).contains(&limit),
             "invalid event page bounds"
         );
+        let columns = match frames {
+            Frames::All => EVENT_COLUMNS,
+            Frames::Lean => LEAN_EVENT_COLUMNS,
+        };
         let rows = sqlx::query(&format!(
-            "SELECT {EVENT_COLUMNS} FROM run_events
+            "SELECT {columns} FROM run_events
              WHERE session_id = $1 AND seq > $2 ORDER BY seq LIMIT $3"
         ))
         .bind(session_id)

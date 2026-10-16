@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::time::Duration;
 
-use crate::archive::EventArchive;
+use crate::archive::{EventArchive, Frames};
 
 /// Build the evidence router. The caller MUST use a loopback listener when enabled.
 pub fn router(archive: Option<EventArchive>) -> Router {
@@ -98,12 +98,22 @@ struct EventQuery {
     after_seq: i64,
     #[serde(default = "page_size")]
     limit: i64,
+    /// `lean=true` leaves each event's raw ACP frame out except where the browser reads it
+    /// ([`Frames::Lean`]). Off by default, so any other reader still gets every frame.
+    #[serde(default)]
+    lean: bool,
 }
 fn initial_cursor() -> i64 {
     -1
 }
 fn page_size() -> i64 {
     200
+}
+
+impl EventQuery {
+    fn frames(&self) -> Frames {
+        if self.lean { Frames::Lean } else { Frames::All }
+    }
 }
 
 async fn events(
@@ -124,7 +134,7 @@ async fn events(
         return disabled();
     };
     match archive
-        .event_page(&query.session, query.after_seq, query.limit)
+        .trace_page(&query.session, query.after_seq, query.limit, query.frames())
         .await
     {
         Ok(events) => Json(events).into_response(),
@@ -173,7 +183,10 @@ async fn follow_archive(mut socket: WebSocket, archive: EventArchive, query: Eve
         // Seen before the read, not after: a batch that commits once the read has started still
         // counts as a change, so the wait below cannot sleep through it.
         written.mark_unchanged();
-        let Ok(page) = archive.written_page(&query.session, cursor, 200).await else {
+        let Ok(page) = archive
+            .written_page(&query.session, cursor, 200, query.frames())
+            .await
+        else {
             break;
         };
         let full_page = page.len() == 200;
@@ -370,6 +383,150 @@ mod tests {
         })
         .await
         .expect("closing the socket ends the follow task");
+        server.abort();
+    }
+
+    /// One event of each kind a lean page treats differently, every one with its raw frame.
+    async fn traced_archive() -> (EventArchive, Vec<crate::RunEvent>) {
+        use crate::{EventKind, RunEvent};
+        let archive = EventArchive::new(crate::db::Db::temp().await);
+        let output = "line of output\n".repeat(50);
+        let update = |update: serde_json::Value| {
+            json!({"jsonrpc": "2.0", "method": "session/update",
+                   "params": {"sessionId": "acp", "update": update}})
+        };
+        let events = [
+            (
+                EventKind::Message,
+                json!({"role": "agent", "content": {"type": "text", "text": "hi"}}),
+                update(json!({"sessionUpdate": "agent_message_chunk",
+                              "content": {"type": "text", "text": "hi"},
+                              "_meta": {"codex": {"phase": "final_answer"}}})),
+            ),
+            (
+                EventKind::ToolCall,
+                json!({"callId": "c1", "title": "Run", "status": "pending"}),
+                update(json!({"sessionUpdate": "tool_call", "toolCallId": "c1",
+                              "title": "Run", "status": "pending"})),
+            ),
+            (
+                EventKind::ToolUpdate,
+                json!({"callId": "c1", "status": "completed", "rawOutput": output}),
+                update(
+                    json!({"sessionUpdate": "tool_call_update", "toolCallId": "c1",
+                              "status": "completed", "rawOutput": output}),
+                ),
+            ),
+            (
+                EventKind::SessionMeta,
+                json!({"phase": "turn_resumed"}),
+                json!({"source": "loomwatch", "response": {"result": {"stopReason": "cancelled"}}}),
+            ),
+            (
+                EventKind::TurnEnd,
+                json!({"stopReason": "end_turn"}),
+                json!({"jsonrpc": "2.0", "id": 3, "result": {"stopReason": "end_turn",
+                       "_meta": {"quota": {"model_usage": []}}}}),
+            ),
+        ];
+        let mut archived = Vec::new();
+        for (seq, (kind, payload, raw)) in events.into_iter().enumerate() {
+            let event = RunEvent {
+                id: format!("lean:{seq}"),
+                session_id: "lean".into(),
+                agent_id: "lead".into(),
+                seq: seq as u64,
+                ts: "2026-10-16T00:00:00Z".into(),
+                kind,
+                payload,
+                raw: Some(raw),
+            };
+            archive.append(&event).await.unwrap();
+            archived.push(event);
+        }
+        (archive, archived)
+    }
+
+    /// What a lean page holds: every event, with the raw frame only where the browser reads it.
+    fn leaned(events: &[crate::RunEvent]) -> Vec<crate::RunEvent> {
+        use crate::EventKind;
+        events
+            .iter()
+            .map(|event| crate::RunEvent {
+                raw: matches!(
+                    event.kind,
+                    EventKind::Message | EventKind::SessionMeta | EventKind::TurnEnd
+                )
+                .then(|| event.raw.clone())
+                .flatten(),
+                ..event.clone()
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_lean_page_leaves_out_the_frames_the_browser_never_reads() {
+        use http_body_util::BodyExt;
+        let (archive, archived) = traced_archive().await;
+        let page = async |query: &str| {
+            let response = router(Some(archive.clone()))
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/session/events?session=lean{query}"))
+                        .header("host", "localhost")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            serde_json::from_slice::<Vec<serde_json::Value>>(&body).unwrap()
+        };
+        let as_json = |events: &[crate::RunEvent]| -> Vec<serde_json::Value> {
+            events
+                .iter()
+                .map(|event| serde_json::to_value(event).unwrap())
+                .collect()
+        };
+        assert_eq!(page("").await, as_json(&archived), "unchanged by default");
+        assert_eq!(page("&lean=false").await, as_json(&archived));
+        let lean = page("&lean=true").await;
+        assert_eq!(lean, as_json(&leaned(&archived)));
+        // Left out as an event with no frame is: no `raw` key at all.
+        assert!(lean[2].get("raw").is_none(), "{}", lean[2]);
+        assert!(lean[1].get("raw").is_none(), "{}", lean[1]);
+        assert_eq!(lean[0]["raw"], archived[0].raw.clone().unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_lean_stream_leaves_out_the_frames_the_browser_never_reads() {
+        use futures_util::StreamExt;
+        let (archive, archived) = traced_archive().await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = router(Some(archive.clone()));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        for (query, expected) in [("&lean=true", leaned(&archived)), ("", archived.clone())] {
+            let (mut client, _) = tokio_tungstenite::connect_async(format!(
+                "ws://{address}/api/session/stream?session=lean{query}"
+            ))
+            .await
+            .unwrap();
+            let mut streamed = Vec::new();
+            while streamed.len() < expected.len() {
+                let message = tokio::time::timeout(Duration::from_secs(3), client.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                streamed.push(
+                    serde_json::from_str::<crate::RunEvent>(message.to_text().unwrap()).unwrap(),
+                );
+            }
+            assert_eq!(streamed, expected, "{query}");
+            client.close(None).await.unwrap();
+        }
         server.abort();
     }
 
