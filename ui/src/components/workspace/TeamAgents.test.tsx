@@ -70,7 +70,7 @@ describe('a team’s agents, the first of its views', () => {
     const props = renderTeamAgents({ agents: [scoper], selected: 'scope' })
     const block = screen.getByRole('region', { name: 'What it reads' })
     expect(block).toHaveTextContent('Reads 1 folder, 1 file and 1 Notion page the team gives it')
-    const held = within(block).getByRole('list', { name: 'In its file holder' })
+    const held = within(block).getByRole('list', { name: 'In its file drawer' })
     expect(within(held).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
       'sutd-final-projectFolder · /Users/me/Developer/sutd-final-project',
       'brief.mdFile · scope.files/brief.md',
@@ -93,7 +93,7 @@ describe('a team’s agents, the first of its views', () => {
     const props = renderTeamAgents({ agents: [scoper], selected: 'scope' })
     const block = screen.getByRole('region', { name: 'Tools it can use' })
     expect(block).toHaveTextContent('Can use 2 tools the team gives it, while it works')
-    const rack = within(block).getByRole('list', { name: 'On its tool rack' })
+    const rack = within(block).getByRole('list', { name: 'In its tool drawer' })
     expect(within(rack).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
       'githubTool · an MCP server it can use while it works',
       'notionTool · an MCP server it can use while it works',

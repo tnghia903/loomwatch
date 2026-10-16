@@ -30,7 +30,7 @@ export function draftFromTeamAgent(agent: AgentConfig, harnesses: readonly Detec
 }
 
 /**
- * What a team's agent reads, for the file holder on its bench: each folder, file and Notion page
+ * What a team's agent reads, for the drawer in its bench: each folder, file and Notion page
  * the team gives it with a line on the canvas (ADR 0042, 0050), in the team file's order. The same
  * for a linked agent, since what it reads stays the team's own. Knowledge without a path or page
  * names nothing it can read (ADR 0036), so it isn't shown as something it reads.
@@ -45,8 +45,8 @@ export function readsOf(agent: Pick<AgentConfig, 'capabilities'>): ReadSource[] 
 }
 
 /**
- * The tools (MCP servers) a team's agent is given with a line on the canvas, for the rack on its
- * bench: each named once, in the team file's order. Like what it reads, the team's own for a
+ * The tools (MCP servers) a team's agent is given with a line on the canvas, for the tool drawer
+ * in its bench: each named once, in the team file's order. Like what it reads, the team's own for a
  * linked agent too.
  */
 export function toolsOf(agent: Pick<AgentConfig, 'capabilities'>): string[] {

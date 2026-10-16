@@ -30,7 +30,7 @@ const AgentFigure = lazy(() => import('./AgentFigure'))
  * The blocks are the way in: each says what its setting does, in words, so nobody needs to learn
  * the bench first. The bench is the picture of the same settings: the laptop is the app, the
  * nameplate the name, the clipboard the job, the cards on the pegboard the skills, the folders in
- * the file holder what its team gives it to read, the wrenches on the rack the tools it is given,
+ * the file drawer what its team gives it to read, the wrenches in the tool drawer its tools,
  * the keys on the hooks what it may do without
  * asking (the ones in your dish ask you first), and the tray what it hands back. Clicking anything
  * on the bench takes you to its block, and working in a block lights its thing on the bench. While
@@ -66,12 +66,12 @@ export interface ByHandProps {
   readOnly?: boolean
   /**
    * In a team: the folders, files and Notion pages the team gives it to read (teamDraft.ts
-   * readsOf), shown in the file holder. Absent in Your agents, where an agent reads nothing yet.
+   * readsOf), filed in the bench's file drawer. Absent in Your agents, where an agent reads nothing yet.
    */
   reads?: readonly ReadSource[]
   /**
-   * In a team: the tools (MCP servers) the team gives it (teamDraft.ts toolsOf), hanging on the
-   * tool rack. Absent in Your agents, where an agent is given no tools yet.
+   * In a team: the tools (MCP servers) the team gives it (teamDraft.ts toolsOf), standing in the
+   * bench's tool drawer. Absent in Your agents, where an agent is given no tools yet.
    */
   tools?: readonly string[]
   /** In a team: open its Workflow, where what it reads and the tools it uses are given with a line. */
@@ -94,8 +94,8 @@ const BLOCKS: readonly { part: FigurePart; title: string; where: string }[] = [
   { part: 'app', title: 'App', where: 'the laptop' },
   { part: 'mind', title: 'Model', where: 'the figure' },
   { part: 'skills', title: 'Skills', where: 'the recipe cards' },
-  { part: 'reads', title: 'What it reads', where: 'the file holder' },
-  { part: 'tools', title: 'Tools it can use', where: 'the tool rack' },
+  { part: 'reads', title: 'What it reads', where: 'the file drawer' },
+  { part: 'tools', title: 'Tools it can use', where: 'the tool drawer' },
   { part: 'keys', title: 'What it may do without asking', where: 'the keys, and your dish' },
   { part: 'reply', title: 'What it hands back', where: 'the tray' },
 ]
@@ -191,11 +191,10 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
     { anchor: 'skills', part: 'skills', place: 'above', text: `Skills · ${draft.skills.length || 'none yet'}${more}`, short: `Skills · ${draft.skills.length}`, label: `The recipe cards: ${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'}` },
     { anchor: 'keys', part: 'keys', place: 'above', text: keysText, short: `Keys · ${wild ? 'all' : given.length}`, label: `The key hooks: ${keysText}` },
     { anchor: 'dish', part: 'keys', place: 'below', text: dishText, short: asking ? `Asking for ${asking}` : `You keep ${wild ? 0 : kept.length}`, label: `Your dish: ${dishText}` },
-    // Below its tray, as your dish's is below the dish: in a team, the file holder stands behind the tray.
-    { anchor: 'tray', part: 'reply', place: 'below', text: `Hands back · ${reply ? 'see the tray' : 'not said yet'}`, short: 'Hands back', label: 'The tray: what it hands back' },
-    ...(reads ? [{ anchor: 'reads', part: 'reads', place: 'above', text: readsText, short: `Reads · ${reads.length}`, label: `The file holder: ${says.reads}` } satisfies BenchLabel] : []),
-    // Below the rack: the keys above it have their own label.
-    ...(tools ? [{ anchor: 'tools', part: 'tools', place: 'below', text: toolsText, short: `Tools · ${tools.length}`, label: `The tool rack: ${says.tools}` } satisfies BenchLabel] : []),
+    { anchor: 'reply', part: 'reply', place: 'above', text: `Hands back · ${reply ? 'see the tray' : 'not said yet'}`, short: 'Hands back', label: 'The tray: what it hands back' },
+    // Under the bench's two drawers, on its face: what the team gives it, apart from the work on top.
+    ...(reads ? [{ anchor: 'reads', part: 'reads', place: 'below', text: readsText, short: `Reads · ${reads.length}`, label: `The file drawer: ${says.reads}` } satisfies BenchLabel] : []),
+    ...(tools ? [{ anchor: 'tools', part: 'tools', place: 'below', text: toolsText, short: `Tools · ${tools.length}`, label: `The tool drawer: ${says.tools}` } satisfies BenchLabel] : []),
     { anchor: 'name', part: 'name', place: 'plate', label: `The nameplate: ${name}` },
     { anchor: 'app', part: 'app', place: 'plate', label: `The laptop, the app it works in: ${harness?.name ?? 'none chosen'}` },
   ]
@@ -317,7 +316,7 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
           {block('skills', <SkillShelf chosen={draft.skills} available={skills} loading={skillsLoading} onAdd={addSkill} onRemove={(skill) => set('skills', draft.skills.filter((item) => item !== skill))} onDrag={setDragging} />)}
 
           {reads && block('reads', <>
-            {reads.length > 0 && <ul className="byhand-reads" aria-label="In its file holder">
+            {reads.length > 0 && <ul className="byhand-reads" aria-label="In its file drawer">
               {reads.map((source, index) => {
                 const Icon = source.kind === 'page' ? NotebookText : source.kind === 'file' ? FileText : Folder
                 return <li key={`${source.kind}:${source.where}:${index}`}><Icon size={15} aria-hidden="true" /><span><b>{source.name}</b><em title={source.where}>{source.kind === 'page' ? source.where : `${source.kind === 'file' ? 'File' : 'Folder'} · ${middleTruncate(source.where, 64)}`}</em></span></li>
@@ -328,7 +327,7 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
           </>)}
 
           {tools && block('tools', <>
-            {tools.length > 0 && <ul className="byhand-reads" aria-label="On its tool rack">
+            {tools.length > 0 && <ul className="byhand-reads" aria-label="In its tool drawer">
               {tools.map((tool) => <li key={tool}><Wrench size={15} aria-hidden="true" /><span><b>{tool}</b><em>Tool · an MCP server it can use while it works</em></span></li>)}
             </ul>}
             <p className="t-meta">The tools it uses are the team’s to give: draw a line from a tool to this agent in Workflow.</p>

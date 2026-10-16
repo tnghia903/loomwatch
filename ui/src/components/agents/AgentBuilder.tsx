@@ -36,8 +36,8 @@ export interface AgentBuilderProps {
   /**
    * Shown inside a team's Agents tab, for an agent placed from Your agents: there is no page to
    * go back to, and every save is followed by moving that team to the version just saved. What it
-   * reads and the tools it uses stay the team's own (lib/library/link.ts), so its file holder and
-   * tool rack show the team's.
+   * reads and the tools it uses stay the team's own (lib/library/link.ts), so its file drawer
+   * and tool drawer show the team's.
    */
   inTeam?: { name: string; onSaved: (job: SavedJob) => void; reads: readonly ReadSource[]; tools: readonly string[]; onShowWorkflow?: () => void }
 }
