@@ -2545,6 +2545,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               <div className="tc-details-body" id="tc-pane-body" role={paneDocument ? 'tabpanel' : undefined} aria-labelledby={paneDocument ? `tc-pane-${shownTab}` : undefined}>
                 {shownTab === 'answer' ? (
                   <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} />
+                ) : session.loading ? (
+                  // The record is shown once it is read whole, so it opens as it ended rather than replaying.
+                  <p className="tc-loading" role="status">Reading the run…</p>
                 ) : (
                 <DeliveryLane
                   key={activeRunId ?? 'new-run'}

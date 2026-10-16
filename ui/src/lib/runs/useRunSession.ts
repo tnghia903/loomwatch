@@ -13,7 +13,7 @@ export type ViewMode = 'live' | 'replay'
  */
 export function useRunSession(runId: string | null, responder: string | null) {
   const { record, missing, apply: applyRecord } = useRunRecord(runId)
-  const { events, error, connected } = useSessionEvents(runId ?? '')
+  const { events, error, connected, loading } = useSessionEvents(runId ?? '')
   const [cursor, setCursorState] = useState<number | null>(null)
   const previousRun = useRef(runId)
 
@@ -46,5 +46,5 @@ export function useRunSession(runId: string | null, responder: string | null) {
     setCursorState(seq === null || seq >= lastSeq ? null : Math.max(0, seq))
   }, [lastSeq])
 
-  return { record, applyRecord, missing, events, error, connected, projection, latest, cursor, setCursor, lastSeq, mode, terminal, evidenceComplete }
+  return { record, applyRecord, missing, events, error, connected, loading, projection, latest, cursor, setCursor, lastSeq, mode, terminal, evidenceComplete }
 }
