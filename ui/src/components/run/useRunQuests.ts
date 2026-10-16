@@ -4,6 +4,8 @@ import { questFor, type Quest, type QuestItem } from '../../lib/quests/catalog'
 import { BOBBIN_LINE, questsEarned, wholeCraft, type Award } from '../../lib/quests/rules'
 import { earnItem, fetchWardrobe, useWardrobe } from '../../lib/quests/wardrobe'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
+import { fetchTeamFile } from '../../lib/team-file/client'
+import { TeamFileModel } from '../../lib/team-file/document'
 import { LESSON_RUNS, lessonRun } from '../../lib/team-file/runLessons'
 import type { AgentConfig } from '../../lib/team-file/types'
 import type { RunProjection } from '../../lib/watch/events'
@@ -37,36 +39,60 @@ export function earlierRecords(records: readonly RunRecord[], record: RunRecord)
 }
 
 /**
+ * The agents of the team file exactly as `record` ran it, or null when that is no longer on disk.
+ *
+ * A run is judged only against the settings it ran with: a Done when, a folder, a key or a bench
+ * link added after it must not earn for a run that never had it, and the first earn is permanent.
+ * The daemon records the digest of the bytes each run executed (`teamRevision`), so while the team
+ * file's revision is still that one it holds exactly those settings, and once it has changed the
+ * run is not judged at all. Keeping a copy of every run's team file would let those runs be judged
+ * too, but needs a second store and a route to read it back; one digest compared is the smallest
+ * change that is never wrong. It costs only runs nobody can judge honestly any more: a run from
+ * before the digest was kept, or one whose team was edited since. The editor's copy of the team is
+ * not used either: it can hold edits nobody has saved, let alone run.
+ */
+export async function agentsRunWith(record: Pick<RunRecord, 'teamPath' | 'teamRevision'>): Promise<AgentConfig[] | null> {
+  if (!record.teamRevision) return null
+  const file = await fetchTeamFile(record.teamPath)
+  if (file.revision !== record.teamRevision) return null
+  return TeamFileModel.parse(file.yaml).snapshot().agents ?? []
+}
+
+/**
  * The quests a finished run earned (lib/quests), put in the wardrobe the first time, and what its
  * receipt shows: only items this run was the first to earn, so a later run never repeats them.
  * Read once the run's record is complete, so nothing is judged on half of it. A run looked at again
- * later is judged the same way, against the runs before it, so a run that earned something before
- * the wardrobe existed earns it when its receipt is opened.
+ * later is judged the same way, against the runs before it and the team file it ran, so a run that
+ * earned something before the wardrobe existed earns it when its receipt is opened, as long as its
+ * team file has not changed since (`agentsRunWith`).
  */
-export function useRunQuests({ record, projection, agents, phase }: {
+export function useRunQuests({ record, projection, phase }: {
   record: RunRecord | null
   projection: Pick<RunProjection, 'agents' | 'evidence' | 'messages' | 'checks' | 'coverage'>
-  agents: readonly AgentConfig[]
   phase: string
 }): RunEarned[] {
   const { wardrobe } = useWardrobe()
   const [awards, setAwards] = useState<{ runId: string; list: Award[] } | null>(null)
   const judged = useRef<string | null>(null)
   const ready = Boolean(record && ENDED.has(record.status) && ENDED.has(phase === 'partial' ? 'failed' : phase) && projection.coverage.agents.level === 'complete')
-  // The latest of what is judged, read when the judging starts: the team file's agents are a new
-  // list on every render, and the record a new object each time the run list is read again, and
-  // neither must restart it.
-  const latest = useRef({ record, projection, agents, phase })
-  useEffect(() => { latest.current = { record, projection, agents, phase } })
+  // The latest of what is judged, read when the judging starts: the record is a new object each
+  // time the run list is read again, and that must not restart it.
+  const latest = useRef({ record, projection, phase })
+  useEffect(() => { latest.current = { record, projection, phase } })
   const runId = record?.runId ?? null
 
   useEffect(() => {
-    const { record, projection, agents, phase } = latest.current
+    const { record, projection, phase } = latest.current
     if (!ready || !record || record.runId !== runId || judged.current === record.runId) return
     judged.current = record.runId
     let shown = true
     void (async () => {
       try {
+        const agents = await agentsRunWith(record)
+        if (agents === null) {
+          if (shown) setAwards({ runId: record.runId, list: [] })
+          return
+        }
         const records = await fetchRuns()
         const earlier = (await Promise.all(earlierRecords(records, record).map(lesson))).flatMap((run) => (run ? [run] : []))
         const list = questsEarned({

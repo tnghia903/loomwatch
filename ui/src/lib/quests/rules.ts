@@ -23,7 +23,7 @@ export interface QuestFacts {
   run: Pick<RunRecord, 'runId' | 'createdAt' | 'trigger' | 'onlyAgent' | 'startAt'>
   /** The run finished with its answer (`succeeded`, not `partial`): only a finished run earns. */
   succeeded: boolean
-  /** The team file the run ran, as it is now. */
+  /** The agents of the team file exactly as this run ran it (useRunQuests.ts `agentsRunWith`). */
   agents: readonly AgentConfig[]
   projection: Pick<RunProjection, 'agents' | 'evidence' | 'messages' | 'checks'>
   /** This run reduced like the team's other runs (runLessons.ts `lessonRun`). */

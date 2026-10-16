@@ -18,6 +18,8 @@ After    the receipt names the practice, says why it   (the run receipt, once, o
   that teaches nothing is not made, however good its item looks.
 - **Only facts LoomWatch records decide.** The run's record and evidence, the team file it ran, and
   the team's earlier runs. Never what an agent said about itself, and never a box someone ticks.
+- **A run is judged against the settings it ran with.** A Done when, a folder, a key or a bench link
+  added after a run never counts for it.
 - **Better work, never more runs.** No quest counts runs: running more only spends tokens.
 - **What happened, not what was typed.** A filled-in field earns nothing. A run that shows the
   practice does, so the only way to game a quest is to do the practice.
@@ -43,12 +45,17 @@ The summaries in the app are LoomWatch’s own words, not quotes from the source
 ## How it works
 
 - **Rules** (`ui/src/lib/quests/rules.ts`) are pure functions over a finished run: its record and
-  projection, the team file's agents, the team's whole-team runs before it (the same reduction the
-  checkup's run lessons use), and which saved agents had a test bench run before it.
+  projection, the agents of the team file it ran, the team's whole-team runs before it (the same
+  reduction the checkup's run lessons use), and which saved agents had a test bench run before it.
 - **Judging** (`ui/src/components/run/useRunQuests.ts`) happens when a run's receipt is shown and
   its record is complete. A run looked at again later is judged the same way, against the runs
   before it, so runs from before the wardrobe existed can earn their items when their receipts
   are opened.
+- **The team file a run ran.** The daemon keeps the revision (the `sha256:` digest) of the team file
+  bytes each run executed, as the run record's `teamRevision`. A run is judged only while the team
+  file on disk still has that revision, with the agents read from it, never from the editor's
+  copy. Once the file has changed, the run is not judged again, and neither is a run recorded
+  before the daemon kept the revision. What it earned before stays earned.
 - **The wardrobe** is kept by the daemon in `wardrobe.json` in its state folder: what you earned
   belongs to you on this computer, not to a team file you might share. Each item is earned once.
   The first run to earn it keeps it, so that run's receipt is the one that says so.

@@ -2563,7 +2563,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
                   output={(graph.nodes.find((node) => node.id === '__output') as OutputNode | undefined)?.data ?? { text: responseText, phase, phaseText: '', producer: null, producerLabel: 'the responder', mode: session.mode, streaming: false, pending: false, strip: null, compact: false, expanded: false, terminal: session.terminal }}
                   projection={projection}
                   record={record}
-                  teamAgents={docAgents}
                   selectedEvidenceId={inspectedEvidenceId}
                   focusAgentId={attentionFocusAgentId}
                   onInspectEvidence={(id) => setInspectedEvidenceId(id)}
