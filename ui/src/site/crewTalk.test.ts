@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { loopLength, PASS, readTime, REST, talkAt, THINK, WAIT, WAITING_WORDS, type TalkLine } from './crewTalk'
+import { glowAt, loopLength, PASS, readTime, REST, talkAt, THINK, WAIT, WAITING_WORDS, type TalkLine } from './crewTalk'
 
 const SCRIPT: TalkLine[] = [
   { by: 5, says: 'Scout, find the sources?', to: 0 },
@@ -53,5 +53,27 @@ describe('talkAt', () => {
     expect(talkAt(SCRIPT, 2 * loop - REST - 0.1, 2).waiting).toBe(true)
     expect(talkAt(SCRIPT, 2 * loop - REST, 2)).toMatchObject({ bubble: null, done: true })
     expect(talkAt(SCRIPT, 5 * loop, 2).done).toBe(true)
+  })
+})
+
+describe('glowAt', () => {
+  const first = THINK + readTime(SCRIPT[0].says)
+
+  it('has everyone ready before it starts, with no conversation, and once it is done', () => {
+    expect(glowAt(talkAt(SCRIPT, -1, 1), 6)).toEqual(Array(6).fill('ready'))
+    expect(glowAt(null, 3)).toEqual(['ready', 'ready', 'ready'])
+    expect(glowAt(talkAt(SCRIPT, 5 * loopLength(SCRIPT), 1), 6)).toEqual(Array(6).fill('ready'))
+  })
+
+  it('has the one thinking, talking or sending the work on working, and only it', () => {
+    expect(glowAt(talkAt(SCRIPT, 0.1, 1), 6)).toEqual(['ready', 'ready', 'ready', 'ready', 'ready', 'working'])
+    expect(glowAt(talkAt(SCRIPT, THINK + 0.1, 1), 6)[5]).toBe('working')
+    expect(glowAt(talkAt(SCRIPT, first + PASS / 2, 1), 6)).toEqual(['ready', 'ready', 'ready', 'ready', 'ready', 'working'])
+    expect(glowAt(talkAt(SCRIPT, first + PASS + 0.1, 1), 6)).toEqual(['working', 'ready', 'ready', 'ready', 'ready', 'ready'])
+  })
+
+  it('has the one that hands you the work waiting, and the rest ready', () => {
+    const asked = loopLength(SCRIPT) - REST - WAIT
+    expect(glowAt(talkAt(SCRIPT, asked + 0.1, 1), 6)).toEqual(['ready', 'waiting', 'ready', 'ready', 'ready', 'ready'])
   })
 })

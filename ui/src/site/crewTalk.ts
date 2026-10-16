@@ -38,6 +38,18 @@ export const WAITING_WORDS = 'Waiting for you'
 
 const IDLE: TalkState = { speaker: null, to: null, bubble: null, pass: null, waiting: false, done: false }
 
+/**
+ * What a figure glows, as an agent's figure does in the app: green while it is ready, blue while it
+ * works (thinks, talks, sends the work on), gold while the work waits for you.
+ */
+export type Glow = 'ready' | 'working' | 'waiting'
+
+/** What each of `count` figures glows while the conversation is where `talk` says. */
+export function glowAt(talk: TalkState | null, count: number): Glow[] {
+  return Array.from({ length: count }, (_, index): Glow =>
+    talk?.waiting && talk.bubble?.by === index ? 'waiting' : talk?.speaker === index ? 'working' : 'ready')
+}
+
 /** Long enough to read a few words at an easy pace, never so long that it drags. */
 export function readTime(says: string): number {
   const words = says.trim().split(/\s+/).filter(Boolean).length

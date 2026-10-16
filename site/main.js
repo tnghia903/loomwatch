@@ -312,6 +312,16 @@
       },
     }, reduced)
     stageOf(crewBox, scene)
+    // Each glows what it is doing, as agents do in the app and the chat below, in the theme's own
+    // green, blue and gold. A live.js cached from before the glow has no glowColors().
+    if (typeof scene.glowColors === 'function') {
+      const glowColors = () => {
+        const css = getComputedStyle(root)
+        return { ready: css.getPropertyValue('--ok').trim(), working: css.getPropertyValue('--live').trim(), waiting: css.getPropertyValue('--accent').trim() }
+      }
+      scene.glowColors(glowColors())
+      new MutationObserver(() => scene.glowColors(glowColors())).observe(root, { attributes: true, attributeFilter: ['data-theme'] })
+    }
     // They look where you point anywhere on the first screen, not only over their canvas.
     window.addEventListener('pointermove', (event) => { const [x, y] = local(event, crewCanvas); scene.pointerMove(x, y) }, { passive: true })
     document.documentElement.addEventListener('pointerleave', () => scene.pointerMove(null, null))
