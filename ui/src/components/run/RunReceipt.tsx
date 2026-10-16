@@ -15,7 +15,7 @@ interface RunReceiptProps {
   /** Switch on what a refused line names, for this agent's next runs (ADR 0037). Absent when the
       team cannot be changed from here. */
   onAllow?: (agentId: string, key: AllowSwitch) => void
-  /** What this run was the first to earn on a quest (lib/quests), with the practice it shows. */
+  /** What this run was the first to earn on a quest (lib/quests), with one sentence of why. */
   earned?: readonly RunEarned[]
 }
 
@@ -121,8 +121,8 @@ export function RunReceipt({ receipt, onInspectEvidence, onAllow, earned = [] }:
 
 /**
  * What the run earned (docs/QUESTS.md), under its lines: once, on the run that earned it. It says
- * what this run did, then names the practice that is and why it works, with where it comes from,
- * so the reward is also the lesson. No toast and no sound: the receipt is where you already look.
+ * what this run did and, in one sentence, why that works: LoomWatch configures agents, it does not
+ * teach a course on them. No toast and no sound: the receipt is where you already look.
  */
 function ReceiptEarned({ earned }: { earned: readonly RunEarned[] }) {
   return (
@@ -137,9 +137,8 @@ function ReceiptEarned({ earned }: { earned: readonly RunEarned[] }) {
           <div>
             <b>{quest.reward === 'accessory' ? 'New in the wardrobe' : 'A new figure'}</b>
             <p><strong>{quest.name}.</strong> {line}</p>
-            <p className="receipt-lesson"><strong>The practice: {quest.practice}.</strong> {quest.teach}</p>
+            <p className="receipt-why">{quest.why}</p>
             <p className="receipt-earned-links">
-              {quest.source && <a className="link" href={quest.source.url} target="_blank" rel="noreferrer">From {quest.source.name}</a>}
               <a className="link" href="/agents">{quest.reward === 'accessory' ? 'Any agent can wear it: choose in Your agents' : 'Any agent can be one: choose in Your agents'}</a>
             </p>
           </div>

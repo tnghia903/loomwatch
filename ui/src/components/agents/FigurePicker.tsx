@@ -72,7 +72,7 @@ export function FigurePicker({ figure, onChange, wardrobe: given }: { figure: Fi
             const on = wearing.includes(item)
             return (
               <li key={item}>
-                <button type="button" className="figure-wardrobe-item" aria-pressed={on} onClick={() => toggle(item)} title={`${quest.practice}: ${quest.teach}`}>
+                <button type="button" className="figure-wardrobe-item" aria-pressed={on} onClick={() => toggle(item)} title={quest.why}>
                   <AccessoryIcon item={item} />
                   <span><span className="figure-wardrobe-name">{quest.name}</span><span className="figure-wardrobe-note">{on ? 'Wearing' : 'Wear it'} · {quest.practice}{IN_CHAT.has(item) ? '' : ' · not in the chat picture'}</span></span>
                 </button>

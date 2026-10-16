@@ -357,7 +357,7 @@ span.story-schedule { cursor: default; }
 /* ADR 0037: a refused line offers the switch that covers it, under its sentence. */
 .receipt-allow, .receipt-allowed { display: block; margin-top: 2px; font-size: 12px; }
 .receipt-allowed { color: var(--color-ok); }
-/* What the run earned on a quest (docs/QUESTS.md): the item, what happened, and the practice. */
+/* What the run earned on a quest (docs/QUESTS.md): the item, what this run did, and one sentence of why. */
 .receipt-earned { display: grid; gap: 14px; font-family: var(--font-sans); }
 .receipt-earned-item { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 14px; align-items: start; animation: receipt-earned-in .5s cubic-bezier(.2, .8, .2, 1) both; }
 .receipt-earned-item b { display: block; margin-bottom: 4px; font-family: var(--font-mono); font-weight: 500; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--color-accent); }
@@ -366,7 +366,7 @@ span.story-schedule { cursor: default; }
 .receipt-earned-art { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--color-accent) 55%, transparent); background: var(--color-accent-tint); overflow: hidden; }
 .receipt-earned-art .accessory-icon { width: 64px; height: 64px; }
 .receipt-earned-art.figure img { width: 64px; height: 64px; }
-.receipt-lesson { margin-top: 6px !important; padding-top: 6px; border-top: 1px dashed color-mix(in srgb, var(--color-accent) 35%, transparent); color: var(--color-ink-2); }
+.receipt-why { margin-top: 6px !important; padding-top: 6px; border-top: 1px dashed color-mix(in srgb, var(--color-accent) 35%, transparent); color: var(--color-ink-2); }
 .receipt-earned-links { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px !important; font-size: 12px !important; }
 @keyframes receipt-earned-in { from { transform: translateY(4px); opacity: .4; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .receipt-earned-item { animation: none; } }

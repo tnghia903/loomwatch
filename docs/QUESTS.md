@@ -1,21 +1,23 @@
 # Quests and the wardrobe
 
-Quests teach how to build good agents and agent teams, using your own runs. Each quest is one
-practice from the field. LoomWatch notices it when a real run shows it, and the run's receipt
-explains what you just did. The reward is an accessory or a figure, and it goes into one wardrobe
-that every agent in Your agents can wear.
+LoomWatch notices when one of your real runs shows a good practice of building agents and agent
+teams, and rewards it with an accessory or a figure. The reward goes into one wardrobe that every
+agent in Your agents can wear.
+
+LoomWatch is a tool for configuring agents, not a course on them. A quest says what to try and,
+once, one sentence of why it works. It has no lessons, reading lists or links to learn more.
 
 ```
-Before   a locked item shows a one-line hint           (the wardrobe, the Quests list)
-During   you try it on work you wanted done anyway     (nothing about the run changes)
-After    the receipt names the practice, says why it   (the run receipt, once, on the run
-         works, and links to where it comes from         that earned it)
+Before   a locked item shows a one-line hint             (the wardrobe, in an agent's figure)
+During   you try it on work you wanted done anyway       (nothing about the run changes)
+After    the receipt says what the run did, and why it   (the run receipt, once, on the run
+         works in one sentence                             that earned it)
 ```
 
 ## Rules every quest keeps
 
-- **Every quest teaches one practice.** It names the practice and links to its source. A quest
-  that teaches nothing is not made, however good its item looks.
+- **Every quest notices one practice.** A run shows it or it doesn't; the hint says what to try,
+  and the receipt says why it works in one sentence.
 - **Only facts LoomWatch records decide.** The run's record and evidence, the team file it ran, and
   the team's earlier runs. Never what an agent said about itself, and never a box someone ticks.
 - **A run is judged against the settings it ran with.** A Done when, a folder, a key or a bench link
@@ -28,19 +30,17 @@ After    the receipt names the practice, says why it   (the run receipt, once, o
 
 ## The quests
 
-| Item | Part | Practice | Earned when | Source |
-|---|---|---|---|---|
-| Tailor’s chalk | Prompt | Clear success criteria | A check step’s first look at an agent’s work gives a verdict on every item of its Done when, every one is Met, and no check sends the work back. What the agent says about its own work never counts. | [Claude docs: Define your success criteria](https://platform.claude.com/docs/en/test-and-evaluate/define-success) |
-| Tailor’s tape | Context | Scoped context | An agent is given at least one folder, and reads from every folder it was given. | [Anthropic: Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) |
-| Safety-pin clip | Harness | Least privilege | A scheduled run never asks for a permission, and every key its agents hold (web, files, commands) was used. | [OWASP Top 10 for LLM apps: Excessive Agency](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/) |
-| Wrist pincushion | Harness | Test before you ship | A team runs an agent from Your agents that had a test bench run that finished before it. | [Anthropic: Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) |
-| Shuttle | Team shape | Orchestrator and workers | One agent asks another over the Team Bus and gets an answer. | [Anthropic: Building effective agents](https://www.anthropic.com/research/building-effective-agents) |
-| Button monocle | Checking | Evaluator–optimizer loop | A check step sends work back, and the second pass meets every item it checks. | [Anthropic: Building effective agents](https://www.anthropic.com/research/building-effective-agents) |
-| Sewn-on patch | Checking | Learn from failures | Something that went wrong in two or more of the team’s last five runs (a permission asked for, an agent failing, a teammate left idle, a stage asking for more) doesn’t happen in this run. | [Anthropic: Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) |
-| Scissors (a figure) | Team shape | Start simple | The team runs with fewer agents than its last finished run, and uses fewer tokens. | [Anthropic: Building effective agents](https://www.anthropic.com/research/building-effective-agents) |
-| Bobbin (a figure) | All five | The whole craft | The wardrobe holds an item from each of the five parts. | — |
-
-The summaries in the app are LoomWatch’s own words, not quotes from the sources.
+| Item | Part | Practice | Earned when |
+|---|---|---|---|
+| Tailor’s chalk | Prompt | Clear success criteria | A check step’s first look at an agent’s work gives a verdict on every item of its Done when, every one is Met, and no check sends the work back. What the agent says about its own work never counts. |
+| Tailor’s tape | Context | Scoped context | An agent is given at least one folder, and reads from every folder it was given. |
+| Safety-pin clip | Harness | Least privilege | A scheduled run never asks for a permission, and every key its agents hold (web, files, commands) was used. |
+| Wrist pincushion | Harness | Test before you ship | A team runs an agent from Your agents that had a test bench run that finished before it. |
+| Shuttle | Team shape | Orchestrator and workers | One agent asks another over the Team Bus and gets an answer. |
+| Button monocle | Checking | Evaluator–optimizer loop | A check step sends work back, and the second pass meets every item it checks. |
+| Sewn-on patch | Checking | Learn from failures | Something that went wrong in two or more of the team’s last five runs (a permission asked for, an agent failing, a teammate left idle, a stage asking for more) doesn’t happen in this run. |
+| Scissors (a figure) | Team shape | Start simple | The team runs with fewer agents than its last finished run, and uses fewer tokens. |
+| Bobbin (a figure) | All five | The whole craft | The wardrobe holds an item from each of the five parts. |
 
 ## How it works
 
@@ -83,8 +83,8 @@ Both answer only this computer and this app's own pages, like the run evidence t
 
 ## Adding a quest
 
-1. Add it to `QUESTS` in `ui/src/lib/quests/catalog.ts`: the practice, a hint, why it works, what a
-   run has to show, and a source you have read.
+1. Add it to `QUESTS` in `ui/src/lib/quests/catalog.ts`: the practice, a one-line hint, one
+   sentence of why it works, and what a run has to show. No links.
 2. Write its rule in `rules.ts` from recorded facts only, with a test that fails without it.
 3. Add its item to `ACCESSORIES` or `FIGURE_ITEMS` in `crates/loomwatch-backend/src/wardrobe.rs`.
    For an accessory, build it in `accessoryMeshes.ts` and render its layers and icons with

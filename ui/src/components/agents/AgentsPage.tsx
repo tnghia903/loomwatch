@@ -12,7 +12,6 @@ import { useTheme } from '../../lib/theme'
 import { LoomMark } from '../ui/glyphs'
 import { AgentBadge } from './AgentBadge'
 import { AgentBuilder } from './AgentBuilder'
-import { QuestsSection } from './QuestsSection'
 import { navigate, useAgentsRoute } from './route'
 
 export interface AgentsPageProps {
@@ -111,8 +110,6 @@ function AgentsList({ harnesses }: { harnesses: DetectedHarness[] }) {
         )}
         {problems.map((problem) => <p key={problem.file} className="home-empty alert" title={problem.message}>Can’t read {problem.file}: {problem.message}</p>)}
       </section>
-
-      <QuestsSection />
     </>
   )
 }

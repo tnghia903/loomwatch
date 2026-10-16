@@ -34,11 +34,15 @@ function facts(extra: Partial<QuestFacts> & { agents?: AgentConfig[] } = {}): Qu
 const items = (from: QuestFacts) => questsEarned(from).map((award) => award.item)
 
 describe('quests', () => {
-  it('teach one practice each, cover every part, and say where the practice comes from', () => {
+  // LoomWatch configures agents, it doesn't teach them: a hint, one sentence of why, and no links.
+  it('cover every part, each with a one-line hint and one sentence of why, and link nowhere', () => {
     for (const area of AREAS) expect(QUESTS.some((quest) => quest.area === area)).toBe(true)
     for (const quest of QUESTS) {
-      expect(quest.practice && quest.hint && quest.teach && quest.earnedWhen).toBeTruthy()
-      if (quest.area !== 'all') expect(quest.source?.url).toMatch(/^https:\/\//)
+      expect(quest.practice && quest.hint && quest.why && quest.earnedWhen).toBeTruthy()
+      expect(quest.hint).not.toContain('\n')
+      expect(quest.why.split(/(?<=[.!?])\s+/)).toHaveLength(1)
+      expect(quest.why).toMatch(/\.$/)
+      expect(JSON.stringify(quest)).not.toMatch(/https?:\/\//)
     }
   })
 

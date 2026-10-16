@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Wardrobe } from '../../lib/quests/wardrobe'
 import { FigurePicker } from './FigurePicker'
-import { QuestsSection } from './QuestsSection'
 
 beforeEach(() => vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 }))))
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -34,16 +33,5 @@ describe('the figure picker’s wardrobe', () => {
     render(<FigurePicker figure={{ kind: 'spool', color: 'sky' }} onChange={vi.fn()} wardrobe={earned} />)
     expect(screen.getByRole('radio', { name: 'Scissors' })).toBeEnabled()
     expect(screen.getByRole('radio', { name: /Bobbin, locked/ })).toBeDisabled()
-  })
-})
-
-describe('the quests on Your agents', () => {
-  it('names each practice, what to try next, and where it comes from', () => {
-    render(<QuestsSection wardrobe={earned} />)
-    const quests = screen.getByRole('region', { name: 'Quests' })
-    expect(quests).toHaveTextContent('2 of 9 earned')
-    expect(quests).toHaveTextContent('Try this: Give an agent a Done when, and a check step that checks its work against it.')
-    expect(quests).toHaveTextContent('Evaluator–optimizer loop')
-    expect(within(quests).getAllByRole('link', { name: /^From / }).length).toBe(8)
   })
 })
