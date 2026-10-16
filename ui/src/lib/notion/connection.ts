@@ -62,6 +62,24 @@ export async function fetchNotionConnection(signal?: AbortSignal): Promise<Notio
   return body.connected ? { state: 'connected', workspace: body.name ?? 'Notion', destination: body.destination ?? null } : { state: 'disconnected' }
 }
 
+let inFlight: Promise<NotionConnection> | null = null
+
+/**
+ * The connection, read once for everything on the page that asks at the same time: every answer
+ * in a chat shows where it can be sent, and they all mount (and re-read on focus) together. The
+ * daemon's first read can wait on macOS asking you about the Keychain, and the browser opens only
+ * six connections to it, so a read per answer could leave the rest of the page queued behind them.
+ */
+function readShared(): Promise<NotionConnection> {
+  if (inFlight) return inFlight
+  const read = fetchNotionConnection().catch((caught: unknown): NotionConnection => (
+    { state: 'unavailable', message: caught instanceof Error ? caught.message : NOTION_UNAVAILABLE }
+  ))
+  inFlight = read
+  void read.finally(() => { if (inFlight === read) inFlight = null })
+  return read
+}
+
 /**
  * The connection as the daemon reports it, read again whenever the window regains focus: the
  * operator connects in the Connections tab and comes back, and the canvas should already know.
@@ -73,14 +91,9 @@ export function useNotionConnection(enabled = true): NotionConnection & { refres
 
   useEffect(() => {
     if (!enabled) return
-    const controller = new AbortController()
-    fetchNotionConnection(controller.signal)
-      .then((next) => { if (!controller.signal.aborted) setConnection(next) })
-      .catch((caught: unknown) => {
-        if (controller.signal.aborted) return
-        setConnection({ state: 'unavailable', message: caught instanceof Error ? caught.message : NOTION_UNAVAILABLE })
-      })
-    return () => controller.abort()
+    let current = true
+    void readShared().then((next) => { if (current) setConnection(next) })
+    return () => { current = false }
   }, [enabled, generation])
 
   useEffect(() => {
