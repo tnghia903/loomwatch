@@ -5,7 +5,8 @@
 #   ./loomwatch update     save a copy of the run history, download the latest version, and start
 #   ./loomwatch rollback   go back to the version the last update replaced (ready-built copies)
 #   ./loomwatch version    say which version this is, and whether a newer one is out
-#   ./loomwatch stop       stop LoomWatch and its database (your teams and history are kept)
+#   ./loomwatch import     bring over the run history an earlier version kept in Docker
+#   ./loomwatch stop       stop LoomWatch (your teams and history are kept)
 #
 # The same script runs a copy of the source code, which it builds, and a ready-built copy put in
 # ~/LoomWatch/app by scripts/install.sh, which carries its program in bin/ and updates from the
@@ -13,10 +14,13 @@
 # Update and restart: LoomWatch stops, this script updates it as `update` does, and starts it
 # again in the same window.
 #
+# LoomWatch keeps its run history in one file. Earlier versions kept it in PostgreSQL, which this
+# script ran in Docker; the first start after updating from one copies that history into the file.
+#
 # Optional settings, read from the environment:
 #   LOOMWATCH_TEAMS_ROOT    where your teams live (default: ~/LoomWatch/teams)
 #   LOOMWATCH_PORT          browser port (default: LOOMWATCH_PORT in .env, else 3000)
-#   LOOMWATCH_DATABASE_URL  use your own PostgreSQL instead of the one this script runs in Docker
+#   LOOMWATCH_DATABASE      the file that holds the run history (see database_file below)
 #   LOOMWATCH_BACKUP_DIR    where updates keep copies of the run history (default: ~/LoomWatch/backups)
 #   LOOMWATCH_UPDATE_CHECK  off: never ask GitHub whether a newer version is out
 #
@@ -79,7 +83,7 @@ back_up=1
 assume_yes=0
 for arg in "$@"; do
   case $arg in
-    start | update | rollback | stop) command=$arg ;;
+    start | update | rollback | stop | import) command=$arg ;;
     version | --version) command=version ;;
     help | -h | --help) command=help ;;
     --no-open) open_browser=0 ;;
@@ -109,7 +113,17 @@ build_stamp=target/release/.loomwatch-build
 pid_file=$state_dir/loomwatchd.pid
 # The script that stays beside a ready-built copy's LoomWatch, so `stop` can end both.
 launcher_pid_file=$state_dir/launcher.pid
-database_started=0
+
+# The run history is one file. The ready-built copy in the usual folder keeps it where the program
+# keeps it by default, in LoomWatch's state folder, so it outlives reinstalling the app. Every other
+# copy, a copy of the source or a release being tried, keeps its own in its folder: two copies never
+# share one, as they once shared a database by accident.
+usual_app=
+if [ -d "$HOME/LoomWatch/app" ]; then usual_app=$(cd "$HOME/LoomWatch/app" && pwd -P); fi
+if [ -z "${LOOMWATCH_DATABASE:-}" ] && { [ "$prebuilt" = 0 ] || [ "$repo_root" != "$usual_app" ]; }; then
+  LOOMWATCH_DATABASE="$repo_root/.loomwatch/loomwatch.db"
+  export LOOMWATCH_DATABASE
+fi
 
 # Someone running a copy of the source is in its folder; someone running a ready-built copy may be
 # anywhere, so instructions name that copy's files and folder in full.
@@ -118,7 +132,6 @@ database_started=0
 pretty_path() { case $1 in "$HOME"/*) printf '~%s\n' "${1#"$HOME"}" ;; *) printf '%s\n' "$1" ;; esac; }
 folder_display=$(pretty_path "$repo_root")
 where_is() { if [ "$prebuilt" = 1 ]; then printf '%s/%s\n' "$folder_display" "$1"; else printf '%s\n' "$1"; fi; }
-in_this_folder() { if [ "$prebuilt" = 1 ]; then printf 'cd %s && ' "$folder_display"; fi; }
 
 # The last KEY=value line for KEY in .env, without surrounding quotes. .env is read, never
 # sourced: sourcing would export the Compose-only host-runner settings into the native daemon.
@@ -162,51 +175,18 @@ open_url() {
   fi
 }
 
-uses_docker_database() { [ -z "${LOOMWATCH_DATABASE_URL:-}" ]; }
+# The file that holds the run history, as the program resolves it. Needs the program built.
+database_file() { "./$binary" database-path; }
 
-database_is_running() {
-  docker info >/dev/null 2>&1 && [ -n "$(docker compose ps --status running --quiet postgres 2>/dev/null)" ]
-}
-
-# A Docker Compose project name no other folder uses, for a copy whose database must be its own.
+# A name for this copy of LoomWatch no other folder uses.
 own_project_name() {
   local prefix=loomwatch
   if [ "$prebuilt" = 1 ]; then prefix=loomwatch-app; fi
   printf '%s-%08x\n' "$prefix" "$(printf '%s' "$repo_root" | cksum | cut -d ' ' -f 1)"
 }
 
-# Compose finds a database by its project name alone, so two folders with the same name share one:
-# starting either takes the database over, and `docker compose down -v` in either deletes both
-# histories. Prints the other copy's folder when the database was created from one that is still
-# there. One whose folder is gone is this copy's to adopt, as match_database_password does.
-other_database_owner() {
-  local id owner
-  id=$(docker compose ps --all --quiet postgres 2>/dev/null | head -n 1)
-  [ -n "$id" ] || return 1
-  owner=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$id" 2>/dev/null) || return 1
-  [ -n "$owner" ] || return 1
-  owner=$(cd "$owner" 2>/dev/null && pwd -P) || return 1
-  [ "$owner" != "$repo_root" ] && [ -f "$owner/docker-compose.yml" ] || return 1
-  printf '%s\n' "$owner"
-}
-
-refuse_other_copys_database() {
-  local owner
-  owner=$(other_database_owner) || return 0
-  fail "the LoomWatch copy in $(pretty_path "$owner") uses the same database as this one, and starting it here would take that database over. If you no longer use that copy, delete its folder and run $self again: this copy then keeps the database and its run history. To keep both copies, set COMPOSE_PROJECT_NAME=$(own_project_name) in $(where_is .env) so this one gets a database of its own (it starts with an empty run history), then run $self again."
-}
-
-# Whether the database still holds what LoomWatch set up when it started, not a new, empty one.
-database_has_loomwatch_tables() {
-  local found
-  found=$(printf '%s\n' "select to_regclass('public._sqlx_migrations') is not null;" |
-    docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA' 2>/dev/null) || true
-  [ "$found" = t ]
-}
-
-# A LoomWatch answering on the port is only this one when it was started from this folder, and it
-# only works while its database runs. Another copy, among them one whose folder has since been
-# deleted, holds the port without this copy's database, so stopping here would never create it.
+# A LoomWatch answering on the port is only this one when it was started from this folder. Another
+# copy, among them one whose folder has since been deleted, holds the port with its own files.
 already_running() {
   local pid folder where
   pid=$(listener_pid "$port" || true)
@@ -217,20 +197,6 @@ already_running() {
     [ -d "$folder" ] || where="from $folder, a folder that no longer exists"
     fail "another copy of LoomWatch is already running at $url (process $pid, started $where). Stop it with: kill $pid
 Then run $self again. To keep it running, start this copy on another port instead: LOOMWATCH_PORT=$((port + 1)) $self"
-  fi
-  if uses_docker_database && ! database_is_running; then
-    # This copy outlived its database: the container was stopped or removed, or Docker Desktop was
-    # quit. Its restart policy covers only Docker restarting, so it is started again here, and
-    # LoomWatch reconnects on its next query, as long as the database still holds its tables.
-    say "LoomWatch is running at $url, but its database had stopped. Starting the database again."
-    wake_docker
-    start_database
-    if ! database_has_loomwatch_tables; then
-      local stop_with="$self stop"
-      if [ -n "$pid" ]; then stop_with="kill $pid"; fi
-      fail "the database LoomWatch was using is gone, and LoomWatch only sets up a new one when it starts. Stop it with: $stop_with
-Then run $self again."
-    fi
   fi
   say "LoomWatch is already running at $url"
   open_url "$url"
@@ -251,27 +217,6 @@ docker_app() {
 check_prerequisites() {
   local missing='' brew=0
   if command -v brew >/dev/null 2>&1; then brew=1; fi
-
-  if uses_docker_database; then
-    local app
-    if ! command -v docker >/dev/null 2>&1 && is_macos && app=$(docker_app); then
-      # Docker Desktop installs its `docker` command the first time it is opened.
-      open -a "$app"
-      missing="$missing
-  - Docker Desktop is installed but has not been set up yet. It is opening now: finish its
-    first-start steps, wait until it says it is running, then run $self again."
-    elif ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
-      if [ "$brew" = 1 ]; then
-        missing="$missing
-  - Docker Desktop, which runs the database: brew install --cask docker-desktop
-    (or download it from https://docs.docker.com/desktop/), then open it once."
-      else
-        missing="$missing
-  - Docker Desktop, which runs the database: https://docs.docker.com/desktop/
-    Open it once after installing."
-      fi
-    fi
-  fi
 
   # Only a copy of the source code is built here; a ready-built copy needs neither Node.js nor Rust.
   if [ "$prebuilt" = 0 ]; then
@@ -311,124 +256,11 @@ check_prerequisites() {
   fi
 }
 
-random_secret() {
-  head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'
-}
-
-ensure_env_file() {
-  [ -f .env ] && return 0
-  [ -f .env.example ] || fail ".env.example is missing from $repo_root. Download LoomWatch again."
-  # Another PostgreSQL on the usual port is common enough to step around instead of failing on.
-  local db_port=5433
-  while port_in_use "$db_port" && [ "$db_port" -lt 5460 ]; do db_port=$((db_port + 1)); done
-  sed -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(random_secret)/" \
-    -e "s/^POSTGRES_PORT=.*/POSTGRES_PORT=$db_port/" \
-    -e "s/^LOOMWATCH_HOST_RUNNER_TOKEN=.*/LOOMWATCH_HOST_RUNNER_TOKEN=$(random_secret)/" \
-    .env.example >.env
-  if [ "$prebuilt" = 1 ]; then
-    # Compose names a project after its folder, and this one is called just `app`, like many other
-    # projects whose database this would otherwise take over. Compose reads the name from .env.
-    # Only the usual folder is loomwatch-app: a copy installed anywhere else, such as a release
-    # being tried, would otherwise share that copy's database, and removing its own would remove it.
-    local project=loomwatch-app
-    if [ "$repo_root" != "$(cd "$HOME/LoomWatch/app" 2>/dev/null && pwd -P)" ]; then project=$(own_project_name); fi
-    printf '\n# The Docker Compose project that holds the database.\nCOMPOSE_PROJECT_NAME=%s\n' "$project" >>.env
-  fi
-  chmod 600 .env
-  say "Created your settings file (.env) with a random database password."
-}
-
-# Fails before the long build, not after it, when the database's port belongs to something else.
-check_database_port() {
-  uses_docker_database || return 0
-  if docker info >/dev/null 2>&1; then refuse_other_copys_database; fi
-  local db_port
-  db_port=$(env_value POSTGRES_PORT)
-  port_in_use "${db_port:-5433}" || return 0
-  if docker info >/dev/null 2>&1 && [ -n "$(docker compose ps --status running --quiet postgres 2>/dev/null)" ]; then
-    return 0
-  fi
-  fail "another program is using port ${db_port:-5433}, which the LoomWatch database needs. Change POSTGRES_PORT in $(where_is .env) to a free port such as $((${db_port:-5433} + 1)), then run $self again."
-}
-
 ensure_teams_root() {
   [ -d "$teams_root" ] && return 0
   mkdir -p "$teams_root"
   cp examples/operator-stop.yaml examples/operator-stop-harness.py "$teams_root/"
   say "Created your teams folder at $(pretty_path "$teams_root"), with an offline demo team in it."
-}
-
-# Asks Docker Desktop to start without waiting, so it boots while LoomWatch builds.
-wake_docker() {
-  uses_docker_database || return 0
-  docker info >/dev/null 2>&1 && return 0
-  local app
-  if is_macos && app=$(docker_app); then
-    say "Starting $(basename "$app" .app). If it asks you to accept its terms, do that and LoomWatch will carry on."
-    open -a "$app"
-  fi
-}
-
-start_database() {
-  if ! uses_docker_database; then
-    DATABASE_URL=$LOOMWATCH_DATABASE_URL
-    return 0
-  fi
-  # Already started by this run of the script, as an update does before it saves the history.
-  if [ "$database_started" = 1 ]; then return 0; fi
-  if ! docker info >/dev/null 2>&1; then
-    if is_macos && docker_app >/dev/null; then
-      say "Waiting for Docker to finish starting…"
-      local waited=0
-      until docker info >/dev/null 2>&1; do
-        [ "$waited" -ge 120 ] && fail "Docker did not start within two minutes. Open Docker Desktop, wait until it says it is running, then run $self again."
-        sleep 2
-        waited=$((waited + 2))
-      done
-    else
-      fail "Docker is not running. Start Docker, then run $self again."
-    fi
-  fi
-
-  local user password db db_port
-  user=$(env_value POSTGRES_USER)
-  password=$(env_value POSTGRES_PASSWORD)
-  db=$(env_value POSTGRES_DB)
-  db_port=$(env_value POSTGRES_PORT)
-  step "Starting the database"
-  refuse_other_copys_database
-  if ! docker compose up --detach --wait postgres; then
-    fail "the database did not start. If the message above says port ${db_port:-5433} is already in use, change POSTGRES_PORT in $(where_is .env) to a free port such as $((${db_port:-5433} + 1)), then run $self again."
-  fi
-  match_database_password
-  DATABASE_URL="postgres://$user:$password@127.0.0.1:${db_port:-5433}/$db"
-  database_started=1
-}
-
-# PostgreSQL keeps the password it was created with, and Compose names the database after this
-# folder. So LoomWatch downloaded again into a folder named like an earlier copy finds that copy's
-# database, which refuses the new random password in .env. The database is LoomWatch's own and
-# its history goes with the teams every copy shares, so it takes this folder's password instead.
-match_database_password() {
-  local refused
-  # Inside the container a connection through its network address is password-checked exactly
-  # like LoomWatch's own; one through the local socket is trusted, which is what lets this fix it.
-  refused=$(docker compose exec -T postgres sh -c \
-    'PGPASSWORD=$POSTGRES_PASSWORD psql -h "$(hostname)" -U "$POSTGRES_USER" -d postgres -tAc "select 1"' 2>&1 >/dev/null) &&
-    return 0
-  case $refused in
-    *'password authentication failed'*) ;;
-    *) return 0 ;; # Anything else is left for LoomWatch itself to report.
-  esac
-  if docker compose exec -T postgres sh -c \
-    'psql -v ON_ERROR_STOP=1 -v user="$POSTGRES_USER" -v password="$POSTGRES_PASSWORD" -U "$POSTGRES_USER" -d postgres -q' \
-    >/dev/null <<'SQL'; then
-ALTER ROLE :"user" WITH PASSWORD :'password';
-SQL
-    say "Found the database of an earlier LoomWatch copy on this computer. It now uses the password in this folder's .env, so its run history is kept."
-    return 0
-  fi
-  fail "the database Docker kept from an earlier LoomWatch copy refuses the password in $(where_is .env), and LoomWatch could not change it. To start over with an empty run history, run: $(in_this_folder)docker compose down --volumes (this deletes the earlier history; your teams are kept), then $self again."
 }
 
 # What the build depends on: the commit plus any local edits. An unchanged checkout never rebuilds.
@@ -462,6 +294,148 @@ build_if_needed() {
   printf '%s\n' "$fingerprint" >"$build_stamp"
 }
 
+# --- The run history an earlier version kept in Docker ------------------------------------------
+# Earlier versions kept the run history in PostgreSQL, which this script ran in Docker. The first
+# start after updating copies it into the file with `loomwatchd import-postgres`. The Docker
+# database is only read: it is stopped again if it was stopped, and kept with everything in it, so
+# going back to an earlier version with rollback finds it as it was.
+
+# Whether this copy's settings name the database an earlier version set up.
+has_earlier_database() {
+  local password
+  password=$(env_value POSTGRES_PASSWORD)
+  [ -n "$password" ] && [ "$password" != replace-with-a-local-password ]
+}
+
+# The Docker Compose project that held the database: named in .env, or after the folder.
+earlier_project() {
+  local project=${COMPOSE_PROJECT_NAME:-$(env_value COMPOSE_PROJECT_NAME)}
+  if [ -z "$project" ]; then
+    project=$(basename "$repo_root" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+  fi
+  printf '%s\n' "$project"
+}
+
+# The database's container, running or not.
+earlier_container() {
+  docker ps --all --quiet --filter "label=com.docker.compose.project=$(earlier_project)" \
+    --filter label=com.docker.compose.service=postgres 2>/dev/null | head -n 1
+}
+
+# Compose found a database by its project name alone, so two folders with the same name shared one.
+# Prints the other copy's folder when the database was created from one that is still there: its
+# history is that copy's to bring over, not this one's.
+other_database_owner() {
+  local id=$1 owner
+  owner=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$id" 2>/dev/null) || return 1
+  [ -n "$owner" ] || return 1
+  owner=$(cd "$owner" 2>/dev/null && pwd -P) || return 1
+  [ "$owner" != "$repo_root" ] && [ -f "$owner/docker-compose.yml" ] || return 1
+  printf '%s\n' "$owner"
+}
+
+# Docker is running, or was started and came up within a minute.
+docker_is_up() {
+  docker info >/dev/null 2>&1 && return 0
+  local app waited=0
+  if ! is_macos || ! app=$(docker_app); then return 1; fi
+  say "Starting $(basename "$app" .app) to read the run history the earlier version kept there."
+  open -a "$app" || return 1
+  until docker info >/dev/null 2>&1; do
+    [ "$waited" -ge 60 ] && return 1
+    sleep 2
+    waited=$((waited + 2))
+  done
+}
+
+# The earlier history could not be read now. On the first start that is said once, plainly, and
+# LoomWatch starts anyway; asked for with `import`, it is the answer. $2 is what to do first, such
+# as "start Docker Desktop".
+cannot_import_now() {
+  if [ "$1" = asked ]; then fail "Docker is not available. To bring the history over, $2, then run $self import again."; fi
+  say "Your run history from the earlier version is still in Docker. To bring it over, $2 and run: $self import"
+}
+
+# Copies a PostgreSQL archive into the file. $1 is its address, $2 how to name it.
+run_import() {
+  step "Bringing over your run history from $2"
+  LOOMWATCH_IMPORT_FROM=$1 "./$binary" import-postgres
+}
+
+# $1 is auto (the first start after updating) or asked (`import`).
+import_earlier_history() {
+  local mode=$1 user password db container owner volume started='' port='' waited=0 imported=0
+  if [ -n "${LOOMWATCH_DATABASE_URL:-}" ]; then
+    run_import "$LOOMWATCH_DATABASE_URL" "your own PostgreSQL (LOOMWATCH_DATABASE_URL)" ||
+      fail "the run history could not be brought over. The messages above say why. It is still in your PostgreSQL; try again with: $self import"
+    return 0
+  fi
+  if ! has_earlier_database; then
+    [ "$mode" = auto ] && return 0
+    fail "this copy has no earlier run history in Docker: its settings file ($(where_is .env)) names no database."
+  fi
+  if ! command -v docker >/dev/null 2>&1; then
+    cannot_import_now "$mode" "install Docker Desktop again"
+    return 0
+  fi
+  if ! docker_is_up; then
+    cannot_import_now "$mode" "start Docker Desktop"
+    return 0
+  fi
+  user=$(env_value POSTGRES_USER)
+  password=$(env_value POSTGRES_PASSWORD)
+  db=$(env_value POSTGRES_DB)
+  container=$(earlier_container)
+  if [ -n "$container" ] && owner=$(other_database_owner "$container"); then
+    [ "$mode" = auto ] && return 0
+    fail "the Docker database named like this copy's belongs to the LoomWatch copy in $(pretty_path "$owner"). Run $self import there instead."
+  fi
+  if [ -z "$container" ]; then
+    # Only the data is left (`docker compose down` keeps it): read it with a container of its own,
+    # removed again afterwards. The data stays.
+    volume="$(earlier_project)_postgres-data"
+    if ! docker volume inspect "$volume" >/dev/null 2>&1; then
+      [ "$mode" = auto ] && return 0
+      fail "there is no earlier run history in Docker for this copy."
+    fi
+    container=$(docker run --detach --rm --volume "$volume:/var/lib/postgresql/data" \
+      --publish 127.0.0.1::5432 postgres:17.6-bookworm) ||
+      { cannot_import_now "$mode" "start Docker Desktop"; return 0; }
+    started=temporary
+  elif [ "$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null)" != true ]; then
+    docker start "$container" >/dev/null || { cannot_import_now "$mode" "start Docker Desktop"; return 0; }
+    started=stopped
+  fi
+  until docker exec "$container" pg_isready -U "${user:-loomwatch}" -d "${db:-loomwatch}" >/dev/null 2>&1; do
+    if [ "$waited" -ge 60 ]; then break; fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+  port=$(docker port "$container" 5432/tcp 2>/dev/null | head -n 1 | sed 's/.*://')
+  if [ -n "$port" ] &&
+    run_import "postgres://${user:-loomwatch}:$password@127.0.0.1:$port/${db:-loomwatch}" "the earlier version's Docker database"; then
+    imported=1
+  fi
+  # Stopped again when this started it. A ready-built copy's database is also stopped when an
+  # update had started it: nothing reads it any more. A copy of the source may share its database
+  # with a developer's own tools, so one found running stays running.
+  if [ -n "$started" ] || { [ "$prebuilt" = 1 ] && [ "$imported" = 1 ]; }; then
+    docker stop "$container" >/dev/null 2>&1 || true
+  fi
+  if [ "$imported" = 1 ]; then
+    if [ "$prebuilt" = 1 ]; then
+      say "The earlier database is kept in Docker as it was, so $self rollback can still go back to the earlier version."
+    else
+      say "The earlier database is kept in Docker as it was."
+    fi
+    return 0
+  fi
+  if [ "$mode" = asked ]; then
+    fail "the run history could not be brought over. The messages above say why. It is still in Docker; try again with: $self import"
+  fi
+  say "Your run history could not be brought over this time; it is still in Docker. Try again with: $self import"
+}
+
 start() {
   if loomwatch_is_running; then already_running; fi
   if port_in_use "$port"; then
@@ -469,19 +443,19 @@ start() {
   fi
 
   check_prerequisites
-  ensure_env_file
   ensure_teams_root
-  wake_docker
-  check_database_port
   build_if_needed
-  start_database
 
-  export DATABASE_URL
+  local database
+  database=$(database_file) || fail "LoomWatch could not say where it keeps the run history. The messages above say why."
+  # The first start after updating from a version that kept the history in Docker.
+  if [ ! -e "$database" ]; then import_earlier_history auto; fi
+
   # Compose-mode settings in the operator's own shell would point this native daemon at a
   # container runner or a container-only capability folder. The update hand-over is supervise's to
   # set: a daemon told about one that nothing is running would stop and stay stopped.
   unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN \
-    LOOMWATCH_SUPERVISED LOOMWATCH_UPDATE_REQUEST LOOMWATCH_UPDATE_FAILED
+    LOOMWATCH_SUPERVISED LOOMWATCH_UPDATE_REQUEST LOOMWATCH_UPDATE_FAILED LOOMWATCH_IMPORT_FROM
   # Which checkout is running, for the "Send feedback" report. `-dirty` marks local edits. A
   # ready-built copy names the commit its release was built from, in VERSION.
   if [ "$prebuilt" = 1 ]; then
@@ -513,6 +487,7 @@ start() {
 
   step "LoomWatch is starting at $url"
   say "Your teams are in $(pretty_path "$teams_root")"
+  say "Your run history is in $(pretty_path "$database")"
   say "Keep this window open while you use LoomWatch. Press Ctrl-C to stop it."
   mkdir -p "$state_dir"
   if [ "$prebuilt" = 1 ]; then supervise; fi
@@ -549,7 +524,7 @@ stop() {
           fail "LoomWatch (process $pid) is still running. Stop it with: kill -9 $pid"
         fi
         stopped=1
-        say "Stopped LoomWatch."
+        say "Stopped LoomWatch. Your teams and history are kept."
         ;;
     esac
   fi
@@ -563,22 +538,24 @@ stop() {
       say "LoomWatch at $url was not started by $self. Press Ctrl-C in the window running it."
     fi
   fi
+}
 
-  if uses_docker_database && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    local owner
-    if owner=$(other_database_owner); then
-      say "Left the database alone: it belongs to the LoomWatch copy in $(pretty_path "$owner")."
-    else
-      docker compose stop postgres
-      say "Stopped the database. Your teams and history are kept."
-    fi
+# `import`: the earlier history, brought over by hand. LoomWatch must be stopped: the import
+# writes the whole history in one go, and LoomWatch would wait on it.
+import_by_hand() {
+  failure_heading='LoomWatch could not bring over the earlier run history'
+  if loomwatch_is_running; then
+    fail "LoomWatch is running. Stop it first (press Ctrl-C in its window, or run $self stop), then run $self import."
   fi
+  build_if_needed
+  [ -x "$binary" ] || fail "the LoomWatch program is missing from $(where_is "$binary"). Run $self first."
+  import_earlier_history asked
 }
 
 # --- Updating (ADR 0052) -------------------------------------------------------------------------
 # An update never starts by itself: the app only says a newer version is out. `update` saves a copy
-# of the run history before anything can change the database, and in a ready-built copy keeps the
-# version it replaces in .previous, so `rollback` can put it back.
+# of the run history before anything can change it, and in a ready-built copy keeps the version it
+# replaces in .previous, so `rollback` can put it back.
 
 # The version this copy runs: VERSION's first word in a ready-built copy, the program's own in a
 # copy of the source.
@@ -640,60 +617,61 @@ confirm() {
   case $answer in [yY] | [yY][eE][sS]) return 0 ;; *) return 1 ;; esac
 }
 
-# The database layout LoomWatch set up: the newest migration applied. Empty when the database
-# holds no LoomWatch tables, such as before LoomWatch first started.
+# The layout LoomWatch set the run history up in: the newest table change applied. Empty when
+# there is no run history yet, such as before LoomWatch first started.
 database_layout() {
-  printf '%s\n' "select max(version) from _sqlx_migrations where success;" |
-    docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA' 2>/dev/null |
-    tr -d '[:space:]' || true
+  [ -x "$binary" ] || return 0
+  "./$binary" database-layout 2>/dev/null | tr -d '[:space:]' || true
 }
 
-# One folder of copies per database, named as Docker Compose names this copy's database.
+# One folder of copies per copy of LoomWatch, named as its Docker database once was, so copies
+# saved before and after LoomWatch kept its history in a file sit together.
 backup_folder() {
-  local project=${COMPOSE_PROJECT_NAME:-$(env_value COMPOSE_PROJECT_NAME)}
-  project=${project:-$(basename "$repo_root" | tr '[:upper:]' '[:lower:]')}
-  printf '%s/%s\n' "$backup_root" "$project"
+  local name=${COMPOSE_PROJECT_NAME:-$(env_value COMPOSE_PROJECT_NAME)}
+  if [ -z "$name" ]; then
+    if [ "$prebuilt" = 0 ]; then
+      name=$(basename "$repo_root" | tr '[:upper:]' '[:lower:]')
+    elif [ "$repo_root" = "$usual_app" ]; then
+      name=loomwatch-app
+    else
+      name=$(own_project_name)
+    fi
+  fi
+  printf '%s/%s\n' "$backup_root" "$name"
 }
 
-# Saves the run history in one file that only this account can read, in pg_dump's own format, and
-# keeps the newest three copies. Sets backup_file. $1 is added to the file's name.
+# Saves the run history in one file that only this account can read, a consistent copy made by
+# the program itself even while LoomWatch runs, and keeps the newest three copies. Sets
+# backup_file. $1 is added to the file's name.
 save_database() {
   local folder
   folder=$(backup_folder)
   mkdir -p "$folder"
   chmod 700 "$backup_root" "$folder" 2>/dev/null || true
   # Named from the time first, so sorting the names sorts the copies oldest first.
-  backup_file="$folder/loomwatch-$(date -u +%Y%m%dT%H%M%SZ)-$(installed_version)$1.dump"
-  if ! (umask 077 && docker compose exec -T postgres sh -c \
-    'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' >"$backup_file.partial") ||
-    [ ! -s "$backup_file.partial" ]; then
+  backup_file="$folder/loomwatch-$(date -u +%Y%m%dT%H%M%SZ)-$(installed_version)$1.db"
+  rm -f "$backup_file.partial"
+  if ! (umask 077 && "./$binary" backup "$backup_file.partial" >/dev/null) || [ ! -s "$backup_file.partial" ]; then
     rm -f "$backup_file.partial"
     return 1
   fi
   mv "$backup_file.partial" "$backup_file"
   local copies
-  copies=$(find "$folder" -maxdepth 1 -name 'loomwatch-*.dump' | sort)
+  copies=$(find "$folder" -maxdepth 1 -name 'loomwatch-*.db' | sort)
   if [ "$(printf '%s\n' "$copies" | wc -l | tr -d ' ')" -gt 3 ]; then
     printf '%s\n' "$copies" | sed -n "1,$(($(printf '%s\n' "$copies" | wc -l) - 3))p" |
       while IFS= read -r old; do rm -f "$old"; done
   fi
 }
 
-# Before an update can change the database: notes its layout, so rollback can tell whether the
-# earlier version can still read it, and saves a copy of the run history. Sets layout_before and
-# backup_file, each empty when there was nothing to note or save.
+# Before an update can change the run history: notes its layout, so rollback can tell whether the
+# earlier version can still read it, and saves a copy. Sets layout_before and backup_file, each
+# empty when there was nothing to note or save.
 back_up_before_update() {
   layout_before=
   backup_file=
-  if ! uses_docker_database; then
-    say "Note: LoomWatch copies only the database it runs in Docker. Back up your own PostgreSQL (LOOMWATCH_DATABASE_URL) before you start the new version."
-    return 0
-  fi
-  # Never started here: there is no database yet, so nothing to keep.
-  if [ ! -f .env ] || ! command -v docker >/dev/null 2>&1; then return 0; fi
-  wake_docker
-  start_database
   layout_before=$(database_layout)
+  # Never started here: there is no run history yet, so nothing to keep.
   [ -n "$layout_before" ] || return 0
   if [ "$back_up" = 0 ]; then
     say "Not saving a copy of your run history (--no-backup)."
@@ -723,8 +701,8 @@ stop_before_update() {
   fi
 }
 
-# What rollback needs, beside the version the installer kept: which version that is, the database
-# layout it ran on, and the copy of the run history saved before the update.
+# What rollback needs, beside the version the installer kept: which version that is, the layout
+# of the run history it ran on, and the copy of the run history saved before the update.
 remember_for_rollback() {
   [ -d .previous ] || return 0
   {
@@ -776,7 +754,8 @@ update() {
   before=$(git rev-parse HEAD)
   git pull --ff-only ||
     fail "the download did not finish. If Git says your local changes would be overwritten, ask whoever changed files in this folder before discarding them."
-  # The new code runs its database changes when it starts, after it is built.
+  # The new code changes the run history's layout when it starts, after it is built; the program
+  # still here is the one built from the code before the pull.
   if [ "$(git rev-parse HEAD)" != "$before" ]; then
     back_up_before_update
     say "To go back to the code you had: git checkout $(git rev-parse --short "$before")"
@@ -859,41 +838,21 @@ install_from_app() {
   LOOMWATCH_VERSION=$tag install_release "$installed"
 }
 
-# Restores a copy into a database of its own, then swaps it in by renaming, so the run history in
-# use is replaced only once the copy has gone in whole.
+# Puts a saved copy in place of the run history file: copied beside it first, then renamed over
+# it, so the file in use is replaced only once the copy is whole.
 restore_database() {
-  local backup=$1
-  maintenance_sql <<'SQL' || fail "could not prepare a database for the copy, so nothing was changed. The messages above say why."
-DROP DATABASE IF EXISTS loomwatch_restoring;
-DROP DATABASE IF EXISTS loomwatch_replaced;
-CREATE DATABASE loomwatch_restoring;
-SQL
-  if ! docker compose exec -T postgres sh -c \
-    'pg_restore --exit-on-error --single-transaction --no-owner -U "$POSTGRES_USER" -d loomwatch_restoring' <"$backup"; then
-    printf '%s\n' 'DROP DATABASE IF EXISTS loomwatch_restoring;' | maintenance_sql || true
+  local backup=$1 database
+  database=$(database_file) || fail "LoomWatch could not say where it keeps the run history, so nothing was changed."
+  rm -f "$database.restoring"
+  if ! (umask 077 && cp "$backup" "$database.restoring"); then
+    rm -f "$database.restoring"
     fail "the copy in $(pretty_path "$backup") could not be restored, so nothing was changed. The messages above say why."
   fi
-  if ! maintenance_sql <<'SQL'; then
-SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db' AND pid <> pg_backend_pid();
-ALTER DATABASE :"db" RENAME TO loomwatch_replaced;
-SQL
-    printf '%s\n' 'DROP DATABASE IF EXISTS loomwatch_restoring;' | maintenance_sql || true
-    fail "the run history in use could not be set aside, so nothing was changed. The messages above say why."
-  fi
-  if ! printf '%s\n' 'ALTER DATABASE loomwatch_restoring RENAME TO :"db";' | maintenance_sql; then
-    printf '%s\n' 'ALTER DATABASE loomwatch_replaced RENAME TO :"db";' | maintenance_sql ||
-      fail "the run history could not be put back, and the one in use is now the database loomwatch_replaced. Report this at https://github.com/tnghia903/loomwatch/issues"
-    fail "the copy could not be put in place, so nothing was changed. The messages above say why."
-  fi
-  printf '%s\n' 'DROP DATABASE loomwatch_replaced;' | maintenance_sql || true
-}
-
-# SQL from standard input, run on the server's own database with the LoomWatch database's name as
-# :"db". Statement by statement: creating, renaming and dropping a database cannot share one.
-# Warnings and errors only: "does not exist, skipping" is not news.
-maintenance_sql() {
-  docker compose exec -T postgres sh -c \
-    'PGOPTIONS="-c client_min_messages=warning" psql -v ON_ERROR_STOP=1 -v db="$POSTGRES_DB" -U "$POSTGRES_USER" -d postgres -q' >/dev/null
+  # The write-ahead log belongs to the file being replaced, and would be read into the copy. What
+  # it held is in the copy saved just before this.
+  rm -f "$database-wal" "$database-shm"
+  mv "$database.restoring" "$database" ||
+    fail "the copy could not be put in place. It is in $(pretty_path "$database.restoring"); the copy saved before going back is in $(pretty_path "$backup_file")."
 }
 
 # An update may have changed how the run history is stored, which the earlier version cannot read.
@@ -904,12 +863,6 @@ restore_database_if_needed() {
   layout_then=$(rollback_value layout)
   backup=$(rollback_value backup)
   [ -n "$layout_then" ] || return 0
-  if ! uses_docker_database; then
-    say "Note: if LoomWatch $previous does not start, restore the backup of your own PostgreSQL made before the update."
-    return 0
-  fi
-  wake_docker
-  start_database
   layout_now=$(database_layout)
   if [ -z "$layout_now" ] || [ "$layout_now" = "$layout_then" ]; then return 0; fi
   if [ -z "$backup" ] || [ ! -f "$backup" ]; then
@@ -923,6 +876,10 @@ restore_database_if_needed() {
   say "Saved the run history recorded since the update in $(pretty_path "$backup_file")."
   restore_database "$backup"
 }
+
+# Whether the kept version is one that keeps its run history in PostgreSQL in Docker: its launcher
+# has the function that said so. (The bracket keeps this line from matching itself.)
+previous_uses_docker() { grep -q '^uses_docker_databas[e]() {' .previous/loomwatch 2>/dev/null; }
 
 # Moves the kept version's files over the current ones. Each is a rename in this folder; the
 # current version's files wait in a scratch folder until every one is in place.
@@ -958,7 +915,12 @@ rollback() {
   previous=$(cut -d ' ' -f 1 .previous/VERSION 2>/dev/null || true)
   previous=${previous:-the earlier version}
   step "Going back from LoomWatch $current to $previous"
-  restore_database_if_needed "$current" "$previous"
+  if previous_uses_docker; then
+    # Its run history is in Docker, where the update only read it: it is all still there.
+    say "LoomWatch $previous keeps its run history in Docker, as it was before the update. What you ran since then stays in $(pretty_path "$(database_file)"), which $previous does not read. After you update again, $self import brings over what $previous records in the meantime."
+  else
+    restore_database_if_needed "$current" "$previous"
+  fi
   put_previous_back
   say "LoomWatch is back to $previous. Run $self update when you want the newest version again."
   start_again
@@ -1010,7 +972,8 @@ Commands:
   start     $start_does
   update    $update_does$rollback_line
   version   Say which version this is, and whether a newer one is out
-  stop      Stop LoomWatch and its database. Your teams and history are kept.
+  import    Bring over the run history an earlier version kept in Docker
+  stop      Stop LoomWatch. Your teams and history are kept.
   help      Show this help
 
 Options:
@@ -1021,7 +984,7 @@ Options:
 Settings (environment variables):
   LOOMWATCH_TEAMS_ROOT     Where your teams live (now: $(pretty_path "$teams_root"))
   LOOMWATCH_PORT           Browser port (now: $port)
-  LOOMWATCH_DATABASE_URL   Use your own PostgreSQL instead of the one in Docker
+  LOOMWATCH_DATABASE       The file that holds the run history
   LOOMWATCH_BACKUP_DIR     Where updates save copies of the run history (now: $(pretty_path "$backup_root"))
   LOOMWATCH_UPDATE_CHECK   off: never ask GitHub whether a newer version is out
 EOF
@@ -1032,6 +995,7 @@ case $command in
   update) update ;;
   rollback) rollback ;;
   version) show_version ;;
+  import) import_by_hand ;;
   stop) stop ;;
   help) usage ;;
 esac

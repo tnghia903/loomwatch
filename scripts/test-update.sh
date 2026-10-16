@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# Tests `loomwatch update`, `rollback` and `version` on a ready-built copy (ADR 0052), and Update
-# and restart from the app, end to end through the real launcher and installer, with stand-ins for
-# everything they reach outside:
+# Tests `loomwatch update`, `rollback`, `version` and `import` on a ready-built copy (ADR 0052),
+# and Update and restart from the app, end to end through the real launcher and installer, with
+# stand-ins for everything they reach outside:
 #
-#   docker    one PostgreSQL whose databases are files, so a test can read what was saved and
-#             restored, and whose database layout (newest migration) a test sets
+#   loomwatchd  writes down what it was started with, instead of serving. Its run history is a
+#             text file at the path the launcher gives it, whose layout (newest table change) a
+#             test sets; `backup`, `database-layout` and `import-postgres` act on that file. When
+#             a test has left $FAKE/app-asks, it does what the app asked once: names that release
+#             for the launcher and exits with 75, as Update and restart does, or exits with exit=N's
+#             status
+#   docker    the PostgreSQL an earlier version kept the run history in: one container, stopped
+#             or running, that a test sets up
+#   open      macOS's, so a Docker Desktop that is not running is "started" only when a test says
 #   curl      GitHub: the newest release's tag, release archives built here, and the health check
 #   lsof      nothing is listening
-#   loomwatchd  writes down what it was started with, instead of serving. When a test has left
-#             $FAKE/app-asks, it does what the app asked once: names that release for the launcher
-#             and exits with 75, as Update and restart does, or exits with exit=N's status
 #
 # Nothing touches Docker, the network, or any LoomWatch on this computer.
 #
@@ -32,61 +36,41 @@ fail() {
 check() { if eval "$2"; then pass "$1"; else fail "$1"; fi; }
 
 export FAKE="$work/fake" HOME="$work/home"
-mkdir -p "$FAKE/bin" "$FAKE/db" "$FAKE/releases" "$HOME"
+mkdir -p "$FAKE/bin" "$FAKE/docker" "$FAKE/releases" "$HOME"
 export FAKE_LOG="$FAKE/log"
 : >"$FAKE_LOG"
 
 cat >"$FAKE/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 printf 'docker %s\n' "$*" >>"$FAKE_LOG"
-db=$FAKE/db
+state=$FAKE/docker
 case $1 in
-  info) exit 0 ;;
-  inspect) exit 0 ;;
-  compose) shift ;;
-  *) exit 0 ;;
-esac
-case $1 in
-  version) exit 0 ;;
-  ps) if [ -f "$db/running" ]; then echo fake-postgres; fi ;;
-  up) touch "$db/running" ;;
-  stop) rm -f "$db/running" ;;
-  exec)
-    script=$6
-    case $script in
-      *PGPASSWORD*) exit 0 ;;
-      *pg_dump*)
-        [ ! -f "$db/fail-dump" ] || exit 1
-        cat "$db/loomwatch"
-        ;;
-      *pg_restore*)
-        [ ! -f "$db/fail-restore" ] || exit 1
-        cat >"$db/loomwatch_restoring"
-        ;;
-      *'-d postgres'*)
-        while IFS= read -r statement; do
-          printf 'sql %s\n' "$statement" >>"$FAKE_LOG"
-          case $statement in
-            'DROP DATABASE IF EXISTS '*) rm -f "$db/$(echo "$statement" | sed 's/.* \([a-z_]*\);$/\1/')" ;;
-            'CREATE DATABASE loomwatch_restoring;') : >"$db/loomwatch_restoring" ;;
-            'ALTER DATABASE :"db" RENAME TO loomwatch_replaced;') mv "$db/loomwatch" "$db/loomwatch_replaced" ;;
-            'ALTER DATABASE loomwatch_restoring RENAME TO :"db";') mv "$db/loomwatch_restoring" "$db/loomwatch" ;;
-            'ALTER DATABASE loomwatch_replaced RENAME TO :"db";') mv "$db/loomwatch_replaced" "$db/loomwatch" ;;
-            'DROP DATABASE loomwatch_replaced;') rm -f "$db/loomwatch_replaced" ;;
-          esac
-        done
-        ;;
-      *psql*)
-        query=$(cat)
-        case $query in
-          *_sqlx_migrations\ where\ success*) [ -f "$db/loomwatch" ] && sed -n 's/^layout=//p' "$db/loomwatch" ;;
-          *to_regclass*) [ -f "$db/loomwatch" ] && echo t ;;
-        esac
-        ;;
+  info) [ -f "$state/up" ] ;;
+  ps)
+    # The earlier database's container, found by its Compose labels.
+    if [ -f "$state/container" ] && printf '%s\n' "$*" | grep -q "com.docker.compose.project=$(cat "$state/container")"; then
+      echo c0ffee
+    fi
+    ;;
+  inspect)
+    case $* in
+      *State.Running*) if [ -f "$state/running" ]; then echo true; else echo false; fi ;;
+      *working_dir*) cat "$state/owner" 2>/dev/null || true ;;
     esac
     ;;
+  volume) [ -f "$state/volume" ] ;;
+  run) touch "$state/running" && echo temporary ;;
+  start) touch "$state/running" ;;
+  stop) rm -f "$state/running" ;;
+  exec) [ -f "$state/running" ] ;;
+  port) echo 127.0.0.1:55432 ;;
 esac
-exit 0
+EOF
+
+cat >"$FAKE/bin/open" <<'EOF'
+#!/usr/bin/env bash
+printf 'open %s\n' "$*" >>"$FAKE_LOG"
+[ -f "$FAKE/docker/wakes" ] && touch "$FAKE/docker/up"
 EOF
 
 cat >"$FAKE/bin/curl" <<'EOF'
@@ -128,11 +112,34 @@ release() {
   cat >"$stage/loomwatch/bin/loomwatchd" <<'EOF'
 #!/usr/bin/env bash
 here=$(cd "$(dirname "$0")/.." && pwd)
+db=${LOOMWATCH_DATABASE:-$HOME/state/loomwatch.db}
+case $1 in
+  database-path) printf '%s\n' "$db"; exit 0 ;;
+  database-layout) if [ -f "$db" ]; then sed -n 's/^layout=//p' "$db"; fi; exit 0 ;;
+  backup)
+    printf 'backup %s\n' "$2" >>"$FAKE_LOG"
+    [ ! -f "$FAKE/fail-backup" ] && [ -f "$db" ] && [ ! -e "$2" ] && cp "$db" "$2"
+    exit
+    ;;
+  import-postgres)
+    printf 'import from=%s\n' "$LOOMWATCH_IMPORT_FROM" >>"$FAKE_LOG"
+    [ ! -f "$FAKE/fail-import" ] || exit 1
+    mkdir -p "$(dirname "$db")"
+    printf 'layout=20261017000000\ncontent=imported\n' >"$db"
+    echo "Imported the run history."
+    exit 0
+    ;;
+esac
 pid=other
 if [ "$(cat "$here/run/loomwatchd.pid" 2>/dev/null)" = "$$" ]; then pid=same; fi
 printf 'started %s install=%s command=%s supervised=%s request=%s pid=%s failed=%s\n' \
   "$(cut -d ' ' -f 1 "$here/VERSION")" "$LOOMWATCH_INSTALL" "$LOOMWATCH_UPDATE_COMMAND" \
   "${LOOMWATCH_SUPERVISED:-}" "${LOOMWATCH_UPDATE_REQUEST:-}" "$pid" "${LOOMWATCH_UPDATE_FAILED:-}" >>"$FAKE_LOG"
+# As the program does: the first start sets the run history up.
+if [ ! -f "$db" ]; then
+  mkdir -p "$(dirname "$db")"
+  printf 'layout=20261017000000\ncontent=new\n' >"$db"
+fi
 if [ -f "$FAKE/app-asks" ]; then
   asked=$(cat "$FAKE/app-asks")
   rm -f "$FAKE/app-asks"
@@ -147,7 +154,7 @@ if [ -f "$FAKE/app-asks" ]; then
 fi
 touch "$FAKE/daemon-up"
 EOF
-  cp "$root/loomwatch" "$root/scripts/install.sh" "$root/docker-compose.yml" "$root/.env.example" "$stage/loomwatch/"
+  cp "$root/loomwatch" "$root/scripts/install.sh" "$stage/loomwatch/"
   cp "$root/examples/operator-stop.yaml" "$root/examples/operator-stop-harness.py" "$stage/loomwatch/examples/"
   chmod 755 "$stage/loomwatch/bin/loomwatchd" "$stage/loomwatch/loomwatch" "$stage/loomwatch/install.sh"
   printf '%s c0ffee%s\n' "$version" "$(printf '%s' "$version" | tr -d .)" >"$stage/loomwatch/VERSION"
@@ -171,7 +178,8 @@ for version in 0.1.4 0.1.5 0.1.6; do release "$version"; done
 
 app="$work/app"
 export LOOMWATCH_TEAMS_ROOT="$work/teams" LOOMWATCH_BACKUP_DIR="$work/backups" LOOMWATCH_PORT=3399
-unset LOOMWATCH_VERSION LOOMWATCH_DOWNLOAD_BASE LOOMWATCH_DATABASE_URL COMPOSE_PROJECT_NAME LOOMWATCH_UPDATE_CHECK
+unset LOOMWATCH_VERSION LOOMWATCH_DOWNLOAD_BASE LOOMWATCH_DATABASE_URL LOOMWATCH_DATABASE \
+  COMPOSE_PROJECT_NAME LOOMWATCH_UPDATE_CHECK LOOMWATCH_IMPORT_FROM
 
 # Runs the installed launcher like the operator would, without a terminal to answer questions.
 # Sets status, which the checks read through eval.
@@ -190,8 +198,9 @@ launcher() {
 said() { grep -qF -- "$1" "$FAKE/out"; }
 logged() { grep -qF -- "$1" "$FAKE_LOG"; }
 version_installed() { cut -d ' ' -f 1 "$app/VERSION"; }
-database() { cat "$FAKE/db/loomwatch"; }
-set_database() { printf 'layout=%s\ncontent=%s\n' "$1" "$2" >"$FAKE/db/loomwatch"; }
+# A copy installed anywhere but ~/LoomWatch/app keeps its run history in its own folder.
+export db="$app/.loomwatch/loomwatch.db"
+set_database() { printf 'layout=%s\ncontent=%s\n' "$1" "$2" >"$db"; }
 
 echo "Installing 0.1.5"
 FAKE_LATEST=v0.1.5 LOOMWATCH_NO_START=1 LOOMWATCH_APP_DIR="$app" bash "$root/scripts/install.sh" </dev/null >"$FAKE/out" 2>&1
@@ -199,7 +208,9 @@ check "install puts 0.1.5 in place" '[ "$(version_installed)" = 0.1.5 ]'
 check "a first install keeps no earlier version" '[ ! -e "$app/.previous" ]'
 launcher start
 check "start tells the program how it is updated" 'logged "started 0.1.5 install=release command=$app/loomwatch update"'
-set_database 20261001000000 runs-before-update
+check "a copy outside the usual folder keeps its run history in its own folder" '[ -f "$db" ] && said "Your run history is in"'
+check "a new copy needs no Docker" '! logged "docker "'
+set_database 20261017000000 runs-before-update
 
 echo "Updating when 0.1.5 is the newest"
 export FAKE_LATEST=v0.1.5
@@ -217,9 +228,9 @@ check "version asks nobody when checks are off" 'said "Checking for new versions
 
 echo "A failed backup changes nothing"
 export FAKE_LATEST=v0.1.6
-touch "$FAKE/db/fail-dump"
+touch "$FAKE/fail-backup"
 launcher update
-rm "$FAKE/db/fail-dump"
+rm "$FAKE/fail-backup"
 check "update fails" '[ $status != 0 ] && said "could not be saved, so LoomWatch was not changed"'
 check "0.1.5 is still installed" '[ "$(version_installed)" = 0.1.5 ] && [ ! -e "$app/.previous" ]'
 check "no half-written copy is left" '[ -z "$(find "$work/backups" -name "*.partial" 2>/dev/null)" ]'
@@ -233,16 +244,18 @@ check "update fails on the checksum" '[ $status != 0 ] && said "does not match t
 check "0.1.5 is still installed" '[ "$(version_installed)" = 0.1.5 ] && [ ! -e "$app/.previous" ]'
 
 echo "Updating to 0.1.6"
+printf 'LOOMWATCH_PORT=3399\n' >"$app/.env"
 launcher update
 export backup
 # The newest: a download that failed its checksum above had already saved one.
-backup=$(find "$work/backups" -name 'loomwatch-*-0.1.5.dump' | sort | tail -n 1)
+backup=$(find "$work/backups" -name 'loomwatch-*-0.1.5.db' | sort | tail -n 1)
 check "update succeeds and starts 0.1.6" '[ $status = 0 ] && logged "started 0.1.6" && [ "$(version_installed)" = 0.1.6 ]'
-check "the run history was copied first" '[ -n "$backup" ] && grep -q runs-before-update "$backup"'
+check "the run history was copied first, by the program" '[ -n "$backup" ] && grep -q runs-before-update "$backup" && logged "backup $backup.partial"'
 check "the copy is private" '[ "$(ls -l "$backup" | cut -c1-10)" = "-rw-------" ]'
+check "the copies are kept per copy of LoomWatch" '[ "$(dirname "$backup")" = "$work/backups/$(cd "$work/backups" && ls)" ]'
 check "0.1.5 is kept for rollback" '[ "$(cut -d " " -f 1 "$app/.previous/VERSION")" = 0.1.5 ] && [ -x "$app/.previous/bin/loomwatchd" ]'
-check "rollback knows the copy and the layout" 'grep -qx "backup=$backup" "$app/.previous/ROLLBACK" && grep -qx "layout=20261001000000" "$app/.previous/ROLLBACK"'
-check "settings survive the update" '[ -f "$app/.env" ] && grep -q COMPOSE_PROJECT_NAME "$app/.env"'
+check "rollback knows the copy and the layout" 'grep -qx "backup=$backup" "$app/.previous/ROLLBACK" && grep -qx "layout=20261017000000" "$app/.previous/ROLLBACK"'
+check "settings and the run history survive the update" '[ -f "$app/.env" ] && grep -q runs-before-update "$db"'
 check "update says how to go back" 'said "rollback goes back to 0.1.5"'
 
 echo "Version after updating"
@@ -250,17 +263,18 @@ launcher version
 check "version mentions the kept version" 'said "This is the newest release." && said "The version it replaced, 0.1.5, is kept"'
 
 echo "Rollback that has to put the run history back"
-# 0.1.6 changed the database layout and recorded more runs.
-set_database 20261006000000 runs-after-update
+# 0.1.6 changed the run history's layout and recorded more runs, with a write-ahead log open.
+set_database 20261024000000 runs-after-update
+echo stale-log >"$db-wal"
 launcher rollback
-check "without --yes and no terminal, nothing changes" '[ $status != 0 ] && said "nothing was changed" && [ "$(version_installed)" = 0.1.6 ] && grep -q runs-after-update "$FAKE/db/loomwatch"'
+check "without --yes and no terminal, nothing changes" '[ $status != 0 ] && said "nothing was changed" && [ "$(version_installed)" = 0.1.6 ] && grep -q runs-after-update "$db"'
 launcher rollback --yes
 check "rollback succeeds and starts 0.1.5" '[ $status = 0 ] && logged "started 0.1.5" && [ "$(version_installed)" = 0.1.5 ]'
-check "the run history is the copy from before the update" 'grep -q runs-before-update "$FAKE/db/loomwatch" && grep -q "layout=20261001000000" "$FAKE/db/loomwatch"'
+check "the run history is the copy from before the update" 'grep -q runs-before-update "$db" && grep -q "layout=20261017000000" "$db"'
+check "the old write-ahead log is gone with the file it belonged to" '[ ! -e "$db-wal" ] && [ ! -e "$db.restoring" ]'
 export saved
-saved=$(find "$work/backups" -name 'loomwatch-*-0.1.6-before-rollback.dump' | head -n 1)
+saved=$(find "$work/backups" -name 'loomwatch-*-0.1.6-before-rollback.db' | head -n 1)
 check "what 0.1.6 recorded is saved first" '[ -n "$saved" ] && grep -q runs-after-update "$saved"'
-check "the copy was restored beside the one in use, then swapped in" 'logged "sql ALTER DATABASE loomwatch_restoring RENAME TO :\"db\";" && [ ! -e "$FAKE/db/loomwatch_replaced" ] && [ ! -e "$FAKE/db/loomwatch_restoring" ]'
 check "the kept version is used up" '[ ! -e "$app/.previous" ] && [ -z "$(find "$app" -maxdepth 1 -name ".loomwatch-rollback.*")" ]'
 
 echo "Rollback with nothing kept"
@@ -269,19 +283,21 @@ check "rollback explains there is nothing to go back to" '[ $status != 0 ] && sa
 
 echo "Rollback when the layout did not change"
 launcher update
-set_database 20261001000000 runs-on-0.1.6
+set_database 20261017000000 runs-on-0.1.6
 launcher rollback
 check "rollback succeeds without asking" '[ $status = 0 ] && [ "$(version_installed)" = 0.1.5 ]'
-check "the run history is left alone" 'grep -q runs-on-0.1.6 "$FAKE/db/loomwatch" && ! logged "pg_restore"'
+check "the run history is left alone" 'grep -q runs-on-0.1.6 "$db" && ! logged "before-rollback"'
 
 echo "A failed restore changes nothing"
 launcher update
-set_database 20261006000000 runs-after-second-update
-touch "$FAKE/db/fail-restore"
+set_database 20261024000000 runs-after-second-update
+export unreadable
+unreadable=$(sed -n 's/^backup=//p' "$app/.previous/ROLLBACK")
+chmod 000 "$unreadable"
 launcher rollback --yes
-rm "$FAKE/db/fail-restore"
+chmod 600 "$unreadable"
 check "rollback fails" '[ $status != 0 ] && said "could not be restored, so nothing was changed"'
-check "0.1.6 and its run history are untouched" '[ "$(version_installed)" = 0.1.6 ] && grep -q runs-after-second-update "$FAKE/db/loomwatch" && [ -d "$app/.previous" ]'
+check "0.1.6 and its run history are untouched" '[ "$(version_installed)" = 0.1.6 ] && grep -q runs-after-second-update "$db" && [ -d "$app/.previous" ] && [ ! -e "$db.restoring" ]'
 
 echo "Updating while LoomWatch runs"
 touch "$FAKE/daemon-up"
@@ -298,12 +314,12 @@ check "a release asked for by name is installed even when older" '[ $status = 0 
 
 echo "Update and restart in the app"
 export FAKE_LATEST=v0.1.6
-set_database 20261001000000 runs-before-app-update
+set_database 20261017000000 runs-before-app-update
 # The release the app showed, which need not be the newest the launcher would find.
 echo v0.1.5 >"$FAKE/app-asks"
 launcher start
 export app_backup
-app_backup=$(find "$work/backups" -name 'loomwatch-*-0.1.4.dump' | sort | tail -n 1)
+app_backup=$(find "$work/backups" -name 'loomwatch-*-0.1.4.db' | sort | tail -n 1)
 check "LoomWatch is told a launcher stays beside it, and where to name a release" 'grep -q "^started 0.1.4 install=release command=$app/loomwatch update supervised=1 request=/.*/app/run/update-request " "$FAKE_LOG"'
 check "stop finds LoomWatch, not the script, in the process file" 'logged "started 0.1.4 " && ! logged "pid=other"'
 check "exit 75 installs the release LoomWatch named, then starts it" '[ $status = 0 ] && [ "$(version_installed)" = 0.1.5 ] && logged "started 0.1.5 "'
@@ -335,7 +351,65 @@ launcher start
 check "ends the launcher with LoomWatch's status, as before" '[ $status = 3 ] && [ "$(grep -c "^started" "$FAKE_LOG")" = 1 ] && [ ! -e "$app/run/launcher.pid" ]'
 
 echo "Three copies are kept"
-check "older copies are removed" '[ "$(find "$work/backups" -name "*.dump" | wc -l | tr -d " ")" = 3 ]'
+check "older copies are removed" '[ "$(find "$work/backups" -name "*.db" | wc -l | tr -d " ")" = 3 ]'
+
+# --- Coming from a version that kept the run history in PostgreSQL in Docker -------------------
+# What such a version leaves in the folder: its settings, naming the database and its password.
+earlier_settings() {
+  printf 'POSTGRES_USER=loomwatch\nPOSTGRES_PASSWORD=0123abcd\nPOSTGRES_DB=loomwatch\nPOSTGRES_PORT=5433\nCOMPOSE_PROJECT_NAME=loomwatch-test\n' >"$app/.env"
+}
+
+echo "The first start after updating from a version that used Docker"
+earlier_settings
+rm -f "$db"
+echo loomwatch-test >"$FAKE/docker/container"
+touch "$FAKE/docker/up" "$FAKE/docker/volume"
+rm -f "$FAKE/docker/running"
+launcher start
+check "the earlier database is started and its history brought over" 'logged "docker start c0ffee" && logged "import from=postgres://loomwatch:0123abcd@127.0.0.1:55432/loomwatch" && grep -q imported "$db"'
+check "it is stopped again and kept" '[ ! -f "$FAKE/docker/running" ] && logged "docker stop c0ffee" && ! logged "docker rm" && ! logged "volume rm" && said "kept in Docker as it was"'
+check "then LoomWatch starts" '[ $status = 0 ] && logged "started 0.1.5"'
+launcher start
+check "the next start brings nothing over again" '[ $status = 0 ] && ! logged "import from" && ! logged "docker "'
+
+echo "The first start after updating, with Docker not running"
+rm -f "$db" "$FAKE/docker/up"
+launcher start
+check "says once how to bring the history over later, and starts" '[ $status = 0 ] && said "To bring it over, start Docker Desktop and run:" && ! logged "import from" && logged "started 0.1.5"'
+launcher import
+check "import refuses plainly while Docker is not running" '[ $status != 0 ] && said "Docker is not available"'
+touch "$FAKE/docker/up"
+launcher import
+check "import brings it over later" '[ $status = 0 ] && logged "import from=postgres://loomwatch:0123abcd@127.0.0.1:55432/loomwatch" && grep -q imported "$db"'
+touch "$FAKE/daemon-up"
+set +e
+"$app/loomwatch" import </dev/null >"$FAKE/out" 2>&1
+status=$?
+set -e
+rm -f "$FAKE/daemon-up"
+check "import refuses while LoomWatch runs" '[ $status != 0 ] && said "Stop it first"'
+
+echo "The first start after updating, when the database was another copy's"
+rm -f "$db"
+echo "$work" >"$FAKE/docker/owner"
+touch "$work/docker-compose.yml"
+launcher start
+check "another copy's history is left alone" '[ $status = 0 ] && ! logged "import from" && ! logged "docker start"'
+rm -f "$FAKE/docker/owner" "$work/docker-compose.yml"
+
+echo "Rollback to a version that keeps the run history in Docker"
+set_database 20261017000000 runs-since-the-update
+mkdir -p "$app/.previous/bin"
+cp "$app/bin/loomwatchd" "$app/.previous/bin/loomwatchd"
+printf '0.1.3 legacy\n' >"$app/.previous/VERSION"
+# Its launcher, with the function such launchers have.
+printf '#!/usr/bin/env bash\nuses_docker_database() { [ -z "${LOOMWATCH_DATABASE_URL:-}" ]; }\nprintf "earlier launcher %%s\\n" "$*" >>"$FAKE_LOG"\n' >"$app/.previous/loomwatch"
+chmod 755 "$app/.previous/loomwatch"
+printf 'version=0.1.5\nlayout=20261006000000\nbackup=%s\n' "$work/backups/loomwatch-app/x.dump" >"$app/.previous/ROLLBACK"
+launcher rollback
+check "goes back without asking, and starts the earlier version" '[ $status = 0 ] && [ "$(version_installed)" = 0.1.3 ] && logged "earlier launcher start --no-open"'
+check "says the history since the update stays in the file" 'said "keeps its run history in Docker" && said "import brings over"'
+check "the file is left alone and nothing is restored" 'grep -q runs-since-the-update "$db" && ! logged "backup "'
 
 if [ "$failures" -gt 0 ]; then
   printf '\n%s check(s) failed. Last output:\n' "$failures"

@@ -260,7 +260,8 @@ CREATE TABLE runs (
     team_revision     TEXT
 );
 
-CREATE INDEX runs_created_idx ON runs (created_at DESC, run_id);
+-- Newest first, ties by id newest first: the order both the history list and the team chat read.
+CREATE INDEX runs_created_idx ON runs (created_at DESC, run_id DESC);
 CREATE INDEX runs_follows_idx ON runs (follows_run_id) WHERE follows_run_id IS NOT NULL;
 CREATE INDEX runs_retry_idx ON runs (retry_of_run_id) WHERE retry_of_run_id IS NOT NULL;
 CREATE UNIQUE INDEX runs_start_key_idx ON runs (start_key) WHERE start_key IS NOT NULL;
@@ -284,7 +285,7 @@ CREATE TABLE operator_questions (
 CREATE UNIQUE INDEX operator_questions_one_open_idx
     ON operator_questions (run_id, agent_id)
     WHERE answered_at IS NULL;
-CREATE INDEX operator_questions_run_idx ON operator_questions (run_id, asked_at);
+CREATE INDEX operator_questions_run_idx ON operator_questions (run_id, asked_at, id);
 
 -- ADR 0051: what the operator typed into a team's chat.
 CREATE TABLE chat_messages (
@@ -301,6 +302,9 @@ CREATE TABLE chat_messages (
 );
 
 CREATE INDEX chat_messages_team_created_idx ON chat_messages (team_key, created_at DESC);
+-- A team's chat is found by key or, for older rows, by path: one index each, so `key OR path`
+-- is two index ranges rather than a scan.
+CREATE INDEX chat_messages_team_path_created_idx ON chat_messages (team_path, created_at DESC);
 CREATE INDEX chat_messages_run_idx ON chat_messages (run_id);
 
 -- Each `loomwatchd import-postgres` that copied rows into this file: when, from which database
