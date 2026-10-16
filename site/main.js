@@ -203,13 +203,34 @@
 
   // The figures are the app's own (ui/src/site/landingLive.ts, built into assets/live/live.js with
   // three.js): the crew on the first screen and the agent's bench in Step 1. The module loads only
-  // where WebGL works; everywhere else the still pictures under the canvases stay, and the page works.
-  const canDraw = (() => {
-    try { const probe = document.createElement('canvas'); return Boolean(probe.getContext('webgl2') || probe.getContext('webgl')) } catch { return false }
-  })()
-  let live = null
-  const loadLive = () => (live ||= canDraw ? import('./assets/live/live.js') : Promise.reject(new Error('WebGL is off')))
+  // where the browser has WebGL; everywhere else, and where a scene can't make its WebGL context,
+  // the still pictures under the canvases stay, and the page works. No canvas is made to find out:
+  // the first WebGL context a page makes can take a second, and it would come before the first paint.
+  const canDraw = 'WebGLRenderingContext' in window
   const MODEL = 'assets/live/workbench.glb'
+  let live = null
+  let model = null
+  // The model comes down alongside the code, once for all three scenes.
+  const loadModel = () => {
+    if (!model) {
+      model = fetch(MODEL).then((response) => (response.ok ? response.arrayBuffer() : Promise.reject(new Error(`${MODEL}: ${response.status}`))))
+      model.catch(() => {})
+    }
+    return model
+  }
+  const loadLive = () => {
+    if (canDraw) loadModel()
+    return (live ||= canDraw ? import('./assets/live/live.js') : Promise.reject(new Error('WebGL is off')))
+  }
+  // What a scene is built from: the model's bytes. A live.js cached from before readModel, for ten
+  // minutes after a deploy, takes only its URL and fetches it itself.
+  const modelFor = (scenes) => (scenes.readModel ? loadModel() : MODEL)
+  // Two frames along: in a task of its own, after what was asked of the screen before it.
+  const nextPaint = () => new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)))
+  // The figures' work on the GPU (their WebGL contexts, then their shaders) starts once the crew's
+  // picture is on the screen, so the first screen paints without waiting for it.
+  const crewPoster = $('.crew-poster')
+  const painted = Promise.resolve(crewPoster?.decode?.()).catch(() => {}).then(nextPaint)
 
   // Draw a stage only while it can be seen, and size its canvas to it.
   function stageOf(box, scene, onResize) {
@@ -292,8 +313,9 @@
   }
 
   async function mountCrew() {
-    const { CrewScene } = await loadLive()
-    const scene = new CrewScene(crewCanvas, CREW, {
+    const scenes = await loadLive()
+    await painted
+    const scene = new scenes.CrewScene(crewCanvas, CREW, {
       onHover: (index) => {
         crewHover = index
         crewCanvas.style.cursor = index === null ? '' : 'pointer'
@@ -326,7 +348,9 @@
     window.addEventListener('pointermove', (event) => { const [x, y] = local(event, crewCanvas); scene.pointerMove(x, y) }, { passive: true })
     document.documentElement.addEventListener('pointerleave', () => scene.pointerMove(null, null))
     crewCanvas.addEventListener('pointerup', (event) => { const [x, y] = local(event, crewCanvas); scene.pointerUp(x, y) })
-    await scene.load(MODEL)
+    // Its lighting and figures a frame or two after its WebGL context, so the page answers between them.
+    await nextPaint()
+    await scene.load(await modelFor(scenes))
     crewBox.classList.add('live')
     // They start talking once the headline has had a moment, twice through, then stop; the button
     // pauses them, and plays it again. A live.js or page cached from before the conversation has no
@@ -658,16 +682,19 @@
   // The figure on the cord is the crew's own, alive; it loads after the crew, from the same model.
   // Until then (and where WebGL is off) the cord carries its still picture.
   async function mountCord() {
+    // Once the GPU has drawn the crew (CrewScene.load), whose work its WebGL context would wait for.
     await crewMounted
-    const { CordScene } = await loadLive()
-    const scene = new CordScene($('.cord-canvas', cord), LAMPLIGHTER, reduced)
+    await nextPaint()
+    const scenes = await loadLive()
+    const scene = new scenes.CordScene($('.cord-canvas', cord), LAMPLIGHTER, reduced)
     scene.resize(BOX, BOX)
-    await scene.load(MODEL)
+    await scene.load(await modelFor(scenes))
     figureScene = scene
     cord.classList.add('live')
   }
   const dropIn = () => { ready = true; wakeCord() }
-  mountCord().then(dropIn, dropIn)
+  // Settles once the figure is on the cord, or won't be; the bench waits for it (mountBench).
+  const cordMounted = mountCord().then(dropIn, dropIn)
   window.setTimeout(dropIn, 6000)
   if (reduced) hang = hangTarget()
   paintCord(0)
@@ -793,7 +820,8 @@
     mind: '#ag-kinds [aria-checked="true"]', keys: '#ag-keys button', reply: '#ag-try',
   }
   async function mountBench() {
-    const { WorkbenchScene, markPattern, placeFace } = await loadLive()
+    const scenes = await loadLive()
+    const { WorkbenchScene, markPattern, placeFace } = scenes
     benchPattern = (name) => markPattern(name.toLowerCase()).over
     const scene = new WorkbenchScene(benchCanvas, {
       // Clicking a thing on the bench takes you to the block that changes it.
@@ -822,7 +850,7 @@
     benchCanvas.addEventListener('pointerup', (event) => { const [x, y] = local(event, benchCanvas); scene.pointerUp(x, y); scene.pointerMove(x, y) })
     benchCanvas.addEventListener('pointerleave', (event) => { if (!benchCanvas.hasPointerCapture(event.pointerId)) scene.pointerLeave() })
     benchCanvas.addEventListener('pointercancel', () => scene.pointerLeave())
-    await scene.load(MODEL)
+    await scene.load(await modelFor(scenes))
     bench.classList.add('live')
     paintBench()
   }
@@ -831,12 +859,13 @@
     paintFaces()
     benchScene?.set(benchView())
   }
-  // The bench loads when Step 1 is near, so the first screen only waits for the crew.
+  // The bench loads when Step 1 is near, and after the crew and the cord are on the screen, so the
+  // first screen only waits for the crew and the GPU readies one scene at a time.
   if ('IntersectionObserver' in window) {
     const near = new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting)) return
       near.disconnect()
-      mountBench().catch(() => bench.classList.add('still'))
+      cordMounted.then(nextPaint).then(mountBench).catch(() => bench.classList.add('still'))
     }, { rootMargin: '600px 0px' })
     near.observe(bench)
   } else bench.classList.add('still')
