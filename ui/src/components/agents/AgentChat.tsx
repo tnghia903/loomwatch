@@ -38,8 +38,9 @@ export interface AgentChatProps {
 const message = (failed: unknown) => (failed instanceof Error ? failed.message : String(failed))
 
 /**
- * An agent's own chat (the Chat tab in Your agents): you work with this one agent as you would in
- * a team's chat, with everything said before above it, while its figure works at the bench beside.
+ * An agent's own chat (its Chat tab, in Your agents or in a team): you work with this one agent as
+ * you would in a team's chat, with everything said before above it, while its figure works at the
+ * bench beside.
  *
  * It is the team chat (ADR 0051) on a team of one, kept in the bench's hidden `.jobs/.bench/`
  * folder so no team list or schedule sees it. Each message that starts work first writes the agent

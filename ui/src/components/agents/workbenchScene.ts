@@ -46,7 +46,7 @@ import type { AllowSwitch } from '../../lib/team-file/types'
 import { dress, type Dressed } from './accessoryMeshes'
 import { cardTexture, keyLabelTexture, pegboardTexture, swatchTextures, woundTexture } from './benchTextures'
 
-/** Everything the bench shows, from the agent on screen and the test bench's run. */
+/** Everything the bench shows, from the agent on screen and the run in its chat. */
 export interface BenchView {
   look: FigureLook
   /** The figure it wears: which head, and the colour of its skin. */
@@ -175,9 +175,9 @@ function corners(mesh: Mesh): Vector3[] {
  * the bench, and the figure with every head it can wear. This dresses it from the agent's settings
  * and the figure it wears, lets each object on the bench be picked up or clicked, and moves the
  * figure. It moves for two reasons only: a change you just made (it looks at what changed) and the
- * test bench's run record (it types while the record moves, rests its hands while the record is
- * quiet, points at your dish when it waits on you for a key, and hands its reply to the tray when it
- * is done). Nothing else: no pose for a feeling the record doesn't show. Between runs it looks
+ * run in its chat (it types while its events arrive, rests its hands while the run is quiet,
+ * points at your dish when it waits on you for a key, and hands its reply to the tray when it is
+ * done). Nothing else: no pose for a feeling the run doesn't show. Between runs it looks
  * around and blinks. Reduced motion keeps every pose and drops the motion.
  */
 export class WorkbenchScene {

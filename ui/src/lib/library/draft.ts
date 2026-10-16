@@ -9,8 +9,8 @@ import { capabilitiesOf, harnessForRole, type RolePreset } from './roles'
 
 /**
  * The agent builder's working copy of one of Your agents: what is on screen, saved or not. Saving
- * turns it into a job spec (`specFromDraft`); its chat and the test bench turn it into a one-agent
- * team (`chatTeamYaml`, `benchTeamYaml`), so working with an agent never needs it saved first.
+ * turns it into a job spec (`specFromDraft`); its chat turns it into a one-agent team
+ * (`chatTeamYaml`), so working with an agent never needs it saved first.
  */
 export interface AgentDraft {
   name: string
@@ -121,7 +121,7 @@ function agentId(name: string): string {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent'
 }
 
-/** The draft as one team agent on `harness`: what the test bench runs and the badge describes. */
+/** The draft as one team agent on `harness`: what its chat runs and the badge describes. */
 export function agentFromDraft(draft: AgentDraft, harness: DetectedHarness | null, model = draft.model, link?: { id: string; job?: SavedJob | null }, effort = draft.effort): AgentConfig {
   const allow = onlyOn(draft.allow)
   return {
@@ -138,24 +138,16 @@ export function agentFromDraft(draft: AgentDraft, harness: DetectedHarness | nul
   }
 }
 
-/**
- * The test bench's team: this one agent and nothing else, in the hidden `.jobs/.bench/` folder so
- * the team list and the scheduler never see it. `model` must be one the app advertises.
- */
-export function benchTeamYaml(draft: AgentDraft, harness: DetectedHarness, model: string, benchId: string): string {
-  const agent = agentFromDraft(draft, harness, model)
-  return stringify({ schemaVersion: 1, id: `bench-${benchId}`, name: `${agent.name} · test bench`, entrypoint: agent.id, agents: [agent] }, { lineWidth: 0 })
-}
-
 /** The id the agent has in its chat's team: the chat's own, so renaming the agent never changes it. */
 export function chatAgentId(chatId: string): string {
   return agentId(chatId)
 }
 
 /**
- * An agent's chat (the Chat tab in Your agents): the bench's one-agent team, in the same hidden
- * folder, as it is on screen. Its agent keeps `chatAgentId(chatId)` whatever it is called, so the
- * chat's history and a note written while it works still reach it after a rename.
+ * An agent's chat (its Chat tab, in Your agents or in a team): this one agent and nothing else, as
+ * it is on screen, in the hidden `.jobs/.bench/` folder so the team list and the scheduler never
+ * see it. `model` must be one the app advertises. Its agent keeps `chatAgentId(chatId)` whatever it
+ * is called, so the chat's history and a note written while it works still reach it after a rename.
  */
 export function chatTeamYaml(draft: AgentDraft, harness: DetectedHarness, model: string, chatId: string): string {
   const agent = { ...agentFromDraft(draft, harness, model), id: chatAgentId(chatId) }

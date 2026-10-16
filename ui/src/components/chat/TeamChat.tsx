@@ -85,7 +85,7 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * work and answer here, with everything said before above it. Runs are still how work executes;
  * each piece of work here is one, and Details opens its full record.
  *
- * With `team.solo` it is one agent's own chat (Your agents): everything you write goes to that
+ * With `team.solo` it is one agent's own chat (its Chat tab): everything you write goes to that
  * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
 export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, autoMode, onNewestRun, startTeam = false, onStartTeamTaken }: TeamChatProps) {

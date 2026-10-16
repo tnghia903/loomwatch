@@ -2,7 +2,7 @@ import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 
 import type { DetectedHarness } from '../harnesses'
-import { benchTeamYaml, chatAgentId, chatTeamYaml, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft } from './draft'
+import { chatAgentId, chatTeamYaml, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft } from './draft'
 import { ROLE_PRESETS } from './roles'
 
 const claude: DetectedHarness = { id: 'claude', name: 'Claude Code', command: 'claude-agent-acp', executablePath: '/bin/claude-agent-acp', acpAvailable: true, spawn: { cmd: 'claude-agent-acp', args: [] } }
@@ -48,14 +48,14 @@ describe('the agent builder’s draft', () => {
 
   // ADR 0062: done-when travels with the agent: saved, a new version when it changes, copied
   // into the bench team, and started from a built-in job's own items.
-  it('saves done-when trimmed, versions it, and runs the bench with it', () => {
+  it('saves done-when trimmed, versions it, and chats with it', () => {
     const saved = draftFromJob({ name: 'Reader', instructions: 'Check.', apps: ['claude'], doneWhen: ['Every story has a link'] })
     expect(saved.doneWhen).toEqual(['Every story has a link'])
     expect(makesNewVersion({ ...saved, doneWhen: ['Every story has a link', 'Five stories'] }, saved)).toBe(true)
     expect(makesNewVersion({ ...saved, doneWhen: ['Every story has a link', '  '] }, saved)).toBe(false)
     expect(specFromDraft({ ...saved, doneWhen: ['  Five stories ', ''] })).toMatchObject({ doneWhen: ['Five stories'] })
     expect(specFromDraft({ ...saved, doneWhen: [' '] })).not.toHaveProperty('doneWhen')
-    const team = parse(benchTeamYaml(saved, claude, 'sonnet', 'reader')) as { agents: Record<string, unknown>[] }
+    const team = parse(chatTeamYaml(saved, claude, 'sonnet', 'reader')) as { agents: Record<string, unknown>[] }
     expect(team.agents[0]).toMatchObject({ doneWhen: ['Every story has a link'] })
     const writer = ROLE_PRESETS.find((preset) => preset.id === 'writer')!
     expect(draftFromPreset(writer, [claude]).doneWhen).toEqual([...(writer.doneWhen ?? [])])
@@ -68,24 +68,24 @@ describe('the agent builder’s draft', () => {
     expect(draft.allow.web).toBe(true)
   })
 
-  it('tries it with its thinking effort', () => {
+  it('chats with it at its thinking effort', () => {
     const draft = { name: 'Reader', does: '', instructions: 'Check.', appId: 'claude', model: 'opus', effort: 'max', skills: [], tools: [], doneWhen: [], allow: {}, figure: null }
-    const team = parse(benchTeamYaml(draft, claude, 'opus', 'reader')) as { agents: Record<string, unknown>[] }
+    const team = parse(chatTeamYaml(draft, claude, 'opus', 'reader')) as { agents: Record<string, unknown>[] }
     expect(team.agents[0]).toMatchObject({ model: 'opus', thinkingEffort: 'max' })
   })
 
-  it('tries it as a team of one, with the model the app advertises', () => {
+  it('chats with it as a team of one, with the model the app advertises', () => {
     const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', appId: 'claude', model: '', effort: '', skills: ['house-style'], tools: ['github'], doneWhen: [], allow: { web: true }, figure: null }
-    const team = parse(benchTeamYaml(draft, claude, 'sonnet', 'release-notes-writer')) as Record<string, unknown>
+    const team = parse(chatTeamYaml(draft, claude, 'sonnet', 'release-notes-writer')) as Record<string, unknown>
     expect(team).toEqual({
       schemaVersion: 1,
       id: 'bench-release-notes-writer',
-      name: 'Release notes writer · test bench',
+      name: 'Release notes writer · chat',
       entrypoint: 'release-notes-writer',
       agents: [{
         id: 'release-notes-writer', name: 'Release notes writer', role: 'Write the notes.',
         spawn: { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '.' }, model: 'sonnet',
-        // Its tools go with it, so trying it uses them as a team would.
+        // Its tools go with it, so its chat uses them as a team would.
         capabilities: [{ kind: 'skill', name: 'house-style' }, { kind: 'tool', name: 'github' }], allow: { web: true },
       }],
     })

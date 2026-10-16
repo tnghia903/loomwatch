@@ -11,6 +11,7 @@ import type { FigureChoice } from '../../lib/library/figures'
 import type { RunRecord } from '../../lib/runs/client'
 import { markPattern } from '../../lib/story/mark'
 import { useNow } from '../../lib/useNow'
+import { useSessionEvents } from '../../lib/watch/useSessionEvents'
 import { actsWithoutAsking, ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import { appendToRole, INSTRUCTION_PARTS, instructionShape, PART_STARTERS } from '../../lib/team-file/checkup'
 import type { AllowSwitch } from '../../lib/team-file/types'
@@ -34,7 +35,7 @@ const AgentFigure = lazy(() => import('./AgentFigure'))
  * the keys on the hooks what it may do without
  * asking (the ones in your dish ask you first), and the tray what it hands back. Clicking anything
  * on the bench takes you to its block, and working in a block lights its thing on the bench. While
- * it works in its chat (or on a team's test bench), the figure works as the run record says.
+ * it works in its chat, the figure works as the run record and its events say.
  */
 
 const SKILL_MIME = 'application/x-loomwatch-skill'
@@ -61,7 +62,7 @@ export interface ByHandProps {
   figure: FigureChoice
   /** Choose another figure: only in Your agents, where the figure is kept. */
   onFigure?: (figure: FigureChoice) => void
-  /** The test bench's run, if one is on screen: the figure works as its record says. */
+  /** The run in its chat, if one is on screen: the figure works as its record and events say. */
   record: RunRecord | null
   /** A team's own agent has no palette line ("what it does"): that belongs to Your agents. */
   hideDoes?: boolean
@@ -76,7 +77,7 @@ export interface ByHandProps {
   /** In a team: open its Workflow, where what it reads is given with a line. */
   onShowWorkflow?: () => void
   /**
-   * Its chat (Your agents' Chat tab), shown beside the bench instead of the blocks: the figure
+   * Its chat (its Chat tab), shown beside the bench instead of the blocks: the figure
    * works there as the chat's newest run says. The bench stays the same one, so it is never drawn
    * twice. Picking something on it goes back to Build, to that thing's block (`onBuild`).
    */
@@ -119,7 +120,7 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   const wild = harness ? actsWithoutAsking({ spawn: { cmd: harness.spawn.cmd, args: harness.spawn.args, env: {}, cwd: '.' } }) : null
   const shape = { ...instructionShape(draft.instructions), ...(draft.doneWhen.length ? { check: true } : {}) }
   const reply = replyLine(draft.instructions)
-  const mood = useFigureMood(record)
+  const { mood, events } = useFigureMood(record)
   const pattern = useMemo(() => markPattern(markId).over, [markId])
   const given = FIGURE_KEYS.filter(({ key }) => draft.allow[key])
   const kept = FIGURE_KEYS.filter(({ key }) => !draft.allow[key])
@@ -137,7 +138,6 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   // A saved effort on a model whose efforts are not known is used only if the model has it.
   const askedOfUnknown = draft.effort && thinkingModel && !thinkingModel.effortsKnown ? models?.models.flatMap((item) => item.thinkingEfforts).find((item) => item.id === draft.effort)?.name ?? draft.effort : null
   const thinks = effort ? `${model} · ${effort.name.toLowerCase()} effort` : model
-  const events = record?.eventCount ?? 0
   const asked = askedKey(record)
 
   const view = useMemo<BenchView>(() => ({
@@ -371,7 +371,6 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   )
 }
 
-/** The figure's mood, from the run record, on the shared clock while the run is live, to tell working from quiet. */
 /** A block brought into view, with its first control taken, so you can carry on in it. */
 function showBlock(block: HTMLElement | undefined) {
   if (!block) return
@@ -379,14 +378,21 @@ function showBlock(block: HTMLElement | undefined) {
   block.querySelector<HTMLElement>('textarea, input, select, button')?.focus({ preventScroll: true })
 }
 
+/**
+ * The figure's mood, from the run record, on the shared clock while the run is live, to tell working
+ * from quiet; and the run's events so far, each one flickering its screen. The record counts its
+ * events only once the run is over, so while it runs they are counted as they arrive.
+ */
 function useFigureMood(record: RunRecord | null) {
-  const now = useNow(record?.status === 'running')
+  const live = record?.status === 'running'
+  const now = useNow(live)
+  const arrived = useSessionEvents(live ? record.sessionId : '').events.length
   const [moved, setMoved] = useState<{ run: string; events: number; at: number } | null>(null)
   const run = record?.runId ?? null
-  const events = record?.eventCount ?? 0
-  // When the record moves, note when (adjusting state while rendering, not in an effect).
+  const events = live ? arrived : record?.eventCount ?? 0
+  // When the run moves, note when (adjusting state while rendering, not in an effect).
   if (run && (moved?.run !== run || moved.events !== events)) setMoved({ run, events, at: now })
-  return figureMood(record, moved && moved.run === run ? moved.at : null, now)
+  return { mood: figureMood(record, moved && moved.run === run ? moved.at : null, now), events }
 }
 
 /** What a shelf says, for skills (recipe cards on the pegboard) and tools (wrenches in the tool drawer). */

@@ -1,4 +1,4 @@
-/* Your agents: the list, the builder and its test bench, the ID card, Home's row of agents, and the
+/* Your agents: the list, the builder and its chat, the ID card, Home's row of agents, and the
    agent panel's "From Your agents" section. Built on Home's frame (home.css) and the app's tokens:
    gold (accent) for your actions, blue (live) for work running now, red (alert) for what needs you. */
 
@@ -63,12 +63,9 @@
 .agent-note { width: 280px; max-width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid); color: var(--color-ink); font: inherit; font-size: 13px; }
 .agent-save-state { flex-basis: 100%; text-align: right; min-height: 16px; color: var(--color-ink-3); }
 .agent-save-error { color: var(--color-alert); }
-.agent-builder-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: var(--sp-5); align-items: start; }
-.agent-builder-form, .agent-builder-side { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
-.agent-builder-side { position: sticky; top: var(--sp-4); }
-/* Your agents has no test bench (its chat is a tab): the ID card, where it is used and its versions share the row. */
-.agent-builder-grid.no-bench { grid-template-columns: minmax(0, 1fr); }
-.agent-builder-grid.no-bench .agent-builder-side { position: static; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); align-items: start; }
+/* Under the bench (its chat is a tab): the ID card, where it is used and its versions share the row. */
+.agent-builder-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); align-items: start; }
+.agent-builder-side { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); align-items: start; gap: var(--sp-4); min-width: 0; }
 .agent-section { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid); min-width: 0; }
 .agent-section-head { display: flex; align-items: center; gap: 6px; font: 600 11px/1.4 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
 .agent-field { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--color-ink-2); min-width: 0; }
@@ -92,28 +89,7 @@
 .skill-picker-find { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-ground); color: var(--color-ink-3); }
 .skill-picker-find input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--color-ink); font: inherit; font-size: 13px; }
 
-/* ---------- the test bench ---------- */
-.agent-bench { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-hairline)); border-radius: var(--r-lg); background: var(--color-panel-solid); }
-.agent-bench > .t-meta { margin: 0; color: var(--color-ink-3); }
-.agent-bench-ask { display: flex; flex-direction: column; gap: var(--sp-2); }
-.agent-bench-ask textarea, .agent-bench-ask-card textarea { box-sizing: border-box; width: 100%; padding: 8px 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-ground); color: var(--color-ink); font: 400 14px/1.45 var(--font-sans); resize: vertical; }
-.agent-bench-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.agent-bench-acts .btn { gap: 6px; }
 .agent-bench-error { margin: 0; color: var(--color-alert); font-size: 13px; }
-.agent-bench-result { display: flex; flex-direction: column; gap: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--color-hairline); }
-.agent-bench-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: 14px; }
-.agent-bench-status .t-meta { color: var(--color-ink-3); }
-.agent-bench-open { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
-.agent-bench-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-ink-3); flex: none; }
-.agent-bench-dot.st-queued, .agent-bench-dot.st-starting, .agent-bench-dot.st-running { background: var(--color-live); }
-.agent-bench-dot.st-succeeded { background: var(--color-ok); }
-.agent-bench-dot.st-failed { background: var(--color-alert); }
-.agent-bench-ask-card { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent); border-radius: var(--r-md); background: var(--color-accent-tint); }
-.agent-bench-ask-card p { margin: 0; font-size: 13.5px; color: var(--color-ink); overflow-wrap: anywhere; }
-.agent-bench-ask-card p.t-meta { color: var(--color-ink-2); font-size: 12.5px; }
-.agent-bench-ask-card code { display: block; margin-top: 4px; font: 400 12px/1.5 var(--font-mono); color: var(--color-ink-2); white-space: pre-wrap; }
-.agent-bench-reply { max-height: 420px; overflow: auto; padding: var(--sp-3); border-radius: var(--r-md); background: var(--color-ground); border: 1px solid var(--color-hairline); font-size: 14px; line-height: 1.55; }
-.agent-bench-reply > :first-child { margin-top: 0; }
 
 /* used in, versions */
 .agent-uses, .agent-versions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -148,8 +124,6 @@
 .linked-agent-note { color: var(--color-ink-3); }
 
 @media (max-width: 900px) {
-  .agent-builder-grid { grid-template-columns: minmax(0, 1fr); }
-  .agent-builder-side { position: static; }
   .agent-builder-head { grid-template-columns: minmax(0, 1fr); }
   .agent-builder-save { justify-content: flex-start; }
   .agent-save-state { text-align: left; }
@@ -341,8 +315,9 @@
 .team-agents-chip[aria-pressed="true"] { border-color: var(--color-accent); background: var(--color-accent-tint); }
 .team-agents-chip[aria-pressed="true"] em { color: var(--color-accent); }
 .team-agents-own, .team-agents-linked { display: flex; flex-direction: column; gap: var(--sp-4); }
+.team-agents-own-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-4); }
+.team-agents-own-head .agent-view-tabs { margin-top: 0; }
 .team-agents-note { margin: 0; }
-.team-agents-bench { max-width: 760px; }
 .team-agents-linked > :first-child { max-width: 760px; }
 /* Choosing agents for the team: the first step of a team, and the strip's last chip. */
 .team-agents-chip.add { border-style: dashed; color: var(--color-ink-2); }
