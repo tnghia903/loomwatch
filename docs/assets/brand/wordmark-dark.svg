@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-5.5 14.5 500 91" role="img" aria-label="LoomWatch">
+<g fill="none" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+<path stroke="#F5F3EE" d="M0 20V100M13 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M74 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M138 50V100M138 67a16 16 0 0 1 32 0V100M170 67a16 16 0 0 1 32 0V100M215 50L231 100L247 56L263 100L279 50M291 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M341 50V100M361 28V86q0 14 14 14M430.73 56.42A25 25 0 1 0 430.73 93.58M449 20V100M449 70a20 20 0 0 1 40 0V100"/>
+<path stroke="#E9C46A" d="M351 50H375"/>
+</g>
+</svg>

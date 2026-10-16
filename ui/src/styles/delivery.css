@@ -721,9 +721,9 @@
     gap: 20px;
   }
   .delivery-shown .delivery-brand {
-    display: block;
-    font-size: 20px;
-    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
   .delivery-shown .workspace-chrome > .lw-chip {
     justify-self: end;

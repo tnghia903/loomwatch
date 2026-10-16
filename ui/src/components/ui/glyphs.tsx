@@ -113,12 +113,43 @@ export function EntityGlyph({ kind, size = 14, style }: { kind: EntityKind; size
   )
 }
 
-/** The loom mark: two strands crossing, warp solid and weft dimmed (§10.1). */
-export function LoomMark({ width = 102, height = 44 }: { width?: number; height?: number }) {
+/**
+ * LoomWatch's mark: the face every crew figure wears, two warp-thread eyes and a gold weft stitch for
+ * a mouth, sewn onto a dark tile with a gold running stitch (docs/assets/brand). At 40 px and below it
+ * draws mark-small.svg, whose face is bigger and whose stitch is coarser, so both still read. The
+ * tile stays dark in both themes, like an app icon.
+ */
+export function LoomMark({ size = 28 }: { size?: number }) {
   return (
-    <svg className="fr-mark" width={width} height={height} viewBox="0 0 102 44" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M6 34 24 10 42 34 60 10 78 34 96 10" />
-      <path d="M6 10 24 34 42 10 60 34 78 10 96 34" opacity=".34" />
+    <svg className="fr-mark" width={size} height={size} viewBox="0 0 512 512" aria-hidden="true" style={{ flex: 'none' }}>
+      <rect width="512" height="512" rx="112" fill="#08080A" />
+      {size <= 40 ? <>
+        <path d="M256 40H384A88 88 0 0 1 472 128V384A88 88 0 0 1 384 472H128A88 88 0 0 1 40 384V128A88 88 0 0 1 128 40Z" fill="none" stroke="#D8A93C" strokeWidth="26" strokeLinecap="round" strokeDasharray="49.28 49.28" strokeDashoffset="24.64" />
+        <rect x="152" y="146" width="70" height="150" rx="35" fill="#F5F3EE" />
+        <rect x="290" y="146" width="70" height="150" rx="35" fill="#F5F3EE" />
+        <path d="M222 354Q256 382 290 354" fill="none" stroke="#E9C46A" strokeWidth="40" strokeLinecap="round" />
+      </> : <>
+        <path d="M256 44H382A86 86 0 0 1 468 130V382A86 86 0 0 1 382 468H130A86 86 0 0 1 44 382V130A86 86 0 0 1 130 44Z" fill="none" stroke="#D8A93C" strokeWidth="10" strokeLinecap="round" strokeDasharray="16.26 22.45" strokeDashoffset="8.13" />
+        <rect x="170" y="170" width="52" height="112" rx="26" fill="#F5F3EE" />
+        <rect x="290" y="170" width="52" height="112" rx="26" fill="#F5F3EE" />
+        <path d="M230 330Q256 352 282 330" fill="none" stroke="#E9C46A" strokeWidth="28" strokeLinecap="round" />
+      </>}
+    </svg>
+  )
+}
+
+/**
+ * The name, drawn with the mark's thread: lowercase round-capped strokes in the text colour, and the
+ * t's crossbar in gold, the weft again (docs/assets/brand/wordmark-*.svg). Below 32 px the thread is a
+ * little heavier so it does not go thin.
+ */
+export function LoomWordmark({ height = 20 }: { height?: number }) {
+  const stroke = height < 32 ? 12 : 11
+  const width = Math.round((height * (489 + stroke)) / (80 + stroke) * 10) / 10
+  return (
+    <svg className="lw-wordmark" width={width} height={height} viewBox={`${-stroke / 2} ${20 - stroke / 2} ${489 + stroke} ${80 + stroke}`} fill="none" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" role="img" aria-label="LoomWatch" style={{ flex: 'none' }}>
+      <path stroke="currentColor" d="M0 20V100M13 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M74 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M138 50V100M138 67a16 16 0 0 1 32 0V100M170 67a16 16 0 0 1 32 0V100M215 50L231 100L247 56L263 100L279 50M291 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M341 50V100M361 28V86q0 14 14 14M430.73 56.42A25 25 0 1 0 430.73 93.58M449 20V100M449 70a20 20 0 0 1 40 0V100" />
+      <path style={{ stroke: 'var(--color-accent)' }} d="M351 50H375" />
     </svg>
   )
 }

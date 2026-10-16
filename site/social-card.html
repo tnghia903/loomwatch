@@ -37,8 +37,8 @@
   }
   .copy { position: absolute; left: 72px; top: 64px; width: 540px; }
   .brand { display: flex; align-items: center; gap: 16px; }
-  .brand svg { width: 70px; height: 30px; }
-  .brand span { font-family: var(--serif); font-size: 40px; letter-spacing: 0.2px; }
+  .brand .mark { width: 64px; height: 64px; }
+  .brand .name { width: 223px; height: 41px; }
   h1 {
     margin-top: 44px; font-family: var(--serif); font-weight: 400; font-size: 54px; line-height: 1.02;
     letter-spacing: -0.5px;
@@ -68,11 +68,20 @@
   <div class="glow"></div>
   <div class="copy">
     <div class="brand">
-      <svg viewBox="0 0 102 44" fill="none" stroke="#E9C46A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path opacity=".34" d="M6 10 24 34 42 10 60 34 78 10 96 34"/>
-        <path d="M6 34 24 10 42 34 60 10 78 34 96 10"/>
+      <!-- docs/assets/brand/mark.svg and wordmark-dark.svg -->
+      <svg class="mark" viewBox="0 0 512 512" aria-hidden="true">
+        <rect width="512" height="512" rx="112" fill="#08080A"/>
+        <path d="M256 44H382A86 86 0 0 1 468 130V382A86 86 0 0 1 382 468H130A86 86 0 0 1 44 382V130A86 86 0 0 1 130 44Z" fill="none" stroke="#D8A93C" stroke-width="10" stroke-linecap="round" stroke-dasharray="16.26 22.45" stroke-dashoffset="8.13"/>
+        <rect x="170" y="170" width="52" height="112" rx="26" fill="#F5F3EE"/>
+        <rect x="290" y="170" width="52" height="112" rx="26" fill="#F5F3EE"/>
+        <path d="M230 330Q256 352 282 330" fill="none" stroke="#E9C46A" stroke-width="28" stroke-linecap="round"/>
       </svg>
-      <span>LoomWatch</span>
+      <svg class="name" viewBox="-5.5 14.5 500 91" role="img" aria-label="LoomWatch">
+        <g fill="none" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+          <path stroke="#F5F3EE" d="M0 20V100M13 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M74 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M138 50V100M138 67a16 16 0 0 1 32 0V100M170 67a16 16 0 0 1 32 0V100M215 50L231 100L247 56L263 100L279 50M291 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M341 50V100M361 28V86q0 14 14 14M430.73 56.42A25 25 0 1 0 430.73 93.58M449 20V100M449 70a20 20 0 0 1 40 0V100"/>
+          <path stroke="#E9C46A" d="M351 50H375"/>
+        </g>
+      </svg>
     </div>
     <h1>Put AI agents to work as one team. <em>See every step. Step in any time.</em></h1>
     <p class="lede">Turn <b>Claude Code</b>, <b>Codex</b> and <b>OpenCode</b> into one team on your

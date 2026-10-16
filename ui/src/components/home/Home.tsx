@@ -8,7 +8,7 @@ import { teamDisplayName, type DeletedTeam, type TeamSummary } from '../../lib/t
 import { openTeam, teamViewFor, useTeamList } from '../../lib/team-file/useTeamList'
 import { useTheme } from '../../lib/theme'
 import { offerTourIfFirstRun, startTour } from '../../lib/tour/store'
-import { ChipDot, LoomMark } from '../ui/glyphs'
+import { ChipDot, LoomMark, LoomWordmark } from '../ui/glyphs'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
 import { chatPreview, listTime } from '../../lib/chat/preview'
 import { isUnread } from '../../lib/chat/seen'
@@ -163,7 +163,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
     <div className="lw-home" data-tour="home">
       <div className="ground" aria-hidden="true" />
       <header className="home-top">
-        <span className="home-brand"><LoomMark width={46} height={20} /><span>LoomWatch</span></span>
+        <span className="home-brand"><LoomMark size={28} /><LoomWordmark height={19} /></span>
         <span className="home-top-acts">
           {topActions}
           <UpdateBadge />

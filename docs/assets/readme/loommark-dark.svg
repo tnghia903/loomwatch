@@ -1,12 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="102" height="44" viewBox="0 0 102 44" fill="none" stroke="#E9C46A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="LoomWatch">
+<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 512 512" role="img" aria-label="LoomWatch">
 <style>
-  .warp, .weft { stroke-dasharray: 100 100; animation-duration: 7s; animation-iteration-count: infinite; animation-timing-function: ease-in-out; }
-  .warp { animation-name: warp; }
-  .weft { opacity: .34; animation-name: weft; }
-  @keyframes warp { 0%, 58% { stroke-dashoffset: 0; opacity: 1; } 66% { stroke-dashoffset: 0; opacity: 0; } 67% { stroke-dashoffset: 100; opacity: 1; } 92%, 100% { stroke-dashoffset: 0; opacity: 1; } }
-  @keyframes weft { 0%, 58% { stroke-dashoffset: 0; opacity: .34; } 66% { stroke-dashoffset: 0; opacity: 0; } 72% { stroke-dashoffset: -100; opacity: .34; } 97%, 100% { stroke-dashoffset: 0; opacity: .34; } }
-  @media (prefers-reduced-motion: reduce) { .warp, .weft { animation: none; } }
+  .eyes { transform-box: fill-box; transform-origin: center; animation: blink 7s ease-in-out infinite; }
+  @keyframes blink { 0%, 90%, 100% { transform: scaleY(1); } 93% { transform: scaleY(.1); } }
+  @media (prefers-reduced-motion: reduce) { .eyes { animation: none; } }
 </style>
-<path class="weft" pathLength="100" d="M6 10 24 34 42 10 60 34 78 10 96 34"/>
-<path class="warp" pathLength="100" d="M6 34 24 10 42 34 60 10 78 34 96 10"/>
+<rect width="512" height="512" rx="112" fill="#08080A"/>
+<path d="M256 44H382A86 86 0 0 1 468 130V382A86 86 0 0 1 382 468H130A86 86 0 0 1 44 382V130A86 86 0 0 1 130 44Z" fill="none" stroke="#D8A93C" stroke-width="10" stroke-linecap="round" stroke-dasharray="16.26 22.45" stroke-dashoffset="8.13"/>
+<g class="eyes"><rect x="170" y="170" width="52" height="112" rx="26" fill="#F5F3EE"/><rect x="290" y="170" width="52" height="112" rx="26" fill="#F5F3EE"/></g>
+<path d="M230 330Q256 352 282 330" fill="none" stroke="#E9C46A" stroke-width="28" stroke-linecap="round"/>
 </svg>

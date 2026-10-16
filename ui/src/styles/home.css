@@ -18,7 +18,7 @@
   position: relative; display: flex; align-items: center; justify-content: space-between;
   padding: var(--sp-5) var(--sp-7);
 }
-.home-brand { display: inline-flex; align-items: center; gap: var(--sp-3); font: 600 17px/1 var(--font-sans); letter-spacing: -.01em; }
+.home-brand { display: inline-flex; align-items: center; gap: 10px; }
 .home-brand .fr-mark { animation: none; }
 .home-top-acts { display: inline-flex; gap: var(--sp-2); }
 

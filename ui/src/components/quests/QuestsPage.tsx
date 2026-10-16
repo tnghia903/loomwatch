@@ -5,7 +5,7 @@ import { AREA_NAMES, AREAS, isAccessory, QUESTS, type Quest } from '../../lib/qu
 import { partsDone, useWardrobe, type EarnedItem, type Wardrobe } from '../../lib/quests/wardrobe'
 import { useTheme } from '../../lib/theme'
 import { AccessoryIcon } from '../agents/AccessoryArt'
-import { LoomMark } from '../ui/glyphs'
+import { LoomMark, LoomWordmark } from '../ui/glyphs'
 
 function earnedDate(entry: EarnedItem): string {
   const at = new Date(entry.at)
@@ -29,7 +29,7 @@ export function QuestsPage({ wardrobe: given }: { wardrobe?: Wardrobe } = {}) {
     <div className="lw-home lw-quests">
       <div className="ground" aria-hidden="true" />
       <header className="home-top">
-        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark width={46} height={20} /><span>LoomWatch</span></a>
+        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} /><LoomWordmark height={19} /></a>
         <span className="home-top-acts">
           <a className="btn" href="/agents">Your agents</a>
           <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>

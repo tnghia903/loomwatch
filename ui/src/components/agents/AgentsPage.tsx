@@ -10,7 +10,7 @@ import { ROLE_PRESETS } from '../../lib/library/roles'
 import { useAgentUses } from '../../lib/library/uses'
 import { useTheme } from '../../lib/theme'
 import { QuestsLink } from '../quests/QuestsLink'
-import { LoomMark } from '../ui/glyphs'
+import { LoomMark, LoomWordmark } from '../ui/glyphs'
 import { AgentBadge } from './AgentBadge'
 import { AgentBuilder } from './AgentBuilder'
 import { navigate, useAgentsRoute } from './route'
@@ -35,7 +35,7 @@ export function AgentsPage(props: AgentsPageProps) {
     <div className="lw-home lw-agents" data-tour="agents">
       <div className="ground" aria-hidden="true" />
       <header className="home-top">
-        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark width={46} height={20} /><span>LoomWatch</span></a>
+        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} /><LoomWordmark height={19} /></a>
         <span className="home-top-acts">
           <QuestsLink />
           <a className="btn" href="/" data-tour="your-teams">Your teams</a>

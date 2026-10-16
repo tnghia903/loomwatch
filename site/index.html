@@ -11,14 +11,14 @@
   <meta property="og:description" content="Turn the AI apps you already use, like Claude Code, Codex and OpenCode, into one team on your Mac. See every step, and step in any time. Free and open source.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://loomwatch.github.io/">
-  <meta property="og:image" content="https://loomwatch.github.io/social-card.jpg?v=5">
+  <meta property="og:image" content="https://loomwatch.github.io/social-card.jpg?v=6">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="LoomWatch: put AI agents to work as one team. Six friendly figures, a yarn ball, a spool, a button, a thimble, a pincushion and a thread cone, joined by one gold thread.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="LoomWatch — Put AI agents to work as one team">
   <meta name="twitter:description" content="Turn the AI apps you already use, like Claude Code, Codex and OpenCode, into one team on your Mac. See every step, and step in any time. Free and open source.">
-  <meta name="twitter:image" content="https://loomwatch.github.io/social-card.jpg?v=5">
+  <meta name="twitter:image" content="https://loomwatch.github.io/social-card.jpg?v=6">
   <meta name="twitter:image:alt" content="LoomWatch: put AI agents to work as one team. Six friendly figures, a yarn ball, a spool, a button, a thimble, a pincushion and a thread cone, joined by one gold thread.">
   <link rel="canonical" href="https://loomwatch.github.io/">
   <link rel="icon" href="favicon.ico" sizes="32x32">
@@ -39,12 +39,14 @@
 <a class="skip" href="#main">Skip to content</a>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="mark" viewBox="0 0 102 44"><g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10 24 34 42 10 60 34 78 10 96 34" opacity=".36"/><path d="M6 34 24 10 42 34 60 10 78 34 96 10"/></g></symbol>
+  <!-- docs/assets/brand/mark-small.svg and the wordmark; ui/src/site/brand.test.ts keeps them the same. -->
+  <symbol id="mark" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#08080A"/><path d="M256 40H384A88 88 0 0 1 472 128V384A88 88 0 0 1 384 472H128A88 88 0 0 1 40 384V128A88 88 0 0 1 128 40Z" fill="none" stroke="#D8A93C" stroke-width="26" stroke-linecap="round" stroke-dasharray="49.28 49.28" stroke-dashoffset="24.64"/><rect x="152" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/><rect x="290" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/><path d="M222 354Q256 382 290 354" fill="none" stroke="#E9C46A" stroke-width="40" stroke-linecap="round"/></symbol>
+  <symbol id="wordmark" viewBox="-6 14 501 92"><g fill="none" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"><path stroke="currentColor" d="M0 20V100M13 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M74 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M138 50V100M138 67a16 16 0 0 1 32 0V100M170 67a16 16 0 0 1 32 0V100M215 50L231 100L247 56L263 100L279 50M291 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M341 50V100M361 28V86q0 14 14 14M430.73 56.42A25 25 0 1 0 430.73 93.58M449 20V100M449 70a20 20 0 0 1 40 0V100"/><path style="stroke: var(--accent)" d="M351 50H375"/></g></symbol>
 </svg>
 
 <header class="top">
   <div class="top-row">
-    <a class="brand" href="#top" aria-label="LoomWatch, back to top"><svg aria-hidden="true"><use href="#mark"/></svg>LoomWatch</a>
+    <a class="brand" href="#top" aria-label="LoomWatch, back to top"><svg class="brand-mark" aria-hidden="true"><use href="#mark"/></svg><svg class="brand-name" aria-hidden="true"><use href="#wordmark"/></svg></a>
     <nav class="top-nav" aria-label="Sections">
       <a href="#act-agents">Agents</a>
       <a href="#act-workflow">Workflow</a>
@@ -417,7 +419,7 @@ Keep this window open while you use LoomWatch. Press Ctrl-C to stop it.</span></
 
 <footer class="foot">
   <div class="wrap foot-row">
-    <a class="brand" href="#top"><svg aria-hidden="true"><use href="#mark"/></svg>LoomWatch</a>
+    <a class="brand" href="#top" aria-label="LoomWatch, back to top"><svg class="brand-mark" aria-hidden="true"><use href="#mark"/></svg><svg class="brand-name" aria-hidden="true"><use href="#wordmark"/></svg></a>
     <nav aria-label="Project">
       <a href="https://github.com/tnghia903/loomwatch">GitHub</a>
       <a href="https://github.com/tnghia903/loomwatch#run-your-own-agents">Run your own agents</a>
