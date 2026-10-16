@@ -191,6 +191,10 @@ em { font-style: italic; }
 .cord-tag { position: absolute; left: 0; top: 0; margin: 0; white-space: nowrap; translate: calc(-100% - 8px) -50%; padding: 6px 12px; border-radius: 999px; background: var(--slip); color: var(--slip-ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), var(--shadow); font-size: 13px; opacity: 0; transition: opacity .2s var(--ease); }
 .cord-tag b { font-weight: 600; }
 .cord.near .cord-tag { opacity: 1; }
+/* Safari's switch, unseen over the figure: Safari buzzes the trackpad or the phone as its thumb is
+   pulled across (main.js sizes and places it). Vertical, so its track runs down the pull. */
+.buzz-switch { position: absolute; left: 0; top: 0; z-index: 2; margin: 0; opacity: 0; writing-mode: vertical-lr; pointer-events: auto; touch-action: none; cursor: grab; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.buzz-switch.held { cursor: grabbing; }
 /* The new theme spreads out from the bulb (main.js animates the clip); nothing crossfades. */
 ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 
@@ -299,8 +303,15 @@ em { font-style: italic; }
 .mem em { font: 400 12px/1 var(--sans); font-style: normal; color: var(--ink-3); }
 .mem.working em { color: var(--live); }
 .mem.waiting em { color: var(--accent); }
-.tc-av.working { border-color: var(--live); animation: ring 2.4s ease-in-out infinite; }
-@keyframes ring { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 28%, transparent); } }
+/* What an agent is doing glows round its figure's outline, as in the app, with no dot or ring: green
+   ready, gold waiting for you, blue at work (breathing). On a piece's line only the figures doing
+   something glow. */
+.mem { --glow: var(--ok); }
+.mem.waiting, .weft .tc-av.waiting { --glow: var(--accent); }
+.mem.working, .weft .tc-av.working { --glow: var(--live); }
+.mem .tc-av::before, .weft .tc-av:is(.waiting, .working)::before { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2px var(--glow)); }
+.mem.working .tc-av::before, .weft .tc-av.working::before { animation: glow 2.4s ease-in-out infinite; }
+@keyframes glow { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5px var(--glow)); } }
 .clog { display: grid; align-content: start; gap: 10px; max-height: 300px; overflow-y: auto; overscroll-behavior: contain; padding: 2px; }
 .tc-empty { text-align: center; padding: 6px 8px 2px; }
 .tc-empty h3 { margin: 0; font: 600 20px/1.25 var(--sans); letter-spacing: -.01em; }
@@ -921,10 +932,12 @@ em { font-style: italic; }
 .btn.nudge { animation: nudge 1s var(--ease) infinite; }
 @keyframes nudge { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent); } }
 
-/* In the team's chat, Researcher and Writer wear their figures, as agents do in the app. */
-.tc-av.m-researcher, .tc-av.m-writer { color: transparent; background-repeat: no-repeat; background-size: 170%; background-position: 50% 20%; }
-.tc-av.m-researcher { background-image: url(assets/figures/pincushion-rose.webp); }
-.tc-av.m-writer { background-image: url(assets/figures/spool-sky.webp); }
+/* In the team's chat, Researcher and Writer are their figures alone, as agents are in the app: the
+   whole figure, a little larger than the face it stands for, with no disc behind it. */
+.tc-av.m-researcher, .tc-av.m-writer { position: relative; border-color: transparent; background: none; color: transparent; }
+.tc-av.m-researcher::before, .tc-av.m-writer::before { content: ''; position: absolute; inset: -20%; background: no-repeat 50% 50% / contain; pointer-events: none; }
+.tc-av.m-researcher::before { background-image: url(assets/figures/pincushion-rose.webp); }
+.tc-av.m-writer::before { background-image: url(assets/figures/spool-sky.webp); }
 .face { display: inline-block; width: 22px; height: 22px; margin: -5px 6px -5px 0; vertical-align: middle; border-radius: 50%; background: color-mix(in srgb, var(--m) 18%, var(--panel-solid)) no-repeat 50% 20% / 170%; flex: none; }
 .face.m-researcher { background-image: url(assets/figures/pincushion-rose.webp); }
 .face.m-writer { background-image: url(assets/figures/spool-sky.webp); }

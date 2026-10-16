@@ -351,6 +351,21 @@
   const PULL = 34 // how far the cord comes out of the switch
   const CLICK = 22 // and how far it comes out when the switch clicks
   const GRAVITY = 2200
+  // A page can't buzz a Mac's trackpad or an iPhone, but Safari does it for its own switch control
+  // as the switch's thumb is dragged across. So where Safari has one, an unseen switch lies over the
+  // figure, and the figure is pulled by it. WebKit moves the thumb once the pointer has gone 40% of
+  // the track from where it was pressed (anywhere, in a square switch), so this one is square, laid
+  // along the pull, and long enough that the thumb crosses as the cord clicks. Phones that can
+  // vibrate do instead (flip, below).
+  const BUZZ = CLICK / 0.4
+  const buzzSwitch = 'switch' in HTMLInputElement.prototype ? el('input', { class: 'buzz-switch', type: 'checkbox', switch: true, tabindex: '-1', style: `width: ${BUZZ}px; height: ${BUZZ}px` }) : null
+  if (buzzSwitch) cord.append(buzzSwitch)
+  const handles = [cordFigure, buzzSwitch].filter(Boolean)
+  let buzzAt = { x: 0, y: 0 } // where the switch lies, in the cord's box
+  // A trackpad's tick is faint, so a mouse's pull ticks three times, a couple of frames apart.
+  const TICKS = 3
+  const TICK_GAP = 30 // ms
+  const placeSwitch = (x, y) => { buzzAt = { x, y }; buzzSwitch.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)` }
   const restLength = () => (window.innerWidth <= 640 ? 30 : 44)
   const hiddenAt = () => -(rest + BOX + 12)
   let rest = restLength()
@@ -498,6 +513,15 @@
     cordPath.setAttribute('d', `${d}L${end.x.toFixed(2)} ${end.y.toFixed(2)}`)
     if (figureScene && shown()) tie = figureScene.draw(dt, { swing: tiltSpeed, pull: out / PULL, pointer: pointerOnFigure(), near: near || Boolean(held) })
     cordFigure.style.transform = `translate(${end.x.toFixed(2)}px, ${end.y.toFixed(2)}px) rotate(${tilt.toFixed(4)}rad) translate(${(-tie.x).toFixed(2)}px, ${(-tie.y).toFixed(2)}px)`
+    // The switch lies over the middle of the figure, and stays where it was taken hold of, so the
+    // pull drags its thumb.
+    if (buzzSwitch && !held) {
+      const mx = BOX / 2 - tie.x
+      const my = BOX / 2 - tie.y
+      const c = Math.cos(tilt)
+      const s = Math.sin(tilt)
+      placeSwitch(end.x + mx * c - my * s - BUZZ / 2, end.y + mx * s + my * c - BUZZ / 2)
+    }
     cordTag.style.transform = `translate(${(end.x - BOX * 0.3).toFixed(1)}px, ${(end.y + BOX * 0.4).toFixed(1)}px)`
     cord.classList.toggle('near', near && !held && out < 2 && shown())
   }
@@ -528,16 +552,33 @@
     window.requestAnimationFrame(cordFrame)
   }
 
-  cordFigure.addEventListener('pointerdown', (event) => {
+  function takeHold(event) {
     if (event.button !== 0 || held) return
-    event.preventDefault()
-    cordFigure.setPointerCapture(event.pointerId)
+    // The switch has to see the press to follow the pull; the figure's is kept from dragging or
+    // selecting its picture.
+    if (event.currentTarget === cordFigure) event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
     const at = cordPoint(event)
     held = { id: event.pointerId, touch: event.pointerType !== 'mouse', dx: at.x - end.x, dy: at.y - end.y, x: end.x, y: end.y, from: at, moved: 0, vx: 0, vy: 0, t: event.timeStamp }
-    cordFigure.classList.add('held')
+    if (event.currentTarget === buzzSwitch && event.pointerType === 'mouse') held.tick = { from: at.y - buzzAt.y, count: 0, at: 0 }
+    handles.forEach((h) => h.classList.add('held'))
     wakeCord()
-  })
-  cordFigure.addEventListener('pointermove', (event) => {
+  }
+  // Safari ticks once its switch's thumb is pulled CLICK below where it was pressed. A pixel and a
+  // half further it surely has, and from the next move on the switch goes with the pointer, on one
+  // side of its middle or, for each tick more, the other: the thumb crosses back and forth, and
+  // then nothing more ticks, however the pull goes on.
+  function tickMore(tick, y, time) {
+    const local = y - buzzAt.y
+    if (!tick.count) {
+      if (local >= tick.from + CLICK + 1.5) { tick.count = 1; tick.at = time }
+      return
+    }
+    if (tick.count < TICKS && time - tick.at >= TICK_GAP) { tick.count += 1; tick.at = time }
+    placeSwitch(buzzAt.x, y - BUZZ / 2 + (tick.count % 2 ? -10 : 10))
+    buzzSwitch.getBoundingClientRect() // so Safari measures the move against where it is now
+  }
+  function pullCord(event) {
     if (!held || event.pointerId !== held.id) return
     const at = cordPoint(event)
     const x = at.x - held.dx
@@ -549,15 +590,21 @@
     held.y = y
     held.t = event.timeStamp
     held.moved = Math.max(held.moved, Math.hypot(at.x - held.from.x, at.y - held.from.y))
+    if (held.tick) tickMore(held.tick, at.y, event.timeStamp)
     // The switch clicks as the cord comes out past the click, here rather than in a frame, so a
     // quick pull counts however few frames the page draws while it happens.
     if (!clicked && Math.hypot(x, y - hang) - rest >= CLICK) { clicked = true; flip(held.touch) }
-  })
+  }
   function letGo(event) {
     if (!held || event.pointerId !== held.id) return
     const { moved, vx, vy } = held
     held = null
-    cordFigure.classList.remove('held')
+    handles.forEach((h) => h.classList.remove('held'))
+    // Safari's switch is made anew after every pull, once its click (if any) is done. Let go off it,
+    // or while the new theme spreads, and a mouse's click never reaches it, so it would carry this
+    // pull into the next (and tick early, or on a hover); and on a phone it times every hold from
+    // the first touch it ever had. Changing its type renews it, without a tick.
+    if (buzzSwitch) window.setTimeout(() => { buzzSwitch.type = 'text'; buzzSwitch.type = 'checkbox'; buzzSwitch.checked = false }, 50)
     if (moved < 4 && event.type === 'pointerup') {
       // A tap is a short pull, and it switches as the button does.
       flip(event.pointerType !== 'mouse')
@@ -571,10 +618,16 @@
     end.py = end.y - vy * k * STEP
     figureScene?.spin(clamp(vx / 160, -9, 9) + (Math.random() - 0.5) * 3)
   }
-  cordFigure.addEventListener('pointerup', letGo)
-  cordFigure.addEventListener('pointercancel', letGo)
-  cordFigure.addEventListener('pointerenter', () => { near = true; wakeCord() })
-  cordFigure.addEventListener('pointerleave', () => { near = false })
+  for (const handle of handles) {
+    handle.addEventListener('pointerdown', takeHold)
+    handle.addEventListener('pointermove', pullCord)
+    handle.addEventListener('pointerup', letGo)
+    handle.addEventListener('pointercancel', letGo)
+    handle.addEventListener('pointerenter', () => { near = true; wakeCord() })
+    handle.addEventListener('pointerleave', () => { near = false })
+  }
+  // The switch's own click is undone, so it is off for the next pull.
+  buzzSwitch?.addEventListener('click', (event) => event.preventDefault())
   // Point at the bulb (or tab to it) while the cord is reeled up and it comes down to be pulled.
   const showCord = (on) => {
     window.clearTimeout(revealTimer)
@@ -1599,7 +1652,8 @@
   })
 
   const INITIALS = { researcher: 'Re', writer: 'Wr', you: 'You' }
-  const avatar = (who, working = false) => el('span', { class: `tc-av m-${who}${working ? ' working' : ''}`, text: INITIALS[who] })
+  // An agent is its figure, which glows what it is doing (styles.css); you are initials on a disc.
+  const avatar = (who, doing = '') => el('span', { class: `tc-av m-${who}${doing ? ` ${doing}` : ''}`, text: INITIALS[who] })
   const mention = (who) => el('span', { class: `tc-at m-${who}`, text: `@${who === 'you' ? 'You' : LANE[who]}` })
   const dots = () => el('span', { class: 'tc-dots', 'aria-hidden': 'true' }, el('i'), el('i'), el('i'))
   // Your message as the chat shows it, its @ picked out.
@@ -1619,8 +1673,10 @@
   }
   const workersOf = (r) => (r && r.only ? [r.only] : ['researcher', 'writer'])
   const worked = (r) => `${listText(workersOf(r).map((w) => LANE[w]))} worked on this · ${clockText(r.clock)}`
-  // The team on a piece of work as a thread: each agent a knot, blue while it works.
-  const weft = (r) => el('span', { class: 'weft', 'aria-hidden': 'true' }, workersOf(r).map((w) => avatar(w, Boolean(r && r === run && r.scrub === null && r.stages[w] === 'running'))))
+  // The team on a piece of work as a thread: each agent a knot, glowing blue while it works and gold
+  // while it waits for you.
+  const DOING = { running: 'working', waiting: 'waiting' }
+  const weft = (r) => el('span', { class: 'weft', 'aria-hidden': 'true' }, workersOf(r).map((w) => avatar(w, r && r === run && r.scrub === null ? DOING[r.stages[w]] : '')))
 
   function memberState(who) {
     if (!run || (run.only && who !== run.only)) return 'ready'
@@ -1634,7 +1690,7 @@
       list.replaceChildren(...['researcher', 'writer'].map((who) => {
         const value = memberState(who)
         return el('li', { class: `mem ${value}`, title: `${LANE[who]} on ${app(team[who]).name} · ${MEMBER_WORD[value]}` },
-          avatar(who, value === 'working'), el('span', { text: LANE[who] }), el('em', { text: MEMBER_WORD[value] }))
+          avatar(who), el('span', { text: LANE[who] }), el('em', { text: MEMBER_WORD[value] }))
       }))
     }
   }
