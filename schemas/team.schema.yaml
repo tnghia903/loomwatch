@@ -90,7 +90,7 @@ properties:
   memory:
     description: >-
       What the team knows before a run starts. The Brief is Markdown beside this file, so it is
-      diffable and reviewable like the rest of the design; Postgres holds only what agents write.
+      diffable and reviewable like the rest of the design; the run archive holds only what agents write.
       Omitting this block, or setting `enabled: false`, leaves every prompt byte-for-byte what it
       was before memory existed. See docs/TEAM_MEMORY.md and ADR 0014.
     $ref: "#/$defs/Memory"

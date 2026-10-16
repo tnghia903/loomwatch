@@ -207,8 +207,8 @@ metadata and questions travel over REST, so the live WebSocket messages do not c
    by the agent's lineage — configured ancestors for a pipeline node, the server-owned
    `delegation_path` on its bus token for a delegated helper. Inherited kept notes rank after the
    run's own. Unrelated branches are reachable by search, never injected by accident of run order.
-5. Ranking within a kind is by explicit citation from the handover, then recency. Postgres
-   full-text search serves `memory_search`. No embeddings until a retrieval evaluation shows
+5. Ranking within a kind is by explicit citation from the handover, then recency. SQLite
+   full-text search (FTS5) serves `memory_search`. No embeddings until a retrieval evaluation shows
    misses that text search cannot fix.
 
 ## 9. Trust boundary
@@ -232,7 +232,7 @@ metadata and questions travel over REST, so the live WebSocket messages do not c
   kept-alive sessions have a short bound everywhere else.
 - **No re-execution.** Follow-ups replay stored handovers and packets; only stages after `startAt`
   run. Retry stays the explicit "from zero" action.
-- **Local text search.** Postgres full-text search over a few thousand notes answers in
+- **Local text search.** SQLite full-text search over a few thousand notes answers in
   milliseconds and needs no embedding service.
 - **One event stream.** Memory and question updates ride the existing WebSocket as invalidation
   hints and are read back over REST.

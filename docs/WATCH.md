@@ -3,13 +3,12 @@
 Watching lives in the workspace itself. A run started from the composer (`POST /api/runs`)
 or by `loomwatchd run` is projected onto the canvas as one causal story — **Prompt · user
 request → Run NN → Agent A · lead → its evidence → Agent B · responder → Output / response**
-— from the exact events in the PostgreSQL archive. The viewer never starts processes;
+— from the exact events in the run archive. The viewer never starts processes;
 `POST /api/runs` does (see *Run control* below).
 
 ## Start
 
-Build the UI, set `DATABASE_URL` to the same PostgreSQL database used by `loomwatchd run`,
-and start the daemon:
+Build the UI and start the daemon:
 
 ```sh
 cd ui
@@ -19,10 +18,11 @@ cd ..
 cargo run -- serve --listen 127.0.0.1:3000 --teams-root teams
 ```
 
-`serve` accepts `--database-url` or `DATABASE_URL`. Without either, the team editor works
-and the composer explains that the archive is disabled. With an archive configured,
-`serve` rejects non-loopback listeners. Exact archive evidence may contain harness inputs,
-paths, and other private data; this implementation does not publish it on the LAN.
+The archive is one SQLite file: `loomwatch.db` in the state folder (`LOOMWATCH_STATE_DIR`), or
+the file `--database` or `LOOMWATCH_DATABASE` names. `loomwatchd run` and `show` take the same
+option, so they read and write the same history. `serve` rejects non-loopback listeners (unless
+`--allow-container-listener`). Exact archive evidence may contain harness inputs, paths, and other
+private data; this implementation does not publish it on the LAN.
 
 ## Reading a run
 
@@ -124,8 +124,9 @@ These are legacy **session** endpoints, separate from the proposed immutable **r
 | `GET /api/session/stream?session=ID&afterSeq=-1` | WebSocket, one unwrapped `RunEvent` per text frame |
 
 A session with no matching events returns an empty page; its stream can wait for future
-archive entries. The server polls PostgreSQL every 500 ms after catching up. Database
-failure closes the stream; the client retries with bounded backoff and archive recovery.
+archive entries. The server reads the archive every 500 ms after catching up; each read first
+flushes the batching writer, so it sees every event appended before it. Database failure closes
+the stream; the client retries with bounded backoff and archive recovery.
 All evidence routes validate loopback Host and same-origin Origin/Fetch Metadata headers,
 return no CORS grants, and disable HTTP caching. The service worker never caches API data.
 
@@ -139,8 +140,8 @@ assembly remain separate work described in `RUN_PROVENANCE_CONTRACT.md`.
 
 `POST /api/runs` starts a team from the browser; the run is then watched through the
 evidence transport above. These routes sit behind the same loopback-only boundary as the
-evidence routes (loopback `Host`, same-origin `Origin`/Fetch Metadata, `no-store`), and they
-require the archive: without `DATABASE_URL` they answer 503.
+evidence routes (loopback `Host`, same-origin `Origin`/Fetch Metadata, `no-store`). The daemon
+always has its archive; a router built without one (tests) answers 503.
 
 | Route | Result |
 |---|---|

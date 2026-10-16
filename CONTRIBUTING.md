@@ -14,8 +14,8 @@ change and why.
 
 ## Building from source
 
-You need Docker (for PostgreSQL), Node.js 22.12 or newer and Rust (the exact toolchain installs
-itself from `rust-toolchain.toml`). Then:
+You need Node.js 22.12 or newer and Rust (the exact toolchain installs itself from
+`rust-toolchain.toml`). The database is SQLite, built into the program, so nothing else. Then:
 
 ```sh
 git clone https://github.com/tnghia903/loomwatch.git
@@ -24,7 +24,7 @@ cd loomwatch
 ```
 
 `./loomwatch` builds the browser app and the program the first time and after every change to
-them, starts the database and opens the app. See [the README](README.md#build-from-source) for the
+them, starts it and opens the app. See [the README](README.md#build-from-source) for the
 details and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit.
 
 ## Before you open a pull request
@@ -37,8 +37,12 @@ yourself first, which is quicker than waiting for CI ([docs/CI.md](docs/CI.md)):
 cd ui && pnpm install --frozen-lockfile && pnpm run lint --deny-warnings && pnpm run build && pnpm test && cd ..
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-DATABASE_URL=postgres://… cargo test --workspace --locked
+cargo test --workspace --locked
 ```
+
+Every database test makes a SQLite file of its own. The tests of `loomwatchd import-postgres` also
+need a PostgreSQL they may create a database on; they are skipped unless you name one:
+`LOOMWATCH_TEST_POSTGRES_URL=postgres://… cargo test --locked -p loomwatch-backend --lib import:: -- --include-ignored`.
 
 - Add a test that fails without your change.
 - Keep user-facing text plain: short sentences, the words a person who has never used LoomWatch

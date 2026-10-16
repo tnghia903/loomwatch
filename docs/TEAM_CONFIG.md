@@ -6,7 +6,7 @@ version `1`; readers must reject a version they do not understand instead of gue
 
 The root document stores stable, user-authored configuration only: the team identity,
 entrypoint, optional responder, guard policy, agents, and configured pipeline edges. Observed edges,
-agent status, and run events are runtime records archived in Postgres. Their shared wire
+agent status, and run events are runtime records kept in the run archive (SQLite). Their shared wire
 shapes are defined as `$defs.Edge` and `$defs.RunEvent` in the same schema so Phase 02 and
 later can reference one contract.
 
@@ -326,7 +326,7 @@ cannot be summarised; the cost of raising them is paid by every stage downstream
 ## Memory
 
 `memory` is what the team knows before a run starts. The Brief is Markdown beside this file, so it
-is diffable and reviewable like the rest of the design; Postgres holds only what agents write.
+is diffable and reviewable like the rest of the design; the run archive holds only what agents write.
 
 ```yaml
 memory:

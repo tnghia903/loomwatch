@@ -9,8 +9,9 @@ and **Release** builds the ready-to-run program for a version tag.
 
 | Workflow | Runs on | What it proves | Typical time |
 | --- | --- | --- | --- |
-| `ci.yml` — **Frontend**, then **Rust** | every pull request, push to `main`, by hand | UI lint (warnings fail), typecheck, build and tests; then `cargo fmt`, Clippy (`-D warnings`) and the full test suite against PostgreSQL 17.6, building on the exact `ui/dist` the Frontend job produced | 2 + 5–8 min |
-| `ci.yml` — **Launcher** | the same, beside Frontend | ShellCheck on the launcher and installer, and `scripts/test-update.sh`: `update`, `rollback` and `version` on an installed copy, with stand-ins for Docker, GitHub and the program | < 1 min |
+| `ci.yml` — **Frontend**, then **Rust** | every pull request, push to `main`, by hand | UI lint (warnings fail), typecheck, build and tests; then `cargo fmt`, Clippy (`-D warnings`) and the full test suite, each database test on a SQLite file of its own, building on the exact `ui/dist` the Frontend job produced | 2 + 5–8 min |
+| `ci.yml` — **PostgreSQL import** | the same, after Frontend | `loomwatchd import-postgres` copies every table of the old PostgreSQL archive whole, against PostgreSQL 17.6 | 5–8 min |
+| `ci.yml` — **Launcher** | the same, beside Frontend | ShellCheck on the launcher and installer, and `scripts/test-update.sh`: `update`, `rollback`, `version` and `import` on an installed copy, with stand-ins for Docker, GitHub and the program | < 1 min |
 | `ci.yml` — **Dependency review** | every pull request | the change adds no dependency with a known vulnerability of moderate severity or worse (`Cargo.lock`, `ui/pnpm-lock.yaml`) | < 1 min |
 | `ci.yml` — **CI result** | after the jobs above | every job above passed. This is the check the branch rule requires | seconds |
 | `container.yml` — **Build image** | a pull request or push to `main` that changes the Dockerfile or a lockfile/toolchain/manifest it builds from, monthly, by hand | `docker build` still succeeds; the image is never pushed | ~10–15 min (estimate) |
@@ -22,7 +23,8 @@ and **Release** builds the ready-to-run program for a version tag.
 pull request / push to main
         │
         ▼
-   Frontend ──ui/dist──▶ Rust (fmt → clippy → test, Postgres service) ─┐
+   Frontend ─┬─ui/dist──▶ Rust (fmt → clippy → test) ──────────────────┐
+             └─ui/dist──▶ PostgreSQL import (Postgres service) ─────────┤
    Launcher (shellcheck → update/rollback test) ───────────────────────┼──▶ CI result
    Dependency review (pull requests only) ─────────────────────────────┘
 ```
@@ -58,19 +60,24 @@ pull request / push to main
 cd ui && pnpm install --frozen-lockfile && pnpm run lint --deny-warnings && pnpm run build && pnpm test && cd ..
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-DATABASE_URL=postgres://… cargo test --workspace --locked
+cargo test --workspace --locked
+LOOMWATCH_TEST_POSTGRES_URL=postgres://… cargo test --locked -p loomwatch-backend --lib import:: -- --include-ignored
 shellcheck loomwatch scripts/install.sh scripts/package-release.sh scripts/test-update.sh
 scripts/test-update.sh
 ```
 
+The import tests create and drop a database of their own on the PostgreSQL you name; without
+`LOOMWATCH_TEST_POSTGRES_URL` they are skipped. Nothing else needs a database server.
+
 `scripts/test-update.sh` touches nothing outside its scratch folder: Docker, GitHub and the program
 are stand-ins on its `PATH`. The stand-in program also plays the app's **Update and restart**: it
 names a release and exits with 75, and the checks follow the launcher through the update and the
-restart. It cannot prove the database commands against a real PostgreSQL; for a change to how
+restart. It cannot prove the real program's `backup` and the restored file; for a change to how
 `update` saves or `rollback` restores the run history, also try it on a release trial (step 3
-below): stop the trial, run its `loomwatch update`, add a row to `_sqlx_migrations` with a newer
-version, and run `loomwatch rollback`. For a change to Update and restart, serve two releases and a
-stand-in for GitHub's answer (`LOOMWATCH_UPDATE_URL`) and click it in the trial's page.
+below): stop the trial, run its `loomwatch update`, add a row to `_sqlx_migrations` in its
+`.loomwatch/loomwatch.db` with a newer version (`sqlite3`), and run `loomwatch rollback`. For a
+change to Update and restart, serve two releases and a stand-in for GitHub's answer
+(`LOOMWATCH_UPDATE_URL`) and click it in the trial's page.
 
 ## Making a release
 
@@ -83,28 +90,19 @@ have been tried.
 2. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`. The Release workflow
    checks the tag matches the version and drafts the release with `loomwatch-macos-universal.tar.gz`,
    `loomwatch-linux-x86_64.tar.gz`, `loomwatch-linux-arm64.tar.gz` and a `.sha256` for each.
-3. Try the draft with the real installer, in a folder and a database of its own:
+3. Try the draft with the real installer, in a folder of its own:
 
    ```sh
    gh release download v0.2.0 -D /tmp/lw-release
    python3 -m http.server -d /tmp/lw-release 8765 &
-   COMPOSE_PROJECT_NAME=loomwatch-try LOOMWATCH_DOWNLOAD_BASE=http://127.0.0.1:8765 \
+   LOOMWATCH_DOWNLOAD_BASE=http://127.0.0.1:8765 \
      LOOMWATCH_APP_DIR=/tmp/lw-try/app LOOMWATCH_TEAMS_ROOT=/tmp/lw-try/teams LOOMWATCH_PORT=3320 \
      bash scripts/install.sh
    ```
 
-   Stop it with Ctrl-C and the file server with `kill %1`, then remove the trial's database and files:
-
-   ```sh
-   (cd /tmp/lw-try/app && COMPOSE_PROJECT_NAME=loomwatch-try docker compose down -v)
-   rm -rf /tmp/lw-try /tmp/lw-release
-   ```
-
-   Keep `COMPOSE_PROJECT_NAME=loomwatch-try` on both commands. Docker Compose finds a database by
-   that project name, and an installed LoomWatch's is `loomwatch-app`. The trial runs the launcher
-   from the release being tried, and launchers up to 0.1.2 name every install `loomwatch-app`.
-   Without the variable, the trial would take over the installed app's database, and `down -v`
-   would delete its run history.
+   A copy installed anywhere but `~/LoomWatch/app` keeps its run history in its own folder
+   (`/tmp/lw-try/app/.loomwatch/loomwatch.db`), never the installed app's. Stop it with Ctrl-C and
+   the file server with `kill %1`, then remove the trial: `rm -rf /tmp/lw-try /tmp/lw-release`.
 4. Edit the notes, then publish: `gh release edit v0.2.0 --draft=false`. Write the notes for the
    people using LoomWatch: every copy on an older version shows them in its **Update available**
    dialog within a day (ADR 0052), as Markdown without images. Say when a release changes how the

@@ -29,8 +29,8 @@
   <sub>The bundled offline demo: ask the team in its chat, approve the handover with a note, read the answer.</sub>
 </p>
 
-**Install on a Mac** (macOS 11 or newer, with [Docker Desktop](https://docs.docker.com/desktop/)
-or [OrbStack](https://orbstack.dev/)), then follow [Try your first run](#try-your-first-run):
+**Install on a Mac** (macOS 11 or newer; nothing else to install first), then follow
+[Try your first run](#try-your-first-run):
 
 ```sh
 curl -fsSL https://loomwatch.github.io/install.sh | bash
@@ -420,16 +420,14 @@ already on your `PATH`.
 
 </details>
 
-LoomWatch itself runs on your computer and keeps only its database (PostgreSQL) in Docker. That way
-it can use the AI apps, skills, MCP tools, sign-ins and folders already set up for your user account.
+LoomWatch runs on your computer as one program, and keeps your run history in one file there. That
+way it can use the AI apps, skills, MCP tools, sign-ins and folders already set up for your user
+account.
 
 ### What you need
 
 - **A Mac** with macOS 11 or newer. Linux downloads exist for x86_64 and arm64 but are untested.
   Windows is not supported yet.
-- **[Docker Desktop](https://docs.docker.com/desktop/)** (or [OrbStack](https://orbstack.dev/)),
-  which runs the database that keeps your run history. With [Homebrew](https://brew.sh/):
-  `brew install --cask docker-desktop`, then open it once. If it is missing, LoomWatch says so.
 - **For real runs, one AI app** installed and signed in: Claude Code, Codex or OpenCode, for
   example. OpenCode has free models and needs no account. You don't need any for the demo, and the
   home screen's **Set up an AI app** gives each app's install and sign-in commands.
@@ -448,13 +446,16 @@ your apps, skills and tools through it.
 
 ### What the first start does
 
-1. Creates its settings file (`~/LoomWatch/app/.env`) with a random database password.
-2. Creates your teams folder, `~/LoomWatch/teams`, with an offline demo team in it, if the folder
+1. Creates your teams folder, `~/LoomWatch/teams`, with an offline demo team in it, if the folder
    does not exist yet.
-3. Opens Docker Desktop if it is not running.
-4. Starts the database, then LoomWatch, and opens **<http://127.0.0.1:3000>** in your browser. The
-   database keeps your run history, notes and checkpoints in a Docker volume, so they survive
-   restarts.
+2. Starts LoomWatch and opens **<http://127.0.0.1:3000>** in your browser.
+3. Keeps your run history, notes and checkpoints in one file,
+   `~/Library/Application Support/LoomWatch/loomwatch.db` (`~/.local/state/loomwatch` on Linux), so
+   they survive restarts and reinstalling.
+
+Coming from a version that kept the run history in Docker? The first start after the update copies
+it into the file and leaves the Docker database as it was. If Docker is not running then, the
+terminal says how to do it later: `~/LoomWatch/app/loomwatch import`.
 
 Keep the Terminal window open while you use LoomWatch. To stop LoomWatch, press
 <kbd>Ctrl</kbd>+<kbd>C</kbd> in it.
@@ -468,16 +469,14 @@ reads them only on your computer; nothing is uploaded.
 | To | Run |
 | --- | --- |
 | Start LoomWatch, or open it if it is already running | `~/LoomWatch/app/loomwatch` |
-| Stop LoomWatch | Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in its window |
-| Also stop the database, for example before quitting Docker Desktop | `~/LoomWatch/app/loomwatch stop` |
+| Stop LoomWatch | Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in its window, or run `~/LoomWatch/app/loomwatch stop` |
 | Update to the newest release | **Update and restart** in the app, or `~/LoomWatch/app/loomwatch update` |
 | Go back to the version the last update replaced | `~/LoomWatch/app/loomwatch rollback` |
 | See which version you have, and whether a newer one is out | `~/LoomWatch/app/loomwatch version` |
 | See every option | `~/LoomWatch/app/loomwatch help` |
 
 When the installer added the `loomwatch` shortcut, plain `loomwatch` works too. Your teams and
-history are kept in every case. The database starts again by itself whenever Docker Desktop does,
-until you run `loomwatch stop`.
+history are kept in every case.
 
 ### Updating
 
@@ -493,7 +492,8 @@ opens the same window at any time. Nothing is installed until you ask for it, in
   `~/LoomWatch/app/loomwatch update` there.
 
 Both first save a copy of your run history in `~/LoomWatch/backups` (the three newest copies are
-kept). Then they download the release, check it against the release's checksum, and start it. If
+kept; each is a database file you can open). Then they download the release, check it against the
+release's checksum, and start it. If
 any step fails, the version you had stays as it was, and the terminal says why; after **Update and
 restart**, it also starts again and the app says why.
 Run `update` while LoomWatch is running and it asks before stopping it. Already on the newest
@@ -506,8 +506,10 @@ those once in the terminal.
 The version an update replaced is kept. If the new one gives you trouble,
 `~/LoomWatch/app/loomwatch rollback` puts it back. When the newer version changed how the run
 history is stored, the older one cannot read it, so `rollback` also puts back the copy saved before
-the update. It asks first, and saves what you recorded since in another copy. To install one
-particular release, run `LOOMWATCH_VERSION=v0.1.4 ~/LoomWatch/app/loomwatch update`.
+the update. It asks first, and saves what you recorded since in another copy. Going back to a
+version that kept the run history in Docker finds that history there, as the update left it; what
+you ran since stays in the file. To install one particular release, run
+`LOOMWATCH_VERSION=v0.1.4 ~/LoomWatch/app/loomwatch update`.
 
 The daily check asks GitHub for the newest version number and sends nothing about you, your teams
 or your runs. Turn it off in the **Check for updates** window, or for good on this computer with
@@ -515,8 +517,7 @@ or your runs. Turn it off in the **Check for updates** window, or for good on th
 the copy of the run history.
 
 To stop one run, click **Stop** beside the request box. Closing the browser tab does not stop LoomWatch or
-its runs. Scheduled teams run only while LoomWatch and its database are running and the computer is
-awake. For scheduled runs and optional Notion delivery, see [Routines](docs/WATCH.md#routines) and
+its runs. Scheduled teams run only while LoomWatch is running and the computer is awake. For scheduled runs and optional Notion delivery, see [Routines](docs/WATCH.md#routines) and
 [Notion setup](docs/NOTION.md).
 
 ### Remove LoomWatch
@@ -525,25 +526,22 @@ awake. For scheduled runs and optional Notion delivery, see [Routines](docs/WATC
    **Disconnect** beside each one. For Claude Code, Codex and Gemini CLI this also removes LoomWatch
    from the app's own settings. For an app you pasted a snippet into, delete its `loomwatch` entry
    yourself.
-2. Stop LoomWatch and delete its database. This erases your run history, Notebook entries and Ask
-   conversations:
-
-   ```sh
-   ~/LoomWatch/app/loomwatch stop
-   cd ~/LoomWatch/app && docker compose down -v && cd ~
-   ```
-
+2. Stop LoomWatch: `~/LoomWatch/app/loomwatch stop`.
 3. Delete the program: `rm -rf ~/LoomWatch/app`, and `rm ~/.local/bin/loomwatch` if the installer
    made that shortcut.
 4. Your teams are kept in `~/LoomWatch/teams` until you delete `~/LoomWatch` too. It also holds Your
    agents, deleted teams, the agents' working folders, and in `backups` the copies of your run
    history that updates saved.
-5. LoomWatch remembers which teams you approved to run, and your update-check choices, in
-   `~/Library/Application Support/LoomWatch` (`~/.local/state/loomwatch` on Linux). Delete that
-   folder too to leave nothing behind.
+5. Your run history, Notebook entries and Ask conversations, which teams you approved to run, and
+   your update-check choices are in `~/Library/Application Support/LoomWatch`
+   (`~/.local/state/loomwatch` on Linux). Delete that folder too to leave nothing behind.
 
-For a copy built from source, run `./loomwatch stop` and `docker compose down -v` in its folder,
-then delete the folder.
+For a copy built from source, run `./loomwatch stop` in its folder, then delete the folder: its run
+history is inside it, in `.loomwatch/`.
+
+If you used a version that kept the run history in Docker, its database is still there. Delete it,
+once you no longer need it, with `cd ~/LoomWatch/app && docker compose down -v` before step 3 (or
+in Docker Desktop, the `loomwatch-app_postgres-data` volume).
 
 ### Change the defaults
 
@@ -551,7 +549,7 @@ then delete the folder.
 | --- | --- | --- |
 | Browser port | `3000` (or `LOOMWATCH_PORT` in `.env`) | `LOOMWATCH_PORT=3001 ~/LoomWatch/app/loomwatch` |
 | Teams folder | `~/LoomWatch/teams` | `LOOMWATCH_TEAMS_ROOT=~/Work/teams ~/LoomWatch/app/loomwatch` |
-| Database | PostgreSQL in Docker | `LOOMWATCH_DATABASE_URL=postgres://… ~/LoomWatch/app/loomwatch` uses your own PostgreSQL, and Docker is not needed |
+| Run history file | `~/Library/Application Support/LoomWatch/loomwatch.db` | `LOOMWATCH_DATABASE=~/Work/loomwatch.db ~/LoomWatch/app/loomwatch` |
 | Install folder | `~/LoomWatch/app` | `curl -fsSL https://loomwatch.github.io/install.sh \| LOOMWATCH_APP_DIR=~/Apps/LoomWatch bash` |
 | Version | The newest release | `curl -fsSL https://loomwatch.github.io/install.sh \| LOOMWATCH_VERSION=v0.1.0 bash` |
 | Copies of the run history saved by `update` | `~/LoomWatch/backups` | `LOOMWATCH_BACKUP_DIR=~/Backups/LoomWatch ~/LoomWatch/app/loomwatch update` |
@@ -562,11 +560,11 @@ then delete the folder.
 ### Build from source
 
 To change LoomWatch, or to run the newest code on `main`, build it yourself. That needs Git,
-[Node.js](https://nodejs.org/) 22.12 or newer and [Rust](https://rustup.rs/) besides Docker; the
-exact Rust version downloads on its own during the first build. With Homebrew:
+[Node.js](https://nodejs.org/) 22.12 or newer and [Rust](https://rustup.rs/); the exact Rust
+version downloads on its own during the first build. With Homebrew:
 
 ```sh
-brew install --cask docker-desktop && brew install node
+brew install node
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ```
 
@@ -583,27 +581,27 @@ the installed copy does. Use `./loomwatch` from that folder wherever this guide 
 `~/LoomWatch/app/loomwatch`. In a copy of the source, `./loomwatch update` pulls the newest `main`,
 saves a copy of the run history when anything changed, and rebuilds; `rollback` is for installed
 copies, since Git keeps every version of yours. `./loomwatch --rebuild` builds again even when
-nothing changed. `main` moves faster than the releases, so expect rough edges. If you installed LoomWatch from source before,
-`./loomwatch` keeps using your existing settings, teams folder and database.
+nothing changed. `main` moves faster than the releases, so expect rough edges. A copy of the source
+keeps its own run history in `.loomwatch/loomwatch.db` inside its folder, apart from the installed
+app's. If it ran before with its database in Docker, the first start copies that history in.
 
 <details>
 <summary>What <code>./loomwatch</code> runs, if you prefer to do it by hand</summary>
 
 ```sh
-cp .env.example .env   # then replace both replace-with-… values with long random letters and numbers
-docker compose up -d --wait postgres
 (cd ui && npx --yes pnpm@12 install --frozen-lockfile && npx --yes pnpm@12 run build)
 cargo build --release --locked --bin loomwatchd
 mkdir -p "$HOME/LoomWatch/teams"
 cp -n examples/operator-stop.yaml examples/operator-stop-harness.py "$HOME/LoomWatch/teams/"
-set -a; . ./.env; set +a
-export DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
 unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN
-./target/release/loomwatchd serve --teams-root "$HOME/LoomWatch/teams" --listen 127.0.0.1:3000
+./target/release/loomwatchd serve --teams-root "$HOME/LoomWatch/teams" --listen 127.0.0.1:3000 \
+  --database .loomwatch/loomwatch.db
 ```
 
 The browser app is built before the program because it is packed into it. The `unset` line keeps
-settings meant for the Docker Compose mode below out of a local run.
+settings meant for the Docker Compose mode below out of a local run. `loomwatchd backup <file>`
+saves a copy of the run history, safely while it runs, and `loomwatchd import-postgres --from
+postgres://…` copies in one an older version kept in PostgreSQL.
 
 </details>
 
@@ -814,8 +812,7 @@ billing, under each provider's terms. The offline demo uses none.
 <details>
 <summary><strong>Is my work sent anywhere?</strong></summary>
 
-LoomWatch serves everything on `127.0.0.1` and keeps your run history in a database on this
-computer. It reads your skills and tools only on your computer. The agents' own apps still send
+LoomWatch serves everything on `127.0.0.1` and keeps your run history in a file on this computer. It reads your skills and tools only on your computer. The agents' own apps still send
 prompts and files to their model providers, as they do when you use them directly.
 
 </details>
@@ -913,9 +910,9 @@ configuration, credentials, or arbitrary host workspace paths.
 <details>
 <summary>Set up the Compose stack</summary>
 
-Create your settings file with `cp .env.example .env` and replace both `replace-with-…` values with
-long random letters and numbers (or run `./loomwatch` once, which does this for you). Then create a
-repository-local teams folder, and build and start the complete stack:
+Create your settings file with `cp .env.example .env` and replace the `replace-with-…` value with
+long random letters and numbers. Then create a repository-local teams folder, and build and start
+the stack:
 
 ```sh
 mkdir -p teams
@@ -924,10 +921,10 @@ docker compose up --build --detach --wait
 ```
 
 Open the [offline review-stop demo](http://127.0.0.1:3000/?path=operator-stop.yaml). The UI is
-embedded in the `loomwatch` image, PostgreSQL holds run history, context packets, Notebook entries,
-and checkpoints, and both services are published only on host loopback. To stop, finish or stop
-active runs, then run `docker compose stop`: it preserves both named volumes, and
-`docker compose up --detach --wait` resumes the stack.
+embedded in the `loomwatch` image, the run history, context packets, Notebook entries and
+checkpoints are one SQLite file in the `loomwatch-home` volume, and the app is published only on
+host loopback. To stop, finish or stop active runs, then run `docker compose stop`: it preserves
+the volume, and `docker compose up --detach --wait` resumes the stack.
 
 The defaults mount these explicit roots:
 
@@ -936,7 +933,7 @@ The defaults mount these explicit roots:
 | `/data/teams` | `./teams` | Read/write | Team YAML, Brief files, layouts, and managed `.loomwatch` workspaces |
 | `/workspaces` | `./container/workspaces` | Read/write | Repositories used by container-native agents |
 | `/opt/loomwatch/capabilities` | `./container/capabilities` | Read-only | Skills and plugin metadata intentionally imported for discovery |
-| `/home/node` | `loomwatch-home` volume | Read/write | Harness credentials and mutable CLI state |
+| `/home/node` | `loomwatch-home` volume | Read/write | Harness credentials, mutable CLI state, and the run history |
 
 </details>
 
@@ -1007,19 +1004,19 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Files you add to an agent (**File** under **Given**) | `<team>.files/` beside the team file |
 | Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
 | AI apps you connected to LoomWatch | `.loomwatch/connections.json` in your teams folder. It holds each app's private key. |
-| Team chats (your messages and every run), recorded events, Notebook entries and Ask conversations | The local PostgreSQL Docker volume |
-| Database settings | `.env` in the LoomWatch folder (`~/LoomWatch/app`, or your copy of the source) |
+| Team chats (your messages and every run), recorded events, Notebook entries and Ask conversations | One file, `loomwatch.db`, in `~/Library/Application Support/LoomWatch` on macOS or `~/.local/state/loomwatch` on Linux. A copy of the source keeps its own in `.loomwatch/` in its folder; Compose deployments in the `loomwatch-home` volume. |
 | Which team files you approved to run, and your update-check choices | `~/Library/Application Support/LoomWatch` on macOS, `~/.local/state/loomwatch` on Linux |
-| Copies of the run history saved by `loomwatch update` | `~/LoomWatch/backups`, one folder per database, the three newest in each |
+| Copies of the run history saved by `loomwatch update` | `~/LoomWatch/backups`, one folder per copy of LoomWatch, the three newest in each |
 | The version the last update replaced, for `loomwatch rollback` | `.previous` in `~/LoomWatch/app` |
 | Provider sign-in | Managed by each host agent app; Compose-only deployments use `loomwatch-home` |
 
-Back up your teams folder and PostgreSQL database if you want to move or preserve your work.
-`docker compose stop` preserves data.
+Back up your teams folder and the run history if you want to move or preserve your work. Copy the
+history while LoomWatch runs with `~/LoomWatch/app/bin/loomwatchd backup ~/loomwatch-copy.db`, or
+copy `loomwatch.db` while it is stopped.
 
 > [!WARNING]
-> Avoid `docker compose down -v` for normal shutdown: it deletes the database volume, including
-> history and Notebook entries.
+> In Compose mode, avoid `docker compose down -v` for normal shutdown: it deletes the
+> `loomwatch-home` volume, including the run history and Notebook entries.
 
 <details>
 <summary>Deleting and restoring a team</summary>
@@ -1029,7 +1026,7 @@ LoomWatch refuses while the team is running, or while another team reads its mem
 erased. The team file, its layout, its own notes folder (`<team>.brief`) and the folder of files
 added to its agents with **Add file…** (`<team>.files`) move to `.trash/<date>-<team>/` inside your
 teams folder; `moved` in that folder's `deleted.json` lists which of them the team had. Its run
-history and Notebook entries stay in the database, and no new team takes its file name while it is
+history and Notebook entries stay in the run history, and no new team takes its file name while it is
 in the trash. To restore it, move everything in that folder except `deleted.json` back to the
 folder where `path` in `deleted.json` says the team file was. `<team>.files` must go back too, or
 its agents lose the files added to them. In Finder, press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>.</kbd> to show hidden folders. To remove a team for good,
@@ -1066,10 +1063,8 @@ you can share it by copying it into another teams folder's `.jobs`.
 | LoomWatch says something needs to be installed first | Install what it lists, open a new terminal window so it picks up the new `PATH`, then run `loomwatch` again. |
 | `zsh: no such file or directory: …/loomwatch` or `command not found: loomwatch` | The installer puts LoomWatch in `~/LoomWatch/app`, so start it with `~/LoomWatch/app/loomwatch`. In a copy of the source, run `./loomwatch` from its folder. |
 | `permission denied: ./loomwatch` (a copy of the source) | Run `chmod +x loomwatch` once, or start it with `bash loomwatch`. |
-| Docker did not start within two minutes | Open Docker Desktop yourself, finish any first-start steps it shows, wait until it says it is running, then run `loomwatch` again. |
-| Another program is using port 5433 | Change `POSTGRES_PORT` in `.env` (`~/LoomWatch/app/.env` for the installed copy) to a free port such as `5434`, then run `loomwatch` again. |
-| `password authentication failed for user "loomwatch"` | The database of an earlier LoomWatch copy on this computer kept its first password. `loomwatch` fixes this on its own when it starts; update it if it is older than that. If you set up the database by hand, editing `.env` does not change an existing database's password. |
-| Archive disabled / Run unavailable | LoomWatch was started without its database. Stop it and start it with `loomwatch`. If Docker Desktop quit or restarted while LoomWatch kept running, just run `loomwatch` again: it starts the database. |
+| "Your run history from the earlier version is still in Docker" | The first start after updating could not read the Docker database an earlier version used. Start Docker Desktop, stop LoomWatch, and run `~/LoomWatch/app/loomwatch import`. Running it twice is safe: nothing is copied twice. |
+| "The database … was set up by a newer LoomWatch" | You went back to an older version by hand. Run the newer one again, or `loomwatch rollback`, which puts back the copy saved before the update. |
 | Another program is using port 3000 | Start LoomWatch on another port: `LOOMWATCH_PORT=3001 ~/LoomWatch/app/loomwatch`. |
 | LoomWatch says another copy of LoomWatch is already running, or the page says "Couldn't list your teams" and none of your AI apps can start | An earlier copy is still running, often one whose folder you deleted before downloading LoomWatch again. Stop it with the `kill` command the message gives, then run `loomwatch` again. |
 | Team file not found | Confirm the file is in your teams folder (`~/LoomWatch/teams` unless you set `LOOMWATCH_TEAMS_ROOT`). The demo link uses `?path=operator-stop.yaml`, relative to that folder. |
@@ -1093,7 +1088,7 @@ you can share it by copying it into another teams folder's `.jobs`.
 | [ACP](https://agentclientprotocol.com) | How LoomWatch talks to every agent app, over its standard input and output |
 | Team Bus | A tool server the agents call back into to hand work over, ask each other questions, or report |
 | LoomWatch Control | The tool server Ask LoomWatch and your connected apps use to read, propose and start teams. It answers only on this computer, with a key per app |
-| Event archive | PostgreSQL, holding every message, tool call and handover, so runs can be replayed |
+| Event archive | One SQLite file, built into the program, holding every message, tool call and handover, so runs can be replayed |
 | Browser app | React, streamed live over a WebSocket and packed into the program |
 
 ## More guides
