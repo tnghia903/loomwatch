@@ -2664,8 +2664,8 @@ impl EventLog {
     ///
     /// The event gets the next `seq` and is handed to the archive's writer under the same lock,
     /// so events are written in `seq` order. It returns before the row is written: every read of
-    /// the archive flushes first, so nothing reads around it, and a write that fails is returned
-    /// by the next append.
+    /// the archive flushes first, and a live stream is woken when the row commits, so nothing
+    /// reads around it, and a write that fails is returned by the next append.
     pub(crate) async fn append(
         &self,
         agent_id: &str,

@@ -1,6 +1,4 @@
 use std::path::Path;
-#[cfg(test)]
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -9,7 +7,7 @@ use serde::Serialize;
 use serde_json::Value;
 use sqlx::Row;
 use sqlx::sqlite::{SqlitePool, SqliteRow};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::db::{self, Db};
 use crate::{EventKind, RunEvent};
@@ -156,6 +154,15 @@ impl EventArchive {
     /// Wait until every event handed over before this call is written.
     pub async fn flush(&self) {
         self.db.flush_events().await;
+    }
+
+    /// A signal that changes each time the writer commits a batch of events, to any session.
+    ///
+    /// A live view waits on this instead of polling: it reads what is written, marks the signal
+    /// seen, and reads again when it changes. It is a counter rather than a notification, so a
+    /// batch committed while the view was busy sending still shows as a change.
+    pub(crate) fn written(&self) -> watch::Receiver<u64> {
+        self.db.events().written()
     }
 
     /// Record what one agent was supplied from team memory, before it is sent.
@@ -309,11 +316,26 @@ impl EventArchive {
         after_seq: i64,
         limit: i64,
     ) -> Result<Vec<RunEvent>> {
+        self.flush().await;
+        self.written_page(session_id, after_seq, limit).await
+    }
+
+    /// [`Self::event_page`] over what the writer has already committed, without asking it to
+    /// write what it holds. A live view that follows [`Self::written`] reads this way, so following
+    /// a run never makes the writer commit early.
+    ///
+    /// # Errors
+    /// Returns an error for invalid bounds, database failures, or invalid archived events.
+    pub(crate) async fn written_page(
+        &self,
+        session_id: &str,
+        after_seq: i64,
+        limit: i64,
+    ) -> Result<Vec<RunEvent>> {
         ensure!(
             after_seq >= -1 && (1..=500).contains(&limit),
             "invalid event page bounds"
         );
-        self.flush().await;
         let rows = sqlx::query(&format!(
             "SELECT {EVENT_COLUMNS} FROM run_events
              WHERE session_id = $1 AND seq > $2 ORDER BY seq LIMIT $3"
@@ -424,8 +446,8 @@ fn parse_event_kind(kind: &str) -> Result<EventKind> {
 /// An agent streaming its reply sends a frame per few tokens, and a busy team peaks near two
 /// hundred a second. One transaction per event was most of what writing them cost; one per tenth
 /// of a second, or per [`BATCH_MAX`] events, makes a burst a handful of commits. Nothing waits for
-/// the window to close: readers flush first ([`Db::flush_events`]), so a live view still sees an
-/// event as soon as it polls.
+/// the window to close: readers flush first ([`Db::flush_events`]), and a live view is woken by
+/// the commit itself ([`EventArchive::written`]).
 pub(crate) const BATCH_WINDOW: Duration = Duration::from_millis(100);
 /// Events in one transaction, at most.
 pub(crate) const BATCH_MAX: usize = 256;
@@ -486,16 +508,16 @@ struct WriterShared {
     /// session is verified, so a run whose last events were never written cannot pass for whole:
     /// a missing tail leaves no gap in `seq` to notice.
     lost: Mutex<std::collections::HashMap<String, String>>,
-    /// Transactions committed, which the batching test counts.
-    #[cfg(test)]
-    commits: AtomicU64,
+    /// Transactions committed so far. Live views wait for it to change ([`EventArchive::written`]),
+    /// and the batching test counts it.
+    written: watch::Sender<u64>,
 }
 
 impl WriterShared {
-    #[cfg_attr(not(test), allow(clippy::unused_self))]
+    /// A batch is committed: wake everyone following the archive. `send_modify` rather than
+    /// `send`, which would leave the count alone while nobody is following.
     fn committed(&self) {
-        #[cfg(test)]
-        self.commits.fetch_add(1, Ordering::Relaxed);
+        self.written.send_modify(|count| *count += 1);
     }
 
     fn lost(&self, session_id: &str, message: &str) {
@@ -518,7 +540,17 @@ impl EventWriter {
     /// How many transactions the writer has committed.
     #[cfg(test)]
     pub(crate) fn commits(&self) -> u64 {
-        self.shared.commits.load(Ordering::Relaxed)
+        *self.shared.written.borrow()
+    }
+
+    /// How many live views are following the archive right now.
+    #[cfg(test)]
+    pub(crate) fn followers(&self) -> usize {
+        self.shared.written.receiver_count()
+    }
+
+    fn written(&self) -> watch::Receiver<u64> {
+        self.shared.written.subscribe()
     }
 
     /// Why `session_id` lost an event, if it did.

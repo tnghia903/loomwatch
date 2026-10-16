@@ -155,10 +155,25 @@ async fn stream(
         .into_response()
 }
 
+/// How long a live stream waits for the writer's signal before it reads again anyway.
+///
+/// Only a safety net: every event the daemon writes wakes the stream when its batch commits. Rows
+/// that arrive another way, such as an import run from another process, are picked up within this.
+const FOLLOW_FALLBACK: Duration = Duration::from_secs(30);
+
+/// Replay a session from the cursor, then send each event as soon as the writer commits it.
+///
+/// Push, not poll: the stream sleeps until a batch is committed ([`EventArchive::written`]), the
+/// client goes away, or [`FOLLOW_FALLBACK`] passes. It reads only what is already committed, so
+/// following a run never makes the writer commit early.
 async fn follow_archive(mut socket: WebSocket, archive: EventArchive, query: EventQuery) {
+    let mut written = archive.written();
     let mut cursor = query.after_seq;
     loop {
-        let Ok(page) = archive.event_page(&query.session, cursor, 200).await else {
+        // Seen before the read, not after: a batch that commits once the read has started still
+        // counts as a change, so the wait below cannot sleep through it.
+        written.mark_unchanged();
+        let Ok(page) = archive.written_page(&query.session, cursor, 200).await else {
             break;
         };
         let full_page = page.len() == 200;
@@ -186,7 +201,8 @@ async fn follow_archive(mut socket: WebSocket, archive: EventArchive, query: Eve
             continue;
         }
         tokio::select! {
-            () = tokio::time::sleep(Duration::from_millis(500)) => {},
+            () = committed(&mut written) => {},
+            () = tokio::time::sleep(FOLLOW_FALLBACK) => {},
             incoming = socket.recv() => {
                 match incoming {
                     Some(Ok(Message::Ping(_) | Message::Pong(_))) => {},
@@ -196,6 +212,15 @@ async fn follow_archive(mut socket: WebSocket, archive: EventArchive, query: Eve
         }
     }
     let _ = socket.send(Message::Close(None)).await;
+}
+
+/// Resolve when the writer has committed a batch since the signal was last marked seen.
+async fn committed(written: &mut tokio::sync::watch::Receiver<u64>) {
+    if written.changed().await.is_err() {
+        // The writer has stopped, so nothing more will be committed: wait on the client and the
+        // fallback instead of waking at once, forever.
+        std::future::pending::<()>().await;
+    }
 }
 
 #[cfg(test)]
@@ -266,6 +291,85 @@ mod tests {
             make_event(1)
         );
         resumed.close(None).await.unwrap();
+        server.abort();
+    }
+
+    /// The stream is pushed, not polled: an event committed while the stream waits arrives at
+    /// once, far sooner than the half-second poll it replaced, whether the event was written for
+    /// a caller that waited or by the writer's own batch window. Closing the socket ends the
+    /// follow task, which lets go of the writer's signal.
+    #[tokio::test]
+    async fn a_waiting_stream_is_woken_by_the_commit_and_ends_with_its_socket() {
+        use crate::archive::WriteFailure;
+        use crate::{EventKind, RunEvent};
+        use futures_util::StreamExt;
+        use std::sync::Arc;
+        use std::time::Instant;
+        let db = crate::db::Db::temp().await;
+        let archive = EventArchive::new(db.clone());
+        let make_event = |seq| RunEvent {
+            id: format!("push:{seq}"),
+            session_id: "push".into(),
+            agent_id: "lead".into(),
+            seq,
+            ts: "2026-10-16T00:00:00Z".into(),
+            kind: EventKind::Process,
+            payload: json!({"phase":"spawned", "pid":seq}),
+            raw: None,
+        };
+        archive.append(&make_event(0)).await.unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = router(Some(archive.clone()));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (mut client, _) = tokio_tungstenite::connect_async(format!(
+            "ws://{address}/api/session/stream?session=push"
+        ))
+        .await
+        .unwrap();
+        let mut next = async || {
+            let message = tokio::time::timeout(Duration::from_secs(3), client.next())
+                .await
+                .expect("an event arrives")
+                .unwrap()
+                .unwrap();
+            serde_json::from_str::<RunEvent>(message.to_text().unwrap()).unwrap()
+        };
+        assert_eq!(next().await, make_event(0));
+        assert_eq!(db.events().followers(), 1);
+
+        // Long enough for the stream to be waiting, not mid-read.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let started = Instant::now();
+        archive.append(&make_event(1)).await.unwrap();
+        assert_eq!(next().await, make_event(1));
+        let waited = started.elapsed();
+        assert!(
+            waited < Duration::from_millis(250),
+            "a committed event took {waited:?} to reach the stream"
+        );
+
+        // Handed over without waiting: nobody flushes, the writer's window commits it.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let failure = Arc::new(WriteFailure::default());
+        let started = Instant::now();
+        archive.enqueue(make_event(2), &failure).await.unwrap();
+        assert_eq!(next().await, make_event(2));
+        let waited = started.elapsed();
+        assert!(
+            waited < crate::archive::BATCH_WINDOW + Duration::from_millis(250),
+            "a queued event took {waited:?} to reach the stream"
+        );
+        failure.check().unwrap();
+
+        client.close(None).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while db.events().followers() > 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("closing the socket ends the follow task");
         server.abort();
     }
 
