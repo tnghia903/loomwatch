@@ -120,7 +120,9 @@ jobs:
         image: postgres:17.6-bookworm
         env:
           POSTGRES_USER: loomwatch
-          POSTGRES_PASSWORD: loomwatch
+          # Unlike the user and database names: a test checks the import never shows the password,
+          # and "loomwatch" is in the source's name, which it does show.
+          POSTGRES_PASSWORD: import-test-password
           POSTGRES_DB: loomwatch
         ports:
           - 5432:5432
@@ -130,7 +132,7 @@ jobs:
           --health-timeout 5s
           --health-retries 15
     env:
-      LOOMWATCH_TEST_POSTGRES_URL: postgres://loomwatch:loomwatch@localhost:5432/loomwatch
+      LOOMWATCH_TEST_POSTGRES_URL: postgres://loomwatch:import-test-password@localhost:5432/loomwatch
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
