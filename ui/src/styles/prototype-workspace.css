@@ -93,8 +93,8 @@ button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tin
 .delivery-review-findings li { font-size:13px; line-height:1.5; color:var(--color-ink-2); }
 .delivery-review-findings li.tone-bad::before { content:"✗"; color:var(--color-alert); }
 .delivery-response { border:1px solid var(--color-hairline); border-radius:7px; padding:28px; background:var(--color-panel); font-size:15px; line-height:1.65; white-space:normal; }
-.delivery-response h1 { font-family:Georgia,serif; font-size:39px; line-height:1.13; letter-spacing:-1px; font-weight:500; margin-top:0; padding-bottom:23px; border-bottom:1px solid var(--color-hairline); }
-.delivery-response h2,.delivery-response h3 { font-family:Georgia,serif; font-size:24px; font-weight:500; }
+.delivery-response h1 { font-family:var(--font-serif); font-size:39px; line-height:1.13; letter-spacing:-1px; font-weight:500; margin-top:0; padding-bottom:23px; border-bottom:1px solid var(--color-hairline); }
+.delivery-response h2,.delivery-response h3 { font-family:var(--font-serif); font-size:20px; font-weight:500; }
 .delivery-shown .lw-composer { left:calc(60.7% + 30px); right:30px; bottom:21px; width:auto; transform:none; border:1px solid var(--color-hairline); border-radius:8px; }
 .delivery-shown .lw-composer-notices { left:calc(60.7% + 30px); right:30px; width:auto; transform:none; bottom:calc(var(--lw-composer-height,150px) + 33px); }
 .build-workspace-heading { position:absolute; top:64px; left:0; right:0; min-height:112px; padding:24px 30px; display:flex; align-items:center; justify-content:space-between; gap:18px; border-bottom:1px solid var(--color-hairline); background:var(--workspace-glass); z-index:30; }

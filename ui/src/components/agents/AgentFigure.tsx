@@ -145,7 +145,7 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
       />
       {!ready && <p className="bench-loading t-meta">Setting up the bench…</p>}
       <div className="bench-faces" aria-hidden="true">
-        <div ref={face('name')} className="bench-face bench-face-name"><p><b>{name}</b>{does && <span>{does}</span>}</p></div>
+        <div ref={face('name')} className="bench-face bench-face-name" style={{ '--chars': name.length } as CSSProperties}><p><b>{name}</b>{does && <span>{does}</span>}</p></div>
         <div ref={face('job')} className={`bench-face bench-face-job${instructions ? '' : ' empty'}`}><p>{instructions || 'Nothing written yet.'}</p></div>
         <div ref={face('app')} className={`bench-face bench-face-app${view.appName ? '' : ' empty'}`} style={{ '--chars': appWord.length } as CSSProperties}><p>{appWord}</p></div>
       </div>

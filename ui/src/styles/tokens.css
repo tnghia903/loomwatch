@@ -99,7 +99,7 @@
 
   --font-sans:  "Inter", "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono:  "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-serif: "Fraunces", ui-serif, Georgia, serif;
 }
 
 :root {
@@ -216,7 +216,7 @@
 /* ---------------------------------------------------------------------------
    TYPE SCALE — nine steps, DESIGN_LANGUAGE §6
    --------------------------------------------------------------------------- */
-.t-display { font: 400 34px/38px var(--font-serif); letter-spacing: -.01em; }
+.t-display { font: 600 28px/34px var(--font-sans); letter-spacing: -.02em; }
 .t-title   { font: 600 19px/26px var(--font-sans);  letter-spacing: -.01em; }
 .t-body    { font: 400 14px/20px var(--font-sans); }
 .t-body-m  { font: 500 14px/20px var(--font-sans); }

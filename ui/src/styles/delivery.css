@@ -530,7 +530,7 @@
 .delivery-response h1,
 .delivery-response h2,
 .delivery-response h3 {
-  font-family: Georgia, serif;
+  font-family: var(--font-serif);
   font-weight: 600;
   margin: 1.3em 0 0.65em;
   line-height: 1.3;

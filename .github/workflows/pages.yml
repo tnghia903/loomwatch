@@ -16,7 +16,7 @@ on:
       - site/**
       - scripts/install.sh
       - docs/assets/readme/**
-      - docs/design-system/fonts/**
+      - ui/public/fonts/**
       - ui/public/agent/**
       - ui/src/site/**
       - ui/src/components/agents/workbenchScene.ts

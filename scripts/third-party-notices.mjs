@@ -129,7 +129,7 @@ const header = `Third-party software in LoomWatch
 LoomWatch is built with the open-source software listed below. Each entry
 quotes the license it is used under, with its authors' copyright notices.
 
-The fonts (Inter, Instrument Serif and JetBrains Mono) are under the SIL Open
+The fonts (Inter, Fraunces and JetBrains Mono) are under the SIL Open
 Font License 1.1: see fonts/OFL.txt next to this file.
 
 Part 1: ${rust.count} Rust crates inside loomwatchd

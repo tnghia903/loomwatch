@@ -27,7 +27,7 @@
   .build-workspace.lib-collapsed.inspecting .team-story { max-width: min(680px, calc(100% - 126px - var(--lw-inspector-w) - var(--lw-panel-inset) - 12px)); }
 }
 .team-story-eyebrow { font: 600 10.5px/1.3 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
-.team-story p { margin: 0; font: 400 19px/1.45 var(--font-serif); color: var(--color-ink-2); text-wrap: pretty; }
+.team-story p { margin: 0; font: 400 18px/1.5 var(--font-serif); color: var(--color-ink-2); text-wrap: pretty; }
 .story-name, .story-schedule {
   display: inline-flex; align-items: center; gap: 5px; vertical-align: 1px;
   margin: 0 1px; padding: 0 9px; min-height: 22px; border-radius: 99px;
@@ -90,7 +90,7 @@ span.story-schedule { cursor: default; }
 /* Story: a name and one sentence, sized to be read at the zoom that fits a whole team. */
 .lw-canvas[data-depth="story"] .build-node .depth-story-line {
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  margin: 7px 0 0; font: 400 22px/1.15 var(--font-serif); color: var(--color-ink-2); white-space: normal;
+  margin: 7px 0 0; font: 400 18px/1.25 var(--font-sans); color: var(--color-ink-2); white-space: normal;
 }
 .lw-canvas[data-depth="story"] .build-node strong { font-size: 25px; line-height: 1.12; font-weight: 600; letter-spacing: -.02em; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .lw-canvas[data-depth="story"] .build-node .node-kind,
@@ -110,7 +110,7 @@ span.story-schedule { cursor: default; }
 /* The other cards keep their content and just speak up. */
 .lw-canvas[data-depth="story"] .build-node:not(.kind-harness):not(.kind-operator) strong { font-size: 22px; }
 .lw-canvas[data-depth="story"] .schedule-node .t-node { font-size: 22px; line-height: 1.15; }
-.lw-canvas[data-depth="story"] .schedule-node .t-meta { font: 400 19px/1.2 var(--font-serif); color: var(--color-ink-2); }
+.lw-canvas[data-depth="story"] .schedule-node .t-meta { font: 400 16px/1.3 var(--font-sans); color: var(--color-ink-2); }
 
 /* Trace: the same card plus what the agent panel would tell (model, what it may do, what it is
    given), in plain words, and the full instructions. */
@@ -160,7 +160,7 @@ span.story-schedule { cursor: default; }
 .weft-ctl input[type="range"] { width: 100%; accent-color: var(--color-accent-fill); }
 .weft-cap { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 8px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--color-ground); border: 1px solid var(--color-hairline); }
 .weft-cap time { font: 500 12.5px/1.4 var(--font-mono); color: var(--color-accent); font-variant-numeric: tabular-nums; }
-.weft-sentence { flex: 1 1 240px; min-width: 0; font: 400 17px/1.35 var(--font-serif); color: var(--color-ink); overflow-wrap: anywhere; }
+.weft-sentence { flex: 1 1 240px; min-width: 0; font: 400 15px/1.4 var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
 .weft-cap code { font-size: 11px; color: var(--color-ink-3); }
 .weft-cap .delivery-link { display: inline-flex; align-items: center; gap: 5px; }
 .weft-cap.bad .weft-sentence { color: var(--color-alert); }
@@ -402,7 +402,7 @@ span.story-schedule { cursor: default; }
   display: flex; flex-direction: column; border-radius: 14px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid); text-align: left;
 }
 .needs-you-panel > header { display: flex; align-items: baseline; gap: 10px; padding: 14px 12px 12px 16px; border-bottom: 1px solid var(--color-hairline); }
-.needs-you-panel > header h2 { margin: 0; font: 400 22px/1.1 var(--font-serif); color: var(--color-ink); }
+.needs-you-panel > header h2 { margin: 0; font: 600 18px/1.25 var(--font-sans); letter-spacing: -.01em; color: var(--color-ink); }
 .needs-you-panel > header span { flex: 1; font-size: 12px; color: var(--color-ink-3); }
 .needs-you-empty { margin: 0; padding: 18px 16px; font-size: 13.5px; line-height: 1.5; color: var(--color-ink-2); }
 .needs-you-list { list-style: none; margin: 0; padding: 0; }
@@ -423,7 +423,7 @@ span.story-schedule { cursor: default; }
 .needs-you-keys { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 16px; font-size: 11.5px; color: var(--color-ink-3); border-top: 1px solid var(--color-hairline); }
 .needs-you-keys span { display: inline-flex; align-items: center; gap: 4px; }
 .needs-you-keys kbd { font: 500 10px/1 var(--font-mono); padding: 2px 5px; border-radius: 4px; border: 1px solid var(--color-hairline); background: var(--color-ground); }
-.ticket-context { margin: 0; padding: 7px 10px; border-left: 2px solid var(--color-accent-dim); border-radius: 0 6px 6px 0; background: var(--color-ground); font: 400 14px/1.4 var(--font-serif); color: var(--color-ink-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ticket-context { margin: 0; padding: 7px 10px; border-left: 2px solid var(--color-accent-dim); border-radius: 0 6px 6px 0; background: var(--color-ground); font: 400 13px/1.45 var(--font-sans); color: var(--color-ink-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 /* The review step's lane is time the team spent waiting for you, not work: an outline, not a thread. */
 .weft-thread.you { background: transparent; border: 1.5px dashed var(--color-accent); height: 7px; top: calc(50% - 3.5px); }
 
@@ -450,7 +450,7 @@ span.story-schedule { cursor: default; }
   font: 400 10.5px/1.4 var(--font-sans); color: var(--color-ink-2);
   box-shadow: 0 8px 18px -12px color-mix(in srgb, var(--color-black) 55%, transparent);
 }
-.nt-example b { font: 400 14.5px/1.15 var(--font-serif); color: var(--color-ink); margin: 2px 0 2px; }
+.nt-example b { font: 600 13px/1.25 var(--font-sans); color: var(--color-ink); margin: 2px 0 2px; }
 .nt-example em { margin-top: 3px; font-style: normal; font-size: 10px; color: var(--color-accent); }
 .nt-example-tag { font: 600 9px/1.2 var(--font-sans); letter-spacing: .09em; text-transform: uppercase; color: var(--color-ink-3); }
 .nt-option.on .nt-example { border-color: color-mix(in srgb, var(--color-accent) 35%, transparent); }
@@ -471,7 +471,7 @@ span.story-schedule { cursor: default; }
 .weft-story button { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 10px; width: 100%; padding: 5px 6px; border: 0; border-radius: 6px; background: transparent; text-align: left; cursor: pointer; color: var(--color-ink); }
 .weft-story button:hover, .weft-story button:focus-visible { background: var(--color-accent-tint); }
 .weft-story time { font: 500 11.5px/1.9 var(--font-mono); color: var(--color-ink-3); font-variant-numeric: tabular-nums; }
-.weft-story span { font: 400 17px/1.4 var(--font-serif); }
+.weft-story span { font: 400 14.5px/1.45 var(--font-sans); }
 .weft-story .bad span { color: var(--color-alert); }
 /* Key hints are for keyboards; a touch screen gets the same actions without them. */
 @media (hover: none) { .needs-you-keys, .ticket-acts kbd { display: none; } }
@@ -620,7 +620,7 @@ span.story-schedule { cursor: default; }
 .file-card-body { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .file-card-eyebrow { font: 600 10.5px/1.2 var(--font-sans); letter-spacing: .1em; text-transform: uppercase; color: var(--color-accent); }
 .file-card.muted .file-card-eyebrow { color: var(--color-ink-3); }
-.file-card-title { font: 400 21px/1.15 var(--font-serif); color: var(--color-ink); text-wrap: balance; overflow-wrap: anywhere; }
+.file-card-title { font: 600 16px/1.3 var(--font-sans); letter-spacing: -.01em; color: var(--color-ink); text-wrap: balance; overflow-wrap: anywhere; }
 .file-card-name { font: 400 11.5px/1.3 var(--font-mono); color: var(--color-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-card-meta { font-size: 12.5px; color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
 .file-card-by, .file-card-where { display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 12px; color: var(--color-ink-3); min-width: 0; }
