@@ -3,9 +3,10 @@ import { ArrowRight, Check, Lock, Moon, Sun } from 'lucide-react'
 import { figureStill, type FigureKind } from '../../lib/library/figures'
 import { AREA_NAMES, AREAS, isAccessory, isGarment, QUESTS, type Quest } from '../../lib/quests/catalog'
 import { partsDone, useWardrobe, type EarnedItem, type Wardrobe } from '../../lib/quests/wardrobe'
+import type { LoomMarkState } from '../../lib/story/loomMark'
 import { useTheme } from '../../lib/theme'
 import { AccessoryIcon } from '../agents/AccessoryArt'
-import { LoomMark } from '../ui/glyphs'
+import { LoomMark, LoomWordmark } from '../ui/glyphs'
 
 function earnedDate(entry: EarnedItem): string {
   const at = new Date(entry.at)
@@ -18,7 +19,7 @@ function earnedDate(entry: EarnedItem): string {
  * rather than teaches (docs/QUESTS.md): each quest says what to try and how a run earns it, and once
  * earned, why the practice works in one sentence. Nothing here is a task to tick.
  */
-export function QuestsPage({ wardrobe: given }: { wardrobe?: Wardrobe } = {}) {
+export function QuestsPage({ wardrobe: given, mark }: { wardrobe?: Wardrobe; mark?: LoomMarkState } = {}) {
   const read = useWardrobe()
   const wardrobe = given ?? read.wardrobe
   const { resolved, toggle } = useTheme()
@@ -30,7 +31,7 @@ export function QuestsPage({ wardrobe: given }: { wardrobe?: Wardrobe } = {}) {
     <div className="lw-home lw-quests">
       <div className="ground" aria-hidden="true" />
       <header className="home-top">
-        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark width={46} height={20} /><span>LoomWatch</span></a>
+        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></a>
         <span className="home-top-acts">
           <a className="btn" href="/agents">Your agents</a>
           <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>

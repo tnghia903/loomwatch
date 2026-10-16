@@ -153,8 +153,9 @@ em { font-style: italic; }
 
 .top { position: fixed; inset: 0 0 auto 0; z-index: 30; background: var(--glass); backdrop-filter: blur(24px) saturate(150%); -webkit-backdrop-filter: blur(24px) saturate(150%); border-bottom: 1px solid var(--hairline); }
 .top-row { max-width: 1240px; margin: 0 auto; padding: 0 var(--gutter); height: 58px; display: flex; align-items: center; gap: 28px; }
-.brand { display: inline-flex; align-items: center; gap: 10px; font: 600 16px/1 var(--sans); letter-spacing: -.01em; text-decoration: none; color: var(--ink); }
-.brand svg { width: 30px; height: 13px; color: var(--accent); }
+.brand { display: inline-flex; align-items: center; gap: 9px; text-decoration: none; color: var(--ink); }
+.brand .brand-mark { width: 26px; height: 26px; flex: none; }
+.brand .brand-name { width: 98px; height: 18px; flex: none; }
 .top-nav { display: flex; gap: 22px; margin-left: 8px; }
 .top-nav a { color: var(--ink-2); text-decoration: none; font: 500 13px/1 var(--sans); }
 .top-nav a:hover { color: var(--ink); }
@@ -195,14 +196,14 @@ em { font-style: italic; }
    pulled across (main.js sizes and places it). Vertical, so its track runs down the pull. */
 .buzz-switch { position: absolute; left: 0; top: 0; z-index: 2; margin: 0; opacity: 0; writing-mode: vertical-lr; pointer-events: auto; touch-action: none; cursor: grab; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .buzz-switch.held { cursor: grabbing; }
+/* And on a phone one lies over the bulb, which an iPhone buzzes for as it is tapped. */
+.bulb-switch { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; opacity: 0; touch-action: none; cursor: pointer; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 /* The new theme spreads out from the bulb (main.js animates the clip); nothing crossfades. */
 ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 
 /* ---------------------------------------------------------------- Cold open */
 
 .cta { display: flex; align-items: center; gap: 22px; margin-top: 32px; flex-wrap: wrap; }
-
-@keyframes blink { 50% { opacity: 0; } }
 
 @keyframes cue { 0% { transform: scaleY(0); } 60% { transform: scaleY(1); } 100% { transform: scaleY(1); opacity: 0; } }
 
@@ -226,7 +227,7 @@ em { font-style: italic; }
 /* The window every panel shares, so it reads as one app moving forward. */
 .win { background: var(--panel-solid); border: 1px solid var(--hairline-2); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
 .win-bar { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 16px; border-bottom: 1px solid var(--hairline); }
-.win-bar > svg { width: 24px; height: 11px; color: var(--accent); flex: none; }
+.win-bar > svg { width: 18px; height: 18px; flex: none; }
 .win-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; font-size: 13.5px; }
 .win-title b { font-weight: 600; white-space: nowrap; }
 .win-title .mono { color: var(--ink-3); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -565,26 +566,23 @@ em { font-style: italic; }
 .footnote { margin: 22px 0 0; font-size: 13px; color: var(--ink-3); max-width: 720px; }
 
 /* 09 · Start */
-.start-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 560px); gap: 56px; align-items: start; }
-.needs { margin: 28px 0 0; display: grid; border-top: 1px solid var(--hairline); }
-.needs div { display: grid; grid-template-columns: 190px 1fr; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--hairline); font-size: 14px; }
-.needs dt { font-weight: 600; }
-.needs dd { margin: 0; color: var(--ink-2); }
-.termbox { border: 1px solid var(--hairline-2); border-radius: 14px; background: var(--panel-solid); box-shadow: var(--shadow); overflow: hidden; margin-top: 30px; }
-.termbox-bar { display: flex; align-items: center; justify-content: space-between; height: 46px; padding: 0 10px 0 18px; border-bottom: 1px solid var(--hairline); }
-.termbox-bar .btn { height: 28px; }
-/* The command never breaks: it scrolls sideways when it is wider than the box. What it prints wraps. */
-.termbox pre { margin: 0; padding: 20px 20px 22px; font: 400 13.5px/1.9 var(--mono); font-variant-ligatures: none; color: var(--ink); white-space: pre; overflow-x: auto; min-height: 168px; }
-.termbox .p { color: var(--accent); }
-.termbox .c { color: var(--ink-3); white-space: pre-wrap; }
-.termbox .c b { color: var(--ink-2); font-weight: 400; }
-.termbox .typing::after { content: ''; display: inline-block; width: 8px; height: 15px; margin-left: 1px; background: var(--ink); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
-.termbox-foot { margin: 0; padding: 14px 20px 18px; border-top: 1px solid var(--hairline); font-size: 13px; line-height: 1.6; color: var(--ink-2); }
-.start-get { margin-top: 28px; gap: 16px; }
+.start-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 560px); gap: 56px; align-items: center; }
+/* The download, in a card of its own: the button first, the Terminal line under it for those who want it. */
+.get { max-width: 560px; padding: 28px; border: 1px solid var(--hairline-2); border-radius: 14px; background: var(--panel-solid); box-shadow: var(--shadow); }
+.get-mac { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.os-logo { width: 15px; height: 15px; fill: currentColor; flex: none; }
+.get-mac .os-logo { width: 17px; height: 17px; margin: -2px 2px 0 -4px; }
 .start-meta { font-size: 13px; color: var(--ink-3); }
-.start-note { margin: 14px 0 0; max-width: 560px; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+.start-note { margin: 14px 0 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
 .start-note b { font-weight: 600; color: var(--ink); }
-.start-alt { margin: 18px 0 0; font-size: 13.5px; color: var(--ink-3); }
+.get-term { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--hairline); }
+.get-term-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.get-term-head .btn { height: 28px; margin-left: auto; }
+.os { display: inline-flex; gap: 8px; color: var(--ink-3); }
+/* One line on a wide screen; on a narrow one it wraps, which a copy leaves out, so what you select still runs. */
+.cmdline { display: block; padding: 10px 14px; border: 1px solid var(--hairline-2); border-radius: 10px; background: var(--ground); font: 400 13px/1.6 var(--mono); font-variant-ligatures: none; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cmdline .p { color: var(--accent); user-select: none; }
+.start-alt { margin: 12px 0 0; font-size: 13px; color: var(--ink-3); }
 .start-alt a { color: var(--accent); text-decoration: none; font-weight: 500; }
 .start-alt a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .real { margin-top: 96px; }
@@ -756,8 +754,8 @@ em { font-style: italic; }
   
   
   
-  .needs div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-  .termbox pre { padding: 16px; font-size: 12px; line-height: 1.75; }
+  .get { padding: 20px; }
+  .cmdline { padding: 10px 12px; font-size: 11.5px; }
   
   
   .filecard .acts { display: none; }
@@ -998,8 +996,3 @@ em { font-style: italic; }
 @media (prefers-reduced-motion: reduce) {
   .bench-poster, .btn.nudge { animation: none !important; }
 }
-/* Start: what you need, in two short columns. */
-#start .needs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
-#start .needs div { grid-template-columns: minmax(0, 1fr); gap: 2px; align-content: start; }
-#start .needs dd { font-size: 13.5px; }
-@media (max-width: 640px) { #start .needs { grid-template-columns: minmax(0, 1fr); } }

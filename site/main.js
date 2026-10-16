@@ -344,6 +344,23 @@
       scene.glowColors(glowColors())
       new MutationObserver(() => scene.glowColors(glowColors())).observe(root, { attributes: true, attributeFilter: ['data-theme'] })
     }
+    // Their light is the lamp's: it hangs where the bulb is, wherever the page has scrolled them to
+    // (with reduced motion, where it was when they came), so each figure's shadow falls away from it;
+    // switched off, they cast none. A live.js cached from before the lamp has no lamp().
+    if (typeof scene.lamp === 'function') {
+      let lampQueued = false
+      const hangLamp = () => {
+        lampQueued = false
+        const bulb = themeButton.getBoundingClientRect()
+        const stage = crewCanvas.getBoundingClientRect()
+        scene.lamp(bulb.left + bulb.width / 2 - stage.left, bulb.top + bulb.height / 2 - stage.top, root.dataset.theme === 'light')
+      }
+      const queueLamp = () => { if (!lampQueued) { lampQueued = true; window.requestAnimationFrame(hangLamp) } }
+      hangLamp()
+      if (!reduced) window.addEventListener('scroll', queueLamp, { passive: true })
+      window.addEventListener('resize', queueLamp)
+      new MutationObserver(hangLamp).observe(root, { attributes: true, attributeFilter: ['data-theme'] })
+    }
     // They look where you point anywhere on the first screen, not only over their canvas.
     window.addEventListener('pointermove', (event) => { const [x, y] = local(event, crewCanvas); scene.pointerMove(x, y) }, { passive: true })
     document.documentElement.addEventListener('pointerleave', () => scene.pointerMove(null, null))
@@ -385,13 +402,13 @@
   const PULL = 34 // how far the cord comes out of the switch
   const CLICK = 22 // and how far it comes out when the switch clicks
   const GRAVITY = 2200
-  // A page can't buzz a Mac's trackpad or an iPhone, but Safari does it for its own switch control
-  // as the switch's thumb is dragged across. So where Safari has one, an unseen switch lies over the
-  // figure, and the figure is pulled by it. WebKit moves the thumb once the pointer has gone 40% of
-  // the track from where it was pressed (anywhere, in a square switch), so this one is square, laid
-  // along the pull, and long enough that the thumb crosses as the cord clicks. Phones that can
-  // vibrate do instead (flip, below).
-  const BUZZ = CLICK / 0.4
+  // The light is felt as it changes, however it is changed, and at no other time. Phones that can
+  // vibrate do (flip, below). A page can't buzz a Mac's trackpad or an iPhone, but Safari does it
+  // for its own switch control: as the switch's thumb is dragged across, and on an iPhone as it is
+  // tapped. So where Safari has one, an unseen switch lies over the figure, and the figure is pulled
+  // by it; it is square and laid along the pull, so its thumb crosses down the pull, wherever it is
+  // pressed. Nothing can buzz a Mac's click, but a trackpad's click is felt anyway.
+  const BUZZ = 55 // the switch's side, about the figure's
   const buzzSwitch = 'switch' in HTMLInputElement.prototype ? el('input', { class: 'buzz-switch', type: 'checkbox', switch: true, tabindex: '-1', style: `width: ${BUZZ}px; height: ${BUZZ}px` }) : null
   if (buzzSwitch) cord.append(buzzSwitch)
   const handles = [cordFigure, buzzSwitch].filter(Boolean)
@@ -399,6 +416,9 @@
   // A trackpad's tick is faint, so a mouse's pull ticks three times, a couple of frames apart.
   const TICKS = 3
   const TICK_GAP = 30 // ms
+  // On a phone the bulb is tapped more than the cord is pulled, so one lies over the bulb too.
+  const bulbSwitch = buzzSwitch && touchOnly ? el('input', { class: 'bulb-switch', type: 'checkbox', switch: true, tabindex: '-1', 'aria-hidden': 'true' }) : null
+  if (bulbSwitch) lamp.prepend(bulbSwitch)
   const placeSwitch = (x, y) => { buzzAt = { x, y }; buzzSwitch.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)` }
   const restLength = () => (window.innerWidth <= 640 ? 30 : 44)
   const hiddenAt = () => -(rest + BOX + 12)
@@ -417,6 +437,7 @@
   let tilt = 0 // the figure's own lean on the thread, radians clockwise
   let tiltSpeed = 0
   let held = null
+  let lastHold = null // held, kept once it's let go, for Safari's switch (it hears the release after)
   let tugAt = -1
   let tie = { x: BOX / 2, y: BOX * 0.163 } // where the thread is tied: the spool's hole in the still
   let near = false
@@ -435,10 +456,10 @@
     return ready ? Math.max(hiddenAt(), -window.scrollY) : hiddenAt()
   }
 
-  function flip(fromTouch) {
+  function flip() {
     switchTheme()
     figureScene?.flinch()
-    if (fromTouch) navigator.vibrate?.(8)
+    navigator.vibrate?.(8)
   }
 
   // A short pull down and back, to show a switch that has just clicked (from the button, or a tap).
@@ -547,8 +568,8 @@
     cordPath.setAttribute('d', `${d}L${end.x.toFixed(2)} ${end.y.toFixed(2)}`)
     if (figureScene && shown()) tie = figureScene.draw(dt, { swing: tiltSpeed, pull: out / PULL, pointer: pointerOnFigure(), near: near || Boolean(held) })
     cordFigure.style.transform = `translate(${end.x.toFixed(2)}px, ${end.y.toFixed(2)}px) rotate(${tilt.toFixed(4)}rad) translate(${(-tie.x).toFixed(2)}px, ${(-tie.y).toFixed(2)}px)`
-    // The switch lies over the middle of the figure, and stays where it was taken hold of, so the
-    // pull drags its thumb.
+    // The switch lies over the middle of the figure; held, it stays where it was taken hold of until
+    // the light changes (tickMore moves it then).
     if (buzzSwitch && !held) {
       const mx = BOX / 2 - tie.x
       const my = BOX / 2 - tie.y
@@ -597,23 +618,21 @@
     if (event.currentTarget === cordFigure) event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
     const at = cordPoint(event)
-    held = { id: event.pointerId, touch: event.pointerType !== 'mouse', dx: at.x - end.x, dy: at.y - end.y, x: end.x, y: end.y, from: at, moved: 0, vx: 0, vy: 0, t: event.timeStamp }
-    if (event.currentTarget === buzzSwitch && event.pointerType === 'mouse') held.tick = { from: at.y - buzzAt.y, count: 0, at: 0 }
+    held = { id: event.pointerId, dx: at.x - end.x, dy: at.y - end.y, x: end.x, y: end.y, from: at, moved: 0, vx: 0, vy: 0, t: event.timeStamp, flipped: false }
+    if (event.currentTarget === buzzSwitch) held.tick = { from: at.y - buzzAt.y, mouse: event.pointerType === 'mouse', count: 0, at: 0 }
+    lastHold = held
     handles.forEach((h) => h.classList.add('held'))
     wakeCord()
   }
-  // Safari ticks once its switch's thumb is pulled CLICK below where it was pressed. A pixel and a
-  // half further it surely has, and from the next move on the switch goes with the pointer, on one
-  // side of its middle or, for each tick more, the other: the thumb crosses back and forth, and
-  // then nothing more ticks, however the pull goes on.
+  // Safari's thumb crosses once the pointer is 40% of the track past where it was pressed, then
+  // whenever it crosses the middle. Until the light changes Safari isn't let see the pull (below), so
+  // it can't cross early. As it changes, the switch jumps up a whole length, so the thumb crosses on
+  // that very move, and from then on the switch goes with the pointer. A mouse's thumb then crosses
+  // back and forth for each tick more, and stays across; a finger's just stays across.
   function tickMore(tick, y, time) {
-    const local = y - buzzAt.y
-    if (!tick.count) {
-      if (local >= tick.from + CLICK + 1.5) { tick.count = 1; tick.at = time }
-      return
-    }
-    if (tick.count < TICKS && time - tick.at >= TICK_GAP) { tick.count += 1; tick.at = time }
-    placeSwitch(buzzAt.x, y - BUZZ / 2 + (tick.count % 2 ? -10 : 10))
+    if (!tick.count) { tick.count = 1; tick.at = time } else if (tick.mouse && tick.count < TICKS && time - tick.at >= TICK_GAP) { tick.count += 1; tick.at = time }
+    const local = tick.count === 1 ? tick.from + BUZZ : BUZZ / 2 + (tick.count % 2 ? 10 : -10)
+    placeSwitch(buzzAt.x, y - local)
     buzzSwitch.getBoundingClientRect() // so Safari measures the move against where it is now
   }
   function pullCord(event) {
@@ -628,10 +647,10 @@
     held.y = y
     held.t = event.timeStamp
     held.moved = Math.max(held.moved, Math.hypot(at.x - held.from.x, at.y - held.from.y))
-    if (held.tick) tickMore(held.tick, at.y, event.timeStamp)
     // The switch clicks as the cord comes out past the click, here rather than in a frame, so a
     // quick pull counts however few frames the page draws while it happens.
-    if (!clicked && Math.hypot(x, y - hang) - rest >= CLICK) { clicked = true; flip(held.touch) }
+    if (!clicked && Math.hypot(x, y - hang) - rest >= CLICK) { clicked = true; held.flipped = true; flip() }
+    if (held.tick && held.flipped) tickMore(held.tick, at.y, event.timeStamp)
   }
   function letGo(event) {
     if (!held || event.pointerId !== held.id) return
@@ -641,11 +660,12 @@
     // Safari's switch is made anew after every pull, once its click (if any) is done. Let go off it,
     // or while the new theme spreads, and a mouse's click never reaches it, so it would carry this
     // pull into the next (and tick early, or on a hover); and on a phone it times every hold from
-    // the first touch it ever had. Changing its type renews it, without a tick.
-    if (buzzSwitch) window.setTimeout(() => { buzzSwitch.type = 'text'; buzzSwitch.type = 'checkbox'; buzzSwitch.checked = false }, 50)
+    // the first touch it ever had. Changing its type renews it, without a tick (but not under a hand
+    // that has already taken hold again: that would lose its pull, and it renews it as it lets go).
+    if (buzzSwitch) window.setTimeout(() => { if (held) return; buzzSwitch.type = 'text'; buzzSwitch.type = 'checkbox'; buzzSwitch.checked = false }, 50)
     if (moved < 4 && event.type === 'pointerup') {
       // A tap is a short pull, and it switches as the button does.
-      flip(event.pointerType !== 'mouse')
+      flip()
       tug()
       return
     }
@@ -666,6 +686,20 @@
   }
   // The switch's own click is undone, so it is off for the next pull.
   buzzSwitch?.addEventListener('click', (event) => event.preventDefault())
+  // Until the light changes, Safari isn't let see the pull (tickMore), nor a hover. A finger's
+  // release taps the switch, which an iPhone feels, so that is let through only for a tap (which
+  // switches) or after a pull that switched: if Safari felt the switch already, it doesn't again,
+  // and if the pull was quicker than it (it waits 200 ms into a hold), the release is felt instead.
+  const untilFlipped = (event) => { if (!held?.flipped) event.preventDefault() }
+  buzzSwitch?.addEventListener('mousemove', untilFlipped)
+  buzzSwitch?.addEventListener('touchmove', untilFlipped, { passive: false })
+  buzzSwitch?.addEventListener('touchend', (event) => { if (lastHold && !lastHold.flipped && lastHold.moved >= 4) event.preventDefault() }, { passive: false })
+  // The bulb's switch switches as the button does, as it's let go; Safari's own click, which an
+  // iPhone feels, is undone, and it isn't let follow a finger, so nothing else is felt.
+  bulbSwitch?.addEventListener('pointerup', () => { flip(); tug() })
+  bulbSwitch?.addEventListener('click', (event) => event.preventDefault())
+  bulbSwitch?.addEventListener('mousemove', (event) => event.preventDefault())
+  bulbSwitch?.addEventListener('touchmove', (event) => event.preventDefault(), { passive: false })
   // Point at the bulb (or tab to it) while the cord is reeled up and it comes down to be pulled.
   const showCord = (on) => {
     window.clearTimeout(revealTimer)
@@ -676,7 +710,7 @@
   lamp.addEventListener('pointerleave', () => showCord(false))
   themeButton.addEventListener('focus', () => { if (themeButton.matches(':focus-visible')) showCord(true) })
   themeButton.addEventListener('blur', () => showCord(false))
-  themeButton.addEventListener('click', () => { flip(false); tug() })
+  themeButton.addEventListener('click', () => { flip(); tug() })
   window.addEventListener('pointermove', (event) => { pointer = { x: event.clientX, y: event.clientY } }, { passive: true })
   document.documentElement.addEventListener('pointerleave', () => { pointer = null })
   window.addEventListener('scroll', wakeCord, { passive: true })
@@ -2631,27 +2665,10 @@
   const cmds = $('#cmds')
   $('#copy-cmds').addEventListener('click', async (event) => {
     const button = event.currentTarget
-    const text = $$('.cmd', cmds).map((c) => c.dataset.full || c.textContent).join('\n')
+    const text = $$('.cmd', cmds).map((c) => c.textContent).join('\n')
     try { await navigator.clipboard.writeText(text); button.textContent = 'Copied' } catch { button.textContent = 'Select and copy' }
     window.setTimeout(() => { button.textContent = 'Copy' }, 1600)
   })
-  let typed = false
-  async function typeCommands() {
-    if (typed || reduced) return
-    typed = true
-    const lines = $$('.cmd', cmds)
-    const comment = $('.c', cmds)
-    lines.forEach((line) => { line.dataset.full = line.textContent; line.textContent = '' })
-    comment.style.visibility = 'hidden'
-    for (const line of lines) {
-      line.classList.add('typing')
-      for (let i = 1; i <= line.dataset.full.length; i++) { line.textContent = line.dataset.full.slice(0, i); await new Promise((r) => window.setTimeout(r, 22)) }
-      await new Promise((r) => window.setTimeout(r, 260))
-      line.classList.remove('typing')
-    }
-    await new Promise((r) => window.setTimeout(r, 300))
-    comment.style.visibility = ''
-  }
 
   const SCREENS = {
     home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as a team, a gold Build an agent button beside New team, a box to describe the job in plain words, the three steps Agents, Workflow and Chat, a row of your saved agents each with its little figure and version, and your teams as cards below.', cap: 'Home: start with an agent, then a team. Your agents sit in a row, each with its figure and its version.' },
@@ -2695,7 +2712,6 @@
         if (!entry.isIntersecting) continue
         const target = entry.target
         target.classList.add('seen')
-        if (target.id === 'start') typeCommands()
       }
     }, { rootMargin: '0px 0px -30% 0px' })
     $$('.chapter, .act, #start').forEach((node) => seen.observe(node))

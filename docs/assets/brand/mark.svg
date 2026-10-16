@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="LoomWatch">
+<rect width="512" height="512" rx="112" fill="#08080A"/>
+<path d="M256 44H382A86 86 0 0 1 468 130V382A86 86 0 0 1 382 468H130A86 86 0 0 1 44 382V130A86 86 0 0 1 130 44Z" fill="none" stroke="#D8A93C" stroke-width="10" stroke-linecap="round" stroke-dasharray="16.26 22.45" stroke-dashoffset="8.13"/>
+<rect x="170" y="170" width="52" height="112" rx="26" fill="#F5F3EE"/>
+<rect x="290" y="170" width="52" height="112" rx="26" fill="#F5F3EE"/>
+<path d="M230 330Q256 352 282 330" fill="none" stroke="#E9C46A" stroke-width="28" stroke-linecap="round"/>
+</svg>

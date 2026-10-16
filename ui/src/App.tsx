@@ -7,6 +7,7 @@ import { GettingStarted } from './components/tour/GettingStarted'
 import { Workspace } from './components/Workspace'
 import { type DetectedHarness, fetchHarnesses, isHarnessRunnable } from './lib/harnesses'
 import { fetchCapabilities, type CapabilityInventory } from './lib/library/client'
+import { useNeedsYou } from './lib/story/useNeedsYou'
 import { useTheme } from './lib/theme'
 
 const Connections = lazy(() => import('./components/Connections'))
@@ -98,24 +99,30 @@ function Editor({ initialRunId }: { initialRunId: string | null }) {
 function Agents() {
   const { harnesses, loading } = useHarnesses()
   const capabilities = useCapabilities()
+  // The same poll as the workspace's, so the header's mark and the tab icon say the same here.
+  const { mark } = useNeedsYou()
   const readyApps = useMemo(() => harnesses.filter(isHarnessRunnable).map((harness) => harness.name), [harnesses])
   return (
     <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading your agents…</p>}>
       {/* The guide starts with building an agent, here, then carries on at Home and in a team. */}
       <GettingStarted readyApps={readyApps} appsLoading={loading} />
       <Feedback harnesses={harnesses} />
-      <AgentsPage harnesses={harnesses} harnessesLoading={loading} skills={capabilities.inventory.skills} tools={capabilities.inventory.tools} skillsLoading={capabilities.loading} />
+      <AgentsPage harnesses={harnesses} harnessesLoading={loading} skills={capabilities.inventory.skills} tools={capabilities.inventory.tools} skillsLoading={capabilities.loading} mark={mark} />
     </Suspense>
   )
+}
+
+/** Quests (`/quests`), with the header's mark on the same poll as everywhere else. */
+function Quests() {
+  const { mark } = useNeedsYou()
+  return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading quests…</p>}><QuestsPage mark={mark} /></Suspense>
 }
 
 export default function App() {
   useTheme()
   const { pathname, search } = window.location
   if (pathname === '/agents' || pathname.startsWith('/agents/')) return <Agents />
-  if (pathname === '/quests') {
-    return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading quests…</p>}><QuestsPage /></Suspense>
-  }
+  if (pathname === '/quests') return <Quests />
   if (pathname === '/connections') {
     return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading connections…</p>}><Connections /></Suspense>
   }

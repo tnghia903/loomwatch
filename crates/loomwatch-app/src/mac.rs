@@ -474,9 +474,9 @@ fn append_log(log: &Path, line: &str) {
 const MENU_BAR_WIDTH: u16 = 36;
 const MENU_BAR_HEIGHT: u16 = 44;
 
-/// The loom mark, drawn for the menu bar: two threads woven over and under each other, as in
-/// `ui/public/icon.svg`, shortened to three strokes each so it stays legible this small. Black on
-/// clear, the back thread fainter; macOS tints a template image to suit the menu bar.
+/// The mark, drawn for the menu bar: the tile of `docs/assets/brand/mark-small.svg` in black, with
+/// its face and its running stitch cut out of it so the menu bar shows through them. macOS tints a
+/// template image to suit the menu bar, so the gold has no colour of its own here.
 fn menu_bar_icon() -> Icon {
     Icon::from_rgba(
         menu_bar_pixels(),
@@ -486,32 +486,60 @@ fn menu_bar_icon() -> Icon {
     .expect("menu-bar icon pixels")
 }
 
-/// The mark's RGBA pixels. It is 16 × 14 pt inside the 18 × 22 pt image, about the size Apple
-/// suggests for a menu-bar item, with the rest left clear; the first drawing filled all 22 pt and
-/// was twice as wide as the items beside it.
+/// The mark's RGBA pixels. Its tile is 16 × 16 pt inside the 18 × 22 pt image, about the size Apple
+/// suggests for a menu-bar item, with the rest left clear.
 fn menu_bar_pixels() -> Vec<u8> {
-    const STROKE: f32 = 4.0;
-    // Where the strokes' centre lines end, in pixels: the ink stops 8 px above and below, and
-    // 2 px from each side.
-    let (top, bottom) = (10.0_f32, 34.0_f32);
-    let left = 2.0 + STROKE / 2.0;
-    let step = (f32::from(MENU_BAR_WIDTH) - 2.0 * left) / 3.0;
-    let x = |i: u8| f32::from(i).mul_add(step, left);
-    let front = [(x(0), bottom), (x(1), top), (x(2), bottom), (x(3), top)];
-    let back = [(x(0), top), (x(1), bottom), (x(2), top), (x(3), bottom)];
-    let coverage = |points: &[(f32, f32)], px: f32, py: f32| {
-        let distance = points
-            .windows(2)
-            .map(|pair| segment_distance(pair[0], pair[1], (px, py)))
-            .fold(f32::INFINITY, f32::min);
-        (STROKE / 2.0 + 0.5 - distance).clamp(0.0, 1.0)
+    // The tile is 32 px square, 2 px from each side and 6 px from the top and the bottom.
+    const TILE: f32 = 32.0;
+    const LEFT: f32 = 2.0;
+    const TOP: f32 = 6.0;
+    // mark-small.svg is drawn on a 512 grid; `at` maps one of its points into the image.
+    let scale = TILE / 512.0;
+    let at = |(x, y): (f32, f32)| (x.mul_add(scale, LEFT), y.mul_add(scale, TOP));
+    // Each eye is a 70-wide pill: a line between its two round ends.
+    let eyes = [
+        [at((187.0, 181.0)), at((187.0, 261.0))],
+        [at((325.0, 181.0)), at((325.0, 261.0))],
+    ];
+    // The mouth is a quadratic curve; six straight pieces are smooth at this size.
+    let mouth: Vec<(f32, f32)> = (0..=6_u8)
+        .map(|step| {
+            let t = f32::from(step) / 6.0;
+            let u = 1.0 - t;
+            let along = |from: f32, bend: f32, to: f32| {
+                (u * u).mul_add(from, (2.0 * u * t).mul_add(bend, t * t * to))
+            };
+            at((along(222.0, 256.0, 290.0), along(354.0, 382.0, 354.0)))
+        })
+        .collect();
+    let stitches: Vec<Vec<(f32, f32)>> = stitch_lines()
+        .iter()
+        .map(|line| line.iter().copied().map(at).collect())
+        .collect();
+    let cover = |distance: f32, width: f32| (width * scale / 2.0 + 0.5 - distance).clamp(0.0, 1.0);
+    let on_line = |line: &[(f32, f32)], point: (f32, f32)| {
+        line.windows(2)
+            .map(|pair| segment_distance(pair[0], pair[1], point))
+            .fold(f32::INFINITY, f32::min)
     };
     let mut rgba =
         Vec::with_capacity(usize::from(MENU_BAR_WIDTH) * usize::from(MENU_BAR_HEIGHT) * 4);
     for y in 0..MENU_BAR_HEIGHT {
         for x in 0..MENU_BAR_WIDTH {
-            let (px, py) = (f32::from(x) + 0.5, f32::from(y) + 0.5);
-            let alpha = coverage(&front, px, py).max(0.45 * coverage(&back, px, py));
+            let point = (f32::from(x) + 0.5, f32::from(y) + 0.5);
+            let tile = (0.5 - rounded_square_distance(point, (LEFT, TOP), TILE, 112.0 * scale))
+                .clamp(0.0, 1.0);
+            let cut = eyes
+                .iter()
+                .map(|eye| cover(on_line(eye, point), 70.0))
+                .chain(std::iter::once(cover(on_line(&mouth, point), 40.0)))
+                .chain(
+                    stitches
+                        .iter()
+                        .map(|line| cover(on_line(line, point), 26.0)),
+                )
+                .fold(0.0_f32, f32::max);
+            let alpha = tile * (1.0 - cut);
             // `alpha` is clamped to 0..=1, so this fits a byte.
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let alpha = (alpha * 255.0).round() as u8;
@@ -519,6 +547,85 @@ fn menu_bar_pixels() -> Vec<u8> {
         }
     }
     rgba
+}
+
+/// The running stitch of mark-small.svg, on its 512 grid: 16 stitches round the square inset by 40
+/// with 88-unit corners, each half a step long and the first centred on the top edge, as the SVG's
+/// dash pattern draws them. Each stitch is a short line of points, so the ones on corners bend.
+fn stitch_lines() -> Vec<Vec<(f32, f32)>> {
+    const STITCHES: u8 = 16;
+    let step = stitch_outline().iter().sum::<f32>() / f32::from(STITCHES);
+    (0..STITCHES)
+        .map(|stitch| {
+            let middle = f32::from(stitch) * step;
+            (0..=4_u8)
+                .map(|part| stitch_point((f32::from(part) / 4.0 - 0.5).mul_add(step / 2.0, middle)))
+                .collect()
+        })
+        .collect()
+}
+
+const STITCH_INSET: f32 = 40.0;
+const STITCH_RADIUS: f32 = 88.0;
+
+/// The lengths of the stitch's outline in the order its SVG path draws it, clockwise from the top's
+/// midpoint: half the top edge, then a corner and a side three times, a corner, and the other half.
+fn stitch_outline() -> [f32; 9] {
+    let side = 2.0f32.mul_add(-(STITCH_INSET + STITCH_RADIUS), 512.0);
+    let corner = std::f32::consts::FRAC_PI_2 * STITCH_RADIUS;
+    [
+        side / 2.0,
+        corner,
+        side,
+        corner,
+        side,
+        corner,
+        side,
+        corner,
+        side / 2.0,
+    ]
+}
+
+/// The point `distance` along the stitch's outline.
+fn stitch_point(distance: f32) -> (f32, f32) {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    let pieces = stitch_outline();
+    let (near, far) = (STITCH_INSET, 512.0 - STITCH_INSET);
+    let (start, end) = (near + STITCH_RADIUS, far - STITCH_RADIUS);
+    let mut left = distance.rem_euclid(pieces.iter().sum());
+    let mut piece = 0;
+    while piece < pieces.len() - 1 && left > pieces[piece] {
+        left -= pieces[piece];
+        piece += 1;
+    }
+    let arc = |(cx, cy): (f32, f32), from: f32| {
+        let angle = from + left / STITCH_RADIUS;
+        (
+            STITCH_RADIUS.mul_add(angle.cos(), cx),
+            STITCH_RADIUS.mul_add(angle.sin(), cy),
+        )
+    };
+    match piece {
+        0 => (256.0 + left, near),
+        1 => arc((end, start), -FRAC_PI_2),
+        2 => (far, start + left),
+        3 => arc((end, end), 0.0),
+        4 => (end - left, far),
+        5 => arc((start, end), FRAC_PI_2),
+        6 => (near, end - left),
+        7 => arc((start, start), PI),
+        _ => (start + left, near),
+    }
+}
+
+/// How far `point` lies outside a square with rounded corners (negative inside).
+fn rounded_square_distance(point: (f32, f32), corner: (f32, f32), size: f32, radius: f32) -> f32 {
+    let half = size / 2.0;
+    let (qx, qy) = (
+        (point.0 - corner.0 - half).abs() - (half - radius),
+        (point.1 - corner.1 - half).abs() - (half - radius),
+    );
+    qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - radius
 }
 
 fn segment_distance(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
@@ -610,5 +717,19 @@ mod tests {
         assert!(span(&columns) <= 32, "{} px wide", span(&columns));
         assert!(rows.first().unwrap() >= &6 && rows.last().unwrap() < &(height - 6));
         assert!(columns.first().unwrap() >= &1 && columns.last().unwrap() < &(width - 1));
+    }
+
+    #[test]
+    fn the_menu_bar_mark_shows_its_face_and_stitch_as_holes_in_the_tile() {
+        let pixels = menu_bar_pixels();
+        let alpha = |x: usize, y: usize| pixels[(y * usize::from(MENU_BAR_WIDTH) + x) * 4 + 3];
+        // The middle of each eye, of the mouth and of the stitch on the top edge are clear...
+        assert_eq!(alpha(13, 19), 0, "left eye");
+        assert_eq!(alpha(22, 19), 0, "right eye");
+        assert_eq!(alpha(18, 29), 0, "mouth");
+        assert_eq!(alpha(18, 8), 0, "the stitch in the middle of the top edge");
+        // ...and the tile around them is solid.
+        assert_eq!(alpha(18, 19), 255, "between the eyes");
+        assert_eq!(alpha(18, 33), 255, "below the mouth");
     }
 }

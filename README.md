@@ -1159,7 +1159,7 @@ LoomWatch is not affiliated with, endorsed by or sponsored by Anthropic, OpenAI,
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/loommark-dark.svg">
-    <img src="docs/assets/readme/loommark-light.svg" width="72" alt="The LoomWatch mark: two strands woven across each other.">
+    <img src="docs/assets/readme/loommark-light.svg" width="72" alt="The LoomWatch mark: the crew's face, sewn onto its tile with a gold running stitch.">
   </picture>
   <br>
   <sub>Woven with Rust, React and ACP. Watch every thread.</sub>

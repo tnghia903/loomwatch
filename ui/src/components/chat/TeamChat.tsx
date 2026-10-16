@@ -476,7 +476,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         {!chat.loaded && <p className="tc-loading" role="status">Loading the chat…</p>}
         {chat.loaded && chat.items.length === 0 && chat.pending.length === 0 && !chat.error && (
           <div className="tc-empty">
-            <WeaveMark />
+            <SewnMark />
             {soloAgent ? <>
               <h3>Talk to {soloAgent.name || soloAgent.id}</h3>
               <p>Ask it for real work, the kind you would hand it. It works on it here, as it is on screen, and reads what was said before each time. Nothing here changes a team.</p>
@@ -548,12 +548,20 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   )
 }
 
-/** LoomWatch's mark, woven in when an empty chat opens: the weft first, then the warp across it. */
-function WeaveMark() {
+/** LoomWatch's mark, sewn on when an empty chat opens: the stitch runs round the tile, then the face looks up. */
+function SewnMark() {
+  // The mask reveals the dashed stitch along its own path, so it reads as being sewn rather than fading in.
+  const thread = `tc-sewn-${useId().replace(/[^\w-]/g, '')}`
   return (
-    <svg className="tc-weave" width="72" height="32" viewBox="0 0 102 44" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path className="tc-weave-warp" pathLength={1} d="M6 10 24 34 42 10 60 34 78 10 96 34" />
-      <path className="tc-weave-weft" pathLength={1} d="M6 34 24 10 42 34 60 10 78 34 96 10" />
+    <svg className="tc-sewn" width="56" height="56" viewBox="0 0 512 512" aria-hidden="true">
+      <mask id={thread}><path className="tc-sewn-run" pathLength={1} d="M256 44H382A86 86 0 0 1 468 130V382A86 86 0 0 1 382 468H130A86 86 0 0 1 44 382V130A86 86 0 0 1 130 44Z" fill="none" stroke="#fff" strokeWidth="40" /></mask>
+      <rect width="512" height="512" rx="112" fill="#08080A" />
+      <path mask={`url(#${thread})`} d="M256 44H382A86 86 0 0 1 468 130V382A86 86 0 0 1 382 468H130A86 86 0 0 1 44 382V130A86 86 0 0 1 130 44Z" fill="none" stroke="#D8A93C" strokeWidth="10" strokeLinecap="round" strokeDasharray="16.26 22.45" strokeDashoffset="8.13" />
+      <g className="tc-sewn-face">
+        <rect x="170" y="170" width="52" height="112" rx="26" fill="#F5F3EE" />
+        <rect x="290" y="170" width="52" height="112" rx="26" fill="#F5F3EE" />
+        <path d="M230 330Q256 352 282 330" fill="none" stroke="#E9C46A" strokeWidth="28" strokeLinecap="round" />
+      </g>
     </svg>
   )
 }

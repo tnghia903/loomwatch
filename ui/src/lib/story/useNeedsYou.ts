@@ -4,6 +4,7 @@ import { keepIfSame } from '../keepIfSame'
 import { answerPermission, answerRun, fetchRuns, type PermissionDecision, type RunRecord } from '../runs/client'
 import { teamDisplayName } from '../team-file/client'
 import { useTeamList } from '../team-file/useTeamList'
+import { useLoomMarkState } from './loomMark'
 import { ticketsFrom, type Ticket } from './needsYou'
 
 const DISMISSED_KEY = 'loomwatch.needsYou.dismissed'
@@ -15,7 +16,8 @@ function loadDismissed(): Set<string> {
 /**
  * Polls the run registry for the needs-you tray, and shows the result where the operator looks
  * when they are not looking at LoomWatch: the tab title counts what waits on them, and the tab
- * icon carries a dot — red when something needs them, blue while a team is working.
+ * icon carries a dot — red when something needs them, blue while a team is working. The header's
+ * mark says the same from inside the app (`mark`, lib/story/loomMark.ts).
  */
 export function useNeedsYou() {
   const [records, setRecords] = useState<RunRecord[]>([])
@@ -77,8 +79,9 @@ export function useNeedsYou() {
   }, [refresh])
 
   usePresence(tickets.length, working)
+  const mark = useLoomMarkState(records, tickets.length, working)
   const teamList = useMemo(() => [...names].map(([path, name]) => ({ path, name })), [names])
-  return { records, tickets, working, error, dismiss, answer, answerPermission: answerPermissionTicket, refresh, teams: teamList }
+  return { records, tickets, working, mark, error, dismiss, answer, answerPermission: answerPermissionTicket, refresh, teams: teamList }
 }
 
 /** Tab title and tab icon carry the count, so a waiting team is visible from another tab. */
@@ -92,7 +95,7 @@ function usePresence(waiting: number, working: number) {
     link.dataset.original = original
     if (waiting === 0 && working === 0) { link.href = original; return }
     const dot = waiting > 0 ? '#F2635C' : '#6AB8FF'
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#08080A"/><g fill="none" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"><path d="M96 332 156 180 216 332 276 180 336 332 396 180" stroke="#E9C46A"/><path d="M96 180 156 332 216 180 276 332 336 180 396 332" stroke="#E9C46A" opacity=".34"/></g><circle cx="416" cy="96" r="92" fill="${dot}" stroke="#08080A" stroke-width="24"/></svg>`
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#08080A"/><path d="M256 40H384A88 88 0 0 1 472 128V384A88 88 0 0 1 384 472H128A88 88 0 0 1 40 384V128A88 88 0 0 1 128 40Z" fill="none" stroke="#D8A93C" stroke-width="26" stroke-linecap="round" stroke-dasharray="49.28 49.28" stroke-dashoffset="24.64"/><rect x="152" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/><rect x="290" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/><path d="M222 354Q256 382 290 354" fill="none" stroke="#E9C46A" stroke-width="40" stroke-linecap="round"/><circle cx="416" cy="96" r="92" fill="${dot}" stroke="#08080A" stroke-width="24"/></svg>`
     link.href = `data:image/svg+xml,${encodeURIComponent(svg)}`
   }, [waiting, working])
   useEffect(() => () => {

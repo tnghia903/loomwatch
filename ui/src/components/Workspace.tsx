@@ -84,7 +84,7 @@ import { isDocument } from '../lib/chat/document'
 import type { ReceiptLine } from '../lib/story/receipt'
 import { PermissionPrompt } from './run/PermissionPrompt'
 import { EvidenceNodeCard, MoreEvidenceCard, OutputNodeCard, PromptNodeCard, RunNodeCard } from './run/StoryNodes'
-import { ChipDot } from './ui/glyphs'
+import { ChipDot, LoomMark, LoomWordmark } from './ui/glyphs'
 import { SegmentThumb } from './ui/SegmentThumb'
 import { AttentionAlerts } from './workspace/AttentionAlerts'
 import { BuildHeading } from './workspace/BuildHeading'
@@ -2467,6 +2467,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         // box steps aside while the panel is open: one place to type to Ask (ADR 0043).
         topActions={needsYouTray()}
         runs={needsYou.records}
+        mark={needsYou.mark}
         ask={ask.open ? undefined : { unavailable: ask.unavailable, onAsk: askFor }}
       >
         {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
@@ -2699,7 +2700,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
 
         <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>
           {/* The brand is the way home: every team is one click from the list of all teams. */}
-          <a className="delivery-brand" href="/" aria-label="LoomWatch — all teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}>LoomWatch</a>
+          <a className="delivery-brand" href="/" aria-label="LoomWatch — all teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}><LoomMark size={26} state={needsYou.mark} /><LoomWordmark height={19} /></a>
           <WorkspaceMenu runView={runView} onMemory={() => { clearSelection(); setMemoryOpen(true) }} />
           <div className="needs-you-anchor"><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray(runView ? activeRunId : null)}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
