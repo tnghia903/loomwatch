@@ -9,7 +9,6 @@ import { replyLine } from '../../lib/library/desk'
 import { askedKey, CARD_SLOTS, FIGURE_KEYS, figureMood, READ_SLOTS, TOOL_SLOTS, type FigurePart, type ReadSource } from '../../lib/library/figure'
 import type { FigureChoice } from '../../lib/library/figures'
 import type { RunRecord } from '../../lib/runs/client'
-import { markPattern } from '../../lib/story/mark'
 import { useNow } from '../../lib/useNow'
 import { useSessionEvents } from '../../lib/watch/useSessionEvents'
 import { actsWithoutAsking, ALLOW_SWITCHES } from '../../lib/team-file/allow'
@@ -55,8 +54,6 @@ export interface ByHandProps {
   tools: readonly DetectedCapability[]
   toolsLoading: boolean
   roleField: RefObject<HTMLTextAreaElement | null>
-  /** The id its woven mark is made from, so its scarf is the swatch it wears everywhere. */
-  markId: string
   /** The figure it wears (lib/library/figures.ts). */
   figure: FigureChoice
   /** The run in its chat, if one is on screen: the figure works as its record and events say. */
@@ -97,7 +94,7 @@ const BLOCKS: readonly { part: FigurePart; title: string; where: string }[] = [
   { part: 'reply', title: 'What it hands back', where: 'the tray' },
 ]
 
-export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading, models, modelsError = null, modelName, skills, skillsLoading, roleField, markId, figure, record, hideDoes = false, readOnly = false, tools, toolsLoading, reads, onShowWorkflow, chat, onBuild, cover }: ByHandProps) {
+export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading, models, modelsError = null, modelName, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, tools, toolsLoading, reads, onShowWorkflow, chat, onBuild, cover }: ByHandProps) {
   const chatting = chat !== undefined
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
@@ -118,7 +115,6 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   const shape = { ...instructionShape(draft.instructions), ...(draft.doneWhen.length ? { check: true } : {}) }
   const reply = replyLine(draft.instructions)
   const { mood, events } = useFigureMood(record)
-  const pattern = useMemo(() => markPattern(markId).over, [markId])
   const given = FIGURE_KEYS.filter(({ key }) => draft.allow[key])
   const kept = FIGURE_KEYS.filter(({ key }) => !draft.allow[key])
   const giveKey = (key: AllowSwitch, on: boolean) => set('allow', { ...draft.allow, [key]: on })
@@ -140,7 +136,6 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
   const view = useMemo<BenchView>(() => ({
     look: { name: draft.name, instructions: draft.instructions, app: draft.appId ?? '', model: `${draft.model}|${draft.effort}`, skills: draft.skills, allow: draft.allow },
     figure,
-    pattern,
     does: draft.does,
     appName: harness?.name ?? '',
     hasReply: Boolean(replyLine(draft.instructions)),
@@ -152,7 +147,7 @@ export function ByHand({ draft, set: write, harness, harnesses, harnessesLoading
     // Outside a team its file drawer stays shut: what it reads is given by each team it joins.
     reads: reads ?? [],
     tools: draft.tools,
-  }), [draft, figure, pattern, harness, mood, events, asked, focus, dragging, reads])
+  }), [draft, figure, harness, mood, events, asked, focus, dragging, reads])
 
   /** From the bench: go to the block for what was picked, and start working in it. */
   const goTo = (part: FigurePart) => {

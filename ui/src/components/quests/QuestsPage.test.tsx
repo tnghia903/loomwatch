@@ -16,10 +16,11 @@ const earned: Wardrobe = {
 const card = (name: string) => screen.getByText(name, { selector: '.quest-name b' }).closest('li') as HTMLElement
 
 describe('the Quests page', () => {
-  it('lists every accessory and figure, and how many are earned', () => {
+  it('lists every set of clothes, accessory and figure, and how many are earned', () => {
     render(<QuestsPage wardrobe={earned} />)
     expect(screen.getByRole('heading', { level: 1, name: 'Quests' })).toBeVisible()
-    expect(screen.getByRole('group', { name: 'Your progress' })).toHaveTextContent('2 of 9 earned')
+    expect(screen.getByRole('group', { name: 'Your progress' })).toHaveTextContent('2 of 13 earned')
+    expect(within(screen.getByRole('region', { name: /Clothes/ })).getAllByRole('listitem')).toHaveLength(4)
     expect(within(screen.getByRole('region', { name: /Accessories/ })).getAllByRole('listitem')).toHaveLength(7)
     expect(within(screen.getByRole('region', { name: /Figures/ })).getAllByRole('listitem').filter((item) => item.classList.contains('quest-card'))).toHaveLength(2)
   })
@@ -55,6 +56,6 @@ describe('the Quests page', () => {
     render(<QuestsLink />)
     const link = screen.getByRole('link', { name: /Quests/ })
     expect(link).toHaveAttribute('href', '/quests')
-    expect(await within(link).findByLabelText('2 of 9 earned')).toHaveTextContent('2/9')
+    expect(await within(link).findByLabelText('2 of 13 earned')).toHaveTextContent('2/13')
   })
 })

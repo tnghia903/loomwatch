@@ -16,7 +16,7 @@ export function FigureStill({ figure, className = '', headOnly = false, ...image
   return (
     <span className={`figure-still${className ? ` ${className}` : ''}`} style={{ ...(width ? { width: Number(width) } : {}), ...(height ? { height: Number(height) } : {}), ...style }}>
       <img src={figureStill(figure)} {...image} style={undefined} />
-      <WornOverlay kind={figure.kind} wear={wear} headOnly={headOnly} />
+      <WornOverlay kind={figure.kind} color={figure.color} wear={wear} headOnly={headOnly} />
     </span>
   )
 }

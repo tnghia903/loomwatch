@@ -1,6 +1,6 @@
 # Figure art: earned heads, accessory layers and icons
 
-The two figures quests earn (Scissors and Bobbin) and the pictures of the wardrobe's accessories
+The two figures quests earn (Scissors and Bobbin) and the pictures of the wardrobe's clothes and accessories
 (docs/QUESTS.md) are made here with three.js, in the conventions of `ui/public/agent/workbench.glb`.
 The six starter figures and their stills come from a Blender script kept outside this repository;
 these files only add to them.
@@ -12,7 +12,7 @@ these files only add to them.
 | `merge.py BASE HEADS OUT` | Adds the heads under `head` without re-encoding anything already in the model; refuses one that has them. |
 | `calib.html`, `calib.mjs` | Fit the camera and the arms' pose to the Blender stills' silhouettes (IoU 0.98). The result is `cam.json`. |
 | `render.html`, `still.mjs` | Render a still with `cam.json`: how the earned figures' stills are made. |
-| `layers.html`, `layers.mjs` | Render each accessory on each figure as a layer the size of a still: the figure hides what is behind it and catches its shadow. The accessories come from the app's own `accessoryMeshes.ts`, so the pictures match the 3D bench. Accessories on the face are moved by each still's measured face shift (in `layers.mjs`): the Blender stills' faces sit a few pixels from this model's. |
+| `layers.html`, `layers.mjs` | Render each item on each figure as a layer the size of a still (the tee, in the figure's own colour, once per colour): the figure hides what is behind it and catches its shadow. The accessories come from the app's own `accessoryMeshes.ts`, so the pictures match the 3D bench. Accessories on the face are moved by each still's measured face shift (in `layers.mjs`): the Blender stills' faces sit a few pixels from this model's. |
 | `finish.py` | Turns the layers into WebP in `ui/public/agent/wear`, with an icon and a locked silhouette per accessory. |
 
 Serve this folder with `three` (ui/node_modules/three) and `agent` (ui/public/agent) linked into

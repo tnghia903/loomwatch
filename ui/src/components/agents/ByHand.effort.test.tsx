@@ -17,7 +17,7 @@ const harness: DetectedHarness = {
 
 function renderByHand(draft: Partial<AgentDraft>) {
   const set = vi.fn()
-  render(<ByHand draft={{ ...BLANK_DRAFT, appId: 'claude', ...draft }} set={set} harness={harness} harnesses={[harness]} harnessesLoading={false} models={claude} skills={[]} skillsLoading={false} tools={[]} toolsLoading={false} roleField={createRef()} markId="researcher" figure={{ kind: 'yarn', color: 'sage' }} record={null} />)
+  render(<ByHand draft={{ ...BLANK_DRAFT, appId: 'claude', ...draft }} set={set} harness={harness} harnesses={[harness]} harnessesLoading={false} models={claude} skills={[]} skillsLoading={false} tools={[]} toolsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={null} />)
   return set
 }
 

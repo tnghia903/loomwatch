@@ -29,7 +29,7 @@ describe('what each part of the workbench stands for', () => {
   it('takes the whole figure for the model', () => {
     expect(partOfNode(['yarn_eye_l_mesh', 'yarn_eye_l', 'yarn_face', 'head_yarn', 'head', 'neck', 'body', 'figure'])).toBe('mind')
     expect(partOfNode(['pincushion_pin_1_head', 'pincushion_pin_1', 'head_pincushion', 'head', 'neck', 'body', 'figure'])).toBe('mind')
-    expect(partOfNode(['scarf', 'neck', 'body', 'figure', 'scene'])).toBe('mind')
+    expect(partOfNode(['torso', 'body', 'figure', 'scene'])).toBe('mind')
     expect(partOfNode(['hand_l_mitten', 'hand_l', 'arm_l', 'body', 'figure'])).toBe('mind')
   })
 

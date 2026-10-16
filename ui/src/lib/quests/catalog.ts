@@ -21,8 +21,12 @@ export const AREAS: readonly QuestArea[] = ['prompt', 'context', 'harness', 'gra
 /** The five parts of building agents, as the Quests page names them. */
 export const AREA_NAMES: Record<QuestArea, string> = { prompt: 'Prompt', context: 'Context', harness: 'Harness', graph: 'Team shape', loop: 'Checking' }
 
-/** Accessories, in the order they are layered on a figure: what sits behind first. */
-export const ACCESSORIES = ['band', 'chalk', 'patch', 'pin', 'monocle', 'cushion', 'shuttle'] as const
+/** Clothes from the wardrobe: a figure wears one at a time, under everything else. */
+export const GARMENTS = ['tee', 'overalls', 'apron', 'vest'] as const
+export type Garment = (typeof GARMENTS)[number]
+
+/** Everything a figure can wear, in the order it is layered: what sits behind first, so clothes first. */
+export const ACCESSORIES = [...GARMENTS, 'band', 'chalk', 'patch', 'pin', 'monocle', 'cushion', 'shuttle'] as const
 export type Accessory = (typeof ACCESSORIES)[number]
 
 /** Figures a quest earns (lib/library/figures.ts draws them once earned). */
@@ -56,10 +60,22 @@ export const QUESTS: readonly Quest[] = [
     earnedWhen: 'A check step’s first look at an agent’s work finds every item of its Done when met, in a run that finished.',
   },
   {
+    item: 'vest', reward: 'accessory', area: 'prompt', name: 'Crew vest', practice: 'Ask, don’t guess',
+    hint: 'Tell an agent to ask you when the brief leaves a real choice open.',
+    why: 'One question at the right moment costs less than a whole run built on the wrong guess.',
+    earnedWhen: 'An agent asks you a question, you answer it, and the run finishes.',
+  },
+  {
     item: 'band', reward: 'accessory', area: 'context', name: 'Tailor’s tape', practice: 'Scoped context',
     hint: 'Give an agent only the folders its job needs, not a whole drive.',
     why: 'A model recalls less the more it holds, so the few folders a job needs beat a whole drive.',
     earnedWhen: 'An agent is given at least one folder to read, and reads from every folder it was given, in a run that finished.',
+  },
+  {
+    item: 'apron', reward: 'accessory', area: 'context', name: 'Maker’s apron', practice: 'Reusable skills',
+    hint: 'Give an agent a skill its job needs, so it opens the know-how only when the work calls for it.',
+    why: 'A skill keeps a procedure out of the prompt until the job calls for it, so the agent reads it when it matters.',
+    earnedWhen: 'An agent opens a skill it was given, in a run that finished.',
   },
   {
     item: 'pin', reward: 'accessory', area: 'harness', name: 'Safety-pin clip', practice: 'Least privilege',
@@ -78,6 +94,18 @@ export const QUESTS: readonly Quest[] = [
     hint: 'Let a lead hand one clear question to a teammate instead of doing everything itself.',
     why: 'A lead that hands a teammate one clear question gets a focused answer back, instead of doing every part itself.',
     earnedWhen: 'One agent asks another a question over the Team Bus and gets an answer, in a run that finished.',
+  },
+  {
+    item: 'overalls', reward: 'accessory', area: 'graph', name: 'Work overalls', practice: 'Parallel work',
+    hint: 'Have a lead dispatch two independent parts of a job to two teammates at once.',
+    why: 'Independent parts done side by side finish sooner, and each teammate holds only its own part.',
+    earnedWhen: 'One agent dispatches work to two teammates who work on it at the same time, and both finish, in a run that finished.',
+  },
+  {
+    item: 'tee', reward: 'accessory', area: 'graph', name: 'Plain tee', practice: 'Chain clear steps',
+    hint: 'Split a job into three or more stages, each handing its result to the next.',
+    why: 'Each stage does one smaller job well, and every handover shows exactly what passed between them.',
+    earnedWhen: 'A pipeline of three or more stages finishes, each stage after the first starting from what it was handed.',
   },
   {
     item: 'monocle', reward: 'accessory', area: 'loop', name: 'Button monocle', practice: 'Evaluator–optimizer loop',
@@ -107,6 +135,10 @@ export const QUESTS: readonly Quest[] = [
 
 export function questFor(item: string): Quest | undefined {
   return QUESTS.find((quest) => quest.item === item)
+}
+
+export function isGarment(value: unknown): value is Garment {
+  return typeof value === 'string' && (GARMENTS as readonly string[]).includes(value)
 }
 
 export function isAccessory(value: unknown): value is Accessory {

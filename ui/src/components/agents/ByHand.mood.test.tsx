@@ -28,7 +28,7 @@ const run = (status: RunRecord['status'], eventCount: number | null = null): Run
 })
 
 function bench(record: RunRecord | null) {
-  return <ByHand draft={{ ...BLANK_DRAFT, name: 'Reader', instructions: 'Check it.', appId: 'claude' }} set={vi.fn()} harness={harness} harnesses={[harness]} harnessesLoading={false} models={null} skills={[]} skillsLoading={false} tools={[]} toolsLoading={false} roleField={createRef()} markId="reader" figure={{ kind: 'yarn', color: 'sage' }} record={record} />
+  return <ByHand draft={{ ...BLANK_DRAFT, name: 'Reader', instructions: 'Check it.', appId: 'claude' }} set={vi.fn()} harness={harness} harnesses={[harness]} harnessesLoading={false} models={null} skills={[]} skillsLoading={false} tools={[]} toolsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={record} />
 }
 
 beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); shown.view = null; stream.asked = []; stream.count = 0 })

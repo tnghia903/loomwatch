@@ -2,7 +2,10 @@ import { chromium } from 'playwright'
 import { readFileSync, mkdirSync } from 'node:fs'
 const cam = readFileSync('cam.json', 'utf8').trim()
 const shift = { yarn: [4.2, 8.7], spool: [4.2, 8.5], button: [0.7, 1.3], thimble: [4.9, 8.6], pincushion: [4.6, 8.8], cone: [4.6, 8.9], scissors: [0, 0], bobbin: [0, 0] }
-const items = ['band', 'chalk', 'patch', 'pin', 'monocle', 'cushion', 'shuttle']
+const items = ['tee', 'overalls', 'apron', 'vest', 'band', 'chalk', 'patch', 'pin', 'monocle', 'cushion', 'shuttle']
+// Clothes in the figure's own colour (a tee is a deeper shade of it) get a layer per colour.
+const inColor = new Set(['tee'])
+const colors = { clay: '#E3A386', butter: '#F1D488', sage: '#9FBF9E', sky: '#9EC3E6', lilac: '#BDB0E6', rose: '#EBB3C0', oat: '#E8DFCF' }
 mkdirSync('wear', { recursive: true })
 const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
 const shot = async (query, size, out) => {
@@ -15,7 +18,9 @@ const shot = async (query, size, out) => {
 }
 const q = (o) => Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
 for (const kind of Object.keys(shift)) for (const item of items) {
-  await shot(q({ mode: 'layer', kind, wear: item, cam, nudge: JSON.stringify(shift[kind]), size: 320, ss: 2 }), 320, `wear/${kind}-${item}.png`)
+  const base = { mode: 'layer', kind, wear: item, cam, nudge: JSON.stringify(shift[kind]), size: 320, ss: 2 }
+  if (!inColor.has(item)) await shot(q(base), 320, `wear/${kind}-${item}.png`)
+  else for (const [name, hex] of Object.entries(colors)) await shot(q({ ...base, color: hex }), 320, `wear/${kind}-${item}-${name}.png`)
 }
 await b.close()
 console.log('done')

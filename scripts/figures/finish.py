@@ -14,8 +14,10 @@ for path in sorted(glob.glob('wear/*-*.png')):
         continue
     Image.open(path).convert('RGBA').save(os.path.join(OUT, name.replace('.png', '.webp')), 'WEBP', quality=90, method=6)
 base = Image.open(STILL).convert('RGBA')
-for item in ['band', 'chalk', 'patch', 'pin', 'monocle', 'cushion', 'shuttle']:
-    layer = Image.open(f'wear/yarn-{item}.png').convert('RGBA')
+# Clothes in the figure's own colour have a layer per colour; the icon is the sky one, on the sky still.
+IN_COLOR = {'tee'}
+for item in ['tee', 'overalls', 'apron', 'vest', 'band', 'chalk', 'patch', 'pin', 'monocle', 'cushion', 'shuttle']:
+    layer = Image.open(f'wear/yarn-{item}{"-sky" if item in IN_COLOR else ""}.png').convert('RGBA')
     pixels = np.asarray(layer).copy()
     # The accessory's own pixels: opaque enough, and not the black of its shadow.
     own = (pixels[:, :, 3] > 110) & (pixels[:, :, :3].max(axis=2) > 40)

@@ -1,8 +1,8 @@
 import { CanvasTexture, RepeatWrapping, SRGBColorSpace, type Texture } from 'three'
 
 /**
- * Pictures drawn on the workbench at run time: the agent's own swatch wound on the figure's spool,
- * the words on its key tags and the recipe cards. They are canvases, so they always show the real
+ * Pictures drawn on the workbench at run time: the thread wound on the figure's head, the words on
+ * its key tags and the recipe cards. They are canvases, so they always show the real
  * setting. The scene keeps its own colours in both themes, like a photograph of a real bench, and
  * draws in the app's own fonts. The words meant to be read (the nameplate, the job sheet, the
  * laptop's lid) are not painted: painted words blur once the bench is drawn small, so AgentFigure
@@ -11,8 +11,6 @@ import { CanvasTexture, RepeatWrapping, SRGBColorSpace, type Texture } from 'thr
 
 const BONE = '#EFEAE0'
 const INK = '#17150F'
-const STONE = '#A9A59C'
-const GOLD = '#D8A93C'
 
 function canvas(width: number, height: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const element = document.createElement('canvas')
@@ -70,50 +68,6 @@ function wrap(context: CanvasRenderingContext2D, text: string, width: number, ma
     if (lines.length >= max) return lines
   }
   return lines
-}
-
-/**
- * The agent's mark, tiled around its spool: at each crossing either the gold weft or the grey warp
- * floats on top, exactly as on its swatch everywhere else (AgentMark). Returns the picture and a
- * matching height map, so the floats stand up from the spool.
- */
-export function swatchTextures(over: readonly boolean[]): { map: Texture; bump: Texture } {
-  const columns = 36
-  const rows = 9
-  const cell = 32
-  const [colour, paint] = canvas(columns * cell, rows * cell)
-  const [height, lift] = canvas(columns * cell, rows * cell)
-  paint.fillStyle = '#5E5A52'
-  paint.fillRect(0, 0, colour.width, colour.height)
-  lift.fillStyle = '#000'
-  lift.fillRect(0, 0, height.width, height.height)
-  paint.lineCap = 'round'
-  lift.lineCap = 'round'
-  for (let row = 0; row < rows; row += 1) {
-    for (let column = 0; column < columns; column += 1) {
-      const weft = over[(row % 3) * 3 + (column % 3)]
-      const x = column * cell + cell / 2
-      const y = row * cell + cell / 2
-      const half = cell * 0.4
-      for (const [context, stroke, width] of [[paint, weft ? GOLD : STONE, cell * 0.42], [lift, '#fff', cell * 0.36]] as const) {
-        context.strokeStyle = stroke
-        context.lineWidth = width
-        context.beginPath()
-        if (weft) { context.moveTo(x - half, y); context.lineTo(x + half, y) } else { context.moveTo(x, y - half); context.lineTo(x, y + half) }
-        context.stroke()
-      }
-      // A thin shine along each float, like spun thread catching the light.
-      paint.strokeStyle = 'rgba(255, 255, 255, 0.18)'
-      paint.lineWidth = cell * 0.08
-      paint.beginPath()
-      if (weft) { paint.moveTo(x - half + 3, y - cell * 0.08); paint.lineTo(x + half - 3, y - cell * 0.08) } else { paint.moveTo(x - cell * 0.08, y - half + 3); paint.lineTo(x - cell * 0.08, y + half - 3) }
-      paint.stroke()
-    }
-  }
-  const map = texture(colour)
-  const bump = texture(height, false)
-  for (const made of [map, bump]) { made.wrapS = RepeatWrapping }
-  return { map, bump }
 }
 
 /** The pegboard: obsidian with the canvas's dot grid, and one gold thread across it. */

@@ -21,9 +21,8 @@ import type { AllowSwitch } from '../team-file/types'
  * - `keys`: keys on the pegboard hooks go ahead without asking; the ones in your dish ask you first.
  * - `reply`: the tray where what it hands back lands.
  *
- * Its scarf is woven in its mark (lib/story/mark.ts), the swatch it wears on the canvas. Its
- * motion is a reaction to a change you just made, or what the run in its chat says: every pose is
- * something the run shows, never a feeling it guesses.
+ * Its motion is a reaction to a change you just made, or what the run in its chat says: every pose
+ * is something the run shows, never a feeling it guesses.
  */
 export type FigurePart = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'tools' | 'keys' | 'reply'
 
