@@ -670,8 +670,8 @@ The Library recognizes these integrations:
 
 | Agent app | Connection used by LoomWatch |
 | --- | --- |
-| Claude | `claude-agent-acp`, with an `npx` bridge fallback |
-| Codex | `codex-acp`, with an `npx` bridge fallback |
+| Claude | `claude-agent-acp`: LoomWatch installs its own copy once |
+| Codex | `codex-acp`: LoomWatch installs its own copy once |
 | Gemini | `gemini --acp` (API key sign-in only; untested) |
 | OpenCode | `opencode acp` |
 | Hermes | `hermes-acp` |
@@ -680,9 +680,13 @@ The Library recognizes these integrations:
 LoomWatch also recognizes pi, but cannot run it: pi has no ACP connection. Use its models through
 OpenCode instead.
 
-Bridge fallbacks may download a package on first use. Availability in the Library means
-the required commands were found; it does not confirm that your account is signed in or
-has model access. Delegation and session-resume support vary by integration.
+Claude and Codex connect through bridges that run on Node.js. The first time LoomWatch sees one of
+these apps, it installs that bridge once into its own folder, from versions it was tested with, and
+from then on starts it directly: an agent starts in about a fifth of a second. If this computer has
+no Node.js 22 or newer, LoomWatch downloads its own copy from nodejs.org (about 50 MB) and checks it
+before use. Availability in the Library means the required commands were found; it does not confirm
+that your account is signed in or has model access. Delegation and session-resume support vary by
+integration.
 
 > [!IMPORTANT]
 > Provider authentication stays with your agent app. Real runs use your existing provider account

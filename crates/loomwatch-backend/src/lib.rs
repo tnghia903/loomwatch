@@ -12,6 +12,7 @@ pub mod chat;
 pub mod chosen_knowledge;
 pub mod composer;
 pub mod config;
+pub mod connectors;
 pub mod control;
 pub mod delivery;
 mod files;

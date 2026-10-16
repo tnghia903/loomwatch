@@ -28,6 +28,9 @@ sha2 = "0.10"
 base64 = "0.22"
 url = "2.5"
 serde_yaml = "0.9.34"
+# LoomWatch's own Node.js download (connectors.rs) is a .tar.gz.
+flate2 = "1.1"
+tar = "0.4"
 sqlx = { version = "0.8.6", default-features = false, features = ["json", "macros", "migrate", "postgres", "runtime-tokio-rustls"] }
 tokio = { version = "1.47", features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 uuid = { version = "1.18", features = ["v4"] }

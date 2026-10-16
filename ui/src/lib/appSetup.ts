@@ -74,6 +74,9 @@ export type AppSetupState =
    * and runs start apps from the PATH LoomWatch started with (the daemon's `needsRestart`).
    */
   | { kind: 'restart' }
+  /** LoomWatch is installing the app's connector (once); `step` says what it is doing. */
+  | { kind: 'preparing'; step: string }
+  | { kind: 'connector_failed'; reason: string }
   | { kind: 'ready' }
 
 /** Judge one app from what the daemon reported. */
@@ -81,6 +84,12 @@ export function appSetupState(harness: DetectedHarness | undefined, checking: bo
   if (!harness) return { kind: 'missing' }
   if (checking) return { kind: 'checking' }
   if (harness.acpAvailable === false) return { kind: 'no_bridge', reason: harness.unavailableReason ?? `${harness.name} can’t be started by LoomWatch.` }
+  // An app already checked through npx works while its connector installs in the background.
+  const connector = harness.connector
+  if (connector && connector.state !== 'ready' && harness.health !== 'ok') {
+    if (connector.state === 'failed') return { kind: 'connector_failed', reason: connector.reason }
+    return { kind: 'preparing', step: connector.state === 'preparing' ? connector.step : 'Waiting to start' }
+  }
   if (harness.health === 'error') {
     if (harness.healthCause === 'signed_out') return { kind: 'signed_out', reason: harness.healthReason ?? `${harness.name} isn’t signed in.` }
     if (harness.healthCause === 'needs_api_key') return { kind: 'needs_key', reason: harness.healthReason ?? `${harness.name} needs an API key to work with other apps.` }
@@ -97,5 +106,5 @@ export function appSetupState(harness: DetectedHarness | undefined, checking: bo
  * apply_harness_health).
  */
 export function checkSignature(harness: DetectedHarness): string {
-  return [harness.executablePath, harness.spawn.cmd, ...harness.spawn.args].join('\u0000')
+  return [harness.executablePath, harness.connector?.state ?? '', harness.spawn.cmd, ...harness.spawn.args].join('\u0000')
 }

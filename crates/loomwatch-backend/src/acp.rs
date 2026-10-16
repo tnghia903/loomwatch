@@ -236,6 +236,49 @@ fn withheld_app_config(spec: &ProcessSpec) -> Result<Option<String>> {
         .context("cannot start Codex without its plugins and apps")
 }
 
+/// What actually starts a [`ProcessSpec`].
+struct StartCommand {
+    program: std::ffi::OsString,
+    args: Vec<String>,
+    /// The Node.js folder to put first on the child's `PATH`, for a bridge started directly.
+    node_dir: Option<PathBuf>,
+}
+
+/// `LoomWatch`'s own install of a Node bridge when the spec asks for it through `npx -y`
+/// (`crate::connectors`): about a second faster to start and 140 MB lighter than npx. Otherwise
+/// the command as written, including while the install is still under way and npx can stand in.
+fn start_command(spec: &ProcessSpec) -> Result<StartCommand> {
+    let as_written = || StartCommand {
+        program: spec.cmd.clone().into(),
+        args: spec.args.clone(),
+        node_dir: None,
+    };
+    let Some(connectors) = crate::connectors::installed() else {
+        return Ok(as_written());
+    };
+    match connectors.resolve(&spec.cmd, &spec.args) {
+        crate::connectors::Resolved::Direct {
+            program,
+            args,
+            node_dir,
+        } => Ok(StartCommand {
+            program: program.into_os_string(),
+            args,
+            node_dir: Some(node_dir),
+        }),
+        crate::connectors::Resolved::AsWritten => Ok(as_written()),
+        crate::connectors::Resolved::NotReady { app, name } => {
+            connectors.prepare_in_background(app);
+            if connectors.npx_available() {
+                return Ok(as_written());
+            }
+            bail!(
+                "{name} isn't ready yet. LoomWatch is getting it ready, which happens once and takes a minute or two. Try again shortly."
+            )
+        }
+    }
+}
+
 /// Owns one ACP child and both sides of its line-delimited JSON-RPC stream.
 pub struct AcpProcess {
     child: Child,
@@ -286,7 +329,8 @@ impl AcpProcess {
     ///
     /// Returns an error when the process cannot be spawned or its streams are unavailable.
     pub fn spawn(spec: &ProcessSpec) -> Result<Self> {
-        let mut command = Command::new(&spec.cmd);
+        let start = start_command(spec)?;
+        let mut command = Command::new(&start.program);
         for (key, _) in std::env::vars_os() {
             if let Some(key) = key.to_str()
                 && daemon_only(key, spec)
@@ -295,13 +339,24 @@ impl AcpProcess {
             }
         }
         command
-            .args(&spec.args)
+            .args(&start.args)
             .envs(&spec.env)
             .current_dir(&spec.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        if let Some(node_dir) = &start.node_dir {
+            let path = spec
+                .env
+                .get("PATH")
+                .map(std::ffi::OsString::from)
+                .or_else(|| std::env::var_os("PATH"));
+            command.env(
+                "PATH",
+                crate::connectors::path_with(node_dir, path.as_deref()),
+            );
+        }
         if let Some(config) = withheld_app_config(spec)? {
             command.env(CODEX_CONFIG, config);
         }

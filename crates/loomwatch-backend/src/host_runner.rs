@@ -489,6 +489,7 @@ mod tests {
             health_detail: None,
             health_cause: None,
             needs_restart: false,
+            connector: None,
             spawn: HarnessSpawn {
                 cmd: command.to_owned(),
                 args: vec!["acp".to_owned()],

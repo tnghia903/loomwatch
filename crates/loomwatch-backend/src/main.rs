@@ -171,6 +171,10 @@ async fn main() -> Result<()> {
             let state_dir = state_dir.or_else(default_state_dir).context(
                 "set LOOMWATCH_STATE_DIR: there is no home folder to keep LoomWatch's state in",
             )?;
+            // Claude's and Codex's bridges, installed once and started directly instead of
+            // through npx; installing the ones this computer's apps need starts now, in the
+            // background.
+            loomwatch_backend::connectors::init(&state_dir).prepare_detected();
             let approvals =
                 loomwatch_backend::approvals::TeamApprovals::open(&state_dir, &teams_root)
                     .with_context(|| {

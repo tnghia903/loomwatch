@@ -1,0 +1,8 @@
+{
+  "name": "loomwatch-connector-codex",
+  "private": true,
+  "description": "The ACP bridge LoomWatch starts Codex through, installed once with this lockfile.",
+  "dependencies": {
+    "@agentclientprotocol/codex-acp": "2.1.1"
+  }
+}

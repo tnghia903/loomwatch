@@ -312,6 +312,10 @@ pub struct DetectedHarness {
     /// (`CommandStatus::OutsidePath`, judged here the same way, without starting anything).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub needs_restart: bool,
+    /// Where `LoomWatch`'s own copy of this app's ACP bridge stands, for an app started through
+    /// one (`crate::connectors`). Absent for an app that brings its own bridge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<crate::connectors::ConnectorStatus>,
     pub spawn: HarnessSpawn,
 }
 
@@ -633,6 +637,10 @@ fn router_with(
     Ok(Router::new()
         .route("/api/harnesses", get(get_harnesses))
         .route("/api/harnesses/{id}/models", get(get_harness_models))
+        .route(
+            "/api/harnesses/{id}/prepare",
+            axum::routing::post(post_harness_prepare),
+        )
         .route("/api/commands", get(get_commands))
         .route("/api/capabilities", get(get_capabilities))
         .route("/api/capabilities/{id}", get(get_capability_details))
@@ -913,6 +921,30 @@ async fn get_harnesses(State(state): State<ApiState>) -> Json<HarnessReport> {
     Json(report)
 }
 
+/// Start installing `LoomWatch`'s own copy of an app's bridge (`crate::connectors`), so its first
+/// run starts at once. Answers at once with where it stands; `/api/harnesses` reports the rest.
+async fn post_harness_prepare(
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<crate::connectors::ConnectorStatus>, ApiError> {
+    let connectors = crate::connectors::installed().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::CONFLICT,
+            "this LoomWatch keeps no connectors".to_owned(),
+        )
+    })?;
+    if connectors.status(&id).is_none() {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            format!("{id} needs no connector"),
+        ));
+    }
+    connectors.prepare_in_background(&id);
+    connectors
+        .status(&id)
+        .map(Json)
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, format!("{id} needs no connector")))
+}
+
 async fn get_harness_models(
     State(state): State<ApiState>,
     AxumPath(id): AxumPath<String>,
@@ -927,6 +959,24 @@ async fn get_harness_models(
         return Err(ApiError::new(
             StatusCode::CONFLICT,
             format!("{} does not have an available ACP adapter", harness.name),
+        ));
+    }
+    // Still installing its connector, with no npx to stand in: nothing to check yet, and no
+    // verdict is recorded, so the check runs as soon as the connector is ready.
+    if let Some(connectors) = crate::connectors::installed()
+        && harness
+            .connector
+            .as_ref()
+            .is_some_and(|status| *status != crate::connectors::ConnectorStatus::Ready)
+        && !connectors.npx_available()
+    {
+        connectors.prepare_in_background(&harness.id);
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            format!(
+                "{} isn't ready yet: LoomWatch is getting it ready.",
+                harness.name
+            ),
         ));
     }
 
@@ -2460,6 +2510,17 @@ pub(crate) fn known_app_name(spawn: &crate::config::SpawnConfig) -> Option<&'sta
     None
 }
 
+/// The `npx` package and version `LoomWatch` starts `app`'s bridge from, when it has one.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn fallback_package(app: &str) -> Option<&'static str> {
+    HARNESSES
+        .iter()
+        .find(|spec| spec.id == app)
+        .and_then(|spec| spec.acp)
+        .and_then(|bridge| bridge.fallback_package)
+}
+
 /// Every id in the catalog, so the UI need not keep a second copy of the vendor list.
 #[must_use]
 pub fn known_harness_ids() -> Vec<String> {
@@ -2486,6 +2547,7 @@ fn detected(
         health_detail: None,
         health_cause: None,
         needs_restart: false,
+        connector: None,
         spawn: HarnessSpawn {
             cmd: command.to_owned(),
             args: args.iter().map(|arg| (*arg).to_owned()).collect(),
@@ -2507,8 +2569,18 @@ fn detected(
         return found(bridge.command, bridge.args, true, None);
     }
     let npx_available = find_executable(search_path, "npx").is_some();
+    // LoomWatch installs this bridge itself and starts it directly (`crate::connectors`). The
+    // spawn still says `npx -y`, so a team file stays portable; a computer without Node.js gets
+    // LoomWatch's own.
+    let connector = bridge
+        .fallback_package
+        .and(crate::connectors::installed())
+        .and_then(|connectors| connectors.status(spec.id));
     match bridge.fallback_package {
-        Some(package) if npx_available => found("npx", &["-y", package], true, None),
+        Some(package) if npx_available || connector.is_some() => DetectedHarness {
+            connector,
+            ..found("npx", &["-y", package], true, None)
+        },
         Some(package) => found(
             bridge.command,
             bridge.args,
@@ -3775,6 +3847,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
             health_detail: None,
             health_cause: None,
             needs_restart: false,
+            connector: None,
             spawn: HarnessSpawn {
                 cmd: "gemini".to_owned(),
                 args: vec!["--acp".to_owned()],

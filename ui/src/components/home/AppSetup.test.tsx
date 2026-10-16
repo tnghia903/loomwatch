@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { DetectedHarness } from '../../lib/harnesses'
+import type { ConnectorStatus, DetectedHarness } from '../../lib/harnesses'
 import { AppSetup } from './AppSetup'
 
 const opencode: DetectedHarness = { id: 'opencode', name: 'OpenCode', command: 'opencode', executablePath: '/home/u/.opencode/bin/opencode', acpAvailable: true, spawn: { cmd: 'opencode', args: ['acp'] } }
@@ -23,9 +23,14 @@ function fakeDaemon() {
     needsRestart: new Set<string>(),
     modelCalls: [] as string[],
     checked: new Set<string>(),
+    /** Each app's connector, for an app LoomWatch starts through one. */
+    connectors: new Map<string, ConnectorStatus>(),
+    prepareCalls: [] as string[],
   }
   const listed = () => daemon.installed.map((installed): DetectedHarness => {
-    const harness = daemon.needsRestart.has(installed.id) ? { ...installed, needsRestart: true } : installed
+    const restarted = daemon.needsRestart.has(installed.id) ? { ...installed, needsRestart: true } : installed
+    const connector = daemon.connectors.get(installed.id)
+    const harness = connector ? { ...restarted, connector } : restarted
     if (!daemon.checked.has(harness.id)) return harness
     const verdict = daemon.verdicts.get(harness.id) ?? 'ok'
     if (verdict === 'ok') return { ...harness, health: 'ok' }
@@ -35,6 +40,12 @@ function fakeDaemon() {
   })
   const fetchMock = vi.fn((url: string) => {
     if (url === '/api/harnesses') return respond({ harnesses: listed(), searchedPath: [], knownIds: [] })
+    const prepare = /^\/api\/harnesses\/([^/]+)\/prepare$/.exec(url)
+    if (prepare) {
+      daemon.prepareCalls.push(prepare[1])
+      daemon.connectors.set(prepare[1], { state: 'preparing', step: 'Downloading Node.js (about 50 MB, once)' })
+      return respond(daemon.connectors.get(prepare[1]))
+    }
     const models = /^\/api\/harnesses\/([^/]+)\/models$/.exec(url)
     if (models) {
       daemon.modelCalls.push(models[1])
@@ -81,6 +92,52 @@ describe('AppSetup', () => {
     expect(within(openCodeCard).getByText('No account needed')).toBeInTheDocument()
     expect(within(openCodeCard).getByText(/That’s all/)).toBeInTheDocument()
     expect(within(openCodeCard).getByRole('button', { name: 'Copy curl -fsSL https://opencode.ai/install | bash' })).toBeInTheDocument()
+  })
+
+  it('gets an app’s connector ready before checking it, and checks it once it is in', async () => {
+    const daemon = fakeDaemon()
+    daemon.installed = [claude]
+    daemon.connectors.set('claude', { state: 'needed' })
+    renderSetup([], true)
+    fireEvent(window, new Event('focus'))
+
+    // Until the daemon answers, the card says it is waiting; then what the daemon is doing.
+    await waitFor(() => expect(card(/^Claude Code: Getting ready/)).toHaveTextContent('Downloading Node.js (about 50 MB, once). LoomWatch does this once, so Claude Code starts quickly from then on.'))
+    expect(daemon.prepareCalls).toEqual(['claude'])
+    // Starting Claude before its connector is in would only fail.
+    expect(daemon.modelCalls).toEqual([])
+
+    daemon.connectors.set('claude', { state: 'ready' })
+    fireEvent(window, new Event('focus'))
+    await waitFor(() => expect(card(/^Claude Code: Ready/)).toBeInTheDocument())
+    expect(daemon.modelCalls).toEqual(['claude'])
+    expect(daemon.prepareCalls).toEqual(['claude'])
+  })
+
+  it('says why a connector couldn’t be installed, and tries again on request', async () => {
+    const daemon = fakeDaemon()
+    daemon.installed = [claude]
+    daemon.connectors.set('claude', { state: 'failed', reason: 'couldn’t download Node.js' })
+    renderSetup([], true)
+    fireEvent(window, new Event('focus'))
+
+    const failed = await waitFor(() => card(/^Claude Code: Couldn’t get ready/))
+    expect(within(failed).getByRole('alert')).toHaveTextContent('LoomWatch couldn’t get Claude Code ready: couldn’t download Node.js')
+    expect(daemon.prepareCalls).toEqual([])
+    fireEvent.click(within(failed).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(card(/^Claude Code: Getting ready/)).toBeInTheDocument())
+    expect(daemon.prepareCalls).toEqual(['claude'])
+    expect(daemon.modelCalls).toEqual([])
+  })
+
+  it('leaves an app that already works through npx alone while its connector installs', async () => {
+    const daemon = fakeDaemon()
+    daemon.installed = [claude]
+    daemon.connectors.set('claude', { state: 'preparing', step: 'Installing what Claude needs (once)' })
+    daemon.checked.add('claude')
+    renderSetup([], true)
+    fireEvent(window, new Event('focus'))
+    await waitFor(() => expect(card(/^Claude Code: Ready/)).toBeInTheDocument())
   })
 
   it('notices an install on its own, checks the app once, and says it is ready', async () => {

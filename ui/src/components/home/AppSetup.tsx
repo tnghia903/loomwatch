@@ -3,7 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 
 import { APP_SETUP_GUIDES, appSetupState, checkSignature, type AppSetupGuide, type AppSetupState } from '../../lib/appSetup'
 import { listNames } from '../../lib/format'
-import { fetchHarnesses, fetchHarnessModels, type DetectedHarness } from '../../lib/harnesses'
+import { fetchHarnesses, fetchHarnessModels, prepareHarness, type DetectedHarness } from '../../lib/harnesses'
 import { ChipDot, type ChipState } from '../ui/glyphs'
 
 /** How often the panel asks the daemon what is installed. A PATH scan, never an app start. */
@@ -33,6 +33,8 @@ const STATUS: Record<AppSetupState['kind'], { chip: ChipState; text: string }> =
   needs_key: { chip: 'incomplete', text: 'Needs an API key' },
   failed: { chip: 'failed', text: 'Can’t start' },
   restart: { chip: 'incomplete', text: 'Restart LoomWatch' },
+  preparing: { chip: 'saving', text: 'Getting ready…' },
+  connector_failed: { chip: 'failed', text: 'Couldn’t get ready' },
   ready: { chip: 'saved', text: 'Ready' },
 }
 
@@ -64,7 +66,7 @@ function CommandLine({ command }: { command: string }) {
  */
 type CardGuide = Pick<AppSetupGuide, 'id' | 'name'> & Partial<AppSetupGuide>
 
-function AppCard({ guide, state, connector, onCheck }: { guide: CardGuide; state: AppSetupState; connector: boolean; onCheck: () => void }) {
+function AppCard({ guide, state, connector, onCheck, onPrepare }: { guide: CardGuide; state: AppSetupState; connector: boolean; onCheck: () => void; onPrepare: () => void }) {
   const status = STATUS[state.kind]
   const checkAgain = <button type="button" className="btn" onClick={onCheck}>Check again</button>
   return (
@@ -126,6 +128,15 @@ function AppCard({ guide, state, connector, onCheck }: { guide: CardGuide; state
             {state.kind === 'failed' && checkAgain}
             {guide.docs && <a className="link" href={guide.docs} target="_blank" rel="noreferrer">{guide.name} install help<ExternalLink size={12} aria-hidden="true" /></a>}
           </span>
+        </div>
+      )}
+      {state.kind === 'preparing' && (
+        <p className="hs-note t-meta">{state.step}. LoomWatch does this once, so {guide.name} starts quickly from then on.</p>
+      )}
+      {state.kind === 'connector_failed' && (
+        <div className="hs-fix">
+          <span role="alert" className="hs-problem">LoomWatch couldn’t get {guide.name} ready: {state.reason}</span>
+          <span className="hs-fix-acts"><button type="button" className="btn" onClick={onPrepare}>Try again</button></span>
         </div>
       )}
       {state.kind === 'ready' && guide.optionalSignIn && (
@@ -204,6 +215,26 @@ export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: Ap
       .map((harness) => ({ guide: { id: harness.id, name: harness.name }, harness })),
   ]
 
+  const prepare = useCallback(async (harness: DetectedHarness) => {
+    try {
+      await prepareHarness(harness.id)
+    } catch {
+      // The next poll shows where it stands.
+    }
+    await refresh()
+  }, [refresh])
+
+  // An app found after LoomWatch started gets its connector now; one found at start already has
+  // it coming (the daemon starts those itself).
+  const asked = useRef(new Set<string>())
+  useEffect(() => {
+    for (const harness of report) {
+      if (harness.connector?.state !== 'needed' || asked.current.has(harness.id)) continue
+      asked.current.add(harness.id)
+      void prepare(harness)
+    }
+  }, [report, prepare])
+
   // Check an app the daemon holds no verdict for: as soon as it appears, and again when a verdict
   // the panel saw is gone (LoomWatch restarted, or its 10-minute record lapsed). A check that itself
   // left no verdict (the daemon was busy, say) is not repeated on every poll; it waits for
@@ -211,6 +242,8 @@ export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: Ap
   useEffect(() => {
     for (const harness of report) {
       if (harness.acpAvailable === false || checking.has(harness.id)) continue
+      // Nothing to check until its connector is in: the check runs once it is (its signature changes).
+      if (harness.connector && harness.connector.state !== 'ready' && harness.health === undefined) continue
       const last = attempted.current.get(harness.id)
       const sameInstall = last?.signature === checkSignature(harness)
       if (harness.health !== undefined) {
@@ -231,7 +264,7 @@ export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: Ap
 
   // Tell the rest of LoomWatch when a verdict changes, so the footer, New team and the Library
   // stop offering a signed-out app and start offering a ready one. Not on the first render.
-  const verdicts = report.map((harness) => `${harness.id}:${harness.health ?? '-'}:${harness.healthCause ?? '-'}:${harness.needsRestart ? 'restart' : '-'}`).join(' ')
+  const verdicts = report.map((harness) => `${harness.id}:${harness.health ?? '-'}:${harness.healthCause ?? '-'}:${harness.needsRestart ? 'restart' : '-'}:${harness.connector?.state ?? '-'}`).join(' ')
   const previousVerdicts = useRef(verdicts)
   useEffect(() => {
     if (previousVerdicts.current === verdicts) return
@@ -261,8 +294,9 @@ export function AppSetup({ harnesses, onChanged, onHide, firstTeam = false }: Ap
             key={guide.id}
             guide={guide}
             state={state}
-            connector={harness?.spawn.cmd === 'npx'}
+            connector={harness?.spawn.cmd === 'npx' && harness.connector?.state !== 'ready'}
             onCheck={() => { if (harness) void check(harness) }}
+            onPrepare={() => { if (harness) void prepare(harness) }}
           />
         ))}
       </ul>

@@ -42,8 +42,20 @@ export interface DetectedHarness {
    * checkable, but no run can start it until LoomWatch restarts. Absent otherwise.
    */
   needsRestart?: boolean
+  /**
+   * LoomWatch's own copy of the app's bridge, for an app it starts through one (Claude, Codex):
+   * installed once, then started directly instead of through npx. Absent for other apps.
+   */
+  connector?: ConnectorStatus
   spawn: HarnessSpawn
 }
+
+/** Where an app's connector stands (backend connectors::ConnectorStatus). */
+export type ConnectorStatus =
+  | { state: 'ready' }
+  | { state: 'needed' }
+  | { state: 'preparing'; step: string }
+  | { state: 'failed'; reason: string }
 
 /**
  * True when an app can be offered for new work: it speaks ACP, did not last fail to start, and a
@@ -75,7 +87,15 @@ export function harnessProblem(harness: DetectedHarness): string | null {
   if (harness.acpAvailable === false) return harness.unavailableReason ?? `${harness.spawn.cmd} not found on PATH`
   if (harness.health === 'error') return harness.healthReason ?? `${harness.name}: sign-in or version problem — run "${harness.command}" in Terminal to fix`
   if (harness.needsRestart) return `${harness.name} was installed after LoomWatch started. Restart LoomWatch to use it.`
+  if (harness.connector?.state === 'failed' && harness.health !== 'ok') return `LoomWatch couldn’t get ${harness.name} ready: ${harness.connector.reason}`
   return null
+}
+
+/** `POST /api/harnesses/:id/prepare` — start installing an app's connector; answers at once. */
+export async function prepareHarness(id: string): Promise<ConnectorStatus> {
+  const response = await daemonFetch(`/api/harnesses/${encodeURIComponent(id)}/prepare`, { method: 'POST' })
+  if (!response.ok) throw new Error(`prepare ${id}: ${response.status}`)
+  return (await response.json()) as ConnectorStatus
 }
 
 /**
