@@ -17,6 +17,7 @@ import {
   PMREMGenerator,
   Raycaster,
   Scene,
+  ShaderMaterial,
   ShadowMaterial,
   SphereGeometry,
   TubeGeometry,
@@ -25,6 +26,7 @@ import {
   WebGLRenderer,
   type Material,
   type Texture,
+  type Vector4,
 } from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
@@ -33,7 +35,8 @@ import { benchMaterial, fitCanvas } from '../components/agents/workbenchScene'
 import { pegboardTexture, swatchTextures, woundTexture } from '../components/agents/benchTextures'
 import { COLOR_HEX, FIGURE_KINDS, type FigureChoice } from '../lib/library/figures'
 import { markPattern } from '../lib/story/mark'
-import { talkAt, type TalkLine, type TalkState } from './crewTalk'
+import { CrewGlow, easeTint, glowColor } from './crewGlow'
+import { glowAt, talkAt, type Glow, type TalkLine, type TalkState } from './crewTalk'
 
 /** One figure in the crew: who it is (its scarf is woven from this) and what it wears. */
 export interface CrewMember {
@@ -63,6 +66,8 @@ interface Figure {
   handR: Object3D
   eyes: Object3D[]
   meshes: Mesh[]
+  /** Its flat colour in the glow round it: what it is doing (crewGlow.ts). */
+  tint: ShaderMaterial
   pose: Pose
   nextBlink: number
   /** Its own beat, so six figures never breathe in step. */
@@ -77,6 +82,10 @@ type Pose = typeof REST
 const SPACING = 0.78
 const HEAD_TURN = 0.5
 const HEAD_NOD = 0.24
+/** How strongly a figure glows: ready, waiting for you, working (breathing between these), and pointed at. */
+const GLOW = { ready: 0.45, waiting: 1, working: [0.6, 1], hovered: 1 } as const
+/** One breath of a working figure's glow, in seconds, as in the page's chat. */
+const BREATH = 2.4
 
 /**
  * The landing page's crew: the app's own figures (workbench.glb, the same model and materials as
@@ -85,8 +94,10 @@ const HEAD_NOD = 0.24
  * under the pointer lets go of the thread with one mitten and waves, and the others look at it.
  * Given a script (talk()), they act out a hand-off: the one talking bobs as it speaks, the others
  * look at it, a gold bead carries the work along the thread to the next, and when it reaches you
- * they all look out and the last one waves. Reduced motion keeps the poses and drops the motion,
- * the conversation with it.
+ * they all look out and the last one waves. Each glows round its outline what it is doing, as an
+ * agent's figure does in the app: green ready, blue working (breathing), gold waiting for you; the
+ * one under the pointer glows wider. Reduced motion keeps the poses and drops the motion, the
+ * conversation with it.
  */
 export class CrewScene {
   private readonly renderer: WebGLRenderer
@@ -127,6 +138,10 @@ export class CrewScene {
   private passTo: number | null = null
   /** The work on its way from one figure to the next: a glowing gold bead. */
   private readonly bead = new Object3D()
+  private readonly floor: Mesh
+  private readonly glow: CrewGlow
+  /** Each state's glow colour, the page's own (glowColors()); these are its dark theme's. */
+  private colors: Record<Glow, Vector4> = { ready: glowColor('#4FC98D'), working: glowColor('#6AB8FF'), waiting: glowColor('#E9C46A') }
 
   constructor(canvas: HTMLCanvasElement, members: readonly CrewMember[], callbacks: CrewCallbacks, reduced: boolean) {
     this.members = members
@@ -134,6 +149,8 @@ export class CrewScene {
     this.reduced = reduced
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'low-power' })
     this.renderer.setClearColor(0x000000, 0)
+    // The glow is laid on the cleared canvas first, and the scene drawn over it.
+    this.renderer.autoClear = false
     this.renderer.toneMapping = NeutralToneMapping
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = PCFShadowMap
@@ -171,7 +188,9 @@ export class CrewScene {
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
     this.scene.add(floor)
+    this.floor = floor
     this.disposables.push(floorGeometry, floorMaterial)
+    this.glow = this.own(new CrewGlow(this.renderer, 0.9))
   }
 
   async load(url: string): Promise<void> {
@@ -192,13 +211,14 @@ export class CrewScene {
         mesh.castShadow = role !== 'glint' && !mesh.name.endsWith('_face')
         mesh.receiveShadow = role !== 'glint'
         mesh.userData.member = index
+        mesh.userData.material = mesh.material
       }
       const named = figurePart(root)
       const eyes = figureEyes(root)
       this.scene.add(root)
       this.figures.push({
         root, body: named('body'), neck: named('neck'), head: named('head'), armL: named('arm_l'), armR: named('arm_r'),
-        handL: named('hand_l'), handR: named('hand_r'), eyes, meshes, pose: { ...REST },
+        handL: named('hand_l'), handR: named('hand_r'), eyes, meshes, tint: this.glow.material(), pose: { ...REST },
         nextBlink: 1.5 + ((index * 1.37) % 2.6), phase: index * 1.618, hop: -10,
       })
     })
@@ -327,6 +347,12 @@ export class CrewScene {
     this.talking = false
   }
 
+  /** The colour each state glows, as CSS colours: the page passes its theme's. */
+  glowColors(colors: Record<Glow, string>) {
+    this.colors = { ready: glowColor(colors.ready), working: glowColor(colors.working), waiting: glowColor(colors.waiting) }
+    if (this.loaded && !this.running) this.frame()
+  }
+
   playTalk() {
     if (this.script && !this.talkState?.done) this.talking = true
   }
@@ -355,6 +381,11 @@ export class CrewScene {
   }
 
   private frame() {
+    if (this.loaded) this.glow.draw(() => this.drawFlat())
+    else {
+      this.renderer.setRenderTarget(null)
+      this.renderer.clear()
+    }
     this.renderer.render(this.scene, this.camera)
     if (this.loaded) this.callbacks.onFrame(this.figures.map((figure) => this.screen(figure.head.getWorldPosition(new Vector3()).setY(this.headTop + 0.04))), this.hovered === null ? this.talkState : null)
   }
@@ -458,6 +489,33 @@ export class CrewScene {
     this.scene.updateMatrixWorld(true)
     this.weave()
     this.placeBead(talk)
+    this.tint(talk, dt)
+  }
+
+  /** Each figure's glow eases to what it is doing; a working one breathes while the talk plays. */
+  private tint(talk: TalkState | null, dt: number) {
+    const glows = glowAt(talk, this.figures.length)
+    const ease = this.reduced ? 1 : 1 - Math.exp(-dt * 6)
+    const breath = this.talking && !this.reduced ? 0.5 - 0.5 * Math.cos((2 * Math.PI * this.now) / BREATH) : 1
+    this.figures.forEach((figure, index) => {
+      const glow = glows[index]
+      const [low, high] = GLOW.working
+      const strength = this.hovered === index ? GLOW.hovered : glow === 'working' ? low + (high - low) * breath : GLOW[glow]
+      easeTint(figure.tint.uniforms.tint.value as Vector4, this.colors[glow], strength, ease)
+    })
+  }
+
+  /** The figures alone, each flat in its glow's colour, for the glow to blur: no floor, thread or bead. */
+  private drawFlat() {
+    const shown = [this.floor, this.bead, ...this.threads].filter((object) => object.visible)
+    for (const object of shown) object.visible = false
+    for (const figure of this.figures) for (const mesh of figure.meshes) mesh.material = figure.tint
+    // The shadows are the scene's, drawn once with it.
+    this.renderer.shadowMap.autoUpdate = false
+    this.renderer.render(this.scene, this.camera)
+    this.renderer.shadowMap.autoUpdate = true
+    for (const figure of this.figures) for (const mesh of figure.meshes) mesh.material = mesh.userData.material as Material
+    for (const object of shown) object.visible = true
   }
 
   /**
@@ -545,6 +603,11 @@ export class CrewScene {
     this.camera.position.copy(target).addScaledVector(direction, far)
     this.camera.lookAt(target)
     this.camera.updateProjectionMatrix()
+    this.camera.updateMatrixWorld()
+    // The glow spreads with the figures' size on the screen: a twentieth of a front-row figure's height.
+    const tall = this.screen(new Vector3(0, 0, front)).y - this.screen(new Vector3(0, this.headTop, front)).y
+    const size = this.renderer.getDrawingBufferSize(new Vector2())
+    this.glow.resize(size.x, size.y, tall * 0.05 * (size.x / this.width))
   }
 
   private screen(point: Vector3) {
