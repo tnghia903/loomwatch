@@ -23,4 +23,5 @@ are copies of `mark-small.svg`, and the app's `LoomMark` and `LoomWordmark` draw
 `ui/src/site/brand.test.ts` fails when a copy drifts. After changing a master, also run
 `node site/icons.mjs`, `packaging/macos/make-icon.sh`, and re-render `site/social-card.html`.
 
-The licenses cover the code, not the LoomWatch name or logo.
+The licenses cover the code, not the LoomWatch name, logo or crew figures: see
+[TRADEMARKS.md](../../../TRADEMARKS.md).
