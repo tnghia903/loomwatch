@@ -469,51 +469,56 @@ fn append_log(log: &Path, line: &str) {
     }
 }
 
-/// The loom mark, drawn for the menu bar: two woven zigzags as in `ui/public/icon.svg`, black on
-/// clear, the back thread fainter. macOS tints a template image to suit the menu bar.
+/// The menu-bar image's size in pixels: twice the menu bar's 22 pt, so it is sharp on a Retina
+/// screen. `tray-icon` shows an image taller than 22 pt at 22 pt.
+const MENU_BAR_WIDTH: u16 = 36;
+const MENU_BAR_HEIGHT: u16 = 44;
+
+/// The loom mark, drawn for the menu bar: two threads woven over and under each other, as in
+/// `ui/public/icon.svg`, shortened to three strokes each so it stays legible this small. Black on
+/// clear, the back thread fainter; macOS tints a template image to suit the menu bar.
 fn menu_bar_icon() -> Icon {
-    const WIDTH: u16 = 50;
-    const HEIGHT: u16 = 32;
-    // The mark's points in icon.svg's coordinates, and the box around them to draw.
-    let front = [
-        (96.0, 332.0),
-        (156.0, 180.0),
-        (216.0, 332.0),
-        (276.0, 180.0),
-        (336.0, 332.0),
-        (396.0, 180.0),
-    ];
-    let back = [
-        (96.0, 180.0),
-        (156.0, 332.0),
-        (216.0, 180.0),
-        (276.0, 332.0),
-        (336.0, 180.0),
-        (396.0, 332.0),
-    ];
-    let (left, top, right, bottom) = (78.0_f32, 162.0_f32, 414.0_f32, 350.0_f32);
-    let scale = (f32::from(WIDTH) / (right - left)).min(f32::from(HEIGHT) / (bottom - top));
-    let half_stroke = 15.0 * scale;
-    let to_pixels = |(x, y): (f32, f32)| ((x - left) * scale, (y - top) * scale);
+    Icon::from_rgba(
+        menu_bar_pixels(),
+        u32::from(MENU_BAR_WIDTH),
+        u32::from(MENU_BAR_HEIGHT),
+    )
+    .expect("menu-bar icon pixels")
+}
+
+/// The mark's RGBA pixels. It is 16 × 14 pt inside the 18 × 22 pt image, about the size Apple
+/// suggests for a menu-bar item, with the rest left clear; the first drawing filled all 22 pt and
+/// was twice as wide as the items beside it.
+fn menu_bar_pixels() -> Vec<u8> {
+    const STROKE: f32 = 4.0;
+    // Where the strokes' centre lines end, in pixels: the ink stops 8 px above and below, and
+    // 2 px from each side.
+    let (top, bottom) = (10.0_f32, 34.0_f32);
+    let left = 2.0 + STROKE / 2.0;
+    let step = (f32::from(MENU_BAR_WIDTH) - 2.0 * left) / 3.0;
+    let x = |i: u8| f32::from(i).mul_add(step, left);
+    let front = [(x(0), bottom), (x(1), top), (x(2), bottom), (x(3), top)];
+    let back = [(x(0), top), (x(1), bottom), (x(2), top), (x(3), bottom)];
     let coverage = |points: &[(f32, f32)], px: f32, py: f32| {
         let distance = points
             .windows(2)
-            .map(|pair| segment_distance(to_pixels(pair[0]), to_pixels(pair[1]), (px, py)))
+            .map(|pair| segment_distance(pair[0], pair[1], (px, py)))
             .fold(f32::INFINITY, f32::min);
-        (half_stroke + 0.5 - distance).clamp(0.0, 1.0)
+        (STROKE / 2.0 + 0.5 - distance).clamp(0.0, 1.0)
     };
-    let mut rgba = Vec::with_capacity(usize::from(WIDTH) * usize::from(HEIGHT) * 4);
-    for y in 0..HEIGHT {
-        for x in 0..WIDTH {
+    let mut rgba =
+        Vec::with_capacity(usize::from(MENU_BAR_WIDTH) * usize::from(MENU_BAR_HEIGHT) * 4);
+    for y in 0..MENU_BAR_HEIGHT {
+        for x in 0..MENU_BAR_WIDTH {
             let (px, py) = (f32::from(x) + 0.5, f32::from(y) + 0.5);
-            let alpha = coverage(&front, px, py).max(0.4 * coverage(&back, px, py));
+            let alpha = coverage(&front, px, py).max(0.45 * coverage(&back, px, py));
             // `alpha` is clamped to 0..=1, so this fits a byte.
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let alpha = (alpha * 255.0).round() as u8;
             rgba.extend_from_slice(&[0, 0, 0, alpha]);
         }
     }
-    Icon::from_rgba(rgba, u32::from(WIDTH), u32::from(HEIGHT)).expect("menu-bar icon pixels")
+    rgba
 }
 
 fn segment_distance(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
@@ -580,5 +585,30 @@ mod login_item {
         text.replace('&', "&amp;")
             .replace('<', "&lt;")
             .replace('>', "&gt;")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_menu_bar_mark_is_about_sixteen_points_and_leaves_room_around_it() {
+        let pixels = menu_bar_pixels();
+        let (width, height) = (usize::from(MENU_BAR_WIDTH), usize::from(MENU_BAR_HEIGHT));
+        assert_eq!(pixels.len(), width * height * 4);
+        let inked = |x: usize, y: usize| pixels[(y * width + x) * 4 + 3] > 0;
+        let rows: Vec<usize> = (0..height)
+            .filter(|&y| (0..width).any(|x| inked(x, y)))
+            .collect();
+        let columns: Vec<usize> = (0..width)
+            .filter(|&x| (0..height).any(|y| inked(x, y)))
+            .collect();
+        // Two pixels a point: the ink is at most 16 pt each way, and clear of the image's edges.
+        let span = |lines: &[usize]| lines.last().unwrap() - lines.first().unwrap() + 1;
+        assert!(span(&rows) <= 32, "{} px tall", span(&rows));
+        assert!(span(&columns) <= 32, "{} px wide", span(&columns));
+        assert!(rows.first().unwrap() >= &6 && rows.last().unwrap() < &(height - 6));
+        assert!(columns.first().unwrap() >= &1 && columns.last().unwrap() < &(width - 1));
     }
 }
