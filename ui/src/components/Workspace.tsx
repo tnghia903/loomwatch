@@ -16,7 +16,7 @@ import { ownerLabelFor } from '../lib/runs/graph'
 import { appLabelForAgent, harnessIdForAgent, modelOptionsForAgent } from '../lib/models'
 import type { OutputNode } from '../lib/runs/graph'
 import { causalOrder, DOCK } from '../lib/runs/runOverlay'
-import { mergeHistory } from '../lib/runs/history'
+import { mergeHistory, teamRunIds } from '../lib/runs/history'
 import { useRunHistory } from '../lib/runs/useRunHistory'
 import { useRunSession } from '../lib/runs/useRunSession'
 import { snapToGrid } from '../lib/grid'
@@ -995,7 +995,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const lineageLabel = useMemo(() => {
     if (!activeRunId) return null
     const attemptOf = (runId: string) => {
-      const all = mergeHistory(history.records, history.sessions).map((entry) => entry.id).reverse()
+      const all = teamRunIds(mergeHistory(history.records, history.sessions), record?.teamPath ?? doc.path)
       const index = all.indexOf(runId)
       return index >= 0 ? String(index + 1).padStart(2, '0') : runId.slice(0, 8)
     }
@@ -1003,7 +1003,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     const retriedServerSide = record?.retryOfRunId
     const retried = retriedServerSide ?? retryOf.get(activeRunId)
     return retried ? `Retry of Run ${attemptOf(retried)}` : null
-  }, [activeRunId, record, retryOf, history.records, history.sessions])
+  }, [activeRunId, record, retryOf, history.records, history.sessions, doc.path])
 
   // Who the request goes to first: the one agent of a one-agent turn (ADR 0051), the stage a run
   // started at, or the team's entrypoint.
@@ -1038,10 +1038,10 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const live = session.mode === 'live'
   const attempt = useMemo(() => {
     if (!activeRunId) return 1
-    const all = mergeHistory(history.records, history.sessions).map((entry) => entry.id).reverse()
+    const all = teamRunIds(mergeHistory(history.records, history.sessions), record?.teamPath ?? doc.path)
     const index = all.indexOf(activeRunId)
     return index >= 0 ? index + 1 : all.length + 1
-  }, [activeRunId, history.records, history.sessions])
+  }, [activeRunId, history.records, history.sessions, record?.teamPath, doc.path])
   // A finished run ends when the daemon says it did. The last recorded event can be much earlier: a
   // run stopped while it waited for you records nothing after the handover, and read "took 63ms".
   const runningNow = live && !isTerminalRun(record?.status)
