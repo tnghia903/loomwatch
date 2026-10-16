@@ -14,6 +14,18 @@ const APP_ERROR = /Codex reported an error instead of an answer: (.*)/
 const STAGE_FAILURE = /^pipeline node ([^:\s]+) failed/
 
 /**
+ * The agent a failed run stopped at: the one its error names, or the only one it ran. `null` when
+ * the run didn't fail, or its error names nobody, since a guess would mark the wrong agent.
+ */
+export function failedAgent(run: { status: string; error: string | null; onlyAgent?: string | null; agentIds: readonly string[] }): string | null {
+  if (run.status !== 'failed') return null
+  const error = run.error?.trim() ?? ''
+  const named = STAGE_FAILURE.exec(error)?.[1] ?? SPAWN_FAILURE.exec(error)?.[1]
+  if (named) return named
+  return run.onlyAgent ?? (run.agentIds.length === 1 ? run.agentIds[0] : null)
+}
+
+/**
  * A daemon error in the operator's words. Only failures with a known, fixable cause are rewritten;
  * anything else is returned as the daemon wrote it, because a paraphrase that guesses is worse
  * than a technical sentence that is true.

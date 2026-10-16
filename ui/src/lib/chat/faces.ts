@@ -7,8 +7,8 @@ export interface AgentFacts {
   id: string
   name: string
   hue: number
-  /** "ready", "working", "waiting for you" or "away", as the team list says it. */
-  state: 'idle' | 'working' | 'waiting' | 'away'
+  /** "ready", "working", "waiting for you", "failed" or "offline", as the team list says it. */
+  state: 'idle' | 'working' | 'waiting' | 'failed' | 'away'
   stateWords: string
   /** "Claude", "Codex (not installed)", "Offline demo (no AI)". */
   app: string | null
