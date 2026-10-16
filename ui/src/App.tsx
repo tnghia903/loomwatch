@@ -11,6 +11,7 @@ import { useTheme } from './lib/theme'
 
 const Connections = lazy(() => import('./components/Connections'))
 const AgentsPage = lazy(() => import('./components/agents/AgentsPage').then((module) => ({ default: module.AgentsPage })))
+const QuestsPage = lazy(() => import('./components/quests/QuestsPage').then((module) => ({ default: module.QuestsPage })))
 
 function useHarnesses() {
   const [harnesses, setHarnesses] = useState<DetectedHarness[]>([])
@@ -112,6 +113,9 @@ export default function App() {
   useTheme()
   const { pathname, search } = window.location
   if (pathname === '/agents' || pathname.startsWith('/agents/')) return <Agents />
+  if (pathname === '/quests') {
+    return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading quests…</p>}><QuestsPage /></Suspense>
+  }
   if (pathname === '/connections') {
     return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading connections…</p>}><Connections /></Suspense>
   }

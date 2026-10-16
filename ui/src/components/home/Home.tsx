@@ -16,6 +16,7 @@ import { fabricFor } from '../../lib/story/fabric'
 import { TeamFabric } from './TeamFabric'
 import { AppSetup } from './AppSetup'
 import { UpdateBadge } from '../updates/Updates'
+import { QuestsLink } from '../quests/QuestsLink'
 import { DeleteTeamDialog } from './DeleteTeamDialog'
 import { NewTeamDialog } from './NewTeamDialog'
 import { TeamCardMenu } from './TeamCardMenu'
@@ -166,6 +167,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
         <span className="home-top-acts">
           {topActions}
           <UpdateBadge />
+          <QuestsLink />
           <button type="button" className="home-feedback" onClick={() => openFeedback({ screen: 'home' })} aria-label="Send feedback" title="Report a problem or share an idea"><MessageSquareWarning size={15} aria-hidden="true" /><span className="home-feedback-label">Feedback</span></button>
           <button type="button" className="iconbtn" onClick={onPalette} aria-label="Open the command palette" title="Commands (⌘K)"><Search size={15} aria-hidden="true" /></button>
           <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title="Theme (⌘⇧L)">{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>

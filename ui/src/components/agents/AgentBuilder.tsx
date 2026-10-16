@@ -18,6 +18,7 @@ import { SegmentThumb } from '../ui/SegmentThumb'
 import { AgentBadge } from './AgentBadge'
 import { AgentAnswer, AgentChat } from './AgentChat'
 import { ByHand } from './ByHand'
+import { FigurePicker } from './FigurePicker'
 import { navigate, withView, type AgentView } from './route'
 
 export interface AgentBuilderProps {
@@ -223,7 +224,7 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
       </header>
 
       <ByHand
-        draft={draft} set={set} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={markId} figure={figure} onFigure={(next) => set('figure', next)} record={benchRecord} tools={tools} toolsLoading={skillsLoading} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
+        draft={draft} set={set} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} markId={markId} figure={figure} record={benchRecord} tools={tools} toolsLoading={skillsLoading} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
         chat={view === 'chat' ? <AgentChat draft={draft} harness={harness} model={resolvedModel} chatId={chatId} figure={figure} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} /> : undefined}
         onBuild={() => showView('build')}
         cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={draft.name.trim() || 'New agent'} onClose={() => setAnswerRun(null)} /> : undefined}
@@ -231,41 +232,45 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
 
       {view === 'build' && <div className="agent-builder-grid">
         <aside className="agent-builder-side">
-          {badge}
+          {/* Who it is and where it is used, then how it looks: its figure is not part of the bench. */}
+          <div className="agent-builder-facts">
+            {badge}
 
-          {saved && (
-            <section className="agent-section" aria-label="Used in">
-              <div className="agent-section-head">Used in</div>
-              {uses === null ? <p className="t-meta">Looking through your teams…</p>
-                : mine.length === 0 ? <p className="t-meta">No team uses it yet. Open a team and add it from Your agents in the add panel.</p>
-                : <ul className="agent-uses">
-                  {mine.map((use) => (
-                    <li key={`${use.teamPath}#${use.agentId}`}>
-                      <a href={`/?path=${encodeURIComponent(use.teamPath)}`}>{use.teamName}<ExternalLink size={12} aria-hidden="true" /></a>
-                      <span className={`agent-use-version${version && use.version < version ? ' behind' : ''}`}>v{use.version}{version && use.version < version ? ` · v${version} is ready` : ''}</span>
-                      {use.scheduled && <span className="t-meta">on a schedule</span>}
-                    </li>
-                  ))}
-                </ul>}
-            </section>
-          )}
+            {saved && (
+              <section className="agent-section" aria-label="Used in">
+                <div className="agent-section-head">Used in</div>
+                {uses === null ? <p className="t-meta">Looking through your teams…</p>
+                  : mine.length === 0 ? <p className="t-meta">No team uses it yet. Open a team and add it from Your agents in the add panel.</p>
+                  : <ul className="agent-uses">
+                    {mine.map((use) => (
+                      <li key={`${use.teamPath}#${use.agentId}`}>
+                        <a href={`/?path=${encodeURIComponent(use.teamPath)}`}>{use.teamName}<ExternalLink size={12} aria-hidden="true" /></a>
+                        <span className={`agent-use-version${version && use.version < version ? ' behind' : ''}`}>v{use.version}{version && use.version < version ? ` · v${version} is ready` : ''}</span>
+                        {use.scheduled && <span className="t-meta">on a schedule</span>}
+                      </li>
+                    ))}
+                  </ul>}
+              </section>
+            )}
 
-          {saved && versions && versions.length > 0 && (
-            <section className="agent-section" aria-label="Versions">
-              <div className="agent-section-head"><History size={13} aria-hidden="true" />Versions</div>
-              <ol className="agent-versions">
-                {versions.map((entry) => <li key={entry.version}><b>v{entry.version}</b><span>{entry.note || (entry.version === 1 ? 'First version' : 'No note')}</span>{entry.savedAt && <time dateTime={entry.savedAt}>{relativeTime(new Date(entry.savedAt))}</time>}</li>)}
-              </ol>
-            </section>
-          )}
+            {saved && versions && versions.length > 0 && (
+              <section className="agent-section" aria-label="Versions">
+                <div className="agent-section-head"><History size={13} aria-hidden="true" />Versions</div>
+                <ol className="agent-versions">
+                  {versions.map((entry) => <li key={entry.version}><b>v{entry.version}</b><span>{entry.note || (entry.version === 1 ? 'First version' : 'No note')}</span>{entry.savedAt && <time dateTime={entry.savedAt}>{relativeTime(new Date(entry.savedAt))}</time>}</li>)}
+                </ol>
+              </section>
+            )}
 
-          {saved && (
-            <div className="agent-remove">
-              {removing
-                ? <><span className="t-meta">Remove it from Your agents? Teams keep their copies.</span><button type="button" className="btn" onClick={() => void doRemove()}>Remove</button><button type="button" className="btn" onClick={() => setRemoving(false)}>Keep it</button></>
-                : <button type="button" className="link" onClick={() => setRemoving(true)}><Trash2 size={12} aria-hidden="true" />Remove from Your agents</button>}
-            </div>
-          )}
+            {saved && (
+              <div className="agent-remove">
+                {removing
+                  ? <><span className="t-meta">Remove it from Your agents? Teams keep their copies.</span><button type="button" className="btn" onClick={() => void doRemove()}>Remove</button><button type="button" className="btn" onClick={() => setRemoving(false)}>Keep it</button></>
+                  : <button type="button" className="link" onClick={() => setRemoving(true)}><Trash2 size={12} aria-hidden="true" />Remove from Your agents</button>}
+              </div>
+            )}
+          </div>
+          <FigurePicker figure={figure} onChange={(next) => set('figure', next)} />
         </aside>
       </div>}
     </div>

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
 import { servesHtml } from '../library/client'
-import { isQuestItem, type QuestItem } from './catalog'
+import { AREAS, isQuestItem, QUESTS, type QuestArea, type QuestItem } from './catalog'
 
 /** One item in the wardrobe (crates/loomwatch-backend/src/wardrobe.rs): when, and the run that earned it. */
 export interface EarnedItem {
@@ -85,4 +85,9 @@ export function useWardrobe(): WardrobeState {
 
 export function hasEarned(wardrobe: Wardrobe, item: string): boolean {
   return isQuestItem(item) && Boolean(wardrobe[item])
+}
+
+/** The parts the wardrobe holds an item from: Bobbin is earned once it holds all five. */
+export function partsDone(wardrobe: Wardrobe): Set<QuestArea> {
+  return new Set(AREAS.filter((area) => QUESTS.some((quest) => quest.area === area && wardrobe[quest.item])))
 }
