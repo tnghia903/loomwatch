@@ -1,10 +1,13 @@
-//! The macOS app: a menu-bar item over a supervised `loomwatchd`.
+//! The macOS app: a menu-bar item over a supervised `loomwatchd`, which shows what the teams are
+//! doing. While agents work its stitch sews round and the menu names who is working; when something
+//! needs you its mouth opens and the menu bar counts what waits.
 
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -12,8 +15,10 @@ use anyhow::{Context, Result};
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tray_icon::{Icon, TrayIconBuilder};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
+use tray_icon::{Icon, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+
+use crate::progress::{self, Ended, Mood, Progress, Row};
 
 /// The port a `LoomWatch` started from Terminal uses too, so the address people know keeps working.
 const FIRST_PORT: u16 = 3000;
@@ -24,13 +29,24 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 const CRASH_WINDOW: Duration = Duration::from_secs(60);
 const CRASHES_BEFORE_GIVING_UP: usize = 3;
 const LOGIN_ITEM_LABEL: &str = "io.github.loomwatch";
+/// How often the menu reads what the teams are doing.
+const POLL: Duration = Duration::from_secs(2);
+/// At work the face shows a new picture every `FRAME`. The stitch moves one stitch along in
+/// `SEWING_FRAMES` of them (a stitch a second), and the eyes blink once every `BLINK_EVERY` (2.5 s).
+const FRAME: Duration = Duration::from_millis(125);
+const SEWING_FRAMES: u8 = 8;
+const BLINK_EVERY: u32 = 20;
 
 enum UserEvent {
     Menu(MenuEvent),
-    /// `loomwatchd` answers at this address.
-    Ready(String),
+    /// `loomwatchd` answers on this port.
+    Ready(u16),
     /// What the menu's status line should say now.
     Status(String),
+    /// What the teams are doing now.
+    Progress(Progress),
+    /// The menu-bar item was clicked, which opens its menu.
+    Opened,
 }
 
 /// Where everything is.
@@ -106,94 +122,417 @@ pub fn run() -> Result<()> {
     // A menu-bar app: no Dock icon, no app menu.
     event_loop.set_activation_policy(ActivationPolicy::Accessory);
     let proxy = event_loop.create_proxy();
+    forward_events(&proxy);
+
+    let (items, menu) = Items::new(&paths)?;
+    let mut bar = Bar::new(&menu);
+    let supervisor = Supervisor::start(paths.clone(), proxy.clone());
+    let watched = Arc::new(AtomicU16::new(0));
     {
-        let proxy = proxy.clone();
-        MenuEvent::set_event_handler(Some(move |event| {
-            let _ = proxy.send_event(UserEvent::Menu(event));
-        }));
+        let watched = Arc::clone(&watched);
+        std::thread::spawn(move || watch_runs(&watched, &proxy));
     }
-
-    let open = MenuItem::new("Open LoomWatch", true, None);
-    let status = MenuItem::new("Starting…", false, None);
-    let at_login = CheckMenuItem::new(
-        "Start at login",
-        paths.bundle.is_some(),
-        login_item::enabled(),
-        None,
-    );
-    let log = MenuItem::new("Show log", true, None);
-    let quit = MenuItem::new("Quit LoomWatch", true, None);
-    let menu = Menu::new();
-    menu.append_items(&[
-        &open,
-        &status,
-        &PredefinedMenuItem::separator(),
-        &at_login,
-        &log,
-        &PredefinedMenuItem::separator(),
-        &quit,
-    ])?;
-
-    let supervisor = Supervisor::start(paths.clone(), proxy);
     let mut menu = Some(menu);
-    let mut tray = None;
     let mut address: Option<String> = None;
     let mut open_when_ready = !background;
 
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
         match event {
             // The menu-bar item can only be made once the app is running.
             Event::NewEvents(StartCause::Init) => {
                 if let Some(menu) = menu.take() {
-                    tray = TrayIconBuilder::new()
-                        .with_menu(Box::new(menu))
-                        .with_icon_templated(menu_bar_icon())
-                        .with_tooltip("LoomWatch")
-                        .build()
-                        .map_err(|error| eprintln!("LoomWatch: no menu-bar item: {error}"))
-                        .ok();
+                    bar.build(menu);
                 }
             }
+            Event::NewEvents(StartCause::ResumeTimeReached { .. }) => bar.tick(),
             // Opened again from Applications or Spotlight while running: show it.
             Event::Reopen { .. } => match &address {
                 Some(url) => open_in_browser(url),
                 None => open_when_ready = true,
             },
-            Event::UserEvent(UserEvent::Ready(url)) => {
-                status.set_text("Running");
+            Event::UserEvent(UserEvent::Ready(port)) => {
+                let url = format!("http://127.0.0.1:{port}");
+                items.status.set_text("LoomWatch is running");
+                watched.store(port, Ordering::SeqCst);
                 if open_when_ready {
                     open_in_browser(&url);
                     open_when_ready = false;
                 }
                 address = Some(url);
             }
-            Event::UserEvent(UserEvent::Status(text)) => status.set_text(text),
+            Event::UserEvent(UserEvent::Status(text)) => items.status.set_text(text),
+            Event::UserEvent(UserEvent::Progress(next)) => bar.show(next),
+            Event::UserEvent(UserEvent::Opened) => bar.seen(),
             Event::UserEvent(UserEvent::Menu(event)) => {
-                if event.id == *open.id() {
+                if let Some(link) = bar.link_for(&event.id) {
+                    if let Some(url) = &address {
+                        open_in_browser(&format!("{url}{link}"));
+                    }
+                } else if event.id == *items.open.id() {
                     match &address {
                         Some(url) => open_in_browser(url),
                         None => open_when_ready = true,
                     }
-                } else if event.id == *at_login.id() {
+                } else if event.id == *items.at_login.id() {
                     if let Some(bundle) = &paths.bundle {
                         let wanted = !login_item::enabled();
                         if let Err(error) = login_item::set(wanted, bundle) {
                             eprintln!("LoomWatch: start at login: {error:#}");
                         }
                     }
-                    at_login.set_checked(login_item::enabled());
-                } else if event.id == *log.id() {
+                    items.at_login.set_checked(login_item::enabled());
+                } else if event.id == *items.log.id() {
                     let _ = Command::new("/usr/bin/open").arg(&paths.log).status();
-                } else if event.id == *quit.id() {
+                } else if event.id == *items.quit.id() {
                     supervisor.stop();
-                    tray.take();
+                    bar.remove();
                     *control_flow = ControlFlow::Exit;
+                    return;
                 }
             }
             _ => {}
         }
+        // Sleep until something happens, or until the face next moves.
+        *control_flow = bar
+            .wakes_at()
+            .map_or(ControlFlow::Wait, ControlFlow::WaitUntil);
     })
+}
+
+/// Clicks on the menu and on the menu-bar item, as events on the app's loop.
+fn forward_events(proxy: &EventLoopProxy<UserEvent>) {
+    let menu = proxy.clone();
+    MenuEvent::set_event_handler(Some(move |event| {
+        let _ = menu.send_event(UserEvent::Menu(event));
+    }));
+    let item = proxy.clone();
+    TrayIconEvent::set_event_handler(Some(move |event| {
+        if matches!(
+            event,
+            TrayIconEvent::Click {
+                button_state: MouseButtonState::Down,
+                ..
+            }
+        ) {
+            let _ = item.send_event(UserEvent::Opened);
+        }
+    }));
+}
+
+/// The menu's own items, which are always there.
+struct Items {
+    open: MenuItem,
+    status: MenuItem,
+    at_login: CheckMenuItem,
+    log: MenuItem,
+    quit: MenuItem,
+}
+
+impl Items {
+    fn new(paths: &Paths) -> Result<(Self, Menu)> {
+        let items = Self {
+            open: MenuItem::new("Open LoomWatch", true, None),
+            status: MenuItem::new("Starting…", false, None),
+            at_login: CheckMenuItem::new(
+                "Start at login",
+                paths.bundle.is_some(),
+                login_item::enabled(),
+                None,
+            ),
+            log: MenuItem::new("Show log", true, None),
+            quit: MenuItem::new("Quit LoomWatch", true, None),
+        };
+        let menu = Menu::new();
+        menu.append_items(&[
+            &items.open,
+            &items.status,
+            &PredefinedMenuItem::separator(),
+            &items.at_login,
+            &items.log,
+            &PredefinedMenuItem::separator(),
+            &items.quit,
+        ])?;
+        Ok((items, menu))
+    }
+}
+
+/// The menu-bar item, and what it shows of the teams' work: the face, the count of what waits on
+/// you beside it, a tooltip, and the menu's rows under the status line.
+struct Bar {
+    tray: Option<TrayIcon>,
+    faces: Faces,
+    face: Face,
+    shown: Progress,
+    work: WorkSection,
+}
+
+impl Bar {
+    fn new(menu: &Menu) -> Self {
+        Self {
+            tray: None,
+            faces: Faces::draw(),
+            face: Face::default(),
+            shown: Progress::default(),
+            // Under "Open LoomWatch" and the status line.
+            work: WorkSection::new(menu.clone(), 2),
+        }
+    }
+
+    fn build(&mut self, menu: Menu) {
+        self.tray = TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_icon_templated(self.faces.get(Picture::Asleep).clone())
+            .with_tooltip("LoomWatch")
+            .build()
+            .map_err(|error| eprintln!("LoomWatch: no menu-bar item: {error}"))
+            .ok();
+    }
+
+    fn show(&mut self, next: Progress) {
+        self.work.show(&next.rows());
+        if let Some(tray) = &self.tray {
+            // The menu bar counts what waits on you, as the browser tab's title does.
+            let waiting = next.needs_you.len();
+            tray.set_title((waiting > 0).then(|| waiting.to_string()));
+            let _ = tray.set_tooltip(Some(next.summary()));
+        }
+        self.face.update(&self.shown, &next, Instant::now());
+        self.show_face();
+        self.shown = next;
+    }
+
+    fn tick(&mut self) {
+        if self.face.tick(Instant::now()) {
+            self.show_face();
+        }
+    }
+
+    /// The menu is open: whatever finished has been seen.
+    fn seen(&mut self) {
+        if self.face.seen() {
+            self.show_face();
+        }
+    }
+
+    fn show_face(&self) {
+        if let Some(tray) = &self.tray {
+            let picture = self.face.picture();
+            let icon = self.faces.get(picture).clone();
+            // Asleep it is a template, in the menu bar's own ink; awake it shows its colour.
+            let _ = if picture == Picture::Asleep {
+                tray.set_icon_templated(Some(icon))
+            } else {
+                tray.set_icon(Some(icon))
+            };
+        }
+    }
+
+    fn wakes_at(&self) -> Option<Instant> {
+        self.face.wakes_at()
+    }
+
+    fn link_for(&self, id: &MenuId) -> Option<&str> {
+        self.work.link_for(id)
+    }
+
+    fn remove(&mut self) {
+        self.tray.take();
+    }
+}
+
+/// Reads what the teams are doing from the `loomwatchd` on `watched` (0 until one answers), and
+/// tells the menu each time it changes. When `loomwatchd` doesn't answer, nothing is under way.
+fn watch_runs(watched: &AtomicU16, proxy: &EventLoopProxy<UserEvent>) {
+    let mut last: Option<Progress> = None;
+    loop {
+        let port = watched.load(Ordering::SeqCst);
+        if port != 0 {
+            let now = get(port, &progress::runs_path())
+                .and_then(|body| serde_json::from_str::<Vec<progress::Record>>(&body).ok())
+                .map(|runs| progress::progress(&runs, chrono::Utc::now()))
+                .unwrap_or_default();
+            if last.as_ref() != Some(&now) {
+                if proxy.send_event(UserEvent::Progress(now.clone())).is_err() {
+                    return;
+                }
+                last = Some(now);
+            }
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
+/// The menu's rows about the teams' work, between the status line and the settings.
+struct WorkSection {
+    menu: Menu,
+    /// Where the section starts in the menu.
+    at: usize,
+    separator: PredefinedMenuItem,
+    /// Each row's item and where it opens in the app.
+    shown: Vec<(MenuItem, Option<String>)>,
+}
+
+impl WorkSection {
+    fn new(menu: Menu, at: usize) -> Self {
+        Self {
+            menu,
+            at,
+            separator: PredefinedMenuItem::separator(),
+            shown: Vec::new(),
+        }
+    }
+
+    /// Show `rows`. Rows about the same runs as before only change their words, so a menu that is
+    /// open as the minutes tick over does not jump; anything else builds the section again.
+    fn show(&mut self, rows: &[Row]) {
+        let same = self.shown.len() == rows.len()
+            && self
+                .shown
+                .iter()
+                .zip(rows)
+                .all(|((_, link), row)| *link == row.link);
+        if same {
+            for ((item, _), row) in self.shown.iter().zip(rows) {
+                if item.text() != row.text {
+                    item.set_text(&row.text);
+                }
+            }
+            return;
+        }
+        if !self.shown.is_empty() {
+            let _ = self.menu.remove(&self.separator);
+        }
+        for (item, _) in self.shown.drain(..) {
+            let _ = self.menu.remove(&item);
+        }
+        if rows.is_empty() {
+            return;
+        }
+        let _ = self.menu.insert(&self.separator, self.at);
+        for (offset, row) in rows.iter().enumerate() {
+            // Headings are greyed out; a line about a run opens that run.
+            let item = MenuItem::new(&row.text, row.link.is_some(), None);
+            let _ = self.menu.insert(&item, self.at + 1 + offset);
+            self.shown.push((item, row.link.clone()));
+        }
+    }
+
+    /// Where a clicked row opens in the app.
+    fn link_for(&self, id: &MenuId) -> Option<&str> {
+        self.shown
+            .iter()
+            .find(|(item, _)| item.id() == id)
+            .and_then(|(_, link)| link.as_deref())
+    }
+}
+
+/// What the menu-bar face is doing, and when it next moves.
+#[derive(Default)]
+struct Face {
+    mood: Mood,
+    /// Runs that ended since the menu was last opened, and how. The face winks at a finished one,
+    /// and shows one that failed in red, until you look. A cancelled run is not news.
+    news: BTreeMap<String, Ended>,
+    /// Pictures shown since the team started working; the stitch and the blink both follow it.
+    frame: u32,
+    next_frame: Option<Instant>,
+    /// macOS's Reduce motion is on: at work the face keeps still, and its colour says it.
+    still: bool,
+}
+
+impl Face {
+    fn update(&mut self, before: &Progress, after: &Progress, now: Instant) {
+        let mood = after.mood();
+        if mood == Mood::Working && self.mood != Mood::Working {
+            self.still = reduce_motion();
+            // It wakes with a blink.
+            self.frame = 0;
+        }
+        self.mood = mood;
+        self.next_frame =
+            (mood == Mood::Working && !self.still).then(|| self.next_frame.unwrap_or(now + FRAME));
+        self.news.extend(
+            after
+                .ended_since(before)
+                .filter(|(_, how)| *how != Ended::Cancelled)
+                .map(|(run, how)| (run.to_owned(), how)),
+        );
+        // News lasts as long as the menu lists the run.
+        self.news.retain(|run, _| after.has_ended(run));
+    }
+
+    /// The menu was opened. Returns whether there was news to put away.
+    fn seen(&mut self) -> bool {
+        let had = !self.news.is_empty();
+        self.news.clear();
+        had
+    }
+
+    /// Move on when it is time. Returns whether the picture changed.
+    fn tick(&mut self, now: Instant) -> bool {
+        if self.next_frame.is_some_and(|at| at <= now) {
+            self.frame = self.frame.wrapping_add(1);
+            self.next_frame = Some(now + FRAME);
+            return true;
+        }
+        false
+    }
+
+    fn wakes_at(&self) -> Option<Instant> {
+        self.next_frame
+    }
+
+    fn picture(&self) -> Picture {
+        match self.mood {
+            Mood::Asking => Picture::Asking,
+            Mood::Working if self.still => Picture::Working {
+                frame: 0,
+                eyes: Eye::Open,
+            },
+            Mood::Working => Picture::Working {
+                frame: u8::try_from(self.frame % u32::from(SEWING_FRAMES)).unwrap_or(0),
+                eyes: blink(self.frame),
+            },
+            Mood::Idle if self.news.values().any(|how| *how == Ended::Failed) => Picture::Stopped,
+            Mood::Idle if !self.news.is_empty() => Picture::Winking,
+            Mood::Idle => Picture::Asleep,
+        }
+    }
+}
+
+/// Where the eyes are in their blink, `frame` pictures into the work: half shut, shut, half shut,
+/// then open until the next one.
+const fn blink(frame: u32) -> Eye {
+    match frame % BLINK_EVERY {
+        0 | 2 => Eye::Half,
+        1 => Eye::Shut,
+        _ => Eye::Open,
+    }
+}
+
+/// Which of the [`Faces`] shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Picture {
+    /// Nothing under way: eyes shut, in the menu bar's own ink.
+    Asleep,
+    /// A team at work, in blue: one picture of the stitch sewing round (of [`SEWING_FRAMES`]) and
+    /// of the eyes' blink.
+    Working { frame: u8, eyes: Eye },
+    /// Something waits on you: gold, its mouth open.
+    Asking,
+    /// A run stopped with an error: red, crosses for eyes, until you open the menu.
+    Stopped,
+    /// A run finished: jade, winking, until you open the menu.
+    Winking,
+}
+
+/// Whether Reduce motion is on in System Settings › Accessibility › Display.
+fn reduce_motion() -> bool {
+    Command::new("/usr/bin/defaults")
+        .args(["read", "com.apple.universalaccess", "reduceMotion"])
+        .stderr(Stdio::null())
+        .output()
+        .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).trim() == "1")
 }
 
 fn open_in_browser(url: &str) {
@@ -250,9 +589,9 @@ fn supervise(
     };
     // Another LoomWatch already answers, started from Terminal, say: open that one, and don't
     // start a second that would run the same scheduled teams twice.
-    if let Some(url) = running_loomwatch() {
-        say("Running (started elsewhere)");
-        let _ = proxy.send_event(UserEvent::Ready(url));
+    if let Some(port) = running_loomwatch() {
+        let _ = proxy.send_event(UserEvent::Ready(port));
+        say("LoomWatch is running (started elsewhere)");
         return;
     }
     let path = login_shell_path();
@@ -276,9 +615,8 @@ fn supervise(
             }
         };
         *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(child);
-        let url = format!("http://127.0.0.1:{port}");
         if wait_until_healthy(port, slot) {
-            let _ = proxy.send_event(UserEvent::Ready(url));
+            let _ = proxy.send_event(UserEvent::Ready(port));
         } else if !stopping.load(Ordering::SeqCst) {
             say("Still starting… (see Show log)");
         }
@@ -412,12 +750,11 @@ fn free_port() -> Option<u16> {
     (first..=first.max(LAST_PORT)).find(|port| TcpListener::bind(("127.0.0.1", *port)).is_ok())
 }
 
-/// The address of a `LoomWatch` already answering on its usual port.
-fn running_loomwatch() -> Option<String> {
+/// The port of a `LoomWatch` already answering on its usual one.
+fn running_loomwatch() -> Option<u16> {
     let port = first_port();
     let body = get(port, "/api/about")?;
-    (body.contains("\"startedAt\"") && body.contains("\"version\""))
-        .then(|| format!("http://127.0.0.1:{port}"))
+    (body.contains("\"startedAt\"") && body.contains("\"version\"")).then_some(port)
 }
 
 fn wait_until_healthy(port: u16, slot: &Mutex<Option<Child>>) -> bool {
@@ -474,105 +811,240 @@ fn append_log(log: &Path, line: &str) {
 const MENU_BAR_WIDTH: u16 = 36;
 const MENU_BAR_HEIGHT: u16 = 44;
 
-/// The mark, drawn for the menu bar: the tile of `docs/assets/brand/mark-small.svg` in black, with
-/// its face and its running stitch cut out of it so the menu bar shows through them. macOS tints a
-/// template image to suit the menu bar, so the gold has no colour of its own here.
-fn menu_bar_icon() -> Icon {
+/// The frame the face is sewn into, in the image's pixels: a 14.2 pt square in the middle of the
+/// image, with rounded corners, drawn as a running stitch of 3 px stitches; with the stitches'
+/// width it comes to 16 pt.
+const FRAME_LEFT: f32 = 3.8;
+const FRAME_TOP: f32 = 7.8;
+const FRAME_SIZE: f32 = 28.4;
+const FRAME_RADIUS: f32 = 6.9;
+const STITCHES: u8 = 12;
+const STITCH_WIDTH: f32 = 3.0;
+/// How much of each stitch's step is thread; round ends make it look longer.
+const STITCH_LENGTH: f32 = 0.4;
+
+/// One picture of the face.
+#[derive(Clone, Copy, Default)]
+struct Pose {
+    /// How far the stitch has sewn round, in stitches; a whole stitch looks as it started.
+    sewn: f32,
+    /// The left eye and the right one, as you look at it.
+    eyes: [Eye; 2],
+    mouth: Mouth,
+    ink: Ink,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Eye {
+    #[default]
+    Open,
+    Half,
+    Shut,
+    /// An X: the run failed.
+    Cross,
+}
+
+/// The eyes through a blink, in the order of the working pictures drawn for each.
+const BLINKS: [Eye; 3] = [Eye::Open, Eye::Half, Eye::Shut];
+
+/// What the face is drawn in: the colours the crew's figures glow in the app
+/// (`ui/src/styles/team-chat.css`), blue while one works, gold while one waits for you, jade when
+/// it is done and red when it failed. Awake, macOS shows the colour as it is on a light menu bar
+/// or a dark one, so each is the tone of the app's palette that reads on both (about 3:1): the
+/// palette's own `blue-500` and `gold-500`, and jade and red halfway between their light-theme
+/// and dark-theme tones. Colour is never the only sign: the eyes and the mouth say the same.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Ink {
+    /// Black, for a template image that macOS tints to suit the menu bar.
+    #[default]
+    MenuBar,
+    Live,
+    Accent,
+    Ok,
+    Alert,
+}
+
+impl Ink {
+    const fn rgb(self) -> [u8; 3] {
+        match self {
+            Self::MenuBar => [0, 0, 0],
+            Self::Live => [0x2F, 0x7D, 0xD3],
+            Self::Accent => [0xAD, 0x8A, 0x20],
+            Self::Ok => [0x33, 0x9D, 0x6B],
+            Self::Alert => [0xD9, 0x4B, 0x45],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Mouth {
+    /// The weft stitch, smiling.
+    #[default]
+    Smile,
+    /// An "o": something needs you.
+    Open,
+}
+
+/// Every picture the menu bar shows, drawn once.
+struct Faces {
+    asleep: Icon,
+    asking: Icon,
+    stopped: Icon,
+    winking: Icon,
+    /// Each sewing frame with the eyes open, half shut and shut.
+    working: Vec<[Icon; 3]>,
+}
+
+impl Faces {
+    fn get(&self, picture: Picture) -> &Icon {
+        match picture {
+            Picture::Asleep => &self.asleep,
+            Picture::Asking => &self.asking,
+            Picture::Stopped => &self.stopped,
+            Picture::Winking => &self.winking,
+            Picture::Working { frame, eyes } => {
+                let blink = BLINKS.iter().position(|eye| *eye == eyes).unwrap_or(0);
+                &self.working[usize::from(frame)][blink]
+            }
+        }
+    }
+
+    fn draw() -> Self {
+        let awake = Pose::default();
+        Self {
+            asleep: icon(Pose {
+                eyes: [Eye::Shut; 2],
+                ..awake
+            }),
+            asking: icon(Pose {
+                mouth: Mouth::Open,
+                ink: Ink::Accent,
+                ..awake
+            }),
+            stopped: icon(Pose {
+                eyes: [Eye::Cross; 2],
+                mouth: Mouth::Open,
+                ink: Ink::Alert,
+                ..awake
+            }),
+            winking: icon(Pose {
+                eyes: [Eye::Open, Eye::Shut],
+                ink: Ink::Ok,
+                ..awake
+            }),
+            working: (0..SEWING_FRAMES)
+                .map(|frame| {
+                    BLINKS.map(|eye| {
+                        icon(Pose {
+                            sewn: f32::from(frame) / f32::from(SEWING_FRAMES),
+                            eyes: [eye; 2],
+                            ink: Ink::Live,
+                            ..awake
+                        })
+                    })
+                })
+                .collect(),
+        }
+    }
+}
+
+fn icon(pose: Pose) -> Icon {
     Icon::from_rgba(
-        menu_bar_pixels(),
+        menu_bar_pixels(pose),
         u32::from(MENU_BAR_WIDTH),
         u32::from(MENU_BAR_HEIGHT),
     )
     .expect("menu-bar icon pixels")
 }
 
-/// The mark's RGBA pixels. Its tile is 16 × 16 pt inside the 18 × 22 pt image, about the size Apple
-/// suggests for a menu-bar item, with the rest left clear.
-fn menu_bar_pixels() -> Vec<u8> {
-    // The tile is 32 px square, 2 px from each side and 6 px from the top and the bottom.
-    const TILE: f32 = 32.0;
-    const LEFT: f32 = 2.0;
-    const TOP: f32 = 6.0;
-    // mark-small.svg is drawn on a 512 grid; `at` maps one of its points into the image.
-    let scale = TILE / 512.0;
-    let at = |(x, y): (f32, f32)| (x.mul_add(scale, LEFT), y.mul_add(scale, TOP));
-    // Each eye is a 70-wide pill: a line between its two round ends.
-    let eyes = [
-        [at((187.0, 181.0)), at((187.0, 261.0))],
-        [at((325.0, 181.0)), at((325.0, 261.0))],
-    ];
-    // The mouth is a quadratic curve; six straight pieces are smooth at this size.
-    let mouth: Vec<(f32, f32)> = (0..=6_u8)
+/// The mark drawn for the menu bar as a line drawing, the way macOS draws its own items: the face
+/// of `docs/assets/brand/mark-small.svg` (two pill eyes and a smiling stitch) inside its running
+/// stitch, without the dark tile, so it sits as lightly as its neighbours.
+fn menu_bar_pixels(pose: Pose) -> Vec<u8> {
+    let stitches = stitch_lines(pose.sewn);
+    // Each eye is drawn in lines with round ends, each with its half-width: upright and open, as
+    // wide but squashed half shut, flat when shut, and two crossing lines for an X.
+    let eye = |x: f32, eye: Eye| match eye {
+        Eye::Open => vec![([(x, 16.2), (x, 21.4)], 2.4)],
+        Eye::Half => vec![([(x - 0.8, 19.6), (x + 0.8, 19.6)], 1.6)],
+        Eye::Shut => vec![([(x - 2.4, 20.0), (x + 2.4, 20.0)], 1.1)],
+        Eye::Cross => vec![
+            ([(x - 2.1, 16.9), (x + 2.1, 21.1)], 1.1),
+            ([(x - 2.1, 21.1), (x + 2.1, 16.9)], 1.1),
+        ],
+    };
+    let eyes: Vec<([(f32, f32); 2], f32)> = eye(13.6, pose.eyes[0])
+        .into_iter()
+        .chain(eye(22.4, pose.eyes[1]))
+        .collect();
+    let [red, green, blue] = pose.ink.rgb();
+    let smile = quadratic((14.4, 28.4), (18.0, 31.0), (21.6, 28.4));
+    // How much of a pixel lies within `radius` of a shape `distance` from its middle.
+    let cover = |distance: f32, radius: f32| (radius + 0.5 - distance).clamp(0.0, 1.0);
+    let mut rgba =
+        Vec::with_capacity(usize::from(MENU_BAR_WIDTH) * usize::from(MENU_BAR_HEIGHT) * 4);
+    for y in 0..MENU_BAR_HEIGHT {
+        for x in 0..MENU_BAR_WIDTH {
+            let point = (f32::from(x) + 0.5, f32::from(y) + 0.5);
+            let mouth = match pose.mouth {
+                Mouth::Smile => cover(line_distance(&smile, point), 1.4),
+                Mouth::Open => cover((point.0 - 18.0).hypot(point.1 - 29.4), 2.3),
+            };
+            let ink = stitches
+                .iter()
+                .map(|line| cover(line_distance(line, point), STITCH_WIDTH / 2.0))
+                .chain(
+                    eyes.iter()
+                        .map(|([a, b], radius)| cover(segment_distance(*a, *b, point), *radius)),
+                )
+                .fold(mouth, f32::max);
+            // `ink` is clamped to 0..=1, so this fits a byte.
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let alpha = (ink * 255.0).round() as u8;
+            rgba.extend_from_slice(&[red, green, blue, alpha]);
+        }
+    }
+    rgba
+}
+
+/// A quadratic curve from `from` to `to`, bent towards `bend`, as points along it; six straight
+/// pieces are smooth at this size.
+fn quadratic(from: (f32, f32), bend: (f32, f32), to: (f32, f32)) -> Vec<(f32, f32)> {
+    (0..=6_u8)
         .map(|step| {
             let t = f32::from(step) / 6.0;
             let u = 1.0 - t;
             let along = |from: f32, bend: f32, to: f32| {
                 (u * u).mul_add(from, (2.0 * u * t).mul_add(bend, t * t * to))
             };
-            at((along(222.0, 256.0, 290.0), along(354.0, 382.0, 354.0)))
+            (along(from.0, bend.0, to.0), along(from.1, bend.1, to.1))
         })
-        .collect();
-    let stitches: Vec<Vec<(f32, f32)>> = stitch_lines()
-        .iter()
-        .map(|line| line.iter().copied().map(at).collect())
-        .collect();
-    let cover = |distance: f32, width: f32| (width * scale / 2.0 + 0.5 - distance).clamp(0.0, 1.0);
-    let on_line = |line: &[(f32, f32)], point: (f32, f32)| {
-        line.windows(2)
-            .map(|pair| segment_distance(pair[0], pair[1], point))
-            .fold(f32::INFINITY, f32::min)
-    };
-    let mut rgba =
-        Vec::with_capacity(usize::from(MENU_BAR_WIDTH) * usize::from(MENU_BAR_HEIGHT) * 4);
-    for y in 0..MENU_BAR_HEIGHT {
-        for x in 0..MENU_BAR_WIDTH {
-            let point = (f32::from(x) + 0.5, f32::from(y) + 0.5);
-            let tile = (0.5 - rounded_square_distance(point, (LEFT, TOP), TILE, 112.0 * scale))
-                .clamp(0.0, 1.0);
-            let cut = eyes
-                .iter()
-                .map(|eye| cover(on_line(eye, point), 70.0))
-                .chain(std::iter::once(cover(on_line(&mouth, point), 40.0)))
-                .chain(
-                    stitches
-                        .iter()
-                        .map(|line| cover(on_line(line, point), 26.0)),
-                )
-                .fold(0.0_f32, f32::max);
-            let alpha = tile * (1.0 - cut);
-            // `alpha` is clamped to 0..=1, so this fits a byte.
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-            let alpha = (alpha * 255.0).round() as u8;
-            rgba.extend_from_slice(&[0, 0, 0, alpha]);
-        }
-    }
-    rgba
+        .collect()
 }
 
-/// The running stitch of mark-small.svg, on its 512 grid: 16 stitches round the square inset by 40
-/// with 88-unit corners, each half a step long and the first centred on the top edge, as the SVG's
-/// dash pattern draws them. Each stitch is a short line of points, so the ones on corners bend.
-fn stitch_lines() -> Vec<Vec<(f32, f32)>> {
-    const STITCHES: u8 = 16;
-    let step = stitch_outline().iter().sum::<f32>() / f32::from(STITCHES);
+/// The frame's stitches, each a short line of points so the ones on corners bend: [`STITCHES`]
+/// evenly round the outline, the first centred on the top edge, then moved `sewn` stitches on.
+fn stitch_lines(sewn: f32) -> Vec<Vec<(f32, f32)>> {
+    let step = outline_pieces().iter().sum::<f32>() / f32::from(STITCHES);
     (0..STITCHES)
         .map(|stitch| {
-            let middle = f32::from(stitch) * step;
+            let middle = (f32::from(stitch) + sewn) * step;
             (0..=4_u8)
-                .map(|part| stitch_point((f32::from(part) / 4.0 - 0.5).mul_add(step / 2.0, middle)))
+                .map(|part| {
+                    outline_point(
+                        (f32::from(part) / 4.0 - 0.5).mul_add(step * STITCH_LENGTH, middle),
+                    )
+                })
                 .collect()
         })
         .collect()
 }
 
-const STITCH_INSET: f32 = 40.0;
-const STITCH_RADIUS: f32 = 88.0;
-
-/// The lengths of the stitch's outline in the order its SVG path draws it, clockwise from the top's
-/// midpoint: half the top edge, then a corner and a side three times, a corner, and the other half.
-fn stitch_outline() -> [f32; 9] {
-    let side = 2.0f32.mul_add(-(STITCH_INSET + STITCH_RADIUS), 512.0);
-    let corner = std::f32::consts::FRAC_PI_2 * STITCH_RADIUS;
+/// The lengths of the frame's outline, clockwise from the middle of its top edge: half the top
+/// edge, then a corner and a side three times, a corner, and the other half.
+fn outline_pieces() -> [f32; 9] {
+    let side = 2.0f32.mul_add(-FRAME_RADIUS, FRAME_SIZE);
+    let corner = std::f32::consts::FRAC_PI_2 * FRAME_RADIUS;
     [
         side / 2.0,
         corner,
@@ -586,46 +1058,44 @@ fn stitch_outline() -> [f32; 9] {
     ]
 }
 
-/// The point `distance` along the stitch's outline.
-fn stitch_point(distance: f32) -> (f32, f32) {
+/// The point `distance` clockwise along the frame's outline from the middle of its top edge.
+fn outline_point(distance: f32) -> (f32, f32) {
     use std::f32::consts::{FRAC_PI_2, PI};
-    let pieces = stitch_outline();
-    let (near, far) = (STITCH_INSET, 512.0 - STITCH_INSET);
-    let (start, end) = (near + STITCH_RADIUS, far - STITCH_RADIUS);
-    let mut left = distance.rem_euclid(pieces.iter().sum());
+    let pieces = outline_pieces();
+    let (left, top) = (FRAME_LEFT, FRAME_TOP);
+    let (right, bottom) = (FRAME_LEFT + FRAME_SIZE, FRAME_TOP + FRAME_SIZE);
+    let radius = FRAME_RADIUS;
+    let mut along = distance.rem_euclid(pieces.iter().sum());
     let mut piece = 0;
-    while piece < pieces.len() - 1 && left > pieces[piece] {
-        left -= pieces[piece];
+    while piece < pieces.len() - 1 && along > pieces[piece] {
+        along -= pieces[piece];
         piece += 1;
     }
     let arc = |(cx, cy): (f32, f32), from: f32| {
-        let angle = from + left / STITCH_RADIUS;
+        let angle = from + along / radius;
         (
-            STITCH_RADIUS.mul_add(angle.cos(), cx),
-            STITCH_RADIUS.mul_add(angle.sin(), cy),
+            radius.mul_add(angle.cos(), cx),
+            radius.mul_add(angle.sin(), cy),
         )
     };
     match piece {
-        0 => (256.0 + left, near),
-        1 => arc((end, start), -FRAC_PI_2),
-        2 => (far, start + left),
-        3 => arc((end, end), 0.0),
-        4 => (end - left, far),
-        5 => arc((start, end), FRAC_PI_2),
-        6 => (near, end - left),
-        7 => arc((start, start), PI),
-        _ => (start + left, near),
+        0 => (left + FRAME_SIZE / 2.0 + along, top),
+        1 => arc((right - radius, top + radius), -FRAC_PI_2),
+        2 => (right, top + radius + along),
+        3 => arc((right - radius, bottom - radius), 0.0),
+        4 => (right - radius - along, bottom),
+        5 => arc((left + radius, bottom - radius), FRAC_PI_2),
+        6 => (left, bottom - radius - along),
+        7 => arc((left + radius, top + radius), PI),
+        _ => (left + radius + along, top),
     }
 }
 
-/// How far `point` lies outside a square with rounded corners (negative inside).
-fn rounded_square_distance(point: (f32, f32), corner: (f32, f32), size: f32, radius: f32) -> f32 {
-    let half = size / 2.0;
-    let (qx, qy) = (
-        (point.0 - corner.0 - half).abs() - (half - radius),
-        (point.1 - corner.1 - half).abs() - (half - radius),
-    );
-    qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - radius
+/// How far `point` is from a line of straight pieces.
+fn line_distance(line: &[(f32, f32)], point: (f32, f32)) -> f32 {
+    line.windows(2)
+        .map(|pair| segment_distance(pair[0], pair[1], point))
+        .fold(f32::INFINITY, f32::min)
 }
 
 fn segment_distance(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
@@ -699,12 +1169,18 @@ mod login_item {
 mod tests {
     use super::*;
 
+    const WIDTH: usize = MENU_BAR_WIDTH as usize;
+
+    fn alpha(pixels: &[u8], x: usize, y: usize) -> u8 {
+        pixels[(y * WIDTH + x) * 4 + 3]
+    }
+
     #[test]
     fn the_menu_bar_mark_is_about_sixteen_points_and_leaves_room_around_it() {
-        let pixels = menu_bar_pixels();
-        let (width, height) = (usize::from(MENU_BAR_WIDTH), usize::from(MENU_BAR_HEIGHT));
+        let pixels = menu_bar_pixels(Pose::default());
+        let (width, height) = (WIDTH, usize::from(MENU_BAR_HEIGHT));
         assert_eq!(pixels.len(), width * height * 4);
-        let inked = |x: usize, y: usize| pixels[(y * width + x) * 4 + 3] > 0;
+        let inked = |x: usize, y: usize| alpha(&pixels, x, y) > 0;
         let rows: Vec<usize> = (0..height)
             .filter(|&y| (0..width).any(|x| inked(x, y)))
             .collect();
@@ -715,21 +1191,211 @@ mod tests {
         let span = |lines: &[usize]| lines.last().unwrap() - lines.first().unwrap() + 1;
         assert!(span(&rows) <= 32, "{} px tall", span(&rows));
         assert!(span(&columns) <= 32, "{} px wide", span(&columns));
-        assert!(rows.first().unwrap() >= &6 && rows.last().unwrap() < &(height - 6));
+        assert!(rows.first().unwrap() >= &5 && rows.last().unwrap() < &(height - 5));
         assert!(columns.first().unwrap() >= &1 && columns.last().unwrap() < &(width - 1));
     }
 
     #[test]
-    fn the_menu_bar_mark_shows_its_face_and_stitch_as_holes_in_the_tile() {
-        let pixels = menu_bar_pixels();
-        let alpha = |x: usize, y: usize| pixels[(y * usize::from(MENU_BAR_WIDTH) + x) * 4 + 3];
-        // The middle of each eye, of the mouth and of the stitch on the top edge are clear...
-        assert_eq!(alpha(13, 19), 0, "left eye");
-        assert_eq!(alpha(22, 19), 0, "right eye");
-        assert_eq!(alpha(18, 29), 0, "mouth");
-        assert_eq!(alpha(18, 8), 0, "the stitch in the middle of the top edge");
-        // ...and the tile around them is solid.
-        assert_eq!(alpha(18, 19), 255, "between the eyes");
-        assert_eq!(alpha(18, 33), 255, "below the mouth");
+    fn the_face_is_sewn_into_a_frame_of_stitches_with_no_tile_behind_it() {
+        let pixels = menu_bar_pixels(Pose::default());
+        let alpha = |x, y| alpha(&pixels, x, y);
+        assert_eq!(alpha(13, 18), 255, "left eye");
+        assert_eq!(alpha(22, 18), 255, "right eye");
+        assert_eq!(alpha(15, 28), 255, "the smile");
+        assert_eq!(
+            alpha(18, 7),
+            255,
+            "the stitch in the middle of the top edge"
+        );
+        assert_eq!(alpha(22, 7), 0, "the gap before the next stitch");
+        // Nothing fills the frame: the menu bar shows through between the eyes and round the face.
+        assert_eq!(alpha(18, 18), 0, "between the eyes");
+        assert_eq!(alpha(8, 22), 0, "beside the face");
+    }
+
+    #[test]
+    fn its_eyes_open_half_shut_and_shut_and_its_mouth_opens_when_something_needs_you() {
+        let awake = menu_bar_pixels(Pose::default());
+        let asking = menu_bar_pixels(Pose {
+            mouth: Mouth::Open,
+            ..Pose::default()
+        });
+        assert_eq!(alpha(&asking, 14, 28), 0, "no smile");
+        assert_eq!(alpha(&asking, 18, 29), 255, "an o");
+        assert_eq!(alpha(&awake, 18, 26), 0);
+        assert!(alpha(&asking, 18, 27) > 0, "taller than the smile");
+
+        let half = menu_bar_pixels(Pose {
+            eyes: [Eye::Half; 2],
+            ..Pose::default()
+        });
+        let shut = menu_bar_pixels(Pose {
+            eyes: [Eye::Shut; 2],
+            ..Pose::default()
+        });
+        assert_eq!(alpha(&awake, 13, 15), 255, "an open eye is tall");
+        assert_eq!(alpha(&half, 13, 15), 0, "half shut, it is shorter");
+        assert_eq!(alpha(&half, 13, 19), 255);
+        assert_eq!(alpha(&shut, 13, 17), 0, "shut, it is a line");
+        assert_eq!(alpha(&shut, 11, 19), 255, "across");
+
+        let winking = menu_bar_pixels(Pose {
+            eyes: [Eye::Open, Eye::Shut],
+            ..Pose::default()
+        });
+        assert_eq!(alpha(&winking, 13, 15), 255, "one eye open");
+        assert_eq!(alpha(&winking, 22, 15), 0, "the other shut");
+        assert_eq!(alpha(&winking, 21, 19), 255, "to a line");
+
+        let crossed = menu_bar_pixels(Pose {
+            eyes: [Eye::Cross; 2],
+            ..Pose::default()
+        });
+        assert_eq!(alpha(&crossed, 13, 18), 255, "an X crosses in the middle");
+        assert_eq!(alpha(&crossed, 11, 17), 255, "out to its corners");
+        assert_eq!(alpha(&half, 11, 17), 0);
+        assert_eq!(alpha(&crossed, 13, 15), 0, "no taller than it is wide");
+    }
+
+    #[test]
+    fn awake_it_is_drawn_in_its_colour_and_asleep_in_the_menu_bar_s_ink() {
+        let colour = |ink: Ink| {
+            let pixels = menu_bar_pixels(Pose {
+                ink,
+                ..Pose::default()
+            });
+            // The middle of the left eye.
+            let at = (18 * WIDTH + 13) * 4;
+            assert_eq!(pixels[at + 3], 255);
+            [pixels[at], pixels[at + 1], pixels[at + 2]]
+        };
+        assert_eq!(colour(Ink::MenuBar), [0, 0, 0]);
+        assert_eq!(colour(Ink::Live), [0x2F, 0x7D, 0xD3]);
+        assert_eq!(colour(Ink::Accent), [0xAD, 0x8A, 0x20]);
+        assert_eq!(colour(Ink::Ok), [0x33, 0x9D, 0x6B]);
+        assert_eq!(colour(Ink::Alert), [0xD9, 0x4B, 0x45]);
+    }
+
+    #[test]
+    fn the_stitch_sews_round_and_comes_back_to_where_it_started() {
+        let start = menu_bar_pixels(Pose::default());
+        let halfway = menu_bar_pixels(Pose {
+            sewn: 0.5,
+            ..Pose::default()
+        });
+        let round = menu_bar_pixels(Pose {
+            sewn: 1.0,
+            ..Pose::default()
+        });
+        assert_eq!(alpha(&halfway, 18, 7), 0, "the top stitch has moved on");
+        assert_eq!(alpha(&halfway, 22, 7), 255, "into the gap");
+        // A whole stitch on, every stitch stands where the next one stood: the same picture.
+        assert!(
+            start.iter().zip(&round).all(|(a, b)| a.abs_diff(*b) <= 1),
+            "the last picture leads back into the first"
+        );
+        // Only the stitch moves: the face is the same in every picture.
+        let face = |pixels: &[u8]| -> Vec<u8> {
+            (12..33)
+                .flat_map(|y| (10..26).map(move |x| (x, y)))
+                .map(|(x, y)| alpha(pixels, x, y))
+                .collect()
+        };
+        assert_eq!(face(&start), face(&halfway));
+    }
+
+    fn progress_of(records: serde_json::Value) -> Progress {
+        let runs: Vec<progress::Record> = serde_json::from_value(records).unwrap();
+        progress::progress(&runs, chrono::Utc::now())
+    }
+
+    /// One run, `status`, with `working` agents at work.
+    fn record(status: &str, working: &[&str]) -> serde_json::Value {
+        let at = chrono::Utc::now().to_rfc3339();
+        serde_json::json!([{"runId": "r", "teamPath": "t.yaml", "status": status,
+            "createdAt": at, "finishedAt": at, "working": working}])
+    }
+
+    #[test]
+    fn it_sleeps_blinks_while_a_team_works_and_winks_when_the_work_is_done() {
+        let quiet = Progress::default();
+        let now = Instant::now();
+        let mut face = Face::default();
+        face.update(&quiet, &quiet, now);
+        assert_eq!(face.picture(), Picture::Asleep);
+        assert_eq!(face.wakes_at(), None, "asleep it never wakes the app");
+        assert!(!face.tick(now + Duration::from_secs(5)));
+
+        let working = progress_of(record("running", &["a"]));
+        face.update(&quiet, &working, now);
+        if face.still {
+            // Reduce motion is on here: blue and still, and it never wakes the app.
+            assert_eq!(
+                face.picture(),
+                Picture::Working {
+                    frame: 0,
+                    eyes: Eye::Open
+                }
+            );
+            assert_eq!(face.wakes_at(), None);
+        } else {
+            // It wakes with a blink, then keeps its eyes open while the stitch sews round, and
+            // blinks again every BLINK_EVERY pictures.
+            let mut seen = vec![face.picture()];
+            for step in 1..=u32::from(SEWING_FRAMES) * 3 {
+                let at = now + FRAME * step;
+                assert_eq!(face.wakes_at(), Some(at));
+                assert!(face.tick(at));
+                seen.push(face.picture());
+            }
+            let eyes: Vec<Eye> = seen
+                .iter()
+                .map(|picture| match picture {
+                    Picture::Working { eyes, .. } => *eyes,
+                    other => panic!("{other:?} while working"),
+                })
+                .collect();
+            assert_eq!(eyes[..4], [Eye::Half, Eye::Shut, Eye::Half, Eye::Open]);
+            assert!(eyes[3..20].iter().all(|eye| *eye == Eye::Open));
+            assert_eq!(eyes[20..23], [Eye::Half, Eye::Shut, Eye::Half]);
+            assert_eq!(
+                seen[9],
+                Picture::Working {
+                    frame: 1,
+                    eyes: Eye::Open
+                },
+                "the stitch comes round every SEWING_FRAMES pictures"
+            );
+        }
+
+        // Done: it winks in jade until the menu is opened, and then goes back to sleep.
+        let done = progress_of(record("succeeded", &[]));
+        face.update(&working, &done, now);
+        assert_eq!(face.picture(), Picture::Winking);
+        assert_eq!(face.wakes_at(), None);
+        face.update(&done, &done, now);
+        assert_eq!(face.picture(), Picture::Winking, "until you look");
+        assert!(face.seen());
+        assert_eq!(face.picture(), Picture::Asleep);
+        assert!(!face.seen(), "nothing more to put away");
+    }
+
+    #[test]
+    fn a_failed_run_shows_until_it_leaves_the_list_and_a_cancelled_one_is_not_news() {
+        let working = progress_of(record("running", &["a"]));
+        let now = Instant::now();
+
+        let mut face = Face::default();
+        let failed = progress_of(record("failed", &[]));
+        face.update(&working, &failed, now);
+        assert_eq!(face.picture(), Picture::Stopped);
+        // The run leaves the menu's list (an hour on): the news goes with it.
+        face.update(&failed, &Progress::default(), now);
+        assert_eq!(face.picture(), Picture::Asleep);
+
+        let mut face = Face::default();
+        let cancelled = progress_of(record("cancelled", &[]));
+        face.update(&working, &cancelled, now);
+        assert_eq!(face.picture(), Picture::Asleep);
     }
 }

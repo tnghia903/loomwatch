@@ -153,7 +153,7 @@ always has its archive; a router built without one (tests) answers 503.
 | Route | Result |
 |---|---|
 | `POST /api/runs` | Start a run; `202 Accepted` with the run record |
-| `GET /api/runs` | Every run since the daemon started, newest first; `?preview=true` cuts each `reply` to its first 400 characters, which is what the browser's lists read |
+| `GET /api/runs` | Every run since the daemon started, newest first; `?preview=true` cuts each `reply` to its first 400 characters, which is what the browser's lists read; `?finishedWithin=<seconds>` keeps the runs still under way and those that finished in that many seconds, which is what the menu bar reads |
 | `GET /api/runs/{id}` | One run record, or 404 |
 | `POST /api/runs/{id}/cancel` | Abort a live run: 200 with the record; 409 with the record when it already finished; 404 when unknown |
 
@@ -221,6 +221,9 @@ Response (`202 Accepted`):
   succeeds, or by `POST /api/runs/{id}/deliver`, which sends any finished answer now: an optional
   `{ "title": "…" }`, `200` with the record (a refusal is recorded in `delivery`), 404 for an
   unknown run, 409 while it is live or already sending, 422 without an answer.
+- `teamName` (the team file's `name`) and `agentNames` (each agent's name by id, its id when it
+  has none) are fixed at launch, so a client that has not read the team file, such as the menu
+  bar, can say who `working` is. Runs recorded before they were kept have neither.
 - `permissionRequests` lists what an agent's app is blocked on until the operator answers: `{id,
   agent, name, title, kind, switch, detail, since, expiresAt}`. It is live only, emptied when the
   run ends and never stored. `POST /api/runs/{id}/permissions` with `{ "requestId": "…", "decision":

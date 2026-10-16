@@ -11,6 +11,9 @@
 
 #[cfg(target_os = "macos")]
 mod mac;
+// What the menu says about the teams' work. Built and tested everywhere, used by the Mac menu.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod progress;
 
 #[cfg(target_os = "macos")]
 fn main() -> anyhow::Result<()> {
