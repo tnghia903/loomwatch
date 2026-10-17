@@ -117,8 +117,9 @@ $defs:
     properties:
       keepAliveMinutes:
         description: >-
-          Minutes a kept-alive session idles before LoomWatch asks it for a checkpoint and releases
-          it. A live process at zero token cost is still a live process.
+          Accepted so older team files still load, and read by nothing. It bounded how long a
+          third-party app's session could idle while you decided; a parked agent has nothing
+          running, so it no longer limits a wait.
         type: integer
         minimum: 1
         default: 15

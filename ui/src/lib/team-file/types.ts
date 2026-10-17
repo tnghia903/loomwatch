@@ -189,6 +189,7 @@ export interface TeamDocument {
   /** Optional explicit owner of the canonical team output. */
   responder?: string
   guards?: GuardsConfig
+  /** `stop.keepAliveMinutes` is accepted from older team files and read by nothing. */
   conversation?: { stop?: { keepAliveMinutes?: number }; [key: string]: unknown }
   schedule?: ScheduleConfig
   /** Where every successful run's answer goes, whoever started it (ADR 0038). */

@@ -293,26 +293,24 @@ impl Default for AgentMemoryConfig {
 pub struct ConversationConfig {
     pub brief: BriefConfig,
     pub ask: AskConfig,
-    /// How long a session may idle while the person at the keyboard decides.
+    /// Bounds on a review stop or a parked `ask_user`, kept so older team files still load.
     pub stop: StopConfig,
 }
 
-/// Bounds on a review stop or a parked `ask_user` (`docs/TEAM_MEMORY.md`, "Rules that keep this
-/// safe"). Only the second tier of decision 7 reads this: a harness that advertises
-/// `loadSession` is closed while the operator thinks and costs no process at all, so no window
-/// applies to it.
+/// Bounds on a review stop or a parked `ask_user`. Kept so older team files still load, and read
+/// by nothing: an agent waiting for the operator is parked in the database with nothing running,
+/// so no window applies to it (`docs/TEAM_CONFIG.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct StopConfig {
-    /// Minutes a kept-alive session idles before `LoomWatch` asks it for a checkpoint and releases
-    /// it. A live process at zero token cost is still a live process.
+    /// Minutes a third-party app's session could idle before it was checkpointed and let go.
+    /// Accepted, and no longer limits a wait.
     pub keep_alive_minutes: u32,
 }
 
 impl Default for StopConfig {
     fn default() -> Self {
-        // Decision 7 settled on 15, down from 30: long enough to answer a question you meant to
-        // answer, short enough that a stop you walked away from does not hold a harness all day.
+        // The default the schema documents.
         Self {
             keep_alive_minutes: 15,
         }
