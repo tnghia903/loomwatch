@@ -425,8 +425,7 @@ function Start-LoomWatch {
 
   # The update hand-over is set below, for a ready-built copy only: a daemon told about one that
   # nothing is running would stop and stay stopped.
-  foreach ($name in @('LOOMWATCH_SUPERVISED', 'LOOMWATCH_UPDATE_REQUEST', 'LOOMWATCH_UPDATE_FAILED',
-      'LOOMWATCH_IMPORT_FROM')) {
+  foreach ($name in @('LOOMWATCH_SUPERVISED', 'LOOMWATCH_UPDATE_REQUEST', 'LOOMWATCH_UPDATE_FAILED')) {
     Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
   }
   $env:LOOMWATCH_COMMIT = Get-Commit

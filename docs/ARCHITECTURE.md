@@ -136,9 +136,8 @@ which is what makes a run replayable. How it stays fast as history grows:
 - **Search** in the Notebook is SQLite FTS5 with English stemming.
 
 `loomwatchd backup <file>` writes a consistent copy while LoomWatch runs (`VACUUM INTO`). The
-launcher saves one before every update. Earlier versions kept the history in PostgreSQL in
-Docker. `loomwatchd import-postgres` copies such a database into the file, and the launcher runs
-it once, on the first start after updating. `loomwatchd` runs as a native process. The container
+launcher saves one before every update. Versions before 0.5 kept the history in PostgreSQL in
+Docker; 0.5.0 is the last release that copies such a history into the file. `loomwatchd` runs as a native process. The container
 image (`Dockerfile`, `docker-compose.yml`) runs the same binary, with the state folder on a
 volume. There the key is in `keys.json`.
 

@@ -65,9 +65,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
 
-Every database test makes a SQLite file of its own. The tests of `loomwatchd import-postgres` also
-need a PostgreSQL they may create a database on; they are skipped unless you name one:
-`LOOMWATCH_TEST_POSTGRES_URL=postgres://… cargo test --locked -p loomwatch-backend --lib import:: -- --include-ignored`.
+Every database test makes a SQLite file of its own, so no test needs a database server.
 
 - Add a test that fails without your change.
 - Paths, programs and processes behave differently on Windows: go through `src/platform.rs` (and

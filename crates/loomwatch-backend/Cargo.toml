@@ -28,10 +28,9 @@ sha2 = "0.10"
 base64 = "0.22"
 url = "2.5"
 serde_yaml = "0.9.34"
-# The archive is one SQLite file, built into the program. `postgres` is only for
-# `loomwatchd import-postgres`, which copies the archive an earlier version kept.
+# The archive is one SQLite file, built into the program.
 # `regexp` is SQL's REGEXP, which chat search uses to ignore case beyond ASCII.
-sqlx = { version = "0.8.6", default-features = false, features = ["json", "macros", "migrate", "postgres", "regexp", "runtime-tokio-rustls", "sqlite"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["json", "macros", "migrate", "regexp", "runtime-tokio-rustls", "sqlite"] }
 regex = "1.11"
 # The archive keeps raw ACP frames compressed (archive/codec.rs).
 zstd = { version = "0.13", default-features = false }
