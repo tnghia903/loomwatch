@@ -136,6 +136,38 @@ const ALLOW_RULES: { rule: CheckupRule; key: AllowSwitch; needs: RegExp; doing: 
   },
 ]
 
+/**
+ * A word that turns the rest of its clause into a prohibition: "don't run curl", "never edit the
+ * files", "without a terminal", "web search instead of the shell". Not when it is turned around
+ * itself ("don't forget to run the tests") or counts something ("no more than two web searches").
+ */
+const FORBIDS = /\b(?:not|never|no|nor|without|avoid|cannot|(?:do|does|did|ca|wo|should|must|could|would|is|are|need)n['’]?t|instead of|rather than)\b(?!\s+(?:forget|fail|hesitate|neglect|omit|skip|more|less|fewer|later|longer|only|just)\b)/i
+/**
+ * Where a prohibition stops: "don't just read the code, run the tests" asks for the tests. A
+ * condition starts a clause of its own, kept with it so it can be told apart.
+ */
+const CLAUSE_START = /[.;:!?\n,]|\b(?:but|so|then|instead(?! of)|until|before|after|once|while|because)\b|(?=\b(?:if|when|whenever|unless)\b)/gi
+/** "If you can't browse the web, say so" plans for a missing switch; it does not forbid it. */
+const CONDITION = /^\s*(?:if|when|whenever|unless)\b/i
+/** Switched off right after it is named: "the terminal is off", "web search is disabled". */
+const SWITCHED_OFF = /^\s+(?:(?!(?:that|which|who)\b)\w+\s+)?(?:is|are)\s+(?:off|disabled|blocked|unavailable|not (?:allowed|available|on))\b/i
+
+/** Whether the instructions ask for what `needs` names, not counting a clause that forbids it. */
+function asksFor(role: string, needs: RegExp): boolean {
+  const search = new RegExp(needs.source, `${needs.flags.replace('g', '')}g`)
+  for (let found = search.exec(role); found; found = search.exec(role)) {
+    const before = role.slice(0, found.index)
+    let from = 0
+    for (const start of before.matchAll(CLAUSE_START)) from = start.index + start[0].length
+    const clause = before.slice(from)
+    const forbidden = (!CONDITION.test(clause) && FORBIDS.test(clause)) || SWITCHED_OFF.test(role.slice(found.index + found[0].length))
+    if (!forbidden) return true
+    // A forbidden match can hold an asked-for one: "never install packages, run the tests".
+    search.lastIndex = found.index + 1
+  }
+  return false
+}
+
 /** Says what to reply with: a reply, a format, or a shape drawn as headings. */
 const HAND_BACK = /\b(reply|replies|respond|response|return|hand (it |them |this )?(back|over|on)|output|deliver|produce|format|end with|give back|answer with|in this shape)\b|^\s*#{1,3}\s/im
 /** A self-check sentence ("Before you reply, check …") names the reply without saying what it is. */
@@ -280,7 +312,7 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
 
     // An app that never asks (allow.ts) has nothing to be allowed: the panel already says so.
     for (const allow of actsWithoutAsking(agent) ? [] : ALLOW_RULES) {
-      if (agent.allow?.[allow.key] || !allow.needs.test(role)) continue
+      if (agent.allow?.[allow.key] || !asksFor(role, allow.needs)) continue
       add({
         rule: allow.rule, severity: scheduled ? 'fix' : 'improve', agentId: agent.id,
         // permissions.rs: what is not switched on waits for the operator, up to 10 minutes, and a

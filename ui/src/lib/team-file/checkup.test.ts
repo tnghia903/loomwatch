@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 
@@ -114,6 +117,47 @@ describe('checkup', () => {
     expect(run({ agents: [{ ...coder, allow: { edits: true, commands: true } }] })).toEqual([])
     // OpenCode never asks, so there is nothing to allow.
     expect(run({ agents: [{ ...coder, spawn: { ...CLAUDE, cmd: 'opencode', args: ['acp'] } }] })).toEqual([])
+  })
+
+  it('does not read a prohibition as a need', () => {
+    const asked = (role: string) => rules(run({ agents: [agent('gatherer', `${role} Reply with one bullet per story, each with its link.`, { allow: { web: true } })], scheduled: true }))
+    // The bundled daily digest's Gatherer (examples/usecases/daily-tech-digest.yaml).
+    expect(asked('Find and read pages with web search only. Commands are off for this team, so don\'t run curl or any other command.')).toEqual([])
+    for (const forbidden of [
+      'Do not run any command.',
+      'Never run scripts or open a shell.',
+      'Don\'t edit files or run commands.',
+      'Read pages without a terminal.',
+      'There is no need to run the tests.',
+      'Use web search instead of the shell.',
+      'The terminal is off for this team.',
+      'Do not change any files in this folder.',
+    ]) expect(asked(forbidden), forbidden).toEqual([])
+    for (const [needed, rule] of [
+      ['Run curl to fetch the feed with a command.', 'needs-commands'],
+      ['Run the tests before you reply.', 'needs-commands'],
+      ['Don\'t forget to run the tests.', 'needs-commands'],
+      ['Don\'t just read the code, run the tests.', 'needs-commands'],
+      ['Never install packages, run the tests.', 'needs-commands'],
+      ['Commands are off for this team. Run the build anyway.', 'needs-commands'],
+      ['Don\'t reply before you run the linter.', 'needs-commands'],
+      ['Save the digest to a file.', 'needs-edits'],
+    ] as const) expect(asked(needed), needed).toEqual([`${rule}:gatherer`])
+    // A condition plans for a missing switch; the web is still what it works from.
+    expect(rules(run({ agents: [agent('scout', 'If you can\'t browse the web, say so in your first line. Reply with five links, each with its date.')] }))).toEqual(['needs-web:scout'])
+  })
+
+  it('has nothing to fix in the bundled use cases, on their own schedule', () => {
+    // A finding to fix turns Build's heading from "Your team is ready" to "Almost ready".
+    const usecases = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../examples/usecases')
+    const files = readdirSync(usecases).filter((name) => name.endsWith('.yaml'))
+    expect(files.length).toBeGreaterThan(0)
+    for (const file of files) {
+      const doc = parse(readFileSync(path.join(usecases, file), 'utf8')) as TeamDocument
+      const scheduled = Boolean(doc.schedule && doc.schedule.enabled !== false)
+      const findings = run({ agents: doc.agents, edges: doc.edges.map((edge) => ({ from: edge.from, to: edge.to })), entrypoint: doc.entrypoint, responder: doc.responder, scheduled })
+      expect(findings.filter((finding) => finding.severity === 'fix').map((finding) => finding.title), file).toEqual([])
+    }
   })
 
   it('asks the team’s answer for a format, and a helper for what it sends back', () => {
