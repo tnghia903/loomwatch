@@ -1,4 +1,6 @@
-//! User-owned Notion connections. Secrets live in the OS credential store only.
+//! User-owned Notion connections. Secrets live in the OS credential store only, except in a trial
+//! copy started with `LOOMWATCH_KEY_STORE=file`, which keeps them in a private file of its own
+//! state folder and never touches the Keychain ([`install`]).
 //!
 //! There are two ways in. Notion sign-in ([`sign_in`]) is the default: the operator allows
 //! `LoomWatch` on Notion's own page, and every call then goes through Notion's hosted MCP server
@@ -12,7 +14,7 @@ mod sign_in;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, OnceLock},
     time::Duration,
 };
 
@@ -33,6 +35,8 @@ use tokio::sync::Mutex;
 const SERVICE: &str = "LoomWatch.Notion";
 #[cfg(target_os = "macos")]
 const ACCOUNT: &str = "local-workspace";
+/// The connection [`Store::File`] keeps, in the state folder: the JSON the Keychain item holds.
+const CREDENTIALS_FILE: &str = "notion-credentials.json";
 const VERSION: &str = "2026-03-11";
 /// Upstream bodies larger than this are refused, including ones without `Content-Length`.
 const MAX_RESPONSE_BYTES: usize = 2_000_000;
@@ -133,10 +137,25 @@ impl Remembered {
     }
 }
 
-/// Where the connection is kept: the macOS Keychain, or memory in tests.
+/// Where [`Publisher`] and [`Reader`] find the connection, chosen once at startup ([`install`]).
+static INSTALLED: OnceLock<Store> = OnceLock::new();
+
+/// Chooses where this process keeps the Notion connection: the Keychain, or with
+/// `LOOMWATCH_KEY_STORE=file` ([`crate::ai::KEY_STORE_ENV`]) a private file in `state_dir`, so a
+/// trial copy never reads or writes the item the installed app keeps. The daemon calls this once,
+/// at startup, before anything can send or read; a second call is ignored.
+pub fn install(state_dir: &Path) {
+    let _ = INSTALLED.set(Store::chosen(state_dir, crate::ai::keys_in_file()));
+}
+
+/// Where the connection is kept: the macOS Keychain, a file in the state folder, or memory in
+/// tests.
 #[derive(Clone)]
 enum Store {
     Keychain,
+    /// `<state dir>/notion-credentials.json`, readable by this account only, for a trial copy that
+    /// must not touch the Keychain. It holds what the Keychain item would.
+    File(PathBuf),
     #[cfg(test)]
     Memory(Arc<std::sync::Mutex<Option<String>>>),
     /// A Keychain that refuses every read and write, for tests that show something never reads it.
@@ -145,12 +164,46 @@ enum Store {
 }
 
 impl Store {
-    /// Whether a connection can be kept here at all. Linux and Windows have no store yet.
+    /// The Keychain, or the file in `state_dir` when `in_file`.
+    fn chosen(state_dir: &Path, in_file: bool) -> Self {
+        if in_file {
+            Self::File(state_dir.join(CREDENTIALS_FILE))
+        } else {
+            Self::Keychain
+        }
+    }
+
+    /// The store [`install`] chose. Before that, the Keychain, unless the file store was asked
+    /// for: then there is no folder to keep a file in, and nothing is kept rather than reach the
+    /// Keychain.
+    fn installed() -> anyhow::Result<Self> {
+        match INSTALLED.get() {
+            Some(store) => Ok(store.clone()),
+            None if crate::ai::keys_in_file() => anyhow::bail!(
+                "{} is file, but no state folder was given for the Notion connection",
+                crate::ai::KEY_STORE_ENV
+            ),
+            None => Ok(Self::Keychain),
+        }
+    }
+
+    /// Whether a connection can be kept here at all. Linux and Windows have no Keychain, so only
+    /// the file keeps one there.
     fn available(&self) -> bool {
         match self {
             Self::Keychain => cfg!(target_os = "macos"),
+            Self::File(_) => true,
             #[cfg(test)]
             Self::Memory(_) | Self::Refusing => true,
+        }
+    }
+
+    /// What a store that cannot be read or written says, in its own words.
+    fn unavailable(&self) -> ApiError {
+        if matches!(self, Self::File(_)) {
+            file_error()
+        } else {
+            storage_error()
         }
     }
 
@@ -169,13 +222,14 @@ impl Store {
     async fn read(&self, ask: bool) -> ApiResult<Option<Connection>> {
         let stored = match self {
             Self::Keychain => KEYCHAIN.load(ask, keychain_read).await?,
+            Self::File(path) => file_read(path.clone()).await?,
             #[cfg(test)]
             Self::Memory(slot) => slot.lock().map_err(|_| storage_error())?.clone(),
             #[cfg(test)]
             Self::Refusing => return Err(storage_error()),
         };
         stored
-            .map(|value| serde_json::from_str(&value).map_err(|_| storage_error()))
+            .map(|value| serde_json::from_str(&value).map_err(|_| self.unavailable()))
             .transpose()
     }
 
@@ -185,6 +239,7 @@ impl Store {
             .transpose()?;
         match self {
             Self::Keychain => KEYCHAIN.save(value, keychain_write).await,
+            Self::File(path) => file_write(path.clone(), value).await,
             #[cfg(test)]
             Self::Memory(slot) => {
                 *slot.lock().map_err(|_| storage_error())? = value;
@@ -349,7 +404,8 @@ impl Public {
 }
 
 /// The caller must only mount this router on a loopback listener. What the connection status
-/// shows is kept in `state_dir` ([`Shown`]).
+/// shows is kept in `state_dir` ([`Shown`]), and with `LOOMWATCH_KEY_STORE=file` the connection
+/// too ([`install`]).
 ///
 /// # Errors
 /// Returns an error if the HTTPS client cannot be initialized.
@@ -357,7 +413,7 @@ pub fn router(state_dir: &Path) -> anyhow::Result<Router> {
     Ok(router_with(NotionState {
         client: build_client()?,
         gate: Arc::new(Mutex::new(())),
-        store: Store::Keychain,
+        store: Store::chosen(state_dir, crate::ai::keys_in_file()),
         shown: Arc::new(Shown::in_folder(state_dir)),
         endpoints: Arc::new(Endpoints::notion()),
         pending: Arc::new(Mutex::new(None)),
@@ -498,7 +554,16 @@ fn storage_error() -> ApiError {
     )
 }
 
+fn file_error() -> ApiError {
+    failure(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "LoomWatch can't read or write notion-credentials.json in its state folder. Check that folder and retry.",
+    )
+}
+
 async fn keychain_read() -> ApiResult<Option<String>> {
+    #[cfg(test)]
+    tests::never_the_keychain();
     tokio::task::spawn_blocking(|| {
         #[cfg(target_os = "macos")]
         {
@@ -518,6 +583,8 @@ async fn keychain_read() -> ApiResult<Option<String>> {
 }
 
 async fn keychain_write(value: Option<String>) -> ApiResult<()> {
+    #[cfg(test)]
+    tests::never_the_keychain();
     tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "macos")]
         {
@@ -539,6 +606,34 @@ async fn keychain_write(value: Option<String>) -> ApiResult<()> {
     })
     .await
     .map_err(|_| storage_error())?
+}
+
+/// What [`Store::File`] keeps at `path`, or `None` when nothing is connected.
+async fn file_read(path: PathBuf) -> ApiResult<Option<String>> {
+    tokio::task::spawn_blocking(move || match std::fs::read_to_string(&path) {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(file_error()),
+    })
+    .await
+    .map_err(|_| file_error())?
+}
+
+/// Keeps `value` at `path`, readable by this account only, as `keys.json` is. Forgetting the
+/// connection removes the file, as it removes the Keychain item.
+async fn file_write(path: PathBuf, value: Option<String>) -> ApiResult<()> {
+    tokio::task::spawn_blocking(move || {
+        match value {
+            Some(value) => crate::approvals::write_private(&path, value.as_bytes()),
+            None => match std::fs::remove_file(&path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                removed => removed,
+            },
+        }
+        .map_err(|_| file_error())
+    })
+    .await
+    .map_err(|_| file_error())?
 }
 
 fn public_status(connection: Option<&Connection>) -> Value {
@@ -838,15 +933,17 @@ pub(crate) struct Publisher {
 }
 
 impl Publisher {
-    /// A publisher reading the stored connection, with its own HTTPS client.
+    /// A publisher reading the stored connection, wherever [`install`] keeps it, with its own
+    /// HTTPS client.
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTPS client cannot be initialized.
+    /// Returns an error if the HTTPS client cannot be initialized, or if the file store was asked
+    /// for before [`install`] named its folder.
     pub(crate) fn new() -> anyhow::Result<Self> {
         Ok(Self {
             client: build_client()?,
-            store: Store::Keychain,
+            store: Store::installed()?,
             endpoints: Arc::new(Endpoints::notion()),
         })
     }
@@ -1059,15 +1156,17 @@ pub(crate) struct Reader {
 }
 
 impl Reader {
-    /// A reader for the stored connection, with its own HTTPS client.
+    /// A reader for the stored connection, wherever [`install`] keeps it, with its own HTTPS
+    /// client.
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTPS client cannot be initialized.
+    /// Returns an error if the HTTPS client cannot be initialized, or if the file store was asked
+    /// for before [`install`] named its folder.
     pub(crate) fn new() -> anyhow::Result<Self> {
         Ok(Self {
             client: build_client()?,
-            store: Store::Keychain,
+            store: Store::installed()?,
             endpoints: Arc::new(Endpoints::notion()),
         })
     }
@@ -1420,6 +1519,15 @@ fn styled_item(content: &str, style: &Style) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Test builds never reach the Keychain item the installed app keeps. Every test gives the
+    /// connection a store of its own, and one that would read or write the real item fails here
+    /// first.
+    pub(super) fn never_the_keychain() {
+        panic!(
+            "a test reached the real Keychain: give it a Store::Memory, Store::File or Store::Refusing"
+        );
+    }
 
     /// The Keychain, as [`Remembered`] sees it: how often it was read, and whether it refuses.
     #[derive(Clone, Default)]
@@ -2320,6 +2428,70 @@ mod tests {
             shown_by(&later).await,
             (StatusCode::OK, json!({"connected": false}))
         );
+    }
+
+    /// The Keychain stays where a connection is kept unless the file store is asked for.
+    #[test]
+    fn only_the_file_store_keeps_the_connection_in_the_state_folder() {
+        let folder = Folder::new();
+        assert!(matches!(Store::chosen(&folder.0, false), Store::Keychain));
+        assert!(matches!(
+            Store::chosen(&folder.0, true),
+            Store::File(path) if path == folder.0.join(CREDENTIALS_FILE)
+        ));
+    }
+
+    /// `LOOMWATCH_KEY_STORE=file`: a trial copy with its own state folder signs in, shows, uses and
+    /// forgets the connection there. A read or write of the real Keychain fails any test
+    /// ([`never_the_keychain`]), so the first status, made with nothing kept yet, shows it never
+    /// reads the item the installed app keeps.
+    #[tokio::test]
+    async fn a_trial_copy_keeps_the_connection_in_its_own_state_folder() {
+        let (endpoints, fake) = fake_notion().await;
+        let folder = Folder::new();
+        let store = Store::chosen(&folder.0, true);
+        let credentials = folder.0.join(CREDENTIALS_FILE);
+        let router = router_with(state_with(store.clone(), endpoints.clone(), &folder));
+        assert_eq!(
+            shown_by(&router).await,
+            (StatusCode::OK, json!({"connected": false}))
+        );
+        assert!(!credentials.exists());
+
+        let state = start(&router, &fake).await;
+        send(
+            &router,
+            from_notion(&format!("state={state}&code=code-1")),
+            None,
+        )
+        .await;
+        let (_, signed_in) = shown_by(&router).await;
+        assert_eq!(
+            signed_in,
+            json!({"connected": true, "name": "Acme", "destination": null, "via": "signIn"})
+        );
+        let kept: Value = serde_json::from_slice(&std::fs::read(&credentials).unwrap()).unwrap();
+        assert_eq!(kept["signIn"]["refreshToken"], "refresh-1");
+        assert!(!folder.shown().contains("refresh-1"), "{}", folder.shown());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&credentials)
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "readable by this account only");
+        }
+
+        // A run reads its pages through the same file.
+        let reader = Reader::with(store, endpoints);
+        assert!(reader.read(&[DESTINATION.to_owned()]).await.is_ok());
+
+        let (_, _, connection) =
+            send(&router, from_ui("DELETE", "/api/notion/connection"), None).await;
+        assert_eq!(connection, json!({"connected": false}));
+        assert!(!credentials.exists(), "disconnecting removes the file");
+        assert_eq!(fake.lock().unwrap().revoked, ["refresh-1"]);
     }
 
     /// A connection saved by a `LoomWatch` from before the status was kept is read once, and shown
