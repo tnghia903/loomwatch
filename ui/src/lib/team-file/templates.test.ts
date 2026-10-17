@@ -16,7 +16,7 @@ const schema = parse(readFileSync(resolve(process.cwd(), '../schemas/team.schema
 const validate = compileTeamValidator(schema, Ajv2020)
 
 describe('team templates', () => {
-  it.each(['single', 'research-write', 'research-write-check', 'research-review-write'] as const)('writes a complete, schema-valid team for %s', (template) => {
+  it.each(['single', 'research-write', 'research-write-check', 'research-review-write', 'research'] as const)('writes a complete, schema-valid team for %s', (template) => {
     const yaml = templateTeamYaml(template, '  Blog writer ', new Date('2026-10-01T00:00:00Z'))
     const doc = parse(yaml) as TeamDocument
     const result = validate(doc)
@@ -43,15 +43,33 @@ describe('team templates', () => {
   // ADR 0057 and 0062: the researcher gathers on the faster model, the writer writes on the strong
   // one, the check step reads on another maker's, and each thinks as hard as its job needs.
   it('puts each job on its tier’s model at its job’s effort', () => {
-    const tiers = (template: 'single' | 'research-write' | 'research-write-check' | 'research-review-write') => {
+    const tiers = (template: 'single' | 'research-write' | 'research-write-check' | 'research-review-write' | 'research') => {
       const doc = parse(templateTeamYaml(template, 'Report')) as TeamDocument
       return Object.fromEntries(doc.agents.filter((agent) => agent.kind !== 'operator').map((agent) => [agent.id, `${agent.model}${agent.thinkingEffort ? `[${agent.thinkingEffort}]` : ''}`]))
     }
     expect(tiers('research-write')).toEqual({ researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
     expect(tiers('research-review-write')).toEqual({ researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
     expect(tiers('research-write-check')).toEqual({ researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]`, checker: `${CHECK_MODEL}[high]` })
+    // The lead plans and judges on the strong model; its researchers gather on the faster one.
+    expect(tiers('research')).toEqual({ lead: `${DEFAULT_MODEL}[medium]`, researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
     // One assistant writes the answer itself: the strong model, at its own default.
     expect(tiers('single')).toEqual({ assistant: DEFAULT_MODEL })
+  })
+
+  // Open Deep Research's shape: no edges, so the lead answers, and reaches the Researcher (many
+  // times over, in parallel) and the Writer through the Team Bus. It names both, so it is told
+  // when to use them.
+  it('leads the Research team from one agent that hands the research out and has the Writer report', () => {
+    const doc = parse(templateTeamYaml('research', 'Question')) as TeamDocument
+    expect(doc.entrypoint).toBe('lead')
+    expect(doc.edges).toEqual([])
+    expect(doc.agents.map((agent) => agent.name)).toEqual(['Research lead', 'Researcher', 'Writer'])
+    const lead = doc.agents[0]
+    expect(lead.role).toMatch(/`dispatch` to the Researcher, one call for each/)
+    expect(lead.role).toMatch(/`ask` the Writer for the report/)
+    expect(lead.role).toMatch(/numbered citation such as \[1\] after every claim/)
+    expect(lead.allow).toBeUndefined()
+    expect(doc.agents[1].allow).toEqual({ web: true })
   })
 
   // ADR 0062: the checked starter team ends on a check step that checks the writer, so the writer's

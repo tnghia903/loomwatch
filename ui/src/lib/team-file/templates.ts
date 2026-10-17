@@ -14,7 +14,7 @@ import { slugifyTeamName } from './useTeamDocument'
  * type a request and press Enter. `blank` is the one exception — it has no agents, so it cannot be
  * saved yet and opens as an unsaved document instead.
  */
-export type TeamTemplateId = 'single' | 'research-write' | 'research-write-check' | 'research-review-write' | 'blank'
+export type TeamTemplateId = 'single' | 'research-write' | 'research-write-check' | 'research-review-write' | 'research' | 'blank'
 
 export interface TeamTemplate {
   id: TeamTemplateId
@@ -67,6 +67,16 @@ export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
     example: { title: 'Competitor summary', lines: ['Acme shipped a team canvas', 'Northwind cut prices by 20%', 'Globex is hiring for agents'], note: 'You approved the research before writing' },
   },
   {
+    // Open Deep Research's shape (MIT, credited on the Research lead job): a lead plans, the
+    // research runs in parallel, a writer reports with a citation on every claim.
+    id: 'research',
+    title: 'Research team',
+    description: 'A lead splits your question, researchers look into each part at the same time, and a writer turns what they found into a report that cites every source.',
+    steps: ['Lead', 'Researchers', 'Writer'],
+    perRun: 'Four to six agents work on each run: the lead, a researcher for each part of the question, and the writer. It costs the most, and suits a question that needs many sources.',
+    example: { title: 'Report: should we move to a four-day week?', lines: ['What the trials measured, and what changed [1][2]', 'Where the results disagree, and why [3]', 'Sources: 12, each cited beside its claim'], note: 'Three researchers worked on it at the same time' },
+  },
+  {
     id: 'blank',
     title: 'Empty team',
     description: 'Start with no agents, and choose its agents yourself.',
@@ -98,7 +108,7 @@ const ROLES = {
  * A template's Researcher and Writer are the palette's jobs of the same name, so a starter team and
  * a team built by hand get the same instructions.
  */
-function jobRole(id: 'researcher' | 'writer' | 'checker'): string {
+function jobRole(id: 'lead' | 'researcher' | 'writer' | 'checker'): string {
   const preset = ROLE_PRESETS.find((candidate) => candidate.id === id)
   if (!preset) throw new Error(`no built-in job ${id}`)
   return preset.role
@@ -147,6 +157,16 @@ export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, nam
       { ...agent('checker', 'Checker', jobRole('checker')), checks: 'writer' },
     ]
     edges = [sequence('researcher', 'writer', ts), sequence('writer', 'checker', ts)]
+  } else if (template === 'research') {
+    // No edges, so the lead is the entrypoint and its reply is the answer; it reaches the others
+    // through the Team Bus: `dispatch` to the Researcher once per sub-question, each its own
+    // session working in parallel, then `ask` to the Writer.
+    agents = [
+      agent('lead', 'Research lead', jobRole('lead')),
+      agent('researcher', 'Researcher', jobRole('researcher')),
+      agent('writer', 'Writer', jobRole('writer')),
+    ]
+    edges = []
   } else {
     agents = [
       agent('researcher', 'Researcher', jobRole('researcher')),

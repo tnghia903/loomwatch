@@ -179,9 +179,11 @@ export function jobFor(agent: Pick<AgentConfig, 'name' | 'role'>): RolePreset | 
   const stems: Record<string, RegExp> = {
     researcher: /\bresearch/, writer: /\bwrit(er|e|ing)\b/, editor: /\bedit(or|ing)?\b|\bproofread/,
     reviewer: /\breview|\bcritic|\bqa\b/, coder: /\bcod(er|e|ing)\b|\bdevelop|\bengineer|\bprogramm/,
-    designer: /\bdesign/, analyst: /\banaly/,
+    designer: /\bdesign/, analyst: /\banaly/, lead: /\blead\b|\bsupervis/,
   }
-  const byName = ROLE_PRESETS.find((preset) => stems[preset.id]?.test(name))
+  // "Research lead" leads: its name says what it does before it says what about.
+  const lead = stems.lead.test(name) ? ROLE_PRESETS.find((preset) => preset.id === 'lead') : undefined
+  const byName = lead ?? ROLE_PRESETS.find((preset) => stems[preset.id]?.test(name))
   return byName ?? ROLE_PRESETS.find((preset) => stems[preset.id]?.test(role)) ?? null
 }
 

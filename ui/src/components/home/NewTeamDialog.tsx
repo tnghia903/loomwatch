@@ -88,7 +88,7 @@ export function NewTeamDialog({ existingPaths, onCreateBlank, onClose, openTeamU
 
           {openTeamUnsaved && <p className="nt-note warn">The open team has unsaved changes. Save it first, or they will be lost.</p>}
 
-          {/* Pinned to the bottom of the dialog: four templates with example results are taller than
+          {/* Pinned to the bottom of the dialog: five templates with example results are taller than
               a laptop screen, and a Create button (or its progress and errors) scrolled out of view
               reads as a dialog that does nothing. */}
           <div className="nt-foot">

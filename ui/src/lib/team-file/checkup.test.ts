@@ -26,7 +26,7 @@ const rules = (findings: ReturnType<typeof checkup>) => findings.map((finding) =
 
 describe('checkup', () => {
   it('finds nothing to improve in the starter teams', () => {
-    for (const template of ['single', 'research-write', 'research-write-check', 'research-review-write'] as const) {
+    for (const template of ['single', 'research-write', 'research-write-check', 'research-review-write', 'research'] as const) {
       const doc = parse(templateTeamYaml(template, 'Starter')) as TeamDocument
       const edges = doc.edges.map((edge) => ({ from: edge.from, to: edge.to }))
       // A pipeline that ends on a check step answers with the work it checks (answeringAgent).
@@ -207,6 +207,9 @@ describe('checkup helpers', () => {
     expect(jobFor({ name: 'Code reviewer', role: '' })?.id).toBe('reviewer')
     expect(jobFor({ name: 'Ada', role: 'Analyse the sales data' })?.id).toBe('analyst')
     expect(jobFor({ name: 'Ada', role: 'Be nice' })).toBeNull()
+    // A research lead leads; it is not a researcher on the faster model.
+    expect(jobFor({ name: 'Research lead', role: '' })?.id).toBe('lead')
+    expect(jobFor({ name: 'Lead researcher', role: '' })?.id).toBe('lead')
   })
 
   it('appends after a blank line', () => {
