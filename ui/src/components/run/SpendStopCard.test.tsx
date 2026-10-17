@@ -15,14 +15,22 @@ describe('the spend stop (ADR 0068)', () => {
     const onRun = vi.fn()
     render(<SpendStopCard run={{ runId: 'r1', spendStops: [stop()] }} onRun={onRun} />)
     expect(screen.getByText('The team used its $1.00 for this run.')).toBeInTheDocument()
-    // One call can take the run a little over; the card says so instead of hiding it.
-    expect(screen.getByText(/Spent \$1\.03 \(the last call took it \$0\.03 over\)\. The agents wait, and nothing more is spent until you answer\./)).toBeInTheDocument()
+    // A call under way can take the run a little over; the card says so instead of hiding it.
+    expect(screen.getByText(/Spent \$1\.03 \(calls already under way took it \$0\.03 over\)\. The agents wait, and nothing more is spent until you answer\./)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Add $0.50 and carry on' }))
     await vi.waitFor(() => expect(screen.queryByText('The team used its $1.00 for this run.')).toBeNull())
     const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('/api/runs/r1/spend')
     expect(JSON.parse(String(init.body))).toEqual({ stopId: 's1', decision: 'add' })
     expect(onRun).toHaveBeenCalledWith({ runId: 'r1' })
+  })
+
+  it('never blames one call for what parallel work spent past the limit', () => {
+    // A lead's two dispatches to the Researcher each cost $0.00316 and crossed a $0.003 guard
+    // together: $0.00332 over, more than any one call cost.
+    render(<SpendStopCard run={{ runId: 'r1', spendStops: [stop({ agent: 'researcher', name: 'Researcher', limitUsd: 0.003, spentUsd: 0.00632, addUsd: 0.1 })] }} />)
+    expect(screen.getByText(/Spent \$0\.00632 \(calls already under way took it \$0\.00332 over\)\. Researcher waits/)).toBeInTheDocument()
+    expect(screen.queryByText(/last call/)).toBeNull()
   })
 
   it('at an agent’s own guard, offers to stop that agent', async () => {

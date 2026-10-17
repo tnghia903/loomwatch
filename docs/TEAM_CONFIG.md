@@ -170,7 +170,8 @@ depend on the document as a whole:
   with what it has" ends the run as done, with the last words an agent wrote as its answer, stop
   reason `spend_limit`, and its checkpoints kept. A scheduled run has nobody to ask: it fails with
   code `spend_limit`, says so, keeps its checkpoints and delivers nothing. A call's cost is known
-  only after it is made, so one call can take a run a few cents past its figure.
+  only after it is made, so the calls under way when the figure is reached, one for each agent at
+  work, can take a run a few cents past it.
 - `spend.perRun` on an agent is that agent's own guard, for an agent that runs away; there is
   none unless set. At it, that agent waits, and "Stop it here" ends its turn with what it wrote
   while the rest of the team carries on. Operator nodes spend nothing and may not set it. The

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SpendStop } from './client'
-import { dollars, openStops, spendNote, spoolLabel, spoolOf, spoolWords, stopActions, stopSentence } from './spend'
+import { dollarField, dollars, openStops, spendNote, spoolLabel, spoolOf, spoolWords, stopActions, stopSentence, typedDollars } from './spend'
 
 const stop = (extra: Partial<SpendStop> = {}): SpendStop => ({ id: 's1', limitUsd: 1, spentUsd: 1.03, addUsd: 0.5, since: '2026-10-17T09:00:00Z', ...extra })
 const names: Record<string, string> = { r: 'Researcher', w: 'Writer' }
@@ -18,6 +18,17 @@ describe('spend as the operator reads it (ADR 0068)', () => {
     expect(dollars(0.003)).toBe('$0.003')
     expect(dollars(0.000479)).toBe('$0.000479')
     expect(dollars(0)).toBe('$0.00')
+  })
+
+  it('shows a limit in a field as it is, and never rounds a typed one down to nothing', () => {
+    expect(dollarField(1)).toBe('1.00')
+    expect(dollarField(0.3)).toBe('0.30')
+    expect(dollarField(0.003)).toBe('0.003')
+    expect(dollarField(0.255)).toBe('0.255')
+    expect(typedDollars('2.499')).toBe(2.5)
+    expect(typedDollars('0.004')).toBe(0.004)
+    expect(typedDollars('0.3')).toBe(0.3)
+    for (const nothing of ['', ' ', '0', '-1', 'abc']) expect(typedDollars(nothing)).toBeNull()
   })
 
   it('says whose limit a stop is, and its two answers', () => {

@@ -12,8 +12,9 @@
 //! flight while it waits, so the wait costs nothing and has no time limit. A scheduled run has
 //! nobody to ask, so it stops at once and keeps its checkpoints.
 //!
-//! A call's cost is only known after it is made, so the check comes before the call, and one call
-//! can take the run a few cents past its spool. The figures say so rather than hide it.
+//! A call's cost is only known after it is made, so the check comes before the call, and the calls
+//! under way when the spool runs out, one for each agent at work, can take the run a few cents
+//! past it. The figures say so rather than hide it.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -368,6 +369,17 @@ pub enum AnswerError {
 pub struct SpendStopped {
     pub cause: Stopped,
     pub limit_usd: f64,
+}
+
+impl SpendStopped {
+    /// The spool a run stopped at, when that is what `error` comes down to.
+    #[must_use]
+    pub fn of(error: &anyhow::Error) -> Option<Self> {
+        error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<Self>())
+            .copied()
+    }
 }
 
 impl fmt::Display for SpendStopped {

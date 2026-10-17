@@ -17,6 +17,12 @@ describe('what one run may spend (ADR 0068)', () => {
     expect(onChange).toHaveBeenCalledWith(2.5)
   })
 
+  it('opens a limit under a cent as written, not as 0.00', () => {
+    render(<SpendLimitChip perRun={0.003} onChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Each run · \$0\.003/ }))
+    expect(screen.getByLabelText('One run of this team may spend up to')).toHaveValue(0.003)
+  })
+
   it('can take the limit off, and starts a team with none from $1.00', () => {
     const onChange = vi.fn()
     const { rerender } = render(<SpendLimitChip perRun={1} onChange={onChange} />)

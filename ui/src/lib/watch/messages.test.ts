@@ -94,6 +94,15 @@ describe('messages between agents', () => {
     expect(messages[1]).toMatchObject({ state: 'failed', error: 'cycle detected: lead -> lead', reply: null })
   })
 
+  it('marks an answer cut short at a spending limit as stopped, keeping why (ADR 0068)', () => {
+    seq = 0
+    const { messages } = projectRun([
+      bus(1, 'lead', 'a', 'ask', { agent: 'writer', question: 'Write it up.' }),
+      settled(9, 'lead', 'a', { agent: 'writer', reply: '(Writer stopped here. The team used its $0.01 for this run, and you finished it there.)', sessionId: 'run', stopped: 'spend_limit' }),
+    ])
+    expect(messages[0]).toMatchObject({ state: 'answered', reply: { stopped: true, text: expect.stringContaining('you finished it there') } })
+  })
+
   it('records a task sent off as delivered, since nothing comes back for it', () => {
     seq = 0
     const { messages } = projectRun([

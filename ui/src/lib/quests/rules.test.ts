@@ -126,6 +126,9 @@ describe('quests', () => {
     expect(questsEarned(asked({}))).toEqual([{ item: 'shuttle', agentId: 'lead', line: 'Lead asked Scout a question over the Team Bus and got an answer.' }])
     expect(items(asked({ state: 'failed' }))).toEqual([])
     expect(items(asked({ carried: true }))).toEqual([])
+    // Stopped at a spending limit before it answered: its reply says why, and is no answer.
+    const stopped = { from: 'scout', text: '(Scout stopped here.)', eventId: 'e', seq: 1, ts: '', offsetMs: 0, source: 'fresh' as const, sentBackTo: null, stopped: true as const }
+    expect(items(asked({ reply: stopped }))).toEqual([])
   })
 
   it('monocle: a check sent the work back, and the second pass met everything', () => {

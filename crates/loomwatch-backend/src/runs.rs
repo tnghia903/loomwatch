@@ -1222,6 +1222,21 @@ impl RunRegistry {
         })
     }
 
+    /// `agent`'s own guard in `run_id`, once the operator stopped it there (ADR 0068): it makes no
+    /// more model calls in this run.
+    pub(crate) fn guard_stopped(&self, run_id: &str, agent: &str) -> Option<f64> {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        let share = inner
+            .runs
+            .get(run_id)?
+            .record
+            .spend
+            .as_ref()?
+            .agents
+            .get(agent)?;
+        share.stopped.then_some(share.limit_usd).flatten()
+    }
+
     /// The operator's answer at one spend stop (ADR 0068), handed to every agent waiting there:
     /// add to the spool (or the agent's guard) and carry on, or finish. Finishing the team's spool
     /// also releases every other stop of the run, since nothing more will be spent.
@@ -3143,8 +3158,8 @@ async fn execute(
             let (_, _, stop_reason) = archived_exit(&archive, &run_id, responder.as_deref()).await;
             registry.mark_succeeded(&run_id, &outcome, stop_reason)
         }
-        Err(error) if spend_stopped(&error).is_some() => {
-            let stopped = spend_stopped(&error).expect("checked by the guard");
+        Err(error) if crate::spend::SpendStopped::of(&error).is_some() => {
+            let stopped = crate::spend::SpendStopped::of(&error).expect("checked by the guard");
             settle_at_spool(
                 &registry,
                 &archive,
@@ -3174,14 +3189,6 @@ async fn execute(
         }
     };
     persist_or_log(&registry, &run_id).await;
-}
-
-/// The spool the run stopped at, when that is why it ended (ADR 0068).
-fn spend_stopped(error: &anyhow::Error) -> Option<crate::spend::SpendStopped> {
-    error
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<crate::spend::SpendStopped>())
-        .copied()
 }
 
 /// End a run that stopped at its spool (ADR 0068). Its checkpoints are kept either way, so it can
@@ -3217,7 +3224,8 @@ async fn settle_at_spool(
     }
     let error = match stopped.cause {
         crate::spend::Stopped::Finished => format!(
-            "The team used its {} before any agent wrote anything, so there was nothing to finish              with.",
+            "The team used its {} before any agent wrote anything, so there was nothing to finish \
+             with.",
             crate::spend::usd(stopped.limit_usd)
         ),
         crate::spend::Stopped::NobodyToAsk => stopped.to_string(),
@@ -3235,6 +3243,10 @@ async fn settle_at_spool(
 /// What a run that stopped part way had to say for itself: the responder's last turn of work, or
 /// failing that the last turn of work any agent wrote in. Checkpoints and handovers are the
 /// coordinator's bookkeeping, never an answer, so their turns are skipped.
+///
+/// One agent can work in several sessions at once (a lead's dispatches to the Researcher), and
+/// their words reach the record interleaved, so each session's turn is kept apart by the session
+/// its prompt, words and tool calls name.
 async fn last_words(
     archive: &EventArchive,
     run_id: &str,
@@ -3242,14 +3254,28 @@ async fn last_words(
 ) -> Option<String> {
     let events = archive.load_session(run_id).await.ok()?;
     let mut bookkeeping: BTreeSet<String> = BTreeSet::new();
-    let mut turns: BTreeMap<String, crate::engine::ReplyText> = BTreeMap::new();
-    let mut latest: Option<String> = None;
+    // Keyed by agent and session; an event that names no session is the agent's latest one's.
+    let mut turns: BTreeMap<(String, String), crate::engine::ReplyText> = BTreeMap::new();
+    let mut sessions: BTreeMap<String, String> = BTreeMap::new();
+    let mut latest: Option<(String, String)> = None;
     for event in &events {
         if event.agent_id.is_empty() {
             continue;
         }
         let agent = &event.agent_id;
-        let turn = turns.entry(agent.clone()).or_default();
+        if let Some(session) = event
+            .raw
+            .as_ref()
+            .and_then(|raw| raw.pointer("/params/sessionId"))
+            .and_then(Value::as_str)
+        {
+            sessions.insert(agent.clone(), session.to_owned());
+        }
+        let key = (
+            agent.clone(),
+            sessions.get(agent).cloned().unwrap_or_default(),
+        );
+        let turn = turns.entry(key.clone()).or_default();
         match event.kind {
             EventKind::SessionMeta if event.payload["phase"] == "turn_purpose" => {
                 if event.payload["purpose"] == "work" {
@@ -3268,7 +3294,7 @@ async fn last_words(
                     .filter(|text| !text.trim().is_empty())
                 {
                     turn.push(text, event.payload["messageId"].as_str());
-                    latest = Some(agent.clone());
+                    latest = Some(key);
                 }
             }
             EventKind::ToolCall
@@ -3278,15 +3304,20 @@ async fn last_words(
             _ => {}
         }
     }
-    let said = |agent: &str| {
+    let said = |key: (String, String)| {
         turns
-            .get(agent)
+            .get(&key)
             .map(|turn| turn.as_str().trim().to_owned())
             .filter(|text| !text.is_empty())
     };
     responder
-        .and_then(said)
-        .or_else(|| latest.as_deref().and_then(said))
+        .and_then(|agent| {
+            said((
+                agent.to_owned(),
+                sessions.get(agent).cloned().unwrap_or_default(),
+            ))
+        })
+        .or_else(|| latest.and_then(said))
 }
 
 /// Leave a `coordinator` checkpoint for every agent of a dead run that did not write one itself.
@@ -6632,7 +6663,11 @@ pub(crate) mod tests {
             Some(0.05)
         );
 
-        let waiting = wait_for(&registry, &run.run_id, |r| !r.spend_stops.is_empty()).await;
+        // Marked running once a poll sees its first agent start, which can come after the stop.
+        let waiting = wait_for(&registry, &run.run_id, |r| {
+            !r.spend_stops.is_empty() && r.status == RunStatus::Running
+        })
+        .await;
         let stop = waiting.spend_stops[0].clone();
         assert_eq!(stop.agent, None, "the team's spool, not an agent's guard");
         assert!((stop.limit_usd - 0.05).abs() < 1e-9, "{stop:?}");
@@ -6730,6 +6765,112 @@ pub(crate) mod tests {
             .await
             .unwrap();
         assert_eq!(checkpoints.len(), 1, "{checkpoints:?}");
+    }
+
+    /// "Finish with what it has" when no agent has written a word yet: there is nothing to finish
+    /// with, and the run says so in one plain sentence.
+    #[tokio::test]
+    async fn finishing_before_any_agent_wrote_anything_says_so_plainly() {
+        use crate::agent::{ToolCall, Usage};
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        // Plans without a word, three times; each call costs $0.04.
+        let silent = demo_model(Demo::responder(|_| {
+            Some(Completion {
+                usage: Usage {
+                    input_tokens: 1000,
+                    output_tokens: 50,
+                    cost_usd: 0.04,
+                    ..Usage::default()
+                },
+                ..Completion::calls(
+                    "",
+                    vec![ToolCall {
+                        id: "plan".into(),
+                        name: "update_plan".into(),
+                        arguments: r#"{"steps":[{"step":"look","status":"in_progress"}]}"#.into(),
+                    }],
+                )
+            })
+        }));
+        write_spool_team(&dir, "spool.yaml", &silent, 0.05);
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let app = router(Some(archive), dir.0.clone(), registry.clone());
+        let run = start(&app, "spool.yaml").await;
+
+        let waiting = wait_for(&registry, &run.run_id, |r| !r.spend_stops.is_empty()).await;
+        let answered = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/spend", run.run_id),
+                &json!({"stopId": waiting.spend_stops[0].id, "decision": "finish"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(answered.status(), StatusCode::OK);
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Failed, "{done:?}");
+        assert_eq!(done.error_code.as_deref(), Some(SPEND_LIMIT));
+        assert_eq!(
+            done.error.as_deref(),
+            Some(
+                "The team used its $0.05 before any agent wrote anything, so there was nothing \
+                 to finish with."
+            )
+        );
+    }
+
+    /// A lead's two dispatches to the Researcher work side by side, so their words reach the
+    /// record interleaved, chunk by chunk. Finishing at the spool answers with the words of one
+    /// of them, whole, never the two woven together.
+    #[tokio::test]
+    async fn the_last_words_of_two_sessions_of_one_agent_are_not_woven_together() {
+        let archive = EventArchive::new(crate::db::Db::temp().await);
+        let log = crate::EventLog::new(archive.clone(), "parallel".into());
+        let update = |session: &str| json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": session}});
+        for session in ["first", "second"] {
+            log.append(
+                "researcher",
+                EventKind::Message,
+                json!({"role": "user", "messageId": null, "content": {"type": "text", "text": "Look into it."}}),
+                Some(json!({"jsonrpc": "2.0", "method": "session/prompt", "params": {"sessionId": session}})),
+            )
+            .await
+            .unwrap();
+        }
+        for (first, second) in [
+            ("## Summary\nShort guides ", "## Summary\nScreenshots "),
+            ("are finished more often.", "help newcomers."),
+        ] {
+            for (session, text) in [("first", first), ("second", second)] {
+                log.append(
+                    "researcher",
+                    EventKind::Message,
+                    json!({"role": "agent", "messageId": format!("{session}-1"), "content": {"type": "text", "text": text}}),
+                    Some(update(session)),
+                )
+                .await
+                .unwrap();
+            }
+        }
+        // The lead, the responder, had nothing more to say in the turn that was stopped.
+        log.append(
+            "lead",
+            EventKind::Message,
+            json!({"role": "user", "messageId": null, "content": {"type": "text", "text": "Here is what came back."}}),
+            Some(json!({"jsonrpc": "2.0", "method": "session/prompt", "params": {"sessionId": "lead"}})),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            last_words(&archive, "parallel", Some("lead"))
+                .await
+                .as_deref(),
+            Some("## Summary\nScreenshots help newcomers."),
+            "the session that wrote last, whole"
+        );
     }
 
     /// A scheduled run has nobody to ask: at its spool it stops, says so, and keeps its

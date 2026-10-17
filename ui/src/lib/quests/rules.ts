@@ -152,7 +152,7 @@ function cushion({ succeeded, agents, current, benched }: QuestFacts): Award | n
 
 function shuttle({ succeeded, agents, projection }: QuestFacts): Award | null {
   if (!succeeded) return null
-  const ask = projection.messages.find((message) => message.kind === 'ask' && !message.carried && message.state === 'answered' && message.from && message.to && message.from !== message.to)
+  const ask = projection.messages.find((message) => message.kind === 'ask' && !message.carried && message.state === 'answered' && !message.reply?.stopped && message.from && message.to && message.from !== message.to)
   if (!ask?.from || !ask.to) return null
   return { item: 'shuttle', agentId: ask.from, line: `${nameOf(agents, ask.from)} asked ${nameOf(agents, ask.to)} a question over the Team Bus and got an answer.` }
 }

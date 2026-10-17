@@ -60,8 +60,9 @@ function Stop({ runId, stop, onDecide, onRun, onAnswered }: {
     setBusy(false)
     onAnswered(failure)
   }
-  // A call's cost is only known once it is made, so the last one can take the run a little over.
-  const over = stop.spentUsd > stop.limitUsd ? ` (the last call took it ${dollars(stop.spentUsd - stop.limitUsd)} over)` : ''
+  // A call's cost is only known once it is made, so the calls under way when the limit is reached,
+  // one for each agent at work, can take the run a little over.
+  const over = stop.spentUsd > stop.limitUsd ? ` (calls already under way took it ${dollars(stop.spentUsd - stop.limitUsd)} over)` : ''
   return (
     <article ref={element} className="permission-ask" aria-live="polite">
       <header>

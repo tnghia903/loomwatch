@@ -1,7 +1,7 @@
 import { ChevronDown, Coins } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
-import { dollars, NEW_TEAM_PER_RUN_USD } from '../../lib/runs/spend'
+import { dollarField, dollars, NEW_TEAM_PER_RUN_USD, typedDollars } from '../../lib/runs/spend'
 
 export interface SpendLimitControl {
   /** What one run may spend, in dollars; `null` is no limit. */
@@ -32,11 +32,10 @@ export function SpendLimitChip({ perRun, onChange }: SpendLimitControl) {
   }, [open])
 
   const show = () => {
-    setText((perRun ?? NEW_TEAM_PER_RUN_USD).toFixed(2))
+    setText(dollarField(perRun ?? NEW_TEAM_PER_RUN_USD))
     setOpen(true)
   }
-  const amount = Number(text)
-  const valid = text.trim() !== '' && Number.isFinite(amount) && amount > 0
+  const typed = typedDollars(text)
   const save = (next: number | null) => {
     setOpen(false)
     if (next !== perRun) onChange?.(next)
@@ -65,7 +64,7 @@ export function SpendLimitChip({ perRun, onChange }: SpendLimitControl) {
       </button>
       {open && (
         <form className="tc-mode-menu tc-spend-menu e2" id={panelId} role="dialog" aria-label="What one run may spend"
-          onSubmit={(event) => { event.preventDefault(); if (valid) save(Math.round(amount * 100) / 100) }}>
+          onSubmit={(event) => { event.preventDefault(); if (typed !== null) save(typed) }}>
           <label className="tc-mode-title" htmlFor={fieldId}>One run of this team may spend up to</label>
           <span className="tc-spend-field">
             <span aria-hidden="true">$</span>
@@ -74,7 +73,7 @@ export function SpendLimitChip({ perRun, onChange }: SpendLimitControl) {
           </span>
           <p className="tc-mode-foot">Past it, the agents wait for you to add more or to finish with what they have.</p>
           <span className="tc-spend-acts">
-            <button type="submit" className="btn btn-primary" disabled={!valid}>Save</button>
+            <button type="submit" className="btn btn-primary" disabled={typed === null}>Save</button>
             {perRun !== null && <button type="button" className="btn" onClick={() => save(null)}>No limit</button>}
           </span>
         </form>

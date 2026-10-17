@@ -21,6 +21,26 @@ export function dollars(amount: number): string {
   return `$${amount.toFixed(places).replace(/(\.\d\d\d*?)0+$/, '$1')}`
 }
 
+/**
+ * A limit as a field shows it: whole cents as `0.30`, and anything finer as written (`0.003`,
+ * `0.255`), so a limit that is set never reads as `0.00` or as a figure it is not.
+ */
+export function dollarField(amount: number): string {
+  const cents = amount.toFixed(2)
+  return Number(cents) === amount ? cents : String(amount)
+}
+
+/**
+ * The limit a typed figure sets: whole cents, but never rounded down to nothing, so a figure under
+ * half a cent stays as typed. `null` for an empty field or no positive figure.
+ */
+export function typedDollars(text: string): number | null {
+  const amount = Number(text)
+  if (text.trim() === '' || !Number.isFinite(amount) || amount <= 0) return null
+  const cents = Math.round(amount * 100) / 100
+  return cents > 0 ? cents : amount
+}
+
 /** "The team used its $1.00", "Researcher used its $0.30": what a stop is about. */
 export function stopSentence(stop: SpendStop): string {
   return `${stop.agent ? stop.name || stop.agent : 'The team'} used its ${dollars(stop.limitUsd)} for this run.`

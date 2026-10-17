@@ -662,14 +662,19 @@ impl TeamBus {
                     let mut context = self.guard_delegation(session, &target)?;
                     context.answering = true;
                     started.store(true, Ordering::SeqCst);
-                    let outcome = self
+                    let helped = self
                         .run_agent(&target, &question, event_log.clone(), context)
                         .await?;
-                    Ok(json!({
+                    let mut answer = json!({
                         "agent": target,
-                        "reply": outcome.reply,
-                        "sessionId": outcome.session_id
-                    }))
+                        "reply": helped.outcome.reply,
+                        "sessionId": helped.outcome.session_id
+                    });
+                    // Its reply says why it stopped; it is not an answer to the question.
+                    if helped.stopped {
+                        answer["stopped"] = json!("spend_limit");
+                    }
+                    Ok(answer)
                 };
                 // Withdrawn when the asker's turn ends first: the answer could reach nobody, so
                 // a kept-alive agent's turn is stopped and a helper started for it is ended.
@@ -1052,7 +1057,7 @@ impl TeamBus {
                 .run_agent(&agent_id, &prompt, event_log.clone(), context)
                 .await;
             let returned = match &outcome {
-                Ok(outcome) => Ok(outcome.reply.clone()),
+                Ok(helped) => Ok(helped.outcome.reply.clone()),
                 Err(error) => Err(format!("{error:#}")),
             };
             bus.record_delegated(&event_log, &caller, &agent_id, mode, &prompt, &returned)
@@ -1111,17 +1116,37 @@ impl TeamBus {
         prompt: &str,
         event_log: EventLog,
         context: DelegationContext,
-    ) -> Result<crate::SessionOutcome> {
+    ) -> Result<Helped> {
         let agent = self.agent(agent_id)?;
         self.state
             .statuses
             .write()
             .await
             .insert(agent.id.clone(), "starting".to_owned());
-        let result = self
+        let run_id = event_log.session_id().to_owned();
+        let result = match self
             .run_agent_inner(&agent, prompt, event_log, context)
             .await
-            .with_context(|| format!("delegated agent {:?} failed", agent.id));
+        {
+            Ok(outcome) => Ok(self.say_if_stopped_at_its_guard(&run_id, &agent, outcome)),
+            // The run stopped at its spool while this helper waited there (ADR 0068): the
+            // operator finished it, or a scheduled run had nobody to ask. The helper did not fail,
+            // so what it comes back with says why it stopped instead of reading as a failure.
+            Err(error) => match crate::spend::SpendStopped::of(&error) {
+                Some(stopped) => Ok(Helped {
+                    outcome: crate::SessionOutcome {
+                        session_id: run_id,
+                        event_count: 0,
+                        exit_code: 0,
+                        reply: format!("({} stopped here. {stopped})", shown_name(&agent)),
+                    },
+                    stopped: true,
+                }),
+                None => {
+                    Err(error).with_context(|| format!("delegated agent {:?} failed", agent.id))
+                }
+            },
+        };
         self.state.statuses.write().await.insert(
             agent.id,
             if result.is_ok() {
@@ -1132,6 +1157,45 @@ impl TeamBus {
             .to_owned(),
         );
         result
+    }
+
+    /// A helper the operator stopped at its own spending guard (ADR 0068) ends its turn with what it
+    /// wrote, often nothing. Whoever reads what it came back with, the agent that handed it the
+    /// work and the run's record, is told why, and that it does no more work in this run, so a lead
+    /// neither takes an empty reply for findings nor hands it the work again.
+    fn say_if_stopped_at_its_guard(
+        &self,
+        run_id: &str,
+        agent: &AgentConfig,
+        mut outcome: crate::SessionOutcome,
+    ) -> Helped {
+        let Some(limit) = self
+            .state
+            .operator
+            .as_ref()
+            .and_then(|desk| desk.registry().guard_stopped(run_id, &agent.id))
+        else {
+            return Helped {
+                outcome,
+                stopped: false,
+            };
+        };
+        let note = format!(
+            "({} stopped here: it used its own {} for this run, and the person running the team \
+             chose to stop it. It does no more work in this run.)",
+            shown_name(agent),
+            crate::spend::usd(limit)
+        );
+        let words = outcome.reply.trim_end();
+        outcome.reply = if words.is_empty() {
+            note
+        } else {
+            format!("{words}\n\n{note}")
+        };
+        Helped {
+            outcome,
+            stopped: true,
+        }
     }
 
     async fn run_agent_inner(
@@ -1485,6 +1549,23 @@ impl TeamBusConnection {
                 .await
                 .insert(agent_id, "running".to_owned());
         }
+    }
+}
+
+/// What a helper came back with.
+struct Helped {
+    outcome: crate::SessionOutcome,
+    /// It stopped at the run's spool, or at its own guard, before it finished (ADR 0068): its
+    /// reply says so, and is not the work it was given.
+    stopped: bool,
+}
+
+/// The name an agent is shown by, or its id when it has none.
+fn shown_name(agent: &AgentConfig) -> &str {
+    if agent.name.trim().is_empty() {
+        &agent.id
+    } else {
+        &agent.name
     }
 }
 

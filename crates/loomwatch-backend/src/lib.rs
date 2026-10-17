@@ -4033,6 +4033,221 @@ mod tests {
         Ok(())
     }
 
+    /// **A helper stopped at its own spending guard says so** (ADR 0068).
+    ///
+    /// "Stop Researcher here" ends the Researcher's turn with what it wrote, often nothing. The
+    /// lead that dispatched it used to get an empty reply with no reason, and a lead that hands the
+    /// work out again gets another. What comes back now says the agent was stopped at its limit and
+    /// does no more work in this run, and no model call is made for it.
+    #[tokio::test]
+    async fn a_helper_stopped_at_its_spending_guard_says_so_to_the_lead() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let lead = crate::engine::demo_model(crate::agent::Demo::responder(|request| {
+            let prompt = request.prompt();
+            if prompt.contains("came back with") {
+                return Some(crate::agent::Completion::text(
+                    if prompt.contains("worker name stopped here")
+                        && prompt.contains("$0.003")
+                        && prompt.contains("no more work in this run")
+                    {
+                        "told why the worker stopped"
+                    } else {
+                        "never told why the worker came back empty"
+                    },
+                ));
+            }
+            Some(match request.messages.last() {
+                Some(crate::agent::Message::Tool { .. }) => {
+                    crate::agent::Completion::text("dispatched the count")
+                }
+                _ => crate::agent::Completion::calls(
+                    "",
+                    vec![crate::agent::ToolCall {
+                        id: "dispatch-1".to_owned(),
+                        name: "dispatch".to_owned(),
+                        arguments: r#"{"agent": "worker", "task": "count the sources"}"#.to_owned(),
+                    }],
+                ),
+            })
+        }));
+        let mut worker = pipeline_agent("worker", &never_prompted());
+        worker.spend.per_run = Some(0.003);
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "dispatching-team".into(),
+            name: "Dispatching team".into(),
+            entrypoint: "lead".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![pipeline_agent("lead", &lead), worker],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let mut record = crate::runs::RunRecord::queued(
+            "team.yaml".to_owned(),
+            "go".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )?;
+        // Earlier in this run, the operator stopped the worker at its guard.
+        let share = record
+            .spend
+            .as_mut()
+            .and_then(|spend| spend.agents.get_mut("worker"))
+            .expect("the worker has a guard");
+        share.spent_usd = 0.004;
+        share.stopped = true;
+        let run_id = record.run_id.clone();
+        let registry = crate::runs::RunRegistry::default();
+        registry.insert(record);
+        let desk = registry.operator_desk(Some(&archive));
+        let outcome = run_team_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "how many sources?",
+            Duration::from_secs(5),
+            Some(EventLog::new(archive.clone(), run_id.clone())),
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage {
+                operator: Some(desk),
+                ..RunLineage::default()
+            },
+        )
+        .await?;
+        assert_eq!(outcome.reply, "told why the worker stopped");
+        let events = archive.load_verified_session(&run_id).await?;
+        let returned = events
+            .iter()
+            .find(|event| {
+                event.agent_id == "worker" && event.payload["phase"] == "delegated_result"
+            })
+            .expect("what the worker came back with is on the record");
+        assert_eq!(returned.payload["status"], "succeeded");
+        assert!(
+            returned.payload["reply"]
+                .as_str()
+                .is_some_and(|reply| reply.contains("stopped here")),
+            "{returned:?}"
+        );
+        Ok(())
+    }
+
+    /// **A helper the run's spool stopped did not fail** (ADR 0068).
+    ///
+    /// The lead asks the Writer, the Writer waits at the run's spool, and the operator finishes the
+    /// run there. The Writer's request used to come back as a failure, so the record said the lead
+    /// "asked writer, which failed" and raised it for attention, over an answer the operator chose.
+    /// It now comes back as the Writer stopping, saying why, and no model call is made for it.
+    #[tokio::test]
+    async fn a_helper_stopped_when_the_run_is_finished_at_its_spool_did_not_fail() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let lead = crate::engine::demo_model(crate::agent::Demo::responder(|_| {
+            Some(crate::agent::Completion {
+                usage: crate::agent::Usage {
+                    input_tokens: 1000,
+                    output_tokens: 50,
+                    cost_usd: 0.06,
+                    ..crate::agent::Usage::default()
+                },
+                ..crate::agent::Completion::calls(
+                    "",
+                    vec![crate::agent::ToolCall {
+                        id: "ask-1".to_owned(),
+                        name: "ask".to_owned(),
+                        arguments: r#"{"agent": "writer", "question": "write it up"}"#.to_owned(),
+                    }],
+                )
+            })
+        }));
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "asking-team".into(),
+            name: "Asking team".into(),
+            entrypoint: "lead".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig {
+                per_run: Some(0.05),
+            },
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![
+                pipeline_agent("lead", &lead),
+                pipeline_agent("writer", &never_prompted()),
+            ],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let (registry, desk, run_id) = operator_desk(&team, &archive);
+        let memory = Arc::new(memory::TeamMemory::default());
+        let lineage = RunLineage {
+            operator: Some(desk),
+            ..RunLineage::default()
+        };
+        let run = run_team_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "write it up",
+            Duration::from_secs(5),
+            Some(EventLog::new(archive.clone(), run_id.clone())),
+            &memory,
+            &lineage,
+        );
+        let finish = async {
+            let stop = loop {
+                match registry.get(&run_id).map(|record| record.spend_stops) {
+                    Some(stops) if !stops.is_empty() => break stops[0].id.clone(),
+                    _ => tokio::time::sleep(Duration::from_millis(20)).await,
+                }
+            };
+            registry
+                .answer_spend(&run_id, &stop, crate::spend::SpendDecision::Finish, None)
+                .expect("the stop is open");
+        };
+        let (ended, ()) =
+            tokio::time::timeout(Duration::from_secs(20), async { tokio::join!(run, finish) })
+                .await
+                .expect("the writer waits at the spool, and the run ends once finished there");
+        let error = ended.expect_err("the run stopped at its spool");
+        assert!(
+            crate::spend::SpendStopped::of(&error).is_some(),
+            "{error:#}"
+        );
+        let events = archive.load_session(&run_id).await?;
+        let call = events
+            .iter()
+            .find(|event| event.kind == EventKind::ToolCall && event.payload["name"] == "ask")
+            .expect("the lead asked the writer");
+        let asked = events
+            .iter()
+            .find(|event| {
+                event.kind == EventKind::ToolUpdate
+                    && event.payload["callId"] == call.payload["callId"]
+                    && event.payload["status"] != "in_progress"
+            })
+            .expect("the ask came back");
+        assert_eq!(asked.payload["status"], "completed", "{asked:?}");
+        assert_eq!(asked.payload["rawOutput"]["stopped"], "spend_limit");
+        assert_eq!(
+            asked.payload["rawOutput"]["reply"],
+            "(writer name stopped here. The team used its $0.05 for this run, and you finished it there.)"
+        );
+        Ok(())
+    }
+
     #[tokio::test]
     async fn a_run_with_no_key_fails_and_its_pre_minted_session_says_why() -> Result<()> {
         let pool = crate::db::Db::temp().await;

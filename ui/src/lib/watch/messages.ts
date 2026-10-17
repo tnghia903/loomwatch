@@ -63,6 +63,11 @@ export interface MessageReply {
   source: 'open' | 'fresh' | null
   /** Your answer at a review step that sent the work back: the stage it went back to. */
   sentBackTo: string | null
+  /**
+   * For an `ask`: the asked agent stopped at the run's spending limit, or its own, before it
+   * answered (ADR 0068). `text` says why; it is not an answer to the question.
+   */
+  stopped?: true
 }
 
 /** Who a handover or a direction came from, as the prompt record names them. */
@@ -238,6 +243,7 @@ export class Correspondence {
       ...this.at(event),
       source: output.live === true ? 'open' : typeof output.sessionId === 'string' ? 'fresh' : null,
       sentBackTo: null,
+      ...(output.stopped === 'spend_limit' ? { stopped: true as const } : {}),
     }
   }
 
