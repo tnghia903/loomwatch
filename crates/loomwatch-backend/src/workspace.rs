@@ -1210,7 +1210,7 @@ mod tests {
             &crate::NodeTask::goal("Summarise the memo"),
             Some(&workspace),
         );
-        let skill_file = workspace.root.join(".agents/skills/report-writer/SKILL.md");
+        let skill_file = under(&workspace.root, ".agents/skills/report-writer/SKILL.md");
         assert!(
             prompt
                 .text

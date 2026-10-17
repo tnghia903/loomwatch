@@ -160,7 +160,12 @@ async fn a_turn_writes_a_file_and_replies() {
     assert_eq!(started["title"], "Write out/report.md");
     assert_eq!(
         started["locations"][0]["path"],
-        folder.0.join("out/report.md").to_string_lossy().as_ref()
+        folder
+            .0
+            .join("out")
+            .join("report.md")
+            .to_string_lossy()
+            .as_ref()
     );
 
     // The policy was asked with the exact file, in the shape the daemon's policy reads.

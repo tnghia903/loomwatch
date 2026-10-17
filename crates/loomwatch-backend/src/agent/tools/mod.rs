@@ -396,9 +396,19 @@ pub(crate) fn resolve(cwd: &Path, given: &str) -> PathBuf {
 pub(crate) fn shown(cwd: &Path, path: &Path) -> String {
     match path.strip_prefix(cwd) {
         Ok(relative) if relative.as_os_str().is_empty() => "the work folder".to_owned(),
-        Ok(relative) => relative.display().to_string(),
+        Ok(relative) => slashed(relative),
         Err(_) => path.display().to_string(),
     }
+}
+
+/// A relative path written with `/` on every system, as the agent and the operator read it and as
+/// the file tools take it back. Windows reads `/` too.
+pub(crate) fn slashed(relative: &Path) -> String {
+    relative
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// The first line of `text`, cut to `limit` characters.
@@ -450,8 +460,8 @@ mod tests {
         assert_eq!(resolve(cwd, "~/notes.md"), home.join("notes.md"));
         assert_eq!(
             shown(cwd, &resolve(cwd, r"notes\a.md")),
-            r"notes\a.md",
-            "the card shows a path inside the work folder relative to it"
+            "notes/a.md",
+            "the card shows a path inside the work folder relative to it, with `/`"
         );
     }
 

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use regex::RegexBuilder;
 use serde_json::Value;
 
-use super::{Builtin, Output, resolve, shown};
+use super::{Builtin, Output, resolve, shown, slashed};
 
 /// Folders nobody wants listed or searched: dependencies, version control, and `LoomWatch`'s own
 /// workspaces.
@@ -97,9 +97,7 @@ fn list(cwd: &Path, folder: &Path, recursive: bool) -> Output {
             let path = child.path();
             let relative = path
                 .strip_prefix(folder)
-                .unwrap_or(&path)
-                .display()
-                .to_string();
+                .map_or_else(|_| path.display().to_string(), slashed);
             // Symlinks are listed but not followed, so a loop can't run the listing forever.
             let kind = child.file_type();
             let is_dir = kind.as_ref().is_ok_and(fs::FileType::is_dir);
