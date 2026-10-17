@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- One of the guides: site/build.sh publishes it at https://loomwatch.github.io/ai-agent-team/ and site/sitemap.sh lists it
+       there; ui/src/site/seo.test.ts checks its title, description and address. -->
+  <title>Build a team of AI agents, no code needed — LoomWatch</title>
+  <meta name="description" content="Make an AI agent once, try it on its own, then connect a few into a team that hands work from one to the next. A plain-words guide, no code needed.">
+  <meta name="theme-color" content="#08080A">
+  <meta property="og:site_name" content="LoomWatch">
+  <meta property="og:title" content="Build a team of AI agents, no code needed — LoomWatch">
+  <meta property="og:description" content="Make an AI agent once, try it on its own, then connect a few into a team that hands work from one to the next. A plain-words guide, no code needed.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://loomwatch.github.io/ai-agent-team/">
+  <meta property="og:image" content="https://loomwatch.github.io/social-card.jpg?v=8">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="LoomWatch: put AI agents to work as one team. Six friendly figures, a yarn ball, a spool, a button, a thimble, a pincushion and a thread cone, joined by one gold thread.">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://loomwatch.github.io/ai-agent-team/">
+  <meta name="robots" content="max-image-preview:large">
+  <link rel="icon" href="../favicon.ico?v=2" sizes="32x32">
+  <link rel="icon" href="../favicon.svg?v=2" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png?v=2">
+  <link rel="preload" href="../assets/fonts/fraunces-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="../assets/fonts/fonts.css">
+  <link rel="stylesheet" href="../styles.css">
+  <link rel="stylesheet" href="../guides.css">
+  <script>
+    // The theme chosen on any page of the site, restored before the first paint.
+    try {
+      const t = localStorage.getItem('loomwatch-site-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
+    } catch {}
+  </script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- docs/assets/brand/mark-small.svg and the wordmark; ui/src/site/brand.test.ts keeps them the same. -->
+  <symbol id="mark" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#08080A"/><path d="M256 40H384A88 88 0 0 1 472 128V384A88 88 0 0 1 384 472H128A88 88 0 0 1 40 384V128A88 88 0 0 1 128 40Z" fill="none" stroke="#D8A93C" stroke-width="26" stroke-linecap="round" stroke-dasharray="49.28 49.28" stroke-dashoffset="24.64"/><rect x="152" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/><rect x="290" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/><path d="M222 354Q256 382 290 354" fill="none" stroke="#E9C46A" stroke-width="40" stroke-linecap="round"/></symbol>
+  <symbol id="wordmark" viewBox="-6 14 501 92"><g fill="none" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"><path stroke="currentColor" d="M0 20V100M13 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M74 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M138 50V100M138 67a16 16 0 0 1 32 0V100M170 67a16 16 0 0 1 32 0V100M215 50L231 100L247 56L263 100L279 50M291 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M341 50V100M361 28V86q0 14 14 14M430.73 56.42A25 25 0 1 0 430.73 93.58M449 20V100M449 70a20 20 0 0 1 40 0V100"/><path style="stroke: var(--accent)" d="M351 50H375"/></g></symbol>
+</svg>
+
+<header class="top">
+  <div class="top-row">
+    <a class="brand" href="../" aria-label="LoomWatch home"><svg class="brand-mark" aria-hidden="true"><use href="#mark"/></svg><svg class="brand-name" aria-hidden="true"><use href="#wordmark"/></svg></a>
+    <nav class="top-nav" aria-label="Guides">
+      <a href="../get-started/">Get started</a>
+      <a href="../openrouter-key/">OpenRouter key</a>
+      <a href="../ai-agent-team/" aria-current="page">Agent teams</a>
+      <a href="../review-every-step/">Review every step</a>
+      <a href="../faq/">FAQ</a>
+    </nav>
+    <div class="top-actions">
+      <a class="btn top-get" href="../#start" aria-label="Get LoomWatch"><span class="long">Get LoomWatch</span><span class="short">Get it</span></a>
+      <a class="iconbtn" href="https://github.com/tnghia903/loomwatch" aria-label="LoomWatch on GitHub">
+        <svg viewBox="-1 -1 18 18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+      <button class="iconbtn" type="button" id="theme" aria-label="Switch to the light theme">
+        <svg class="bulb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="bulb-rays" d="M12 1.2v1.6M4.4 4.4l1.1 1.1M19.6 4.4l-1.1 1.1M1.6 11.2h1.6M20.8 11.2h1.6"/><path class="bulb-glass" d="M12 4.4a6.6 6.6 0 0 0-4 11.86c.62.47.98 1.2.98 1.98v.26h6.04v-.26c0-.78.36-1.51.98-1.98A6.6 6.6 0 0 0 12 4.4z"/><path d="M9.6 20.8h4.8"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="guide">
+  <a class="back" href="../">← LoomWatch home</a>
+  <header class="guide-head">
+    <span class="act-tag"><b>Guide</b>Agent teams</span>
+    <h1>Build a team of AI agents. <em>No code needed.</em></h1>
+    <p class="lede">One AI chat can only do so much. In LoomWatch you give each AI helper one job and let them pass the work along, like a small team: one finds the facts, the next writes, another checks. You set it up by clicking, and read it back in one plain sentence.</p>
+  </header>
+
+  <section aria-labelledby="agent-h">
+    <h2 id="agent-h">What an agent is</h2>
+    <p>An agent is an AI helper with one job. In LoomWatch each one has:</p>
+    <ul>
+      <li><strong>Instructions:</strong> its job, written in plain words, such as <em>"Find three trustworthy sources and sum up what they agree on."</em></li>
+      <li><strong>A model</strong> it thinks with, such as Claude, GPT or Gemini, and how hard it should think.</li>
+      <li><strong>Skills:</strong> recipe cards that show it how to do one kind of task well.</li>
+      <li><strong>Keys:</strong> what it may do without asking you first, such as searching the web or editing files in its own folder.</li>
+    </ul>
+    <p>Each agent also gets a face from a little sewing-box crew, so you can tell who is who at a glance.</p>
+  </section>
+
+  <section aria-labelledby="build-h">
+    <h2 id="build-h">1. Build an agent, and try it on its own</h2>
+    <ol class="steps-list">
+      <li>Click <strong>Build an agent</strong> on Home.</li>
+      <li>Give it a name and its instructions. Choose its model and how hard it thinks, and pin up the skills it needs.</li>
+      <li>Pick it a face.</li>
+      <li>Click <strong>Try it</strong> and give it a real request. It runs on your <a href="../openrouter-key/">OpenRouter key</a>, and asks you before it does anything it wasn't given a key for.</li>
+      <li>When it does the job well, click <strong>Save to Your agents</strong>.</li>
+    </ol>
+    <figure class="shot">
+      <img class="dark" src="../assets/app/agents-dark.webp" width="2880" height="1600" alt="Building an agent called Writer. On the left, its figure sits at a workbench: a clipboard for its job, a laptop showing the model it thinks with, Claude Opus 5.5, a recipe card for its one skill, empty key hooks because it may not act without asking, and a tray for what it hands back. On the right, the same settings as plain blocks, starting with Name and Instructions." loading="lazy" decoding="async">
+      <img class="light" src="../assets/app/agents-light.webp" width="2880" height="1600" alt="Building an agent called Writer. On the left, its figure sits at a workbench: a clipboard for its job, a laptop showing the model it thinks with, Claude Opus 5.5, a recipe card for its one skill, empty key hooks because it may not act without asking, and a tray for what it hands back. On the right, the same settings as plain blocks, starting with Name and Instructions." loading="lazy" decoding="async">
+      <figcaption>Building an agent: its job, its model, its skills and its keys, on a workbench and as plain settings.</figcaption>
+    </figure>
+    <p>You build each agent once and use it in any team. Change its job later and it becomes the next version. A team keeps the version it was given until you choose <strong>Update</strong>, so a team that works keeps working.</p>
+  </section>
+
+  <section aria-labelledby="team-h">
+    <h2 id="team-h">2. Start a team</h2>
+    <p>Click <strong>New team</strong>, give it a name and choose how it starts:</p>
+    <ul>
+      <li><strong>One assistant:</strong> a single agent does the whole job. The best place to begin.</li>
+      <li><strong>Researcher and writer:</strong> one agent gathers the facts, a second writes the result.</li>
+      <li><strong>Research, write and check:</strong> a third agent, on another company's model, checks the finished piece.</li>
+      <li><strong>Research, your approval, then writing:</strong> the team stops so you can approve the research first.</li>
+      <li><strong>Research team:</strong> a lead splits your question, researchers look into each part at the same time, and a writer turns what they found into a report that names its sources.</li>
+      <li><strong>Empty team:</strong> build it yourself.</li>
+    </ul>
+    <p>A ready-made team is saved straight away, each agent on a model that suits its job, so you can run it right away.</p>
+  </section>
+
+  <section aria-labelledby="connect-h">
+    <h2 id="connect-h">3. Connect who hands work to whom</h2>
+    <p>Open the team's <strong>Workflow</strong> tab. Add agents from <strong>Your agents</strong>, or hire one by its job, such as Researcher or Writer. Then drag from the dot on one card's right edge to the next card, so they work in that order. Add a <strong>You</strong> step wherever you want to <a href="../review-every-step/">check the work</a> before it goes on.</p>
+    <p>LoomWatch reads your team back to you as one plain sentence, such as <em>"Every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer."</em> If the sentence sounds right, so is the plan.</p>
+    <figure class="shot">
+      <img class="dark" src="../assets/app/workflow-dark.webp" width="2880" height="1600" alt="A team's Workflow tab: a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team's answer. Above them the team is read back as one sentence, with each agent's figure. On the left, a panel lists Your agents, then Hire by job." loading="lazy" decoding="async">
+      <img class="light" src="../assets/app/workflow-light.webp" width="2880" height="1600" alt="A team's Workflow tab: a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team's answer. Above them the team is read back as one sentence, with each agent's figure. On the left, a panel lists Your agents, then Hire by job." loading="lazy" decoding="async">
+      <figcaption>Workflow: your agents connected in order, and the whole team read back as one sentence.</figcaption>
+    </figure>
+  </section>
+
+  <section aria-labelledby="ask-h">
+    <h2 id="ask-h">4. Give the team work</h2>
+    <p>Open the <strong>Chat</strong> tab, write <strong>@team</strong> and the job in plain words, and press <strong>Enter</strong>. For example: <code>@team Prepare today's AI and tech news digest, and link every claim.</code></p>
+    <p>Each agent starts when the one before it hands over, and what they tell each other shows in the chat as they say it. Beside each face, its status is in words, such as <em>"Writing its reply"</em> or <em>"Waiting for you"</em>. Write <strong>@</strong> and one agent's name to ask just that agent. A message with no <strong>@</strong> is a note the team reads next time.</p>
+  </section>
+
+  <section aria-labelledby="recipes-h">
+    <h2 id="recipes-h">Teams people build</h2>
+    <table class="recipes">
+      <thead><tr><th scope="col">Team</th><th scope="col">The steps</th><th scope="col">Good for</th></tr></thead>
+      <tbody>
+        <tr><td>Morning briefing</td><td>Every day at 10:00 → Collector → Editor → Writer → Notion</td><td>A news digest waiting when you start work</td></tr>
+        <tr><td>Research team</td><td>Lead → Researchers, at the same time → Writer</td><td>A report on a big question, with a source for every claim</td></tr>
+        <tr><td>Research and review</td><td>Researcher → Reviewer</td><td>Answers whose sources a second agent has checked</td></tr>
+        <tr><td>Approve before writing</td><td>Researcher → You → Writer</td><td>Anything where a wrong first step is costly</td></tr>
+        <tr><td>From numbers to slides</td><td>Analyst → Designer</td><td>A deck or page built from real data</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section aria-labelledby="describe-h">
+    <h2 id="describe-h">Or just describe the team you want</h2>
+    <p>Click <strong>Ask</strong> at the top of any screen and say what you want in a sentence, such as <em>"Every weekday at 8, brief me on AI news."</em> Ask sets the team up for you to look over. Nothing is saved until you click <strong>Apply</strong>, and <strong>Undo</strong> takes it back. Ask runs on your OpenRouter key too, like a run.</p>
+  </section>
+
+  <a class="next" href="../review-every-step/">
+    <span class="micro">Next</span>
+    <b>Review every step</b>
+    <span>Approve the work, or send it back, before the team goes on.</span>
+  </a>
+
+  <nav class="more" aria-label="More guides">
+    <span class="micro">More guides</span>
+    <ul>
+      <li><a href="../get-started/">Get started<span>Install LoomWatch and run the practice team, free.</span></a></li>
+      <li><a href="../openrouter-key/">One OpenRouter key<span>Make one key that reaches Claude, GPT, Gemini and more.</span></a></li>
+      <li><a href="../review-every-step/">Review every step<span>Approve the work, or send it back, before the team goes on.</span></a></li>
+      <li><a href="../faq/">FAQ<span>Cost, privacy, keys, models, and what LoomWatch is not.</span></a></li>
+    </ul>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-row">
+    <a class="brand" href="../" aria-label="LoomWatch home"><svg class="brand-mark" aria-hidden="true"><use href="#mark"/></svg><svg class="brand-name" aria-hidden="true"><use href="#wordmark"/></svg></a>
+    <nav aria-label="Project">
+      <a href="../">Home</a>
+      <a href="https://github.com/tnghia903/loomwatch">GitHub</a>
+      <a href="https://github.com/tnghia903/loomwatch/issues/new/choose">Report a problem</a>
+      <a href="https://github.com/tnghia903/loomwatch/discussions">Questions</a>
+    </nav>
+    <p class="foot-line">Woven with Rust and React. Watch every thread.</p>
+    <nav class="foot-guides" aria-label="Guides">
+      <span class="micro">Guides</span>
+      <a href="../get-started/">Get started</a>
+      <a href="../openrouter-key/">OpenRouter key</a>
+      <a href="../ai-agent-team/" aria-current="page">Agent teams</a>
+      <a href="../review-every-step/">Review every step</a>
+      <a href="../faq/">FAQ</a>
+    </nav>
+    <p class="foot-legal">An independent open-source project, not affiliated with or endorsed by Anthropic, OpenAI, Google or OpenRouter. Product names are their owners' trademarks.</p>
+  </div>
+</footer>
+
+<script src="../guides.js" defer></script>
+</body>
+</html>

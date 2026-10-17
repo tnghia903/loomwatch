@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- One of the guides: site/build.sh publishes it at https://loomwatch.github.io/get-started/ and site/sitemap.sh lists it
+       there; ui/src/site/seo.test.ts checks its title, description and address. -->
+  <title>Get started with LoomWatch: your first AI team in minutes</title>
+  <meta name="description" content="Install LoomWatch on a Mac or Windows PC and run the practice team. No account, no API key and no code needed for your first try.">
+  <meta name="theme-color" content="#08080A">
+  <meta property="og:site_name" content="LoomWatch">
+  <meta property="og:title" content="Get started with LoomWatch: your first AI team in minutes">
+  <meta property="og:description" content="Install LoomWatch on a Mac or Windows PC and run the practice team. No account, no API key and no code needed for your first try.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://loomwatch.github.io/get-started/">
+  <meta property="og:image" content="https://loomwatch.github.io/social-card.jpg?v=8">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="LoomWatch: put AI agents to work as one team. Six friendly figures, a yarn ball, a spool, a button, a thimble, a pincushion and a thread cone, joined by one gold thread.">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://loomwatch.github.io/get-started/">
+  <meta name="robots" content="max-image-preview:large">
+  <link rel="icon" href="../favicon.ico?v=2" sizes="32x32">
+  <link rel="icon" href="../favicon.svg?v=2" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png?v=2">
+  <link rel="preload" href="../assets/fonts/fraunces-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="../assets/fonts/fonts.css">
+  <link rel="stylesheet" href="../styles.css">
+  <link rel="stylesheet" href="../guides.css">
+  <script>
+    // The theme chosen on any page of the site, restored before the first paint.
+    try {
+      const t = localStorage.getItem('loomwatch-site-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
+    } catch {}
+  </script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- docs/assets/brand/mark-small.svg and the wordmark; ui/src/site/brand.test.ts keeps them the same. -->
+  <symbol id="mark" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#08080A"/><path d="M256 40H384A88 88 0 0 1 472 128V384A88 88 0 0 1 384 472H128A88 88 0 0 1 40 384V128A88 88 0 0 1 128 40Z" fill="none" stroke="#D8A93C" stroke-width="26" stroke-linecap="round" stroke-dasharray="49.28 49.28" stroke-dashoffset="24.64"/><rect x="152" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/><rect x="290" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/><path d="M222 354Q256 382 290 354" fill="none" stroke="#E9C46A" stroke-width="40" stroke-linecap="round"/></symbol>
+  <symbol id="wordmark" viewBox="-6 14 501 92"><g fill="none" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"><path stroke="currentColor" d="M0 20V100M13 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M74 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M138 50V100M138 67a16 16 0 0 1 32 0V100M170 67a16 16 0 0 1 32 0V100M215 50L231 100L247 56L263 100L279 50M291 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M341 50V100M361 28V86q0 14 14 14M430.73 56.42A25 25 0 1 0 430.73 93.58M449 20V100M449 70a20 20 0 0 1 40 0V100"/><path style="stroke: var(--accent)" d="M351 50H375"/></g></symbol>
+</svg>
+
+<header class="top">
+  <div class="top-row">
+    <a class="brand" href="../" aria-label="LoomWatch home"><svg class="brand-mark" aria-hidden="true"><use href="#mark"/></svg><svg class="brand-name" aria-hidden="true"><use href="#wordmark"/></svg></a>
+    <nav class="top-nav" aria-label="Guides">
+      <a href="../get-started/" aria-current="page">Get started</a>
+      <a href="../openrouter-key/">OpenRouter key</a>
+      <a href="../ai-agent-team/">Agent teams</a>
+      <a href="../review-every-step/">Review every step</a>
+      <a href="../faq/">FAQ</a>
+    </nav>
+    <div class="top-actions">
+      <a class="btn top-get" href="../#start" aria-label="Get LoomWatch"><span class="long">Get LoomWatch</span><span class="short">Get it</span></a>
+      <a class="iconbtn" href="https://github.com/tnghia903/loomwatch" aria-label="LoomWatch on GitHub">
+        <svg viewBox="-1 -1 18 18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+      <button class="iconbtn" type="button" id="theme" aria-label="Switch to the light theme">
+        <svg class="bulb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="bulb-rays" d="M12 1.2v1.6M4.4 4.4l1.1 1.1M19.6 4.4l-1.1 1.1M1.6 11.2h1.6M20.8 11.2h1.6"/><path class="bulb-glass" d="M12 4.4a6.6 6.6 0 0 0-4 11.86c.62.47.98 1.2.98 1.98v.26h6.04v-.26c0-.78.36-1.51.98-1.98A6.6 6.6 0 0 0 12 4.4z"/><path d="M9.6 20.8h4.8"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="guide">
+  <a class="back" href="../">← LoomWatch home</a>
+  <header class="guide-head">
+    <span class="act-tag"><b>Guide</b>Get started</span>
+    <h1>Get started with LoomWatch. <em>Your first AI team in a few minutes.</em></h1>
+    <p class="lede">LoomWatch is a free app that puts a few AI helpers, called agents, to work on one job together, and shows you every step. This guide installs it and runs a practice team that needs no account, no key and no code.</p>
+  </header>
+
+  <section aria-labelledby="need-h">
+    <h2 id="need-h">What you need</h2>
+    <ul>
+      <li><strong>A Mac</strong> with macOS 11 or newer (Apple silicon or Intel), or <strong>a Windows PC</strong> with 64-bit Windows 10 or 11.</li>
+      <li>Nothing else to install first. You don't need a ChatGPT, Claude or Gemini account, and you don't need to know how to code.</li>
+      <li>For real work later, one <a href="../openrouter-key/">OpenRouter key</a>. The practice team below needs no key and costs nothing.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="mac-h">
+    <h2 id="mac-h">Install on a Mac</h2>
+    <ol class="steps-list">
+      <li>Download <strong>LoomWatch-macos.dmg</strong> (about 30 MB) and open it.</li>
+      <li>Drag <strong>LoomWatch</strong> into <strong>Applications</strong>.</li>
+      <li>Open LoomWatch from Applications.</li>
+    </ol>
+    <div class="get-row">
+      <a class="btn btn-primary btn-lg" href="https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-macos.dmg">Download for Mac</a>
+      <span class="start-meta">macOS 11 or newer</span>
+    </div>
+    <div class="note">
+      <p><strong>If macOS won't open it:</strong> LoomWatch isn't notarized by Apple yet, so the first time macOS may say it can't check it for harmful software. Click <strong>Done</strong>, open <strong>System Settings › Privacy &amp; Security</strong>, scroll down and click <strong>Open Anyway</strong> beside LoomWatch. macOS asks only once.</p>
+    </div>
+    <p>LoomWatch opens in your web browser and puts a small icon in the menu bar at the top of your screen. There is no window to keep open: closing the browser tab leaves LoomWatch running, and you quit it from that icon.</p>
+  </section>
+
+  <section aria-labelledby="win-h">
+    <h2 id="win-h">Install on Windows</h2>
+    <ol class="steps-list">
+      <li>Download <strong>LoomWatch-windows-setup.exe</strong> and open it.</li>
+      <li>It installs LoomWatch for you alone (no administrator needed), adds it to the Start menu and opens it.</li>
+    </ol>
+    <div class="get-row">
+      <a class="btn btn-primary btn-lg" href="https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-windows-setup.exe">Download for Windows</a>
+      <span class="start-meta">Windows 10 or 11, 64-bit</span>
+    </div>
+    <div class="note">
+      <p><strong>If Windows says it protected your PC:</strong> LoomWatch isn't signed with a code-signing certificate yet. Click <strong>More info</strong>, then <strong>Run anyway</strong>.</p>
+    </div>
+    <p>LoomWatch opens in your web browser and keeps an icon beside the clock (click the <strong>^</strong> there if you can't see it). Click the icon to open LoomWatch again. Rather install from Terminal or PowerShell? The one-line commands are on the <a href="../#start">home page</a>.</p>
+  </section>
+
+  <section aria-labelledby="first-h">
+    <h2 id="first-h">Your first run, with the practice team</h2>
+    <p>LoomWatch comes with a practice team called <strong>Review stop demo</strong>. It has three steps: a <strong>Researcher</strong>, then <strong>you</strong>, then a <strong>Writer</strong>. Its agents give fixed answers instead of asking a real AI model, so you can learn how everything works for free.</p>
+    <figure class="shot">
+      <img class="dark" src="../assets/app/home-dark.webp" width="2880" height="1600" alt="LoomWatch's Home: Build an agent, New team and the 3-minute guide at the top, a box to describe the job to Ask, a row of Your agents with their figures, and Your teams below, where the Review stop demo is Waiting for you." loading="lazy" decoding="async">
+      <img class="light" src="../assets/app/home-light.webp" width="2880" height="1600" alt="LoomWatch's Home: Build an agent, New team and the 3-minute guide at the top, a box to describe the job to Ask, a row of Your agents with their figures, and Your teams below, where the Review stop demo is Waiting for you." loading="lazy" decoding="async">
+      <figcaption>Home, where your agents and teams are. The practice team is under Your teams.</figcaption>
+    </figure>
+    <ol class="steps-list">
+      <li>On Home, under <strong>Your teams</strong>, pick <strong>Review stop demo</strong> and open its <strong>Chat</strong> tab.</li>
+      <li>Type <code>@team Prepare a short getting-started guide for new users.</code> and press <strong>Enter</strong>. A message starts work only when it has an <strong>@</strong> in it.</li>
+      <li>The team stops for you. The chat shows what the Researcher handed over, with <strong>Approve</strong> and <strong>Send back to Researcher</strong> under it.</li>
+      <li>To ask for a change, type <code>Use the short guide and remove the detailed walkthrough.</code> and click <strong>Send back to Researcher</strong>. The Researcher tries again and asks you again.</li>
+      <li>Click <strong>Approve</strong> to let the team go on. To pass a note to the Writer, type it first: the button becomes <strong>Approve with your note</strong>.</li>
+      <li>Read the team's answer in the chat. The practice Writer repeats the direction you gave it, so you can see your note arrived.</li>
+    </ol>
+    <figure class="shot">
+      <img class="dark" src="../assets/readme/step-review-dark.png" width="992" height="606" alt="The Researcher's handover to You in the chat: a summary, and the open question Which format should Writer use? Below it, your turn: Approve, or Send back to Researcher." loading="lazy" decoding="async">
+      <img class="light" src="../assets/readme/step-review-light.png" width="992" height="606" alt="The Researcher's handover to You in the chat: a summary, and the open question Which format should Writer use? Below it, your turn: Approve, or Send back to Researcher." loading="lazy" decoding="async">
+      <figcaption>The team waits for you. Nothing moves on until you approve or send the work back.</figcaption>
+    </figure>
+    <p>Everything the team did stays in its chat. Click <strong>Details</strong> on any message to see each step, and drag the timeline there to replay what happened.</p>
+  </section>
+
+  <section aria-labelledby="tour-h">
+    <h2 id="tour-h">Rather be shown around?</h2>
+    <p>The first time you open LoomWatch, a short guide offers to walk you through building your first agent, trying it on its own, putting it in a team and running it. That last part uses your OpenRouter key. Open the guide again any time with <strong>New here? Take the 3-minute guide</strong> on Home.</p>
+  </section>
+
+  <a class="next" href="../openrouter-key/">
+    <span class="micro">Next</span>
+    <b>One OpenRouter key</b>
+    <span>Make one key that reaches Claude, GPT, Gemini and more.</span>
+  </a>
+
+  <nav class="more" aria-label="More guides">
+    <span class="micro">More guides</span>
+    <ul>
+      <li><a href="../openrouter-key/">One OpenRouter key<span>Make one key that reaches Claude, GPT, Gemini and more.</span></a></li>
+      <li><a href="../ai-agent-team/">Build an agent team<span>Give each agent one job, and let them pass the work along.</span></a></li>
+      <li><a href="../review-every-step/">Review every step<span>Approve the work, or send it back, before the team goes on.</span></a></li>
+      <li><a href="../faq/">FAQ<span>Cost, privacy, keys, models, and what LoomWatch is not.</span></a></li>
+    </ul>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-row">
+    <a class="brand" href="../" aria-label="LoomWatch home"><svg class="brand-mark" aria-hidden="true"><use href="#mark"/></svg><svg class="brand-name" aria-hidden="true"><use href="#wordmark"/></svg></a>
+    <nav aria-label="Project">
+      <a href="../">Home</a>
+      <a href="https://github.com/tnghia903/loomwatch">GitHub</a>
+      <a href="https://github.com/tnghia903/loomwatch/issues/new/choose">Report a problem</a>
+      <a href="https://github.com/tnghia903/loomwatch/discussions">Questions</a>
+    </nav>
+    <p class="foot-line">Woven with Rust and React. Watch every thread.</p>
+    <nav class="foot-guides" aria-label="Guides">
+      <span class="micro">Guides</span>
+      <a href="../get-started/" aria-current="page">Get started</a>
+      <a href="../openrouter-key/">OpenRouter key</a>
+      <a href="../ai-agent-team/">Agent teams</a>
+      <a href="../review-every-step/">Review every step</a>
+      <a href="../faq/">FAQ</a>
+    </nav>
+    <p class="foot-legal">An independent open-source project, not affiliated with or endorsed by Anthropic, OpenAI, Google or OpenRouter. Product names are their owners' trademarks.</p>
+  </div>
+</footer>
+
+<script src="../guides.js" defer></script>
+</body>
+</html>
