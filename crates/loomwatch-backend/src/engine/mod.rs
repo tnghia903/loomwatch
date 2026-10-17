@@ -255,11 +255,6 @@ impl AgentRun {
         self.event_log.clone()
     }
 
-    /// The built-in agent can always be parked and reopened.
-    pub(crate) fn supports_load_session(&self) -> bool {
-        self.session.is_some() || self.session_id.is_some()
-    }
-
     /// The session id, once open. Kept across a park so [`Self::load_live`] reopens the same one.
     pub(crate) fn acp_session_id(&self) -> Option<&str> {
         self.session_id.as_deref()

@@ -1250,7 +1250,7 @@ describe('Workspace', () => {
 
 
 it.each(['review_stop', 'question'] as const)('answers a %s from the live workspace and shows Attention without starting another run', async (kind) => {
-  const waiting = { node: 'reviewer', name: 'Reviewer', kind, since: at(4), question: 'Approve the smaller budget?', park: 'kept_alive', parkNote: 'Researcher is kept alive', handoverFrom: kind === 'review_stop' ? 'researcher' : null, sendBackAvailable: kind === 'review_stop', context: 'The budget is 20.', questionId: 'q-1' }
+  const waiting = { node: 'reviewer', name: 'Reviewer', kind, since: at(4), question: 'Approve the smaller budget?', park: 'reloadable', parkNote: 'Researcher is parked', handoverFrom: kind === 'review_stop' ? 'researcher' : null, sendBackAvailable: kind === 'review_stop', context: 'The budget is 20.', questionId: 'q-1' }
   const fallback = globalThis.fetch
   const calls: Array<{ url: string; body: unknown }> = []
   let answered = false

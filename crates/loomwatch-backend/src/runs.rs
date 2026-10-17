@@ -3466,13 +3466,6 @@ async fn answer_run(
             ),
         ));
     }
-    let continuation = if waiting.kind == crate::operator::StopKind::Question
-        && waiting.park == crate::operator::ParkTier::Released
-    {
-        Some(continue_released_question(&state, &run_id, &waiting, &request).await?)
-    } else {
-        None
-    };
     desk.deliver(
         &run_id,
         &request.node,
@@ -3484,79 +3477,8 @@ async fn answer_run(
         },
     )
     .await
-    .map(|record| {
-        let mut response =
-            (StatusCode::ACCEPTED, Json(continuation.unwrap_or(record))).into_response();
-        if waiting.park == crate::operator::ParkTier::Released
-            && waiting.kind == crate::operator::StopKind::Question
-        {
-            response.headers_mut().insert(
-                "x-loomwatch-continuation-of",
-                run_id.parse().expect("run ids are valid header values"),
-            );
-        }
-        response
-    })
+    .map(|record| (StatusCode::ACCEPTED, Json(record)).into_response())
     .map_err(operator_status)
-}
-
-/// A released question becomes a new checkpoint continuation, explicitly identified in the response.
-async fn continue_released_question(
-    state: &RunsState,
-    run_id: &str,
-    waiting: &crate::operator::WaitingOn,
-    request: &AnswerRequest,
-) -> Result<RunRecord, ApiError> {
-    let previous = state.registry.get(run_id).ok_or_else(|| {
-        ApiError::new(
-            StatusCode::NOT_FOUND,
-            format!("Run {run_id} does not exist."),
-        )
-    })?;
-    let checkpoint = latest_checkpoint_id(state.archive.as_ref(), run_id, &request.node)
-        .await
-        .ok_or_else(|| {
-            ApiError::new(
-                StatusCode::CONFLICT,
-                "This session was released without a checkpoint. Start a new run with your answer."
-                    .to_owned(),
-            )
-        })?;
-    let start = StartRunRequest {
-        team_path: previous.team_path,
-        prompt: format!(
-            "{}\n\n## Direction from you\nThe answer to your question ({}) is:\n{}",
-            previous.prompt, waiting.question, request.text
-        ),
-        expected_revision: None,
-        start_key: Some(format!(
-            "answer:{run_id}:{}",
-            waiting.question_id.as_deref().unwrap_or(&waiting.since)
-        )),
-        follows_run_id: None,
-        start_at: None,
-        from_checkpoint_id: Some(checkpoint),
-        retry_of_run_id: None,
-        only_agent: None,
-    };
-    match launch_manual(
-        &state.registry,
-        state.archive.clone(),
-        &state.teams_root,
-        &start,
-    )
-    .await
-    .map_err(LaunchError::into_api_error)?
-    {
-        StartRunOutcome::Accepted(record) | StartRunOutcome::Duplicate(record) => {
-            persist_or_log(&state.registry, &record.run_id).await;
-            Ok(record)
-        }
-        StartRunOutcome::IdempotencyConflict { .. } => Err(ApiError::new(
-            StatusCode::CONFLICT,
-            "This question already started a continuation with a different answer.".to_owned(),
-        )),
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -6163,8 +6085,9 @@ pub(crate) mod tests {
             question: "Which budget?".into(),
             context: None,
             handover_from: None,
-            park: ParkTier::KeptAlive,
-            park_note: "kept alive".into(),
+            // As `ask_user` records it, before the turn has ended and the agent is parked.
+            park: ParkTier::None,
+            park_note: "The turn is still finishing.".into(),
             send_back_available: false,
             question_id: None,
         };
@@ -6177,9 +6100,14 @@ pub(crate) mod tests {
                 .conflict
         );
         let second = desk.park(&run_id, waiting("helper")).await.unwrap();
+        // The question behind the visible one is parked; the visible one is still the first.
         let mut update = waiting("helper");
-        update.park = ParkTier::Released;
+        update.park = ParkTier::Reloadable;
         desk.repark(&run_id, &update).await;
+        assert_eq!(
+            desk.waiting_for(&run_id, "helper").unwrap().park,
+            ParkTier::Reloadable
+        );
         assert_eq!(desk.waiting(&run_id).unwrap().node, "solo");
         let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
         let endpoint = format!("/api/runs/{run_id}/answers");
@@ -6278,101 +6206,6 @@ pub(crate) mod tests {
             "Do not publish the draft"
         );
         assert_eq!(lineage.replayed_stage_results["writer"], "source material");
-    }
-
-    #[tokio::test]
-    async fn a_released_question_starts_a_checkpoint_continuation_and_identifies_it() {
-        use crate::memory::{CheckpointSource, CheckpointWrite};
-        use crate::operator::{ParkTier, StopKind, WaitingOn};
-        let pool = crate::db::Db::temp().await;
-        let dir = TeamsDir::new();
-        let harness = completing();
-        dir.write_team("team.yaml", &harness);
-        let team = TeamConfig::load(&dir.0.join("team.yaml")).unwrap();
-        let archive = EventArchive::new(pool);
-        let registry = RunRegistry::durable(archive.run_store());
-        let record = RunRecord::queued(
-            "team.yaml".into(),
-            "Finish the report".into(),
-            &team,
-            RunTrigger::Manual,
-        )
-        .unwrap();
-        let run_id = record.run_id.clone();
-        registry.insert(record);
-        assert!(registry.mark_starting(&run_id));
-        assert!(registry.mark_running(&run_id));
-        archive
-            .notebook()
-            .write_checkpoint(&CheckpointWrite {
-                run_id: run_id.clone(),
-                agent_id: "solo".into(),
-                done: "First draft prepared".into(),
-                next: String::new(),
-                blockers: None,
-                artifacts: vec![],
-                seq_high_water: Some(0),
-                source: CheckpointSource::Coordinator,
-                team_revision: None,
-            })
-            .await
-            .unwrap();
-        let desk = registry.operator_desk(Some(&archive));
-        let receiver = desk
-            .park(
-                &run_id,
-                WaitingOn {
-                    node: "solo".into(),
-                    name: "Solo".into(),
-                    kind: StopKind::Question,
-                    since: now(),
-                    question: "Which audience?".into(),
-                    context: None,
-                    handover_from: None,
-                    park: ParkTier::Released,
-                    park_note: "released".into(),
-                    send_back_available: false,
-                    question_id: None,
-                },
-            )
-            .await
-            .unwrap();
-        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
-        let response = app
-            .clone()
-            .oneshot(post_json(
-                &format!("/api/runs/{run_id}/answers"),
-                &json!({"node":"solo", "text":"Write for new users"}),
-            ))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::ACCEPTED);
-        assert_eq!(response.headers()["x-loomwatch-continuation-of"], run_id);
-        let next: RunRecord = serde_json::from_value(json_body(response).await).unwrap();
-        assert_ne!(next.run_id, run_id);
-        assert_eq!(next.follows_run_id.as_deref(), Some(run_id.as_str()));
-        assert_eq!(receiver.answer().await.unwrap().text, "Write for new users");
-        let done = wait_for(&registry, &next.run_id, |record| {
-            record.status.is_terminal()
-        })
-        .await;
-        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
-        let packets = archive
-            .context_packets(&next.run_id, Some("solo"))
-            .await
-            .unwrap();
-        assert!(format!("{packets:?}").contains("First draft prepared"));
-        let events = archive.load_session(&next.run_id).await.unwrap();
-        assert!(events.iter().any(|event| {
-            event.kind == EventKind::Message
-                && event.payload["role"] == "user"
-                && event.payload["content"]["text"]
-                    .as_str()
-                    .is_some_and(|text| {
-                        text.contains("Write for new users")
-                            && text.contains("## Direction from you")
-                    })
-        }));
     }
 
     #[tokio::test]

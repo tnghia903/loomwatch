@@ -783,7 +783,7 @@ async fn run_pipeline_nodes(
         // from there — so the reply this pipeline goes on to use is the one after the answer.
         let mut session = StageSession { process, recorder };
         while let Some(wait) = bus.take_pending_question(agent_id).await {
-            match answer_a_parked_question(
+            let (resumed, answer) = answer_a_parked_question(
                 AskedQuestion {
                     team,
                     agent,
@@ -798,25 +798,13 @@ async fn run_pipeline_nodes(
                 session,
                 wait,
             )
-            .await?
-            {
-                Some((resumed, answer)) => {
-                    session = resumed;
-                    reply = session
-                        .process
-                        .prompt_turn(&mut session.recorder, &answer_turn(&answer.text))
-                        .await
-                        .with_context(|| {
-                            format!("pipeline node {} failed after your answer", agent.id)
-                        })?;
-                }
-                None => bail!(
-                    "{}'s session was released after waiting {} minutes for your answer to its \
-                     question. Its checkpoint is where the work stopped: start a new run from it.",
-                    agent.id,
-                    team.conversation.stop.keep_alive_minutes
-                ),
-            }
+            .await?;
+            session = resumed;
+            reply = session
+                .process
+                .prompt_turn(&mut session.recorder, &answer_turn(&answer.text))
+                .await
+                .with_context(|| format!("pipeline node {} failed after your answer", agent.id))?;
         }
         // Notes the operator sent while this stage worked go in now, in the same session, so the
         // stage's output — and the handover written from it — already follows them.
@@ -895,15 +883,13 @@ async fn run_pipeline_nodes(
             outcome = Some(closed);
         } else if next_is_operator(team, order, index) {
             // A review stop is next. Nothing will ask this stage a question, but the operator may
-            // send a note back to it, so it is parked rather than kept answerable — and parking is
-            // what decision 7 tiers by what the harness advertised.
+            // send a note back to it, so it is parked rather than kept answerable.
             parked = Some(
                 ParkedStage::park(
                     agent_id,
                     spec.clone(),
                     StageSession { process, recorder },
                     exit_timeout,
-                    keep_alive_window(team),
                 )
                 .await?,
             );
@@ -926,11 +912,6 @@ async fn run_pipeline_nodes(
         .with_context(|| format!("configured responder {responder:?} did not run"))?;
     set_aside_answer_notes(shared_log.as_ref(), &responder, &mut outcome).await?;
     Ok(outcome)
-}
-
-/// How long a kept-alive session may idle while the operator decides.
-fn keep_alive_window(team: &TeamConfig) -> Duration {
-    Duration::from_secs(u64::from(team.conversation.stop.keep_alive_minutes) * 60)
 }
 
 /// What the stage that asked a question needs to park and come back.
@@ -974,14 +955,8 @@ pub(crate) async fn run_answerable_session(
         .prompt_turn(&mut session.recorder, prompt)
         .await?;
     while let Some(wait) = asked.bus.take_pending_question(&asked.agent.id).await {
-        let Some((resumed, answer)) =
-            answer_a_parked_question(AskedQuestion { ..asked }, session, wait).await?
-        else {
-            bail!(
-                "{}'s session was released while waiting for your answer. Start a new run from its checkpoint.",
-                asked.agent.id
-            );
-        };
+        let (resumed, answer) =
+            answer_a_parked_question(AskedQuestion { ..asked }, session, wait).await?;
         session = resumed;
         reply = session
             .process
@@ -1024,14 +999,11 @@ pub(crate) async fn run_answerable_session(
 }
 
 /// Park a stage that called `ask_user`, wait for the answer, and bring its session back.
-///
-/// `None` means the kept-alive window ran out first: a coordinator checkpoint was written, the
-/// session was released, and there is nothing left to deliver an answer to.
 async fn answer_a_parked_question(
     asked: AskedQuestion<'_>,
     mut session: StageSession,
     wait: operator::OperatorWait,
-) -> Result<Option<(StageSession, operator::OperatorAnswer)>> {
+) -> Result<(StageSession, operator::OperatorAnswer)> {
     let agent_id = asked.agent.id.as_str();
     let run_id = asked.shared_log.map(EventLog::session_id);
     let boundary = StageBoundary {
@@ -1054,37 +1026,15 @@ async fn answer_a_parked_question(
         .with_context(|| format!("pipeline node {agent_id} failed to checkpoint before parking"))?;
     boundary.record(agent_id, &answer).await;
 
-    let mut park = ParkedStage::park(
-        agent_id,
-        asked.spec.clone(),
-        session,
-        asked.exit_timeout,
-        keep_alive_window(asked.team),
-    )
-    .await?;
+    let mut park =
+        ParkedStage::park(agent_id, asked.spec.clone(), session, asked.exit_timeout).await?;
     if let (Some(desk), Some(run_id)) = (asked.lineage.operator.as_ref(), run_id) {
-        note_park_tier(desk, run_id, park.tier, asked.agent, asked.team).await;
+        note_parked(desk, run_id, asked.agent).await;
     }
-    let answer = match park.deadline() {
-        None => wait
-            .answer()
-            .await
-            .map_err(|error| anyhow::anyhow!("{error}"))?,
-        Some(deadline) => {
-            let waiting = wait.answer();
-            tokio::pin!(waiting);
-            tokio::select! {
-                answered = &mut waiting => answered.map_err(|error| anyhow::anyhow!("{error}"))?,
-                () = tokio::time::sleep_until(deadline) => {
-                    park.expire(&boundary, asked.exit_timeout, "").await;
-                    if let (Some(desk), Some(run_id)) = (asked.lineage.operator.as_ref(), run_id) {
-                        note_park_tier(desk, run_id, park.tier, asked.agent, asked.team).await;
-                    }
-                    (&mut waiting).await.map_err(|error| anyhow::anyhow!("{error}"))?
-                }
-            }
-        }
-    };
+    let answer = wait
+        .answer()
+        .await
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
     if let Some(log) = asked.shared_log {
         // The team may have no operator node at all — an `ask_user` needs none — so the answer is
         // archived under the reserved `operator` id. It is the one id beside the team's own that
@@ -1103,35 +1053,25 @@ async fn answer_a_parked_question(
         )
         .await;
     }
-    if park.tier == operator::ParkTier::Released {
-        return Ok(None);
-    }
     park.reopen(
         asked.bus,
         asked.archive,
         asked.shared_log,
         asked.exit_timeout,
-        keep_alive_window(asked.team),
     )
     .await?;
     let session = park.into_session().with_context(|| {
         format!("{agent_id}'s session could not be reopened to take your answer")
     })?;
-    Ok(Some((session, answer)))
+    Ok((session, answer))
 }
 
-/// Say, on the run record, how the session behind a stop is actually waiting.
+/// Say, on the run record, that the agent behind a question is now parked.
 ///
-/// Written after the park rather than before it, because until the process has been closed (or
-/// not) the tier is a prediction. The card reads this, so a prediction here would be the UI making
-/// a claim about a process nobody had looked at.
-async fn note_park_tier(
-    desk: &operator::OperatorDesk,
-    run_id: &str,
-    tier: operator::ParkTier,
-    agent: &config::AgentConfig,
-    team: &TeamConfig,
-) {
+/// Written after the park rather than before it, because until its conversation has been put away
+/// that is a prediction. The card reads this, so a prediction here would be the UI making a claim
+/// about a session nobody had looked at.
+async fn note_parked(desk: &operator::OperatorDesk, run_id: &str, agent: &config::AgentConfig) {
     let Some(mut waiting) = desk.waiting_for(run_id, &agent.id) else {
         return;
     };
@@ -1140,9 +1080,9 @@ async fn note_park_tier(
     } else {
         agent.name.as_str()
     };
-    waiting.park = tier;
-    waiting.park_note = tier.sentence(Some(name), team.conversation.stop.keep_alive_minutes);
-    waiting.send_back_available = tier != operator::ParkTier::Released;
+    waiting.park = operator::ParkTier::Reloadable;
+    waiting.park_note = operator::ParkTier::Reloadable.sentence(Some(name));
+    waiting.send_back_available = true;
     desk.repark(run_id, &waiting).await;
 }
 
@@ -1369,9 +1309,11 @@ async fn run_review_stop(
         }
         log.append(&node.id, EventKind::SessionMeta, meta, None)
             .await?;
-        let tier = parked
-            .as_ref()
-            .map_or(operator::ParkTier::None, |stage| stage.tier);
+        let tier = if parked.is_some() {
+            operator::ParkTier::Reloadable
+        } else {
+            operator::ParkTier::None
+        };
         let waiting = operator::WaitingOn {
             node: node.id.clone(),
             name: node.name.clone(),
@@ -1383,14 +1325,8 @@ async fn run_review_stop(
             context: (!handover.trim().is_empty()).then(|| handover.clone()),
             handover_from: predecessor.clone(),
             park: tier,
-            park_note: tier.sentence(
-                predecessor_name.as_deref(),
-                team.conversation.stop.keep_alive_minutes,
-            ),
-            send_back_available: matches!(
-                tier,
-                operator::ParkTier::Reloadable | operator::ParkTier::KeptAlive
-            ),
+            park_note: tier.sentence(predecessor_name.as_deref()),
+            send_back_available: tier == operator::ParkTier::Reloadable,
             question_id: None,
         };
         log.append(
@@ -1411,47 +1347,10 @@ async fn run_review_stop(
             .await
             .map_err(|error| anyhow::anyhow!("{error}"))?;
 
-        let answer = match parked.as_ref().and_then(ParkedStage::deadline) {
-            None => wait
-                .answer()
-                .await
-                .map_err(|error| anyhow::anyhow!("{error}"))?,
-            Some(deadline) => {
-                let waiting = wait.answer();
-                tokio::pin!(waiting);
-                tokio::select! {
-                    answered = &mut waiting => answered
-                        .map_err(|error| anyhow::anyhow!("{error}"))?,
-                    () = tokio::time::sleep_until(deadline) => {
-                        // The window ran out under a stop that is still open. The stop itself
-                        // is unaffected — the operator can still answer — but the note they
-                        // could have sent back has nowhere to go, and the card says so.
-                        if let Some(stage) = parked.as_mut() {
-                            let boundary = StageBoundary {
-                                archive,
-                                run_id: Some(run_id.as_str()),
-                                seq_high_water: i64::try_from(log.events_appended().await).ok(),
-                                artifact_root: memory_root(team_path),
-                                team_revision: lineage.team_revision.as_deref(),
-                            };
-                            stage.expire(&boundary, exit_timeout, &handover).await;
-                            if let Some(mut open) = desk.waiting_for(&run_id, &node.id) {
-                                open.park = operator::ParkTier::Released;
-                                open.park_note = operator::ParkTier::Released.sentence(
-                                    predecessor_name.as_deref(),
-                                    team.conversation.stop.keep_alive_minutes,
-                                );
-                                open.send_back_available = false;
-                                desk.repark(&run_id, &open).await;
-                            }
-                        }
-                        // Wait on, with no deadline left to race.
-                        (&mut waiting).await
-                            .map_err(|error| anyhow::anyhow!("{error}"))?
-                    }
-                }
-            }
-        };
+        let answer = wait
+            .answer()
+            .await
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
 
         archive_operator_answer(log, &node.id, &answer, desk.questions(), &run_id, &node.id).await;
         let Some(send_back) = answer.send_back.clone() else {
@@ -1474,14 +1373,7 @@ async fn run_review_stop(
         let feedback = send_back_note(&answer.text);
         let stage_id = stage.agent_id.clone();
         let reply = stage
-            .send_back(
-                &feedback,
-                bus,
-                archive,
-                shared_log,
-                exit_timeout,
-                keep_alive_window(team),
-            )
+            .send_back(&feedback, bus, archive, shared_log, exit_timeout)
             .await?;
         let session = stage
             .session_mut()
@@ -1519,7 +1411,7 @@ async fn run_review_stop(
                 .with_context(|| format!("{stage_id} failed to checkpoint after your note"))?;
             boundary.record(&stage_id, &checkpoint).await;
         }
-        stage.repark(exit_timeout, keep_alive_window(team)).await?;
+        stage.repark(exit_timeout).await?;
     }
 }
 
@@ -1842,31 +1734,22 @@ struct StageSession {
 
 /// A stage's session while the person at the keyboard is thinking (decision 7).
 ///
-/// The two tiers are not a preference, they are what the harness said about itself in its
-/// `initialize` response. A harness that advertises `loadSession` is **closed** — the process is
-/// reaped and only the ACP session id is kept — so a stop that waits an hour holds nothing at all;
-/// one that does not is kept alive, which is a real process idling at zero token cost, so it is
-/// bounded by `conversation.stop.keepAliveMinutes` and then checkpointed and released.
+/// Parking closes the session and keeps its conversation in the database, so a stop that waits an
+/// hour holds nothing at all. The session is open again only while it takes a turn: the
+/// operator's answer, or a note sent back to it.
 struct ParkedStage {
     agent_id: String,
-    /// What to spawn to get this session back. Kept for both tiers because only the reloadable
-    /// one uses it, and carrying it costs nothing.
+    /// What to spawn to get this session back.
     spec: ProcessSpec,
-    tier: operator::ParkTier,
     state: ParkedState,
 }
 
 enum ParkedState {
     /// Closed, with its conversation kept in the database (`agent_sessions`) under this id until
     /// it is reopened or let go. Nothing of it is held in memory meanwhile.
-    Reloadable { acp_session_id: String },
-    /// Still in this process, until `deadline`.
-    KeptAlive {
-        session: Box<StageSession>,
-        deadline: tokio::time::Instant,
-    },
-    /// The window expired: a coordinator checkpoint was written and the session released.
-    Released,
+    Parked { session_id: String },
+    /// Reopened, in this process, to take a turn.
+    Open { session: Box<StageSession> },
 }
 
 impl ParkedStage {
@@ -1880,126 +1763,25 @@ impl ParkedStage {
         spec: ProcessSpec,
         mut session: StageSession,
         exit_timeout: Duration,
-        keep_alive: Duration,
     ) -> Result<Self> {
-        if session.process.supports_load_session() {
-            let acp_session_id = session
-                .process
-                .acp_session_id()
-                .context("a negotiated session always has an ACP session id")?
-                .to_owned();
-            session
-                .process
-                .park_session(&mut session.recorder, exit_timeout)
-                .await
-                .with_context(|| format!("failed to park {agent_id}'s session"))?;
-            return Ok(Self {
-                agent_id: agent_id.to_owned(),
-                spec,
-                tier: operator::ParkTier::Reloadable,
-                state: ParkedState::Reloadable { acp_session_id },
-            });
-        }
+        let session_id = park_open_session(agent_id, &mut session, exit_timeout).await?;
         Ok(Self {
             agent_id: agent_id.to_owned(),
             spec,
-            tier: operator::ParkTier::KeptAlive,
-            state: ParkedState::KeptAlive {
-                session: Box::new(session),
-                deadline: tokio::time::Instant::now() + keep_alive,
-            },
+            state: ParkedState::Parked { session_id },
         })
-    }
-
-    /// When this park stops being free, if it ever does. `None` for a reloadable session, which
-    /// holds no process and therefore has no window to run out.
-    fn deadline(&self) -> Option<tokio::time::Instant> {
-        match &self.state {
-            ParkedState::KeptAlive { deadline, .. } => Some(*deadline),
-            ParkedState::Reloadable { .. } | ParkedState::Released => None,
-        }
-    }
-
-    /// The window ran out: record a coordinator checkpoint from the stored boundary and release.
-    /// No model turn is started by an idle timeout. A later answer starts a new run, which
-    /// is what the strip already offers — so the cost of walking away from a stop is bounded and
-    /// recoverable rather than a held process and a lost context.
-    ///
-    /// `done` is the stage's own last checkpoint when it wrote one, else `handed_over`: a team
-    /// with no notebook asks no stage-end checkpoint, and what the stage handed the stop is the
-    /// truest account of what it finished.
-    async fn expire(
-        &mut self,
-        boundary: &StageBoundary<'_>,
-        _exit_timeout: Duration,
-        handed_over: &str,
-    ) {
-        let ParkedState::KeptAlive { session, .. } =
-            std::mem::replace(&mut self.state, ParkedState::Released)
-        else {
-            return;
-        };
-        let mut session = *session;
-        if let Some(run_id) = boundary.run_id {
-            let notebook = boundary.archive.notebook();
-            let prior = notebook
-                .checkpoints(run_id, Some(&self.agent_id))
-                .await
-                .ok()
-                .and_then(|points| points.into_iter().last());
-            let request = memory::CheckpointWrite {
-                run_id: run_id.to_owned(),
-                agent_id: self.agent_id.clone(),
-                done: prior
-                    .as_ref()
-                    .map_or_else(|| handed_over.trim().to_owned(), |point| point.done.clone()),
-                next: String::new(),
-                blockers: Some(
-                    "The session was released while waiting for your answer.".to_owned(),
-                ),
-                artifacts: prior.map_or_else(Vec::new, |point| point.artifacts),
-                seq_high_water: boundary.seq_high_water,
-                source: memory::CheckpointSource::Coordinator,
-                team_revision: boundary.team_revision.map(str::to_owned),
-            };
-            if let Err(error) = notebook.write_checkpoint(&request).await {
-                eprintln!(
-                    "warning: could not checkpoint {} before release: {error}",
-                    self.agent_id
-                );
-            }
-        }
-        let context = TeamSessionContext {
-            archive: boundary.archive,
-            bus: None,
-            event_log: None,
-            packet: None,
-            composed: None,
-            boundary: None,
-        };
-        if let Err(error) = session
-            .process
-            .finish_live(&mut session.recorder, String::new(), &context)
-            .await
-        {
-            eprintln!(
-                "warning: {}'s kept-alive session did not close cleanly: {error:#}",
-                self.agent_id
-            );
-        }
-        self.tier = operator::ParkTier::Released;
     }
 
     /// Re-prompt this stage with the operator's note and take its new reply — "Send back to
     /// <predecessor>".
     ///
-    /// A reloadable session is reopened here and now, on a fresh process, with `session/load`: the
-    /// note lands in the conversation that produced the work, not in a new one that would have to
-    /// be told what the work was.
+    /// The session is reopened here and now, on a fresh process: the note lands in the
+    /// conversation that produced the work, not in a new one that would have to be told what the
+    /// work was.
     ///
     /// # Errors
     ///
-    /// Returns an error when the session has already been released, or when the reload fails.
+    /// Returns an error when the reopen or the turn fails.
     async fn send_back(
         &mut self,
         note: &str,
@@ -2007,42 +1789,35 @@ impl ParkedStage {
         archive: &EventArchive,
         shared_log: Option<&EventLog>,
         exit_timeout: Duration,
-        keep_alive: Duration,
     ) -> Result<String> {
-        self.reopen(bus, archive, shared_log, exit_timeout, keep_alive)
-            .await?;
-        let ParkedState::KeptAlive { session, .. } = &mut self.state else {
-            bail!(
-                "{}'s session was released before your note could reach it. Start a new run from \
-                 its checkpoint instead.",
-                self.agent_id
-            );
-        };
+        self.reopen(bus, archive, shared_log, exit_timeout).await?;
+        let agent_id = self.agent_id.clone();
+        let session = self
+            .session_mut()
+            .context("a reopened stage always has a session")?;
         session
             .process
             .prompt_turn(&mut session.recorder, note)
             .await
-            .with_context(|| format!("{} failed to answer your note", self.agent_id))
+            .with_context(|| format!("{agent_id} failed to answer your note"))
     }
 
-    /// Bring a reloadable session back on a fresh process. A no-op for a session that never let
-    /// go, and a refusal for one that was released.
+    /// Bring the parked session back on a fresh process. A no-op for one that is already open.
     ///
     /// # Errors
     ///
-    /// Returns an error when the respawn or `session/load` fails.
+    /// Returns an error when the respawn or the reload fails.
     async fn reopen(
         &mut self,
         bus: &TeamBus,
         archive: &EventArchive,
         shared_log: Option<&EventLog>,
         _exit_timeout: Duration,
-        keep_alive: Duration,
     ) -> Result<()> {
-        let ParkedState::Reloadable { acp_session_id } = &self.state else {
+        let ParkedState::Parked { session_id } = &self.state else {
             return Ok(());
         };
-        let acp_session_id = acp_session_id.clone();
+        let session_id = session_id.clone();
         let mut process = AgentRun::spawn(&self.spec).with_context(|| {
             format!("failed to respawn {} to reopen its session", self.agent_id)
         })?;
@@ -2058,73 +1833,48 @@ impl ParkedStage {
             boundary: None,
         };
         let recorder = process
-            .load_live(&self.agent_id, &acp_session_id, &mut context)
+            .load_live(&self.agent_id, &session_id, &mut context)
             .await?;
-        self.state = ParkedState::KeptAlive {
+        self.state = ParkedState::Open {
             session: Box::new(StageSession { process, recorder }),
-            deadline: tokio::time::Instant::now() + keep_alive,
         };
-        self.tier = operator::ParkTier::KeptAlive;
         Ok(())
     }
 
     fn session_mut(&mut self) -> Option<&mut StageSession> {
         match &mut self.state {
-            ParkedState::KeptAlive { session, .. } => Some(session),
-            ParkedState::Reloadable { .. } | ParkedState::Released => None,
+            ParkedState::Open { session } => Some(session),
+            ParkedState::Parked { .. } => None,
         }
     }
 
     /// Take the session back out, for a stage that is about to go on working.
     fn into_session(self) -> Option<StageSession> {
         match self.state {
-            ParkedState::KeptAlive { session, .. } => Some(*session),
-            ParkedState::Reloadable { .. } | ParkedState::Released => None,
+            ParkedState::Open { session } => Some(*session),
+            ParkedState::Parked { .. } => None,
         }
     }
 
-    /// Park again after a send-back, applying the tier rule from scratch: a reloadable session is
-    /// closed and reaped once more rather than left running because it happened to be open.
+    /// Park again after a send-back: the session is closed once more rather than left open
+    /// because it happened to be.
     ///
     /// # Errors
     ///
-    /// Returns an error when closing the reopened session fails.
-    async fn repark(&mut self, exit_timeout: Duration, keep_alive: Duration) -> Result<()> {
-        let ParkedState::KeptAlive { session, deadline } =
-            std::mem::replace(&mut self.state, ParkedState::Released)
-        else {
+    /// Returns an error when the reopened session cannot be parked.
+    async fn repark(&mut self, exit_timeout: Duration) -> Result<()> {
+        let ParkedState::Open { session } = &mut self.state else {
             return Ok(());
         };
-        let mut session = *session;
-        if session.process.supports_load_session() {
-            let acp_session_id = session
-                .process
-                .acp_session_id()
-                .context("a reloaded session always has an ACP session id")?
-                .to_owned();
-            session
-                .process
-                .park_session(&mut session.recorder, exit_timeout)
-                .await
-                .with_context(|| format!("failed to park {}'s session again", self.agent_id))?;
-            self.tier = operator::ParkTier::Reloadable;
-            self.state = ParkedState::Reloadable { acp_session_id };
-            return Ok(());
-        }
-        self.tier = operator::ParkTier::KeptAlive;
-        self.state = ParkedState::KeptAlive {
-            session: Box::new(session),
-            // The window restarts: the operator has just acted, so this is a fresh wait, not the
-            // tail of the old one.
-            deadline: deadline.max(tokio::time::Instant::now() + keep_alive),
-        };
+        let session_id = park_open_session(&self.agent_id, session, exit_timeout).await?;
+        self.state = ParkedState::Parked { session_id };
         Ok(())
     }
 
     /// Let go of this stage for good, once the stop it was parked for is over.
-    async fn release(mut self, archive: &EventArchive, _exit_timeout: Duration) -> Result<()> {
-        match std::mem::replace(&mut self.state, ParkedState::Released) {
-            ParkedState::KeptAlive { session, .. } => {
+    async fn release(self, archive: &EventArchive, _exit_timeout: Duration) -> Result<()> {
+        match self.state {
+            ParkedState::Open { session } => {
                 let mut session = *session;
                 let context = TeamSessionContext {
                     archive,
@@ -2142,19 +1892,37 @@ impl ParkedStage {
             }
             // Closed when it was parked: only its stored history is left to let go of. A row left
             // behind is not worth failing a finished run over: the run's end forgets it anyway.
-            ParkedState::Reloadable { acp_session_id } => {
-                if let Err(error) = crate::engine::forget_parked(archive, &acp_session_id).await {
+            ParkedState::Parked { session_id } => {
+                if let Err(error) = crate::engine::forget_parked(archive, &session_id).await {
                     eprintln!(
                         "warning: could not forget {}'s parked session: {error:#}",
                         self.agent_id
                     );
                 }
             }
-            // Already released on expiry.
-            ParkedState::Released => {}
         }
         Ok(())
     }
+}
+
+/// Close an open session, keep its conversation in the database, and return the id it is kept
+/// under.
+async fn park_open_session(
+    agent_id: &str,
+    session: &mut StageSession,
+    exit_timeout: Duration,
+) -> Result<String> {
+    let session_id = session
+        .process
+        .acp_session_id()
+        .context("an open session always has an id")?
+        .to_owned();
+    session
+        .process
+        .park_session(&mut session.recorder, exit_timeout)
+        .await
+        .with_context(|| format!("failed to park {agent_id}'s session"))?;
+    Ok(session_id)
 }
 
 /// Open a continuation's packet with the checkpoint it was started from.
@@ -4801,7 +4569,6 @@ mod tests {
             "record-senders",
             pipeline_agent("a", OFFLINE),
             pipeline_agent("b", OFFLINE),
-            5,
         );
         let empty = memory::ContextPacket::default();
         let handovers = BTreeMap::from([("review".to_owned(), "the findings".to_owned())]);
@@ -5317,12 +5084,7 @@ mod tests {
         }
     }
 
-    fn stop_team(
-        id: &str,
-        first: AgentConfig,
-        last: AgentConfig,
-        keep_alive_minutes: u32,
-    ) -> Arc<TeamConfig> {
+    fn stop_team(id: &str, first: AgentConfig, last: AgentConfig) -> Arc<TeamConfig> {
         let sequence = |from: &str, to: &str| EdgeConfig {
             from: from.into(),
             to: to.into(),
@@ -5338,10 +5100,7 @@ mod tests {
             responder: None,
             schedule: None,
             deliver: None,
-            conversation: ConversationConfig {
-                stop: config::StopConfig { keep_alive_minutes },
-                ..ConversationConfig::default()
-            },
+            conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
@@ -5444,7 +5203,6 @@ mod tests {
             "held",
             pipeline_agent("a", &researcher),
             pipeline_agent("b", &writer),
-            15,
         );
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
@@ -5565,7 +5323,6 @@ mod tests {
             "direction",
             pipeline_agent("a", &researcher),
             pipeline_agent("b", &writer),
-            15,
         );
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
@@ -5681,7 +5438,6 @@ mod tests {
             "send-back",
             pipeline_agent("a", &researcher),
             pipeline_agent("b", &writer),
-            15,
         );
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
@@ -5776,7 +5532,6 @@ mod tests {
             "reloaded",
             pipeline_agent("a", &researcher),
             pipeline_agent("b", &writer),
-            15,
         );
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
@@ -5884,7 +5639,6 @@ mod tests {
             "restarted",
             pipeline_agent("a", &researcher),
             pipeline_agent("b", &writer),
-            15,
         );
         let archive = EventArchive::new(crate::db::Db::temp().await);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");

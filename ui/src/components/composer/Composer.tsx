@@ -194,7 +194,7 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
   let noteClass = ''
   if (!noteNode) {
     if (replyTo) noteNode = `Reply to ${replyTo.name}. This is another turn in its current session.`
-    else if (answering) noteNode = answering.waiting.kind === 'review_stop' ? 'Your turn: approve to let the team continue, or type what should change. Anything you type is passed on as your direction.' : answering.waiting.park === 'released' ? `Reply to ${answering.waiting.name}. Its session was released; your answer starts a new run from its checkpoint.` : `Reply to ${answering.waiting.name}. Your answer arrives as its next turn.`
+    else if (answering) noteNode = answering.waiting.kind === 'review_stop' ? 'Your turn: approve to let the team continue, or type what should change. Anything you type is passed on as your direction.' : `Reply to ${answering.waiting.name}. Your answer arrives as its next turn.`
     else if (busy) noteNode = 'Connection loss never starts, restarts or cancels a run.'
     // One line explaining the chosen target, because "from Writer" and "whole pipeline" cost
     // different amounts and the operator is choosing between them.

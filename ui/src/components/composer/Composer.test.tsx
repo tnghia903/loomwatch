@@ -169,7 +169,7 @@ it('keeps Retry and New run when no follow-up handler is supplied', () => {
 
 it.each(['review_stop', 'question'] as const)('routes the %s answer and keyboard shortcut without launching a run', (kind) => {
   const onAnswer = vi.fn(), onSubmit = vi.fn()
-  const waiting = { node: 'review', name: 'Review', kind, since: '2026-09-13T00:00:00Z', question: 'Approve?', park: 'kept_alive' as const, parkNote: 'kept alive', handoverFrom: 'researcher', sendBackAvailable: kind === 'review_stop' }
+  const waiting = { node: 'review', name: 'Review', kind, since: '2026-09-13T00:00:00Z', question: 'Approve?', park: 'reloadable' as const, parkNote: 'parked', handoverFrom: 'researcher', sendBackAvailable: kind === 'review_stop' }
   const props = { mode: 'pipeline' as const, stepCount: 3, state: { kind: 'answering' as const, waiting, sending: false }, value: 'Proceed', onChange: vi.fn(), onSubmit, onStop: vi.fn(), onRetry: vi.fn(), onNewRun: vi.fn(), onAnswer }
   const { rerender } = render(<Composer {...props} />)
   expect(screen.getByRole('button', { name: kind === 'review_stop' ? /Continue/ : /^Reply/ })).toBeEnabled()
@@ -246,7 +246,7 @@ it('only retries a finished run on an explicit ⌘↵, never on a bare Enter', (
 
 // "Looks good" is the most common answer at a review stop; it must not require typing.
 it('lets a review stop be approved without a comment, and names who work goes back to', () => {
-  const waiting = { node: 'review', name: 'You', kind: 'review_stop' as const, since: '2026-10-01T00:00:00Z', question: 'Approve?', park: 'kept_alive' as const, parkNote: 'kept alive', handoverFrom: 'researcher', sendBackAvailable: true }
+  const waiting = { node: 'review', name: 'You', kind: 'review_stop' as const, since: '2026-10-01T00:00:00Z', question: 'Approve?', park: 'reloadable' as const, parkNote: 'parked', handoverFrom: 'researcher', sendBackAvailable: true }
   const onAnswer = vi.fn()
   render(
     <Composer
@@ -263,7 +263,7 @@ it('lets a review stop be approved without a comment, and names who work goes ba
 })
 
 it('still requires words to answer an agent’s question', () => {
-  const waiting = { node: 'writer', name: 'Writer', kind: 'question' as const, since: '2026-10-01T00:00:00Z', question: 'Which tone?', park: 'kept_alive' as const, parkNote: 'kept alive', sendBackAvailable: false }
+  const waiting = { node: 'writer', name: 'Writer', kind: 'question' as const, since: '2026-10-01T00:00:00Z', question: 'Which tone?', park: 'reloadable' as const, parkNote: 'parked', sendBackAvailable: false }
   render(
     <Composer
       mode="pipeline" stepCount={3} state={{ kind: 'answering', waiting, sending: false }} value="" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()}
@@ -275,7 +275,7 @@ it('still requires words to answer an agent’s question', () => {
   expect(screen.getByRole('textbox', { name: 'Answer to Writer' })).toHaveAttribute('placeholder', 'Which tone?')
 })
 
-const demoStop = { node: 'review', name: 'You', kind: 'review_stop' as const, since: '2026-10-04T00:00:00Z', question: 'Researcher is done. Approve the findings, or say what to change.', park: 'kept_alive' as const, parkNote: 'kept alive', handoverFrom: 'researcher', sendBackAvailable: true }
+const demoStop = { node: 'review', name: 'You', kind: 'review_stop' as const, since: '2026-10-04T00:00:00Z', question: 'Researcher is done. Approve the findings, or say what to change.', park: 'reloadable' as const, parkNote: 'parked', handoverFrom: 'researcher', sendBackAvailable: true }
 
 // Field report (2026-10-04): the note box was a borderless line whose placeholder, the stop's own
 // question, read like a heading, and a screen reader called it "Answer to You".
