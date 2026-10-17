@@ -1,5 +1,6 @@
 // Thin wrapper over the daemon REST surface added in TNG-52 (crates/loomwatch-backend/src/api.rs).
 import { daemonFetch } from '../daemonFetch'
+import { baseName, isAbsolutePath, relativeUnder } from '../files/paths'
 
 export interface TeamFilePayload {
   path: string
@@ -38,15 +39,13 @@ export function teamSummaries(discovery: TeamsDiscoveryPayload): TeamSummary[] {
 /** "Review stop demo" for a named team, "research-team" for a file without a usable name. */
 export function teamDisplayName(team: Pick<TeamSummary, 'path' | 'name'>): string {
   if (team.name) return team.name
-  const file = team.path.split('/').pop() ?? team.path
-  return file.replace(/\.ya?ml$/i, '')
+  return baseName(team.path).replace(/\.ya?ml$/i, '')
 }
 
 /** `path` as the run registry files it: relative to the teams folder. `null` when it is outside. */
 export function teamPathUnderRoot(root: string, path: string): string | null {
-  if (!path.startsWith('/')) return path
-  const prefix = `${root.replace(/\/+$/, '')}/`
-  return path.startsWith(prefix) ? path.slice(prefix.length) : null
+  if (!isAbsolutePath(path)) return path
+  return relativeUnder(root, path)
 }
 
 export class TeamFileApiError extends Error {

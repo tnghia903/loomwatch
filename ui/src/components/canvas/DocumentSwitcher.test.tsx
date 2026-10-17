@@ -55,6 +55,20 @@ it('tells two teams with the same name apart by their files', async () => {
   expect(await within(list).findByText('trip-planner-2.yaml')).toBeInTheDocument()
 })
 
+// On Windows the open team's path is `C:\Users\…`, and the list names it under the root.
+it('marks the open team in the list when its path is a Windows one', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    root: 'C:\\Users\\ana\\LoomWatch\\teams',
+    files: ['trip-planner.yaml', 'blog.yaml'],
+    teams: [{ path: 'trip-planner.yaml', name: 'Trip planner', agentCount: 1 }, { path: 'blog.yaml', name: 'Blog', agentCount: 1 }],
+  }), { status: 200, headers: { 'content-type': 'application/json' } })))
+  renderSwitcher({ path: 'C:\\Users\\ana\\LoomWatch\\teams\\trip-planner.yaml' })
+  fireEvent.click(screen.getByRole('button', { name: /open team switcher/ }))
+  const list = screen.getByRole('listbox', { name: 'Your teams' })
+  expect(await within(list).findByRole('option', { name: /Trip planner/ })).toHaveAttribute('aria-selected', 'true')
+  expect(within(list).getByRole('option', { name: /Blog/ })).toHaveAttribute('aria-selected', 'false')
+})
+
 it('says nothing is left to finish on a valid saved team', () => {
   renderSwitcher()
   expect(screen.queryByText(/to finish/)).not.toBeInTheDocument()

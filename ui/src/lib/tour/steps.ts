@@ -1,4 +1,5 @@
 import { currentRun } from './currentRun'
+import { keys } from '../platform'
 
 /**
  * The getting-started guide, one card per step, in the order the work is done: build an agent in
@@ -298,7 +299,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'any',
     view: () => ({
       title: 'You’re all set',
-      body: 'That is the whole loop: build an agent, put it in a team’s workflow, and give the team work in its chat. When a team needs you, for an answer or an approval, it asks in its chat and says so at the top of every screen. To see this guide again, press ⌘K and choose Getting started guide, or use the menu in any team.',
+      body: `That is the whole loop: build an agent, put it in a team’s workflow, and give the team work in its chat. When a team needs you, for an answer or an approval, it asks in its chat and says so at the top of every screen. To see this guide again, press ${keys('⌘K')} and choose Getting started guide, or use the menu in any team.`,
       advance: 'finish',
     }),
   },

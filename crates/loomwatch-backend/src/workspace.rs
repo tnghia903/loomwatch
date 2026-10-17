@@ -385,7 +385,7 @@ fn prepare_root(root: &Path, agent: &AgentConfig) -> Result<Option<PathBuf>, Str
         SKILL_DIRECTORY,
         crate::chosen_knowledge::TEXT_COPY_DIR,
     ] {
-        let directory = root.join(relative);
+        let directory = under(root, relative);
         if directory.exists() {
             fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
         }
@@ -397,13 +397,13 @@ fn prepare_root(root: &Path, agent: &AgentConfig) -> Result<Option<PathBuf>, Str
         .iter()
         .any(|capability| capability.kind == CapabilityKind::Skill)
     {
-        let directory = root.join(SKILL_DIRECTORY);
+        let directory = under(root, SKILL_DIRECTORY);
         fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
         Some(directory)
     } else {
         None
     };
-    let old_settings = root.join(".claude/settings.json");
+    let old_settings = under(root, ".claude/settings.json");
     if old_settings.is_file() {
         fs::remove_file(&old_settings).map_err(|error| error.to_string())?;
     }
@@ -498,9 +498,18 @@ fn native_memory_file(agent: &AgentConfig, memory: &TeamMemory) -> Option<&'stat
     Some(MEMORY_FILE)
 }
 
+/// `relative`, a `/`-separated path, under `root`, joined part by part so that Windows writes it
+/// with `\` throughout, as the agent is told it and as paths are compared.
+fn under(root: &Path, relative: &str) -> PathBuf {
+    relative
+        .split('/')
+        .fold(root.to_path_buf(), |path, part| path.join(part))
+}
+
 /// Whether `path` lies inside `folder`, both resolved as far as they exist.
 fn holds(folder: &Path, path: &Path) -> bool {
-    let resolved = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let resolved =
+        |path: &Path| crate::platform::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let folder = resolved(folder);
     let path = path.parent().map_or_else(
         || resolved(path),
@@ -696,7 +705,7 @@ mod tests {
         assert!(!workspace.cwd.join(".agents/skills").exists());
         assert!(!workspace.cwd.join(SKILL_DIRECTORY).exists());
         assert!(!workspace.cwd.join(".claude/settings.json").exists());
-        let folder = fs::canonicalize(&project).expect("canonical");
+        let folder = crate::platform::canonicalize(&project).expect("canonical");
         assert_eq!(
             workspace.delivery.knowledge[0].folders,
             [folder.to_string_lossy()]
@@ -750,7 +759,7 @@ mod tests {
             panic!("two sources: {:?}", workspace.delivery.knowledge);
         };
         assert_eq!(folder.source, "Linked folder");
-        let memo = fs::canonicalize(teams.join("team.files/memo.md")).expect("memo");
+        let memo = crate::platform::canonicalize(teams.join("team.files/memo.md")).expect("memo");
         assert_eq!(file.source, "Added file");
         assert_eq!(file.files, [memo.to_string_lossy()]);
         assert_eq!(file.read_access, Some(crate::delivery::Permission::Granted));
@@ -886,7 +895,7 @@ mod tests {
     fn a_skill_is_copied_into_the_agents_skill_folder_and_its_receipt_kept() {
         let temp = TempDirectory::new();
         let home = temp.path().join("home");
-        let source = home.join(".claude/skills/claude-design");
+        let source = home.join(".claude").join("skills").join("claude-design");
         fs::create_dir_all(&source).expect("skill directory");
         fs::write(
             source.join("SKILL.md"),
@@ -1108,7 +1117,7 @@ mod tests {
                 r#"{"permissions":{}}"#,
             )
             .expect("project settings");
-            let project = fs::canonicalize(&project).expect("canonical");
+            let project = crate::platform::canonicalize(&project).expect("canonical");
             let mut writer = agent(
                 "npx",
                 &["@agentclientprotocol/claude-agent-acp"],
@@ -1209,7 +1218,7 @@ mod tests {
             "{}",
             prompt.text
         );
-        let copy = workspace.root.join("knowledge/memo.md");
+        let copy = workspace.root.join("knowledge").join("memo.md");
         assert!(
             prompt
                 .text

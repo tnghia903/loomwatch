@@ -2,6 +2,7 @@ import { AlertCircle, ArrowUp, Check, RotateCcw, X } from 'lucide-react'
 import { useEffect, useId, useRef, type KeyboardEvent } from 'react'
 
 import type { AskContext } from '../../lib/ask/client'
+import { keys } from '../../lib/platform'
 import type { AskStep, AssistantTurn } from '../../lib/ask/thread'
 import type { AskController } from '../../lib/ask/useAsk'
 import { StatusGlyph } from '../ui/glyphs'
@@ -212,7 +213,7 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: A
             maxLength={8000}
             disabled={Boolean(ask.unavailable)}
           />
-          <button type="submit" className="ask-send" aria-label="Send" title="Send (↵)" disabled={!ask.draft.trim() || working || ask.sending || Boolean(ask.unavailable)}>
+          <button type="submit" className="ask-send" aria-label="Send" title={`Send (${keys('↵')})`} disabled={!ask.draft.trim() || working || ask.sending || Boolean(ask.unavailable)}>
             <ArrowUp size={16} aria-hidden="true" />
           </button>
         </div>

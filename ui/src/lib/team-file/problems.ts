@@ -34,13 +34,17 @@ export interface ReviewProblem extends DocumentProblem {
   field?: AgentField
 }
 
-/** `/Users/me/Developer/loomwatch/teams` → `~/Developer/loomwatch/teams`, middle-truncated past ~40 chars. */
+/**
+ * `/Users/me/Developer/loomwatch/teams` → `~/Developer/loomwatch/teams` (and `C:\Users\me\…` →
+ * `~\…` on Windows), middle-truncated past ~40 chars.
+ */
 export function shortenDirectory(directory: string): string {
-  const home = directory.replace(/^\/(?:Users|home)\/[^/]+/, '~')
+  const home = directory.replace(/^\/(?:Users|home)\/[^/]+/, '~').replace(/^[A-Za-z]:\\Users\\[^\\]+/i, '~')
   if (home.length <= 40) return home
-  const parts = home.split('/')
-  const tail = parts.slice(-2).join('/')
-  return `${parts[0]}/…/${tail}`
+  const separator = home.includes('\\') && !home.includes('/') ? '\\' : '/'
+  const parts = home.split(/[\\/]/)
+  const tail = parts.slice(-2).join(separator)
+  return `${parts[0]}${separator}…${separator}${tail}`
 }
 
 /** Collects every problem the chip counts so a counted problem can never vanish from Review. */

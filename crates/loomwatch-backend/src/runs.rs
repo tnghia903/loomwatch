@@ -1586,7 +1586,7 @@ struct RunsState {
 /// editor uses (`main` canonicalises once and hands it to both); a non-canonical path is
 /// canonicalised here as a fallback. Every route is loopback-only and never cached.
 pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunRegistry) -> Router {
-    let teams_root = fs::canonicalize(&teams_root).unwrap_or(teams_root);
+    let teams_root = crate::platform::canonicalize(&teams_root).unwrap_or(teams_root);
     Router::new()
         .route("/api/runs", post(start_run).get(list_runs))
         .route("/api/runs/{id}", get(get_run))
@@ -3816,7 +3816,7 @@ pub(crate) mod tests {
         pub(crate) fn new() -> Self {
             let path = std::env::temp_dir().join(format!("loomwatch-runs-{}", Uuid::new_v4()));
             fs::create_dir(&path).expect("create temporary teams root");
-            Self(fs::canonicalize(&path).expect("canonical teams root"))
+            Self(crate::platform::canonicalize(&path).expect("canonical teams root"))
         }
 
         /// A two-stage pipeline with a notebook, whose stages answer the full ADR 0013 +

@@ -1,6 +1,7 @@
 import { FilePlus2, PackageOpen, PencilLine, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
+import { isAbsolutePath } from '../../lib/files/paths'
 import type { MemoryEntry, MemoryView, Note, NotebookView } from '../../lib/memory/client'
 import { NotebookTab } from './NotebookTab'
 
@@ -353,7 +354,8 @@ function briefCount(own: number, inherited: number): string {
 
 function draftReady(draft: NonNullable<Draft>): boolean {
   if (draft.kind === 'note' || draft.kind === 'edit') return draft.body.trim().length > 0
-  return /^[^/].*\.md$/.test(draft.path.trim())
+  const path = draft.path.trim()
+  return !isAbsolutePath(path) && /\.md$/i.test(path)
 }
 
 function BriefRow({ title, meta, body, editable, onRemove, onEdit }: { title: string; meta: string; body: string; editable: boolean; onRemove: () => void; onEdit?: () => void }) {

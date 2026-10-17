@@ -664,7 +664,9 @@ pub(crate) fn plain_permissions(path: &Path) -> io::Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(plain))
 }
 
+/// Windows keeps no mode bits to clear. The same signature as the Unix one, so callers don't care.
 #[cfg(not(unix))]
+#[allow(clippy::unnecessary_wraps)]
 pub(crate) fn plain_permissions(_path: &Path) -> io::Result<()> {
     Ok(())
 }
@@ -1097,23 +1099,35 @@ impl AppFolder {
     }
 }
 
+/// `relative`, a `/`-separated path, under `home`, joined part by part so that Windows writes it
+/// with `\` throughout, as it shows the folder a skill came from.
+fn under(home: &Path, relative: &str) -> PathBuf {
+    relative
+        .split('/')
+        .fold(home.to_path_buf(), |path, part| path.join(part))
+}
+
 /// Every app skill folder, in the order a copy is preferred when two apps hold a skill of the
 /// same name. Skill folders only, mirroring `capabilities.rs` `home_skill_roots`: no app's
 /// settings, sign-in or session files are among them.
 fn app_folders(home: &Path) -> Vec<AppFolder> {
     use Layout::{Plugins, Skills};
     let mut folders = vec![
-        AppFolder::new(home.join(".claude/skills"), "Claude Code", Skills),
-        AppFolder::new(home.join(".codex/skills"), "Codex", Skills),
-        AppFolder::new(home.join(".agents/skills"), "Shared skills folder", Skills),
+        AppFolder::new(under(home, ".claude/skills"), "Claude Code", Skills),
+        AppFolder::new(under(home, ".codex/skills"), "Codex", Skills),
+        AppFolder::new(
+            under(home, ".agents/skills"),
+            "Shared skills folder",
+            Skills,
+        ),
         // OpenCode documents `skill/`; `skills/` is what most installers write.
-        AppFolder::new(home.join(".config/opencode/skills"), "OpenCode", Skills),
-        AppFolder::new(home.join(".config/opencode/skill"), "OpenCode", Skills),
-        AppFolder::new(home.join(".gemini/skills"), "Gemini", Skills),
+        AppFolder::new(under(home, ".config/opencode/skills"), "OpenCode", Skills),
+        AppFolder::new(under(home, ".config/opencode/skill"), "OpenCode", Skills),
+        AppFolder::new(under(home, ".gemini/skills"), "Gemini", Skills),
         // Hermes files skills by category and keeps a set per profile.
-        AppFolder::new(home.join(".hermes/skills"), "Hermes", Skills),
+        AppFolder::new(under(home, ".hermes/skills"), "Hermes", Skills),
     ];
-    for profile in subfolders(&home.join(".hermes/profiles")) {
+    for profile in subfolders(&under(home, ".hermes/profiles")) {
         folders.push(AppFolder::new(profile.join("skills"), "Hermes", Skills));
     }
     for relative in [
@@ -1121,21 +1135,25 @@ fn app_folders(home: &Path) -> Vec<AppFolder> {
         ".openclaw/workspace/skills",
         ".openclaw/plugin-skills",
     ] {
-        folders.push(AppFolder::new(home.join(relative), "OpenClaw", Skills));
+        folders.push(AppFolder::new(under(home, relative), "OpenClaw", Skills));
     }
-    folders.push(AppFolder::new(home.join(".pi/agent/skills"), "pi", Skills));
+    folders.push(AppFolder::new(
+        under(home, ".pi/agent/skills"),
+        "pi",
+        Skills,
+    ));
     // Plugins last. Claude Code's `marketplaces/` is the catalog of every plugin a marketplace
     // offers, installed or not, so its skills aren't the person's.
     folders.push(AppFolder::new(
-        home.join(".codex/plugins/cache"),
+        under(home, ".codex/plugins/cache"),
         "Codex",
         Plugins,
     ));
-    let mut claude_plugins = AppFolder::new(home.join(".claude/plugins"), "Claude Code", Plugins);
+    let mut claude_plugins = AppFolder::new(under(home, ".claude/plugins"), "Claude Code", Plugins);
     claude_plugins.exclude = &["marketplaces"];
     folders.push(claude_plugins);
     folders.push(AppFolder::new(
-        home.join(".gemini/extensions"),
+        under(home, ".gemini/extensions"),
         "Gemini",
         Plugins,
     ));
@@ -1167,7 +1185,8 @@ pub(crate) fn find_skill_files(root: &Path, max_depth: usize, exclude: &[&str]) 
         if depth > max_depth {
             continue;
         }
-        let canonical = fs::canonicalize(&directory).unwrap_or_else(|_| directory.clone());
+        let canonical =
+            crate::platform::canonicalize(&directory).unwrap_or_else(|_| directory.clone());
         if !seen.insert(canonical) {
             continue;
         }
@@ -1295,7 +1314,8 @@ pub fn preview(home: &Path, store: &SkillsStore) -> Result<Vec<BringInCandidate>
                 continue;
             };
             // The same skill linked into two apps' folders is one skill.
-            let canonical = fs::canonicalize(directory).unwrap_or_else(|_| directory.to_path_buf());
+            let canonical = crate::platform::canonicalize(directory)
+                .unwrap_or_else(|_| directory.to_path_buf());
             if !seen.insert(canonical.clone()) {
                 continue;
             }
@@ -1647,8 +1667,9 @@ pub(crate) mod tests {
                 .origin
                 .source_path
                 .as_deref()
+                .map(Path::new)
                 .unwrap()
-                .ends_with(".claude/skills/writer")
+                .ends_with(Path::new(".claude").join("skills").join("writer"))
         );
         assert_eq!(writer.batch_id.as_deref(), Some(outcome.batch_id.as_str()));
         assert_eq!(writer.sha256.len(), 64);

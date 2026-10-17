@@ -18,7 +18,7 @@ impl TempDirectory {
         let path =
             std::env::temp_dir().join(format!("loomwatch-ask-{label}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).expect("temporary directory");
-        Self(std::fs::canonicalize(&path).expect("canonical temporary directory"))
+        Self(crate::platform::canonicalize(&path).expect("canonical temporary directory"))
     }
 }
 

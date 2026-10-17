@@ -26,13 +26,17 @@ LoomWatch does about that, so you can judge it for yourself.
   websites, and from pages that rebind their address to `127.0.0.1`, are refused. In Docker, its
   port is published on `127.0.0.1` only.
 - **Keep your OpenRouter key to itself.** You paste the key into LoomWatch, which checks it with
-  OpenRouter before keeping it. On a Mac it is kept in the Keychain as `LoomWatch.OpenRouter`;
-  elsewhere in `keys.json` in LoomWatch's state folder, readable by your account only. It is sent
-  to OpenRouter and nowhere else: never to agents or the commands they run, and never into team
-  files, the run history or logs. Anything shaped like a key is cut out of an error message before
-  it is shown or kept. Only a key entered in LoomWatch is used: an `OPENROUTER_API_KEY` in the
-  environment is ignored, LoomWatch never reads another app's credentials or sign-in, and it never
-  uses an AI subscription. Other websites can't set or change the key.
+  OpenRouter before keeping it. On a Mac it is kept in the Keychain as `LoomWatch.OpenRouter`. On
+  Windows it is kept in Windows Credential Manager, as `api-key.LoomWatch.OpenRouter`, which only
+  your Windows account can read (as with every credential there, so can any program you run). On
+  Linux it is kept in `keys.json` in LoomWatch's state folder, readable by your account only. Your
+  Notion connection is kept the same way, as `LoomWatch.Notion`, except that Linux keeps none. The
+  key is sent to OpenRouter and nowhere else: never to agents or the commands they run, and never
+  into team files, the run history or logs. Anything shaped like a key is cut out of an error
+  message before it is shown or kept. Only a key entered in LoomWatch is used: an
+  `OPENROUTER_API_KEY` in the environment is ignored, LoomWatch never reads another app's
+  credentials or sign-in, and it never uses an AI subscription. Other websites can't set or change
+  the key.
 - **Check a team before it first runs.** A team file you didn't build in LoomWatch shows what it
   does before its first run. That covers a file you downloaded, unzipped or edited by hand. You see
   each agent and the model it runs on ("Writer runs on LoomWatch with anthropic/claude-opus-5.5"),
@@ -55,9 +59,12 @@ LoomWatch does about that, so you can judge it for yourself.
 - **Fence commands in on a Mac.** On a Mac every command an agent runs goes through macOS's sandbox
   (Seatbelt, `/usr/bin/sandbox-exec`). It can change files only in the agent's work folder and in
   temporary and cache folders, and it can reach the network only when the agent may use the web.
-  A command stops at its time limit (two minutes unless the agent asks for more, ten at most) or
-  when its turn is stopped, and everything it started stops with it. Every command is approved
-  before it runs, so the sandbox is the second line of defence, not the first.
+  Every command is approved before it runs, so the sandbox is the second line of defence, not the
+  first.
+- **Stop commands whole.** A command stops at its time limit (two minutes unless the agent asks
+  for more, ten at most) or when its turn is stopped, and everything it started stops with it. On
+  Windows, where commands run in `cmd.exe`, each one runs in a Windows job of its own, so nothing it
+  started keeps running after it finishes either.
 - **Ask before agents act.** LoomWatch answers each agent's requests by the switches you set for
   it. Reading inside its own folder and what you gave it needs no switch; web, file edits in its
   own folder, and commands are all off by default. Anything else waits for you: **Allow**, **Allow
@@ -97,6 +104,11 @@ LoomWatch does about that, so you can judge it for yourself.
   which runs them for it; each one shows in the run afterwards.
 - Limit what an allowed command reads. The sandbox limits where a command writes and whether it
   reaches the network, not which of your files it reads.
-- Sandbox commands on Windows or Linux yet. There, approving each command is the only line.
+- Sandbox commands on Windows. A command an agent runs there can read and change every file your
+  Windows account can, and reach the internet even when the agent may not use the web. Approving
+  each command is the only line, and in Auto mode LoomWatch's own reading of the command line is
+  all that lets a read-only command through. On Windows, keep **Run commands** off for any agent
+  whose job doesn't need it, and read each command before you allow it.
+- Sandbox commands on Linux yet. There too, approving each command is the only line.
 - Protect you from a model that is itself compromised, or from a prompt that talks an agent into
   misusing a permission you gave it. Keep **Run commands** off unless a job needs it.

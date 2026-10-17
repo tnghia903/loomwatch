@@ -798,9 +798,10 @@ impl AgentRun {
         if let Some(policy) = &self.spec.permissions {
             config.turned_off = policy.turned_off_skills();
         }
+        // Joined part by part, so Windows names them with `\` throughout, as the agent reads them.
         config.skill_roots = vec![
-            self.spec.cwd.join(".agents/skills"),
-            self.spec.cwd.join(".claude/skills"),
+            self.spec.cwd.join(".agents").join("skills"),
+            self.spec.cwd.join(".claude").join("skills"),
         ];
         if let Some(ai) = crate::ai::installed() {
             config.skill_roots.push(ai.skills_folder());

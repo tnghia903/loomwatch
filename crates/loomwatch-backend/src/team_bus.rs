@@ -1225,7 +1225,9 @@ impl TeamBus {
             operator: self.state.operator.clone(),
             ..crate::RunLineage::default()
         };
-        crate::run_answerable_session(
+        // Boxed: on Windows, where a child process takes more room, the session's future is over
+        // Clippy's 16 KB `large_futures` limit, and everything that awaits it would be too.
+        Box::pin(crate::run_answerable_session(
             crate::AskedQuestion {
                 team: &self.state.team,
                 agent,
@@ -1250,7 +1252,7 @@ impl TeamBus {
                 composed: Some(&composed),
                 boundary: None,
             },
-        )
+        ))
         .await
     }
 

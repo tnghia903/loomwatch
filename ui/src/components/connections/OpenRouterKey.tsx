@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from 'react'
 
 import { type KeyStatus, fetchKeyStatus, recheckOpenRouterKey, removeOpenRouterKey, saveOpenRouterKey } from '../../lib/ai/client'
 import { announceKeyStatus } from '../../lib/ai/useKeyStatus'
+import { keyStore } from '../../lib/platform'
 
 const KEYS_PAGE = 'https://openrouter.ai/keys'
 const CREDITS_PAGE = 'https://openrouter.ai/settings/credits'
@@ -21,7 +22,8 @@ function said(status: KeyStatus): string {
 
 /**
  * The OpenRouter key every agent runs on: paste it once, LoomWatch checks it with OpenRouter and
- * keeps it in this Mac's Keychain. The key is never shown again, only what OpenRouter says about it.
+ * keeps it in this Mac's Keychain, or Windows Credential Manager. The key is never shown again,
+ * only what OpenRouter says about it.
  *
  * `variant="card"` is the short form Home shows when no key is set yet.
  */
@@ -75,7 +77,7 @@ export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'se
           <span className="t-meta">{said(status) || 'Connected.'}</span>
           {status.freeTier && <span className="t-meta">This account has no credits yet, so only free models work. <a className="link" href={CREDITS_PAGE} target="_blank" rel="noreferrer">Add credits</a> to use the others.</span>}
           {status.problem && <span className="t-meta inline-error">{status.problem}</span>}
-          <span className="t-meta lw-settings-quiet">Each run costs what its model calls cost on OpenRouter; the run’s receipt shows the exact amount. The key is kept in this Mac’s Keychain, outside your team files, and agents never see it.</span>
+          <span className="t-meta lw-settings-quiet">Each run costs what its model calls cost on OpenRouter; the run’s receipt shows the exact amount. The key is kept in {keyStore()}, outside your team files, and agents never see it.</span>
         </div>
         <div className="lw-settings-actions">
           <button type="button" className="btn" disabled={busy} onClick={() => void act(recheckOpenRouterKey, 'Checked with OpenRouter.')}>{busy ? 'Checking…' : 'Check again'}</button>
@@ -97,7 +99,7 @@ export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'se
         }}>
           <label className="t-meta" htmlFor={inputId}>OpenRouter key</label>
           <input id={inputId} type="password" autoComplete="off" spellCheck={false} value={key} maxLength={512} placeholder="sk-or-…" onChange={(event) => setKey(event.target.value)} className="input mono" />
-          <span className="hint t-meta">LoomWatch checks it with OpenRouter first, then keeps it in this Mac’s Keychain. It is never shown again, and agents never see it.</span>
+          <span className="hint t-meta">LoomWatch checks it with OpenRouter first, then keeps it in {keyStore()}. It is never shown again, and agents never see it.</span>
           <button disabled={busy || !key.trim()} className="btn btn-primary lw-settings-start">{busy ? 'Checking the key…' : 'Save key'}</button>
         </form>
       </>}

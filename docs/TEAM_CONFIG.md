@@ -34,8 +34,9 @@ agents:
 
 - **The key.** You enter it in LoomWatch, with **Add your OpenRouter key** on Home or under
   **AI models** in **Connections…**. LoomWatch checks a key with OpenRouter and keeps it only if
-  OpenRouter accepts it. On a Mac it is kept in the Keychain as `LoomWatch.OpenRouter`. Elsewhere
-  it is kept in `<state dir>/keys.json`, which only your account can read. An `OPENROUTER_API_KEY`
+  OpenRouter accepts it. On a Mac it is kept in the Keychain as `LoomWatch.OpenRouter`, and on
+  Windows in Windows Credential Manager. On Linux it is kept in `<state dir>/keys.json`, which only
+  your account can read. An `OPENROUTER_API_KEY`
   in the environment is ignored. The key goes to OpenRouter and nowhere else: never to an agent, a
   command an agent runs, a team file, the run archive or a log. Without a key, a run stops before
   its first model call and says to add one.
@@ -326,14 +327,16 @@ Every agent in a run works with LoomWatch's own tools:
 
 - **Files** in its work folder: `list_files`, `read_file`, `search_files`, `write_file` and
   `edit_file`.
-- **Commands**: `run_command` runs a shell command in the agent's work folder and stops it after two
-  minutes, or up to ten if the agent asks. The command's environment has every provider key and
+- **Commands**: `run_command` runs a shell command in the agent's work folder (with `cmd.exe` on
+  Windows) and stops it, and everything it started, after two minutes, or up to ten if the agent
+  asks. The command's environment has every provider key and
   LoomWatch's own settings removed, so a script cannot read your key or LoomWatch's database
   address. That means any variable ending in `_API_KEY`, `_API_TOKEN` or `_AUTH_TOKEN`, any starting
   with `OPENROUTER_`, `ANTHROPIC_`, `OPENAI_`, `GEMINI_`, `GOOGLE_API`, `LOOMWATCH_` or `POSTGRES_`,
   and `DATABASE_URL` and `PGPASSWORD`. On a Mac a command also runs in a sandbox: it can change
   files only in the agent's folder and temporary folders, and it can reach the network only when the
-  agent is allowed the web.
+  agent is allowed the web. Windows and Linux have no such sandbox: there a command can change any
+  file you can, so asking before each one is the only check.
 - **The web**, only for an agent with `allow.web: true`: OpenRouter's web search and page fetch.
   OpenRouter runs them, and the run shows each search and each page read. An agent without the
   switch has no web tools.

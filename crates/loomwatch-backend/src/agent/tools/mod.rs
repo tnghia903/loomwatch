@@ -18,6 +18,20 @@ use super::provider::{Cancel, ToolSpec};
 
 pub(crate) use command::CommandSettings;
 
+/// What `run_command` says it does: which shell reads the command, and where it may change files,
+/// which only the Mac's sandbox enforces.
+const RUN_COMMAND: &str = if cfg!(windows) {
+    "Run a command in your work folder with cmd.exe, such as a script a skill provides. Write it \
+     for cmd.exe; for PowerShell, run powershell -NoProfile -Command \"…\". The operator may be \
+     asked first. Change files only inside your work folder."
+} else if cfg!(target_os = "macos") {
+    "Run a shell command in your work folder, such as a script a skill provides. The operator may \
+     be asked first. It can change files only inside your work folder."
+} else {
+    "Run a shell command in your work folder, such as a script a skill provides. The operator may \
+     be asked first. Change files only inside your work folder."
+};
+
 /// A built-in tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Builtin {
@@ -171,8 +185,7 @@ impl Builtin {
                 }),
             ),
             Self::RunCommand => (
-                "Run a shell command in your work folder, such as a script a skill provides. The \
-                 operator may be asked first. It can change files only inside your work folder.",
+                RUN_COMMAND,
                 json!({
                     "type": "object",
                     "properties": {
@@ -351,13 +364,14 @@ fn required_path(input: &Value, cwd: &Path) -> Result<PathBuf, String> {
 /// touched; this only says which path it is.
 pub(crate) fn resolve(cwd: &Path, given: &str) -> PathBuf {
     let given = given.trim();
-    let given = given.strip_prefix("~/").map_or_else(
+    // `~\` too on Windows, where `~` is the user profile.
+    let home_relative = given
+        .strip_prefix("~/")
+        .or_else(|| given.strip_prefix("~\\").filter(|_| cfg!(windows)));
+    let given = home_relative.map_or_else(
         || PathBuf::from(given),
         |rest| {
-            std::env::var_os("HOME").map_or_else(
-                || PathBuf::from(given),
-                |home| PathBuf::from(home).join(rest),
-            )
+            crate::platform::home_dir().map_or_else(|| PathBuf::from(given), |home| home.join(rest))
         },
     );
     let joined = if given.is_absolute() {
@@ -412,6 +426,33 @@ mod tests {
         assert_eq!(resolve(cwd, "./a/../b.md"), Path::new("/work/team/b.md"));
         assert_eq!(resolve(cwd, "../../etc/passwd"), Path::new("/etc/passwd"));
         assert_eq!(resolve(cwd, "/tmp/x"), Path::new("/tmp/x"));
+    }
+
+    /// On Windows a path may start at a drive, at the root of the work folder's drive, or at `~\`,
+    /// and use either separator.
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_resolve_as_windows_reads_them() {
+        let cwd = Path::new(r"C:\work\team");
+        assert_eq!(
+            resolve(cwd, r"notes\a.md"),
+            Path::new(r"C:\work\team\notes\a.md")
+        );
+        assert_eq!(
+            resolve(cwd, "notes/a.md"),
+            Path::new(r"C:\work\team\notes\a.md")
+        );
+        assert_eq!(resolve(cwd, r"..\..\x.md"), Path::new(r"C:\x.md"));
+        assert_eq!(resolve(cwd, r"\Users\x.md"), Path::new(r"C:\Users\x.md"));
+        assert_eq!(resolve(cwd, r"D:\data\x.md"), Path::new(r"D:\data\x.md"));
+        let home = crate::platform::home_dir().expect("a user profile");
+        assert_eq!(resolve(cwd, r"~\notes.md"), home.join("notes.md"));
+        assert_eq!(resolve(cwd, "~/notes.md"), home.join("notes.md"));
+        assert_eq!(
+            shown(cwd, &resolve(cwd, r"notes\a.md")),
+            r"notes\a.md",
+            "the card shows a path inside the work folder relative to it"
+        );
     }
 
     #[test]

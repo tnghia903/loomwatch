@@ -10,6 +10,7 @@ import type { AgentConfig, AllowSwitch } from '../team-file/types'
 import type { RunProjection } from '../watch/events'
 import { OPERATOR_ID } from '../watch/messages'
 import { chosenIsFile } from '../knowledge/chosen'
+import { isWindowsPath } from '../files/paths'
 import { AREAS, QUESTS, type QuestItem } from './catalog'
 
 /** What a run earned: the item, the agent whose work earned it when one did, and what happened. */
@@ -45,10 +46,12 @@ function nameOf(agents: readonly AgentConfig[], id: string): string {
 const clean = (path: string) => path.replaceAll('\\', '/').replace(/\/+$/, '')
 
 /** Whether a read of `read` reached into `given`: the folder itself or anything inside it. A path
-    the team file keeps relative to its own folder is matched by its tail. */
+    the team file keeps relative to its own folder is matched by its tail. Windows paths match in
+    any case, as Windows names files. */
 function within(read: string, given: string): boolean {
-  const folder = clean(given).replace(/^\.\//, '').replace(/^~\//, '')
-  const path = clean(read)
+  const fold = isWindowsPath(read) || isWindowsPath(given) ? (text: string) => text.toLowerCase() : (text: string) => text
+  const folder = fold(clean(given).replace(/^\.\//, '').replace(/^~\//, ''))
+  const path = fold(clean(read))
   if (!folder) return false
   if (path === folder || path.startsWith(`${folder}/`)) return true
   return path.endsWith(`/${folder}`) || path.includes(`/${folder}/`)

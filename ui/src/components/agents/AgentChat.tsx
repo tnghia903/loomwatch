@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 
+import { joinUnderRoot } from '../../lib/files/paths'
 import { agentFromDraft, chatAgentId, chatTeamYaml, type AgentDraft } from '../../lib/library/draft'
 import { figureHue, type FigureChoice } from '../../lib/library/figures'
 import { benchFolder } from '../../lib/library/jobs'
@@ -86,7 +87,7 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
     let cancelled = false
     void (async () => {
       try {
-        const path = `${await benchFolder()}/${chatId}.yaml`
+        const path = joinUnderRoot(await benchFolder(), `${chatId}.yaml`)
         const exists = () => fetchTeamFile(path).then(() => true, () => false)
         const there = await exists()
         if (!there && !writable) { if (!cancelled) setHome({ chatId, path: null, error: null }); return }

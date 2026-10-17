@@ -17,7 +17,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/runs%20on-your%20computer-AD8A20" alt="Runs on your computer">
-  <img src="https://img.shields.io/badge/platform-macOS-56524A" alt="Platform: macOS">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-56524A" alt="Platform: macOS and Windows">
   <img src="https://img.shields.io/badge/first%20run-offline%20demo%2C%20no%20key-17724A" alt="First run: offline demo, no key">
   <img src="https://img.shields.io/badge/models%20via-OpenRouter-56524A" alt="Models via OpenRouter">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20React-56524A" alt="Built with Rust and React">
@@ -36,6 +36,14 @@ open it, drag LoomWatch to Applications, and open it. Then follow
 
 ```sh
 curl -fsSL https://loomwatch.github.io/install.sh | bash
+```
+
+**Install on Windows** (Windows 10 or 11, 64-bit; nothing else to install first): download
+**[LoomWatch-windows-setup.exe](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-windows-setup.exe)**
+and open it. Rather use PowerShell?
+
+```powershell
+irm https://loomwatch.github.io/install.ps1 | iex
 ```
 
 ## Your agents are the threads. LoomWatch is the loom.
@@ -411,6 +419,23 @@ menu bar. Then follow [Try your first run](#try-your-first-run).
 > check it for malicious software. Click **Done**, open **System Settings › Privacy & Security**,
 > scroll down, and click **Open Anyway** beside LoomWatch. macOS asks only once.
 
+### The Windows app
+
+1. Download **[LoomWatch-windows-setup.exe](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-windows-setup.exe)**
+   (for 64-bit Windows 10 and 11) and open it.
+2. It installs LoomWatch for you alone (no administrator needed), adds it to the Start menu, and
+   opens it.
+
+LoomWatch opens in your browser with an offline demo team ready to run, and keeps an icon beside the
+clock (click the **^** there if it is hidden). Click the icon to open LoomWatch; right-click it for
+what waits on you, who is working and what finished in the last hour (click one to open it), and
+for **Start at sign-in**, **Show log** and **Quit LoomWatch**. There is no window to keep open.
+Then follow [Try your first run](#try-your-first-run).
+
+> [!NOTE]
+> LoomWatch is not signed with a code-signing certificate yet, so the first time you open the
+> installer Windows may say it protected your PC. Click **More info**, then **Run anyway**.
+
 ### Or in Terminal
 
 On a Mac (or Linux), paste this into Terminal:
@@ -423,6 +448,17 @@ It downloads LoomWatch (about 21 MB, one program for Apple silicon and Intel Mac
 against the release's checksum, puts it in `~/LoomWatch/app`, and opens
 **<http://127.0.0.1:3000>** with an offline demo team ready to run. Nothing is compiled and no
 administrator password is needed. Then follow [Try your first run](#try-your-first-run).
+
+On Windows, paste this into PowerShell (from the Start menu, or Terminal) instead:
+
+```powershell
+irm https://loomwatch.github.io/install.ps1 | iex
+```
+
+It does the same with the Windows download, puts LoomWatch in `%USERPROFILE%\LoomWatch\app`, and
+adds that folder to your own `PATH`, so any terminal window opened afterwards knows the `loomwatch`
+command. If PowerShell says running scripts is disabled, run
+`powershell -ExecutionPolicy Bypass -c "irm https://loomwatch.github.io/install.ps1 | iex"` instead.
 
 > [!TIP]
 > No OpenRouter key yet? The offline demo needs no key and calls no model, so you can learn the whole
@@ -443,6 +479,12 @@ It is [scripts/install.sh](scripts/install.sh) in this repository. It downloads
 outside `~/LoomWatch` apart from a `loomwatch` shortcut in `~/.local/bin` when that folder is
 already on your `PATH`.
 
+On Windows, `irm https://loomwatch.github.io/install.ps1 -OutFile install.ps1`, then
+`notepad install.ps1`, then `powershell -ExecutionPolicy Bypass -File install.ps1`. It is
+[scripts/install.ps1](scripts/install.ps1): it downloads `loomwatch-windows-x86_64.zip` and its
+`.sha256`, and changes nothing outside `%USERPROFILE%\LoomWatch` apart from adding
+`%USERPROFILE%\LoomWatch\app` to your own `PATH`.
+
 </details>
 
 LoomWatch runs on your computer as one program, and keeps your run history in one file there, so
@@ -450,16 +492,21 @@ your agents can work in the folders you give them.
 
 ### What you need
 
-- **A Mac** with macOS 11 or newer. Linux downloads exist for x86_64 and arm64 but are untested.
-  Windows is not supported yet.
+- **A Mac** with macOS 11 or newer, or **a Windows PC** with 64-bit Windows 10 or 11. Linux
+  downloads exist for x86_64 and arm64 but are untested.
 - **For real runs, an [OpenRouter](https://openrouter.ai) API key.** One key reaches models from
   Anthropic, OpenAI, Google and others, including some free ones. Make one at
   [openrouter.ai/keys](https://openrouter.ai/keys), add a few dollars of credit for the models that
   aren't free, and paste it into **Add your OpenRouter key** on Home. LoomWatch checks it with
-  OpenRouter, then keeps it in this Mac's Keychain. You don't need a key for the demo.
+  OpenRouter, then keeps it in this Mac's Keychain, or on Windows in Windows Credential Manager. You
+  don't need a key for the demo.
 
 LoomWatch never signs in to an AI app and never uses an AI subscription: no Claude, ChatGPT or Gemini
 account is involved, and nothing else needs installing, not even for the offline demo.
+
+> [!WARNING]
+> On Windows, commands an agent runs are not sandboxed: an agent you let run commands can change
+> any of your files. See [SECURITY.md](SECURITY.md).
 
 ### What the first start does
 
@@ -467,8 +514,8 @@ account is involved, and nothing else needs installing, not even for the offline
    does not exist yet.
 2. Starts LoomWatch and opens **<http://127.0.0.1:3000>** in your browser.
 3. Keeps your run history, notes and checkpoints in one file,
-   `~/Library/Application Support/LoomWatch/loomwatch.db` (`~/.local/state/loomwatch` on Linux), so
-   they survive restarts and reinstalling.
+   `~/Library/Application Support/LoomWatch/loomwatch.db` (`%LOCALAPPDATA%\LoomWatch` on Windows,
+   `~/.local/state/loomwatch` on Linux), so they survive restarts and reinstalling.
 
 Coming from a version that kept the run history in Docker? The first start after the update copies
 it into the file and leaves the Docker database as it was. If Docker is not running then, the
@@ -476,7 +523,8 @@ terminal says how to do it later: `~/LoomWatch/app/loomwatch import`.
 
 Started from Terminal, keep that window open while you use LoomWatch, and press
 <kbd>Ctrl</kbd>+<kbd>C</kbd> in it to stop LoomWatch. The Mac app needs no window: quit it from its
-menu-bar icon. Its log is in `~/Library/Logs/LoomWatch` (**Show log** opens it).
+menu-bar icon. Its log is in `~/Library/Logs/LoomWatch` (**Show log** opens it). The Windows app is
+the same beside the clock, with its log in `%LOCALAPPDATA%\LoomWatch\Logs`.
 
 Already used LoomWatch from Terminal? The Mac app uses the same teams and the same run history
 file. Run `~/LoomWatch/app/loomwatch update` once first if that copy still kept its history in
@@ -506,7 +554,10 @@ history are kept in every case.
 **The Mac app:** when **Update available** shows, download the new
 [LoomWatch-macos.dmg](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-macos.dmg),
 quit LoomWatch from its menu-bar icon, drag the new one to Applications and choose **Replace**.
-Your teams and history stay. The rest of this section is about the Terminal install.
+Your teams and history stay. **The Windows app:** download the new
+[LoomWatch-windows-setup.exe](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-windows-setup.exe)
+and open it; it closes LoomWatch, puts the new version in its place, and opens it again. The rest of
+this section is about the Terminal install.
 
 LoomWatch checks once a day, and again right after you update, whether a newer release is out.
 When one is, Home shows **Update available** and the terminal running LoomWatch says so too. Click
@@ -552,11 +603,15 @@ its runs. Scheduled teams run only while LoomWatch is running and the computer i
 
 **The Mac app:** turn off **Start at login** in its menu, choose **Quit LoomWatch**, and drag
 LoomWatch from Applications to the Trash. Your teams and history stay where steps 4 and 5 below
-say; delete those folders, and `~/Library/Logs/LoomWatch`, to leave nothing behind. The steps
-below are for the Terminal install.
+say; delete those folders, and `~/Library/Logs/LoomWatch`, to leave nothing behind. **The Windows
+app:** remove LoomWatch in **Settings › Apps › Installed apps** (it quits LoomWatch first and turns
+off Start at sign-in). Your teams stay in `%USERPROFILE%\LoomWatch` and your history in
+`%LOCALAPPDATA%\LoomWatch`; delete both to leave nothing behind. The steps below are for the
+Terminal install.
 
 1. Remove your OpenRouter key: choose **Connections…** from the ☰ menu and click **Remove key**
-   under **AI models**. Otherwise it stays in your Keychain as `LoomWatch.OpenRouter`. To stop it
+   under **AI models**. Otherwise it stays in your Keychain as `LoomWatch.OpenRouter` (on Windows,
+   in Windows Credential Manager). To stop it
    working anywhere, delete the key at [openrouter.ai/keys](https://openrouter.ai/keys) too.
 2. Stop LoomWatch: `~/LoomWatch/app/loomwatch stop`.
 3. Delete the program: `rm -rf ~/LoomWatch/app`, and `rm ~/.local/bin/loomwatch` if the installer
@@ -575,6 +630,12 @@ If you used a version that kept the run history in Docker, its database is still
 once you no longer need it, with `cd ~/LoomWatch/app && docker compose down -v` before step 3 (or
 in Docker Desktop, the `loomwatch-app_postgres-data` volume).
 
+On Windows the steps are the same, in PowerShell: remove the key first, `loomwatch stop`, then
+delete `%USERPROFILE%\LoomWatch\app` and remove that folder from your `PATH` (Start menu, "Edit
+environment variables for your account"). Your run history and LoomWatch's approvals are in
+`%LOCALAPPDATA%\LoomWatch`. The OpenRouter key and a Notion sign-in are kept in Windows Credential
+Manager under LoomWatch's name.
+
 ### Change the defaults
 
 | Setting | Default | For example |
@@ -588,6 +649,7 @@ in Docker Desktop, the `loomwatch-app_postgres-data` volume).
 | Daily check for a newer version | On | `LOOMWATCH_UPDATE_CHECK=off ~/LoomWatch/app/loomwatch`, or turn it off in **Check for updates** |
 
 `loomwatch --no-open` starts without opening the browser, and `loomwatch help` lists everything.
+In PowerShell, set a setting for one start like this: `$env:LOOMWATCH_PORT=3001; loomwatch`.
 
 ### Build from source
 
@@ -607,6 +669,10 @@ git clone https://github.com/tnghia903/loomwatch.git
 cd loomwatch
 ./loomwatch
 ```
+
+On Windows, install Git, Node.js and Rust (`winget install Git.Git OpenJS.NodeJS.LTS
+Rustlang.Rustup`, and let Rust's installer add the Visual Studio C++ build tools it asks for), then
+run `.\loomwatch.cmd` in the cloned folder wherever this guide says `./loomwatch`.
 
 The first start builds the browser app and the program, which takes a few minutes, then does what
 the installed copy does. Use `./loomwatch` from that folder wherever this guide says
@@ -797,7 +863,8 @@ For real runs, yes: an OpenRouter API key, which you make at
 [openrouter.ai/keys](https://openrouter.ai/keys). LoomWatch itself is free and has no account. It
 never signs in to an AI app, never uses an AI subscription and never reads another app's sign-ins:
 every model call goes through LoomWatch's own agent with your key. The key stays in this Mac's
-Keychain (on Linux, in a file only your user can read), and agents never see it: it is not in their
+Keychain (on Windows, in Windows Credential Manager; on Linux, in a file only your user can read),
+and agents never see it: it is not in their
 commands, their folders, the team file or the run history.
 
 The offline demo needs no key at all, and some models on OpenRouter are free. Free models change
@@ -954,10 +1021,10 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Your agents | `.jobs` inside your teams folder, one `<agent>.yaml` per agent. Earlier versions are in `.jobs/.versions/<agent>/`, removed agents move to `.jobs/.removed`, and the one-agent teams that **Try it** runs are in `.jobs/.bench` |
 | Files you add to an agent (**File** under **Given**) | `<team>.files/` beside the team file |
 | Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
-| Your OpenRouter key | This Mac's Keychain, as `LoomWatch.OpenRouter`. On Linux and in Compose, `keys.json` in LoomWatch's state folder, readable only by your user |
-| Your skills | `skills/` in `~/Library/Application Support/LoomWatch` (`~/.local/state/loomwatch` on Linux), and where each one came from in `skills.json` beside it. Skills that travel with a team are in `.agents/skills` beside its file |
-| Team chats (your messages and every run), recorded events, Notebook entries and Ask conversations | One file, `loomwatch.db`, in `~/Library/Application Support/LoomWatch` on macOS or `~/.local/state/loomwatch` on Linux. A copy of the source keeps its own in `.loomwatch/` in its folder; Compose deployments in the `loomwatch-home` volume. |
-| Which team files you approved to run, and your update-check choices | `~/Library/Application Support/LoomWatch` on macOS, `~/.local/state/loomwatch` on Linux |
+| Your OpenRouter key | This Mac's Keychain, as `LoomWatch.OpenRouter`. On Windows, Windows Credential Manager, as `api-key.LoomWatch.OpenRouter`. On Linux and in Compose, `keys.json` in LoomWatch's state folder, readable only by your user |
+| Your skills | `skills/` in `~/Library/Application Support/LoomWatch` (`%LOCALAPPDATA%\LoomWatch` on Windows, `~/.local/state/loomwatch` on Linux), and where each one came from in `skills.json` beside it. Skills that travel with a team are in `.agents/skills` beside its file |
+| Team chats (your messages and every run), recorded events, Notebook entries and Ask conversations | One file, `loomwatch.db`, in `~/Library/Application Support/LoomWatch` on macOS, `%LOCALAPPDATA%\LoomWatch` on Windows or `~/.local/state/loomwatch` on Linux. A copy of the source keeps its own in `.loomwatch/` in its folder; Compose deployments in the `loomwatch-home` volume. |
+| Which team files you approved to run, and your update-check choices | `~/Library/Application Support/LoomWatch` on macOS, `%LOCALAPPDATA%\LoomWatch` on Windows, `~/.local/state/loomwatch` on Linux |
 | Copies of the run history saved by `loomwatch update` | `~/LoomWatch/backups`, one folder per copy of LoomWatch, the three newest in each |
 | The version the last update replaced, for `loomwatch rollback` | `.previous` in `~/LoomWatch/app` |
 
@@ -1013,6 +1080,9 @@ you can share it by copying it into another teams folder's `.jobs`.
 | macOS says “loomwatchd” can't be opened because Apple cannot check it for malicious software | The archive was downloaded with a web browser, which marks it for that check. Delete `~/LoomWatch/app` and install with the `curl` command in [Quickstart](#quickstart) instead. |
 | LoomWatch says something needs to be installed first | Install what it lists, open a new terminal window so it picks up the new `PATH`, then run `loomwatch` again. |
 | `zsh: no such file or directory: …/loomwatch` or `command not found: loomwatch` | The installer puts LoomWatch in `~/LoomWatch/app`, so start it with `~/LoomWatch/app/loomwatch`. In a copy of the source, run `./loomwatch` from its folder. |
+| Windows: `'loomwatch' is not recognized` or `The term 'loomwatch' is not recognized` | The window was open before LoomWatch was installed. Open a new terminal window, or start it with `~\LoomWatch\app\loomwatch.cmd`. In a copy of the source, run `.\loomwatch.cmd` from its folder. |
+| Windows: `running scripts is disabled on this system` while installing | Install with `powershell -ExecutionPolicy Bypass -c "irm https://loomwatch.github.io/install.ps1 \| iex"`. Starting LoomWatch afterwards needs no change: `loomwatch` allows its own script. |
+| Windows: an agent's command fails with "Python was not found; run without arguments to install from the Microsoft Store" | That message is Windows' stand-in for a missing Python, which a skill's script may need. Install Python 3 (`winget install Python.Python.3.13`), then quit LoomWatch and start it again so its agents' commands find it. |
 | `permission denied: ./loomwatch` (a copy of the source) | Run `chmod +x loomwatch` once, or start it with `bash loomwatch`. |
 | "Your run history from the earlier version is still in Docker" | The first start after updating could not read the Docker database an earlier version used. Start Docker Desktop, stop LoomWatch, and run `~/LoomWatch/app/loomwatch import`. Running it twice is safe: nothing is copied twice. |
 | "The database … was set up by a newer LoomWatch" | You went back to an older version by hand. Run the newer one again, or `loomwatch rollback`, which puts back the copy saved before the update. |

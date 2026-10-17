@@ -49,6 +49,10 @@ chrono-tz = "0.10"
 toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 # Ask LoomWatch checks a proposed team against the same schema the editor enforces before saving.
 jsonschema = { version = "0.58.2", default-features = false }
+# Resolved paths without Windows' `\\?\` prefix, which cmd.exe refuses as a working folder and
+# which never compares equal to a path the operator typed. On other systems it is std's own
+# `canonicalize`.
+dunce = "1.0"
 
 [dev-dependencies]
 futures-util = "0.3"
@@ -58,3 +62,9 @@ tower = { version = "0.5", features = ["util"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(windows)'.dependencies]
+# The OpenRouter key and the Notion connection, in Windows Credential Manager.
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
+# Ends a command's whole process tree with it: Windows has no process groups.
+win32job = "2.0"

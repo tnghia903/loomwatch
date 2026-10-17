@@ -21,6 +21,8 @@ const PATCH_AND_REBUILD = [
   'python3 build.py && ls -la out.docx && python3 $S/soffice.py --headless --convert-to pdf out.docx >/dev/null 2>&1; ls; pdfinfo out.pdf | grep Pages',
 ].join('\n')
 
+const POWERSHELL = '"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"'
+
 describe('commandName', () => {
   it('names a command by the program it ran, not the folder it ran in', () => {
     expect(commandName(WRITE_AND_BUILD)).toBe('python3 build.py')
@@ -48,6 +50,17 @@ describe('commandName', () => {
 
   it('does not read a heredoc’s text as commands', () => {
     expect(commandName("cat > x.sh <<'EOF'\nrm -rf /tmp/x && curl https://example.com\nEOF\nbash x.sh")).toBe('bash x.sh')
+  })
+
+  // Codex on Windows runs every command through PowerShell, and a program may be named by its full path.
+  it('reads a Windows command through PowerShell or cmd, and names a program without its .exe', () => {
+    expect(commandName(`${POWERSHELL} -Command "npm test"`)).toBe('npm test')
+    // Some titles print the path with every backslash doubled.
+    expect(commandName('"C:\\\\WINDOWS\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe" -Command "npm test"')).toBe('npm test')
+    expect(commandName(`${POWERSHELL} -NoProfile -ExecutionPolicy Bypass -Command "cd C:\\Users\\ana\\repo; cargo test -p loomwatch-backend"`)).toBe('cargo test -p loomwatch-backend')
+    expect(commandName('cmd.exe /d /s /c "npm.cmd run build"')).toBe('npm run build')
+    expect(commandName('pwsh -c Get-ChildItem src')).toBe('Get-ChildItem src')
+    expect(commandName('C:\\Users\\ana\\AppData\\Local\\Programs\\Python\\Python312\\python.exe C:\\Users\\ana\\build\\build.py')).toBe('python build.py')
   })
 
   it('leaves titles that are not shell commands alone', () => {
@@ -83,6 +96,12 @@ describe('commandRedone', () => {
     expect(commandRedone('cd /repo && npm install && npm test', ['cd /repo && npm install && npm test'])).toBe(0)
     // Spread over two commands, it was put right by the one that ran the last of them.
     expect(commandRedone('cd /repo && npm install && npm test', ['cd /repo && npm install', 'cd /repo && ls', 'cd /repo && npm test'])).toBe(2)
+  })
+
+  it('reads a Windows command’s folder the Windows way', () => {
+    const failed = `${POWERSHELL} -Command "cd C:\\repo; cd app; npm test"`
+    expect(commandRedone(failed, [`${POWERSHELL} -Command "cd C:\\repo\\app; npm test"`])).toBe(0)
+    expect(commandRedone(failed, [`${POWERSHELL} -Command "cd C:\\other\\app; npm test"`])).toBeNull()
   })
 
   it('never counts a title that is not a command', () => {

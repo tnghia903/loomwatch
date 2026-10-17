@@ -91,6 +91,12 @@ describe('quests', () => {
     expect(items(facts({ agents: [analyst], projection: { agents: [ran('analyst')], evidence: [{ ...read, status: 'failed' }], messages: [], checks: [] } }))).toEqual([])
     const relative = agent('analyst', { capabilities: [{ kind: 'knowledge', name: 'Docs', path: '~/docs' }] })
     expect(items(facts({ agents: [relative], projection: { agents: [ran('analyst')], evidence: [evidence('analyst', { rawInput: { file_path: '/Users/me/docs/a.md' } })], messages: [], checks: [] } }))).toEqual(['band'])
+    // Windows names a file in any case: an app may read `c:\users\…` from a folder given as `C:\Users\…`.
+    const windows = agent('analyst', { capabilities: [{ kind: 'knowledge', name: 'Reports', path: 'C:\\Users\\me\\Reports' }] })
+    expect(items(facts({ agents: [windows], projection: { agents: [ran('analyst')], evidence: [evidence('analyst', { locations: [{ path: 'c:\\users\\me\\reports\\q3.md' }] })], messages: [], checks: [] } }))).toEqual(['band'])
+    // A Mac's names keep their case.
+    const mac = agent('analyst', { capabilities: [{ kind: 'knowledge', name: 'Reports', path: '/Users/me/Reports' }] })
+    expect(items(facts({ agents: [mac], projection: { agents: [ran('analyst')], evidence: [read], messages: [], checks: [] } }))).toEqual([])
   })
 
   it('pin: a scheduled run that never asked, and used every key it held', () => {

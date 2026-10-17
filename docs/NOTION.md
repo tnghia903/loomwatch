@@ -33,7 +33,7 @@ destination you chose. It holds the sign-in itself; agents never receive it.
 Notion ends it after 30 days without use, or after 180 days in all; then Connections and every
 delivery say to connect again. Connecting again to the same workspace keeps the destination page.
 
-**Disconnect** removes the sign-in from this Mac and asks Notion to revoke it. You can also remove
+**Disconnect** removes the sign-in from this computer and asks Notion to revoke it. You can also remove
 LoomWatch in Notion's settings, under its connections.
 
 ## Advanced: connect with an integration token
@@ -78,11 +78,12 @@ pages, so the approval it asks for lists every Notion page it reads.
 
 ## Where it is kept
 
-Either kind of connection, and the destination, are stored in macOS Keychain under
-`LoomWatch.Notion`, not in YAML, localStorage or the event archive. Connecting replaces the prior
-connection. Only one workspace connection is supported per local OS user. Missing or locked
-Keychain access is an error; there is no plaintext fallback. Windows/Linux storage is not yet
-implemented.
+Either kind of connection, and the destination, are stored in macOS Keychain, or on Windows in
+Windows Credential Manager, under `LoomWatch.Notion`, not in YAML, localStorage or the event archive.
+Credential Manager keeps at most 2,560 bytes in one credential, so a longer connection is split
+across `local-workspace`, `local-workspace#2`, and so on. Connecting replaces the prior connection.
+Only one workspace connection is supported per local OS user. Missing or locked credential storage
+is an error; there is no plaintext fallback. Linux storage is not yet implemented.
 
 What Connections shows of it is also kept, with no token, in `notion-connection.json` in
 LoomWatch's state folder (`~/Library/Application Support/LoomWatch`, or `LOOMWATCH_STATE_DIR`):

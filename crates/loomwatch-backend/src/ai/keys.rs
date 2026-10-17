@@ -1,9 +1,10 @@
 //! Where the operator's `OpenRouter` key is kept.
 //!
-//! On a Mac it is a Keychain item, `LoomWatch.OpenRouter`, the way the Notion connection is kept.
-//! Elsewhere it is `<state dir>/keys.json`, readable by this account only. Either way it is read
-//! once per process: macOS asks the person to allow each read by a program it doesn't trust yet,
-//! and every run needs the key.
+//! On a Mac it is a Keychain item, `LoomWatch.OpenRouter`, the way the Notion connection is kept;
+//! on Windows a generic credential of the same name in Credential Manager, which only this Windows
+//! account can read. On Linux it is `<state dir>/keys.json`, readable by this account only. Either
+//! way it is read once per process: macOS asks the person to allow each read by a program it
+//! doesn't trust yet, and every run needs the key.
 //!
 //! Only keys entered in `LoomWatch` are used. An `OPENROUTER_API_KEY` in the daemon's environment
 //! is ignored, and nothing here ever looks for another app's credentials.
@@ -17,9 +18,9 @@ use tokio::sync::Mutex;
 
 use crate::agent::ApiKey;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 const SERVICE: &str = "LoomWatch.OpenRouter";
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 const ACCOUNT: &str = "api-key";
 pub(crate) const FILE_NAME: &str = "keys.json";
 
@@ -45,8 +46,10 @@ enum Cached {
 
 #[derive(Clone)]
 enum Store {
-    #[cfg(target_os = "macos")]
-    Keychain,
+    /// The system's own store, under this service name: the macOS Keychain, or Windows
+    /// Credential Manager.
+    #[cfg(any(target_os = "macos", windows))]
+    System(&'static str),
     File(PathBuf),
     #[cfg(test)]
     Memory(Arc<std::sync::Mutex<Option<String>>>),
@@ -59,20 +62,21 @@ struct KeyFile {
 }
 
 impl Keys {
-    /// The Keychain on a Mac, `<state_dir>/keys.json` elsewhere.
+    /// The Keychain on a Mac, Credential Manager on Windows, `<state_dir>/keys.json` elsewhere.
     #[must_use]
     pub fn open(state_dir: &Path) -> Self {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         let store = {
             let _ = state_dir;
-            Store::Keychain
+            Store::System(SERVICE)
         };
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         let store = Store::File(state_dir.join(FILE_NAME));
         Self::with(store)
     }
 
-    /// A file in `state_dir`, even on a Mac: for a trial copy that must not touch the Keychain.
+    /// A file in `state_dir`, even on a Mac or Windows: for a trial copy that must not touch the
+    /// key the installed app keeps.
     #[must_use]
     pub fn in_file(state_dir: &Path) -> Self {
         Self::with(Store::File(state_dir.join(FILE_NAME)))
@@ -94,7 +98,8 @@ impl Keys {
     ///
     /// # Errors
     ///
-    /// When the store can't be read: a locked Keychain, or a read the person refused.
+    /// When the store can't be read: a locked Keychain, a read the person refused, or a Windows
+    /// session whose Credential Manager is unavailable.
     pub async fn openrouter(&self) -> Result<Option<ApiKey>> {
         let mut cached = self.cached.lock().await;
         if let Cached::Known(key) = &*cached {
@@ -143,13 +148,13 @@ impl Keys {
     async fn read(&self) -> Result<Option<String>> {
         let store = self.store.clone();
         tokio::task::spawn_blocking(move || match store {
-            #[cfg(target_os = "macos")]
-            Store::Keychain => match credential()?.get_password() {
+            #[cfg(any(target_os = "macos", windows))]
+            Store::System(service) => match credential(service)?.get_password() {
                 Ok(value) => Ok(Some(value)),
                 Err(keyring::Error::NoEntry) => Ok(None),
                 Err(_) => bail!(
-                    "the macOS Keychain wouldn't give LoomWatch its OpenRouter key; unlock it and \
-                     try again"
+                    "{SYSTEM_STORE} wouldn't give LoomWatch its OpenRouter key; {UNLOCK} and try \
+                     again"
                 ),
             },
             Store::File(path) => match std::fs::read(&path) {
@@ -172,16 +177,16 @@ impl Keys {
     async fn write(&self, value: Option<String>) -> Result<()> {
         let store = self.store.clone();
         tokio::task::spawn_blocking(move || match store {
-            #[cfg(target_os = "macos")]
-            Store::Keychain => {
-                let entry = credential()?;
+            #[cfg(any(target_os = "macos", windows))]
+            Store::System(service) => {
+                let entry = credential(service)?;
                 match value {
-                    Some(value) => entry.set_password(&value).context(
-                        "the macOS Keychain wouldn't keep the key; unlock it and try again",
-                    ),
+                    Some(value) => entry.set_password(&value).with_context(|| {
+                        format!("{SYSTEM_STORE} wouldn't keep the key; {UNLOCK} and try again")
+                    }),
                     None => match entry.delete_credential() {
                         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-                        Err(_) => bail!("the macOS Keychain wouldn't remove the key"),
+                        Err(_) => bail!("{SYSTEM_STORE} wouldn't remove the key"),
                     },
                 }
             }
@@ -201,9 +206,19 @@ impl Keys {
     }
 }
 
+/// The system's store, as an error names it, and what the person can do when it refuses.
 #[cfg(target_os = "macos")]
-fn credential() -> Result<keyring::Entry> {
-    keyring::Entry::new(SERVICE, ACCOUNT).context("the macOS Keychain is unavailable")
+const SYSTEM_STORE: &str = "the macOS Keychain";
+#[cfg(target_os = "macos")]
+const UNLOCK: &str = "unlock it";
+#[cfg(windows)]
+const SYSTEM_STORE: &str = "Windows Credential Manager";
+#[cfg(windows)]
+const UNLOCK: &str = "sign in to Windows with your own account";
+
+#[cfg(any(target_os = "macos", windows))]
+fn credential(service: &str) -> Result<keyring::Entry> {
+    keyring::Entry::new(service, ACCOUNT).with_context(|| format!("{SYSTEM_STORE} is unavailable"))
 }
 
 #[cfg(test)]
@@ -222,6 +237,36 @@ mod tests {
         assert!(keys.set_openrouter("   ").await.is_err());
         keys.remove_openrouter().await.unwrap();
         assert!(keys.openrouter().await.unwrap().is_none());
+    }
+
+    /// On Windows the key is a generic credential this account alone can read, kept across
+    /// processes and removed with the key. A service name of its own, so the test never touches
+    /// the key an installed `LoomWatch` keeps.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn on_windows_the_key_is_kept_in_credential_manager() {
+        const TEST_SERVICE: &str = "LoomWatch.Test.OpenRouter";
+        let folder = std::env::temp_dir().join(format!("loomwatch-keys-{}", uuid::Uuid::new_v4()));
+        let keys = Keys::with(Store::System(TEST_SERVICE));
+        keys.set_openrouter("sk-or-v1-credential-manager")
+            .await
+            .unwrap();
+        assert!(!folder.join(FILE_NAME).exists());
+        let fresh = Keys::with(Store::System(TEST_SERVICE));
+        assert_eq!(
+            fresh.openrouter().await.unwrap().unwrap().expose(),
+            "sk-or-v1-credential-manager"
+        );
+        fresh.remove_openrouter().await.unwrap();
+        assert!(
+            Keys::with(Store::System(TEST_SERVICE))
+                .openrouter()
+                .await
+                .unwrap()
+                .is_none()
+        );
+        // Forgetting a key that is already gone is not an error.
+        fresh.remove_openrouter().await.unwrap();
     }
 
     #[cfg(unix)]

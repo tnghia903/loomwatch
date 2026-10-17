@@ -27,6 +27,7 @@ pub mod notion;
 pub mod operator;
 pub mod orientation;
 pub mod permissions;
+pub mod platform;
 pub mod runs;
 pub mod schedule;
 pub mod skill_routing;
@@ -281,8 +282,10 @@ async fn run_loaded_team(
     for agent in &team.agents {
         memory.packet_for(agent)?;
     }
+    // Boxed, as `run_team_mode` boxes the session: on Windows either run's future is over Clippy's
+    // 16 KB `large_futures` limit, and so would be everything that awaits this.
     if team.edges.is_empty() {
-        run_team_mode(
+        Box::pin(run_team_mode(
             team,
             team_path,
             archive,
@@ -291,10 +294,10 @@ async fn run_loaded_team(
             event_log,
             &memory,
             lineage,
-        )
+        ))
         .await
     } else {
-        run_pipeline_mode(
+        Box::pin(run_pipeline_mode(
             team,
             team_path,
             archive,
@@ -303,7 +306,7 @@ async fn run_loaded_team(
             event_log,
             &memory,
             lineage,
-        )
+        ))
         .await
     }
 }
@@ -498,7 +501,8 @@ async fn run_team_mode(
         .as_ref()
         .map(EventLog::session_id)
         .map(str::to_owned);
-    let root = run_answerable_session(
+    // Boxed: see `TeamBus::run_agent_inner`.
+    let root = Box::pin(run_answerable_session(
         AskedQuestion {
             team,
             agent,
@@ -521,7 +525,7 @@ async fn run_team_mode(
             composed: Some(&composed),
             boundary: checkpoint_turn.as_ref(),
         },
-    )
+    ))
     .await;
     let delegated = bus.wait_for_tasks().await;
     let mut outcome = root?;
@@ -3215,13 +3219,47 @@ pub(crate) fn resolve_cwd(team_path: &Path, cwd: &Path) -> Result<PathBuf> {
             .unwrap_or_else(|| Path::new("."))
             .join(cwd)
     };
-    resolved
-        .canonicalize()
+    platform::canonicalize(&resolved)
         .with_context(|| format!("failed to resolve harness cwd {}", resolved.display()))
 }
 
 #[cfg(test)]
 pub(crate) mod test_support {
+    /// The POSIX shell the fake programs in these tests are written for: `/bin/sh`, or on Windows
+    /// the `sh` that Git for Windows puts on `PATH`, as it is on GitHub's Windows runners.
+    #[cfg_attr(unix, allow(dead_code))]
+    pub(crate) const SH: &str = if cfg!(windows) { "sh" } else { "/bin/sh" };
+
+    /// `path` as a fixture writes it into a team file or a shell script: `/`-separated, which
+    /// YAML's double quotes and Git's `sh` on Windows both read as written.
+    pub(crate) fn sh_path(path: &std::path::Path) -> String {
+        path.display().to_string().replace('\\', "/")
+    }
+
+    /// Write `script`, a POSIX shell script, as a program named `path` and return what to start.
+    ///
+    /// Elsewhere that is `path` itself, made executable. Windows starts no shell script, so there
+    /// it is also given a `.cmd` beside it that runs it with [`SH`], and the `.cmd` is returned: a
+    /// `PATH` lookup finds it by `path`'s name.
+    pub(crate) fn fake_program(path: &std::path::Path, script: &str) -> std::path::PathBuf {
+        std::fs::write(path, script).expect("write the fake program");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+                .expect("make the fake program executable");
+            path.to_path_buf()
+        }
+        #[cfg(not(unix))]
+        {
+            let name = path.file_name().expect("a program name").to_string_lossy();
+            let wrapper = path.with_file_name(format!("{name}.cmd"));
+            std::fs::write(&wrapper, format!("@{SH} \"%~dp0{name}\" %*\r\n"))
+                .expect("write the fake program's .cmd");
+            wrapper
+        }
+    }
+
     /// One turn a [`stand_in`] takes: what its prompt must contain and must not, and its reply.
     pub(crate) struct Turn {
         must: Vec<String>,

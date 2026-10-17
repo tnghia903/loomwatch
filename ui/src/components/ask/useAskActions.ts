@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { isAbsolutePath, relativeUnder } from '../../lib/files/paths'
 import { decideRunRequest, fetchProposal, reportProposalOutcome, type Proposal } from '../../lib/ask/client'
 import { proposalChanges, type ProposalChanges } from '../../lib/ask/proposal'
 import type { ProposalCard, ReviewNoteCard, RunRequestCard } from '../../lib/ask/thread'
@@ -31,15 +32,17 @@ const CARRIED_PROPOSAL_KEY = 'loomwatch:ask:proposal'
 /** The daemon names team files relative to the teams folder; an open team's path may be absolute. */
 export function sameTeamFile(docPath: string | null, file: string): boolean {
   if (!docPath || !file) return false
-  const relative = file.replace(/^\.\//, '')
-  return docPath === file || docPath === relative || docPath.endsWith(`/${relative}`)
+  // Windows paths arrive with `\`; the daemon's tools name team files with `/`.
+  const doc = docPath.replaceAll('\\', '/')
+  const named = file.replaceAll('\\', '/')
+  const relative = named.replace(/^\.\//, '')
+  return doc === named || doc === relative || doc.endsWith(`/${relative}`)
 }
 
 /** The open team's path as the daemon's tools spell it, relative to the teams folder when known. */
 export function teamFileForAsk(docPath: string | null, teamsRoot: string | null): string | null {
   if (!docPath) return null
-  if (teamsRoot && docPath.startsWith(`${teamsRoot.replace(/\/$/, '')}/`)) return docPath.slice(teamsRoot.replace(/\/$/, '').length + 1)
-  return docPath
+  return (teamsRoot && isAbsolutePath(docPath) ? relativeUnder(teamsRoot, docPath) : null) ?? docPath
 }
 
 /** Who made a proposal, in words. Only Ask LoomWatch makes them now; a proposal an AI app

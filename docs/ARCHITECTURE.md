@@ -27,11 +27,14 @@ instructions and tools.
   `write_file`, `edit_file`, `run_command`, `update_plan` and `read_tool_output`. An agent
   allowed the web also gets OpenRouter's web search and fetch. Tools the daemon serves itself,
   such as the Team Bus and Ask's tools, come in through the `HostTools` trait.
-- **Commands** run in the agent's work folder. Every provider key and LoomWatch setting is
-  removed from their environment. On a Mac they also run in a Seatbelt sandbox
-  (`agent/sandbox.rs`): they can change files only in the work folder and temporary folders,
-  and reach the network only when the agent may use the web. Other systems have no sandbox yet,
-  so the permission check is the only line there.
+- **Commands** run in the agent's work folder, through `/bin/sh -c` on macOS and Linux and
+  `cmd.exe /d /s /c` on Windows (`agent/tools/command.rs`). Every provider key and LoomWatch
+  setting is removed from their environment. A command stops at its time limit or when its turn
+  is cancelled, with everything it started: its process group, or on Windows the job it runs in
+  (`platform::ProcessTree`), which also ends whatever it leaves running when it finishes. On a
+  Mac they also run in a Seatbelt sandbox (`agent/sandbox.rs`): they can change files only in the
+  work folder and temporary folders, and reach the network only when the agent may use the web.
+  Windows and Linux have no sandbox, so the permission check is the only line there.
 - **The opening instructions** (`agent/prompt.rs`) are the same for every agent, so the
   provider's prompt cache keeps them. The team's role, task and "Done when" come in the first
   user message. Skills are listed by name and description only, from the agent's folder
@@ -69,9 +72,11 @@ model is a change to one row of the team file, not to code.
 Models are reached through OpenRouter with the operator's own API key, entered on the
 Connections page. The backend handles exactly one key, and it guards it:
 
-- **Where it is kept.** `ai/keys.rs` keeps it in the macOS Keychain as `LoomWatch.OpenRouter`.
-  On other systems it is in `<state dir>/keys.json`, readable by this account only.
-  `LOOMWATCH_KEY_STORE=file` uses the file on a Mac too, for trial copies. An
+- **Where it is kept.** `ai/keys.rs` keeps it in the macOS Keychain as `LoomWatch.OpenRouter`,
+  and on Windows in Credential Manager (the `keyring` crate's Windows backend) as
+  `api-key.LoomWatch.OpenRouter`. On Linux it is in `<state dir>/keys.json`, readable by this
+  account only. `LOOMWATCH_KEY_STORE=file` uses the file on a Mac and Windows too, for trial
+  copies. An
   `OPENROUTER_API_KEY` in the daemon's environment is ignored, and LoomWatch never looks for
   another app's credentials.
 - **How it is checked.** A key is checked with OpenRouter before it is kept

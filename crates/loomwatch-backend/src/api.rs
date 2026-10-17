@@ -189,13 +189,13 @@ pub fn router_with_archive(
 ) -> io::Result<Router> {
     let state = ApiState {
         writes: Arc::default(),
-        teams_root: fs::canonicalize(teams_root)?,
+        teams_root: crate::platform::canonicalize(teams_root)?,
         allowed_hosts: allowed_hosts
             .into_iter()
             .map(|host| normalize_hostname(&host))
             .filter(|host| !host.is_empty())
             .collect(),
-        home_dir: std::env::var_os("HOME").map(PathBuf::from),
+        home_dir: crate::platform::home_dir(),
         skills_folder: crate::capabilities::skills_folder(),
         archive,
         runs,
@@ -707,7 +707,7 @@ pub(crate) fn discover_team_files(teams_root: &Path) -> io::Result<Vec<String>> 
 
             // A file symlink is useful when it still resolves inside the teams root. Broken
             // links and links to files outside the root are not discoverable.
-            let Ok(resolved) = fs::canonicalize(&path) else {
+            let Ok(resolved) = crate::platform::canonicalize(&path) else {
                 continue;
             };
             if !resolved.starts_with(teams_root) || !resolved.is_file() {
@@ -1289,7 +1289,7 @@ async fn put_memory_file(
         })?;
         // Re-check after creating: a pre-existing symlinked directory on the way down would
         // otherwise place the file outside the team.
-        let resolved_parent = fs::canonicalize(parent).map_err(|error| {
+        let resolved_parent = crate::platform::canonicalize(parent).map_err(|error| {
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("failed to resolve {}: {error}", parent.display()),
@@ -1457,7 +1457,7 @@ pub(crate) fn resolve_existing_team_path(
     requested: &Path,
 ) -> Result<PathBuf, ApiError> {
     let candidate = rooted_candidate(teams_root, requested);
-    let resolved = fs::canonicalize(&candidate).map_err(|error| {
+    let resolved = crate::platform::canonicalize(&candidate).map_err(|error| {
         let status = if error.kind() == io::ErrorKind::NotFound {
             StatusCode::NOT_FOUND
         } else {
@@ -1481,7 +1481,7 @@ pub(crate) fn resolve_writable_team_path(
     let candidate = rooted_candidate(teams_root, requested);
     match fs::symlink_metadata(&candidate) {
         Ok(_) => {
-            let resolved = fs::canonicalize(&candidate).map_err(|error| {
+            let resolved = crate::platform::canonicalize(&candidate).map_err(|error| {
                 ApiError::new(
                     StatusCode::BAD_REQUEST,
                     format!(
@@ -1505,7 +1505,7 @@ pub(crate) fn resolve_writable_team_path(
                     format!("team path {} has no parent", requested.display()),
                 )
             })?;
-            let resolved_parent = fs::canonicalize(parent).map_err(|error| {
+            let resolved_parent = crate::platform::canonicalize(parent).map_err(|error| {
                 ApiError::new(
                     StatusCode::BAD_REQUEST,
                     format!(
@@ -1630,42 +1630,39 @@ async fn get_about() -> Json<Value> {
     }))
 }
 
-/// The macOS release, such as `26.0`. Other systems, and a `sw_vers` that fails, report none.
+/// The macOS release, such as `26.0`, or the Windows build, such as `10.0.26100.4652`. Linux, and a
+/// command that fails, report none.
 async fn os_version() -> Option<String> {
-    if !cfg!(target_os = "macos") {
+    let (program, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
+        ("/usr/bin/sw_vers", &["-productVersion"])
+    } else if cfg!(windows) {
+        ("cmd", &["/d", "/c", "ver"])
+    } else {
         return None;
-    }
-    let output = tokio::process::Command::new("/usr/bin/sw_vers")
-        .arg("-productVersion")
+    };
+    let output = tokio::process::Command::new(program)
+        .args(args)
         .output()
         .await
         .ok()
         .filter(|output| output.status.success())?;
-    let version = String::from_utf8(output.stdout).ok()?;
-    Some(version.trim().to_owned()).filter(|version| !version.is_empty())
+    let said = String::from_utf8(output.stdout).ok()?;
+    windows_version(&said)
+        .or_else(|| Some(said.trim()))
+        .map(str::to_owned)
+        .filter(|version| !version.is_empty())
+}
+
+/// `10.0.26100.4652` out of `ver`'s `Microsoft Windows [Version 10.0.26100.4652]`.
+fn windows_version(said: &str) -> Option<&str> {
+    let (_, after) = said.split_once("[Version ")?;
+    after.split_once(']').map(|(version, _)| version.trim())
 }
 
 pub(crate) fn find_executable(search_path: &std::ffi::OsStr, command: &str) -> Option<PathBuf> {
     std::env::split_paths(search_path)
-        .flat_map(|directory| executable_candidates(&directory, command))
+        .flat_map(|directory| crate::platform::program_candidates(&directory.join(command)))
         .find(|candidate| is_executable(candidate))
-}
-
-#[cfg(not(windows))]
-fn executable_candidates(directory: &Path, command: &str) -> Vec<PathBuf> {
-    vec![directory.join(command)]
-}
-
-#[cfg(windows)]
-fn executable_candidates(directory: &Path, command: &str) -> Vec<PathBuf> {
-    let extensions =
-        std::env::var_os("PATHEXT").unwrap_or_else(|| OsString::from(".COM;.EXE;.BAT;.CMD"));
-    extensions
-        .to_string_lossy()
-        .split(';')
-        .filter(|extension| !extension.is_empty())
-        .map(|extension| directory.join(format!("{command}{extension}")))
-        .collect()
 }
 
 #[cfg(unix)]
@@ -1826,7 +1823,7 @@ mod tests {
         let workspace = root.0.join(".loomwatch").join("team").join("writer");
         fs::create_dir_all(&workspace).expect("create workspace");
         fs::write(workspace.join("report.docx"), b"PK").expect("write report");
-        let canonical = fs::canonicalize(&root.0).expect("canonical root");
+        let canonical = crate::platform::canonicalize(&root.0).expect("canonical root");
         let report = canonical.join(".loomwatch/team/writer/report.docx");
 
         let response = test_router(&root.0)
@@ -2396,11 +2393,16 @@ mod tests {
         assert!(about.get("commit").is_some());
         assert!(about.get("osVersion").is_some());
         assert_eq!(about["startedAt"], crate::updates::started_at());
-        if cfg!(target_os = "macos") {
+        if cfg!(any(target_os = "macos", windows)) {
             assert!(about["osVersion"].is_string(), "{about}");
         }
+        assert_eq!(
+            windows_version("\r\nMicrosoft Windows [Version 10.0.26100.4652]\r\n"),
+            Some("10.0.26100.4652")
+        );
+        assert_eq!(windows_version("26.0"), None);
         let text = about.to_string();
-        if let Some(home) = std::env::var_os("HOME") {
+        if let Some(home) = crate::platform::home_dir() {
             assert!(!text.contains(&*home.to_string_lossy()), "{text}");
         }
 
@@ -2547,7 +2549,7 @@ mod tests {
         assert_eq!(
             body["root"],
             json!(
-                fs::canonicalize(&directory.0)
+                crate::platform::canonicalize(&directory.0)
                     .expect("canonical teams root")
                     .to_string_lossy()
             )
@@ -3523,7 +3525,7 @@ mod tests {
     #[test]
     fn two_deletions_in_one_second_get_a_folder_each() {
         let directory = TempDirectory::new();
-        let root = fs::canonicalize(&directory.0).expect("canonical root");
+        let root = crate::platform::canonicalize(&directory.0).expect("canonical root");
         let now = chrono::DateTime::parse_from_rfc3339("2026-10-01T09:00:00Z")
             .expect("timestamp")
             .with_timezone(&chrono::Utc);

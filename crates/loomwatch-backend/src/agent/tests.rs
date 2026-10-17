@@ -80,7 +80,7 @@ impl Folder {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!("loomwatch-agent-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).unwrap();
-        Self(path.canonicalize().unwrap())
+        Self(crate::platform::canonicalize(&path).unwrap())
     }
 }
 

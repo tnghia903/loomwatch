@@ -453,7 +453,7 @@ pub fn spawn(
     // Every run delivers through the registry (ADR 0038), so the one publisher lives there.
     registry.set_publisher(scheduler.publisher.clone());
     if let Some(archive) = archive {
-        let teams_root = fs::canonicalize(&teams_root).unwrap_or(teams_root);
+        let teams_root = crate::platform::canonicalize(&teams_root).unwrap_or(teams_root);
         let ticking = scheduler.clone();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(TICK);
@@ -679,7 +679,7 @@ pub fn router(
     archive: Option<EventArchive>,
     teams_root: PathBuf,
 ) -> Router {
-    let teams_root = fs::canonicalize(&teams_root).unwrap_or(teams_root);
+    let teams_root = crate::platform::canonicalize(&teams_root).unwrap_or(teams_root);
     // Already done by `spawn` in the daemon; a router built on its own (tests) still needs it.
     registry.set_publisher(scheduler.publisher.clone());
     Router::new()

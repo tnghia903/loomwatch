@@ -128,6 +128,8 @@ import { AskButton } from './ask/AskButton'
 import type { CardActions } from './ask/AskCards'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './ask/useAskActions'
 import { answeringAgent, isCheckerRole } from '../lib/library/checker'
+import { baseName } from '../lib/files/paths'
+import { keyStore } from '../lib/platform'
 
 // The Ask panel is code-split like the Markdown stack: most visits never open it.
 const AskPanel = lazy(() => import('./ask/AskPanel').then((module) => ({ default: module.AskPanel })))
@@ -517,7 +519,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // demo calls no model and runs without it.
   const key = useKeyStatus()
   const needsKey = key !== null && !key.connected && docAgents.some((agent) => agent.kind !== 'operator' && openRouterId(agent.model) !== OFFLINE_MODEL)
-  const keyProblem = needsKey ? 'Add your OpenRouter key so these agents can think. LoomWatch keeps it in this Mac’s Keychain.' : null
+  const keyProblem = needsKey ? `Add your OpenRouter key so these agents can think. LoomWatch keeps it in ${keyStore()}.` : null
   const { catalog: modelCatalog } = useModels()
   const modelNames = useMemo(() => new Map((modelCatalog?.models ?? []).map((model) => [model.id, shortName(model)])), [modelCatalog])
   // Planned capability wiring lives in a sidecar, never in the team file the daemon runs.
@@ -1533,7 +1535,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [doc, setMemoryGeneration])
   const writeBriefNote = useCallback(async (body: string) => {
     if (!doc.path) throw new Error('Open a team first.')
-    const teamFile = doc.path.split('/').pop() ?? doc.path
+    const teamFile = baseName(doc.path)
     const file = briefFileNameFor(body, memory?.entries.map((entry) => entry.path) ?? [], `${teamFile.replace(/\.ya?ml$/i, '')}.brief`)
     // The file first, then the team-file entry: an entry pointing at a file that does not exist
     // would refuse the next run, which is a worse failure than a stray unreferenced Markdown file.
@@ -2188,7 +2190,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [statusById])
 
   // ---- composer state ---------------------------------------------------------------------
-  const filename = doc.path?.split('/').pop() ?? 'team'
+  const filename = doc.path ? baseName(doc.path) : 'team'
   // §1.3: the blocker names the offending agents, so the preflight keeps their ids, not a count.
   const terminalIds = useMemo(
     () => (doc.mode === 'pipeline' ? doc.nodes.filter((node) => !doc.edges.some((edge) => edge.source === node.id)).map((node) => node.id) : []),
@@ -2464,7 +2466,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           <>
           <TeamChat
             teamPath={doc.path}
-            teamName={doc.teamName ?? (doc.path.split('/').pop() ?? doc.path).replace(/\.ya?ml$/i, '')}
+            teamName={doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, '')}
             agents={chatAgents}
             team={chatTeam}
             steps={doc.pipelineSteps.length || doc.nodes.length}
@@ -2686,7 +2688,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             delivery={{
               deliver: doc.teamDeliver,
               readOnly: !editable,
-              teamName: doc.teamName ?? (doc.path?.split('/').pop() ?? 'team').replace(/\.ya?ml$/i, ''),
+              teamName: doc.teamName ?? (doc.path ? baseName(doc.path) : 'team').replace(/\.ya?ml$/i, ''),
               routineTitle: doc.teamSchedule?.deliver?.notion ? doc.teamSchedule.deliver.notion.title ?? DEFAULT_ROUTINE_NOTION_TITLE : null,
               onChange: (deliver) => {
                 if (!editable) return
@@ -2922,7 +2924,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         {newTeamSheet && <NewTeamSheet openTeamUnsaved={['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)} onClose={() => setNewTeamSheet(false)} onCreateBlank={(name, path) => { doc.createNewDocument(name, path); setNewTeamSheet(false); showRun(null); showAgents(null); onDocumentOpen() }} />}
         {saveCopyOpen && <SaveCopySheet error={doc.saveError} onClose={() => setSaveCopyOpen(false)} onSave={doc.saveCopy} />}
         {/* Home, not the deleted team's empty canvas, is where the operator goes next. */}
-        {deleteTeamOpen && doc.path && <DeleteTeamDialog path={doc.path} name={doc.teamName ?? (doc.path.split('/').pop() ?? doc.path).replace(/\.ya?ml$/i, '')} onDeleted={() => window.location.assign('/')} onClose={() => setDeleteTeamOpen(false)} />}
+        {deleteTeamOpen && doc.path && <DeleteTeamDialog path={doc.path} name={doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, '')} onDeleted={() => window.location.assign('/')} onClose={() => setDeleteTeamOpen(false)} />}
         {/* ADR 0048: a team from outside LoomWatch is checked before its first run. */}
         {teamReview && <TeamReviewDialog review={teamReview} onTrust={trustAndRun} onClose={dismissReview} />}
         {chatReview && <TeamReviewDialog review={chatReview.review} onTrust={async () => { await approveTeam(chatReview.review.teamPath, chatReview.review.teamRevision); const { retry } = chatReview; setChatReview(null); retry() }} onClose={() => setChatReview(null)} />}

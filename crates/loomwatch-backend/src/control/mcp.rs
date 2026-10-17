@@ -336,7 +336,11 @@ async fn propose_team(
     caller: &Caller,
     arguments: &Value,
 ) -> Result<Value, String> {
-    let file = text(arguments, "file")?;
+    let mut file = text(arguments, "file")?;
+    // The canvas names team files with `/`, and an app on Windows may write `sub\a.yaml`.
+    if cfg!(windows) {
+        file = file.replace('\\', "/");
+    }
     let yaml = arguments
         .get("yaml")
         .and_then(Value::as_str)

@@ -155,7 +155,7 @@ always has its archive; a router built without one (tests) answers 503.
 | Route | Result |
 |---|---|
 | `POST /api/runs` | Start a run; `202 Accepted` with the run record |
-| `GET /api/runs` | Every run since the daemon started, newest first; `?preview=true` cuts each `reply` to its first 400 characters, which is what the browser's lists read; `?finishedWithin=<seconds>` keeps the runs still under way and those that finished in that many seconds, which is what the menu bar reads |
+| `GET /api/runs` | Every run since the daemon started, newest first; `?preview=true` cuts each `reply` to its first 400 characters, which is what the browser's lists read; `?finishedWithin=<seconds>` keeps the runs still under way and those that finished in that many seconds, which is what the Mac menu bar and the Windows notification-area menu read |
 | `GET /api/runs/{id}` | One run record, or 404 |
 | `POST /api/runs/{id}/cancel` | Abort a live run: 200 with the record; 409 with the record when it already finished; 404 when unknown |
 
@@ -214,8 +214,8 @@ Response (`202 Accepted`):
   the optional root team-file setting; when that setting is absent, it falls back to the entrypoint
   in team mode and the last node of the topological order in pipeline mode.
 - Cancel aborts the run task. Every agent's session ends where it is, delegated helpers are
-  aborted with it, and a command an agent was still running has its shell killed
-  (`kill_on_drop`). No cancellation event is archived; the run record is the source of truth for
+  aborted with it, and a command an agent was still running is killed with everything it started
+  (its process group, or on Windows its job). No cancellation event is archived; the run record is the source of truth for
   terminal classification.
 - The registry is in memory: a daemon restart forgets `GET /api/runs`, while the archive
   keeps every event and `GET /api/sessions` still lists the session with its `prompt`.

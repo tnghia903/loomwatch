@@ -1,5 +1,6 @@
 import { CircleAlert, History, Lightbulb, Wand2 } from 'lucide-react'
 
+import { keys } from '../../lib/platform'
 import type { CheckupFinding } from '../../lib/team-file/checkup'
 import { SectionHead } from '../ui/SectionHead'
 
@@ -64,7 +65,7 @@ export function AgentCheckup({ findings, readOnly = false, headClassName, ...act
   return (
     <div className="agent-context agent-checkup">
       <SectionHead title="Make it work better" className={headClassName} explain={<>
-        <div>LoomWatch reads this agent’s instructions, its place in the team and what it may do, and the team’s last few runs, and suggests what would make its work better. Nothing changes until you choose a fix, and ⌘Z undoes one.</div>
+        <div>LoomWatch reads this agent’s instructions, its place in the team and what it may do, and the team’s last few runs, and suggests what would make its work better. Nothing changes until you choose a fix, and {keys('⌘Z')} undoes one.</div>
         <div><b>Not needed</b> hides a suggestion for this team.</div>
       </>} />
       <ul className="checkup-list">

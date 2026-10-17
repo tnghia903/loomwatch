@@ -841,7 +841,7 @@ struct ChatState {
 
 /// The chat's routes. Loopback-only and never cached, like run control.
 pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunRegistry) -> Router {
-    let teams_root = std::fs::canonicalize(&teams_root).unwrap_or(teams_root);
+    let teams_root = crate::platform::canonicalize(&teams_root).unwrap_or(teams_root);
     Router::new()
         .route("/api/chat", get(chat_page))
         .route("/api/chat/messages", post(send_message))

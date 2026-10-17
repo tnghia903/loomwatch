@@ -19,6 +19,17 @@ use crate::delivery::{Delivery, RESERVED_SERVER};
 /// offered, `.loomwatch` what `LoomWatch` keeps for the team, and `.git` hooks run code.
 const PROTECTED_FOLDERS: [&str; 4] = [".claude", ".agents", ".git", ".loomwatch"];
 
+/// Whether `name` is one of [`PROTECTED_FOLDERS`] as the file system sees it: in any case (Windows
+/// and macOS do not tell `.Claude` from `.claude`) and with Windows' trailing dots and spaces
+/// dropped, which it drops when it makes the folder.
+fn is_protected(name: &std::ffi::OsStr) -> bool {
+    let name = name.to_string_lossy();
+    let name = name.trim_end_matches(['.', ' ']);
+    PROTECTED_FOLDERS
+        .iter()
+        .any(|folder| name.eq_ignore_ascii_case(folder))
+}
+
 /// How one run agent's permission requests are answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionPolicy {
@@ -217,9 +228,7 @@ impl PermissionPolicy {
         path.strip_prefix(&self.folder).is_ok_and(|inside| {
             inside.components().next().is_some()
                 && inside.components().all(|component| match component {
-                    Component::Normal(name) => {
-                        !PROTECTED_FOLDERS.iter().any(|folder| name == *folder)
-                    }
+                    Component::Normal(name) => !is_protected(name),
                     _ => false,
                 })
         })
@@ -672,7 +681,7 @@ pub(crate) fn resolve(path: &Path) -> PathBuf {
         missing.push(name);
         existing.pop();
     }
-    let mut resolved = std::fs::canonicalize(&existing).unwrap_or(existing);
+    let mut resolved = crate::platform::canonicalize(&existing).unwrap_or(existing);
     for name in missing.into_iter().rev() {
         resolved.push(name);
     }
@@ -746,6 +755,29 @@ mod tests {
         edits: true,
         commands: true,
     };
+
+    /// A settings folder is protected however the edit spells it: Windows and macOS make
+    /// `.Agents` or `.agents.` the same folder as `.agents` when it does not exist yet.
+    #[test]
+    fn a_protected_folder_is_protected_in_any_case_and_with_trailing_dots() {
+        let scratch = Scratch::new();
+        let policy = policy(&scratch, ALL);
+        let agent = scratch.0.join("agent");
+        for folder in [
+            ".agents",
+            ".Agents",
+            ".CLAUDE",
+            ".agents.",
+            ".git. .",
+            ".LoomWatch",
+        ] {
+            assert!(
+                !policy.may_write(&agent.join(folder).join("settings.json")),
+                "{folder}"
+            );
+        }
+        assert!(policy.may_write(&agent.join("agents-notes").join("a.md")));
+    }
 
     /// "Edit, then allow" is offered for a command line or a fetch's address, whole, and for
     /// nothing else: not a file write, not an MCP tool, whatever kind it carries.
@@ -916,6 +948,50 @@ mod tests {
             &[&at("agent/a.md"), "/etc/hosts"]
         )));
         assert!(!edits.approves(&request(Some("edit"), "Edit", &[])));
+    }
+
+    /// Windows paths are judged where Windows puts them: either separator, a drive letter or a
+    /// folder name in another case, `..\` out of the folder, a path from the root of the folder's
+    /// own drive, and another drive with or without its root.
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_are_judged_where_windows_puts_them() {
+        let scratch = Scratch::new();
+        let edits = policy(&scratch, ALL);
+        let agent = resolve(&scratch.0.join("agent"));
+        let folder = agent.to_string_lossy().into_owned();
+        let edit = |path: &str| edits.approves(&request(Some("edit"), "Write", &[path]));
+        assert!(edit(&format!(r"{folder}\draft.md")), "{folder}");
+        assert!(
+            edit(&format!("{}/draft.md", folder.replace('\\', "/"))),
+            "forward slashes"
+        );
+        assert!(edit(r"sub\notes.md"), "relative, with backslashes");
+        let lower_drive = format!("{}{}", folder[..1].to_ascii_lowercase(), &folder[1..]);
+        assert!(edit(&format!(r"{lower_drive}\draft.md")), "{lower_drive}");
+        let upper = folder.to_ascii_uppercase();
+        assert!(edit(&format!(r"{upper}\draft.md")), "{upper}");
+        assert!(!edit(&format!(r"{folder}\..\team.yaml")));
+        assert!(!edit(r"..\team.yaml"));
+        assert!(!edit(r"sub\..\..\team.yaml"));
+        assert!(
+            !edit(r"\Windows\System32\drivers\etc\hosts"),
+            "the root of the folder's own drive"
+        );
+        let other = if folder.starts_with(['Z', 'z']) {
+            "Y:"
+        } else {
+            "Z:"
+        };
+        assert!(!edit(&format!(r"{other}\agent\draft.md")));
+        assert!(
+            !edit(&format!("{other}draft.md")),
+            "another drive's own folder"
+        );
+        assert!(!edit(&format!(r"{folder}\.CLAUDE\settings.json")));
+        assert!(!edit(&format!(r"{folder}\.git.\config")));
+        assert!(!edits.may_read(Path::new(r"C:\Windows\win.ini")));
+        assert!(edits.may_read(Path::new(&format!(r"{upper}\draft.md"))));
     }
 
     #[cfg(unix)]

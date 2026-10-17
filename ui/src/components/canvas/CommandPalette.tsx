@@ -1,5 +1,6 @@
 import { Command, type LucideIcon } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { keys } from '../../lib/platform'
 
 export interface CommandAction {
   label: string
@@ -69,7 +70,7 @@ export function CommandPalette({ actions, onClose, interpret, fallback }: {
                 <Icon size={14} aria-hidden="true" style={{ color: proposal ? 'var(--color-accent)' : 'var(--color-ink-3)', flex: 'none' }} />
                 <span className="name t-body">{action.label}{proposal?.detail && <small className="understood-detail">{proposal.detail}</small>}</span>
                 {proposal && <span className="understood-dialect">{proposal.dialect === 'exact' ? 'Command' : 'From your words'}</span>}
-                {action.shortcut && <kbd className="kbd t-mono-sm">{action.shortcut}</kbd>}
+                {action.shortcut && <kbd className="kbd t-mono-sm">{keys(action.shortcut)}</kbd>}
               </button>
             )
           })}

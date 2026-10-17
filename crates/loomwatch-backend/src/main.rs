@@ -27,8 +27,9 @@ struct DatabaseArgs {
     #[arg(long, env = "LOOMWATCH_DATABASE", value_name = "PATH")]
     database: Option<PathBuf>,
     /// Where `LoomWatch` keeps its own state, such as which team files you approved to run.
-    /// Defaults to `~/Library/Application Support/LoomWatch` on macOS and
-    /// `$XDG_STATE_HOME/loomwatch` (or `~/.local/state/loomwatch`) elsewhere.
+    /// Defaults to `~/Library/Application Support/LoomWatch` on macOS,
+    /// `%LOCALAPPDATA%\LoomWatch` on Windows, and `$XDG_STATE_HOME/loomwatch` (or
+    /// `~/.local/state/loomwatch`) elsewhere.
     #[arg(long, env = "LOOMWATCH_STATE_DIR")]
     state_dir: Option<PathBuf>,
 }
@@ -141,7 +142,30 @@ async fn recovered_registry(archive: &EventArchive) -> RunRegistry {
 /// force-quit app never leaves `LoomWatch` running where nobody can see or stop it. An orphaned
 /// process is adopted by launchd (or init), whose pid is 1. As on a signal, the archive writes
 /// what it holds first.
+///
+/// On Windows, which has neither, `LoomWatch.exe` holds the other end of this process's standard
+/// input: it closes when the app quits (its way of asking this to stop, as a signal does on a Mac)
+/// or ends any other way.
 fn exit_with_parent(archive: EventArchive) {
+    #[cfg(windows)]
+    if std::env::var_os("LOOMWATCH_EXIT_WITH_PARENT").is_some_and(|value| value == "1") {
+        let (gone, app_gone) = tokio::sync::oneshot::channel::<()>();
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut stdin = std::io::stdin();
+            let mut buffer = [0_u8; 256];
+            while matches!(stdin.read(&mut buffer), Ok(read) if read > 0) {}
+            let _ = gone.send(());
+        });
+        tokio::spawn(async move {
+            if app_gone.await.is_ok() {
+                eprintln!("LoomWatch quit, so loomwatchd is stopping too");
+                let _ = tokio::time::timeout(Duration::from_secs(5), archive.flush()).await;
+                std::process::exit(0);
+            }
+        });
+        return;
+    }
     #[cfg(unix)]
     if std::env::var_os("LOOMWATCH_EXIT_WITH_PARENT").is_some_and(|value| value == "1") {
         tokio::spawn(async move {
@@ -156,15 +180,20 @@ fn exit_with_parent(archive: EventArchive) {
         });
     }
     #[cfg(not(unix))]
-    let _ = archive;
+    drop(archive);
 }
 
-/// `~/Library/Application Support/LoomWatch` on macOS, `$XDG_STATE_HOME/loomwatch` or
-/// `~/.local/state/loomwatch` elsewhere.
+/// `~/Library/Application Support/LoomWatch` on macOS, `%LOCALAPPDATA%\LoomWatch` on Windows,
+/// `$XDG_STATE_HOME/loomwatch` or `~/.local/state/loomwatch` elsewhere.
 fn default_state_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .filter(|home| home.is_absolute())?;
+    if cfg!(windows)
+        && let Some(local) = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .filter(|local| local.is_absolute())
+    {
+        return Some(local.join("LoomWatch"));
+    }
+    let home = loomwatch_backend::platform::home_dir().filter(|home| home.is_absolute())?;
     if cfg!(target_os = "macos") {
         return Some(home.join("Library/Application Support/LoomWatch"));
     }
@@ -199,7 +228,28 @@ async fn stop_signal() -> i32 {
     }
 }
 
-#[cfg(not(unix))]
+/// Ctrl+C or Ctrl+Break, or the console window closing, or Windows signing out or shutting down.
+/// After the last three Windows ends the process a few seconds later anyway, which is enough for
+/// the archive's last batch.
+#[cfg(windows)]
+async fn stop_signal() -> i32 {
+    use tokio::signal::windows::{ctrl_break, ctrl_close, ctrl_logoff, ctrl_shutdown};
+    let (Ok(mut close), Ok(mut brk), Ok(mut logoff), Ok(mut shutdown)) =
+        (ctrl_close(), ctrl_break(), ctrl_logoff(), ctrl_shutdown())
+    else {
+        let _ = tokio::signal::ctrl_c().await;
+        return 130;
+    };
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => 130,
+        _ = brk.recv() => 130,
+        _ = close.recv() => 143,
+        _ = logoff.recv() => 143,
+        _ = shutdown.recv() => 143,
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 async fn stop_signal() -> i32 {
     let _ = tokio::signal::ctrl_c().await;
     130
@@ -245,9 +295,10 @@ async fn main() -> Result<()> {
             let archive = Some(opened.clone());
             // One canonical root for both the team editor and run control, so a team the
             // editor can open is exactly a team a run may start, and vice versa.
-            let teams_root = std::fs::canonicalize(&teams_root).with_context(|| {
-                format!("failed to resolve teams root {}", teams_root.display())
-            })?;
+            let teams_root =
+                loomwatch_backend::platform::canonicalize(&teams_root).with_context(|| {
+                    format!("failed to resolve teams root {}", teams_root.display())
+                })?;
             // The OpenRouter key and model list every run's agents use. Installed before anything
             // can start a run. Nothing is read or fetched here: the key is read when the first
             // agent starts, and the model list when it is first asked for.
@@ -351,9 +402,7 @@ async fn main() -> Result<()> {
                 // from GitHub, skills.sh and ClawHub. Building it scans and fetches nothing.
                 app = app.merge(loomwatch_backend::skills_api::router(
                     state_dir.clone(),
-                    std::env::var_os("HOME")
-                        .map(PathBuf::from)
-                        .unwrap_or_default(),
+                    loomwatch_backend::platform::home_dir().unwrap_or_default(),
                 ));
             }
             // After "Update and restart": stop taking requests, give the open ones a moment (the

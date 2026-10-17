@@ -242,6 +242,8 @@ pub(crate) fn is_job_id(id: &str) -> bool {
         && !id.starts_with('-')
         && !id.ends_with('-')
         && !id.contains("--")
+        // `.jobs/con.yaml` can't be made on Windows; refused everywhere so job files stay portable.
+        && !crate::platform::is_reserved_name(id)
 }
 
 /// An icon is one the UI draws; a blank one is none.

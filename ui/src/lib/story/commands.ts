@@ -16,7 +16,13 @@
  *
  * A title that is not a shell command ("Terminal" before Claude Code names the call, a harness's
  * own "Read file …", an MCP tool id) is not read as one: `null`.
+ *
+ * On Windows, Codex runs each command through PowerShell (`"C:\…\powershell.exe" -Command "npm test"`),
+ * and programs are named by paths like `C:\…\node.exe`. These read the same way: the PowerShell or
+ * cmd script is unwrapped as bash's is, and a program is named without its `.exe`.
  */
+
+import { baseName, isAbsolutePath, joinUnderRoot } from '../files/paths'
 
 interface Run {
   /** The words the shell passes, quotes removed: the program first. */
@@ -39,9 +45,15 @@ const CLOSING = new Set(['fi', 'done', 'esac', '}'])
 /** Programs that run the program after them. */
 const WRAPPERS = new Set(['sudo', 'nohup', 'exec', 'command', 'builtin', 'nice', 'caffeinate', 'env', 'timeout'])
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash'])
+/** Windows' shells: PowerShell's `-Command` and cmd's `/c` run the rest of the line as a script. */
+const WINDOWS_SHELLS = new Set(['powershell', 'pwsh', 'cmd'])
 
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
 const PATH = /^(?:~|\.{1,2}|\$\{?\w+\}?)?\/|^[\w.@+-]+(?:\/[\w.@+-]+)+\/?$/
+/** A path written the Windows way: `C:\…`, `C:/…`, `.\…`, `%USERPROFILE%\…`, `\\server\…` or `src\app.ts`. */
+const WINDOWS_PATH = /^(?:[A-Za-z]:|\.{1,2}|%\w+%|\$env:\w+)?\\|^[A-Za-z]:\/|^[\w.@+-]+(?:\\[\w.@+-]+)+\\?$/
+/** A command that starts with a program's full Windows path: `C:\…\node.exe build.js`. */
+const DRIVE = /^[A-Za-z]:[\\/]/
 const URL = /^[a-z][a-z0-9+.-]*:\/\//i
 
 /** The index just past the `)` that closes the `(` at `open`, stepping over quoted text. */
@@ -59,8 +71,11 @@ function closing(text: string, open: number): number {
   return text.length
 }
 
-/** The command's simple commands in order, as written: nothing is dropped or unwrapped yet. */
-function lex(text: string): Run[] {
+/**
+ * The command's simple commands in order, as written: nothing is dropped or unwrapped yet. In a
+ * `windows` script (PowerShell's or cmd's) `\` is part of a path, and PowerShell escapes with `` ` ``.
+ */
+function lex(text: string, windows = false): Run[] {
   const runs: Run[] = []
   let run: Run = { words: [], input: '', next: '', cwd: '' }
   let word: string | null = null
@@ -108,7 +123,7 @@ function lex(text: string): Run[] {
       }
       heredocs = []
     } else if (c === ' ' || c === '\t' || c === '\r') { endWord(); i++ }
-    else if (c === '\\') { if (text[i + 1] !== '\n') add(text[i + 1] ?? ''); i += 2 }
+    else if (c === (windows ? '`' : '\\')) { if (text[i + 1] !== '\n') add(text[i + 1] ?? ''); i += 2 }
     else if (c === "'") {
       const end = text.indexOf("'", i + 1)
       add(text.slice(i + 1, end === -1 ? text.length : end))
@@ -117,7 +132,7 @@ function lex(text: string): Run[] {
       let j = i + 1
       let part = ''
       while (j < text.length && text[j] !== '"') {
-        if (text[j] === '\\' && '"\\$`\n'.includes(text[j + 1] ?? '')) { if (text[j + 1] !== '\n') part += text[j + 1]; j += 2 }
+        if (!windows && text[j] === '\\' && '"\\$`\n'.includes(text[j + 1] ?? '')) { if (text[j + 1] !== '\n') part += text[j + 1]; j += 2 }
         else if (text.startsWith('$(', j)) { const end = closing(text, j + 1); part += text.slice(j, end); j = end }
         else part += text[j++]
       }
@@ -156,13 +171,28 @@ function lex(text: string): Run[] {
   return runs
 }
 
-const basename = (word: string) => word.replace(/\/+$/, '').split('/').at(-1) || word
-const programOf = (run: Run) => basename(run.words[0])
+/** A program by its name alone: `node` for `C:\…\node.exe`, `npm` for `npm.cmd`. */
+const programName = (word: string) => baseName(word).replace(/\.(?:exe|cmd|bat|ps1)$/i, '')
+const programOf = (run: Run) => programName(run.words[0])
+
+/**
+ * The script a shell was handed, or `null`: bash's `-c` takes the word after it, PowerShell's
+ * `-Command` (or `-c`) and cmd's `/c` the rest of the line.
+ */
+function shellScript(words: string[]): { text: string; windows: boolean } | null {
+  const shell = programName(words[0]).toLowerCase()
+  const windows = WINDOWS_SHELLS.has(shell)
+  if (!windows && !SHELLS.has(shell)) return null
+  const flag = !windows ? /^-[a-z]*c[a-z]*$/ : shell === 'cmd' ? /^\/c$/i : /^-c(?:ommand)?$/i
+  const at = words.findIndex((part, index) => index > 0 && flag.test(part))
+  if (at < 0 || words[at + 1] === undefined) return null
+  return { text: windows ? words.slice(at + 1).join(' ') : words[at + 1], windows }
+}
 
 /**
  * The program a run is for: shell keywords, variable settings and wrappers (`sudo`, `env`,
- * `timeout 60`) taken off its front. A shell handed a script (`bash -lc "…"`) is the runs of that
- * script. Nothing, for a run that only opens or closes a construct (`for i in 1 2`, `done`).
+ * `timeout 60`) taken off its front. A shell handed a script (`bash -lc "…"`, `powershell -Command
+ * "…"`) is the runs of that script. Nothing, for a run that only opens or closes a construct (`for i in 1 2`, `done`).
  */
 function unwrap(run: Run): Run[] {
   const words = [...run.words]
@@ -170,37 +200,37 @@ function unwrap(run: Run): Run[] {
   if (words.length === 0 || CLOSING.has(words[0]) || ['for', 'select', 'case', 'function'].includes(words[0])) return []
   for (;;) {
     while (words.length > 0 && ASSIGNMENT.test(words[0])) words.shift()
-    if (words.length === 0 || !WRAPPERS.has(basename(words[0]))) break
-    const wrapper = basename(words.shift() as string)
+    if (words.length === 0 || !WRAPPERS.has(programName(words[0]))) break
+    const wrapper = programName(words.shift() as string)
     while (words.length > 0 && words[0].startsWith('-')) words.shift()
     if (wrapper === 'timeout' && words.length > 0) words.shift()
   }
   if (words.length === 0) return []
-  if (SHELLS.has(basename(words[0]))) {
-    const flag = words.findIndex((part, index) => index > 0 && /^-[a-z]*c[a-z]*$/.test(part))
-    if (flag > 0 && words[flag + 1] !== undefined) {
-      const inner = lex(words[flag + 1]).flatMap(unwrap)
-      if (inner.length > 0) inner[inner.length - 1].next = run.next
-      return inner
-    }
+  const script = shellScript(words)
+  if (script) {
+    const inner = lex(script.text, script.windows).flatMap(unwrap)
+    if (inner.length > 0) inner[inner.length - 1].next = run.next
+    return inner
   }
   return [{ ...run, words }]
 }
 
 /**
  * Each program a shell command ran, in order, or `null` when the text is not a shell command. A
- * command starts with a lower-case program or a variable setting (`FOO=1 npm test`); a harness's
- * own title ("Terminal", "Read file …") starts with a capital, and an MCP tool id with `mcp.` or `mcp__`.
+ * command starts with a lower-case program, a variable setting (`FOO=1 npm test`) or a drive
+ * (`C:\…\node.exe`); a harness's own title ("Terminal", "Read file …") starts with a capital, and
+ * an MCP tool id with `mcp.` or `mcp__`.
  */
 function commandRuns(text: string): Run[] | null {
   const start = text.trimStart()
-  if (!start || (/^[A-Z]/.test(start) && !ASSIGNMENT.test(start)) || /^mcp[._]/i.test(start)) return null
-  const runs = lex(start).flatMap(unwrap)
+  const drive = DRIVE.test(start)
+  if (!start || (/^[A-Z]/.test(start) && !ASSIGNMENT.test(start) && !drive) || /^mcp[._]/i.test(start)) return null
+  const runs = lex(start, drive).flatMap(unwrap)
   let cwd = ''
   for (const run of runs) {
     if (['cd', 'pushd'].includes(programOf(run))) {
       const to = run.words[1] ?? '~'
-      cwd = to.startsWith('/') || to.startsWith('~') || !cwd ? to : `${cwd}/${to}`
+      cwd = isAbsolutePath(to) || to.startsWith('~') || !cwd ? to : joinUnderRoot(cwd, to)
     }
     run.cwd = cwd
   }
@@ -211,7 +241,7 @@ function commandRuns(text: string): Run[] | null {
 function shortWord(word: string): string | null {
   if (word.includes('\n')) return null
   if (URL.test(word)) return word.length > 48 ? null : word
-  const short = PATH.test(word) ? basename(word) : word
+  const short = PATH.test(word) || WINDOWS_PATH.test(word) ? baseName(word) : word
   const shown = /\s/.test(short) ? `"${short}"` : short
   return shown.length > 40 ? null : shown
 }

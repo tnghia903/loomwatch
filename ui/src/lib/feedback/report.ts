@@ -30,7 +30,7 @@ export interface AboutLoomWatch {
   commit: string | null
   /** Rust's name for the system: `macos`, `linux`, `windows`. */
   os: string
-  /** The macOS release, such as `26.0`. */
+  /** The macOS release, such as `26.0`, or the Windows build, such as `10.0.26100.4652`. */
   osVersion: string | null
   arch: string
   /** When this daemon started. Tells one start from the next; absent before Update and restart. */
@@ -70,11 +70,19 @@ export function browserName(userAgent: string): string {
 }
 
 /**
+ * A Windows home folder however a message writes it: `C:\Users\ana`, `c:\users\ana`, `C:/Users/ana`,
+ * or `C:\\Users\\ana` inside JSON. A name with spaces (`Ana Maria`) counts whole when a folder
+ * follows it, so no part of it is left behind.
+ */
+const WINDOWS_HOME = /[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s'"`)]+(?:(?: +[^\\/\s'"`)]+)+(?=[\\/]))?/gi
+
+/**
  * Replace the operator's home folder with `~`, so a path inside an error message does not carry
  * their account name into a report others can read.
  */
 export function withoutHomeFolder(text: string): string {
-  return text.replace(/\/(Users|home)\/[^/\s'"`)]+/g, '~').replace(/[A-Za-z]:\\Users\\[^\\\s'"`)]+/g, '~')
+  // Windows first: `C:/Users/ana` would otherwise read as a Mac's `/Users/ana` behind a stray `C:`.
+  return text.replace(WINDOWS_HOME, '~').replace(/\/(Users|home)\/[^/\s'"`)]+/g, '~')
 }
 
 /**
