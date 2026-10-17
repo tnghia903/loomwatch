@@ -1,8 +1,13 @@
-//! Read-only discovery of local skills, MCP tools and team memory.
+//! Read-only discovery of the skills and team memory the Library lists.
+//!
+//! Skills come from `LoomWatch`'s own skills folder (`<state dir>/skills`, filled by the Skills
+//! page) and from the project the teams live in (`.agents/skills`, `.claude/skills`), which travel
+//! with the team files. Other AI apps' folders and settings are never read here: the Skills page
+//! brings an app's skills in when the person asks.
 //!
 //! The Library inventory deliberately returns metadata only: names, provenance and compatibility.
 //! A separate, on-demand detail lookup can return a selected skill's local `SKILL.md`, or a memory
-//! source's Brief and kept notes. Connector configuration values are never returned.
+//! source's Brief and kept notes.
 //!
 //! Team memory is the only knowledge the Library lists. Other knowledge is a folder or file the
 //! operator chooses (`chosen_knowledge`, ADR 0035); the Library no longer infers it from other
@@ -15,42 +20,22 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use serde_json::Value;
 
-/// Root used for capability discovery and delivery.
-///
-/// Native launches normally discover capabilities below the operator's `HOME`. A container can
-/// point this at an explicit read-only import containing the conventional `.codex`, `.claude`,
-/// `.agents`, and `.config/opencode` trees without exposing the operator's complete home folder.
-/// Harness processes still keep their actual `HOME` for credentials and mutable state.
+/// `LoomWatch`'s own skills folder, where the Library lists skills from first and runs copy wired
+/// skills from. `None` before the daemon has set up its state folder (`ai::install`).
 #[must_use]
-pub fn configured_home() -> Option<PathBuf> {
-    select_home(
-        std::env::var_os("LOOMWATCH_CAPABILITY_HOME"),
-        std::env::var_os("HOME"),
-    )
+pub fn skills_folder() -> Option<PathBuf> {
+    crate::ai::installed().map(crate::ai::Ai::skills_folder)
 }
 
-fn select_home(
-    configured: Option<std::ffi::OsString>,
-    runtime: Option<std::ffi::OsString>,
-) -> Option<PathBuf> {
-    configured
-        .filter(|value| !value.is_empty())
-        .or(runtime)
-        .map(PathBuf::from)
-}
+/// Where `LoomWatch`'s own skills folder is listed as coming from.
+pub const LOOMWATCH_SOURCE: &str = "LoomWatch";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityInventory {
     pub skills: Vec<DetectedCapability>,
-    pub tools: Vec<DetectedCapability>,
     pub sources: Vec<DetectedCapability>,
-    /// The claude.ai connectors the operator's Claude Code has connected (ADR 0060): tools every
-    /// Claude agent has of its own. Not in `tools`, because `LoomWatch` cannot give one to an
-    /// agent: only turn it off.
-    pub connectors: Vec<DetectedCapability>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -102,18 +87,18 @@ pub struct CapabilityDetails {
     /// A skill's matching `SKILL.md` files, or what a knowledge source holds — one entry per thing
     /// read, each naming where it came from. Empty for a tool.
     pub definitions: Vec<CapabilityDefinition>,
-    /// What this skill assumes about the harness running it, and what each harness will therefore
-    /// do with it. Metadata derived from the skill's own text — never connector configuration and
-    /// never a secret, the same rule the rest of this module keeps.
+    /// What this skill assumes about the agent running it, and how it will therefore reach the
+    /// agent. Metadata derived from the skill's own text — never connector configuration and never
+    /// a secret, the same rule the rest of this module keeps.
     ///
     /// `None` for a tool or a knowledge source, and for a skill with no readable definition.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub portability: Option<SkillPortabilityReport>,
 }
 
-/// One skill's portability facts, plus the route it would take on every harness `LoomWatch` knows.
+/// One skill's portability facts, plus the route it takes to an agent.
 ///
-/// The routes are computed by the daemon rather than re-derived in the browser: the rule lives in
+/// The route is computed by the daemon rather than re-derived in the browser: the rule lives in
 /// `skill_routing::route` and a second copy of it in TypeScript would be a second rule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -121,8 +106,8 @@ pub struct SkillPortabilityReport {
     pub kind: &'static str,
     pub needs: Vec<&'static str>,
     pub evidence: Vec<ReportedEvidence>,
-    /// Harness id (the `HARNESSES` catalog's) to route name.
-    pub routes: BTreeMap<String, &'static str>,
+    /// `native` or `inline` (`skill_routing::SkillRoute`).
+    pub route: &'static str,
 }
 
 /// One need and the line that proves it, both named the way the inspector shows them.
@@ -141,15 +126,7 @@ pub struct ReportedEvidence {
 impl SkillPortabilityReport {
     fn of(text: &str) -> Self {
         let portability = crate::skill_routing::analyse(text);
-        let routes = crate::workspace::Harness::ALL
-            .into_iter()
-            .filter_map(|harness| {
-                Some((
-                    harness.id()?.to_owned(),
-                    crate::skill_routing::route(&portability, harness).label(),
-                ))
-            })
-            .collect();
+        let route = crate::skill_routing::route(&portability).label();
         Self {
             kind: portability.kind.label(),
             needs: portability
@@ -165,7 +142,7 @@ impl SkillPortabilityReport {
                     line: item.line,
                 })
                 .collect(),
-            routes,
+            route,
         }
     }
 }
@@ -215,150 +192,49 @@ impl CapabilityBuilder {
 
     fn finish(self, kind: &str) -> DetectedCapability {
         let source = self.providers.into_iter().collect::<Vec<_>>().join(" + ");
-        let is_node_repl = kind == "tool" && self.display_name == "Node REPL";
         DetectedCapability {
             id: stable_id(kind, &self.display_name, &source),
             name: self.display_name,
             source,
             detail: self.detail,
-            status: if is_node_repl {
-                "Local only"
-            } else if kind == "tool" {
-                "Compatible"
-            } else {
-                "Ready"
-            }
-            .to_owned(),
+            status: "Ready".to_owned(),
             memory: self.memory,
         }
     }
 }
 
+/// Everything the Library lists. `skills` is `LoomWatch`'s skills folder ([`skills_folder`]).
 #[must_use]
-pub fn detect_capabilities(home: Option<&Path>, teams_root: &Path) -> CapabilityInventory {
-    let mut skills = BTreeMap::<String, CapabilityBuilder>::new();
-    let mut tools = BTreeMap::<String, CapabilityBuilder>::new();
+pub fn detect_capabilities(skills: Option<&Path>, teams_root: &Path) -> CapabilityInventory {
+    let mut found = BTreeMap::<String, CapabilityBuilder>::new();
     let mut sources = BTreeMap::<String, CapabilityBuilder>::new();
-
-    for root in skill_roots(home, teams_root) {
-        match root.layout {
-            SkillLayout::Skills => scan_skill_root(&root, &mut skills),
-            SkillLayout::Plugins => scan_plugin_skill_root(&root, &mut skills),
-        }
+    for root in skill_roots(skills, teams_root) {
+        scan_skill_root(&root, &mut found);
     }
-
-    // Read once for both what it lists: its MCP servers and its claude.ai connectors. It is
-    // Claude Code's whole state file, and grows with every project it has opened.
-    let claude_json = home.and_then(|home| read_json(&home.join(".claude.json")));
-    if let Some(home) = home {
-        scan_codex_mcp(&home.join(".codex/config.toml"), &mut tools);
-        if let Some(claude_json) = &claude_json {
-            collect_json_connector_keys(claude_json, "mcpServers", "Claude Code", &mut tools);
-        }
-        scan_json_connectors(
-            &home.join(".claude/settings.json"),
-            "Claude Code",
-            "mcpServers",
-            &mut tools,
-        );
-        scan_json_connectors(
-            &home.join(".config/opencode/opencode.json"),
-            "OpenCode",
-            "mcp",
-            &mut tools,
-        );
-    }
-
     // Every team with memory, and every imported pack. A team's Brief plus its kept Notebook is a
     // knowledge source in exactly the Library's sense — something an agent reads — which is why it
     // belongs here rather than in a second inventory nobody would think to look in.
     scan_team_memory_sources(teams_root, &mut sources);
-
     CapabilityInventory {
-        skills: finish_map(skills, "skill"),
-        tools: finish_map(tools, "tool"),
+        skills: finish_map(found, "skill"),
         sources: finish_map(sources, "source"),
-        connectors: claude_json
-            .as_ref()
-            .map(claude_connectors)
-            .unwrap_or_default(),
     }
-}
-
-/// Claude Code's own record of the claude.ai connectors it has connected
-/// (`claudeAiMcpEverConnected` in `~/.claude.json`, given here as read), read rather than asked
-/// for: `claude mcp list` checks every server's health and takes most of a minute. Named as Claude
-/// names the server, so turning one off withholds `mcp__claude_ai_<name>` (ADR 0060).
-fn claude_connectors(claude_json: &Value) -> Vec<DetectedCapability> {
-    let Some(Value::Array(names)) = claude_json.get("claudeAiMcpEverConnected") else {
-        return Vec::new();
-    };
-    let mut names: Vec<String> = names
-        .iter()
-        .filter_map(|name| name.as_str().map(str::to_owned))
-        .filter(|name| !name.trim().is_empty())
-        .collect();
-    names.sort();
-    names.dedup();
-    names
-        .into_iter()
-        .map(|name| DetectedCapability {
-            id: format!("connector:{name}"),
-            source: "Claude Code".to_owned(),
-            detail: "claude.ai connector".to_owned(),
-            status: "connected".to_owned(),
-            memory: None,
-            name,
-        })
-        .collect()
-}
-
-/// The server keys behind the tool the Library lists as `name`, in every app's config, so a tool
-/// the operator turned off is withheld under the name each app lists its tools by (ADR 0060). A
-/// name the configs do not have, such as a claude.ai connector's, is its own server name.
-#[must_use]
-pub fn tool_servers_named(home: Option<&Path>, name: &str) -> Vec<String> {
-    let item = DetectedCapability {
-        id: String::new(),
-        name: name.to_owned(),
-        source: "Claude Code + Codex + OpenCode".to_owned(),
-        detail: String::new(),
-        status: String::new(),
-        memory: None,
-    };
-    let mut servers: Vec<String> = home
-        .map(|home| tool_definitions_for(home, &item))
-        .unwrap_or_default()
-        .into_iter()
-        .map(|definition| definition.server)
-        .collect();
-    servers.push(name.to_owned());
-    servers.sort();
-    servers.dedup();
-    servers
 }
 
 /// Load the definition of one already-detected capability. Skill bodies are read only for the
 /// selected row; the inventory remains small and never exposes every installed instruction file.
 #[must_use]
 pub fn detect_capability_details(
-    home: Option<&Path>,
+    skills: Option<&Path>,
     teams_root: &Path,
     id: &str,
 ) -> Option<CapabilityDetails> {
-    let inventory = detect_capabilities(home, teams_root);
+    let inventory = detect_capabilities(skills, teams_root);
     let (kind, item) = inventory
         .skills
         .iter()
         .find(|item| item.id == id)
         .map(|item| ("skill", item))
-        .or_else(|| {
-            inventory
-                .tools
-                .iter()
-                .find(|item| item.id == id)
-                .map(|item| ("tool", item))
-        })
         .or_else(|| {
             inventory
                 .sources
@@ -368,7 +244,7 @@ pub fn detect_capability_details(
         })?;
 
     let definitions = match kind {
-        "skill" => skill_definitions(home, teams_root, item),
+        "skill" => skill_definitions(skills, teams_root, item),
         "knowledge" => knowledge_contents(teams_root, item),
         _ => Vec::new(),
     };
@@ -393,15 +269,15 @@ pub fn detect_capability_details(
 /// first one. Reads the same folders as the inventory, in [`skill_roots`] order.
 #[must_use]
 pub fn skill_definitions_for(
-    home: Option<&Path>,
+    skills: Option<&Path>,
     teams_root: &Path,
     item: &DetectedCapability,
 ) -> Vec<CapabilityDefinition> {
-    skill_definitions(home, teams_root, item)
+    skill_definitions(skills, teams_root, item)
 }
 
 fn skill_definitions(
-    home: Option<&Path>,
+    skills: Option<&Path>,
     teams_root: &Path,
     item: &DetectedCapability,
 ) -> Vec<CapabilityDefinition> {
@@ -409,7 +285,7 @@ fn skill_definitions(
     let mut seen = BTreeSet::new();
     // Root order is preference order. Sorting the copies by source name instead once delivered a
     // trashed plugin generation, because `/.trash/` sorts before `/synced/`.
-    for root in skill_roots(home, teams_root) {
+    for root in skill_roots(skills, teams_root) {
         collect_matching_definitions(&root, item, &mut seen, &mut definitions);
     }
     definitions
@@ -430,14 +306,7 @@ fn collect_matching_definitions(
             .and_then(|name| name.to_str())
             .unwrap_or("Unnamed skill");
         let (name, _) = read_skill_metadata(&path, fallback);
-        let source = if root.layout == SkillLayout::Plugins {
-            plugin_name(directory).map_or_else(
-                || root.provider.clone(),
-                |plugin| format!("{} · {plugin}", root.provider),
-            )
-        } else {
-            root.provider.clone()
-        };
+        let source = root.provider.clone();
         // Rows merge copies by lowercased name, so a copy spelled `PDF` beside `pdf` is the same
         // skill and must be offered for delivery too.
         if !name.eq_ignore_ascii_case(&item.name) || !capability_has_source(&item.source, &source) {
@@ -464,13 +333,10 @@ fn capability_has_source(combined: &str, candidate: &str) -> bool {
 
 /// A skill or source the operator set up themselves.
 const RANK_PERSONAL: u8 = 0;
-/// `review-agent` is pinned just under the personal Claude Code skills by the approved design.
+/// `review-agent` is pinned just under the operator's own skills by the approved design.
 const RANK_PINNED: u8 = 1;
-/// Installed for one of the other harnesses `LoomWatch` drives.
-const RANK_HARNESS: u8 = 2;
-const RANK_SHARED: u8 = 3;
-/// Anything a plugin or another project brought along.
-const RANK_INSTALLED: u8 = 4;
+/// A skill kept in the project the teams live in.
+const RANK_PROJECT: u8 = 2;
 
 fn finish_map(map: BTreeMap<String, CapabilityBuilder>, kind: &str) -> Vec<DetectedCapability> {
     let mut items = map
@@ -498,27 +364,7 @@ fn add_capability(
     detail: &str,
     rank: u8,
 ) {
-    add_keyed_capability(
-        map,
-        &name.to_ascii_lowercase(),
-        name,
-        provider,
-        detail,
-        rank,
-    );
-}
-
-/// Same, but with an explicit dedup key. Plugin skills key on `plugin/name`: two marketplaces
-/// both ship a skill called `index`, and merging them into one row hid one of them.
-fn add_keyed_capability(
-    map: &mut BTreeMap<String, CapabilityBuilder>,
-    key: &str,
-    name: &str,
-    provider: &str,
-    detail: &str,
-    rank: u8,
-) {
-    map.entry(key.to_owned())
+    map.entry(name.to_ascii_lowercase())
         .or_default()
         .add(name, provider, detail, rank);
 }
@@ -668,195 +514,60 @@ const SKIP_DIRECTORIES: [&str; 7] = [
     ".tmp",
 ];
 
-/// How a skill folder is laid out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SkillLayout {
-    /// `<root>/…/<skill>/SKILL.md`: skills the operator or an app installed directly.
-    Skills,
-    /// `<root>/…/<plugin>[/<version>]/skills/<skill>/SKILL.md`: skills a plugin brought along.
-    Plugins,
-}
-
 /// One folder skills are read from.
 #[derive(Debug, Clone)]
 struct SkillRoot {
     path: PathBuf,
-    /// Who installed them, as the Library names the source.
+    /// Where they are kept, as the Library names the source.
     provider: String,
     depth: usize,
     rank: u8,
-    layout: SkillLayout,
     /// Folder names skipped directly below `path`, beyond [`SKIP_DIRECTORIES`].
     exclude: &'static [&'static str],
 }
 
 impl SkillRoot {
-    fn new(path: PathBuf, provider: &str, rank: u8, layout: SkillLayout) -> Self {
+    fn new(path: PathBuf, provider: &str, rank: u8) -> Self {
         Self {
             path,
             provider: provider.to_owned(),
-            depth: if layout == SkillLayout::Plugins {
-                10
-            } else {
-                5
-            },
+            depth: 5,
             rank,
-            layout,
-            exclude: &[],
+            // The Skills page keeps what it took away, and what it is still unpacking, here.
+            exclude: &[".removed", ".staging"],
         }
     }
 }
 
 /// Every folder skills are read from, in the order a copy is preferred when several folders hold
-/// a skill of the same name.
+/// a skill of the same name: `LoomWatch`'s own folder, then the project's.
 ///
 /// Detection and delivery both read this one list (ADR 0031). They used to keep a copy each, and a
 /// folder added to one but not the other would list a skill that no agent could then be given.
-///
-/// A skill's source never limits where it runs: `workspace::materialise` copies the chosen bundle
-/// into whatever folder the receiving app reads, and `skill_routing` decides whether its text also
-/// travels in the prompt.
-fn skill_roots(home: Option<&Path>, teams_root: &Path) -> Vec<SkillRoot> {
-    use SkillLayout::Skills;
-    let mut roots = home_skill_roots(home);
-    // Skills kept in the project the teams live in, the way Claude Code and Codex read a
-    // repository's own `.claude/skills` and `.agents/skills`. Second in preference, after the
-    // operator's own Claude Code skills. A project folder that is the home folder adds nothing:
-    // its skills are already listed under the app that owns them.
+fn skill_roots(skills: Option<&Path>, teams_root: &Path) -> Vec<SkillRoot> {
+    let mut roots: Vec<SkillRoot> = skills
+        .map(|folder| SkillRoot::new(folder.to_path_buf(), LOOMWATCH_SOURCE, RANK_PERSONAL))
+        .into_iter()
+        .collect();
+    // Skills kept in the project the teams live in: a repository's own `.agents/skills` and
+    // `.claude/skills`, which travel with its team files.
     if let Some(project) = project_folder(teams_root)
         && let Some(name) = project.file_name().and_then(|name| name.to_str())
     {
         let label = project_label(name);
-        let home_paths = roots
+        let canonical = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let own = roots
             .iter()
-            .map(|root| fs::canonicalize(&root.path).unwrap_or_else(|_| root.path.clone()))
+            .map(|root| canonical(&root.path))
             .collect::<BTreeSet<_>>();
-        let position = usize::from(home.is_some()).min(roots.len());
-        let project_roots = [".claude/skills", ".agents/skills"]
-            .into_iter()
-            .map(|relative| SkillRoot::new(project.join(relative), &label, RANK_PERSONAL, Skills))
-            .filter(|root| {
-                let path = fs::canonicalize(&root.path).unwrap_or_else(|_| root.path.clone());
-                !home_paths.contains(&path)
-            })
-            .collect::<Vec<_>>();
-        roots.splice(position..position, project_roots);
+        roots.extend(
+            [".agents/skills", ".claude/skills"]
+                .into_iter()
+                .map(|relative| SkillRoot::new(project.join(relative), &label, RANK_PROJECT))
+                .filter(|root| !own.contains(&canonical(&root.path))),
+        );
     }
     roots
-}
-
-/// The skill folders under the home directory, best first; [`skill_roots`] adds the project's.
-fn home_skill_roots(home: Option<&Path>) -> Vec<SkillRoot> {
-    use SkillLayout::{Plugins, Skills};
-    let Some(home) = home else {
-        return Vec::new();
-    };
-    let mut roots = vec![SkillRoot::new(
-        home.join(".claude/skills"),
-        "Claude Code",
-        RANK_PERSONAL,
-        Skills,
-    )];
-    roots.push(SkillRoot::new(
-        home.join(".codex/skills"),
-        "Codex",
-        RANK_HARNESS,
-        Skills,
-    ));
-    // OpenCode documents `skill/`; `skills/` is what most installers write.
-    for relative in [".config/opencode/skills", ".config/opencode/skill"] {
-        roots.push(SkillRoot::new(
-            home.join(relative),
-            "OpenCode",
-            RANK_HARNESS,
-            Skills,
-        ));
-    }
-    roots.push(SkillRoot::new(
-        home.join(".gemini/skills"),
-        "Gemini",
-        RANK_HARNESS,
-        Skills,
-    ));
-    // Hermes files skills by category (`<category>/<skill>/SKILL.md`) and keeps a set per profile.
-    // Its own source checkout and optional-skills catalog are not installed skills, so they are
-    // not read.
-    roots.push(SkillRoot::new(
-        home.join(".hermes/skills"),
-        "Hermes",
-        RANK_HARNESS,
-        Skills,
-    ));
-    for profile in subfolders(&home.join(".hermes/profiles")) {
-        roots.push(SkillRoot::new(
-            profile.join("skills"),
-            "Hermes",
-            RANK_HARNESS,
-            Skills,
-        ));
-    }
-    for relative in [
-        ".openclaw/skills",
-        ".openclaw/workspace/skills",
-        ".openclaw/plugin-skills",
-    ] {
-        roots.push(SkillRoot::new(
-            home.join(relative),
-            "OpenClaw",
-            RANK_HARNESS,
-            Skills,
-        ));
-    }
-    roots.push(SkillRoot::new(
-        home.join(".pi/agent/skills"),
-        "pi",
-        RANK_HARNESS,
-        Skills,
-    ));
-    roots.push(SkillRoot::new(
-        home.join(".agents/skills"),
-        "Shared",
-        RANK_SHARED,
-        Skills,
-    ));
-    // Plugins last. Claude Code's `marketplaces/` is the catalog of every plugin a marketplace
-    // offers, installed or not; listing it showed uninstalled plugins as ready to use.
-    roots.push(SkillRoot::new(
-        home.join(".codex/plugins/cache"),
-        "Codex",
-        RANK_INSTALLED,
-        Plugins,
-    ));
-    let mut claude_plugins = SkillRoot::new(
-        home.join(".claude/plugins"),
-        "Claude Code",
-        RANK_INSTALLED,
-        Plugins,
-    );
-    claude_plugins.exclude = &["marketplaces"];
-    roots.push(claude_plugins);
-    roots.push(SkillRoot::new(
-        home.join(".gemini/extensions"),
-        "Gemini",
-        RANK_INSTALLED,
-        Plugins,
-    ));
-    roots
-}
-
-/// The plain folders directly inside `path`, sorted; none when it is missing.
-fn subfolders(path: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(path) else {
-        return Vec::new();
-    };
-    let mut folders = entries
-        .flatten()
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
-        .map(|entry| entry.path())
-        .collect::<Vec<_>>();
-    folders.sort();
-    folders
 }
 
 fn scan_skill_root(root: &SkillRoot, skills: &mut BTreeMap<String, CapabilityBuilder>) {
@@ -871,37 +582,7 @@ fn scan_skill_root(root: &SkillRoot, skills: &mut BTreeMap<String, CapabilityBui
     }
 }
 
-/// A plugin cache holds `…/<plugin>[/<version>]/skills/<skill>/SKILL.md`. The plugin is what tells
-/// two identically named skills apart, so it becomes both the dedup key and the visible source.
-fn scan_plugin_skill_root(root: &SkillRoot, skills: &mut BTreeMap<String, CapabilityBuilder>) {
-    for skill in find_skill_files(&root.path, root.depth, root.exclude) {
-        let directory = skill.parent().unwrap_or(&root.path);
-        let fallback = directory
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("Unnamed skill");
-        let (name, description) = read_skill_metadata(&skill, fallback);
-        let plugin = plugin_name(directory);
-        let source = plugin.as_deref().map_or_else(
-            || root.provider.clone(),
-            |plugin| format!("{} · {plugin}", root.provider),
-        );
-        let key = plugin.as_deref().map_or_else(
-            || name.to_ascii_lowercase(),
-            |plugin| {
-                format!(
-                    "{}/{}",
-                    plugin.to_ascii_lowercase(),
-                    name.to_ascii_lowercase()
-                )
-            },
-        );
-        add_keyed_capability(skills, &key, &name, &source, &description, root.rank);
-    }
-}
-
-/// Every `SKILL.md` under `root`, following symlinks — the harnesses install skills by linking
-/// them in (5 of the 6 in `~/.claude/skills` here), so skipping links hid most of them.
+/// Every `SKILL.md` under `root`, following symlinks: a project may link a shared skill in.
 /// `exclude` names folders skipped directly below `root` only.
 fn find_skill_files(root: &Path, max_depth: usize, exclude: &[&str]) -> Vec<PathBuf> {
     let mut found = Vec::new();
@@ -950,43 +631,6 @@ fn find_skill_files(root: &Path, max_depth: usize, exclude: &[&str]) -> Vec<Path
     found
 }
 
-fn plugin_name(skill_directory: &Path) -> Option<String> {
-    let skills = skill_directory.parent()?;
-    if skills.file_name()? != "skills" {
-        return None;
-    }
-    let owner = skills.parent()?;
-    let name = owner.file_name()?.to_str()?;
-    if looks_like_a_version(name) {
-        return owner
-            .parent()
-            .and_then(Path::file_name)
-            .and_then(|name| name.to_str())
-            .map(|name| without_generation(name).to_owned());
-    }
-    Some(without_generation(name).to_owned())
-}
-
-/// `engineering~g3` → `engineering`: Claude Code's synced plugins carry a generation suffix that
-/// changes on every update, which showed one plugin as three.
-fn without_generation(name: &str) -> &str {
-    match name.rsplit_once("~g") {
-        Some((plugin, generation))
-            if !plugin.is_empty()
-                && !generation.is_empty()
-                && generation.chars().all(|c| c.is_ascii_digit()) =>
-        {
-            plugin
-        }
-        _ => name,
-    }
-}
-
-/// `1.1.0-alpha.2`, `26.904.11930` — a cache directory named for the release, not the plugin.
-fn looks_like_a_version(name: &str) -> bool {
-    name.starts_with(|first: char| first.is_ascii_digit()) && name.contains('.')
-}
-
 fn read_skill_metadata(path: &Path, fallback: &str) -> (String, String) {
     let Ok(source) = fs::read_to_string(path) else {
         return (humanize(fallback), "Local skill".to_owned());
@@ -998,79 +642,6 @@ fn read_skill_metadata(path: &Path, fallback: &str) -> (String, String) {
         name.unwrap_or_else(|| humanize(fallback)),
         description.unwrap_or_else(|| "Local skill".to_owned()),
     )
-}
-
-fn scan_codex_mcp(path: &Path, tools: &mut BTreeMap<String, CapabilityBuilder>) {
-    let Ok(source) = fs::read_to_string(path) else {
-        return;
-    };
-    for line in source.lines() {
-        let trimmed = line.trim();
-        let Some(section) = trimmed.strip_prefix("[mcp_servers.") else {
-            continue;
-        };
-        let Some(name) = section.strip_suffix(']') else {
-            continue;
-        };
-        let name = name.trim();
-        let root_name = if let Some(quoted) = name.strip_prefix('"') {
-            quoted.split('"').next().unwrap_or(quoted)
-        } else {
-            name.split('.')
-                .next()
-                .unwrap_or(name)
-                .trim_matches(['\'', '"'])
-        };
-        let name = humanize(root_name);
-        add_capability(tools, &name, "Codex", "Local MCP connector", RANK_PERSONAL);
-    }
-}
-
-fn scan_json_connectors(
-    path: &Path,
-    provider: &str,
-    collection_key: &str,
-    tools: &mut BTreeMap<String, CapabilityBuilder>,
-) {
-    let Ok(source) = fs::read_to_string(path) else {
-        return;
-    };
-    let Ok(value) = serde_json::from_str::<Value>(&source) else {
-        return;
-    };
-    collect_json_connector_keys(&value, collection_key, provider, tools);
-}
-
-fn collect_json_connector_keys(
-    value: &Value,
-    collection_key: &str,
-    provider: &str,
-    tools: &mut BTreeMap<String, CapabilityBuilder>,
-) {
-    match value {
-        Value::Object(object) => {
-            if let Some(Value::Object(connectors)) = object.get(collection_key) {
-                for name in connectors.keys() {
-                    add_capability(
-                        tools,
-                        &humanize(name),
-                        provider,
-                        "Local MCP connector",
-                        RANK_PERSONAL,
-                    );
-                }
-            }
-            for child in object.values() {
-                collect_json_connector_keys(child, collection_key, provider, tools);
-            }
-        }
-        Value::Array(values) => {
-            for child in values {
-                collect_json_connector_keys(child, collection_key, provider, tools);
-            }
-        }
-        _ => {}
-    }
 }
 
 /// The project the teams live in, whose own skill folders the Library lists: the teams root's
@@ -1120,112 +691,6 @@ fn knowledge_contents(teams_root: &Path, item: &DetectedCapability) -> Vec<Capab
         .as_ref()
         .map(|reference| memory_contents(teams_root, reference))
         .unwrap_or_default()
-}
-
-/// Which config format a [`ToolDefinition`] is written in. The three name the same facts
-/// differently, so the format travels with the value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolFormat {
-    /// `mcpServers` in `~/.claude.json` or `~/.claude/settings.json`.
-    Claude,
-    /// `[mcp_servers.<name>]` in `~/.codex/config.toml`.
-    Codex,
-    /// `mcp` in `~/.config/opencode/opencode.json`.
-    OpenCode,
-}
-
-/// One MCP server definition exactly as the operator wrote it, found where a tool was discovered.
-///
-/// Holds values — tokens, environment — so it is deliberately neither `Serialize` nor `Debug`:
-/// `tool_delivery` turns it into something that can be recorded.
-#[derive(Clone, PartialEq)]
-pub struct ToolDefinition {
-    /// `Claude Code`, `Codex` or `OpenCode`.
-    pub provider: String,
-    pub config_path: PathBuf,
-    /// The server's key in that file, which is also the name a harness lists its tools under.
-    pub server: String,
-    pub format: ToolFormat,
-    pub value: Value,
-}
-
-/// Every definition behind one Library tool, in the order the Library scan found them: Claude
-/// Code's (top-level before per-project), then Codex's, then `OpenCode`'s.
-#[must_use]
-pub fn tool_definitions_for(home: &Path, item: &DetectedCapability) -> Vec<ToolDefinition> {
-    let mut found = Vec::new();
-    let mut add =
-        |provider: &str, format: ToolFormat, path: PathBuf, servers: Vec<(String, Value)>| {
-            if !capability_has_source(&item.source, provider) {
-                return;
-            }
-            for (server, value) in servers {
-                if humanize(&server) == item.name {
-                    found.push(ToolDefinition {
-                        provider: provider.to_owned(),
-                        config_path: path.clone(),
-                        server,
-                        format,
-                        value,
-                    });
-                }
-            }
-        };
-    for path in [
-        home.join(".claude.json"),
-        home.join(".claude/settings.json"),
-    ] {
-        let servers = read_json(&path)
-            .map(|value| json_definitions(&value, "mcpServers"))
-            .unwrap_or_default();
-        add("Claude Code", ToolFormat::Claude, path, servers);
-    }
-    let codex = home.join(".codex/config.toml");
-    let servers = fs::read_to_string(&codex)
-        .ok()
-        .and_then(|source| source.parse::<toml::Table>().ok())
-        .and_then(|mut table| table.remove("mcp_servers"))
-        .and_then(|servers| serde_json::to_value(servers).ok())
-        .and_then(|value| match value {
-            Value::Object(servers) => Some(servers.into_iter().collect()),
-            _ => None,
-        })
-        .unwrap_or_default();
-    add("Codex", ToolFormat::Codex, codex, servers);
-    let opencode = home.join(".config/opencode/opencode.json");
-    let servers = read_json(&opencode)
-        .map(|value| json_definitions(&value, "mcp"))
-        .unwrap_or_default();
-    add("OpenCode", ToolFormat::OpenCode, opencode, servers);
-    found
-}
-
-fn read_json(path: &Path) -> Option<Value> {
-    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
-}
-
-/// Every `collection_key` table in a JSON config, the outermost first — the same walk
-/// [`collect_json_connector_keys`] makes for the Library, so delivery finds what the Library listed.
-fn json_definitions(value: &Value, collection_key: &str) -> Vec<(String, Value)> {
-    let mut found = Vec::new();
-    let mut pending = std::collections::VecDeque::from([value]);
-    while let Some(value) = pending.pop_front() {
-        match value {
-            Value::Object(object) => {
-                if let Some(Value::Object(servers)) = object.get(collection_key) {
-                    found.extend(
-                        servers
-                            .iter()
-                            .map(|(key, server)| (key.clone(), server.clone())),
-                    );
-                }
-                pending.extend(object.values());
-            }
-            Value::Array(values) => pending.extend(values),
-            _ => {}
-        }
-    }
-    found
 }
 
 /// A project folder's top-level listing, folders first, and its README when it has one.
@@ -1446,40 +911,6 @@ mod tests {
         }
     }
 
-    /// ADR 0060: Claude Code's claude.ai connectors are listed from its own record, apart from the
-    /// tools `LoomWatch` can give; and a turned-off tool is found under each app's server name.
-    #[test]
-    fn claude_connectors_are_listed_apart_and_a_tool_resolves_to_its_server_names() {
-        let home = TempDirectory::new();
-        fs::write(
-            home.0.join(".claude.json"),
-            r#"{"claudeAiMcpEverConnected": ["claude.ai Notion", "claude.ai Gmail", "claude.ai Notion"],
-                "mcpServers": {"agentmemory": {"command": "npx"}}}"#,
-        )
-        .expect("claude.json");
-        let inventory = detect_capabilities(Some(&home.0), &home.0);
-        let connectors: Vec<&str> = inventory
-            .connectors
-            .iter()
-            .map(|item| item.name.as_str())
-            .collect();
-        assert_eq!(connectors, vec!["claude.ai Gmail", "claude.ai Notion"]);
-        assert!(
-            inventory
-                .tools
-                .iter()
-                .all(|tool| !tool.name.starts_with("claude.ai"))
-        );
-        assert_eq!(
-            tool_servers_named(Some(&home.0), "Agent Memory"),
-            vec!["Agent Memory".to_owned(), "agentmemory".to_owned()]
-        );
-        assert_eq!(
-            tool_servers_named(None, "claude.ai Notion"),
-            vec!["claude.ai Notion".to_owned()]
-        );
-    }
-
     /// A team's memory is a knowledge source, and the row carries the ids wiring it will write —
     /// not a display name a client would have to parse back apart.
     #[test]
@@ -1535,52 +966,76 @@ mod tests {
         );
     }
 
+    /// The Library lists `LoomWatch`'s own skills folder and the project the teams live in, one row
+    /// for a skill in both, and never reads another app's folders or settings.
     #[test]
-    fn discovers_and_deduplicates_skills_and_connectors_without_reading_secrets() {
+    fn lists_loomwatchs_skills_and_the_projects_and_no_apps() {
         let home = TempDirectory::new();
-        fs::create_dir_all(home.0.join(".claude/skills/notebooklm")).expect("skill directory");
-        fs::create_dir_all(home.0.join(".codex/skills/notebooklm")).expect("skill directory");
+        let skills = home.0.join("state/skills");
+        let project = home.0.join("demo");
+        let teams = project.join("teams");
+        fs::create_dir_all(&teams).expect("teams");
+        for folder in [
+            skills.join("notebooklm"),
+            project.join(".agents/skills/notebooklm"),
+        ] {
+            fs::create_dir_all(&folder).expect("skill directory");
+            fs::write(
+                folder.join("SKILL.md"),
+                "---\nname: notebooklm\ndescription: Research notebooks\n---\nsecret body",
+            )
+            .expect("write skill");
+        }
+        write_skill(&project.join(".claude/skills/house-style"), "house-style");
+        write_skill(&skills.join(".removed/old-skill"), "old-skill");
+        // What another app keeps is not LoomWatch's to list.
+        write_skill(&home.0.join(".claude/skills/claude-only"), "claude-only");
         fs::create_dir_all(home.0.join(".codex")).expect("codex directory");
-        fs::write(
-            home.0.join(".claude/skills/notebooklm/SKILL.md"),
-            "---\nname: notebooklm\ndescription: Research notebooks\n---\nsecret body",
-        )
-        .expect("write skill");
-        fs::write(
-            home.0.join(".codex/skills/notebooklm/SKILL.md"),
-            "---\nname: notebooklm\ndescription: Research notebooks\n---\n",
-        )
-        .expect("write skill");
         fs::write(
             home.0.join(".codex/config.toml"),
             "[mcp_servers.agentmemory]\ncommand = \"secret-command\"\n",
         )
         .expect("write config");
 
-        let inventory = detect_capabilities(Some(&home.0), &home.0);
-
-        assert_eq!(inventory.skills.len(), 1);
-        assert_eq!(inventory.skills[0].name, "notebooklm");
-        assert_eq!(inventory.skills[0].source, "Claude Code + Codex");
-        assert_eq!(inventory.tools.len(), 1);
-        assert_eq!(inventory.tools[0].name, "Agent Memory");
+        let inventory = detect_capabilities(Some(&skills), &teams);
+        let listed = inventory
+            .skills
+            .iter()
+            .map(|skill| (skill.name.as_str(), skill.source.as_str()))
+            .collect::<BTreeMap<_, _>>();
+        let project_name = project_label("demo");
+        let both = format!("{LOOMWATCH_SOURCE} + {project_name}");
+        assert_eq!(listed.get("notebooklm"), Some(&both.as_str()));
+        assert_eq!(listed.get("house-style"), Some(&project_name.as_str()));
+        assert_eq!(listed.len(), 2, "{listed:?}");
         assert!(
             !serde_json::to_string(&inventory)
                 .expect("serialize")
                 .contains("secret-command")
         );
 
-        let details = detect_capability_details(Some(&home.0), &home.0, &inventory.skills[0].id)
+        let notebook = inventory
+            .skills
+            .iter()
+            .find(|skill| skill.name == "notebooklm")
+            .expect("listed");
+        let details = detect_capability_details(Some(&skills), &teams, &notebook.id)
             .expect("detected skill details");
         assert_eq!(details.kind, "skill");
         assert_eq!(details.definitions.len(), 2);
-        assert!(
-            details
-                .definitions
-                .iter()
-                .any(|definition| definition.content.contains("secret body"))
+        assert_eq!(
+            details.definitions[0].source, LOOMWATCH_SOURCE,
+            "LoomWatch's own copy is the one a run delivers"
         );
-        assert!(detect_capability_details(Some(&home.0), &home.0, "skill-missing").is_none());
+        assert!(detect_capability_details(Some(&skills), &teams, "skill-missing").is_none());
+        // Delivery reads the same folders: each listed skill can be handed to an agent.
+        for skill in &inventory.skills {
+            assert!(
+                !skill_definitions(Some(&skills), &teams, skill).is_empty(),
+                "{} is listed but could not be delivered",
+                skill.name
+            );
+        }
     }
 
     fn write_skill(path: &Path, name: &str) {
@@ -1631,144 +1086,6 @@ mod tests {
         assert_eq!(names, vec!["notebooklm", "sketch"]);
     }
 
-    /// Both harnesses ship plugin skills. Scanning only Codex's cache listed 123 Codex plugin
-    /// skills against a single Claude Code one, which reads as a broken scan.
-    #[test]
-    fn lists_plugin_skills_from_both_harnesses_and_keeps_same_named_ones_apart() {
-        let home = TempDirectory::new();
-        write_skill(
-            &home.0.join(
-                ".codex/plugins/cache/openai-curated-remote/sales/1.1.0-alpha.2/skills/index",
-            ),
-            "index",
-        );
-        write_skill(
-            &home.0.join(
-                ".codex/plugins/cache/openai-curated-remote/data-analytics/1.0.2/skills/index",
-            ),
-            "index",
-        );
-        // Claude Code's synced plugins carry a generation suffix and park earlier generations in
-        // `.trash/`; its `marketplaces/` folder is a catalog of plugins that are not installed.
-        let synced = ".claude/plugins/synced/account";
-        write_skill(
-            &home
-                .0
-                .join(format!("{synced}/engineering~g3/skills/code-review")),
-            "code-review",
-        );
-        write_skill(
-            &home
-                .0
-                .join(".claude/plugins/.trash/old/engineering~g2/skills/code-review"),
-            "code-review",
-        );
-        write_skill(
-            &home
-                .0
-                .join(format!("{synced}/.staging/1/design/skills/half-written")),
-            "half-written",
-        );
-        write_skill(
-            &home.0.join(
-                ".claude/plugins/marketplaces/official/plugins/uninstalled/skills/catalog-only",
-            ),
-            "catalog-only",
-        );
-
-        let inventory = detect_capabilities(Some(&home.0), &home.0);
-
-        let listed = inventory
-            .skills
-            .iter()
-            .map(|skill| (skill.name.as_str(), skill.source.as_str()))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            listed,
-            vec![
-                ("code-review", "Claude Code · engineering"),
-                ("index", "Codex · data-analytics"),
-                ("index", "Codex · sales"),
-            ]
-        );
-        let code_review = &inventory.skills[0];
-        let definitions = skill_definitions(Some(&home.0), &home.0, code_review);
-        assert_eq!(
-            definitions.len(),
-            1,
-            "the trashed generation is never offered for delivery"
-        );
-        assert!(
-            definitions[0].path.contains("engineering~g3"),
-            "{:?}",
-            definitions[0].path
-        );
-    }
-
-    /// Every app `LoomWatch` drives keeps its own skills somewhere; each folder is listed under the
-    /// app that owns it, and a skill several apps share is one row.
-    #[test]
-    fn lists_skills_from_every_app_and_the_project_the_teams_live_in() {
-        let home = TempDirectory::new();
-        let project = TempDirectory::new();
-        let teams = project.0.join("teams");
-        fs::create_dir_all(&teams).expect("teams folder");
-        write_skill(&home.0.join(".hermes/skills/research/arxiv"), "arxiv");
-        write_skill(
-            &home.0.join(".hermes/profiles/hannah/skills/writing/memo"),
-            "memo",
-        );
-        write_skill(
-            &home.0.join(".hermes/hermes-agent/skills/source-checkout"),
-            "source-checkout",
-        );
-        write_skill(&home.0.join(".openclaw/skills/notion"), "notion");
-        write_skill(&home.0.join(".openclaw/workspace/skills/canvas"), "canvas");
-        write_skill(&home.0.join(".gemini/skills/gemini-only"), "gemini-only");
-        write_skill(
-            &home.0.join(".gemini/extensions/maps/skills/directions"),
-            "directions",
-        );
-        write_skill(&home.0.join(".pi/agent/skills/pi-only"), "pi-only");
-        write_skill(
-            &home.0.join(".config/opencode/skill/opencode-only"),
-            "opencode-only",
-        );
-        write_skill(&home.0.join(".agents/skills/notion"), "notion");
-        write_skill(&project.0.join(".claude/skills/house-style"), "house-style");
-
-        let inventory = detect_capabilities(Some(&home.0), &teams);
-        let listed = inventory
-            .skills
-            .iter()
-            .map(|skill| (skill.name.as_str(), skill.source.as_str()))
-            .collect::<BTreeMap<_, _>>();
-        let project_name = project_label(&project.0.file_name().expect("name").to_string_lossy());
-        assert_eq!(listed.get("arxiv"), Some(&"Hermes"));
-        assert_eq!(listed.get("memo"), Some(&"Hermes"));
-        assert_eq!(listed.get("notion"), Some(&"OpenClaw + Shared"));
-        assert_eq!(listed.get("canvas"), Some(&"OpenClaw"));
-        assert_eq!(listed.get("gemini-only"), Some(&"Gemini"));
-        assert_eq!(listed.get("directions"), Some(&"Gemini · maps"));
-        assert_eq!(listed.get("pi-only"), Some(&"pi"));
-        assert_eq!(listed.get("opencode-only"), Some(&"OpenCode"));
-        assert_eq!(listed.get("house-style"), Some(&project_name.as_str()));
-        assert_eq!(
-            listed.get("source-checkout"),
-            None,
-            "an app's own source tree is not installed skills"
-        );
-
-        // Delivery reads the same folders: each of these can be handed to an agent.
-        for skill in &inventory.skills {
-            assert!(
-                !skill_definitions(Some(&home.0), &teams, skill).is_empty(),
-                "{} is listed but could not be delivered",
-                skill.name
-            );
-        }
-    }
-
     #[test]
     fn a_multi_line_description_reaches_the_library_whole() {
         let home = TempDirectory::new();
@@ -1781,41 +1098,6 @@ mod tests {
         .expect("write skill");
         let inventory = detect_capabilities(Some(&home.0), &home.0);
         assert_eq!(inventory.skills[0].detail, "Turns notes into slides.");
-    }
-
-    /// Personal skills lead the list; a plugin's payload follows, however many there are.
-    #[test]
-    fn ranks_personally_installed_skills_above_plugin_payloads() {
-        let home = TempDirectory::new();
-        write_skill(&home.0.join(".claude/skills/zzz-personal"), "zzz-personal");
-        write_skill(
-            &home.0.join(".codex/skills/.system/review-agent"),
-            "review-agent",
-        );
-        write_skill(&home.0.join(".agents/skills/shared-one"), "shared-one");
-        write_skill(
-            &home
-                .0
-                .join(".codex/plugins/cache/mkt/aaa-plugin/1.0.0/skills/aaa-from-plugin"),
-            "aaa-from-plugin",
-        );
-
-        let inventory = detect_capabilities(Some(&home.0), &home.0);
-
-        let names = inventory
-            .skills
-            .iter()
-            .map(|skill| skill.name.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            names,
-            vec![
-                "zzz-personal",
-                "review-agent",
-                "shared-one",
-                "aaa-from-plugin"
-            ]
-        );
     }
 
     /// A linked folder's contents are its names and its README — and never the bytes of anything
@@ -1905,17 +1187,5 @@ mod tests {
             "Optimization Group Project"
         );
         assert_eq!(project_label("  paperclip  "), "paperclip project");
-    }
-
-    #[test]
-    fn an_explicit_capability_home_is_independent_from_the_runtime_home() {
-        assert_eq!(
-            select_home(Some("/imports".into()), Some("/home/runner".into())),
-            Some(PathBuf::from("/imports"))
-        );
-        assert_eq!(
-            select_home(Some("".into()), Some("/home/runner".into())),
-            Some(PathBuf::from("/home/runner"))
-        );
     }
 }

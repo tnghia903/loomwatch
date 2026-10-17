@@ -25,6 +25,66 @@ const MAX_DESCRIPTION_CHARS: usize = 400;
 
 /// The model new agents get.
 pub const DEFAULT_MODEL: &str = "anthropic/claude-opus-5.5";
+/// The step down from the default, for `LoomWatch`'s own short jobs: rewriting instructions after
+/// a removal. The same step-down the fast tier takes in `ui/src/lib/team-file/tiers.ts`.
+pub const FAST_MODEL: &str = "anthropic/claude-sonnet-5.5";
+
+/// The `OpenRouter` id for a team file's `model`, written for an app `LoomWatch` no longer runs or
+/// already an `OpenRouter` id.
+///
+/// - An `OpenRouter` id (`vendor/model`) is kept, and the `openrouter/` or `openrouter:` prefix the
+///   old `OpenCode` and Hermes catalogs put in front is taken off.
+/// - Claude Code's names (`opus`, `sonnet`, `haiku`, `default`, `claude-sonnet-5-5`) become
+///   Anthropic's, Codex's (`gpt-…`) `OpenAI`'s, and Gemini's (`gemini-…`) Google's.
+/// - Anything else is the default model.
+///
+/// The same rules live in `ui/src/lib/ai/modelIds.ts`, with the same test cases: the app reads team
+/// files itself.
+#[must_use]
+pub fn openrouter_id(model: &str) -> String {
+    let model = model.trim();
+    if model.is_empty() {
+        return DEFAULT_MODEL.to_owned();
+    }
+    let model = model
+        .strip_prefix("openrouter/")
+        .or_else(|| model.strip_prefix("openrouter:"))
+        .unwrap_or(model);
+    if model.contains('/') {
+        return model.to_owned();
+    }
+    let lower = model.to_ascii_lowercase();
+    let family = |name: &str| format!("anthropic/claude-{name}-5.5");
+    match lower.as_str() {
+        "opus" | "best" => return family("opus"),
+        "sonnet" => return family("sonnet"),
+        "haiku" => return family("haiku"),
+        "default" => return DEFAULT_MODEL.to_owned(),
+        _ => {}
+    }
+    if let Some(rest) = lower.strip_prefix("claude-") {
+        // `claude-sonnet-5-5` → `anthropic/claude-sonnet-5.5`; a `[1m]` context suffix goes.
+        let rest = rest.split('[').next().unwrap_or(rest);
+        let mut parts: Vec<&str> = rest.split('-').collect();
+        let numbers = parts
+            .iter()
+            .rev()
+            .take_while(|part| part.chars().all(|c| c.is_ascii_digit()))
+            .count();
+        if numbers == 0 {
+            return family(rest);
+        }
+        let version = parts.split_off(parts.len() - numbers).join(".");
+        return format!("anthropic/claude-{}-{version}", parts.join("-"));
+    }
+    if lower.starts_with("gpt-") || lower.starts_with("o3") || lower.starts_with("o4") {
+        return format!("openai/{lower}");
+    }
+    if lower.starts_with("gemini-") {
+        return format!("google/{lower}");
+    }
+    DEFAULT_MODEL.to_owned()
+}
 
 /// Models worth a newcomer's first look, in order, with why. One that leaves the catalog is left
 /// out; the rest of the catalog is still there to search.
@@ -381,6 +441,32 @@ mod tests {
             ]
         );
         assert_eq!(catalog.default_model, DEFAULT_MODEL);
+    }
+
+    /// The same cases are in `ui/src/lib/ai/modelIds.test.ts`.
+    #[test]
+    fn old_model_names_become_openrouter_ids() {
+        for (given, expected) in [
+            ("anthropic/claude-haiku-5.5", "anthropic/claude-haiku-5.5"),
+            ("openrouter/openai/gpt-6.1-sol", "openai/gpt-6.1-sol"),
+            (
+                "openrouter:anthropic/claude-sonnet-5.5",
+                "anthropic/claude-sonnet-5.5",
+            ),
+            ("fake/offline", "fake/offline"),
+            ("sonnet", "anthropic/claude-sonnet-5.5"),
+            ("opus", "anthropic/claude-opus-5.5"),
+            ("default", DEFAULT_MODEL),
+            ("claude-sonnet-5-5", "anthropic/claude-sonnet-5.5"),
+            ("claude-opus-5-5[1m]", "anthropic/claude-opus-5.5"),
+            ("claude-haiku-4-5", "anthropic/claude-haiku-4.5"),
+            ("gpt-5.5", "openai/gpt-5.5"),
+            ("gemini-3.8-flash", "google/gemini-3.8-flash"),
+            ("", DEFAULT_MODEL),
+            ("something-unknown", DEFAULT_MODEL),
+        ] {
+            assert_eq!(openrouter_id(given), expected, "{given}");
+        }
     }
 
     #[tokio::test]

@@ -396,30 +396,30 @@ $defs:
     maxLength: 512
 
   Spawn:
+    description: >-
+      Where the agent works. Absent means the team file's own folder.
     type: object
     additionalProperties: false
     required:
-      - cmd
-      - args
-      - env
       - cwd
     properties:
       cmd:
         description: >-
-          Bare executable name resolved on PATH, or an absolute path. It is never
-          interpreted by a shell.
+          Retired: the AI app an earlier LoomWatch started for the agent. Every agent runs on
+          LoomWatch's own engine now. Accepted and ignored, so team files written before then
+          still load. Writers must not add it.
+        deprecated: true
         type: string
-        minLength: 1
-        pattern: '^(/[^\x00]*|[A-Za-z0-9._-]+)$'
       args:
+        description: Retired with `cmd`. Accepted and ignored.
+        deprecated: true
         type: array
         items:
           type: string
       env:
-        description: Environment additions passed to the child process; no secrets are stored here.
+        description: Retired with `cmd`. Accepted and ignored.
+        deprecated: true
         type: object
-        propertyNames:
-          pattern: "^[A-Za-z_][A-Za-z0-9_]*$"
         additionalProperties:
           type: string
       cwd:
@@ -451,9 +451,9 @@ $defs:
 
   Agent:
     description: >-
-      One node of the team. A `harness` node runs an ACP harness and must say how (spawn and
-      model). An `operator` node is the person at the keyboard standing in the pipeline: it has an
-      id, sits on edges and takes part in the topological order, and instead of a harness it has a
+      One node of the team. A `harness` node is an agent LoomWatch runs on a model, so it must name
+      the model. An `operator` node is the person at the keyboard standing in the pipeline: it has
+      an id, sits on edges and takes part in the topological order, and instead of a model it has a
       question — its `role` — which is what the panel shows when the pipeline reaches it. See
       docs/TEAM_MEMORY.md, "The operator is a node".
     type: object
@@ -463,19 +463,18 @@ $defs:
       - role
     oneOf:
       - title: Harness node
-        description: Runs an ACP harness, so it must say how to start it and which model to select.
+        description: An agent, so it must say which model it runs on.
         properties:
           kind:
             const: harness
         required:
           - name
-          - spawn
           - model
       - title: Operator node
         description: >-
           A review stop. `spawn`, `model` and `thinkingEffort` are not merely optional here but
-          refused: an operator node spawns nothing and selects no model, so declaring one would
-          make the file say something the daemon does not do. `name` defaults to "You".
+          refused: an operator node works in no folder and selects no model, so declaring one
+          would make the file say something the daemon does not do. `name` defaults to "You".
         properties:
           kind:
             const: operator
@@ -518,11 +517,16 @@ $defs:
       spawn:
         $ref: "#/$defs/Spawn"
       model:
-        description: Harness-specific model selector.
+        description: >-
+          The OpenRouter model id the agent runs on, such as `anthropic/claude-opus-5.5`. Names an
+          earlier LoomWatch wrote for an AI app (`sonnet`, `gpt-5.5`) are read as the matching
+          OpenRouter model.
         type: string
         minLength: 1
       thinkingEffort:
-        description: Optional harness-specific reasoning effort selected independently of the model.
+        description: >-
+          How hard the model reasons: none, minimal, low, medium, high, xhigh or max. Absent uses
+          the model's own default.
         type: string
         minLength: 1
       doneWhen:

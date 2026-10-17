@@ -2,11 +2,9 @@
 
 #![forbid(unsafe_code)]
 
-pub mod acp;
 pub mod agent;
 pub mod ai;
 pub mod api;
-pub mod app_setup;
 pub mod approvals;
 pub mod archive;
 pub mod auto_mode;
@@ -15,12 +13,11 @@ pub mod chat;
 pub mod chosen_knowledge;
 pub mod composer;
 pub mod config;
-pub mod connectors;
 pub mod control;
 pub mod db;
 pub mod delivery;
+pub mod engine;
 mod files;
-pub mod host_runner;
 pub mod import;
 mod jobs;
 pub mod memory;
@@ -48,9 +45,9 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::acp::{AcpProcess, EventLog, ProcessSpec, TeamSessionContext};
 use crate::archive::EventArchive;
 use crate::config::TeamConfig;
+use crate::engine::{AgentRun, EventLog, ProcessSpec, TeamSessionContext};
 use crate::team_bus::{TeamBus, TeamBusMode};
 use crate::workspace::BusMode;
 
@@ -385,7 +382,7 @@ fn materialise_for(
     bus: BusMode,
 ) -> Result<Option<workspace::Workspace>> {
     Ok(workspace::materialise(
-        capabilities::configured_home().as_deref(),
+        capabilities::skills_folder().as_deref(),
         memory_root(team_path),
         team_path,
         &team.id,
@@ -473,7 +470,7 @@ async fn run_team_mode(
     );
     let spec = agent_process_spec(agent, cwd, &composed.delivery, asker);
 
-    let process = AcpProcess::spawn(&spec)
+    let process = AgentRun::spawn(&spec)
         .with_context(|| format!("failed to spawn ACP harness for agent {}", agent.id))?;
     let bus = TeamBus::start(
         team.clone(),
@@ -483,8 +480,7 @@ async fn run_team_mode(
         team_bus_mode,
         Arc::clone(memory),
         lineage.operator.clone(),
-    )
-    .await?;
+    )?;
     let _teardown = bus.abort_on_drop();
     let connection = bus.connection(&agent.id).await?;
     let model_selector = agent.model_selector();
@@ -494,7 +490,7 @@ async fn run_team_mode(
     // surface it had before memory existed.
     let checkpoint_turn = memory
         .notebook_enabled
-        .then(|| crate::acp::BoundaryTurn::new(CHECKPOINT_REQUEST));
+        .then(|| crate::engine::BoundaryTurn::new(CHECKPOINT_REQUEST));
     let run_id = event_log
         .as_ref()
         .map(EventLog::session_id)
@@ -516,7 +512,6 @@ async fn run_team_mode(
         &composed.text,
         TeamSessionContext {
             archive: &archive,
-            exit_timeout,
             bus: Some(&connection),
             event_log: event_log.clone(),
             packet: Some(&packet),
@@ -526,10 +521,8 @@ async fn run_team_mode(
     )
     .await;
     let delegated = bus.wait_for_tasks().await;
-    let shutdown = bus.shutdown().await;
     let mut outcome = root?;
     delegated?;
-    shutdown?;
     set_aside_answer_notes(event_log.as_ref(), &agent.id, &mut outcome).await?;
     outcome.event_count = archive.verify_session(&outcome.session_id).await?;
     if let (Some(turn), Some(run_id)) = (checkpoint_turn.as_ref(), run_id.as_deref()) {
@@ -572,8 +565,7 @@ async fn run_pipeline_mode(
         TeamBusMode::Pipeline,
         Arc::clone(memory),
         lineage.operator.clone(),
-    )
-    .await?;
+    )?;
     let _teardown = bus.abort_on_drop();
 
     let run = run_pipeline_nodes(
@@ -590,10 +582,8 @@ async fn run_pipeline_mode(
     )
     .await;
     let delegated = bus.wait_for_tasks().await;
-    let shutdown = bus.shutdown().await;
     let mut outcome = run?;
     delegated?;
-    shutdown?;
     outcome.event_count = archive.verify_session(&outcome.session_id).await?;
     Ok(outcome)
 }
@@ -752,18 +742,14 @@ async fn run_pipeline_nodes(
         .await?;
         let composed = compose_prompt(agent, &packet, &node_prompt)
             .with_required_skills(&required_skills)
-            .with_delivery(
-                &delivery,
-                workspace::Harness::of(agent) == workspace::Harness::Claude,
-            );
-        let mut process = AcpProcess::spawn(&spec).with_context(|| {
+            .with_delivery(&delivery);
+        let mut process = AgentRun::spawn(&spec).with_context(|| {
             format!("failed to spawn ACP harness for pipeline node {}", agent.id)
         })?;
         let connection = bus.connection(&agent.id).await?;
         let model_selector = agent.model_selector();
         let mut context = TeamSessionContext {
             archive,
-            exit_timeout,
             bus: Some(&connection),
             event_log: shared_log.clone(),
             packet: Some(&packet),
@@ -960,7 +946,7 @@ pub(crate) struct AskedQuestion<'a> {
 /// Team-mode and delegated conversations use the same nonblocking question rendezvous as stages.
 pub(crate) async fn run_answerable_session(
     asked: AskedQuestion<'_>,
-    mut process: AcpProcess,
+    mut process: AgentRun,
     model: &str,
     prompt: &str,
     mut context: TeamSessionContext<'_>,
@@ -1175,7 +1161,7 @@ impl<'a> Work<'a> {
         lineage: &'a RunLineage,
         log: Option<&EventLog>,
         agent_id: &str,
-        recorder: &mut acp::Recorder,
+        recorder: &mut engine::Recorder,
     ) -> Self {
         let run_id = log.map(EventLog::session_id).unwrap_or_default().to_owned();
         let desk = lineage.operator.as_ref().filter(|_| !run_id.is_empty());
@@ -1649,8 +1635,8 @@ async fn stage_handover(
     team: &TeamConfig,
     order: &[String],
     index: usize,
-    process: &mut AcpProcess,
-    recorder: &mut crate::acp::Recorder,
+    process: &mut AgentRun,
+    recorder: &mut crate::engine::Recorder,
     reply: &str,
 ) -> Result<String> {
     let handover = process
@@ -1689,8 +1675,8 @@ async fn checkpoint_stage(
     shared_log: Option<&EventLog>,
     artifact_root: &Path,
     lineage: &RunLineage,
-    process: &mut AcpProcess,
-    recorder: &mut crate::acp::Recorder,
+    process: &mut AgentRun,
+    recorder: &mut crate::engine::Recorder,
     agent_id: &str,
 ) -> Result<()> {
     let boundary = StageBoundary {
@@ -1847,8 +1833,8 @@ impl StageBoundary<'_> {
 
 /// One stage's ACP session, held together so a park can hand both halves back.
 struct StageSession {
-    process: AcpProcess,
-    recorder: crate::acp::Recorder,
+    process: AgentRun,
+    recorder: crate::engine::Recorder,
 }
 
 /// A stage's session while the person at the keyboard is thinking (decision 7).
@@ -1941,7 +1927,7 @@ impl ParkedStage {
     async fn expire(
         &mut self,
         boundary: &StageBoundary<'_>,
-        exit_timeout: Duration,
+        _exit_timeout: Duration,
         handed_over: &str,
     ) {
         let ParkedState::KeptAlive { session, .. } =
@@ -1981,7 +1967,6 @@ impl ParkedStage {
         }
         let context = TeamSessionContext {
             archive: boundary.archive,
-            exit_timeout,
             bus: None,
             event_log: None,
             packet: None,
@@ -2047,20 +2032,19 @@ impl ParkedStage {
         bus: &TeamBus,
         archive: &EventArchive,
         shared_log: Option<&EventLog>,
-        exit_timeout: Duration,
+        _exit_timeout: Duration,
         keep_alive: Duration,
     ) -> Result<()> {
         let ParkedState::Reloadable { acp_session_id } = &self.state else {
             return Ok(());
         };
         let acp_session_id = acp_session_id.clone();
-        let mut process = AcpProcess::spawn(&self.spec).with_context(|| {
+        let mut process = AgentRun::spawn(&self.spec).with_context(|| {
             format!("failed to respawn {} to reopen its session", self.agent_id)
         })?;
         let connection = bus.connection(&self.agent_id).await?;
         let mut context = TeamSessionContext {
             archive,
-            exit_timeout,
             bus: Some(&connection),
             event_log: shared_log.cloned(),
             // Both were archived when this session opened. A reload adds nothing to supply, and a
@@ -2134,13 +2118,12 @@ impl ParkedStage {
     }
 
     /// Let go of this stage for good, once the stop it was parked for is over.
-    async fn release(mut self, archive: &EventArchive, exit_timeout: Duration) -> Result<()> {
+    async fn release(mut self, archive: &EventArchive, _exit_timeout: Duration) -> Result<()> {
         match std::mem::replace(&mut self.state, ParkedState::Released) {
             ParkedState::KeptAlive { session, .. } => {
                 let mut session = *session;
                 let context = TeamSessionContext {
                     archive,
-                    exit_timeout,
                     bus: None,
                     event_log: None,
                     packet: None,
@@ -2153,8 +2136,12 @@ impl ParkedStage {
                     .await
                     .with_context(|| format!("{} failed to close", self.agent_id))?;
             }
-            // Already closed and reaped when it was parked, or already released on expiry.
-            ParkedState::Reloadable { .. } | ParkedState::Released => {}
+            // Closed when it was parked: only its stored history is left to let go of.
+            ParkedState::Reloadable { acp_session_id } => {
+                crate::engine::forget_parked(&acp_session_id);
+            }
+            // Already released on expiry.
+            ParkedState::Released => {}
         }
         Ok(())
     }
@@ -2700,10 +2687,7 @@ pub(crate) fn compose_for(
     };
     composed
         .with_required_skills(&workspace.required_skills)
-        .with_delivery(
-            &workspace.delivery,
-            workspace::Harness::of(agent) == workspace::Harness::Claude,
-        )
+        .with_delivery(&workspace.delivery)
 }
 
 /// What a node is asked to do: the run's goal, plus — for a later pipeline stage — what its
@@ -3228,46 +3212,161 @@ pub(crate) fn resolve_cwd(team_path: &Path, cwd: &Path) -> Result<PathBuf> {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    /// Whether `pid` is still a live process. A zombie counts as gone: it has been killed
-    /// and only awaits reaping by tokio's orphan queue.
-    pub(crate) fn process_is_alive(pid: u32) -> bool {
-        std::process::Command::new("ps")
-            .args(["-o", "stat=", "-p", &pid.to_string()])
-            .output()
-            .is_ok_and(|output| {
-                let state = String::from_utf8_lossy(&output.stdout);
-                let state = state.trim();
-                !state.is_empty() && !state.starts_with('Z')
+    /// One turn a [`stand_in`] takes: what its prompt must contain and must not, and its reply.
+    pub(crate) struct Turn {
+        must: Vec<String>,
+        must_not: Vec<String>,
+        /// Fragments that must appear in this order.
+        ordered: Vec<String>,
+        /// A tool to call before replying, its arguments, and what its answer must contain.
+        call: Option<(String, serde_json::Value, String)>,
+        /// Replies of earlier turns the conversation must still hold: the same session.
+        remembers: Vec<String>,
+        reply: String,
+    }
+
+    /// A turn whose prompt contains every one of `must`, answered with `reply`.
+    pub(crate) fn turn(must: &[&str], reply: &str) -> Turn {
+        Turn {
+            must: must.iter().map(|fragment| (*fragment).to_owned()).collect(),
+            must_not: Vec::new(),
+            ordered: Vec::new(),
+            call: None,
+            remembers: Vec::new(),
+            reply: reply.to_owned(),
+        }
+    }
+
+    impl Turn {
+        /// And whose prompt contains none of `fragments`.
+        pub(crate) fn never(mut self, fragments: &[&str]) -> Self {
+            self.must_not
+                .extend(fragments.iter().map(|fragment| (*fragment).to_owned()));
+            self
+        }
+
+        /// And which calls `tool` with `arguments` first, replying once its answer contains
+        /// `answer`.
+        pub(crate) fn calling(
+            mut self,
+            tool: &str,
+            arguments: serde_json::Value,
+            answer: &str,
+        ) -> Self {
+            self.call = Some((tool.to_owned(), arguments, answer.to_owned()));
+            self
+        }
+
+        /// And whose conversation still holds these earlier replies.
+        pub(crate) fn remembering(mut self, replies: &[&str]) -> Self {
+            self.remembers
+                .extend(replies.iter().map(|reply| (*reply).to_owned()));
+            self
+        }
+
+        /// And in which `fragments` appear in this order.
+        pub(crate) fn in_order(mut self, fragments: &[&str]) -> Self {
+            self.ordered
+                .extend(fragments.iter().map(|fragment| (*fragment).to_owned()));
+            self
+        }
+    }
+
+    /// A stand-in for an agent's model that takes `turns` in order, and the name of the model a
+    /// team file gives it.
+    ///
+    /// It panics on a prompt it was not told to expect — a fragment missing or one that must not
+    /// be there, or a turn past the last — so a run that prompts an agent wrongly fails the test
+    /// that drove it, the way the shell-script agents' exit codes did.
+    pub(crate) fn stand_in(turns: Vec<Turn>) -> (String, crate::agent::Demo) {
+        let taken = std::sync::atomic::AtomicUsize::new(0);
+        let demo = crate::agent::Demo::responder(move |request| {
+            // A tool's answer continues the turn that called it.
+            if request.after_tool() {
+                let index = taken.load(std::sync::atomic::Ordering::SeqCst) - 1;
+                let turn = &turns[index];
+                let answer = match request.messages.last() {
+                    Some(crate::agent::Message::Tool { content, .. }) => content.as_str(),
+                    _ => "",
+                };
+                if let Some((tool, _, expected)) = &turn.call
+                    && !answer.contains(expected.as_str())
+                {
+                    panic!(
+                        "{}'s {tool} call in turn {} came back without {expected:?}: {answer}",
+                        request.agent,
+                        index + 1
+                    );
+                }
+                return Some(crate::agent::Completion::text(&turn.reply));
+            }
+            let index = taken.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let prompt = request.prompt();
+            let Some(turn) = turns.get(index) else {
+                panic!(
+                    "{} was prompted a turn too many (turn {}): {prompt}",
+                    request.agent,
+                    index + 1
+                );
+            };
+            if let Some(missing) = turn
+                .must
+                .iter()
+                .find(|fragment| !prompt.contains(*fragment))
+            {
+                panic!(
+                    "{}'s turn {} lacks {missing:?}: {prompt}",
+                    request.agent,
+                    index + 1
+                );
+            }
+            let mut from = 0;
+            for fragment in &turn.ordered {
+                let Some(at) = prompt[from..].find(fragment.as_str()) else {
+                    panic!(
+                        "{}'s turn {} lacks {fragment:?} after what came before it: {prompt}",
+                        request.agent,
+                        index + 1
+                    );
+                };
+                from += at + fragment.len();
+            }
+            for earlier in &turn.remembers {
+                let held = request.messages.iter().any(|message| {
+                    matches!(message, crate::agent::Message::Assistant { content, .. } if content == earlier)
+                });
+                assert!(
+                    held,
+                    "{}'s turn {} is not in the conversation that said {earlier:?}",
+                    request.agent,
+                    index + 1
+                );
+            }
+            if let Some(found) = turn
+                .must_not
+                .iter()
+                .find(|fragment| prompt.contains(*fragment))
+            {
+                panic!(
+                    "{}'s turn {} has {found:?}, which it must not: {prompt}",
+                    request.agent,
+                    index + 1
+                );
+            }
+            Some(match &turn.call {
+                Some((tool, arguments, _)) => crate::agent::Completion::calls(
+                    "",
+                    vec![crate::agent::ToolCall {
+                        id: format!("call-{}", index + 1),
+                        name: tool.clone(),
+                        arguments: arguments.to_string(),
+                    }],
+                ),
+                None => crate::agent::Completion::text(&turn.reply),
             })
+        });
+        (crate::engine::demo_model(demo.clone()), demo)
     }
-
-    /// What `codex-acp` 2.1.1 sent on 2026-10-14 when a `ChatGPT` sign-in was prompted on
-    /// `gpt-6.1-sol`, verbatim but for the session id: a warning, `threadStatus: systemError`,
-    /// the refusal as agent text, and an `end_turn` answer to prompt `response_id`. As `printf`
-    /// lines for a fake app's shell script.
-    pub(crate) fn codex_refuses_the_model(session_id: &str, response_id: u64) -> String {
-        let response = format!(
-            r#"{{"jsonrpc":"2.0","id":{response_id},"result":{{"stopReason":"end_turn","usage":null,"_meta":{{"quota":{{"token_count":null,"model_usage":[]}}}}}}}}"#
-        );
-        [
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Warning: Model metadata for `gpt-6.1-sol` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.\n\n"}}}}"#,
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"session_info_update","_meta":{"codex":{"threadStatus":{"type":"active","activeFlags":[]}}}}}}"#,
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"session_info_update","_meta":{"codex":{"threadStatus":{"type":"systemError"}}}}}}"#,
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.\n\n"}}}}"#,
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"SESSION","update":{"sessionUpdate":"session_info_update","title":"Reply with exactly one word: ok"}}}"#,
-            &response,
-        ]
-        .iter()
-        .map(|frame| {
-            let frame = frame.replace("SESSION", session_id).replace('\'', r"'\''");
-            ["printf '%s\\n' '", &frame, "'\n"].concat()
-        })
-        .collect()
-    }
-
-    /// The sentence Codex refused the model with in [`codex_refuses_the_model`].
-    pub(crate) const CODEX_REFUSAL: &str =
-        "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.";
 }
 
 #[cfg(test)]
@@ -3277,71 +3376,30 @@ mod tests {
     use memory::PromptSectionKind as Kind;
     use std::collections::BTreeMap;
 
-    /// What every fixture answers the stage-boundary checkpoint request with.
-    ///
-    /// JSON-escaped `\n`, because it is embedded in a `session/update` frame's string. A stage of a
-    /// team with a notebook — with a successor or not — takes this turn as its last, which is the
+    /// What every stand-in answers the stage-boundary checkpoint request with. A stage of a team
+    /// with a notebook — with a successor or not — takes this turn as its last, which is the
     /// contract memory phase 3 adds on top of ADR 0013's handover turn. A stage of a team without
     /// one takes it only before parking on an `ask_user` (ADR 0016 amendment).
-    const CHECKPOINT_ANSWER: &str =
-        "## Done\\nthe stage finished its turn\\n\\n## Next\\nnothing further from this stage";
+    const CHECKPOINT_REPLY: &str =
+        "## Done\nthe stage finished its turn\n\n## Next\nnothing further from this stage";
 
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn pipeline_mode_runs_two_nodes_in_declared_order() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let first_script = r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"pipeline-node-a","configOptions":[]}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"pipeline-node-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"node a "}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"pipeline-node-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r brief_request
-            case "$brief_request" in
-              *'## Summary'*'## Findings'*) ;;
-              *) printf 'expected a handover request: %s\n' "$brief_request" >&2; exit 15 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"pipeline-node-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"node a brief"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r after_handover
-            case "$after_handover" in
-              *'"method":"session/close"'*) ;;
-              *) printf 'a team with no notebook was asked for more than its handover: %s\n' "$after_handover" >&2; exit 17 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
-        "#;
-        let second_script = r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"pipeline-node-b","configOptions":[]}}'
-            IFS= read -r prompt
-            case "$prompt" in
-              *'node a brief'*) ;;
-              *) printf 'expected the first node handover in prompt: %s\n' "$prompt" >&2; exit 13 ;;
-            esac
-            case "$prompt" in
-              *'Asking the stage before you'*) ;;
-              *) printf 'expected the ask offer in prompt: %s\n' "$prompt" >&2; exit 16 ;;
-            esac
-            case "$prompt" in
-              *'b role'*'start the pipeline'*) ;;
-              *) exit 14 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"pipeline-node-b","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"node b done"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r after_work
-            case "$after_work" in
-              *'"method":"session/close"'*) ;;
-              *) printf 'a team with no notebook was asked for a checkpoint: %s\n' "$after_work" >&2; exit 18 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
-        "#;
+        let (first_script, _) = crate::test_support::stand_in(vec![
+            crate::test_support::turn(&[], "node a done"),
+            crate::test_support::turn(&["## Summary", "## Findings"], "node a brief"),
+        ]);
+        let (second_script, _) = crate::test_support::stand_in(vec![crate::test_support::turn(
+            &[
+                "node a brief",
+                "Asking the stage before you",
+                "b role",
+                "start the pipeline",
+            ],
+            "node b done",
+        )]);
 
         let team = Arc::new(TeamConfig {
             schema_version: 1,
@@ -3356,8 +3414,8 @@ mod tests {
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                pipeline_agent("a", vec!["-c".into(), first_script.into()]),
-                pipeline_agent("b", vec!["-c".into(), second_script.into()]),
+                pipeline_agent("a", &first_script),
+                pipeline_agent("b", &second_script),
             ],
             edges: vec![EdgeConfig {
                 from: "a".into(),
@@ -3441,27 +3499,17 @@ mod tests {
     #[tokio::test]
     async fn a_reported_miss_is_reported_and_no_second_turn_is_taken() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let script = r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"done-when","configOptions":[]}}'
-            IFS= read -r prompt
-            case "$prompt" in
-              *'## Done when'*'Every story has a link'*'fix what you can'*'## Not met'*'## Task'*) ;;
-              *) printf 'no done-when in the prompt: %s\n' "$prompt" >&2; exit 61 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"done-when","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"draft\n\n## Not met\n- story two has no link"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r after
-            case "$after" in
-              *'"method":"session/close"'*) ;;
-              *) printf 'a reported miss was prompted again: %s\n' "$after" >&2; exit 62 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
-        "#;
-        let mut agent = pipeline_agent("a", vec!["-c".into(), script.into()]);
+        let (script, _) = crate::test_support::stand_in(vec![crate::test_support::turn(
+            &[
+                "## Done when",
+                "Every story has a link",
+                "fix what you can",
+                "## Not met",
+                "## Task",
+            ],
+            "draft\n\n## Not met\n- story two has no link",
+        )]);
+        let mut agent = pipeline_agent("a", &script);
         agent.done_when = vec!["Every story has a link".into()];
         let team = Arc::new(TeamConfig {
             schema_version: 1,
@@ -3555,53 +3603,29 @@ mod tests {
     #[tokio::test]
     async fn a_check_step_sends_the_work_back_once_and_the_revision_is_the_answer() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let writer = r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"writer","configOptions":[]}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"writer","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"first draft"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r sent_back
-            case "$sent_back" in
-              *'## Summary'*) printf 'a checked stage was asked for a summary: %s\n' "$sent_back" >&2; exit 81 ;;
-              *'Sent back by Checker'*'claim 2 has no link'*'a finding can be wrong'*'## Not changed'*) ;;
-              *) printf 'expected the findings: %s\n' "$sent_back" >&2; exit 81 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"writer","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"second draft, every claim linked\n\n## Not changed\n- Claim 3 kept: the report gives that figure"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
-        "#;
-        let checker = r###"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"checker","configOptions":[]}}'
-            IFS= read -r prompt
-            case "$prompt" in
-              *'### Work from Writer'*'first draft'*'must satisfy'*'Every claim has a link'*) ;;
-              *) printf 'expected the work and its done-when: %s\n' "$prompt" >&2; exit 82 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"checker","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"## Check\n- Not met — Every claim has a link — claim 2 has no link"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r again
-            case "$again" in
-              *'The revised work'*'second draft'*) ;;
-              *) printf 'expected the revised work: %s\n' "$again" >&2; exit 83 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"checker","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"## Check\n- Met — Every claim has a link — all four linked"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
-        "###;
-        let mut writer_agent = pipeline_agent("writer", vec!["-c".into(), writer.into()]);
+        let (writer, _) = crate::test_support::stand_in(vec![
+            crate::test_support::turn(&[], "first draft"),
+            crate::test_support::turn(&["Sent back by Checker", "claim 2 has no link", "a finding can be wrong", "## Not changed"], "second draft, every claim linked\n\n## Not changed\n- Claim 3 kept: the report gives that figure").never(&["## Summary"]),
+        ]);
+        let (checker, _) = crate::test_support::stand_in(vec![
+            crate::test_support::turn(
+                &[
+                    "### Work from Writer",
+                    "first draft",
+                    "must satisfy",
+                    "Every claim has a link",
+                ],
+                "## Check\n- Not met — Every claim has a link — claim 2 has no link",
+            ),
+            crate::test_support::turn(
+                &["The revised work", "second draft"],
+                "## Check\n- Met — Every claim has a link — all four linked",
+            ),
+        ]);
+        let mut writer_agent = pipeline_agent("writer", &writer);
         writer_agent.name = "Writer".into();
         writer_agent.done_when = vec!["Every claim has a link".into()];
-        let mut checker_agent = pipeline_agent("checker", vec!["-c".into(), checker.into()]);
+        let mut checker_agent = pipeline_agent("checker", &checker);
         checker_agent.name = "Checker".into();
         checker_agent.checks = Some("writer".into());
         checker_agent.send_back_once = true;
@@ -3670,40 +3694,24 @@ mod tests {
     }
 
     /// The counterpart: a team with a notebook still asks every stage where its work stands, as
-    /// its last turn, and stores what it says. The scripts exit 41/42 if the checkpoint request
+    /// its last turn, and stores what it says. Each stage's agent panics if the checkpoint request
     /// does not come exactly where it should.
     #[tokio::test]
     async fn a_team_with_a_notebook_still_checkpoints_every_stage() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let stage = |session: &str, handover: bool| {
-            let handover_turn = if handover {
-                format!(
-                    "IFS= read -r _\n{}\n{}\n",
-                    says(session, "## Summary\\nhanded over"),
-                    answers(4, "{\"stopReason\":\"end_turn\"}")
-                )
-            } else {
-                String::new()
-            };
-            let next = if handover { 5 } else { 4 };
-            format!(
-                "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{work_done}\n\
-                 {handover_turn}IFS= read -r request\n\
-                 case \"$request\" in *'Record where this work stands'*) ;; \
-                 *) printf 'expected the checkpoint request: %s\\n' \"$request\" >&2; exit 4{exit} ;; esac\n\
-                 {checkpoint}\n{checkpoint_done}\nIFS= read -r _\n{closed}\n",
-                init = initialize(false),
-                new = answers(
-                    2,
-                    &format!("{{\"sessionId\":\"{session}\",\"configOptions\":[]}}")
-                ),
-                work = says(session, "worked"),
-                work_done = answers(3, "{\"stopReason\":\"end_turn\"}"),
-                exit = if handover { 1 } else { 2 },
-                checkpoint = says(session, CHECKPOINT_ANSWER),
-                checkpoint_done = answers(next, "{\"stopReason\":\"end_turn\"}"),
-                closed = answers(next + 1, "{}"),
-            )
+        let stage = |handover: bool| {
+            let mut turns = vec![crate::test_support::turn(&[], "worked")];
+            if handover {
+                turns.push(crate::test_support::turn(
+                    &["## Summary"],
+                    "## Summary\nhanded over",
+                ));
+            }
+            turns.push(crate::test_support::turn(
+                &["Record where this work stands"],
+                CHECKPOINT_REPLY,
+            ));
+            crate::test_support::stand_in(turns).0
         };
         let team = Arc::new(TeamConfig {
             schema_version: 1,
@@ -3718,8 +3726,8 @@ mod tests {
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                pipeline_agent("a", vec!["-c".into(), stage("nb-a", true)]),
-                pipeline_agent("b", vec!["-c".into(), stage("nb-b", false)]),
+                pipeline_agent("a", &stage(true)),
+                pipeline_agent("b", &stage(false)),
             ],
             edges: vec![EdgeConfig {
                 from: "a".into(),
@@ -3769,78 +3777,30 @@ mod tests {
     #[tokio::test]
     async fn pipeline_mode_joins_diamond_predecessor_outputs() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        // Every stage but the last is asked for a handover once its own turn ends, so it takes a
-        // second prompt before `session/close`.
-        let node_script = |session_id: &str, own_reply: &str, checks: &str, writes_brief: bool| {
-            // A team with no notebook asks no stage for a checkpoint, so a stage closes straight
-            // after its handover, and the last one straight after its work.
-            let tail = if writes_brief {
-                format!(
-                    r#"
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{own_reply} brief"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
-        "#
-                )
-            } else {
-                r#"
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
-        "#
-                .to_owned()
-            };
-            format!(
-                r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"{session_id}","configOptions":[]}}}}'
-            IFS= read -r prompt
-            {checks}
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{own_reply}"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
-            {tail}
-        "#
-            )
+        // Every stage but the last is asked for a handover once its own turn ends. A team with
+        // no notebook asks no stage for a checkpoint.
+        let node = |reply: &str, must: &[&str], never: &[&str], writes_brief: bool| {
+            let mut turns = vec![crate::test_support::turn(must, reply).never(never)];
+            if writes_brief {
+                turns.push(crate::test_support::turn(
+                    &["## Summary"],
+                    &format!("{reply} brief"),
+                ));
+            }
+            crate::test_support::stand_in(turns).0
         };
-
-        let a_script = node_script("pipeline-node-a", "node a done", "", true);
-        let b_script = node_script(
-            "pipeline-node-b",
-            "node b done",
-            r#"case "$prompt" in
-              *'node a done brief'*) ;;
-              *) printf 'expected node a handover in prompt: %s\n' "$prompt" >&2; exit 13 ;;
-            esac"#,
-            true,
-        );
-        let c_script = node_script(
-            "pipeline-node-c",
+        let a_script = node("node a done", &[], &[], true);
+        let b_script = node("node b done", &["node a done brief"], &[], true);
+        let c_script = node(
             "node c done",
-            r#"case "$prompt" in
-              *'node a done brief'*) ;;
-              *) printf 'expected node a handover in prompt: %s\n' "$prompt" >&2; exit 13 ;;
-            esac
-            case "$prompt" in
-              *'node b done brief'*) printf 'must not leak node b handover into node c prompt: %s\n' "$prompt" >&2; exit 14 ;;
-              *) ;;
-            esac"#,
+            &["node a done brief"],
+            &["node b done brief"],
             true,
         );
-        let d_script = node_script(
-            "pipeline-node-d",
+        let d_script = node(
             "node d done",
-            r#"case "$prompt" in
-              *'node b done brief'*) ;;
-              *) printf 'expected node b handover in joined prompt: %s\n' "$prompt" >&2; exit 15 ;;
-            esac
-            case "$prompt" in
-              *'node c done brief'*) ;;
-              *) printf 'expected node c handover in joined prompt: %s\n' "$prompt" >&2; exit 16 ;;
-            esac"#,
+            &["node b done brief", "node c done brief"],
+            &[],
             false,
         );
 
@@ -3865,10 +3825,10 @@ mod tests {
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                pipeline_agent("a", vec!["-c".into(), a_script]),
-                pipeline_agent("b", vec!["-c".into(), b_script]),
-                pipeline_agent("c", vec!["-c".into(), c_script]),
-                pipeline_agent("d", vec!["-c".into(), d_script]),
+                pipeline_agent("a", &a_script),
+                pipeline_agent("b", &b_script),
+                pipeline_agent("c", &c_script),
+                pipeline_agent("d", &d_script),
             ],
             edges: vec![
                 edge("a", "b"),
@@ -3924,64 +3884,41 @@ mod tests {
         Ok(())
     }
 
-    /// A harness that completes exactly one turn with the reply `{reply}` and exits cleanly.
+    /// The model of an agent that takes exactly one turn, replying `reply`.
     ///
     /// **Team mode only.** A pipeline *stage* with a successor takes a handover turn too, so a
-    /// pipeline node built on this would answer that request with `session/close`'s reply. Those
-    /// use [`completing_stage_script`]/[`completing_script_with_handover`].
-    fn completing_script(session_id: &str, reply: &str) -> String {
-        format!(
-            r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"{session_id}","configOptions":[]}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{reply}"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
-        "#
-        )
+    /// pipeline node built on this would panic on that request. Those use
+    /// [`completing_stage_script`]/[`completing_script_with_handover`].
+    fn completing_script(reply: &str) -> String {
+        crate::test_support::stand_in(vec![crate::test_support::turn(&[], reply)]).0
     }
 
-    /// The final stage of a pipeline with no notebook: one work turn, then close.
-    fn completing_stage_script(session_id: &str, reply: &str) -> String {
-        completing_script_with_handover(session_id, reply, false)
+    /// An agent that is never to be prompted: any turn fails, and the run with it, saying so.
+    fn never_prompted() -> String {
+        crate::engine::demo_model(crate::agent::Demo::failing_after(
+            Vec::new(),
+            "this agent must not be prompted",
+        ))
     }
 
-    fn completing_script_with_handover(session_id: &str, reply: &str, handover: bool) -> String {
-        let tail = if handover {
-            format!(
-                r#"
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{reply} handover"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
-        "#
-            )
-        } else {
-            r#"
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
-        "#
-            .to_owned()
-        };
-        format!(
-            r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"{session_id}","configOptions":[]}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{reply}"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
-            {tail}
-        "#
-        )
+    /// The offline demo model, for an agent whose prompt is only composed.
+    const OFFLINE: &str = crate::agent::OFFLINE_MODEL;
+
+    /// The final stage of a pipeline with no notebook: one work turn.
+    fn completing_stage_script(reply: &str) -> String {
+        completing_script_with_handover(reply, false)
+    }
+
+    /// A stage's work turn, and when `handover`, the handover turn after it (`{reply} handover`).
+    fn completing_script_with_handover(reply: &str, handover: bool) -> String {
+        let mut turns = vec![crate::test_support::turn(&[], reply)];
+        if handover {
+            turns.push(crate::test_support::turn(
+                &["## Summary"],
+                &format!("{reply} handover"),
+            ));
+        }
+        crate::test_support::stand_in(turns).0
     }
 
     /// The 2026-10-14 run: Gatherer, on Codex, was refused its model, and the refusal became its
@@ -3989,26 +3926,13 @@ mod tests {
     /// handover is asked for, and the next stage never starts. Each fake app exits non-zero if it
     /// is prompted when it should not be, so this cannot pass by the run merely failing.
     #[tokio::test]
-    async fn a_stage_codex_refused_stops_the_pipeline_instead_of_handing_on_the_refusal()
+    async fn a_stage_whose_turn_failed_stops_the_pipeline_instead_of_handing_on_the_failure()
     -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let gatherer = format!(
-            r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"refused-gatherer","configOptions":[]}}}}'
-            IFS= read -r _
-            {}
-            if IFS= read -r request; then
-              printf 'prompted again after the refusal: %s\n' "$request" >&2
-              exit 9
-            fi
-            "#,
-            test_support::codex_refuses_the_model("refused-gatherer", 3)
-        );
-        let reader = "printf 'the reader must not start after a refused stage\\n' >&2; exit 13";
+        let refusal = "this model is not available on your plan";
+        let gatherer =
+            crate::engine::demo_model(crate::agent::Demo::failing_after(Vec::new(), refusal));
+        let reader = never_prompted();
         let team = Arc::new(TeamConfig {
             schema_version: 1,
             id: "refused-pipeline".into(),
@@ -4022,8 +3946,8 @@ mod tests {
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                pipeline_agent("gatherer", vec!["-c".into(), gatherer]),
-                pipeline_agent("reader", vec!["-c".into(), reader.into()]),
+                pipeline_agent("gatherer", &gatherer),
+                pipeline_agent("reader", &reader),
             ],
             edges: vec![EdgeConfig {
                 from: "gatherer".into(),
@@ -4050,10 +3974,7 @@ mod tests {
         .expect_err("a refused stage fails the run");
         let message = format!("{error:#}");
         assert!(
-            message.starts_with(&format!(
-                "pipeline node gatherer failed: Codex reported an error instead of an answer: {}",
-                test_support::CODEX_REFUSAL
-            )),
+            message.starts_with("pipeline node gatherer failed: ") && message.contains(refusal),
             "{message}"
         );
 
@@ -4094,20 +4015,8 @@ mod tests {
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                pipeline_agent(
-                    "a",
-                    vec![
-                        "-c".into(),
-                        completing_script_with_handover("harness-a", "node a done", true),
-                    ],
-                ),
-                pipeline_agent(
-                    "b",
-                    vec![
-                        "-c".into(),
-                        completing_stage_script("harness-b", "node b done"),
-                    ],
-                ),
+                pipeline_agent("a", &completing_script_with_handover("node a done", true)),
+                pipeline_agent("b", &completing_stage_script("node b done")),
             ],
             edges: vec![EdgeConfig {
                 from: "a".into(),
@@ -4150,21 +4059,23 @@ mod tests {
             .map(|event| event.agent_id.as_str())
             .collect();
         assert_eq!(spawn_order, ["a", "b"]);
-        let harness_ids: Vec<&str> = events
+        let agent_sessions: Vec<&str> = events
             .iter()
             .filter(|event| event.payload["phase"] == "session_new")
-            .filter_map(|event| event.raw.as_ref()?["result"]["sessionId"].as_str())
+            .filter_map(|event| event.payload["result"]["sessionId"].as_str())
             .collect();
-        assert_eq!(
-            harness_ids,
-            ["harness-a", "harness-b"],
-            "raw frames still carry each harness's own ACP session id"
+        assert_eq!(agent_sessions.len(), 2, "{agent_sessions:?}");
+        assert_ne!(
+            agent_sessions[0], agent_sessions[1],
+            "each agent keeps a session of its own"
         );
-        assert!(
-            archive.load_session("harness-a").await?.is_empty()
-                && archive.load_session("harness-b").await?.is_empty(),
-            "nothing leaks into a harness-named session"
-        );
+        for agent_session in agent_sessions {
+            assert!(
+                agent_session == session_id
+                    || archive.load_session(agent_session).await?.is_empty(),
+                "nothing leaks into an agent-named session"
+            );
+        }
         Ok(())
     }
 
@@ -4183,10 +4094,7 @@ mod tests {
             permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
-            agents: vec![pipeline_agent(
-                "solo",
-                vec!["-c".into(), completing_script("harness-solo", "solo done")],
-            )],
+            agents: vec![pipeline_agent("solo", &completing_script("solo done"))],
             edges: Vec::new(),
         });
         let archive = EventArchive::new(pool);
@@ -4220,37 +4128,35 @@ mod tests {
     #[tokio::test]
     async fn what_a_lead_dispatched_comes_back_to_it_before_it_answers() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let lead = format!(
-            r#"set -eu
-IFS= read -r _
-{init}
-IFS= read -r new
-url=$(printf '%s' "$new" | sed -n 's/.*"url":"\([^"]*\)".*/\1/p')
-token=$(printf '%s' "$new" | sed -n 's/.*"Authorization","value":"Bearer \([^"]*\)".*/\1/p')
-{new}
-IFS= read -r _
-accepted=$(curl -s -X POST "$url" -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d '{{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{{"name":"dispatch","arguments":{{"agent":"worker","task":"count the sources"}}}}}}')
-case "$accepted" in *'"accepted":true'*) ;; *) printf 'dispatch was not accepted: %s\n' "$accepted" >&2; exit 51 ;; esac
-{dispatched}
-{done3}
-IFS= read -r results
-case "$results" in *'came back with'*'worker found 42 sources'*) ;; *) printf 'the dispatched reply never came back: %s\n' "$results" >&2; exit 52 ;; esac
-{final_answer}
-{done4}
-IFS= read -r _
-{closed}
-"#,
-            init = answers(
-                1,
-                r#"{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}}}"#
-            ),
-            new = answers(2, "{\"sessionId\":\"lead-l\",\"configOptions\":[]}"),
-            dispatched = says("lead-l", "dispatched the count"),
-            done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            final_answer = says("lead-l", "final: 42 sources"),
-            done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(5, "{}"),
-        );
+        let lead = crate::engine::demo_model(crate::agent::Demo::responder(|request| {
+            let prompt = request.prompt();
+            if prompt.contains("came back with") {
+                return Some(crate::agent::Completion::text(
+                    if prompt.contains("worker found 42 sources") {
+                        "final: 42 sources"
+                    } else {
+                        "the dispatched reply never came back"
+                    },
+                ));
+            }
+            Some(match request.messages.last() {
+                Some(crate::agent::Message::Tool { content, .. }) => {
+                    crate::agent::Completion::text(if content.contains("\"accepted\":true") {
+                        "dispatched the count"
+                    } else {
+                        "dispatch was not accepted"
+                    })
+                }
+                _ => crate::agent::Completion::calls(
+                    "",
+                    vec![crate::agent::ToolCall {
+                        id: "dispatch-1".to_owned(),
+                        name: "dispatch".to_owned(),
+                        arguments: r#"{"agent": "worker", "task": "count the sources"}"#.to_owned(),
+                    }],
+                ),
+            })
+        }));
         let team = Arc::new(TeamConfig {
             schema_version: 1,
             id: "dispatching-team".into(),
@@ -4264,14 +4170,8 @@ IFS= read -r _
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                pipeline_agent("lead", vec!["-c".into(), lead]),
-                pipeline_agent(
-                    "worker",
-                    vec![
-                        "-c".into(),
-                        completing_script("worker-w", "worker found 42 sources"),
-                    ],
-                ),
+                pipeline_agent("lead", &lead),
+                pipeline_agent("worker", &completing_script("worker found 42 sources")),
             ],
             edges: Vec::new(),
         });
@@ -4308,8 +4208,7 @@ IFS= read -r _
     }
 
     #[tokio::test]
-    async fn pre_minted_session_records_a_crash_marker_when_the_harness_never_negotiates()
-    -> Result<()> {
+    async fn a_run_with_no_key_fails_and_its_pre_minted_session_says_why() -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             schema_version: 1,
@@ -4323,7 +4222,7 @@ IFS= read -r _
             permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
-            agents: vec![pipeline_agent("solo", vec!["-c".into(), "exit 3".into()])],
+            agents: vec![pipeline_agent("solo", "anthropic/claude-sonnet-5.5")],
             edges: Vec::new(),
         });
         let archive = EventArchive::new(pool);
@@ -4339,16 +4238,15 @@ IFS= read -r _
             &RunLineage::default(),
         )
         .await
-        .expect_err("a harness that exits before initialize fails the run");
-        assert!(
-            format!("{error:#}").contains("session_id=pre-minted-crash"),
-            "{error:#}"
-        );
+        .expect_err("a run with no key cannot start");
+        assert!(format!("{error:#}").contains("OpenRouter key"), "{error:#}");
         let events = archive.load_verified_session("pre-minted-crash").await?;
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].kind, EventKind::Process);
-        assert_eq!(events[0].payload["phase"], "crashed");
-        assert_eq!(events[0].payload["exitCode"], 3);
+        assert!(
+            events
+                .iter()
+                .all(|event| event.session_id == "pre-minted-crash"),
+            "{events:?}"
+        );
         Ok(())
     }
 
@@ -4378,55 +4276,22 @@ IFS= read -r _
         // Each node refuses the turn unless the constraint is in its opening prompt, under the
         // heading, and unless the heading sits between the role and the task — the section order
         // the UI and `docs/TEAM_MEMORY.md` both state.
-        let assertion = r#"
-            case "$prompt" in
-              *'## Your assigned role'*'## What the team knows'*'## Task'*) ;;
-              *) printf 'memory section out of order: %s\n' "$prompt" >&2; exit 21 ;;
-            esac
-            case "$prompt" in
-              *'Never touch main.'*) ;;
-              *) printf 'brief missing from prompt: %s\n' "$prompt" >&2; exit 22 ;;
-            esac
-        "#;
-        let first_script = format!(
-            r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"brief-node-a","configOptions":[]}}}}'
-            IFS= read -r prompt
-            {assertion}
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"brief-node-a","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"a done"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"brief-node-a","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"a handover"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"brief-node-a","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"\n## Done\nthe stage finished its turn\n\n## Next\nnothing further from this stage"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":6,"result":{{}}}}'
-        "#
-        );
-        let second_script = format!(
-            r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"brief-node-b","configOptions":[]}}}}'
-            IFS= read -r prompt
-            {assertion}
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"brief-node-b","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"b done"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"brief-node-b","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"\n## Done\nthe stage finished its turn\n\n## Next\nnothing further from this stage"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
-        "#
-        );
+        let opening = |reply: &str| {
+            crate::test_support::turn(&["Never touch main."], reply).in_order(&[
+                "## Your assigned role",
+                "## What the team knows",
+                "## Task",
+            ])
+        };
+        let (first_script, _) = crate::test_support::stand_in(vec![
+            opening("a done"),
+            crate::test_support::turn(&["## Summary"], "a handover"),
+            crate::test_support::turn(&["Record where this work stands"], CHECKPOINT_REPLY),
+        ]);
+        let (second_script, _) = crate::test_support::stand_in(vec![
+            opening("b done"),
+            crate::test_support::turn(&["Record where this work stands"], CHECKPOINT_REPLY),
+        ]);
 
         let team = Arc::new(TeamConfig {
             schema_version: 1,
@@ -4451,8 +4316,8 @@ IFS= read -r _
             }),
             guards: GuardsConfig::default(),
             agents: vec![
-                pipeline_agent("a", vec!["-c".into(), first_script]),
-                pipeline_agent("b", vec!["-c".into(), second_script]),
+                pipeline_agent("a", &first_script),
+                pipeline_agent("b", &second_script),
             ],
             edges: vec![EdgeConfig {
                 from: "a".into(),
@@ -4642,6 +4507,7 @@ IFS= read -r _
     #[tokio::test]
     async fn a_decision_recorded_by_stage_one_reaches_stage_three_without_stage_two_restating_it()
     -> Result<()> {
+        use crate::test_support::{stand_in, turn};
         const DECISION_TITLE: &str = "Hermes adapter is out of scope";
         const DECISION_BODY: &str = "Its OAuth path fails on this machine before session/new.";
         let pool = crate::db::Db::temp().await;
@@ -4657,96 +4523,36 @@ IFS= read -r _
         let team_path = scratch.join("team.yaml");
         std::fs::write(&team_path, "").expect("team file");
 
-        // A harness that speaks enough ACP to be handed the bus, and no more. `MCP` is injected
-        // only when the agent declares `agentCapabilities.mcpCapabilities.http`, so a script that
-        // forgets to would silently never see the bus — which is why the write is asserted.
-        let script = |session: &str, body: &str, tail: &str| -> String {
-            format!(
-                concat!(
-                    "set -eu\n",
-                    "IFS= read -r _\n",
-                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"protocolVersion\":1,\"agentCapabilities\":{{\"mcpCapabilities\":{{\"http\":true}}}}}}}}'\n",
-                    "IFS= read -r newsession\n",
-                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{{\"sessionId\":\"{session}\",\"configOptions\":[]}}}}'\n",
-                    "IFS= read -r prompt\n",
-                    "{body}\n",
-                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"{session} done\"}}}}}}}}'\n",
-                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{{\"stopReason\":\"end_turn\"}}}}'\n",
-                    "{tail}\n"
-                ),
-                session = session,
-                body = body,
-                tail = tail
-            )
-        };
-        // A handover turn whose text is fixed here, so "stage 2 did not restate it" is a fact
-        // about this test rather than a hope about a model.
-        let handover_tail = |session: &str, handover: &str| -> String {
-            format!(
-                concat!(
-                    "IFS= read -r _\n",
-                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"{handover}\"}}}}}}}}'\n",
-                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{{\"stopReason\":\"end_turn\"}}}}'\n",
-                    "IFS= read -r _\n",
-                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"{checkpoint}\"}}}}}}}}'\n",
-                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{{\"stopReason\":\"end_turn\"}}}}'\n",
-                    "IFS= read -r _\n",
-                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":6,\"result\":{{}}}}'\n"
-                ),
-                session = session,
-                handover = handover,
-                checkpoint = CHECKPOINT_ANSWER
-            )
-        };
-        let closing_tail = |session: &str| -> String {
-            format!(
-                concat!(
-                    "IFS= read -r _\n",
-                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"{checkpoint}\"}}}}}}}}'\n",
-                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{{\"stopReason\":\"end_turn\"}}}}'\n",
-                    "IFS= read -r _\n",
-                    "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{{}}}}'\n"
-                ),
-                session = session,
-                checkpoint = CHECKPOINT_ANSWER
-            )
-        };
-
-        // Stage 1: record the decision through the bus, and refuse the turn if it did not land.
-        let write_body = format!(
-            concat!(
-                "url=$(printf '%s' \"$newsession\" | sed -n 's/.*\"url\":\"\\([^\"]*\\)\".*/\\1/p')\n",
-                "token=$(printf '%s' \"$newsession\" | sed -n 's/.*Bearer \\([^\"]*\\)\".*/\\1/p')\n",
-                "if [ -z \"$url\" ] || [ -z \"$token\" ]; then printf 'no bus in session/new: %s\\n' \"$newsession\" >&2; exit 29; fi\n",
-                "out=$(curl -sS -X POST \"$url\" -H \"Authorization: Bearer $token\" -H 'Content-Type: application/json' -d '{{\"jsonrpc\":\"2.0\",\"id\":\"w1\",\"method\":\"tools/call\",\"params\":{{\"name\":\"memory_write\",\"arguments\":{{\"kind\":\"decision\",\"title\":\"{title}\",\"body\":\"{body}\",\"sources\":[\"tool result\"],\"idempotencyKey\":\"stage-a-decision\"}}}}}}')\n",
-                "case \"$out\" in\n",
-                "  *'\"recorded\":true'*) ;;\n",
-                "  *) printf 'memory_write did not record: %s\\n' \"$out\" >&2; exit 30 ;;\n",
-                "esac\n"
-            ),
-            title = DECISION_TITLE,
-            body = DECISION_BODY
-        );
         // Stage 2 and stage 3 both refuse the turn unless the decision is in their prompt. Stage 2
         // is the stage that must *not* pass it on; stage 3 is the one whose packet proves it did
-        // not have to.
-        let require_decision = |code: u8| -> String {
-            format!(
-                concat!(
-                    "case \"$prompt\" in\n",
-                    "  *'{body}'*) ;;\n",
-                    "  *) printf 'the decision never reached this stage: %s\\n' \"$prompt\" >&2; exit {code} ;;\n",
-                    "esac\n",
-                    "case \"$prompt\" in\n",
-                    "  *\"From the team's notebook\"*) ;;\n",
-                    "  *) printf 'no notebook section in the prompt: %s\\n' \"$prompt\" >&2; exit {heading} ;;\n",
-                    "esac\n"
-                ),
-                body = DECISION_BODY,
-                code = code,
-                heading = code + 1
-            )
-        };
+        // not have to. Each handover is fixed here, so "stage 2 did not restate it" is a fact
+        // about this test rather than a hope about a model.
+        let needs_decision = [DECISION_BODY, "From the team's notebook"];
+        let (stage_a, _) = stand_in(vec![
+            turn(&[], "note-a done").calling(
+                "memory_write",
+                json!({
+                    "kind": "decision",
+                    "title": DECISION_TITLE,
+                    "body": DECISION_BODY,
+                    "sources": ["tool result"],
+                    "idempotencyKey": "stage-a-decision",
+                }),
+                "\"recorded\":true",
+            ),
+            turn(&["## Summary"], "## Summary\nStage a looked at adapters."),
+            turn(&["Record where this work stands"], CHECKPOINT_REPLY),
+        ]);
+        let (stage_b, _) = stand_in(vec![
+            turn(&needs_decision, "note-b done"),
+            // Deliberately silent about the decision.
+            turn(&["## Summary"], "## Summary\nStage b drafted the report."),
+            turn(&["Record where this work stands"], CHECKPOINT_REPLY),
+        ]);
+        let (stage_c, _) = stand_in(vec![
+            turn(&needs_decision, "note-c done"),
+            turn(&["Record where this work stands"], CHECKPOINT_REPLY),
+        ]);
 
         let team = Arc::new(TeamConfig {
             schema_version: 1,
@@ -4771,36 +4577,9 @@ IFS= read -r _
             }),
             guards: GuardsConfig::default(),
             agents: vec![
-                pipeline_agent(
-                    "a",
-                    vec![
-                        "-c".into(),
-                        script(
-                            "note-a",
-                            &write_body,
-                            &handover_tail("note-a", "## Summary\\nStage a looked at adapters."),
-                        ),
-                    ],
-                ),
-                pipeline_agent(
-                    "b",
-                    vec![
-                        "-c".into(),
-                        script(
-                            "note-b",
-                            &require_decision(23),
-                            // Deliberately silent about the decision.
-                            &handover_tail("note-b", "## Summary\\nStage b drafted the report."),
-                        ),
-                    ],
-                ),
-                pipeline_agent(
-                    "c",
-                    vec![
-                        "-c".into(),
-                        script("note-c", &require_decision(25), &closing_tail("note-c")),
-                    ],
-                ),
+                pipeline_agent("a", &stage_a),
+                pipeline_agent("b", &stage_b),
+                pipeline_agent("c", &stage_c),
             ],
             edges: vec![
                 EdgeConfig {
@@ -4941,7 +4720,7 @@ IFS= read -r _
         let team_path = scratch.join("team.yaml");
         std::fs::write(&team_path, "").expect("team file");
 
-        let never = "exit 99".to_owned();
+        let never = never_prompted();
         let team = Arc::new(TeamConfig {
             schema_version: 1,
             id: "oversize-team".into(),
@@ -4965,10 +4744,7 @@ IFS= read -r _
                 deliver_as: crate::config::DeliverAs::NativeFile,
             }),
             guards: GuardsConfig::default(),
-            agents: vec![
-                pipeline_agent("a", vec!["-c".into(), never.clone()]),
-                pipeline_agent("b", vec!["-c".into(), never]),
-            ],
+            agents: vec![pipeline_agent("a", &never), pipeline_agent("b", &never)],
             edges: vec![EdgeConfig {
                 from: "a".into(),
                 to: "b".into(),
@@ -5013,20 +4789,20 @@ IFS= read -r _
     fn a_stage_record_names_who_handed_it_over_and_whose_direction_it_carries() {
         let team = stop_team(
             "record-senders",
-            pipeline_agent("a", Vec::new()),
-            pipeline_agent("b", Vec::new()),
+            pipeline_agent("a", OFFLINE),
+            pipeline_agent("b", OFFLINE),
             5,
         );
         let empty = memory::ContextPacket::default();
         let handovers = BTreeMap::from([("review".to_owned(), "the findings".to_owned())]);
         let directions = BTreeMap::from([("review".to_owned(), "Approved.".to_owned())]);
         let after_stop = node_task(&team, "b", 2, "goal", &handovers, &directions);
-        let meta = compose_prompt(&pipeline_agent("b", Vec::new()), &empty, &after_stop).meta();
+        let meta = compose_prompt(&pipeline_agent("b", OFFLINE), &empty, &after_stop).meta();
         assert_eq!(meta["stageResultsFrom"], serde_json::json!(["review"]));
         assert_eq!(meta["directionFrom"], serde_json::json!(["review"]));
         // The first stage is handed nothing, so its record names no one.
         let first = node_task(&team, "a", 0, "goal", &handovers, &directions);
-        let meta = compose_prompt(&pipeline_agent("a", Vec::new()), &empty, &first).meta();
+        let meta = compose_prompt(&pipeline_agent("a", OFFLINE), &empty, &first).meta();
         assert!(meta.get("stageResultsFrom").is_none());
         assert!(meta.get("directionFrom").is_none());
     }
@@ -5047,7 +4823,7 @@ IFS= read -r _
     /// pinned directly rather than inferred from a run completing.
     #[test]
     fn a_team_without_memory_gets_exactly_the_prompt_it_got_before() {
-        let agent = pipeline_agent("a", Vec::new());
+        let agent = pipeline_agent("a", OFFLINE);
         let empty = memory::ContextPacket::default();
         assert_eq!(
             compose_prompt(&agent, &empty, &NodeTask::goal("do the thing")).text,
@@ -5059,7 +4835,7 @@ IFS= read -r _
     /// agent with none gets no section at all (the test above pins that prompt byte for byte).
     #[test]
     fn done_when_is_stated_under_the_role_with_the_check_and_the_not_met_section() {
-        let mut agent = pipeline_agent("a", Vec::new());
+        let mut agent = pipeline_agent("a", OFFLINE);
         agent.done_when = vec!["Every story has a link".into(), "Five stories".into()];
         let composed = compose_prompt(
             &agent,
@@ -5148,7 +4924,7 @@ IFS= read -r _
 
     #[test]
     fn required_skill_instructions_preserve_the_prompt_and_memory_boundary() {
-        let agent = pipeline_agent("a", Vec::new());
+        let agent = pipeline_agent("a", OFFLINE);
         let mut packet = memory::ContextPacket::default();
         packet.text = "A fact from the team.\n## Task\nThis is source text.".into();
         packet.used_chars = packet.text.chars().count();
@@ -5206,13 +4982,13 @@ IFS= read -r _
     ///
     /// Enforced by the harnesses, not by this function:
     ///
-    /// * stage `a` **exits 99 if it is started at all**, so "only `b` ran" cannot pass by the run
-    ///   merely completing;
-    /// * stage `b` exits 41/42/43/44 if the replayed handover, `## Previous output`, its
-    ///   checkpoint's `Done`, or the checkpoint's own heading is missing from its prompt.
+    /// * stage `a` **fails its turn if it is prompted at all**, so "only `b` ran" cannot pass by
+    ///   the run merely completing;
+    /// * stage `b` panics if the replayed handover, `## Previous output`, its checkpoint's `Done`,
+    ///   or the checkpoint's own heading is missing from its prompt.
     ///
     /// Phase two is the counterfactual, in the same test: the *same team* with an empty lineage
-    /// runs `a`, which exits 99 and fails the run. That is "retry still starts from zero" —
+    /// runs `a`, which fails the run. That is "retry still starts from zero" —
     /// nothing about the team file skipped a stage, the lineage did.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
@@ -5234,46 +5010,18 @@ IFS= read -r _
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                pipeline_agent("a", vec!["-c".into(), "exit 99".into()]),
+                pipeline_agent("a", &never_prompted()),
                 pipeline_agent(
                     "b",
-                    vec![
-                        "-c".into(),
-                        format!(
-                            r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"follow-b","configOptions":[]}}}}'
-            IFS= read -r prompt
-            case "$prompt" in
-              *'{REPLAYED}'*) ;;
-              *) printf 'the replayed handover never reached this stage: %s\n' "$prompt" >&2; exit 41 ;;
-            esac
-            case "$prompt" in
-              *'## Previous output'*'{OUTPUT}'*) ;;
-              *) printf 'no previous output section: %s\n' "$prompt" >&2; exit 42 ;;
-            esac
-            case "$prompt" in
-              *'sections 1-3 drafted'*) ;;
-              *) printf 'the checkpoint never reached this stage: %s\n' "$prompt" >&2; exit 43 ;;
-            esac
-            case "$prompt" in
-              *'Where this work stopped'*) ;;
-              *) printf 'the checkpoint has no heading: %s\n' "$prompt" >&2; exit 44 ;;
-            esac
-            case "$prompt" in
-              *'Asking the stage before you'*) printf 'a replayed predecessor is not answerable: %s\n' "$prompt" >&2; exit 45 ;;
-              *) ;;
-            esac
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"follow-b","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"node b answered the follow-up"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
-        "#
-                        ),
-                    ],
+                    &crate::test_support::stand_in(vec![
+                        crate::test_support::turn(
+                            &[REPLAYED, "sections 1-3 drafted", "Where this work stopped"],
+                            "node b answered the follow-up",
+                        )
+                        .in_order(&["## Previous output", OUTPUT])
+                        .never(&["Asking the stage before you"]),
+                    ])
+                    .0,
                 ),
             ],
             edges: vec![EdgeConfig {
@@ -5422,32 +5170,17 @@ IFS= read -r _
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                pipeline_agent("a", vec!["-c".into(), "exit 99".into()]),
+                pipeline_agent("a", &never_prompted()),
                 pipeline_agent(
                     "b",
-                    vec![
-                        "-c".into(),
-                        r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"follow-failed-b","configOptions":[]}}'
-            IFS= read -r prompt
-            case "$prompt" in
-              *'Previous output'*) printf 'a failed run has no output to supply: %s\n' "$prompt" >&2; exit 46 ;;
-              *) ;;
-            esac
-            case "$prompt" in
-              *'sections 1-3 drafted'*) ;;
-              *) printf 'the checkpoint is what it starts from: %s\n' "$prompt" >&2; exit 47 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"follow-failed-b","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"node b started from its checkpoint"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
-        "#.to_owned(),
-                    ],
+                    &crate::test_support::stand_in(vec![
+                        crate::test_support::turn(
+                            &["sections 1-3 drafted"],
+                            "node b started from its checkpoint",
+                        )
+                        .never(&["Previous output"]),
+                    ])
+                    .0,
                 ),
             ],
             edges: vec![EdgeConfig {
@@ -5525,19 +5258,16 @@ IFS= read -r _
         Ok(())
     }
 
-    fn pipeline_agent(id: &str, args: Vec<String>) -> AgentConfig {
+    /// An agent running on `model`: a [`crate::test_support::stand_in`], or [`OFFLINE`] for one
+    /// whose prompt is only composed.
+    fn pipeline_agent(id: &str, model: &str) -> AgentConfig {
         AgentConfig {
             kind: config::AgentKind::Harness,
             id: id.into(),
             name: format!("{id} name"),
             role: format!("{id} role"),
-            spawn: SpawnConfig {
-                cmd: "/bin/sh".into(),
-                args,
-                env: BTreeMap::new(),
-                cwd: PathBuf::from("."),
-            },
-            model: "test/model".into(),
+            spawn: SpawnConfig::default(),
+            model: model.into(),
             thinking_effort: None,
             capabilities: Vec::new(),
             memory: None,
@@ -5552,32 +5282,10 @@ IFS= read -r _
 
     // ---- Canvas C: the operator as a node -------------------------------------------------
     //
-    // Every test below drives the *real* pipeline against fake harnesses (docs/WATCH.md,
-    // "Verifying without a paid harness"). The harnesses are the assertion: a script that is
-    // re-prompted, cancelled, or reloaded on the wrong session id exits non-zero and fails the
-    // run, so none of these can pass by the run merely completing.
-
-    /// One `session/update` frame carrying agent text.
-    fn says(session: &str, text: &str) -> String {
-        format!(
-            "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"{text}\"}}}}}}}}'"
-        )
-    }
-
-    /// One JSON-RPC result line.
-    fn answers(id: u32, body: &str) -> String {
-        format!("printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":{id},\"result\":{body}}}'")
-    }
-
-    /// A harness `initialize` result, with or without decision 7's tier flag.
-    fn initialize(load_session: bool) -> String {
-        let capabilities = if load_session {
-            "{\"agentCapabilities\":{\"loadSession\":true},\"protocolVersion\":1}"
-        } else {
-            "{\"protocolVersion\":1}"
-        };
-        format!("IFS= read -r _\n{}\n", answers(1, capabilities))
-    }
+    // Every test below drives the *real* pipeline against stand-in agents (docs/WATCH.md,
+    // "Verifying without a paid model"). The stand-ins are the assertion: one that is prompted
+    // again, or reopened without its earlier conversation, panics and fails the test, so none of
+    // these can pass by the run merely completing.
 
     fn operator_node(id: &str, question: &str) -> AgentConfig {
         AgentConfig {
@@ -5695,41 +5403,26 @@ IFS= read -r _
     /// is never racing them. That is asserted three ways, none of which the run completing would
     /// satisfy on its own:
     ///
-    /// * stage `a` advertises `loadSession`, so its process is **closed and reaped before the wait
-    ///   starts** — its `process: exited` event has a lower `seq` than the `awaiting_operator`
-    ///   marker, which is the archive saying the harness was gone first;
-    /// * `a`'s script exits **67** if it receives one more frame after `session/close` — a
-    ///   re-prompt or a `session/cancel` would fail the run rather than be absorbed;
+    /// * stage `a` is **parked before the wait starts** — its `process: exited` event has a lower
+    ///   `seq` than the `awaiting_operator` marker, which is the archive saying it was put away
+    ///   first;
+    /// * `a`'s agent panics if it is prompted once more — a re-prompt would fail the test rather
+    ///   than be absorbed;
     /// * the answer is deliberately withheld for 600 ms, and the run still succeeds.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn a_review_stop_holds_with_nothing_in_flight_and_never_re_prompts() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
         let pool = crate::db::Db::temp().await;
-        let researcher = format!(
-            "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{work_done}\n\
-             IFS= read -r _\n{handover}\n{handover_done}\nIFS= read -r _\n{closed}\n\
-             if IFS= read -r extra; then printf 'the parked stage was prompted again: %s\\n' \"$extra\" >&2; exit 67; fi\n",
-            init = initialize(true),
-            new = answers(2, "{\"sessionId\":\"warm-1\",\"configOptions\":[]}"),
-            work = says("warm-1", "three harnesses auto-approve"),
-            work_done = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            handover = says("warm-1", "## Summary\\nthe findings, handed over"),
-            handover_done = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(5, "{}"),
-        );
-        let writer = format!(
-            "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{work_done}\n\
-             IFS= read -r _\n{closed}\n",
-            init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"writer\",\"configOptions\":[]}"),
-            work = says("writer", "wrote it"),
-            work_done = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(4, "{}"),
-        );
+        let (researcher, _) = stand_in(vec![
+            turn(&[], "three harnesses auto-approve"),
+            turn(&["## Summary"], "## Summary\nthe findings, handed over"),
+        ]);
+        let (writer, _) = stand_in(vec![turn(&[], "wrote it")]);
         let team = stop_team(
             "held",
-            pipeline_agent("a", vec!["-c".into(), researcher]),
-            pipeline_agent("b", vec!["-c".into(), writer]),
+            pipeline_agent("a", &researcher),
+            pipeline_agent("b", &writer),
             15,
         );
         let archive = EventArchive::new(pool);
@@ -5822,44 +5515,35 @@ IFS= read -r _
     /// The trust boundary (§9) is a claim about *where* text lands, so it is asserted from the
     /// archived prompt record rather than by searching the prose: the answer must be the
     /// `direction` section's text, and must appear in **no other section** — not in the handover
-    /// the stop passed through, not in the memory packet, not in the task. The harness asserts the
-    /// ordering the composer promises ("above the results it reads as source material") and exits
-    /// 51/52/53 if the heading, the ordering or the pass-through handover is missing.
+    /// the stop passed through, not in the memory packet, not in the task. The writer's agent
+    /// asserts the ordering the composer promises, and panics if the heading, the ordering or the
+    /// pass-through handover is missing.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn the_operator_answer_reaches_the_next_stage_as_direction_and_not_as_source_material()
     -> Result<()> {
+        use crate::test_support::{stand_in, turn};
         const ANSWER: &str = "Recommend it. Drop the Gemini section.";
-        const HANDOVER: &str = "## Summary\\nthree harnesses auto-approve";
+        const HANDOVER: &str = "## Summary\nthree harnesses auto-approve";
         let pool = crate::db::Db::temp().await;
-        let researcher = format!(
-            "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
-             IFS= read -r _\n{handover}\n{done4}\nIFS= read -r _\n{closed}\n",
-            init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-a\",\"configOptions\":[]}"),
-            work = says("warm-a", "researched"),
-            done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            handover = says("warm-a", HANDOVER),
-            done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(5, "{}"),
-        );
-        let writer = format!(
-            "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r prompt\n\
-             case \"$prompt\" in\n  *'## Direction from you'*'{ANSWER}'*) ;;\n  *) printf 'no direction heading: %s\\n' \"$prompt\" >&2; exit 51 ;;\nesac\n\
-             case \"$prompt\" in\n  *'## Results from preceding stages'*'## Task'*'## Direction from you'*) ;;\n  *) printf 'direction must come last, after the material it overrules: %s\\n' \"$prompt\" >&2; exit 52 ;;\nesac\n\
-             case \"$prompt\" in\n  *'three harnesses auto-approve'*) ;;\n  *) printf 'the stop did not pass the handover through: %s\\n' \"$prompt\" >&2; exit 53 ;;\nesac\n\
-             case \"$prompt\" in\n  *'Asking the stage before you'*) printf 'a stop has no session to ask: %s\\n' \"$prompt\" >&2; exit 54 ;;\n  *) ;;\nesac\n\
-             {work}\n{done3}\nIFS= read -r _\n{closed}\n",
-            init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-b\",\"configOptions\":[]}"),
-            work = says("warm-b", "wrote it"),
-            done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(4, "{}"),
-        );
+        let (researcher, _) = stand_in(vec![
+            turn(&[], "researched"),
+            turn(&["## Summary"], HANDOVER),
+        ]);
+        let (writer, _) = stand_in(vec![
+            turn(&["three harnesses auto-approve"], "wrote it")
+                .in_order(&[
+                    "## Results from preceding stages",
+                    "## Task",
+                    "## Direction from you",
+                    ANSWER,
+                ])
+                .never(&["Asking the stage before you"]),
+        ]);
         let team = stop_team(
             "direction",
-            pipeline_agent("a", vec!["-c".into(), researcher]),
-            pipeline_agent("b", vec!["-c".into(), writer]),
+            pipeline_agent("a", &researcher),
+            pipeline_agent("b", &writer),
             15,
         );
         let archive = EventArchive::new(pool);
@@ -5948,55 +5632,34 @@ IFS= read -r _
 
     /// **Send back re-prompts the warm predecessor, and the stop runs again on what it produces.**
     ///
-    /// Stage `a` exits 61 if the note never arrives, so a send-back that quietly did nothing fails
-    /// the run. The second handover is a different string from the first, and the stop's second
-    /// question carries it — which is what "runs the stop again" means — and stage `b` exits 62 if
+    /// Stage `a` panics if the note never arrives, so a send-back that quietly did nothing fails
+    /// the test. The second handover is a different string from the first, and the stop's second
+    /// question carries it — which is what "runs the stop again" means — and stage `b` panics if
     /// it is handed the *first* handover instead of the second.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn sending_an_answer_back_re_prompts_the_predecessor_and_runs_the_stop_again()
     -> Result<()> {
+        use crate::test_support::{stand_in, turn};
         const NOTE: &str = "cut the Gemini section";
         let pool = crate::db::Db::temp().await;
-        let researcher = format!(
-            "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
-             IFS= read -r _\n{handover}\n{done4}\nIFS= read -r _\n{checkpoint}\n{done5}\n\
-             IFS= read -r note\n\
-             case \"$note\" in\n  *'{NOTE}'*) ;;\n  *) printf 'the note never reached the predecessor: %s\\n' \"$note\" >&2; exit 61 ;;\nesac\n\
-             {second}\n{done6}\nIFS= read -r _\n{handover2}\n{done7}\nIFS= read -r _\n{checkpoint2}\n{done8}\n\
-             IFS= read -r _\n{closed}\n",
-            init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-a\",\"configOptions\":[]}"),
-            work = says("warm-a", "first pass"),
-            done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            handover = says("warm-a", "HANDOVER ONE"),
-            done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint = says("warm-a", CHECKPOINT_ANSWER),
-            done5 = answers(5, "{\"stopReason\":\"end_turn\"}"),
-            second = says("warm-a", "second pass"),
-            done6 = answers(6, "{\"stopReason\":\"end_turn\"}"),
-            handover2 = says("warm-a", "HANDOVER TWO"),
-            done7 = answers(7, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint2 = says("warm-a", CHECKPOINT_ANSWER),
-            done8 = answers(8, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(9, "{}"),
-        );
-        let writer = format!(
-            "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r prompt\n\
-             case \"$prompt\" in\n  *'HANDOVER TWO'*) ;;\n  *) printf 'the second pass never reached the writer: %s\\n' \"$prompt\" >&2; exit 62 ;;\nesac\n\
-             {work}\n{done3}\nIFS= read -r _\n{checkpoint}\n{done4}\nIFS= read -r _\n{closed}\n",
-            init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-b\",\"configOptions\":[]}"),
-            work = says("warm-b", "wrote the second pass"),
-            done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint = says("warm-b", CHECKPOINT_ANSWER),
-            done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(5, "{}"),
-        );
+        let checkpoint = || turn(&["Record where this work stands"], CHECKPOINT_REPLY);
+        let (researcher, _) = stand_in(vec![
+            turn(&[], "first pass"),
+            turn(&["## Summary"], "HANDOVER ONE"),
+            checkpoint(),
+            turn(&[NOTE], "second pass").remembering(&["first pass"]),
+            turn(&["## Summary"], "HANDOVER TWO"),
+            checkpoint(),
+        ]);
+        let (writer, _) = stand_in(vec![
+            turn(&["HANDOVER TWO"], "wrote the second pass"),
+            checkpoint(),
+        ]);
         let team = stop_team(
             "send-back",
-            pipeline_agent("a", vec!["-c".into(), researcher]),
-            pipeline_agent("b", vec!["-c".into(), writer]),
+            pipeline_agent("a", &researcher),
+            pipeline_agent("b", &writer),
             15,
         );
         let archive = EventArchive::new(pool);
@@ -6069,80 +5732,29 @@ IFS= read -r _
         Ok(())
     }
 
-    /// **A parked Claude-style harness is closed, reloaded with `session/load` on the same id, and
-    /// answers from its earlier context.**
-    ///
-    /// The script is the assertion, and it is written so the two failure modes this can have are
-    /// both fatal:
-    ///
-    /// * a second `session/new` — i.e. the answer arriving on a **fresh** session — exits **72**,
-    ///   caught with a marker file so "the first spawn" and "the second spawn" are distinguishable
-    ///   from inside one script;
-    /// * a `session/load` for any id but `warm-1` exits **71**.
-    ///
-    /// A `session/load` that hands the app back its outward tools (ADR 0044) exits **75**.
-    ///
-    /// The reload also replays two frames, which is what the `session_loaded` / `session_replayed`
-    /// bracket exists to let the projection ignore.
+    /// **A parked stage is put away, reopened on the same session, and answers from its earlier
+    /// context.** Its agent panics if the note arrives in a conversation that does not hold its
+    /// first pass, which is what a fresh session would be.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
-    async fn a_parked_harness_that_advertises_load_session_is_closed_and_reopened_on_the_same_id()
-    -> Result<()> {
+    async fn a_parked_stage_is_reopened_on_the_same_session() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
         let pool = crate::db::Db::temp().await;
-        let marker = std::env::temp_dir().join(format!("loomwatch-load-{}", uuid::Uuid::new_v4()));
-        let researcher = format!(
-            "set -eu\n{init}IFS= read -r second\n\
-             case \"$second\" in\n\
-               *'session/new'*)\n\
-                 if [ -f '{marker}' ]; then printf 'the answer arrived on a fresh session\\n' >&2; exit 72; fi\n\
-                 : > '{marker}'\n\
-                 {new}\n\
-                 IFS= read -r _\n{work}\n{done3}\n\
-                 IFS= read -r _\n{handover}\n{done4}\n\
-                 IFS= read -r _\n{closed}\n\
-                 ;;\n\
-               *'session/load'*)\n\
-                 case \"$second\" in\n  *'\"sessionId\":\"warm-1\"'*) ;;\n  *) printf 'reloaded the wrong session: %s\\n' \"$second\" >&2; exit 71 ;;\nesac\n\
-                 case \"$second\" in\n  *'\"disallowedTools\":[\"Artifact\"'*) ;;\n  *) printf 'the reloaded session got its outward tools back: %s\\n' \"$second\" >&2; exit 75 ;;\nesac\n\
-                 {replay1}\n{replay2}\n{loaded}\n\
-                 IFS= read -r note\n\
-                 case \"$note\" in\n  *'you already found'*) ;;\n  *) printf 'the note did not reach the reloaded session: %s\\n' \"$note\" >&2; exit 73 ;;\nesac\n\
-                 {resumed}\n{done4b}\n\
-                 IFS= read -r _\n{handover_b}\n{done5b}\n\
-                 IFS= read -r _\n{closed_b}\n\
-                 ;;\n\
-             esac\n",
-            init = initialize(true),
-            marker = marker.display(),
-            new = answers(2, "{\"sessionId\":\"warm-1\",\"configOptions\":[]}"),
-            work = says("warm-1", "first pass"),
-            done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            handover = says("warm-1", "HANDOVER ONE"),
-            done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(5, "{}"),
-            replay1 = says("warm-1", "replayed: first pass"),
-            replay2 = says("warm-1", "replayed: HANDOVER ONE"),
-            loaded = answers(2, "{}"),
-            resumed = says("warm-1", "second pass, from what I already had"),
-            done4b = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            handover_b = says("warm-1", "HANDOVER TWO"),
-            done5b = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            closed_b = answers(5, "{}"),
-        );
-        let writer = format!(
-            "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r prompt\n\
-             case \"$prompt\" in\n  *'HANDOVER TWO'*) ;;\n  *) printf 'the reloaded pass never reached the writer: %s\\n' \"$prompt\" >&2; exit 74 ;;\nesac\n\
-             {work}\n{done3}\nIFS= read -r _\n{closed}\n",
-            init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-b\",\"configOptions\":[]}"),
-            work = says("warm-b", "wrote it"),
-            done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(4, "{}"),
-        );
+        let (researcher, _) = stand_in(vec![
+            turn(&[], "first pass"),
+            turn(&["## Summary"], "HANDOVER ONE"),
+            turn(
+                &["you already found"],
+                "second pass, from what I already had",
+            )
+            .remembering(&["first pass", "HANDOVER ONE"]),
+            turn(&["## Summary"], "HANDOVER TWO"),
+        ]);
+        let (writer, _) = stand_in(vec![turn(&["HANDOVER TWO"], "wrote it")]);
         let team = stop_team(
             "reloaded",
-            pipeline_agent("a", vec!["-c".into(), researcher]),
-            pipeline_agent("b", vec!["-c".into(), writer]),
+            pipeline_agent("a", &researcher),
+            pipeline_agent("b", &writer),
             15,
         );
         let archive = EventArchive::new(pool);
@@ -6187,7 +5799,6 @@ IFS= read -r _
         )
         .await?;
         answering.await?;
-        let _ = std::fs::remove_file(&marker);
         assert_eq!(outcome.reply, "wrote it");
 
         let events = archive.load_verified_session(&run_id).await?;
@@ -6197,165 +5808,46 @@ IFS= read -r _
                 event.kind == EventKind::SessionMeta && event.payload["phase"] == "session_loaded"
             })
             .expect("the reload is bracketed by a session_loaded marker");
-        assert_eq!(loaded.payload["sessionId"], "warm-1");
+        let opened = events
+            .iter()
+            .find(|event| event.agent_id == "a" && event.payload["phase"] == "session_new")
+            .expect("a opened a session");
+        assert_eq!(
+            loaded.payload["sessionId"], opened.payload["result"]["sessionId"],
+            "the parked session is the one reopened"
+        );
         let replayed = events
             .iter()
             .find(|event| {
                 event.kind == EventKind::SessionMeta && event.payload["phase"] == "session_replayed"
             })
             .expect("and closed by a session_replayed marker");
-        assert!(
-            replayed.payload["frames"].as_u64().unwrap_or(0) >= 2,
-            "the harness replayed its history between the two markers: {}",
-            replayed.payload
-        );
         assert!(loaded.seq < replayed.seq);
-        Ok(())
-    }
-
-    /// **A kept-alive stage past `keepAliveMinutes` is checkpointed and released, and send-back is
-    /// withdrawn.**
-    ///
-    /// `keepAliveMinutes: 0` is the window this test runs with. The schema's minimum is 1, so an
-    /// operator cannot write it; the in-memory struct allows it, which is what lets the expiry be
-    /// asserted in milliseconds rather than a quarter of an hour.
-    ///
-    /// Expiry records a coordinator checkpoint from the boundary without another model turn.
-    /// The fake exits 92 if it is re-prompted instead of closed. Send-back is then withdrawn.
-    #[tokio::test]
-    async fn a_kept_alive_stage_past_its_window_is_checkpointed_released_and_withdraws_send_back()
-    -> Result<()> {
-        let pool = crate::db::Db::temp().await;
-        let researcher = format!(
-            "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
-             IFS= read -r _\n{handover}\n{done4}\n\
-             IFS= read -r closing\ncase \"$closing\" in *session/close*) ;; *) exit 92 ;; esac\n{closed}\n",
-            init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-a\",\"configOptions\":[]}"),
-            work = says("warm-a", "researched"),
-            done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            handover = says("warm-a", "HANDOVER ONE"),
-            done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(5, "{}"),
-        );
-        let writer = format!(
-            "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
-             IFS= read -r _\n{closed}\n",
-            init = initialize(false),
-            new = answers(2, "{\"sessionId\":\"warm-b\",\"configOptions\":[]}"),
-            work = says("warm-b", "wrote it"),
-            done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(4, "{}"),
-        );
-        let team = stop_team(
-            "expired",
-            pipeline_agent("a", vec!["-c".into(), researcher]),
-            pipeline_agent("b", vec!["-c".into(), writer]),
-            0,
-        );
-        let archive = EventArchive::new(pool);
-        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
-        let (_registry, desk, run_id) = operator_desk(&team, &archive);
-        let answering = tokio::spawn({
-            let desk = desk.clone();
-            let run_id = run_id.clone();
-            async move {
-                let released = wait_for_stop(&desk, &run_id, |waiting| {
-                    waiting.park == crate::operator::ParkTier::Released
-                })
-                .await;
-                desk.deliver(&run_id, &released.node, answer("go ahead", None))
-                    .await
-                    .expect("the stop still takes an answer after the window closed");
-                released
-            }
-        });
-        let outcome = run_pipeline_mode(
-            &team,
-            &team_path,
-            archive.clone(),
-            "go",
-            Duration::from_secs(5),
-            Some(EventLog::new(archive.clone(), run_id.clone())),
-            &Arc::new(memory::TeamMemory::default()),
-            &RunLineage {
-                operator: Some(desk.clone()),
-                ..RunLineage::default()
-            },
-        )
-        .await?;
-        let released = answering.await?;
-        assert_eq!(outcome.reply, "wrote it");
-        assert!(
-            !released.send_back_available,
-            "a released session cannot take a note"
-        );
-        assert!(
-            released.park_note.contains("released"),
-            "{}",
-            released.park_note
-        );
-        let checkpoints = archive
-            .notebook()
-            .checkpoints(&run_id, Some("a"))
-            .await
-            .map_err(|error| anyhow::anyhow!("{error}"))?;
-        // A team with no notebook asked no stage-end checkpoint, so the coordinator's row is the
-        // only one, and what the stage handed the stop is what it says was done.
-        assert_eq!(checkpoints.len(), 1, "{checkpoints:?}");
-        assert!(
-            checkpoints.last().is_some_and(|point| point.source
-                == memory::CheckpointSource::Coordinator
-                && point.next.is_empty()
-                && point.done == "HANDOVER ONE"),
-            "{checkpoints:?}"
-        );
         Ok(())
     }
 
     /// **`ask_user` returns immediately, the turn ends normally, and the answer is the next turn.**
     ///
-    /// The stage calls `ask_user` over the bus with `curl`, reading the endpoint and bearer token
-    /// out of what `session/new` was handed, and **exits 81 if the call does not come back parked**
-    /// — which is the whole contract: a tool that waited for a person would have hung here until
-    /// the ACP request timeout cancelled the turn. It then ends its turn, exactly as the tool's
-    /// instruction says, and exits 82 if the operator's answer does not arrive as its next prompt.
+    /// The stage calls `ask_user`, and **panics if the call does not come back parked** — which is
+    /// the whole contract: a tool that waited for a person would hold the turn open until they
+    /// answered. It then ends its turn, exactly as the tool's instruction says, and panics if the
+    /// operator's answer does not arrive as its next prompt.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn ask_user_returns_at_once_and_the_answer_arrives_as_the_next_turn() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
         let pool = crate::db::Db::temp().await;
-        let asking = format!(
-            "set -eu\n{init}IFS= read -r new\n{new}\n\
-             url=$(printf '%s' \"$new\" | sed -n 's/.*\"url\":\"\\([^\"]*\\)\".*/\\1/p')\n\
-             token=$(printf '%s' \"$new\" | sed -n 's/.*\"Authorization\",\"value\":\"Bearer \\([^\"]*\\)\".*/\\1/p')\n\
-             IFS= read -r _\n\
-             parked=$(curl -s -X POST \"$url\" -H \"Authorization: Bearer $token\" -H 'Content-Type: application/json' \\\n\
-               -d '{{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",\"params\":{{\"name\":\"ask_user\",\"arguments\":{{\"question\":\"which budget applies?\"}}}}}}')\n\
-             case \"$parked\" in\n  *'\"parked\":true'*) ;;\n  *) printf 'ask_user did not park: %s\\n' \"$parked\" >&2; exit 81 ;;\nesac\n\
-             {work}\n{done3}\n\
-             IFS= read -r _\n{checkpoint}\n{done4}\n\
-             IFS= read -r resumed\n\
-             case \"$resumed\" in\n  *'the second one'*) ;;\n  *) printf 'the answer never arrived as a turn: %s\\n' \"$resumed\" >&2; exit 82 ;;\nesac\n\
-             {after}\n{done5}\n\
-             IFS= read -r _\n{handover}\n{handover_done}\nIFS= read -r _\n{closed}\n",
-            init = format_args!(
-                "IFS= read -r _\n{}\n",
-                answers(
-                    1,
-                    r#"{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}}}"#
-                )
+        let (asking, _) = stand_in(vec![
+            turn(&[], "asked and stopped").calling(
+                "ask_user",
+                json!({"question": "which budget applies?"}),
+                "\"parked\":true",
             ),
-            new = answers(2, "{\"sessionId\":\"asker\",\"configOptions\":[]}"),
-            work = says("asker", "asked and stopped"),
-            done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-            checkpoint = says("asker", CHECKPOINT_ANSWER),
-            done4 = answers(4, "{\"stopReason\":\"end_turn\"}"),
-            after = says("asker", "used the second budget"),
-            done5 = answers(5, "{\"stopReason\":\"end_turn\"}"),
-            handover = says("asker", "used the second budget"),
-            handover_done = answers(6, "{\"stopReason\":\"end_turn\"}"),
-            closed = answers(7, "{}"),
-        );
+            turn(&["Record where this work stands"], CHECKPOINT_REPLY),
+            turn(&["the second one"], "used the second budget"),
+            turn(&["## Summary"], "used the second budget"),
+        ]);
+        let (after, _) = stand_in(vec![turn(&[], "done")]);
         let team = Arc::new(TeamConfig {
             schema_version: 1,
             id: "asking".into(),
@@ -6368,24 +5860,7 @@ IFS= read -r _
             permissions: crate::config::TeamPermissions::default(),
             memory: None,
             guards: GuardsConfig::default(),
-            agents: vec![
-                pipeline_agent("a", vec!["-c".into(), asking]),
-                pipeline_agent(
-                    "b",
-                    vec![
-                        "-c".into(),
-                        format!(
-                            "set -eu\n{init}IFS= read -r _\n{new}\nIFS= read -r _\n{work}\n{done3}\n\
-                             IFS= read -r _\n{closed}\n",
-                            init = initialize(false),
-                            new = answers(2, "{\"sessionId\":\"after\",\"configOptions\":[]}"),
-                            work = says("after", "done"),
-                            done3 = answers(3, "{\"stopReason\":\"end_turn\"}"),
-                            closed = answers(4, "{}"),
-                        ),
-                    ],
-                ),
-            ],
+            agents: vec![pipeline_agent("a", &asking), pipeline_agent("b", &after)],
             edges: vec![EdgeConfig {
                 from: "a".into(),
                 to: "b".into(),

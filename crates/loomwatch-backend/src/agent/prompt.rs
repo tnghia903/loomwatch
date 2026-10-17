@@ -13,6 +13,31 @@ use std::path::Path;
 
 use super::skills::{SkillEntry, prompt_section};
 
+/// The project notes file an agent reads from its work folder: the team's Brief when it is
+/// delivered as a file (`docs/TEAM_MEMORY.md`, channel 2), or what the person keeps there. The
+/// name the Agent Skills apps share.
+pub(crate) const PROJECT_NOTES: &str = "AGENTS.md";
+/// More than any Brief `LoomWatch` writes; a longer file is cut, and the agent is told so.
+const MAX_NOTES_CHARS: usize = 40_000;
+
+/// The work folder's `AGENTS.md`, cut to [`MAX_NOTES_CHARS`], or `None` when there is none.
+pub(crate) fn project_notes(cwd: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(cwd.join(PROJECT_NOTES)).ok()?;
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if text.chars().count() <= MAX_NOTES_CHARS {
+        return Some(text.to_owned());
+    }
+    let mut cut: String = text.chars().take(MAX_NOTES_CHARS).collect();
+    let _ = write!(
+        cut,
+        "\n\n[{PROJECT_NOTES} goes on; read the file for the rest.]"
+    );
+    Some(cut)
+}
+
 /// What the agent can do in this session, so the instructions mention only tools it has.
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::struct_excessive_bools)]
@@ -29,6 +54,7 @@ pub(crate) fn system_prompt(
     cwd: &Path,
     abilities: Abilities,
     skills: &[SkillEntry],
+    notes: Option<&str>,
     extra: Option<&str>,
 ) -> String {
     let mut prompt = String::from(
@@ -95,6 +121,12 @@ pub(crate) fn system_prompt(
         prompt.push('\n');
         prompt.push_str(&skills);
     }
+    if let Some(notes) = notes {
+        let _ = write!(
+            prompt,
+            "\n## Project notes\nFrom {PROJECT_NOTES} in your work folder:\n\n{notes}\n"
+        );
+    }
     if let Some(extra) = extra.map(str::trim).filter(|extra| !extra.is_empty()) {
         prompt.push('\n');
         prompt.push_str(extra);
@@ -116,7 +148,13 @@ mod tests {
             plan: false,
             ask_user: false,
         };
-        let talking = system_prompt(Path::new("/w"), none, &[], Some("You are Ask LoomWatch."));
+        let talking = system_prompt(
+            Path::new("/w"),
+            none,
+            &[],
+            None,
+            Some("You are Ask LoomWatch."),
+        );
         assert!(!talking.contains("update_plan") && !talking.contains("run_command"));
         assert!(talking.trim_end().ends_with("You are Ask LoomWatch."));
         let all = Abilities {
@@ -126,8 +164,27 @@ mod tests {
             plan: true,
             ask_user: true,
         };
-        let working = system_prompt(Path::new("/w"), all, &[], None);
+        let working = system_prompt(Path::new("/w"), all, &[], Some("Cite every source."), None);
         assert!(working.contains("update_plan") && working.contains("Your work folder is /w"));
         assert!(working.contains("ask_user"));
+        assert!(working.contains("From AGENTS.md in your work folder:\n\nCite every source.\n"));
+    }
+
+    #[test]
+    fn the_project_notes_are_read_from_the_work_folder_and_cut_when_long() {
+        let folder = std::env::temp_dir().join(format!("loomwatch-notes-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("folder");
+        assert_eq!(project_notes(&folder), None);
+        std::fs::write(folder.join(PROJECT_NOTES), "  \n").expect("blank");
+        assert_eq!(project_notes(&folder), None, "a blank file says nothing");
+        std::fs::write(folder.join(PROJECT_NOTES), "# Brief\nWrite in French.\n").expect("notes");
+        assert_eq!(
+            project_notes(&folder).as_deref(),
+            Some("# Brief\nWrite in French.")
+        );
+        std::fs::write(folder.join(PROJECT_NOTES), "x".repeat(MAX_NOTES_CHARS + 10)).expect("long");
+        let long = project_notes(&folder).expect("long notes");
+        assert!(long.ends_with("[AGENTS.md goes on; read the file for the rest.]"));
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }

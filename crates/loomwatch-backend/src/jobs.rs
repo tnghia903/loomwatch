@@ -126,19 +126,18 @@ pub(crate) struct JobSpec {
     /// The figure it wears in Your agents. Absent, it wears one picked from its id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) figure: Option<JobFigure>,
-    /// App ids in the order the job prefers them. Any installed app beats none, so a job whose
-    /// apps are all missing still runs, on the best app the computer has.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Retired: the AI apps an earlier `LoomWatch` ran the job on. Read so a job saved then still
+    /// loads, ignored, and never written again.
+    #[serde(default, skip_serializing)]
     pub(crate) apps: Vec<String>,
-    /// Model id for the first of `apps`. Model ids belong to one app, so it is applied only when
-    /// the job runs there.
+    /// The `OpenRouter` model id it runs on; absent means the default model. A name saved for an
+    /// AI app (`sonnet`, `gpt-5.5`) is read as the matching `OpenRouter` id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) model: Option<String>,
-    /// How hard that model thinks (one of the efforts the app lists for it). Like the model, it
-    /// belongs to the first of `apps`; absent means the app's own default.
+    /// How hard that model thinks; absent means the model's own default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) thinking_effort: Option<String>,
-    /// Skill names, delivered to whichever app the job runs on (ADR 0021 routes them).
+    /// Skill names, delivered with the job.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) skills: Vec<String>,
     /// Tools it is given: MCP servers on this computer, by the name the capability scan lists. A
@@ -169,7 +168,6 @@ impl JobSpec {
     fn copies_differently(&self, other: &JobSpec) -> bool {
         self.name != other.name
             || self.instructions != other.instructions
-            || self.apps != other.apps
             || self.model != other.model
             || self.thinking_effort != other.thinking_effort
             || self.skills != other.skills
@@ -244,14 +242,6 @@ pub(crate) fn is_job_id(id: &str) -> bool {
         && !id.starts_with('-')
         && !id.ends_with('-')
         && !id.contains("--")
-}
-
-fn is_app_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 64
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// An icon is one the UI draws; a blank one is none.
@@ -334,16 +324,6 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
     }
     let icon = normalize_icon(spec.icon)?;
     let figure = normalize_figure(spec.figure)?;
-    let mut apps = Vec::new();
-    for app in spec.apps {
-        let app = app.trim().to_owned();
-        if !is_app_id(&app) {
-            return Err(format!("{app:?} is not an app id."));
-        }
-        if !apps.contains(&app) {
-            apps.push(app);
-        }
-    }
     let model = spec
         .model
         .map(|model| model.trim().to_owned())
@@ -354,6 +334,7 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
     {
         return Err("That model id is too long.".into());
     }
+    let model = model.map(|model| crate::ai::openrouter_id(&model));
     let thinking_effort = spec
         .thinking_effort
         .map(|effort| effort.trim().to_owned())
@@ -367,9 +348,9 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
     let skills = normalize_names(spec.skills, "skill")?;
     let tools = normalize_names(spec.tools, "tool")?;
     let done_when = normalize_done_when(spec.done_when)?;
-    if apps.len() > MAX_LIST || skills.len() > MAX_LIST || tools.len() > MAX_LIST {
+    if skills.len() > MAX_LIST || tools.len() > MAX_LIST {
         return Err(format!(
-            "A job can name at most {MAX_LIST} apps, {MAX_LIST} skills and {MAX_LIST} tools."
+            "A job can name at most {MAX_LIST} skills and {MAX_LIST} tools."
         ));
     }
     let note = spec.note.trim().to_owned();
@@ -384,7 +365,7 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
         instructions,
         icon,
         figure,
-        apps,
+        apps: Vec::new(),
         model,
         thinking_effort,
         skills,
@@ -770,8 +751,8 @@ mod tests {
             instructions: "Write the release notes.".into(),
             icon: Some("write".into()),
             figure: None,
-            apps: vec!["codex".into(), "claude".into()],
-            model: Some("gpt-5.6".into()),
+            apps: Vec::new(),
+            model: Some("openai/gpt-5.6".into()),
             thinking_effort: None,
             skills: vec!["release-style".into()],
             tools: Vec::new(),
@@ -942,17 +923,30 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_apps_and_skills_collapse_and_blank_optionals_drop() {
+    fn duplicate_skills_collapse_and_blank_optionals_drop() {
         let mut messy = spec("x");
-        messy.apps = vec!["codex".into(), " codex ".into(), "claude".into()];
         messy.skills = vec!["a".into(), "a".into()];
         messy.model = Some("  ".into());
         messy.icon = Some(String::new());
         let clean = normalize(messy).expect("valid");
-        assert_eq!(clean.apps, vec!["codex", "claude"]);
         assert_eq!(clean.skills, vec!["a"]);
         assert_eq!(clean.model, None);
         assert_eq!(clean.icon, None);
+    }
+
+    /// A job saved for an AI app still loads: its apps are dropped, and the model it named there
+    /// becomes the matching `OpenRouter` model.
+    #[test]
+    fn a_job_saved_for_an_app_loses_the_app_and_keeps_its_model() {
+        let old: JobSpec = serde_yaml::from_str(
+            "name: Writer\ninstructions: Write.\napps: [claude, codex]\nmodel: sonnet\n",
+        )
+        .expect("an old job still parses");
+        let clean = normalize(old).expect("valid");
+        assert!(clean.apps.is_empty());
+        assert_eq!(clean.model.as_deref(), Some("anthropic/claude-sonnet-5.5"));
+        let written = serde_yaml::to_string(&clean).expect("yaml");
+        assert!(!written.contains("apps"), "{written}");
     }
 
     #[test]

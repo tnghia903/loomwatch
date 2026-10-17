@@ -16,7 +16,6 @@ use std::fmt::Write as _;
 
 use crate::config::{AgentConfig, TeamConfig};
 use crate::skill_routing::{self, BusMode};
-use crate::workspace::Harness;
 
 /// The heading the section is rendered under.
 pub const HEADING: &str = "## Your place in the team";
@@ -44,10 +43,7 @@ pub fn for_lead(team: &TeamConfig, agent: &AgentConfig) -> Option<String> {
         agent.name,
         team_label(team)
     );
-    // A harness without HTTP MCP is offered no Team Bus tools at all, so naming teammates it
-    // cannot reach would be an instruction it cannot follow.
-    if skill_routing::bus_tools(Harness::of(agent), BusMode::Team, agent.allow_recruiting).delegate
-    {
+    if skill_routing::bus_tools(BusMode::Team, agent.allow_recruiting).delegate {
         text.push_str(
             "\n\nYour teammates, whom you can hand parts of the work to with your Team Bus tools:",
         );
@@ -98,12 +94,7 @@ pub fn for_stage(
         order.len(),
         team_label(team)
     );
-    let ids = skill_routing::bus_tools(
-        Harness::of(agent),
-        BusMode::Pipeline,
-        agent.allow_recruiting,
-    )
-    .reachable();
+    let ids = skill_routing::bus_tools(BusMode::Pipeline, agent.allow_recruiting).reachable();
     let before = neighbours(team, |edge| (edge.to == agent.id).then_some(&edge.from));
     if before.is_empty() {
         text.push_str("\nThe operator's request comes to you first.");
@@ -285,12 +276,8 @@ type Switch = (bool, &'static str, fn(&AgentConfig) -> bool);
 ///
 /// Measured on a Writer lead with a web-enabled Researcher: asked for a current fact, the lead
 /// tried the web itself, was declined, and answered that it could not find out, without asking
-/// the teammate that could. Told who may do what, it has somewhere to send that part. `OpenCode`
-/// asks for nothing, so its lead lacks nothing.
+/// the teammate that could. Told who may do what, it has somewhere to send that part.
 fn what_teammates_may_do_instead(lead: &AgentConfig, teammates: &[&AgentConfig]) -> Vec<String> {
-    if Harness::of(lead) == Harness::OpenCode {
-        return Vec::new();
-    }
     let switches: [Switch; 3] = [
         (lead.allow.web, "search the web", |agent| agent.allow.web),
         (lead.allow.edits, "change files", |agent| agent.allow.edits),
@@ -409,13 +396,6 @@ mod tests {
             !text.contains("final answer"),
             "only the responder writes the answer: {text}"
         );
-
-        // A harness with no Team Bus tools has nothing to put an id into, so it hears names.
-        let mut without_bus = team.clone();
-        without_bus.agents[1].spawn.cmd = "some-unknown-acp".to_owned();
-        let text = for_stage(&without_bus, &without_bus.agents[1], &order(), 1, "write").unwrap();
-        assert!(text.contains("Before you: Researcher."), "{text}");
-        assert!(text.contains("After you: Writer."), "{text}");
     }
 
     #[test]
@@ -493,14 +473,6 @@ mod tests {
         researching.agents[0].allow.web = true;
         let text = for_lead(&researching, &researching.agents[0]).unwrap();
         assert!(!text.contains("You can't"), "{text}");
-
-        // A harness with no HTTP MCP gets no Team Bus tools, so it is not told about teammates it
-        // has no way to reach.
-        let mut without_bus = with_bus.clone();
-        without_bus.agents[0].spawn.cmd = "some-unknown-acp".to_owned();
-        let text = for_lead(&without_bus, &without_bus.agents[0]).unwrap();
-        assert!(text.contains(FINAL_ANSWER));
-        assert!(!text.contains("teammate"), "{text}");
     }
 
     #[test]

@@ -252,6 +252,28 @@ fn an_inherits_entry_names_exactly_one_source() {
     );
 }
 
+/// A team file written for an AI app named it in `spawn`; it still validates, and the app is
+/// ignored.
+#[test]
+fn a_team_file_written_for_an_ai_app_still_validates() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let schema = read_yaml(&workspace.join("schemas/team.schema.yaml"));
+    let team_validator = jsonschema::draft202012::new(&schema)
+        .unwrap_or_else(|error| panic!("failed to compile team schema: {error}"));
+    let mut old_team = read_yaml(&workspace.join("examples/research-team.yaml"));
+    old_team["agents"][0]["spawn"] =
+        json!({"cmd": "claude-agent-acp", "args": [], "env": {"X": "y"}, "cwd": "."});
+    let errors: Vec<String> = team_validator
+        .iter_errors(&old_team)
+        .map(|error| error.to_string())
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "a file written for an AI app still validates:\n{}",
+        errors.join("\n")
+    );
+}
+
 #[test]
 fn review_regressions_are_covered() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -266,10 +288,10 @@ fn review_regressions_are_covered() {
         "edge timestamps must reject non-RFC-3339-shaped strings"
     );
     invalid_team = read_yaml(&workspace.join("examples/research-team.yaml"));
-    invalid_team["agents"][0]["spawn"]["cmd"] = json!("./bin/agent");
+    invalid_team["agents"][0]["spawn"] = json!({});
     assert!(
         !team_validator.is_valid(&invalid_team),
-        "relative commands containing a separator must be rejected"
+        "a spawn block that names no folder says nothing"
     );
 
     let event_schema = json!({
@@ -365,13 +387,14 @@ fn review_regressions_are_covered() {
 /// An operator node is not "an agent with optional fields": the `oneOf` **refuses** `spawn`,
 /// `model` and `thinkingEffort` on it, because an operator node starts nothing and selects no
 /// model, and a file that declared one would be saying something the daemon does not do. A
-/// harness node still requires spawn and model, which is the half that would silently rot if the
-/// requirement were merely moved into a branch nothing tests.
+/// harness node still requires a name and a model, which is the half that would silently rot if
+/// the requirement were merely moved into a branch nothing tests.
 ///
 /// `budget` was retired by ADR 0027: it is accepted on either kind and ignored, so a team file
 /// written before then stays valid.
 #[test]
-fn the_schema_takes_an_operator_node_without_spawn_or_model_and_refuses_a_harness_without_them() {
+fn the_schema_takes_an_operator_node_without_spawn_or_model_and_refuses_a_harness_without_a_model()
+{
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let schema = read_yaml(&workspace.join("schemas/team.schema.yaml"));
     let validator = jsonschema::draft202012::new(&schema)
@@ -434,7 +457,7 @@ fn the_schema_takes_an_operator_node_without_spawn_or_model_and_refuses_a_harnes
             "role": "Approve the findings."
         });
         agent[refused] = match refused {
-            "spawn" => json!({"cmd": "/bin/sh", "cwd": "."}),
+            "spawn" => json!({"cwd": "."}),
             _ => json!("something"),
         };
         assert!(
@@ -448,7 +471,16 @@ fn the_schema_takes_an_operator_node_without_spawn_or_model_and_refuses_a_harnes
             "name": "Review",
             "role": "Approve the findings."
         }))),
-        "a harness node (no `kind`, so the default) still requires spawn and model"
+        "a harness node (no `kind`, so the default) still requires a model"
+    );
+    assert!(
+        validator.is_valid(&with_agent(json!({
+            "id": "review",
+            "name": "Review",
+            "role": "Approve the findings.",
+            "model": "anthropic/claude-sonnet-5.5"
+        }))),
+        "a harness node needs no spawn: it works in the team file's folder"
     );
 }
 

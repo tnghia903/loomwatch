@@ -1,4 +1,4 @@
-//! What an Agent Skill assumes about the harness running it, and what to do about it.
+//! What an Agent Skill assumes about the agent running it, and what to do about it.
 //!
 //! `docs/decisions/0019-cross-harness-skill-delivery.md` decided that a skill's discovery source
 //! never constrains the harness that executes it, and its last consequence disclaimed the rest:
@@ -12,17 +12,15 @@
 //!
 //! * [`analyse`] reads a `SKILL.md` and reports what it *needs* from its harness and what kind of
 //!   thing it is;
-//! * [`route`] turns those facts plus the receiving harness into one of three routes;
-//! * [`translation_note`] writes the short mapping an agent on a foreign harness is given, and
-//!   advertises a Team Bus tool only when that agent will actually have it.
+//! * [`route`] turns those facts into one of three routes;
+//! * [`translation_note`] writes the short mapping an agent is given for a skill written for
+//!   Claude Code, and advertises a Team Bus tool only when that agent will actually have it.
 //!
 //! Everything here is a pure function over text. Nothing in this module touches the filesystem,
 //! and nothing it produces is ever written into a skill: `LoomWatch` adapts placement and framing,
 //! never bytes (ADR 0019 decision 2, unchanged).
 
 use std::fmt::Write as _;
-
-use crate::workspace::Harness;
 
 /// One harness assumption a skill's text makes.
 ///
@@ -304,28 +302,18 @@ pub fn analyse(text: &str) -> SkillPortability {
     }
 }
 
-/// Decide the route for one skill on one harness.
+/// Decide the route for one skill.
 ///
 /// The rule, and only the rule:
 ///
-/// * a harness that loads no skills from a project folder (Hermes, an unknown app) is `inline`
-///   before anything else is considered: nothing would discover the bundle on disk, so its
-///   instructions travel in the prompt (ADR 0031, replacing ADR 0019 decision 5's refusal);
-/// * Claude Code is `native` for everything, because every coupling this module detects is a
-///   Claude facility and Claude has it;
-/// * on any other harness, execution-level coupling or a behaviour-governing skill is `inline`,
-///   because those are the two cases where the body has to be *in* the prompt to have any effect;
+/// * execution-level coupling or a behaviour-governing skill is `inline`, because those are the
+///   two cases where the body has to be *in* the prompt to have any effect: every coupling this
+///   module detects is a Claude Code facility, and `LoomWatch`'s agent has its own tools instead;
 /// * everything else is `native`: the bundle is on disk and the prompt says to read it.
 ///
-/// No harness is `blocked` any more; the variant stays because archived runs recorded it.
+/// No skill is `blocked` any more; the variant stays because archived runs recorded it.
 #[must_use]
-pub fn route(portability: &SkillPortability, harness: Harness) -> SkillRoute {
-    if harness.skill_directory().is_none() {
-        return SkillRoute::Inline;
-    }
-    if harness == Harness::Claude {
-        return SkillRoute::Native;
-    }
+pub fn route(portability: &SkillPortability) -> SkillRoute {
     if portability.has_execution_coupling() || portability.kind == SkillKind::Behavior {
         return SkillRoute::Inline;
     }
@@ -365,14 +353,10 @@ impl BusTools {
     }
 }
 
-/// What Team Bus tools an agent on `harness` will have in `mode`.
+/// What Team Bus tools an agent will have in `mode`.
 #[must_use]
-pub fn bus_tools(harness: Harness, mode: BusMode, allow_recruiting: bool) -> BusTools {
-    // A harness that does not advertise HTTP MCP gets `team_bus_unavailable` at negotiation and no
-    // tools at all (`acp.rs::start_recorder`). Only the rows `docs/ARCHITECTURE.md` records as ACP
-    // verified *with* HTTP MCP may be promised tools; anything else is told it has none, because
-    // naming a tool that turns out not to exist is the exact failure this note is written to stop.
-    if mode == BusMode::None || !harness.advertises_http_mcp() {
+pub fn bus_tools(mode: BusMode, allow_recruiting: bool) -> BusTools {
+    if mode == BusMode::None {
         return BusTools {
             ask: false,
             delegate: false,
@@ -392,7 +376,6 @@ pub fn bus_tools(harness: Harness, mode: BusMode, allow_recruiting: bool) -> Bus
 #[derive(Debug, Clone, Copy)]
 pub struct TranslationRequest<'a> {
     pub skill: &'a str,
-    pub harness: Harness,
     pub needs: &'a [SkillNeed],
     /// The delivered bundle's directory, so "the scripts are here" names a real path.
     pub bundle_dir: &'a str,
@@ -445,36 +428,17 @@ pub fn self_report(reply: &str) -> Option<String> {
     )
 }
 
-/// Write the mapping an agent on a foreign harness is given beside an inlined skill.
+/// Write the mapping an agent is given beside an inlined skill.
 ///
 /// It is a mapping, never a rewrite: it quotes nothing from the skill and says only what to do
 /// where the skill assumes a facility this agent does not have. It also tells the truth about
-/// bundled scripts — `LoomWatch` refuses every `session/request_permission`
-/// (`acp.rs::build_client_response`), so a script may simply not run, and promising otherwise
-/// would be the same false assurance ADR 0019's last consequence left in place.
+/// bundled scripts: a command may be put to the person first, and they may say no.
 #[must_use]
 pub fn translation_note(request: &TranslationRequest<'_>) -> String {
-    let mut note = if request.harness.skill_directory().is_some() {
-        format!(
-            "This skill was written for Claude Code; you are running on {}. Its instructions are above, unchanged, and its files are in {}. Where it assumes something you do not have, use this mapping.\n",
-            request.harness.label(),
-            request.bundle_dir,
-        )
-    } else if request.needs.is_empty() {
-        // Inline only because this app loads no skills from a folder; the skill itself assumes
-        // nothing, so there is no mapping to give and no claim about who it was written for.
-        format!(
-            "You are running on {}, which does not load skills from a project folder, so this skill's instructions are above, unchanged. Its files are in {}.\n",
-            request.harness.label(),
-            request.bundle_dir,
-        )
-    } else {
-        format!(
-            "This skill was written for Claude Code; you are running on {}, which does not load skills from a project folder, so its instructions are above, unchanged, and its files are in {}. Where it assumes something you do not have, use this mapping.\n",
-            request.harness.label(),
-            request.bundle_dir,
-        )
-    };
+    let mut note = format!(
+        "This skill was written for Claude Code; you are running on LoomWatch. Its instructions are above, unchanged, and its files are in {}. Where it assumes something you do not have, use this mapping.\n",
+        request.bundle_dir,
+    );
     for need in SkillNeed::ALL {
         if !request.needs.contains(&need) {
             continue;
@@ -509,7 +473,7 @@ fn mapping(need: SkillNeed, request: &TranslationRequest<'_>) -> String {
             }
         }
         SkillNeed::Scripts => format!(
-            "Scripts: the bundled scripts are in {}. LoomWatch refuses every permission request your harness makes, so a script may simply not run. If one does not, do that step by hand and say so in your reply.",
+            "Scripts: the bundled scripts are in {}. Run one with run_command when you have it; the person may be asked first and may say no. If a script does not run, do that step by hand and say so in your reply.",
             request.bundle_dir,
         ),
         SkillNeed::SlashCommands => {
@@ -517,7 +481,7 @@ fn mapping(need: SkillNeed, request: &TranslationRequest<'_>) -> String {
                 .to_owned()
         }
         SkillNeed::NamedTools => {
-            let mut text = "Named tools: where it names Read, Write, Edit, Glob, Grep, Bash, WebFetch or WebSearch, use your own file-reading, file-writing, search, shell or web tool. TodoWrite: keep your own plan in your reply.".to_owned();
+            let mut text = "Named tools: where it names Read, Write, Edit, Glob or Grep, use read_file, write_file, edit_file, list_files or search_files; Bash is run_command; WebFetch and WebSearch are your web tools, when you have them. TodoWrite: use update_plan.".to_owned();
             if request.bus.ask_user {
                 text.push_str(" AskUserQuestion: call the Team Bus `ask_user` tool.");
             } else {
@@ -925,7 +889,6 @@ mod tests {
     fn note_for(needs: &[SkillNeed], bus: BusTools) -> String {
         translation_note(&TranslationRequest {
             skill: "claude-design",
-            harness: Harness::Codex,
             needs,
             bundle_dir: "/w/.agents/skills/claude-design",
             bus,
@@ -1057,31 +1020,6 @@ mod tests {
     }
 
     #[test]
-    fn a_harness_with_no_skill_directory_gets_every_skill_inline() {
-        let portable = analyse("---\nname: x\ndescription: d\n---\nNothing special.\n");
-        for harness in [Harness::Hermes, Harness::Other] {
-            assert_eq!(route(&portable, harness), SkillRoute::Inline);
-        }
-        let note = translation_note(&TranslationRequest {
-            skill: "x",
-            harness: Harness::Hermes,
-            needs: &portable.needs,
-            bundle_dir: ".agents/skills/x",
-            bus: bus_tools(Harness::Hermes, BusMode::None, false),
-            siblings_wired: &[],
-            siblings_missing: &[],
-        });
-        assert!(
-            note.starts_with("You are running on Hermes, which does not load skills"),
-            "{note}"
-        );
-        assert!(
-            !note.contains("written for Claude Code"),
-            "a portable skill makes no such claim: {note}"
-        );
-    }
-
-    #[test]
     fn a_multi_line_description_is_read_whole() {
         for frontmatter in [
             "name: x\ndescription: >-\n  Turns notes\n  into slides.\nlicense: MIT",
@@ -1106,43 +1044,36 @@ mod tests {
     }
 
     #[test]
-    fn a_coupled_skill_is_inline_off_claude_and_native_on_it() {
+    fn a_skill_coupled_to_claude_code_is_inline() {
         let coupled = analyse(
             "---\nname: x\ndescription: Design a deck\n---\nUse the Task tool to fan out.\n",
         );
-        assert_eq!(route(&coupled, Harness::Codex), SkillRoute::Inline);
-        assert_eq!(route(&coupled, Harness::Gemini), SkillRoute::Inline);
-        assert_eq!(route(&coupled, Harness::Claude), SkillRoute::Native);
+        assert_eq!(route(&coupled), SkillRoute::Inline);
     }
 
     #[test]
-    fn a_behaviour_governing_skill_is_inline_off_claude_even_without_execution_coupling() {
+    fn a_behaviour_governing_skill_is_inline_even_without_execution_coupling() {
         let behaviour = analyse(
             "---\nname: x\ndescription: The review standard every change is held to.\n---\nSee `house-style` skill.\n",
         );
         assert!(!behaviour.has_execution_coupling());
         assert_eq!(behaviour.kind, SkillKind::Behavior);
-        assert_eq!(route(&behaviour, Harness::Codex), SkillRoute::Inline);
+        assert_eq!(route(&behaviour), SkillRoute::Inline);
     }
 
     #[test]
-    fn an_uncoupled_skill_is_native_everywhere_it_can_be_delivered() {
+    fn an_uncoupled_skill_is_native() {
         let portable = analyse("---\nname: x\ndescription: d\n---\nAnswer briefly.\n");
-        for harness in [
-            Harness::Claude,
-            Harness::Codex,
-            Harness::Gemini,
-            Harness::OpenCode,
-            Harness::OpenClaw,
-            Harness::Pi,
-        ] {
-            assert_eq!(route(&portable, harness), SkillRoute::Native, "{harness:?}");
-        }
+        assert_eq!(route(&portable), SkillRoute::Native);
     }
 
     #[test]
     fn team_mode_offers_every_delegation_tool_and_pipeline_mode_withdraws_two() {
-        let team = bus_tools(Harness::Codex, BusMode::Team, false);
+        let team = bus_tools(BusMode::Team, false);
+        assert!(
+            !bus_tools(BusMode::None, true).reachable(),
+            "no bus, no tools"
+        );
         assert_eq!(
             team,
             BusTools {
@@ -1152,62 +1083,29 @@ mod tests {
             },
             "team mode offers ask even to an agent that may not recruit",
         );
-        let recruiting = bus_tools(Harness::Codex, BusMode::Pipeline, true);
+        let recruiting = bus_tools(BusMode::Pipeline, true);
         assert!(recruiting.ask && !recruiting.delegate && recruiting.ask_user);
-        let restricted = bus_tools(Harness::Codex, BusMode::Pipeline, false);
+        let restricted = bus_tools(BusMode::Pipeline, false);
         assert!(!restricted.ask && !restricted.delegate && restricted.ask_user);
     }
 
     #[test]
-    fn a_harness_without_http_mcp_is_promised_no_bus_tools_at_all() {
-        // OpenClaw is ACP-verified with `loadSession`, and has no HTTP MCP
-        // (`docs/ARCHITECTURE.md`), so the run archives `team_bus_unavailable` for it.
-        let openclaw = bus_tools(Harness::OpenClaw, BusMode::Team, true);
-        assert_eq!(
-            openclaw,
-            BusTools {
-                ask: false,
-                delegate: false,
-                ask_user: false
-            }
-        );
-        assert!(!openclaw.reachable());
-        assert_eq!(
-            bus_tools(Harness::Codex, BusMode::None, true),
-            BusTools {
-                ask: false,
-                delegate: false,
-                ask_user: false
-            }
-        );
-    }
-
-    #[test]
     fn the_note_names_ask_only_when_this_agent_may_actually_call_it() {
-        let allowed = note_for(
-            &[SkillNeed::Subagents],
-            bus_tools(Harness::Codex, BusMode::Pipeline, true),
-        );
+        let allowed = note_for(&[SkillNeed::Subagents], bus_tools(BusMode::Pipeline, true));
         assert!(allowed.contains("`ask`"), "{allowed}");
         assert!(
             !allowed.contains("`dispatch`"),
             "pipeline mode has no dispatch: {allowed}"
         );
 
-        let refused = note_for(
-            &[SkillNeed::Subagents],
-            bus_tools(Harness::Codex, BusMode::Pipeline, false),
-        );
+        let refused = note_for(&[SkillNeed::Subagents], bus_tools(BusMode::Pipeline, false));
         assert!(
             !refused.contains("`ask`"),
             "an agent that may not recruit must not be told to call ask: {refused}"
         );
         assert!(refused.contains("do the steps yourself"), "{refused}");
 
-        let busless = note_for(
-            &[SkillNeed::Subagents],
-            bus_tools(Harness::OpenClaw, BusMode::Team, true),
-        );
+        let busless = note_for(&[SkillNeed::Subagents], bus_tools(BusMode::None, true));
         assert!(busless.contains("no way to delegate"), "{busless}");
         assert!(!busless.contains("`ask`"), "{busless}");
     }
@@ -1217,7 +1115,7 @@ mod tests {
         let note = note_for(&[SkillNeed::Scripts], FULL_BUS);
         assert!(note.contains("/w/.agents/skills/claude-design"), "{note}");
         assert!(
-            note.contains("refuses every permission request"),
+            note.contains("may be asked first and may say no"),
             "the note must not promise a script will run: {note}"
         );
         assert!(note.contains("do that step by hand and say so"), "{note}");
@@ -1226,12 +1124,10 @@ mod tests {
     #[test]
     fn the_note_maps_named_tools_and_routes_the_operator_question_to_the_bus() {
         let note = note_for(&[SkillNeed::NamedTools], FULL_BUS);
-        assert!(note.contains("your own file-reading"), "{note}");
+        assert!(note.contains("Bash is run_command"), "{note}");
+        assert!(note.contains("TodoWrite: use update_plan"), "{note}");
         assert!(note.contains("`ask_user`"), "{note}");
-        let busless = note_for(
-            &[SkillNeed::NamedTools],
-            bus_tools(Harness::OpenClaw, BusMode::Team, true),
-        );
+        let busless = note_for(&[SkillNeed::NamedTools], bus_tools(BusMode::None, true));
         assert!(!busless.contains("`ask_user`"), "{busless}");
         assert!(
             busless.contains("state the question in your reply"),
@@ -1245,7 +1141,6 @@ mod tests {
         let missing = ["sketch".to_owned()];
         let note = translation_note(&TranslationRequest {
             skill: "claude-design",
-            harness: Harness::Codex,
             needs: &[SkillNeed::SiblingSkills],
             bundle_dir: "/w/.agents/skills/claude-design",
             bus: FULL_BUS,

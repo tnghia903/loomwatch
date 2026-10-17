@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub use keys::Keys;
-pub use models::{Catalog, DEFAULT_MODEL, Model, Models};
+pub use models::{Catalog, DEFAULT_MODEL, FAST_MODEL, Model, Models, openrouter_id};
 
 use crate::agent::{ApiKey, DEFAULT_BASE_URL};
 use crate::api::ApiError;
@@ -49,9 +49,23 @@ pub struct Ai {
 struct Inner {
     keys: Keys,
     models: Models,
+    state_dir: PathBuf,
     status_file: PathBuf,
     key_url: String,
     client: Option<reqwest::Client>,
+}
+
+/// The one [`Ai`] the daemon's runs use, set once at startup.
+static INSTALLED: std::sync::OnceLock<Ai> = std::sync::OnceLock::new();
+
+/// Makes `ai` the one runs use. The daemon calls this once, at startup; a second call is ignored.
+pub fn install(ai: Ai) {
+    let _ = INSTALLED.set(ai);
+}
+
+/// The installed [`Ai`], if the daemon set one. Tests and one-off commands may have none.
+pub(crate) fn installed() -> Option<&'static Ai> {
+    INSTALLED.get()
 }
 
 /// What the app shows about the `OpenRouter` connection. None of it is the key.
@@ -113,6 +127,7 @@ impl Ai {
             inner: Arc::new(Inner {
                 keys,
                 models,
+                state_dir: state_dir.to_path_buf(),
                 status_file: state_dir.join(STATUS_FILE),
                 key_url: key_url.to_owned(),
                 client,
@@ -132,6 +147,19 @@ impl Ai {
     #[must_use]
     pub fn models(&self) -> &Models {
         &self.inner.models
+    }
+
+    /// `LoomWatch`'s own skills folder, `<state dir>/skills`: every agent can read what is in it.
+    #[must_use]
+    pub fn skills_folder(&self) -> PathBuf {
+        self.inner.state_dir.join("skills")
+    }
+
+    /// The state folder: the key file, the database, the approvals. Agents never read it without
+    /// asking, the skills folder apart.
+    #[must_use]
+    pub fn state_dir(&self) -> PathBuf {
+        self.inner.state_dir.clone()
     }
 
     /// What was last said about the key. Never reads the key.

@@ -187,7 +187,11 @@ impl Provider {
     ) -> Result<Completion, CallError> {
         match self {
             Self::OpenRouter(provider) => provider.complete(request, deltas, cancel).await,
-            Self::Demo(demo) => demo.complete(request, deltas).await,
+            // A stopped turn stops the demo too, as it stops a stream.
+            Self::Demo(demo) => tokio::select! {
+                completion = demo.complete(request, deltas) => completion,
+                () = cancel.cancelled() => Err(CallError::Cancelled),
+            },
         }
     }
 

@@ -1179,7 +1179,7 @@ impl RunRegistry {
     }
 
     /// Abort a live run's task and mark it `cancelled`. Dropping the task drops its
-    /// [`crate::acp::AcpProcess`], whose child was spawned with `kill_on_drop`, and its
+    /// [`crate::engine::AgentRun`], whose child was spawned with `kill_on_drop`, and its
     /// Team Bus teardown guard, which aborts delegated helpers the same way.
     pub fn cancel(&self, run_id: &str) -> CancelOutcome {
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
@@ -2879,22 +2879,32 @@ async fn execute(
         &lineage,
     );
     tokio::pin!(run);
-    let mut ticker = tokio::time::interval(SPAWN_POLL_INTERVAL);
-    let mut spawned = false;
-    let result = loop {
-        tokio::select! {
-            result = &mut run => break result,
-            _ = ticker.tick(), if !spawned => {
-                if first_process_spawned(&archive, &run_id).await {
-                    spawned = true;
-                    // A cancel can race any of these transitions; the registry keeps
-                    // terminal states frozen, so a refused transition needs no handling.
-                    let _applied = registry.mark_running(&run_id);
-                    persist_or_log(&registry, &run_id).await;
-                }
+    // Polled beside the run, never instead of it: the run may be holding the database's one
+    // writing connection while this reads. And told to stop rather than dropped, so it is never
+    // cut off part way through a query.
+    let (run_over, mut over) = tokio::sync::watch::channel(false);
+    let watch_spawn = async {
+        let mut ticker = tokio::time::interval(SPAWN_POLL_INTERVAL);
+        loop {
+            tokio::select! {
+                _ = ticker.tick() => {}
+                _ = over.changed() => return,
+            }
+            if first_process_spawned(&archive, &run_id).await {
+                // A cancel can race any of these transitions; the registry keeps terminal
+                // states frozen, so a refused transition needs no handling.
+                let _applied = registry.mark_running(&run_id);
+                persist_or_log(&registry, &run_id).await;
+                return;
             }
         }
     };
+    let finish = async {
+        let result = run.await;
+        let _ = run_over.send(true);
+        result
+    };
+    let (result, ()) = tokio::join!(finish, watch_spawn);
     let responder = registry.get(&run_id).map(|record| record.responder);
     let _applied = match result {
         // CONTRACT §4: a normal turn with no response is `failed`
@@ -2968,7 +2978,7 @@ async fn record_abandoned_checkpoints(
     // land as `Message` events with `role: "agent"`; the last one is the closest thing to "what
     // this stage had produced when the run died". They are joined by the live reply's rule, so
     // separate messages and turns stay separate paragraphs.
-    let mut last_reply: BTreeMap<String, crate::acp::ReplyText> = BTreeMap::new();
+    let mut last_reply: BTreeMap<String, crate::engine::ReplyText> = BTreeMap::new();
     let mut seen: Vec<String> = Vec::new();
     for event in &events {
         if event.agent_id.is_empty() {
@@ -3007,7 +3017,7 @@ async fn record_abandoned_checkpoints(
             agent_id: agent_id.clone(),
             done: last_reply
                 .get_mut(&agent_id)
-                .map(crate::acp::ReplyText::take)
+                .map(crate::engine::ReplyText::take)
                 .unwrap_or_default(),
             // Deliberately empty. The run ended abnormally, so nothing said what came next, and
             // a sentence here would be the daemon's guess wearing a stage's voice.
@@ -3133,7 +3143,7 @@ fn classify_failure_code(
     }
     if error
         .chain()
-        .any(<dyn std::error::Error>::is::<crate::acp::AppReportedError>)
+        .any(<dyn std::error::Error>::is::<crate::engine::AppReportedError>)
     {
         return APP_ERROR;
     }
@@ -3395,7 +3405,7 @@ async fn answer_run(
             text: request.text,
             send_back: request.send_back,
             // The id of the `message` event the run is about to archive the answer as.
-            answer_event_id: crate::acp::new_event_id(),
+            answer_event_id: crate::engine::new_event_id(),
         },
     )
     .await
@@ -3660,7 +3670,6 @@ pub async fn cancel_live_runs(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::io::Write;
 
     use axum::body::Body;
     use axum::http::{Request, header};
@@ -3669,49 +3678,43 @@ pub(crate) mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::test_support::process_is_alive;
+    use crate::agent::{Completion, Demo, Hold};
+    use crate::engine::demo_model;
 
-    /// A fake ACP harness that answers `initialize`, `session/new`, `session/prompt` (with
-    /// one agent chunk `done`) and `session/close`, then exits 0.
-    pub(crate) const COMPLETING_HARNESS: &str = r#"#!/bin/sh
-set -eu
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"harness-session","configOptions":[]}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"harness-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}'
-printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
-"#;
+    /// The model of an agent that answers every turn with `done`.
+    pub(crate) fn completing() -> String {
+        demo_model(Demo::responder(|_| Some(Completion::text("done"))))
+    }
 
-    /// A fake harness that negotiates a session and then hangs inside `session/prompt`.
-    /// `exec` makes the recorded pid the sleeping process itself, so "is the harness gone"
-    /// is a question about exactly the process `kill_on_drop` must have killed.
-    pub(crate) const SLEEPING_HARNESS: &str = r#"#!/bin/sh
-set -eu
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"sleepy","configOptions":[]}}'
-IFS= read -r _
-exec sleep 60
-"#;
+    /// The model of an agent still thinking until its turn is stopped, and the hold that counts it.
+    pub(crate) fn sleeping() -> (String, Arc<Hold>) {
+        let (demo, hold) = Demo::held(Vec::new());
+        (demo_model(demo), hold)
+    }
 
-    /// A fake harness that completes the protocol cleanly — normal `end_turn`, clean
-    /// exit — but emits no agent text: CONTRACT §4's normal turn with no response.
-    const EMPTY_REPLY_HARNESS: &str = r#"#!/bin/sh
-set -eu
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"quiet","configOptions":[]}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
-"#;
+    /// The model of an agent whose turn ends normally with no text: CONTRACT §4's normal turn
+    /// with no response.
+    fn empty_reply() -> String {
+        demo_model(Demo::responder(|_| Some(Completion::text(""))))
+    }
+
+    /// A stage that answers its work turn with `reply`, a handover request with `{reply}
+    /// handover`, and the checkpoint request with where it stands, however many runs ask it.
+    fn stage(reply: &str) -> String {
+        let reply = reply.to_owned();
+        demo_model(Demo::responder(move |request| {
+            let prompt = request.prompt();
+            Some(Completion::text(
+                &if prompt.contains("Record where this work stands") {
+                    format!("## Done\n{reply}\n\n## Next\nnothing")
+                } else if prompt.contains("## Summary") {
+                    format!("{reply} handover")
+                } else {
+                    reply.clone()
+                },
+            ))
+        }))
+    }
 
     pub(crate) struct TeamsDir(pub(crate) PathBuf);
 
@@ -3722,56 +3725,24 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
             Self(fs::canonicalize(&path).expect("canonical teams root"))
         }
 
-        pub(crate) fn write_harness(&self, name: &str, script: &str) -> PathBuf {
-            let path = self.0.join(name);
-            let mut file = fs::File::create(&path).expect("create harness script");
-            file.write_all(script.as_bytes()).expect("write harness");
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
-                    .expect("mark harness executable");
-            }
-            path
-        }
-
         /// A two-stage pipeline with a notebook, whose stages answer the full ADR 0013 +
         /// memory-phase-3 turn sequence: work, handover (first stage only), checkpoint, close. A
         /// team with no notebook is asked for no checkpoint (ADR 0016 amendment).
         pub(crate) fn write_pipeline_team(&self, name: &str) -> PathBuf {
-            let stage = |session: &str, reply: &str, handover: bool| {
-                let (handover_turn, checkpoint_id, close_id) = if handover {
-                    (
-                        format!(
-                            "IFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"{reply} handover\"}}}}}}}}'\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{{\"stopReason\":\"end_turn\"}}}}'\n"
-                        ),
-                        5,
-                        6,
-                    )
-                } else {
-                    (String::new(), 4, 5)
-                };
-                let script = format!(
-                    "#!/bin/sh\nset -eu\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"protocolVersion\":1}}}}'\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{{\"sessionId\":\"{session}\",\"configOptions\":[]}}}}'\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"{reply}\"}}}}}}}}'\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{{\"stopReason\":\"end_turn\"}}}}'\n{handover_turn}IFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"\\n## Done\\n{reply}\\n\\n## Next\\nnothing\"}}}}}}}}'\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":{checkpoint_id},\"result\":{{\"stopReason\":\"end_turn\"}}}}'\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":{close_id},\"result\":{{}}}}'\n"
-                );
-                self.write_harness(&format!("{session}.sh"), &script)
-            };
-            let first = stage("stage-a", "a done", true);
-            let second = stage("stage-b", "b done", false);
             let yaml = format!(
-                "schemaVersion: 1\nid: chain\nname: Two-stage chain\nentrypoint: a\nmemory:\n  notebook:\n    enabled: true\nagents:\n  - id: a\n    name: A\n    role: first\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n  - id: b\n    name: B\n    role: second\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\nedges:\n  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
-                first.display(),
-                second.display()
+                "schemaVersion: 1\nid: chain\nname: Two-stage chain\nentrypoint: a\nmemory:\n  notebook:\n    enabled: true\nagents:\n  - id: a\n    name: A\n    role: first\n    model: {}\n  - id: b\n    name: B\n    role: second\n    model: {}\nedges:\n  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
+                stage("a done"),
+                stage("b done")
             );
             let path = self.0.join(name);
             fs::write(&path, yaml).expect("write pipeline team file");
             path
         }
 
-        fn write_team(&self, name: &str, harness: &Path) -> PathBuf {
+        /// A one-agent team whose agent runs on `model`.
+        fn write_team(&self, name: &str, model: &str) -> PathBuf {
             let yaml = format!(
-                "schemaVersion: 1\nid: fake\nname: Fake harness team\nentrypoint: solo\nagents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n",
-                harness.display()
+                "schemaVersion: 1\nid: fake\nname: Fake harness team\nentrypoint: solo\nagents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    model: {model}\n"
             );
             let path = self.0.join(name);
             fs::write(&path, yaml).expect("write team file");
@@ -3824,7 +3795,12 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
             }
         })
         .await
-        .expect("run reached the awaited state in time")
+        .unwrap_or_else(|_| {
+            panic!(
+                "the run never reached the awaited state: {:#?}",
+                registry.get(run_id)
+            )
+        })
     }
 
     fn permission_request(id: &str, kind: &str) -> crate::permissions::PermissionRequest {
@@ -4292,7 +4268,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     async fn a_hand_started_run_delivers_when_the_team_does_and_on_request_otherwise() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         let plain = dir.write_team("plain.yaml", &harness);
         let delivering = fs::read_to_string(&plain).unwrap().replace(
             "entrypoint: solo\n",
@@ -4396,7 +4372,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     async fn a_follow_up_is_refused_before_it_starts_when_it_cannot_be_honoured() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         // `write_team` writes a single-agent team with no edges, so this team runs in team mode.
         dir.write_team("team.yaml", &harness);
         dir.write_team("other.yaml", &harness);
@@ -4766,26 +4742,17 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     /// A run that dies mid-turn leaves a **coordinator** checkpoint assembled from the archive, and
     /// the next run started from it opens with it.
     ///
-    /// The harness streams one chunk and then exits without answering `session/prompt`, which is
-    /// the same shape as a turn killed by the ten-minute ACP request timeout — the stage never
-    /// reaches its boundary and never answers the checkpoint request — and reaches it in
-    /// milliseconds instead of ten minutes.
+    /// The agent streams one chunk and then its turn fails — the stage never reaches its boundary
+    /// and never answers the checkpoint request.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn a_run_that_died_mid_turn_leaves_a_coordinator_checkpoint_the_next_run_opens_with() {
-        const DYING_HARNESS: &str = r#"#!/bin/sh
-set -eu
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"dying","configOptions":[]}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"dying","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"half of section three"}}}}'
-exit 7
-"#;
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let dying = dir.write_harness("dying.sh", DYING_HARNESS);
+        let dying = demo_model(Demo::dying(
+            "half of section three",
+            "the connection was lost",
+        ));
         dir.write_team("dying.yaml", &dying);
         let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
@@ -4841,7 +4808,7 @@ exit 7
         assert_eq!(served[0]["source"], "coordinator");
 
         // "Start a new run from this checkpoint": a new run, whose packet opens with it.
-        let working = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let working = completing();
         dir.write_team("dying.yaml", &working);
         let continued: RunRecord = serde_json::from_value(
             json_body(
@@ -5095,7 +5062,7 @@ exit 7
 
         // An app that reported its turn failed is neither: the process was fine, and so was the
         // protocol. The crash marker a one-shot session writes for it changes nothing.
-        let refused = anyhow::Error::new(crate::acp::AppReportedError {
+        let refused = anyhow::Error::new(crate::engine::AppReportedError {
             message: "The model is not supported.".to_owned(),
         })
         .context("pipeline node gatherer failed");
@@ -5275,7 +5242,7 @@ exit 7
     #[tokio::test]
     async fn start_rejects_malformed_prompts_and_bodies() {
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         dir.write_team("team.yaml", &harness);
         let app = router(None, dir.0.clone(), RunRegistry::default());
         for (body, expected) in [
@@ -5313,7 +5280,7 @@ exit 7
         registry.set_approvals(Arc::new(
             TeamApprovals::open(&approvals_home.0, &dir.0).expect("open approvals"),
         ));
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         let team_path = dir.write_team("downloaded.yaml", &harness);
         let revision = team_revision(&fs::read(&team_path).unwrap());
         let app = router(None, dir.0.clone(), registry.clone());
@@ -5331,15 +5298,12 @@ exit 7
         assert_eq!(body["teamRevision"], revision);
         assert_eq!(body["teamName"], "Fake harness team");
         let first = &body["review"][0];
-        assert_eq!(
-            first["warn"], true,
-            "a /bin/sh harness is not an app LoomWatch knows"
-        );
         assert!(
             first["text"]
                 .as_str()
                 .unwrap()
-                .starts_with("Solo runs `/bin/sh ")
+                .starts_with("Solo runs on LoomWatch with "),
+            "{first}"
         );
         assert!(registry.list().is_empty(), "a refused team starts no run");
 
@@ -5387,7 +5351,7 @@ exit 7
     async fn teams_that_were_already_there_run_and_launch_refuses_new_ones() {
         let dir = TeamsDir::new();
         let approvals_home = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         dir.write_team("mine.yaml", &harness);
         let registry = RunRegistry::default();
         registry.set_approvals(Arc::new(
@@ -5425,7 +5389,7 @@ exit 7
     #[tokio::test]
     async fn expected_revision_conflict_returns_a_stable_code_and_creates_no_run() {
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         let team_path = dir.write_team("team.yaml", &harness);
         let current = team_revision(&fs::read(team_path).unwrap());
         let registry = RunRegistry::default();
@@ -5478,7 +5442,7 @@ exit 7
     async fn a_run_keeps_the_revision_of_the_team_file_it_ran() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         let team_path = dir.write_team("team.yaml", &harness);
         let ran = team_revision(&fs::read(&team_path).unwrap());
         let archive = EventArchive::new(pool);
@@ -5592,7 +5556,7 @@ exit 7
         let dir = TeamsDir::new();
         let teams_root = dir.0.join("teams");
         fs::create_dir(&teams_root).unwrap();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         let outside = dir.write_team("outside.yaml", &harness);
         fs::create_dir(teams_root.join("folder")).unwrap();
         let app = router(None, teams_root, RunRegistry::default());
@@ -5618,7 +5582,7 @@ exit 7
     #[tokio::test]
     async fn start_reports_an_invalid_team_and_a_missing_archive() {
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         dir.write_team("team.yaml", &harness);
         fs::write(
             dir.0.join("broken.yaml"),
@@ -5690,7 +5654,7 @@ exit 7
     async fn run_end_to_end_archives_under_the_pre_minted_id() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         dir.write_team("team.yaml", &harness);
         let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
@@ -5744,10 +5708,10 @@ exit 7
             .iter()
             .find(|event| event.payload["phase"] == "session_new")
             .unwrap();
-        assert_eq!(
-            session_new.raw.as_ref().unwrap()["result"]["sessionId"],
-            "harness-session",
-            "raw frames keep the harness's own ACP session id"
+        assert!(
+            session_new.payload["result"]["sessionId"].is_string(),
+            "the agent's own session id is recorded: {}",
+            session_new.payload
         );
 
         let listed = json_body(app.clone().oneshot(get_local("/api/runs")).await.unwrap()).await;
@@ -5791,7 +5755,7 @@ exit 7
     async fn a_normal_turn_with_no_response_fails_as_missing_canonical_response() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("quiet.sh", EMPTY_REPLY_HARNESS);
+        let harness = empty_reply();
         dir.write_team("team.yaml", &harness);
         let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
@@ -5832,10 +5796,10 @@ exit 7
     }
 
     #[tokio::test]
-    async fn cancel_aborts_the_run_and_kills_the_harness() {
+    async fn cancel_aborts_the_run_and_stops_the_agent() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("sleepy.sh", SLEEPING_HARNESS);
+        let (harness, hold) = sleeping();
         dir.write_team("team.yaml", &harness);
         let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
@@ -5857,10 +5821,13 @@ exit 7
         })
         .await;
         assert!(running.started_at.is_some());
-        let spawned = archive.event_page(&accepted.run_id, -1, 1).await.unwrap();
-        assert_eq!(spawned[0].payload["phase"], "spawned");
-        let pid = u32::try_from(spawned[0].payload["pid"].as_u64().unwrap()).unwrap();
-        assert!(process_is_alive(pid), "harness {pid} should be sleeping");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hold.waiting() == 0 {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("the agent should be thinking");
 
         let response = app
             .clone()
@@ -5902,12 +5869,12 @@ exit 7
         );
 
         tokio::time::timeout(Duration::from_secs(10), async {
-            while process_is_alive(pid) {
+            while hold.waiting() > 0 {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         })
         .await
-        .expect("aborting the run task must kill the harness through kill_on_drop");
+        .expect("aborting the run task must stop the agent's turn");
 
         let response = app
             .clone()
@@ -5938,7 +5905,7 @@ exit 7
         use crate::operator::{ParkTier, StopKind, WaitingOn};
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         dir.write_team("team.yaml", &harness);
         let team = TeamConfig::load(&dir.0.join("team.yaml")).unwrap();
         let archive = EventArchive::new(pool);
@@ -6081,7 +6048,7 @@ exit 7
         use crate::operator::{ParkTier, StopKind, WaitingOn};
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         dir.write_team("team.yaml", &harness);
         let team = TeamConfig::load(&dir.0.join("team.yaml")).unwrap();
         let archive = EventArchive::new(pool);
@@ -6174,14 +6141,15 @@ exit 7
     async fn team_mode_checkpoints_without_replacing_its_answer() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let script = COMPLETING_HARNESS.replace(
-            "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{}}'",
-            r###"printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"harness-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"## Done\nDraft ready\n\n## Next\nReview it"}}}}'
-printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'"###
-        );
-        let harness = dir.write_harness("memory.sh", &script);
+        let harness = demo_model(Demo::responder(|request| {
+            Some(Completion::text(
+                if request.prompt().contains("Record where this work stands") {
+                    "## Done\nDraft ready\n\n## Next\nReview it"
+                } else {
+                    "done"
+                },
+            ))
+        }));
         let path = dir.write_team("team.yaml", &harness);
         let yaml = fs::read_to_string(&path).unwrap();
         fs::write(

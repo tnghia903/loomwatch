@@ -207,6 +207,10 @@ impl EventArchive {
         let used = i64::try_from(packet.used_chars).context("usedChars exceeds INTEGER")?;
         let sections =
             serde_json::to_string(&packet.sections).context("failed to encode packet sections")?;
+        // Everything this session handed the writer goes in first, so the packet's row follows
+        // the events recorded before it. Taking the one writing connection while the writer task
+        // waits for it with a batch in hand held both for the pool's whole acquire timeout.
+        self.flush().await;
         let mut last_error = None;
         for _ in 0..5 {
             let result = sqlx::query(

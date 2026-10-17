@@ -498,7 +498,7 @@ impl ComposedPrompt {
     /// An agent with no knowledge and no tools returns here untouched, which keeps the
     /// byte-for-byte prompt guarantee for every team that wires neither.
     #[must_use]
-    pub fn with_delivery(mut self, delivery: &crate::delivery::Delivery, claude: bool) -> Self {
+    pub fn with_delivery(mut self, delivery: &crate::delivery::Delivery) -> Self {
         use crate::delivery::Permission;
 
         if delivery.is_empty() {
@@ -517,7 +517,7 @@ impl ComposedPrompt {
                     Some(Permission::Granted) => {
                         "\nYou have read access to this folder. Read further files in it when they help the task."
                     }
-                    _ => "\nRead further files in it when they help the task, where your permissions allow.",
+                    None => "\nRead further files in it when they help the task, where your permissions allow.",
                 });
             }
             // ADR 0050: a Notion page, read through the operator's connection, which the agent
@@ -533,7 +533,7 @@ impl ComposedPrompt {
                 text.push_str(&knowledge.files.join(", "));
                 text.push_str(match knowledge.read_access {
                     Some(Permission::Granted) => "\nYou have read access to this file.",
-                    _ => "\nOpen it directly where your permissions allow.",
+                    None => "\nOpen it directly where your permissions allow.",
                 });
             }
             text.push_str("\n\n");
@@ -545,18 +545,10 @@ impl ComposedPrompt {
             });
         }
         for tool in &delivery.tools {
-            let names = if claude {
-                format!(" Its tools appear to you as mcp__{}__<tool>.", tool.server)
-            } else {
-                String::new()
-            };
             additions.push(PromptSection {
                 kind: PromptSectionKind::Tool,
                 heading: format!("## Tool: {}", tool.name),
-                text: format!(
-                    "The operator connected the MCP server `{}` to this session for your task.{names} Use its tools where they help; each call still passes your permission rules.",
-                    tool.server
-                ),
+                text: "The operator connected this tool to you, but it came from another AI app's settings, which LoomWatch's agents don't use, so you don't have it. Do the task without it, and say in your reply what it would have let you do.".to_owned(),
             });
         }
         let position = self
@@ -701,7 +693,7 @@ impl ComposedPrompt {
             "requiredSkills": self.required_skills,
         });
         // Only when something was delivered, so a record from a run that wired neither is the
-        // record it always was. Names, paths and fingerprints only: `DeliveredTool` never
+        // record it always was. Names, paths and fingerprints only: `WiredTool` never
         // serialises a value from the operator's config.
         if !self.delivery.knowledge.is_empty() {
             meta["knowledge"] = serde_json::json!(self.delivery.knowledge);

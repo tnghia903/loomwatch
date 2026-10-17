@@ -25,7 +25,7 @@ use super::BoxFuture;
 use super::error::{AgentError, CallError};
 use super::events::{self, EventSink, ToolKind, ToolStatus};
 use super::permission::{Decision, PermissionRequest, Permissions};
-use super::prompt::{Abilities, system_prompt};
+use super::prompt::{Abilities, project_notes, system_prompt};
 use super::provider::{
     Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Provider, ServerTools, ToolCall,
     ToolSpec, Usage,
@@ -275,10 +275,16 @@ impl Session {
             plan: config.tools.plan,
             ask_user: host.specs().iter().any(|tool| tool.name == "ask_user"),
         };
+        let notes = if config.tools.files {
+            project_notes(&config.cwd)
+        } else {
+            None
+        };
         let system = system_prompt(
             &config.cwd,
             abilities,
             &skills,
+            notes.as_deref(),
             config.instructions.as_deref(),
         );
         Self {
@@ -443,7 +449,8 @@ impl Session {
                 | Builtin::EditFile => set.files,
                 Builtin::RunCommand => set.commands,
                 Builtin::UpdatePlan => set.plan,
-                Builtin::ReadToolOutput => true,
+                // Offered once there is something set aside to read.
+                Builtin::ReadToolOutput => !self.outputs.is_empty(),
             })
             .map(Builtin::spec)
             .collect();

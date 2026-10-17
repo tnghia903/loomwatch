@@ -1,16 +1,14 @@
-//! Materialising an agent's wired capabilities into a workspace the harness can discover.
+//! Materialising an agent's wired capabilities into a workspace the agent can discover.
 //!
 //! `docs/decisions/0011-planned-capability-sidecar.md` recorded capability wiring as intent the
 //! daemon stores and never executes. `docs/decisions/0012-capability-delivery.md` supersedes that
 //! half of it: a capability declared on an agent in the team file is delivered here, by writing it
-//! into a per-agent workspace in the harness's own format — the same arrangement
-//! `teams/daily-news/` proves by hand.
+//! into a per-agent workspace — the same arrangement `teams/daily-news/` proves by hand.
 //!
-//! Delivery is not authorisation (TNG122 §8 item 4). Copying a skill where a harness will find it
-//! grants nothing the harness would not otherwise allow; every use still passes that harness's own
-//! permission gate, which `LoomWatch` answers by refusing anything outside the workspace's
-//! `.claude/settings.json`. What delivery does guarantee is honesty: a capability the daemon cannot
-//! place fails the run loudly instead of leaving the operator to wonder why nothing used it.
+//! Delivery is not authorisation (TNG122 §8 item 4). Copying a skill where the agent will find it
+//! grants nothing; every use still passes the agent's permission policy (`permissions.rs`). What
+//! delivery does guarantee is honesty: a capability the daemon cannot place fails the run loudly
+//! instead of leaving the operator to wonder why nothing used it.
 
 use std::fs;
 use std::io;
@@ -25,6 +23,15 @@ use crate::memory::TeamMemory;
 /// give the agent from the same module it calls [`materialise`] on.
 pub use crate::skill_routing::BusMode;
 use crate::skill_routing::{self, SkillKind, SkillNeed, SkillRoute, TranslationRequest};
+
+/// Where an agent's wired skills are copied in its workspace: the shared Agent Skills folder,
+/// which `LoomWatch`'s agent lists skills from (`engine::session_config`).
+pub const SKILL_DIRECTORY: &str = ".agents/skills";
+/// The project notes file the Brief is written as for `deliverAs: native-file`, which the agent
+/// reads from its work folder at the start of every session (`agent::prompt::project_notes`).
+pub const MEMORY_FILE: &str = "AGENTS.md";
+/// What a prepared skill's record names as the agent that runs it.
+const RUNS_ON: &str = "LoomWatch";
 
 /// Why a wired capability could not be delivered. Every variant is the operator's problem to fix,
 /// so each one names the capability and says what to do about it.
@@ -42,184 +49,6 @@ impl std::fmt::Display for CapabilityError {
 
 impl std::error::Error for CapabilityError {}
 
-/// Which harness an agent spawns, by the ACP adapter its command names. Skill delivery is
-/// harness-specific: Claude Code uses its own project directory while the other Agent Skills
-/// harnesses use the interoperable `.agents/skills` directory. The same identification chooses
-/// the harness-native memory file the Brief is written as (`docs/TEAM_MEMORY.md`, decision 2).
-///
-/// The variants match the ids in `api.rs`'s `HARNESSES` catalog one for one; adding a harness
-/// there without adding it here would silently fall through to [`Harness::Other`] and lose that
-/// agent its Brief file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Harness {
-    Claude,
-    Codex,
-    Gemini,
-    OpenCode,
-    OpenClaw,
-    Hermes,
-    Pi,
-    Other,
-}
-
-impl Harness {
-    #[must_use]
-    pub fn of(agent: &AgentConfig) -> Self {
-        Self::of_spawn(&agent.spawn.cmd, &agent.spawn.args)
-    }
-
-    /// [`Self::of`] for a spawn that is already a command and its arguments, such as a
-    /// [`crate::acp::ProcessSpec`].
-    #[must_use]
-    pub fn of_spawn(cmd: &str, args: &[String]) -> Self {
-        let haystack = std::iter::once(cmd)
-            .chain(args.iter().map(String::as_str))
-            .map(str::to_lowercase)
-            .collect::<Vec<_>>()
-            .join(" ");
-        // Order matters: the longer, more specific names are tested first so `openclaw` is never
-        // read as OpenCode and `claude-agent-acp` is never read as something generic. Neither
-        // `openclaw` nor `opencode` contains the substring `claude`, so the Claude test is safe
-        // wherever it sits, but the two `open*` names differ by one letter and must not be
-        // reordered.
-        if haystack.contains("openclaw") {
-            Self::OpenClaw
-        } else if haystack.contains("opencode") {
-            Self::OpenCode
-        } else if haystack.contains("claude") {
-            Self::Claude
-        } else if haystack.contains("codex") {
-            Self::Codex
-        } else if haystack.contains("gemini") {
-            Self::Gemini
-        } else if haystack.contains("hermes") {
-            Self::Hermes
-        } else if Self::names_pi(&haystack) {
-            Self::Pi
-        } else {
-            Self::Other
-        }
-    }
-
-    /// `pi` is two letters, so a substring test would match `mapi`, `pip`, or any path containing
-    /// them. Match it as a whole whitespace- or path-separated word instead.
-    fn names_pi(haystack: &str) -> bool {
-        haystack
-            .split([' ', '/', '\\'])
-            .any(|part| part == "pi" || part == "pi.exe")
-    }
-
-    /// The project-local directory this harness scans for Agent Skills.
-    ///
-    /// A skill's source does not constrain where it can run. `LoomWatch` copies the selected bundle
-    /// from any scanned provider into this target-harness path. Codex, Gemini, pi and the other
-    /// Agent Skills harnesses use the shared path; Claude Code keeps its native project path.
-    #[must_use]
-    pub const fn skill_directory(self) -> Option<&'static str> {
-        match self {
-            Self::Claude => Some(".claude/skills"),
-            Self::Codex | Self::Gemini | Self::OpenCode | Self::OpenClaw | Self::Pi => {
-                Some(".agents/skills")
-            }
-            // Hermes recognizes project `.agents/skills` only for repositories explicitly added
-            // to its own trust list. LoomWatch cannot make that global trust decision on an
-            // operator's behalf, so it stays unsupported until the ACP adapter can pass an
-            // explicit per-session skill root.
-            Self::Hermes | Self::Other => None,
-        }
-    }
-
-    /// Where a wired skill's files are copied for this harness. The harness's own folder when it
-    /// has one; otherwise the shared `.agents/skills`, which nothing discovers by itself — the
-    /// skill's instructions travel in the prompt instead (`skill_routing::route`), and the copy is
-    /// there so the files the skill refers to can still be read.
-    #[must_use]
-    pub const fn delivery_directory(self) -> &'static str {
-        match self.skill_directory() {
-            Some(directory) => directory,
-            None => ".agents/skills",
-        }
-    }
-
-    /// The `id` this harness carries in `api.rs`'s `HARNESSES` catalog, which is the key the web
-    /// UI knows an agent's harness by. `None` for a harness `LoomWatch` cannot name.
-    #[must_use]
-    pub const fn id(self) -> Option<&'static str> {
-        match self {
-            Self::Claude => Some("claude"),
-            Self::Codex => Some("codex"),
-            Self::Gemini => Some("gemini"),
-            Self::OpenCode => Some("opencode"),
-            Self::OpenClaw => Some("openclaw"),
-            Self::Hermes => Some("hermes"),
-            Self::Pi => Some("pi"),
-            Self::Other => None,
-        }
-    }
-
-    /// Every harness `LoomWatch` can route a skill to, for building a per-harness route table.
-    pub const ALL: [Self; 7] = [
-        Self::Claude,
-        Self::Codex,
-        Self::Gemini,
-        Self::OpenCode,
-        Self::OpenClaw,
-        Self::Hermes,
-        Self::Pi,
-    ];
-
-    /// Whether this harness advertises HTTP MCP, which is what decides whether it reaches the Team
-    /// Bus at all (`acp.rs::start_recorder` archives `team_bus_unavailable` when it does not).
-    ///
-    /// Verified rows only, from `docs/ARCHITECTURE.md`'s harness table: `OpenClaw` 2026.8.1 is ACP
-    /// with `loadSession` and **no HTTP MCP**, and pi is not ACP at all. An unverified harness
-    /// answers `false`, because the one thing a translation note must never do is name a tool the
-    /// agent turns out not to have.
-    #[must_use]
-    pub const fn advertises_http_mcp(self) -> bool {
-        match self {
-            Self::Claude | Self::Codex | Self::Gemini | Self::OpenCode | Self::Hermes => true,
-            Self::OpenClaw | Self::Pi | Self::Other => false,
-        }
-    }
-
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Claude => "Claude Code",
-            Self::Codex => "Codex",
-            Self::Gemini => "Gemini",
-            Self::OpenCode => "OpenCode",
-            Self::OpenClaw => "OpenClaw",
-            Self::Hermes => "Hermes",
-            Self::Pi => "pi",
-            Self::Other => "this harness",
-        }
-    }
-
-    /// The project memory file this harness loads from its working directory on its own, which is
-    /// the one delivery channel a harness-side context compaction cannot reach (channel 2 in
-    /// `docs/TEAM_MEMORY.md`).
-    ///
-    /// Verified on this machine rather than assumed: Claude Code reads `CLAUDE.md`; Gemini CLI
-    /// reads `GEMINI.md`; `Codex`, `OpenCode`, `OpenClaw`, Hermes and pi all read `AGENTS.md`
-    /// (pi's `--no-context-files` flag names `AGENTS.md` and `CLAUDE.md` explicitly, and the
-    /// Hermes and `OpenClaw` bundles reference `AGENTS.md` far more than any alternative).
-    /// `None` means the harness is unknown to `LoomWatch`, so the Brief reaches it through the
-    /// context packet only.
-    #[must_use]
-    pub const fn memory_file(self) -> Option<&'static str> {
-        match self {
-            Self::Claude => Some("CLAUDE.md"),
-            Self::Gemini => Some("GEMINI.md"),
-            Self::Codex | Self::OpenCode | Self::OpenClaw | Self::Hermes | Self::Pi => {
-                Some("AGENTS.md")
-            }
-            Self::Other => None,
-        }
-    }
-}
-
 /// What `materialise` produced, so the caller can spawn into it and say what it delivered.
 #[derive(Debug, Clone)]
 pub struct Workspace {
@@ -229,17 +58,17 @@ pub struct Workspace {
     /// of added files, and its grants.
     pub root: PathBuf,
     pub skills: Vec<String>,
-    /// Exact instructions copied for this agent, before its harness starts.
+    /// Exact instructions copied for this agent, before it starts.
     pub required_skills: Vec<PreparedSkill>,
-    /// The harness-native memory file the Brief was written as (`CLAUDE.md`, `AGENTS.md`,
-    /// `GEMINI.md`), or `None` when the Brief reached this agent through the packet only.
+    /// The project notes file the Brief was written as ([`MEMORY_FILE`]), or `None` when the
+    /// Brief reached this agent through the packet only.
     pub brief_file: Option<String>,
     /// The knowledge sources and tools wired to this agent (ADR 0029).
     pub delivery: crate::delivery::Delivery,
 }
 
 /// A selected skill's exact identity and bytes. Metadata is archived; the instruction text is
-/// carried by its prompt section. The source harness never restricts the receiving harness.
+/// carried by its prompt section. Where a skill came from never restricts the agent it is given to.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreparedSkill {
@@ -303,7 +132,7 @@ impl PreparedSkill {
         let portability = skill_routing::analyse(text);
         let body = skill_routing::split_frontmatter(text).1.to_owned();
         Self {
-            harness: "Codex".to_owned(),
+            harness: RUNS_ON.to_owned(),
             name: name.to_owned(),
             source: "Claude Code".to_owned(),
             source_path: "/source/SKILL.md".to_owned(),
@@ -320,14 +149,13 @@ impl PreparedSkill {
             translation: (route == SkillRoute::Inline).then(|| {
                 skill_routing::translation_note(&TranslationRequest {
                     skill: name,
-                    harness: Harness::Codex,
                     needs: &portability.needs,
                     bundle_dir: Path::new(path)
                         .parent()
                         .unwrap_or(Path::new("."))
                         .to_str()
                         .unwrap_or("."),
-                    bus: skill_routing::bus_tools(Harness::Codex, BusMode::Pipeline, true),
+                    bus: skill_routing::bus_tools(BusMode::Pipeline, true),
                     siblings_wired: &[],
                     siblings_missing: &[],
                 })
@@ -340,7 +168,7 @@ impl PreparedSkill {
 ///
 /// The workspace lives beside the team file under `.loomwatch/`, one directory per agent, and its
 /// managed skill trees are rebuilt on every run so a capability removed from the canvas stops
-/// being delivered, including after an agent changes harness.
+/// being delivered.
 ///
 /// The agent starts in it only when the folder it declared is the team's own (ADR 0042). A folder
 /// the operator chose stays where the agent works: what was delivered is read from the workspace
@@ -348,14 +176,14 @@ impl PreparedSkill {
 ///
 /// # Errors
 ///
-/// Returns an error when a wired capability names a skill that is not installed, the target
-/// harness has no known project-level Agent Skills directory, or the workspace cannot be written.
+/// Returns an error when a wired capability names a skill that is not installed, or the
+/// workspace cannot be written.
 // Eight arguments, because the delivery this performs genuinely depends on eight independent
 // facts and grouping them into a struct would only move the same list one line up. The house
 // pattern for that is an explicit allowance beside the reason (`lib.rs::run_team_mode`).
 #[allow(clippy::too_many_arguments)]
 pub fn materialise(
-    home: Option<&Path>,
+    skills: Option<&Path>,
     teams_root: &Path,
     team_path: &Path,
     team_id: &str,
@@ -367,15 +195,15 @@ pub fn materialise(
     // Decision 2: memory implies the managed workspace, the same way wiring a skill already does.
     // `native_memory_file` is `None` — and the workspace is not created for memory's sake — when
     // the team has no Brief for this agent, the agent opted out, `deliverAs: packet-only` keeps it
-    // in its own `cwd`, or LoomWatch does not know which file this harness reads. In every one of
-    // those cases the Brief still reaches the agent through the context packet.
+    // in its own `cwd`. In every one of those cases the Brief still reaches the agent through the
+    // context packet.
     //
     // ADR 0042: the agent starts in the workspace only when the folder it declared holds its team
     // file (`cwd: .`, every template's default), which is the teams folder. A folder the operator
     // chose is a project, so the agent stays in it however much is connected. The Brief then
-    // reaches it through the packet alone: writing `CLAUDE.md` there would change their project.
+    // reaches it through the packet alone: writing `AGENTS.md` there would change their project.
     let starts_here = holds(declared_cwd, team_path);
-    // The declared folder whose settings the workspace carries, when the agent starts there.
+    // The declared folder, when the agent starts in the workspace instead of it.
     let carried = starts_here.then_some(declared_cwd);
     let brief_file = native_memory_file(agent, memory).filter(|_| starts_here);
     // ADR 0037: an agent allowed to edit files edits only inside its own folder, and the teams
@@ -389,9 +217,9 @@ pub fn materialise(
         message,
     };
     let root = workspace_root(team_path, team_id, &agent.id).map_err(&fail)?;
-    let skills_dir = prepare_root(&root, agent, carried).map_err(&fail)?;
+    let skills_dir = prepare_root(&root, agent).map_err(&fail)?;
 
-    let inventory = capabilities::detect_capabilities(home, teams_root);
+    let inventory = capabilities::detect_capabilities(skills, teams_root);
     let mut delivered = Vec::new();
     let mut required_skills = Vec::new();
     let mut instruction_bytes = 0usize;
@@ -424,7 +252,7 @@ pub fn materialise(
                     "cannot use the skill {name}: no skill by that name is installed on this machine."
                 ))
             })?;
-        let definition = capabilities::skill_definitions_for(home, teams_root, item)
+        let definition = capabilities::skill_definitions_for(skills, teams_root, item)
             .into_iter()
             .next()
             .ok_or_else(|| {
@@ -456,7 +284,6 @@ pub fn materialise(
         delivered.push(directory);
     }
     let delivery = deliver_knowledge_and_tools(
-        home,
         team_path.parent().unwrap_or(Path::new(".")),
         &inventory,
         agent,
@@ -487,15 +314,12 @@ pub fn materialise(
     }))
 }
 
-/// ADR 0029: resolve the knowledge and tools an agent wires, after its skills, and on Claude Code
-/// write the grant that wiring implies into the workspace's settings.
+/// ADR 0029: resolve the knowledge and tools an agent wires, after its skills.
 ///
-/// `carried` is the declared folder whose settings the workspace carries over, when the agent
-/// starts in the workspace. When it starts in a folder the operator chose (ADR 0042), no settings
-/// are written: the app reads that folder's own, and asks `LoomWatch` before reading anything
-/// outside it, which the permission policy answers from the same delivery.
+/// `carried` is the declared folder, when the agent starts in the workspace instead. When it
+/// starts in a folder the operator chose (ADR 0042), an excerpted file's full text is named by its
+/// path in the workspace, which the permission policy lets the agent read.
 fn deliver_knowledge_and_tools(
-    home: Option<&Path>,
     team_dir: &Path,
     inventory: &capabilities::CapabilityInventory,
     agent: &AgentConfig,
@@ -504,15 +328,13 @@ fn deliver_knowledge_and_tools(
 ) -> Result<crate::delivery::Delivery, String> {
     let copies = root.join(crate::chosen_knowledge::TEXT_COPY_DIR);
     let mut delivery = crate::delivery::prepare_for(
-        home,
         team_dir,
         inventory,
         agent,
-        &crate::delivery::process_env,
         carried.is_none().then_some(copies.as_path()),
     )?;
     // ADR 0035: an added file whose prompt section is only its opening has its full text put in
-    // the workspace, where every app can read it without a grant or a PDF reader.
+    // the workspace, where the agent reads it without a PDF reader.
     for knowledge in &delivery.knowledge {
         if let Some(copy) = &knowledge.text_copy {
             fs::create_dir_all(&copies).map_err(|error| error.to_string())?;
@@ -523,12 +345,6 @@ fn deliver_knowledge_and_tools(
                 )
             })?;
         }
-    }
-    if let Some(declared_cwd) = carried
-        && Harness::of(agent) == Harness::Claude
-    {
-        let base = read_settings(declared_cwd);
-        crate::delivery::grant_claude_access(root, base.as_deref(), &mut delivery)?;
     }
     delivery.copies = Some(root.to_path_buf());
     Ok(delivery)
@@ -558,19 +374,15 @@ fn workspace_root(team_path: &Path, team_id: &str, agent_id: &str) -> Result<Pat
 
 /// Rebuild the managed workspace directory and return the skill tree to copy into, if any.
 ///
-/// Both managed trees are cleared, not just this harness's: that is what prevents a skill wired
-/// under an agent's old harness from surviving a harness switch and being discovered accidentally
-/// on a later run (ADR 0019 decision 4).
-fn prepare_root(
-    root: &Path,
-    agent: &AgentConfig,
-    carried: Option<&Path>,
-) -> Result<Option<PathBuf>, String> {
+/// `.claude/skills` and `.claude/settings.json` are what an earlier `LoomWatch` wrote for Claude
+/// Code. They are cleared too: the agent lists skills from `.claude/skills`, so one wired there
+/// once would otherwise be offered for good (ADR 0019 decision 4).
+fn prepare_root(root: &Path, agent: &AgentConfig) -> Result<Option<PathBuf>, String> {
     // `knowledge/` holds full texts of added files (ADR 0035), rebuilt on every run for the same
     // reason as the skill trees: a file disconnected since must not linger.
     for relative in [
         ".claude/skills",
-        ".agents/skills",
+        SKILL_DIRECTORY,
         crate::chosen_knowledge::TEXT_COPY_DIR,
     ] {
         let directory = root.join(relative);
@@ -585,24 +397,15 @@ fn prepare_root(
         .iter()
         .any(|capability| capability.kind == CapabilityKind::Skill)
     {
-        let directory = root.join(Harness::of(agent).delivery_directory());
+        let directory = root.join(SKILL_DIRECTORY);
         fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
         Some(directory)
     } else {
         None
     };
-    // The harness only ever asks LoomWatch for permission, and LoomWatch refuses anything the
-    // workspace does not allow. Carrying the declared cwd's settings across keeps that contract
-    // with the operator's own file rather than inventing a policy here. An agent that starts in a
-    // folder the operator chose reads that folder's settings itself (ADR 0042).
-    let managed_settings = root.join(".claude/settings.json");
-    if let Some(settings) = carried.and_then(read_settings) {
-        fs::create_dir_all(root.join(".claude")).map_err(|error| error.to_string())?;
-        fs::write(&managed_settings, settings).map_err(|error| error.to_string())?;
-    } else if managed_settings.is_file() {
-        // Managed like the skill trees: a grant an earlier run wrote for a knowledge folder or a
-        // tool (ADR 0029) must not outlive the wiring that justified it.
-        fs::remove_file(&managed_settings).map_err(|error| error.to_string())?;
+    let old_settings = root.join(".claude/settings.json");
+    if old_settings.is_file() {
+        fs::remove_file(&old_settings).map_err(|error| error.to_string())?;
     }
     Ok(skills_dir)
 }
@@ -610,7 +413,7 @@ fn prepare_root(
 /// Decide one delivered skill's route, and write its translation note if it needs one.
 ///
 /// Split out of [`materialise`] because it is the whole of ADR 0021's decision and belongs in one
-/// readable place: the route is chosen from the skill's own text and the receiving harness, once,
+/// readable place: the route is chosen from the skill's own text, once,
 /// so the prompt, the archive and the inspector cannot disagree about what was delivered.
 fn prepare_skill(
     agent: &AgentConfig,
@@ -620,12 +423,11 @@ fn prepare_skill(
     text: String,
     bus: BusMode,
 ) -> PreparedSkill {
-    let harness = Harness::of(agent);
     let portability = skill_routing::analyse(&text);
-    let route = skill_routing::route(&portability, harness);
+    let route = skill_routing::route(&portability);
     let body = skill_routing::split_frontmatter(&text).1.to_owned();
     let mut prepared = PreparedSkill {
-        harness: harness.label().to_owned(),
+        harness: RUNS_ON.to_owned(),
         name: name.to_owned(),
         source: definition.source.clone(),
         source_path: definition.path.clone(),
@@ -645,10 +447,9 @@ fn prepare_skill(
         let (wired, missing) = resolve_siblings(agent, name, &portability.siblings);
         prepared.translation = Some(skill_routing::translation_note(&TranslationRequest {
             skill: name,
-            harness,
             needs: &portability.needs,
             bundle_dir: &prepared.bundle_dir(),
-            bus: skill_routing::bus_tools(harness, bus, agent.allow_recruiting),
+            bus: skill_routing::bus_tools(bus, agent.allow_recruiting),
             siblings_wired: &wired,
             siblings_missing: &missing,
         }));
@@ -686,7 +487,7 @@ fn resolve_siblings(
     (wired, missing)
 }
 
-/// The harness-native memory file this agent's Brief should be written as, if any.
+/// The project notes file this agent's Brief should be written as, if any.
 fn native_memory_file(agent: &AgentConfig, memory: &TeamMemory) -> Option<&'static str> {
     if memory.brief_for(&agent.id).is_empty() || !agent.reads_brief() {
         return None;
@@ -694,7 +495,7 @@ fn native_memory_file(agent: &AgentConfig, memory: &TeamMemory) -> Option<&'stat
     if agent.deliver_as(memory.deliver_as) != DeliverAs::NativeFile {
         return None;
     }
-    Harness::of(agent).memory_file()
+    Some(MEMORY_FILE)
 }
 
 /// Whether `path` lies inside `folder`, both resolved as far as they exist.
@@ -706,10 +507,6 @@ fn holds(folder: &Path, path: &Path) -> bool {
         |parent| resolved(parent).join(path.file_name().unwrap_or_default()),
     );
     path.starts_with(folder)
-}
-
-fn read_settings(declared_cwd: &Path) -> Option<Vec<u8>> {
-    fs::read(declared_cwd.join(".claude/settings.json")).ok()
 }
 
 /// Copy the skill's whole directory, not just its `SKILL.md`: a skill may ship scripts, references
@@ -863,11 +660,11 @@ mod tests {
         }
     }
 
-    /// ADR 0029: a knowledge folder wired to a Claude Code agent becomes a read grant in the
-    /// workspace's settings, with no skill tree prepared for an agent that wired no skill — and the
-    /// grant does not outlive the wiring when the same agent moves to another harness.
+    /// ADR 0029: a wired knowledge folder is delivered from its path, readable without asking, with
+    /// no skill tree prepared for an agent that wired no skill. What an earlier `LoomWatch` wrote
+    /// for Claude Code in the workspace is cleared.
     #[test]
-    fn a_wired_knowledge_folder_is_granted_on_claude_and_the_grant_goes_with_the_wiring() {
+    fn a_wired_knowledge_folder_is_delivered_and_old_claude_settings_are_cleared() {
         let temp = TempDirectory::new();
         let project = temp.path().join("demo");
         let teams = project.join("teams");
@@ -880,55 +677,33 @@ mod tests {
             path: Some(project.clone()),
             notion: None,
         }];
+        let old = workspace_root(&team, "team", "writer").expect("root");
+        fs::create_dir_all(old.join(".claude/skills/stale")).expect("old skills");
+        fs::write(old.join(".claude/settings.json"), "{}").expect("old settings");
 
         let workspace = materialise(
             None,
             &teams,
             &team,
             "team",
-            &agent(
-                "npx",
-                &["@agentclientprotocol/claude-agent-acp"],
-                knowledge.clone(),
-            ),
+            &agent("npx", &[], knowledge),
             &teams,
             &no_memory(),
             BusMode::Pipeline,
         )
         .expect("delivered")
         .expect("a workspace");
-        assert!(!workspace.cwd.join(".claude/skills").exists());
+        assert!(!workspace.cwd.join(".agents/skills").exists());
+        assert!(!workspace.cwd.join(SKILL_DIRECTORY).exists());
+        assert!(!workspace.cwd.join(".claude/settings.json").exists());
         let folder = fs::canonicalize(&project).expect("canonical");
         assert_eq!(
             workspace.delivery.knowledge[0].folders,
             [folder.to_string_lossy()]
         );
-        let settings = fs::read_to_string(workspace.cwd.join(".claude/settings.json"))
-            .expect("the grant is written");
-        assert!(
-            settings.contains(&format!("Read(/{}/**)", folder.display())),
-            "{settings}"
-        );
-
-        let moved = materialise(
-            None,
-            &teams,
-            &team,
-            "team",
-            &agent("npx", &["@agentclientprotocol/codex-acp"], knowledge),
-            &teams,
-            &no_memory(),
-            BusMode::Pipeline,
-        )
-        .expect("delivered")
-        .expect("a workspace");
-        assert!(
-            !moved.cwd.join(".claude/settings.json").exists(),
-            "an earlier run's grant must not survive a harness switch"
-        );
         assert_eq!(
-            moved.delivery.knowledge[0].read_access,
-            Some(crate::delivery::Permission::HarnessPolicy)
+            workspace.delivery.knowledge[0].read_access,
+            Some(crate::delivery::Permission::Granted)
         );
     }
 
@@ -979,15 +754,15 @@ mod tests {
         assert_eq!(file.source, "Added file");
         assert_eq!(file.files, [memo.to_string_lossy()]);
         assert_eq!(file.read_access, Some(crate::delivery::Permission::Granted));
-        let settings =
-            fs::read_to_string(workspace.cwd.join(".claude/settings.json")).expect("grants");
-        assert!(
-            settings.contains(&format!("Read(/{})", memo.display())),
-            "{settings}"
+        let policy = crate::permissions::PermissionPolicy::for_agent(
+            crate::config::AgentAllow::default(),
+            &workspace.cwd,
+            &workspace.delivery,
         );
+        assert!(policy.may_read(&memo));
         assert!(
-            !settings.contains("team.files/**"),
-            "only the added file is granted, never its folder: {settings}"
+            !policy.may_read(&teams.join("team.files/other.md")),
+            "only the added file is readable, never its folder"
         );
         assert_eq!(
             fs::read_to_string(workspace.cwd.join("knowledge/memo.md")).expect("full text"),
@@ -1003,7 +778,7 @@ mod tests {
             &crate::memory::ContextPacket::default(),
             &crate::NodeTask::goal("Summarise the memo"),
         )
-        .with_delivery(&workspace.delivery, true);
+        .with_delivery(&workspace.delivery);
         assert!(
             prompt.text.contains(&format!(
                 "File: {}\nYou have read access to this file.",
@@ -1100,7 +875,7 @@ mod tests {
     }
 
     #[test]
-    fn a_claude_skill_is_delivered_to_a_codex_agents_shared_skill_directory() {
+    fn a_skill_is_copied_into_the_agents_skill_folder_and_its_receipt_kept() {
         let temp = TempDirectory::new();
         let home = temp.path().join("home");
         let source = home.join(".claude/skills/claude-design");
@@ -1128,7 +903,7 @@ mod tests {
             &no_memory(),
             BusMode::Pipeline,
         )
-        .expect("cross-harness delivery succeeds")
+        .expect("delivery succeeds")
         .expect("a wired capability produces a workspace");
 
         assert!(
@@ -1136,7 +911,7 @@ mod tests {
                 .cwd
                 .join(".agents/skills/claude-design/SKILL.md")
                 .is_file(),
-            "Codex discovers project-local skills through the interoperable Agent Skills path",
+            "the agent lists skills from the shared Agent Skills folder",
         );
         assert!(!workspace.cwd.join(".claude/skills/claude-design").exists());
         let receipt = &workspace.required_skills[0];
@@ -1160,54 +935,6 @@ mod tests {
         );
     }
 
-    /// Hermes loads no skills from a project folder. A wired skill used to refuse the whole run;
-    /// now its instructions travel in the prompt and its files sit beside the agent (ADR 0031).
-    #[test]
-    fn an_app_with_no_skill_folder_gets_the_skill_in_its_prompt_instead_of_a_refusal() {
-        let temp = TempDirectory::new();
-        let home = temp.path().join("home");
-        let source = home.join(".claude/skills/house-style");
-        fs::create_dir_all(&source).expect("skill directory");
-        fs::write(
-            source.join("SKILL.md"),
-            "---\nname: house-style\ndescription: Our writing rules\n---\nWrite short sentences.",
-        )
-        .expect("SKILL.md");
-        let teams = temp.path().join("teams");
-        fs::create_dir_all(&teams).expect("teams");
-
-        let workspace = materialise(
-            Some(&home),
-            &teams,
-            &teams.join("team.yaml"),
-            "team",
-            &agent("hermes", &["acp"], vec![skill("house-style")]),
-            &teams,
-            &no_memory(),
-            BusMode::Pipeline,
-        )
-        .expect("a Hermes agent is given the skill, not refused")
-        .expect("a wired capability produces a workspace");
-
-        assert!(
-            workspace
-                .cwd
-                .join(".agents/skills/house-style/SKILL.md")
-                .is_file()
-        );
-        let receipt = &workspace.required_skills[0];
-        assert_eq!(receipt.route, SkillRoute::Inline);
-        assert_eq!(receipt.body, "Write short sentences.");
-        let note = receipt
-            .translation
-            .as_deref()
-            .expect("a note says why it is inline");
-        assert!(
-            note.contains("does not load skills from a project folder"),
-            "{note}"
-        );
-    }
-
     /// Installers name folders freely. The copy is named for the skill, so two skills from folders
     /// with the same name cannot overwrite each other, and the run's evidence — which matches
     /// `<skills>/<name>/SKILL.md` — can see the skill being opened.
@@ -1216,15 +943,9 @@ mod tests {
         let temp = TempDirectory::new();
         let home = temp.path().join("home");
         for (folder, name) in [
-            (".claude/skills/claude-design--fd7fe6db51", "claude-design"),
-            (
-                ".codex/plugins/cache/mkt/sales/1.0.0/skills/index",
-                "sales-index",
-            ),
-            (
-                ".codex/plugins/cache/mkt/data/1.0.0/skills/index",
-                "data-index",
-            ),
+            ("claude-design--fd7fe6db51", "claude-design"),
+            ("sales/index", "sales-index"),
+            ("data/index", "data-index"),
         ] {
             let source = home.join(folder);
             fs::create_dir_all(&source).expect("skill directory");
@@ -1259,7 +980,7 @@ mod tests {
         .expect("delivery succeeds")
         .expect("a workspace");
 
-        let skills = workspace.cwd.join(".claude/skills");
+        let skills = workspace.cwd.join(".agents/skills");
         assert!(skills.join("Claude-Design/SKILL.md").is_file());
         assert!(
             fs::read_to_string(skills.join("sales-index/SKILL.md"))
@@ -1276,42 +997,6 @@ mod tests {
             workspace.required_skills.len(),
             3,
             "the same skill wired twice is delivered once"
-        );
-    }
-
-    #[test]
-    fn a_codex_skill_is_delivered_to_a_claude_agents_native_skill_directory() {
-        let temp = TempDirectory::new();
-        let home = temp.path().join("home");
-        let source = home.join(".codex/skills/report-writer");
-        fs::create_dir_all(&source).expect("skill directory");
-        fs::write(
-            source.join("SKILL.md"),
-            "---\nname: report-writer\ndescription: Write reports\n---\nBody",
-        )
-        .expect("SKILL.md");
-        let teams = temp.path().join("teams");
-        fs::create_dir_all(&teams).expect("teams");
-        let team = teams.join("team.yaml");
-
-        let workspace = materialise(
-            Some(&home),
-            &teams,
-            &team,
-            "team",
-            &agent("npx", &["claude-agent-acp"], vec![skill("report-writer")]),
-            &teams,
-            &no_memory(),
-            BusMode::Pipeline,
-        )
-        .expect("reverse cross-harness delivery succeeds")
-        .expect("a wired capability produces a workspace");
-
-        assert!(
-            workspace
-                .cwd
-                .join(".claude/skills/report-writer/SKILL.md")
-                .is_file()
         );
     }
 
@@ -1365,7 +1050,7 @@ mod tests {
         .expect("a wired capability produces a workspace");
 
         assert_eq!(workspace.skills, vec!["report-writer".to_owned()]);
-        let delivered = workspace.cwd.join(".claude/skills/report-writer");
+        let delivered = workspace.cwd.join(".agents/skills/report-writer");
         assert!(delivered.join("SKILL.md").is_file());
         // The whole directory travels, so a skill that loads a reference by relative path works.
         assert!(delivered.join("references/style.md").is_file());
@@ -1478,14 +1163,14 @@ mod tests {
         assert!(
             workspace
                 .root
-                .join(".claude/skills/report-writer/SKILL.md")
+                .join(".agents/skills/report-writer/SKILL.md")
                 .is_file()
         );
         assert!(workspace.root.join("knowledge/memo.md").is_file());
         // The Brief reaches it through the packet; nothing is added to the project.
         assert_eq!(workspace.brief_file, None);
-        assert!(!project.join("CLAUDE.md").exists());
-        assert!(!project.join(".claude/skills").exists());
+        assert!(!project.join("AGENTS.md").exists());
+        assert!(!project.join(".agents/skills").exists());
         assert_eq!(
             fs::read_to_string(project.join(".claude/settings.json")).expect("untouched"),
             r#"{"permissions":{}}"#
@@ -1508,7 +1193,7 @@ mod tests {
             &crate::NodeTask::goal("Summarise the memo"),
             Some(&workspace),
         );
-        let skill_file = workspace.root.join(".claude/skills/report-writer/SKILL.md");
+        let skill_file = workspace.root.join(".agents/skills/report-writer/SKILL.md");
         assert!(
             prompt
                 .text
@@ -1543,8 +1228,8 @@ mod tests {
         );
     }
 
-    /// Delivery channel 2: the Brief written as the harness's own project memory file, which is
-    /// the one channel a harness-side compaction does not reach. A `native-file` agent with no
+    /// Delivery channel 2: the Brief written as the project notes file the agent reads at the
+    /// start of every session, the one channel a compaction does not reach. A `native-file` agent with no
     /// wired capabilities still gets a managed workspace, because there is nowhere else to put it.
     #[test]
     fn a_native_file_brief_moves_the_agent_into_a_managed_workspace() {
@@ -1577,76 +1262,12 @@ mod tests {
         .expect("delivery succeeds")
         .expect("a native-file Brief produces a workspace even with no capabilities wired");
 
-        assert_eq!(workspace.brief_file.as_deref(), Some("CLAUDE.md"));
-        let written = fs::read_to_string(workspace.cwd.join("CLAUDE.md")).expect("CLAUDE.md");
+        assert_eq!(workspace.brief_file.as_deref(), Some("AGENTS.md"));
+        let written = fs::read_to_string(workspace.cwd.join("AGENTS.md")).expect("AGENTS.md");
         assert!(written.contains("Never touch main."), "{written}");
         // It is machine-written and rebuilt every run, so it must say so rather than inviting an
         // edit that the next run silently discards.
         assert!(written.contains("Rebuilt on every run"), "{written}");
-    }
-
-    /// Each harness reads a different file, and writing the wrong name delivers nothing at all
-    /// while looking like it worked.
-    #[test]
-    fn each_harness_gets_the_memory_file_it_actually_reads() {
-        let temp = TempDirectory::new();
-        let teams = temp.path().join("teams");
-        fs::create_dir_all(teams.join("brief")).expect("teams");
-        let team = teams.join("team.yaml");
-        fs::write(&team, "").expect("team");
-        fs::write(
-            teams.join("brief/constraints.md"),
-            "# C\nNever touch main.\n",
-        )
-        .expect("brief");
-        let memory = brief_memory(&teams, &team);
-
-        for (cmd, args, expected) in [
-            (
-                "npx",
-                vec!["-y", "@agentclientprotocol/claude-agent-acp"],
-                Some("CLAUDE.md"),
-            ),
-            (
-                "npx",
-                vec!["-y", "@agentclientprotocol/codex-acp"],
-                Some("AGENTS.md"),
-            ),
-            ("gemini", vec!["--acp"], Some("GEMINI.md")),
-            ("opencode", vec!["acp"], Some("AGENTS.md")),
-            ("openclaw", vec!["acp"], Some("AGENTS.md")),
-            ("hermes-acp", vec![], Some("AGENTS.md")),
-            // A harness LoomWatch has never heard of: no file is invented for it, and the Brief
-            // reaches it through the context packet only.
-            ("some-other-acp", vec![], None),
-        ] {
-            let workspace = materialise(
-                None,
-                &teams,
-                &team,
-                "team",
-                &agent(cmd, &args, Vec::new()),
-                &teams,
-                &memory,
-                BusMode::Pipeline,
-            )
-            .expect("delivery succeeds");
-            match expected {
-                Some(name) => {
-                    let workspace = workspace.expect("a known harness gets a workspace");
-                    assert_eq!(
-                        workspace.brief_file.as_deref(),
-                        Some(name),
-                        "{cmd} {args:?}"
-                    );
-                    assert!(workspace.cwd.join(name).is_file(), "{cmd} {args:?}");
-                }
-                None => assert!(
-                    workspace.is_none(),
-                    "{cmd} {args:?} must keep its declared cwd"
-                ),
-            }
-        }
     }
 
     /// `packet-only` is how an agent that must run inside a repository opts out: nothing is
@@ -1709,20 +1330,27 @@ mod tests {
         .expect("load the test Brief")
     }
 
-    /// A skill that assumes Claude's own execution facilities. Written out once because three
-    /// tests turn on the same bytes taking different routes on different harnesses.
+    /// A skill that assumes Claude Code's own execution facilities. Written out once because
+    /// three tests turn on these bytes.
     const COUPLED_SKILL: &str = "---\nname: claude-design\ndescription: Design one-off HTML artifacts (landing, deck, prototype).\n---\n# Designing\n\nUse the Task tool to fan out three variants in parallel.\nRun `python3 scripts/render.py --out deck.html` to build it.\nTrack the steps with TodoWrite.\n\n## House rules\n\nOne idea per screen. Type sets the rhythm; colour is the accent, never the structure.\nMeasure twice: a layout that only works at one width is not a layout.\nPrefer one strong photograph to three weak ones, and no photograph at all to one stock image.\nWhite space is not empty space. Leave the margins alone.\nEvery number on a chart earns its ink or comes off.\n";
 
+    /// The same skill without the coupling: what it says, not what Claude Code does it with.
+    const PORTABLE_SKILL: &str = "---\nname: claude-design\ndescription: Design one-off HTML artifacts (landing, deck, prototype).\n---\n# Designing\n\nOne idea per screen. Type sets the rhythm; colour is the accent, never the structure.\nWhite space is not empty space. Leave the margins alone.\n";
+
     /// Deliver `COUPLED_SKILL` to one agent and hand back what was prepared.
-    fn deliver(temp: &TempDirectory, spawn: (&str, &[&str]), recruiting: bool) -> PreparedSkill {
+    fn deliver(temp: &TempDirectory, recruiting: bool) -> PreparedSkill {
+        deliver_text(temp, COUPLED_SKILL, recruiting)
+    }
+
+    fn deliver_text(temp: &TempDirectory, text: &str, recruiting: bool) -> PreparedSkill {
         let home = temp.path().join(format!("home-{}", uuid::Uuid::new_v4()));
-        let source = home.join(".claude/skills/claude-design");
+        let source = home.join("claude-design");
         fs::create_dir_all(&source).expect("skill directory");
-        fs::write(source.join("SKILL.md"), COUPLED_SKILL).expect("SKILL.md");
+        fs::write(source.join("SKILL.md"), text).expect("SKILL.md");
         let teams = temp.path().join(format!("teams-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&teams).expect("teams");
         let team = teams.join("team.yaml");
-        let mut wired = agent(spawn.0, spawn.1, vec![skill("claude-design")]);
+        let mut wired = agent("npx", &[], vec![skill("claude-design")]);
         wired.allow_recruiting = recruiting;
         let workspace = materialise(
             Some(&home),
@@ -1748,15 +1376,12 @@ mod tests {
     #[test]
     fn no_route_puts_a_skills_yaml_frontmatter_in_front_of_the_model() {
         let temp = TempDirectory::new();
-        for (spawn, route) in [
-            (
-                ("npx", &["-y", "@agentclientprotocol/codex-acp"][..]),
-                SkillRoute::Inline,
-            ),
-            (("npx", &["claude-agent-acp"][..]), SkillRoute::Native),
+        for (text, route) in [
+            (COUPLED_SKILL, SkillRoute::Inline),
+            (PORTABLE_SKILL, SkillRoute::Native),
         ] {
-            let prepared = deliver(&temp, spawn, true);
-            assert_eq!(prepared.route, route, "{spawn:?}");
+            let prepared = deliver_text(&temp, text, true);
+            assert_eq!(prepared.route, route);
             // What may be injected.
             assert!(
                 !prepared.body.contains("description:"),
@@ -1766,15 +1391,15 @@ mod tests {
             assert!(!prepared.body.starts_with("---"));
             assert!(prepared.body.starts_with("# Designing"));
             // What was delivered: untouched, including the frontmatter and its fingerprint.
-            assert_eq!(prepared.text, COUPLED_SKILL);
+            assert_eq!(prepared.text, text);
             assert_eq!(
                 fs::read_to_string(&prepared.path).expect("delivered file"),
-                COUPLED_SKILL,
+                text,
                 "the file on disk is never rewritten",
             );
             assert_eq!(
                 prepared.sha256,
-                format!("{:x}", Sha256::digest(COUPLED_SKILL.as_bytes())),
+                format!("{:x}", Sha256::digest(text.as_bytes())),
                 "the receipt still fingerprints the delivered bytes, not the prompt",
             );
             assert_ne!(
@@ -1792,14 +1417,13 @@ mod tests {
         }
     }
 
-    /// Contract (ii): a coupled skill on a foreign harness is inlined and translated, and the
-    /// note names a Team Bus tool only when this agent will actually be offered it.
+    /// Contract (ii): a skill coupled to Claude Code is inlined and translated, and the note names
+    /// a Team Bus tool only when this agent will actually be offered it.
     #[test]
-    fn a_coupled_skill_on_codex_is_inlined_with_a_note_that_only_promises_tools_it_has() {
+    fn a_coupled_skill_is_inlined_with_a_note_that_only_promises_tools_it_has() {
         let temp = TempDirectory::new();
-        let codex = ("npx", &["-y", "@agentclientprotocol/codex-acp"][..]);
 
-        let recruiting = deliver(&temp, codex, true);
+        let recruiting = deliver(&temp, true);
         assert_eq!(recruiting.route, SkillRoute::Inline);
         assert_eq!(recruiting.kind, SkillKind::Artifact);
         assert!(recruiting.needs.contains(&SkillNeed::Subagents));
@@ -1811,10 +1435,10 @@ mod tests {
             !note.contains("`dispatch`") && !note.contains("`handoff`"),
             "pipeline mode withdraws both outright: {note}"
         );
-        assert!(note.contains("refuses every permission request"), "{note}");
+        assert!(note.contains("may be asked first and may say no"), "{note}");
         assert!(note.contains(&recruiting.bundle_dir()), "{note}");
 
-        let restricted = deliver(&temp, codex, false);
+        let restricted = deliver(&temp, false);
         let note = restricted.translation.expect("a translation note");
         assert!(
             !note.contains("`ask`"),
@@ -1823,16 +1447,14 @@ mod tests {
         assert!(note.contains("do the steps yourself"), "{note}");
     }
 
-    /// Contract (iii): the same bytes on the harness they were written for take the short route.
+    /// Contract (iii): a skill that assumes nothing takes the short route: a pointer to its file
+    /// instead of its text.
     #[test]
-    fn the_same_skill_on_a_claude_agent_is_native_with_a_pointer_instead_of_its_text() {
+    fn a_portable_skill_is_native_with_a_pointer_instead_of_its_text() {
         let temp = TempDirectory::new();
-        let prepared = deliver(&temp, ("npx", &["claude-agent-acp"][..]), true);
+        let prepared = deliver_text(&temp, PORTABLE_SKILL, true);
         assert_eq!(prepared.route, SkillRoute::Native);
-        assert!(
-            prepared.translation.is_none(),
-            "nothing to translate on the harness the skill was written for"
-        );
+        assert!(prepared.translation.is_none(), "nothing to translate");
         let section = crate::memory::ComposedPrompt::default()
             .with_required_skills(std::slice::from_ref(&prepared))
             .sections
@@ -1842,28 +1464,9 @@ mod tests {
         assert!(section.text.contains("Design one-off HTML artifacts"));
         assert!(section.text.contains("SKILL.md in full"));
         assert!(
-            !section.text.contains("Use the Task tool"),
-            "the body stays on disk where the harness discovers it: {}",
+            !section.text.contains("One idea per screen"),
+            "the body stays on disk, where the agent reads it: {}",
             section.text
-        );
-        // The counterfactual for "a pointer instead of its text": the same bytes on Codex take
-        // the inline route, and that section carries the whole body. Comparing the two routes is
-        // the claim; comparing a section against the file would only measure this fixture's size.
-        let inlined = deliver(
-            &temp,
-            ("npx", &["-y", "@agentclientprotocol/codex-acp"][..]),
-            true,
-        );
-        let inline_section = crate::memory::ComposedPrompt::default()
-            .with_required_skills(std::slice::from_ref(&inlined))
-            .sections
-            .into_iter()
-            .next()
-            .expect("a required-skill section");
-        assert!(inline_section.text.contains("Use the Task tool"));
-        assert!(
-            section.text.chars().count() < inline_section.text.chars().count(),
-            "native must be the shorter of the two routes over the same bytes",
         );
     }
 
@@ -1872,7 +1475,7 @@ mod tests {
         let temp = TempDirectory::new();
         let home = temp.path().join("home");
         for name in ["kept", "dropped"] {
-            let source = home.join(".claude/skills").join(name);
+            let source = home.join(name);
             fs::create_dir_all(&source).expect("skill dir");
             fs::write(
                 source.join("SKILL.md"),
@@ -1913,9 +1516,9 @@ mod tests {
         .expect("second run")
         .expect("workspace");
 
-        assert!(workspace.cwd.join(".claude/skills/kept").is_dir());
+        assert!(workspace.cwd.join(".agents/skills/kept").is_dir());
         assert!(
-            !workspace.cwd.join(".claude/skills/dropped").exists(),
+            !workspace.cwd.join(".agents/skills/dropped").exists(),
             "a capability taken off the canvas must stop being delivered",
         );
     }

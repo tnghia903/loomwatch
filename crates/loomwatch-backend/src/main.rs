@@ -71,7 +71,7 @@ enum Commands {
         )]
         allow_container_listener: bool,
     },
-    /// Run one turn through the configured entrypoint ACP harness.
+    /// Run one turn of a team's entrypoint agent.
     Run {
         #[arg(long)]
         team: PathBuf,
@@ -119,29 +119,6 @@ enum Commands {
     DatabaseLayout {
         #[command(flatten)]
         database: DatabaseArgs,
-    },
-    /// Expose this machine's native ACP harnesses to an authenticated `LoomWatch` container.
-    HostRunner {
-        #[arg(long, default_value = "0.0.0.0:3031")]
-        listen: SocketAddr,
-        #[arg(long, env = "LOOMWATCH_HOST_RUNNER_TOKEN", hide_env_values = true)]
-        token: String,
-        /// Translate one container working-directory root to its host bind-mount source.
-        #[arg(long = "map", value_name = "CONTAINER=HOST", required = true)]
-        mappings: Vec<String>,
-    },
-    /// Internal stdio proxy used by agents selected from a configured host runner.
-    #[command(hide = true)]
-    HarnessClient {
-        #[arg(long)]
-        harness: String,
-    },
-    /// Serve the `LoomWatch` Control tools over stdio, for an AI app connected from the
-    /// Connections page. Reads its token from `LOOMWATCH_CONTROL_TOKEN`.
-    Mcp {
-        /// The daemon's tool server, e.g. `http://127.0.0.1:3000/api/control/mcp`.
-        #[arg(long, default_value = "http://127.0.0.1:3000/api/control/mcp")]
-        url: String,
     },
 }
 
@@ -270,12 +247,13 @@ async fn main() -> Result<()> {
             let teams_root = std::fs::canonicalize(&teams_root).with_context(|| {
                 format!("failed to resolve teams root {}", teams_root.display())
             })?;
+            // The OpenRouter key and model list every run's agents use. Installed before anything
+            // can start a run. Nothing is read or fetched here: the key is read when the first
+            // agent starts, and the model list when it is first asked for.
+            let ai = loomwatch_backend::ai::Ai::new(&state_dir);
+            loomwatch_backend::ai::install(ai.clone());
             // Which team files may run (ADR 0048), kept outside the teams folder. Opened before
             // anything can start a run, and the first time, it approves the teams already there.
-            // Claude's and Codex's bridges, installed once and started directly instead of
-            // through npx; installing the ones this computer's apps need starts now, in the
-            // background.
-            loomwatch_backend::connectors::init(&state_dir).prepare_detected();
             let approvals =
                 loomwatch_backend::approvals::TeamApprovals::open(&state_dir, &teams_root)
                     .with_context(|| {
@@ -329,18 +307,16 @@ async fn main() -> Result<()> {
                 archive.clone(),
                 teams_root.clone(),
             );
-            // Ask LoomWatch (ADR 0033): the tool server and the Ask panel's endpoints. It shares the
-            // registry so a run it starts is an ordinary run, and the listener so its URL is the
-            // daemon's own.
+            // Ask LoomWatch (ADR 0033): the Ask panel's endpoints and the tools its agent calls. It
+            // shares the registry so a run it starts is an ordinary run, and the listener so the
+            // links it gives are the daemon's own.
             let control = loomwatch_backend::control::Control::new(
                 loomwatch_backend::control::ControlOptions {
                     archive: archive.clone(),
                     teams_root: teams_root.clone(),
                     registry: registry.clone(),
                     listen: address,
-                    ask_command: std::env::var("LOOMWATCH_ASK_COMMAND")
-                        .ok()
-                        .map(|command| command.split_whitespace().map(str::to_owned).collect()),
+                    ask_model: std::env::var("LOOMWATCH_ASK_MODEL").ok(),
                 },
             );
             // ADR 0052: says when a newer LoomWatch is out and how to install it. The check runs
@@ -369,9 +345,7 @@ async fn main() -> Result<()> {
                 app = app.merge(loomwatch_backend::notion::router(&state_dir)?);
                 // The OpenRouter key and the model list. Like Notion's connection, only on this
                 // computer's own address.
-                app = app.merge(loomwatch_backend::ai::router(
-                    loomwatch_backend::ai::Ai::new(&state_dir),
-                ));
+                app = app.merge(loomwatch_backend::ai::router(ai.clone()));
             }
             // After "Update and restart": stop taking requests, give the open ones a moment (the
             // app's live streams never end by themselves), then exit with the status that has the
@@ -440,22 +414,6 @@ async fn main() -> Result<()> {
                 println!("{layout}");
             }
         }
-        Commands::HostRunner {
-            listen,
-            token,
-            mappings,
-        } => {
-            let mappings = mappings
-                .iter()
-                .map(|value| loomwatch_backend::host_runner::PathMapping::parse(value))
-                .collect::<Result<Vec<_>>>()?;
-            loomwatch_backend::host_runner::serve(listen, token, mappings).await?;
-        }
-        Commands::HarnessClient { harness } => {
-            let code = loomwatch_backend::host_runner::client(harness).await?;
-            std::process::exit(code);
-        }
-        Commands::Mcp { url } => loomwatch_backend::control::bridge(&url).await?,
     }
     Ok(())
 }

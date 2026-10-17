@@ -41,7 +41,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-pub use demo::{Demo, OFFLINE_MODEL, SeenRequest};
+pub use demo::{Demo, Hold, OFFLINE_MODEL, Respond, SeenRequest};
 pub use error::AgentError;
 pub use events::{EventSink, ToolKind, ToolStatus};
 pub use openrouter::{DEFAULT_BASE_URL, OpenRouter};
