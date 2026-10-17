@@ -31,6 +31,16 @@ describe('every copy of the logo draws the masters', () => {
     for (const file of ['ui/public/icon.svg', 'ui/public/favicon.svg', 'site/favicon.svg']) expect(read(file), file).toBe(master)
   })
 
+  it('gives the app the landing page’s pictures of the mark, for Add to Dock and older browsers', () => {
+    const bytes = (file: string) => readFileSync(path.join(repo, file))
+    for (const file of ['apple-touch-icon.png', 'favicon.ico']) expect(bytes(`ui/public/${file}`).equals(bytes(`site/${file}`)), file).toBe(true)
+    const page = read('ui/index.html')
+    expect(page).toContain('rel="apple-touch-icon" href="/apple-touch-icon.png')
+    expect(page).toContain('rel="icon" href="/favicon.ico')
+    const manifest = JSON.parse(read('ui/public/manifest.webmanifest')) as { icons: { src: string; type: string }[] }
+    expect(manifest.icons).toContainEqual(expect.objectContaining({ src: '/apple-touch-icon.png', type: 'image/png' }))
+  })
+
   it('draws the same paths in the app', () => {
     drawsAll('ui/src/components/ui/glyphs.tsx', [...mark, ...small, ...wordmark])
     drawsAll('ui/src/lib/story/useNeedsYou.ts', small)
