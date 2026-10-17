@@ -40,6 +40,8 @@ export function SkillsPage({ mark }: { mark?: LoomMarkState } = {}) {
   const [bringingIn, setBringingIn] = useState(false)
   const [toast, setToast] = useState<(ToastState & { id: number }) | null>(null)
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set())
+  // Results a look inside found the license keeps out: the search leaves them out from now on.
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set())
   // Only the newest add's and search's answers count: one closed or replaced since is ignored.
   const addTurn = useRef(0)
   const searchTurn = useRef(0)
@@ -86,8 +88,10 @@ export function SkillsPage({ mark }: { mark?: LoomMarkState } = {}) {
     inspectInstall(ref, source).then((inspection) => {
       if (turn !== addTurn.current) return
       setAdding({ state: { kind: 'ready', inspection }, key, publisher })
-      const reasons = inspection.candidates.map((candidate) => candidate.reason)
-      if (key && reasons.length > 0 && reasons.every(Boolean)) setOutcomes((current) => ({ ...current, [key]: { kind: 'blocked', reason: reasons[0] ?? '' } }))
+      const { candidates } = inspection
+      const reasons = candidates.map((candidate) => candidate.reason)
+      if (key && candidates.length > 0 && candidates.every((candidate) => candidate.license.restricted)) setGone((current) => new Set(current).add(key))
+      else if (key && reasons.length > 0 && reasons.every(Boolean)) setOutcomes((current) => ({ ...current, [key]: { kind: 'blocked', reason: reasons[0] ?? '' } }))
     }).catch((caught: unknown) => {
       if (turn !== addTurn.current) return
       setAdding({ state: { kind: 'failed', label, message: errorText(caught), retry: () => openAdd(label, ref, source, key, publisher) }, key, publisher })
@@ -136,7 +140,7 @@ export function SkillsPage({ mark }: { mark?: LoomMarkState } = {}) {
           <div className="lw-skills-browse">
             <Finder text={text} onText={setText} busy={search?.loading ?? false} onSearch={(query) => void runSearch(query)} onOpenLink={(link) => openAdd(link, link)} />
             {search
-              ? <Results query={search.query} results={search.found?.results ?? []} missed={search.found?.missed ?? []} loading={search.loading} error={search.error}
+              ? <Results query={search.query} results={(search.found?.results ?? []).filter((result) => !gone.has(resultKey(result)))} missed={search.found?.missed ?? []} loading={search.loading} error={search.error}
                 stateOf={stateOf} onAdd={(result) => openAdd(displayName(result.name), result.ref, result.source, resultKey(result), publisherOf(result))}
                 onClear={() => { searchTurn.current += 1; setSearch(null) }} />
               : <Topics onPick={(query) => void runSearch(query)} />}
@@ -147,7 +151,7 @@ export function SkillsPage({ mark }: { mark?: LoomMarkState } = {}) {
           </aside>
         </div>
       </main>
-      {adding && <AddSheet adding={adding.state} publisher={adding.publisher} onClose={closeAdd} onAdded={added} returnFocus={adding.key ? `[data-result=${JSON.stringify(adding.key)}]` : undefined} />}
+      {adding && <AddSheet adding={adding.state} publisher={adding.publisher} onClose={closeAdd} onAdded={added} returnFocus={adding.key ? (gone.has(adding.key) ? 'input[aria-label="Find skills"]' : `[data-result=${JSON.stringify(adding.key)}]`) : undefined} />}
       {bringingIn && <BringInSheet onClose={() => setBringingIn(false)} onChanged={() => void load()} onBroughtIn={(names) => setFresh(new Set(names))} />}
       {toast && <Toast key={toast.id} text={toast.text} action={toast.action} onAction={toast.onAction} onClose={() => setToast(null)} />}
     </div>

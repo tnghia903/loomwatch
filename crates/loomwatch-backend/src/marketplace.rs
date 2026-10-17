@@ -11,25 +11,35 @@
 //! names a path outside its own folder is refused whole. Downloads are capped at 50 MB, and each
 //! skill at 20 MB and 2,000 files.
 //!
+//! A search never offers a skill it knows can't come in. Before it answers, it reads each
+//! result's `SKILL.md` for its `license:` line, and leaves out the ones that say "All rights
+//! reserved" or "proprietary". A skill whose license only an inspect finds is left out of every
+//! search after it.
+//!
 //! - skills.sh: `GET /api/search?q=` answers `{skills: [{id: "owner/repo/skillId", source:
 //!   "owner/repo", skillId, name, installs}]}`. Installing one is a GitHub install of `source`,
-//!   keeping the folder whose `SKILL.md` is named `skillId`.
+//!   keeping the folder whose `SKILL.md` is named `skillId`. Before a search shows one, its
+//!   `SKILL.md` is read from `raw.githubusercontent.com/{owner}/{repo}/HEAD/` in the folders a
+//!   skill usually sits in.
 //! - `ClawHub`: `GET /api/v1/search?q=` answers `{results: [{displayName, summary, downloads,
 //!   canonicalUrl, install: {kind, reference}}]}`, where `kind` is `clawhub` (`reference` is
 //!   `owner/slug`) or `skills-sh` (`skills-sh:owner/repo/skillId`). `GET /api/v1/download?slug=
 //!   &ownerHandle=` answers the ZIP, or JSON handing off to a GitHub commit. `GET
-//!   /api/v1/skills/{slug}/scan?ownerHandle=` is its safety check, shown when it answers.
+//!   /api/v1/skills/{slug}/scan?ownerHandle=` is its safety check, shown when it answers. `GET
+//!   /api/v1/skills/{slug}/file?path=SKILL.md&ownerHandle=` answers one file, read before a
+//!   search shows it.
 //! - GitHub: `owner/repo[/path][@ref]` or a github.com link. The default branch comes from
 //!   `api.github.com/repos/{owner}/{repo}` and the commit from its `commits/{ref}`; the files
 //!   from `codeload.github.com/{owner}/{repo}/tar.gz/{commit}`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::{self, Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
+use futures_util::stream::{self, StreamExt};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -51,6 +61,18 @@ const MAX_QUERY: usize = 200;
 const MAX_JSON: u64 = 4 * 1024 * 1024;
 const API_TIMEOUT: Duration = Duration::from_secs(20);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+/// How long a search waits on the licenses of what it found. The ones not read by then are shown.
+/// They are all read at once: one of `ClawHub`'s takes about 2 s.
+const LICENSE_WAIT: Duration = Duration::from_secs(4);
+const LICENSE_READS_AT_ONCE: usize = MAX_SEARCH_RESULTS;
+/// A license read as open is trusted this long. One read as restricted stays left out for as long
+/// as the daemon runs.
+const LICENSE_FRESH_FOR: Duration = Duration::from_hours(6);
+const MAX_LICENSES: usize = 4096;
+/// A site none of whose license reads answered in a search isn't asked again for this long, so
+/// a network that blocks or stalls it doesn't make every search wait.
+const SITE_RESTS_FOR: Duration = Duration::from_mins(10);
+const MAX_SKILL_MD: u64 = 1024 * 1024;
 
 /// The sites skills come from. Tests point these at a local server.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +83,8 @@ pub struct Endpoints {
     pub github: String,
     /// GitHub's picture server, for pictures known by account number.
     pub avatars: String,
+    /// GitHub's file server, for one `SKILL.md` read before a search shows it.
+    pub raw: String,
     pub skills_sh: String,
     pub clawhub: String,
 }
@@ -73,6 +97,7 @@ impl Endpoints {
             codeload: "https://codeload.github.com".to_owned(),
             github: "https://github.com".to_owned(),
             avatars: "https://avatars.githubusercontent.com".to_owned(),
+            raw: "https://raw.githubusercontent.com".to_owned(),
             skills_sh: "https://skills.sh".to_owned(),
             clawhub: "https://clawhub.ai".to_owned(),
         }
@@ -84,6 +109,7 @@ impl Endpoints {
             &self.codeload,
             &self.github,
             &self.avatars,
+            &self.raw,
             &self.skills_sh,
             &self.clawhub,
         ]
@@ -296,6 +322,19 @@ pub struct Marketplace {
     client: Option<reqwest::Client>,
     endpoints: Endpoints,
     staged: Mutex<BTreeMap<String, Staged>>,
+    /// What searches know of each result's license, by `license_key`.
+    licenses: Mutex<HashMap<String, Checked>>,
+    /// Until when each site's license reads are skipped, by `Source::id`.
+    resting: Mutex<BTreeMap<&'static str, Instant>>,
+}
+
+/// What a search knows of one result's license.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Checked {
+    /// It can't be copied in, so no search offers it.
+    Restricted,
+    /// Read as open, or no `SKILL.md` was found where skills usually sit: read again once old.
+    Open(Instant),
 }
 
 impl Marketplace {
@@ -319,6 +358,8 @@ impl Marketplace {
             client,
             endpoints,
             staged: Mutex::new(BTreeMap::new()),
+            licenses: Mutex::new(HashMap::new()),
+            resting: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -365,7 +406,174 @@ impl Marketplace {
             }
         };
         results.truncate(MAX_SEARCH_RESULTS);
-        Ok(results)
+        Ok(self.without_restricted(results).await)
+    }
+
+    fn licenses(&self) -> MutexGuard<'_, HashMap<String, Checked>> {
+        self.licenses.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn remember_license(&self, key: String, restricted: bool) {
+        let mut licenses = self.licenses();
+        if licenses.len() >= MAX_LICENSES {
+            licenses.retain(|_, checked| *checked == Checked::Restricted);
+        }
+        let checked = if restricted {
+            Checked::Restricted
+        } else {
+            Checked::Open(Instant::now())
+        };
+        licenses.insert(key, checked);
+    }
+
+    /// Leave out the results whose license says they can't be copied in, so the person never
+    /// meets one. Each result's license is read before it is shown, all at once. One that
+    /// can't be read in time is shown, and inspect still refuses it if it must. A site that
+    /// answers none of a search's reads rests for `SITE_RESTS_FOR`: its results are shown
+    /// unread meanwhile, except the ones already known to be restricted.
+    async fn without_restricted(&self, results: Vec<SearchResult>) -> Vec<SearchResult> {
+        let resting = {
+            let mut resting = self.resting.lock().unwrap_or_else(PoisonError::into_inner);
+            resting.retain(|_, until| *until > Instant::now());
+            resting.keys().copied().collect::<BTreeSet<_>>()
+        };
+        let unread: Vec<(String, Source, String)> = {
+            let licenses = self.licenses();
+            results
+                .iter()
+                .filter_map(|result| {
+                    let source = Source::parse(result.source)?;
+                    if resting.contains(source.id()) {
+                        return None;
+                    }
+                    let key = license_key(source, &result.reference);
+                    let fresh = match licenses.get(&key) {
+                        Some(Checked::Restricted) => true,
+                        Some(Checked::Open(read)) => read.elapsed() < LICENSE_FRESH_FOR,
+                        None => false,
+                    };
+                    (!fresh).then(|| (key, source, result.reference.clone()))
+                })
+                .collect()
+        };
+        let asked = unread
+            .iter()
+            .map(|(_, source, _)| source.id())
+            .collect::<BTreeSet<_>>();
+        let mut answered = BTreeSet::new();
+        let reads = stream::iter(unread)
+            .map(|(key, source, reference)| async move {
+                let restricted = self.restricted_by_license(source, &reference).await;
+                (key, source, restricted)
+            })
+            .buffer_unordered(LICENSE_READS_AT_ONCE)
+            .for_each(|(key, source, restricted)| {
+                if let Some(restricted) = restricted {
+                    answered.insert(source.id());
+                    self.remember_license(key, restricted);
+                }
+                std::future::ready(())
+            });
+        let _ = tokio::time::timeout(LICENSE_WAIT, reads).await;
+        // Not one read answered in time: the site is down or blocked from here, so rest it.
+        let silent = asked.difference(&answered).copied().collect::<Vec<_>>();
+        if !silent.is_empty() {
+            let until = Instant::now() + SITE_RESTS_FOR;
+            let mut resting = self.resting.lock().unwrap_or_else(PoisonError::into_inner);
+            for site in silent {
+                resting.insert(site, until);
+            }
+        }
+        let licenses = self.licenses();
+        results
+            .into_iter()
+            .filter(|result| {
+                let key = Source::parse(result.source)
+                    .map(|source| license_key(source, &result.reference));
+                key.is_none_or(|key| licenses.get(&key) != Some(&Checked::Restricted))
+            })
+            .collect()
+    }
+
+    /// Whether a search result's `license:` line says it can't be copied in. `None` when the
+    /// site couldn't be reached. A skill whose `SKILL.md` isn't where skills usually sit counts
+    /// as open: inspect reads the whole download, license files too.
+    async fn restricted_by_license(&self, source: Source, reference: &str) -> Option<bool> {
+        let restricts = |text: &str, name: Option<&str>| {
+            let skill = read_skill_text(text);
+            // A `SKILL.md` that names another skill isn't this one.
+            if name.is_some_and(|name| {
+                skill
+                    .name
+                    .as_deref()
+                    .is_some_and(|declared| !declared.eq_ignore_ascii_case(name))
+            }) {
+                return None;
+            }
+            Some(
+                skill
+                    .license
+                    .is_some_and(|field| judge_license_field(&field).restricted),
+            )
+        };
+        match parse_target(reference, Some(source)).ok()? {
+            Target::ClawHub { owner, slug } => {
+                let url = format!("{}/api/v1/skills/{slug}/file", self.endpoints.clawhub);
+                let query = [("path", SKILL_FILE), ("ownerHandle", owner.as_str())];
+                let text = self.skill_md(&url, &query, source).await?;
+                Some(
+                    text.and_then(|text| restricts(&text, None))
+                        .unwrap_or(false),
+                )
+            }
+            Target::SkillsSh { repo, skill } => {
+                let base = format!("{}/{}/{}/HEAD", self.endpoints.raw, repo.owner, repo.repo);
+                for folder in [
+                    format!("skills/{skill}/"),
+                    format!("{skill}/"),
+                    String::new(),
+                ] {
+                    let url = format!("{base}/{folder}{SKILL_FILE}");
+                    if let Some(restricted) = self
+                        .skill_md(&url, &[], source)
+                        .await?
+                        .and_then(|text| restricts(&text, Some(&skill)))
+                    {
+                        return Some(restricted);
+                    }
+                }
+                Some(false)
+            }
+            Target::GitHub(_) => None,
+        }
+    }
+
+    /// One `SKILL.md`: `Some(None)` when the site has no such file, `None` when it can't be
+    /// reached or answers anything else.
+    async fn skill_md(
+        &self,
+        url: &str,
+        query: &[(&str, &str)],
+        source: Source,
+    ) -> Option<Option<String>> {
+        let response = self
+            .get(
+                url,
+                query,
+                "text/plain, text/markdown, */*",
+                LICENSE_WAIT,
+                source,
+            )
+            .await
+            .ok()?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Some(None);
+        }
+        if !response.status().is_success() {
+            return None;
+        }
+        let bytes = read_capped(response, MAX_SKILL_MD, source).await.ok()?;
+        Some(Some(String::from_utf8_lossy(&bytes).into_owned()))
     }
 
     /// Download what `reference` names, unpack it into the staging folder and list its skills.
@@ -404,6 +612,16 @@ impl Marketplace {
                 return Err(error);
             }
         };
+        if matches!(fetched.source, Source::SkillsSh | Source::ClawHub)
+            && !unpacked.candidates.is_empty()
+            && unpacked
+                .candidates
+                .iter()
+                .all(|candidate| candidate.license.restricted)
+        {
+            // Its license was found only now: no search offers it again.
+            self.remember_license(license_key(fetched.source, &fetched.reference), true);
+        }
         let mut origin = Origin::new(OriginKind::Installed);
         origin.source = Some(fetched.source.id().to_owned());
         origin.reference = Some(fetched.reference.clone());
@@ -930,6 +1148,12 @@ impl Marketplace {
 }
 
 /// Write a fetched picture beside the others, whole or not at all.
+/// What a skill is known by across searches and inspects: the key the Skills page knows a search
+/// result by, too.
+fn license_key(source: Source, reference: &str) -> String {
+    format!("{}:{}", source.id(), reference.to_lowercase())
+}
+
 fn keep(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let folder = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(folder)?;
@@ -1941,6 +2165,7 @@ mod tests {
             codeload: format!("{base}/codeload"),
             github: format!("{base}/web"),
             avatars: format!("{base}/av"),
+            raw: format!("{base}/raw"),
             skills_sh: format!("{base}/ss"),
             clawhub: format!("{base}/ch"),
         };
@@ -2467,6 +2692,190 @@ mod tests {
         assert_eq!(
             installed[0].origin.reference.as_deref(),
             Some("acme/skills/react-pdf")
+        );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn skills_search_leaves_out_what_its_license_keeps_out() {
+        let (sites, endpoints) = fake_sites().await;
+        let state = Scratch::new("state");
+        let store = SkillsStore::with_limits(state.path(), small_limits());
+        let market = Marketplace::new(endpoints);
+        let proprietary = "license: Proprietary. LICENSE.txt has complete terms\n";
+        sites.answer(
+            "/ch/api/v1/search",
+            "application/json",
+            serde_json::json!({"results": [
+                {"displayName": "Pdf", "install": {"kind": "clawhub", "reference": "acme/pdf"}},
+                {"displayName": "Notes", "install": {"kind": "clawhub", "reference": "acme/notes"}},
+                {"displayName": "docx", "install": {"kind": "skills-sh", "reference": "skills-sh:acme/skills/docx"}}
+            ]})
+            .to_string(),
+        );
+        sites.answer(
+            "/ch/api/v1/skills/pdf/file",
+            "text/markdown",
+            skill_md("pdf", proprietary),
+        );
+        sites.answer(
+            "/ch/api/v1/skills/notes/file",
+            "text/markdown",
+            skill_md("notes", "license: MIT\n"),
+        );
+        sites.answer(
+            "/raw/acme/skills/HEAD/skills/docx/SKILL.md",
+            "text/plain",
+            skill_md("docx", proprietary),
+        );
+        let names = |results: &[SearchResult]| {
+            results
+                .iter()
+                .map(|result| result.name.clone())
+                .collect::<Vec<_>>()
+        };
+        let results = market.search("pdf", Source::ClawHub).await.expect("search");
+        assert_eq!(
+            names(&results),
+            ["Notes"],
+            "ClawHub's own file and GitHub's both say"
+        );
+        assert!(sites.requests().iter().any(|request| {
+            request.starts_with("/ch/api/v1/skills/pdf/file")
+                && request.contains("path=SKILL.md")
+                && request.contains("ownerHandle=acme")
+        }));
+
+        sites.answer(
+            "/ss/api/search",
+            "application/json",
+            r#"{"skills":[
+                {"id":"acme/skills/xlsx","name":"xlsx"},
+                {"id":"acme/skills/other","name":"other"},
+                {"id":"acme/skills/deep","name":"deep"}
+            ]}"#,
+        );
+        // Not in `skills/`, so the next place skills sit.
+        sites.answer(
+            "/raw/acme/skills/HEAD/xlsx/SKILL.md",
+            "text/plain",
+            skill_md("xlsx", proprietary),
+        );
+        // The repository's own SKILL.md is another skill's: it says nothing about this one.
+        sites.answer(
+            "/raw/acme/skills/HEAD/SKILL.md",
+            "text/plain",
+            skill_md("not-other", proprietary),
+        );
+        let results = market
+            .search("sheets", Source::SkillsSh)
+            .await
+            .expect("search");
+        assert_eq!(names(&results), ["other", "deep"]);
+
+        let reads = sites.requests().len();
+        let again = market
+            .search("sheets", Source::SkillsSh)
+            .await
+            .expect("search");
+        assert_eq!(names(&again), ["other", "deep"]);
+        assert_eq!(
+            sites.requests().len(),
+            reads + 1,
+            "only the search itself: each license is read once"
+        );
+
+        // A skill whose SKILL.md sits where no search looks is found out by inspect, then left out.
+        github_repo(
+            &sites,
+            tarball(
+                "skills-0123456",
+                &[Entry::File(
+                    "plugins/office/deep/SKILL.md",
+                    &skill_md("deep", "license: All rights reserved\n"),
+                )],
+            ),
+        );
+        let inspection = market
+            .inspect(&store, "acme/skills/deep", Some(Source::SkillsSh))
+            .await
+            .expect("inspect");
+        assert!(inspection.candidates[0].reason.is_some());
+        let results = market
+            .search("sheets", Source::SkillsSh)
+            .await
+            .expect("search");
+        assert_eq!(names(&results), ["other"]);
+    }
+
+    #[tokio::test]
+    async fn skills_search_rests_a_site_that_answers_none_of_its_reads() {
+        let (sites, endpoints) = fake_sites().await;
+        let market = Marketplace::new(endpoints);
+        let busy = |path: &str| {
+            sites.answers.lock().unwrap().insert(
+                path.to_owned(),
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "text/plain",
+                    b"busy".to_vec(),
+                ),
+            );
+        };
+        let asked = |part: &str| {
+            sites
+                .requests()
+                .iter()
+                .filter(|request| request.contains(part))
+                .count()
+        };
+        sites.answer(
+            "/ch/api/v1/search",
+            "application/json",
+            serde_json::json!({"results": [
+                {"displayName": "Pdf", "install": {"kind": "clawhub", "reference": "acme/pdf"}},
+                {"displayName": "Notes", "install": {"kind": "clawhub", "reference": "acme/notes"}}
+            ]})
+            .to_string(),
+        );
+        busy("/ch/api/v1/skills/pdf/file");
+        busy("/ch/api/v1/skills/notes/file");
+        let results = market.search("pdf", Source::ClawHub).await.expect("search");
+        assert_eq!(results.len(), 2, "what couldn't be read is shown");
+        assert_eq!(asked("/file"), 2);
+        let results = market.search("pdf", Source::ClawHub).await.expect("search");
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            asked("/file"),
+            2,
+            "a site that answered nothing isn't asked again yet"
+        );
+
+        // A site that answers some reads keeps being asked for the others.
+        sites.answer(
+            "/ss/api/search",
+            "application/json",
+            r#"{"skills":[{"id":"acme/skills/open","name":"open"},{"id":"acme/skills/slow","name":"slow"}]}"#,
+        );
+        sites.answer(
+            "/raw/acme/skills/HEAD/skills/open/SKILL.md",
+            "text/plain",
+            skill_md("open", "license: MIT\n"),
+        );
+        busy("/raw/acme/skills/HEAD/skills/slow/SKILL.md");
+        for _ in 0..2 {
+            let results = market.search("x", Source::SkillsSh).await.expect("search");
+            assert_eq!(results.len(), 2);
+        }
+        assert_eq!(
+            asked("/skills/open/SKILL.md"),
+            1,
+            "read once, then remembered"
+        );
+        assert_eq!(
+            asked("/skills/slow/SKILL.md"),
+            2,
+            "asked again: the site does answer"
         );
     }
 

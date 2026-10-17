@@ -14,9 +14,20 @@ export type Adding =
   | { kind: 'ready'; inspection: Inspection }
   | { kind: 'failed'; label: string; message: string; retry: () => void }
 
+/**
+ * The skills a look inside offers. One whose license keeps it out isn't shown beside ones that
+ * can come in; only when nothing else is there does the sheet show it, to say why.
+ */
+const offeredOf = (candidates: InstallCandidate[]): InstallCandidate[] => {
+  const open = candidates.filter((candidate) => !candidate.license.restricted)
+  return open.length > 0 ? open : candidates
+}
+
 const firstChoice = (adding: Adding): ReadonlySet<string> => {
-  if (adding.kind !== 'ready' || adding.inspection.candidates.length !== 1) return new Set()
-  const [only] = adding.inspection.candidates
+  if (adding.kind !== 'ready') return new Set()
+  const offered = offeredOf(adding.inspection.candidates)
+  if (offered.length !== 1) return new Set()
+  const [only] = offered
   return new Set(only.reason ? [] : [only.path])
 }
 
@@ -67,7 +78,7 @@ export function AddSheet({ adding, publisher, onClose, onAdded, returnFocus }: {
   }
 
   const { inspection } = adding
-  const { candidates } = inspection
+  const candidates = offeredOf(inspection.candidates)
   const single = candidates.length === 1 ? candidates[0] : null
   const picked = candidates.filter((candidate) => chosen.has(candidate.path))
   const replacing = picked.filter((candidate) => candidate.conflict)

@@ -948,9 +948,9 @@ const OPEN_LICENSES: [(&str, &str); 12] = [
 ];
 
 /// A skill's license, from its `license:` line and the license file beside it. Either one saying
-/// "All rights reserved" or "proprietary" restricts it, unless the file is an open license that
+/// "All rights reserved" or "proprietary", or a line that is just "UNLICENSED", restricts it, unless the file is an open license that
 /// happens to use the words. With neither, the license of the plugin or repository it came in
-/// counts.
+/// counts, judged the same way: a plugin's manifest names one as its `license:` line does.
 pub(crate) fn license_of(
     folder: &Path,
     field: Option<&str>,
@@ -961,9 +961,7 @@ pub(crate) fn license_of(
     let (declared, file) = if declared.is_none() && file.is_none() {
         (
             None,
-            inherit
-                .and_then(license_file)
-                .map(|text| judge_license_text(&text)),
+            inherit.map(|root| license_of(root, plugin_license(root).as_deref(), None)),
         )
     } else {
         (declared, file)
@@ -992,6 +990,23 @@ pub(crate) fn license_of(
     LicenseInfo { id, restricted }
 }
 
+/// The `license` a plugin's manifest names: Codex's `.codex-plugin/plugin.json` or Claude Code's
+/// `.claude-plugin/plugin.json`. Codex's own plugins say "Proprietary" there and nowhere else.
+fn plugin_license(root: &Path) -> Option<String> {
+    [".codex-plugin", ".claude-plugin"]
+        .iter()
+        .find_map(|folder| {
+            let text =
+                read_capped(&root.join(folder).join("plugin.json"), MAX_LICENSE_TEXT).ok()?;
+            let manifest: serde_json::Value = serde_json::from_str(&text).ok()?;
+            manifest["license"]
+                .as_str()
+                .map(str::trim)
+                .filter(|license| !license.is_empty())
+                .map(str::to_owned)
+        })
+}
+
 fn license_file(folder: &Path) -> Option<String> {
     let mut names = fs::read_dir(folder)
         .ok()?
@@ -1012,6 +1027,14 @@ fn license_file(folder: &Path) -> Option<String> {
 }
 
 pub(crate) fn judge_license_field(field: &str) -> LicenseInfo {
+    // npm's word for "nobody may use this", as manifests borrow it. Only the whole word: "The
+    // Unlicense" is its opposite and gives everything away.
+    if field.trim().eq_ignore_ascii_case("unlicensed") {
+        return LicenseInfo {
+            id: Some("UNLICENSED".to_owned()),
+            restricted: true,
+        };
+    }
     let lower = field.to_lowercase();
     if let Some((_, id)) = RESTRICTING.iter().find(|(words, _)| lower.contains(words)) {
         return LicenseInfo {
@@ -1868,6 +1891,16 @@ pub(crate) mod tests {
         assert!(judge_license_field("Proprietary. LICENSE.txt has complete terms").restricted);
         assert!(judge_license_field("All Rights Reserved").restricted);
         assert_eq!(judge_license_field("MIT").id.as_deref(), Some("MIT"));
+        assert!(
+            judge_license_field(" UNLICENSED ").restricted,
+            "npm's word for proprietary"
+        );
+        assert!(judge_license_field("unlicensed").restricted);
+        assert!(
+            !judge_license_field("Unlicense").restricted,
+            "The Unlicense gives it away"
+        );
+        assert!(!judge_license_field("The Unlicense").restricted);
         assert!(!judge_license_text(BSD).restricted);
         assert!(judge_license_text("Copyright Acme. All rights reserved.").restricted);
         assert!(judge_license_text("This software is proprietary to Acme.").restricted);
@@ -1893,5 +1926,67 @@ pub(crate) mod tests {
         assert!(!pointed.restricted);
         let named = license_of(folder.path(), Some("MIT"), None);
         assert_eq!(named.id.as_deref(), Some("MIT"), "a named license stands");
+    }
+
+    #[test]
+    fn skills_bring_in_reads_a_plugins_manifest_for_a_skill_that_names_no_license() {
+        let home = Scratch::new("home");
+        let state = Scratch::new("state");
+        let store = SkillsStore::with_limits(state.path(), small_limits());
+        let cache = home.path().join(".codex/plugins/cache");
+        // Codex's own plugins name their license only in the manifest.
+        let sales = cache.join("openai-curated-remote/sales/1.1.3");
+        write(
+            &sales.join(".codex-plugin/plugin.json"),
+            r#"{"name":"sales","license":"Proprietary"}"#,
+        );
+        skill(&sales.join("skills/pipeline"), "pipeline", "");
+        // An open plugin, but one skill in it carries its own reserved license, which wins.
+        let documents = cache.join("openai-primary-runtime/documents/26.1015.12040");
+        write(
+            &documents.join(".codex-plugin/plugin.json"),
+            r#"{"name":"documents","license":"MIT"}"#,
+        );
+        skill(&documents.join("skills/documents"), "documents", "");
+        write(
+            &documents.join("skills/documents/LICENSE.txt"),
+            "© 2026 OpenAI. All rights reserved. No copies outside the Services.",
+        );
+        skill(&documents.join("skills/slides"), "slides", "");
+        let claude = home
+            .path()
+            .join(".claude/plugins/cache/acme-market/office/2.0.0");
+        write(
+            &claude.join(".claude-plugin/plugin.json"),
+            r#"{"name":"office","license":"All rights reserved"}"#,
+        );
+        skill(&claude.join("skills/sheets"), "sheets", "");
+
+        let candidates = preview(home.path(), &store).expect("preview");
+        for name in ["pipeline", "documents", "sheets"] {
+            let candidate = named(&candidates, name);
+            assert!(
+                candidate.restricted && !candidate.default_selected,
+                "{name}: {candidate:#?}"
+            );
+        }
+        let slides = named(&candidates, "slides");
+        assert_eq!(slides.license.id.as_deref(), Some("MIT"));
+        assert!(!slides.restricted && slides.default_selected);
+
+        let keys = candidates
+            .iter()
+            .map(|candidate| candidate.key.clone())
+            .collect::<Vec<_>>();
+        let outcome = bring_in(home.path(), &store, &keys).expect("bring in");
+        assert_eq!(
+            outcome
+                .imported
+                .iter()
+                .map(|record| record.name.as_str())
+                .collect::<Vec<_>>(),
+            ["slides"],
+            "copying checks the manifest again"
+        );
     }
 }

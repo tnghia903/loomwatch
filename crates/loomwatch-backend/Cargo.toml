@@ -52,9 +52,11 @@ jsonschema = { version = "0.58.2", default-features = false }
 # which never compares equal to a path the operator typed. On other systems it is std's own
 # `canonicalize`.
 dunce = "1.0"
+# A skills search reads its results' licenses a few at a time (marketplace.rs). Already in the
+# build through axum and sqlx.
+futures-util = "0.3"
 
 [dev-dependencies]
-futures-util = "0.3"
 tokio-tungstenite = "0.29"
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }

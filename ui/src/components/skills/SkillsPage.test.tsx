@@ -197,7 +197,7 @@ describe('adding a skill', () => {
     await waitFor(() => expect(screen.queryByRole('list', { name: 'Your skills' })).toBeNull())
   })
 
-  it('says why a skill can’t be added, and the card remembers', async () => {
+  it('says why a skill’s license keeps it out, then leaves it out of the results', async () => {
     daemon(
       on('GET', '/api/skills', () => folder([])),
       searching(),
@@ -216,7 +216,10 @@ describe('adding a skill', () => {
     expect(within(sheet).queryByRole('button', { name: /Add/ })).toBeNull()
     expect(sheet).not.toHaveTextContent('Needs Python')
     fireEvent.click(within(sheet).getAllByRole('button', { name: 'Close' }).at(-1)!)
-    expect(within(results).getAllByRole('listitem')[0]).toHaveTextContent('Can’t add')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(within(results).queryByRole('button', { name: 'Add PDF by anthropics' })).toBeNull()
+    expect(within(results).getByRole('button', { name: 'Add PDF by awspace' })).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Find skills' })).toHaveFocus()
   })
 
   it('says when adding replaces a skill you have, and offers no undo after', async () => {
@@ -255,7 +258,7 @@ describe('adding a skill', () => {
     expect(await screen.findByText('Added PDF. Every agent can use it now.')).toBeInTheDocument()
   })
 
-  it('lets you pick from a collection, with restricted skills locked', async () => {
+  it('lets you pick from a collection, leaving out the skills whose license keeps them out', async () => {
     const sent = daemon(
       on('GET', '/api/skills', () => folder([record('brand')])),
       on('POST', '/api/skills/install/inspect', () => json(inspection({
@@ -272,11 +275,12 @@ describe('adding a skill', () => {
     fireEvent.change(await screen.findByRole('searchbox', { name: 'Find skills' }), { target: { value: 'acme/skills' } })
     fireEvent.click(screen.getByRole('button', { name: 'Look inside' }))
     const sheet = await screen.findByRole('dialog', { name: 'acme/skills' })
-    expect(sheet).toHaveTextContent('It holds 3 skills. Tick the ones you want.')
+    expect(sheet).toHaveTextContent('It holds 2 skills. Tick the ones you want.')
     expect(sheet).toHaveTextContent('2 links in the download were left out.')
     const list = within(sheet).getByRole('list', { name: 'Skills inside' })
     expect(within(list).getAllByRole('checkbox').every((box) => box.getAttribute('aria-checked') === 'false')).toBe(true)
-    expect(within(list).getByRole('checkbox', { name: /DOCX/ })).toBeDisabled()
+    expect(within(list).queryByRole('checkbox', { name: /DOCX/ })).toBeNull()
+    expect(sheet).not.toHaveTextContent('can’t be copied')
     expect(within(sheet).getByRole('button', { name: 'Add 0 skills' })).toBeDisabled()
 
     fireEvent.click(within(sheet).getByRole('button', { name: 'Select all 2' }))
@@ -340,7 +344,7 @@ describe('Your skills', () => {
 })
 
 describe('skills you already have', () => {
-  it('looks only when asked, ticks what can come in, locks the rest with the reason, then brings in and undoes', async () => {
+  it('looks only when asked, ticks what can come in, locks the rest with the reason, leaves out what its license keeps out, then brings in and undoes', async () => {
     let skills: SkillRecord[] = []
     const sent = daemon(
       on('GET', '/api/skills', () => folder(skills)),
@@ -365,9 +369,8 @@ describe('skills you already have', () => {
     const claude = await within(sheet).findByRole('region', { name: 'Claude Code' })
     expect(within(sheet).getByRole('region', { name: 'Codex' })).toHaveTextContent('You already have it in LoomWatch.')
     expect(within(claude).getByRole('checkbox', { name: /Writer/ })).toHaveAttribute('aria-checked', 'true')
-    const secret = within(claude).getByRole('checkbox', { name: /Secret/ })
-    expect(secret).toBeDisabled()
-    expect(secret.closest('li')).toHaveTextContent('can’t be copied into LoomWatch')
+    expect(within(claude).queryByRole('checkbox', { name: /Secret/ })).toBeNull()
+    expect(sheet).toHaveTextContent('Found 3 skills.')
     expect(within(claude).getByRole('checkbox', { name: /Review/ }).closest('li')).toHaveTextContent('engineering plugin')
 
     fireEvent.click(within(claude).getByRole('checkbox', { name: /Review/ }))
