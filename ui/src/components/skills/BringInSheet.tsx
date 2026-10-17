@@ -18,7 +18,8 @@ type Step =
 /**
  * Bring in skills from your apps. It looks through the skill folders apps on this computer keep,
  * only once the person opens it, and lists what it found by app: the ones that can come in are
- * ticked, the rest say why not. What came in can be taken back with one Undo.
+ * ticked, the rest say why not. One whose license keeps it out isn't listed. What came in can be
+ * taken back with one Undo.
  */
 export function BringInSheet({ onClose, onChanged, onBroughtIn }: { onClose: () => void; onChanged: () => void; onBroughtIn?: (names: string[]) => void }) {
   const [step, setStep] = useState<Step>({ kind: 'looking' })
@@ -30,8 +31,10 @@ export function BringInSheet({ onClose, onChanged, onBroughtIn }: { onClose: () 
   useEffect(() => {
     let active = true
     previewBringIn()
-      .then((candidates) => {
+      .then((found) => {
         if (!active) return
+        // A skill whose license keeps it out isn't offered at all.
+        const candidates = found.filter((candidate) => !candidate.license.restricted)
         setChosen(new Set(candidates.filter((candidate) => candidate.defaultSelected).map((candidate) => candidate.key)))
         setStep({ kind: 'choosing', candidates })
       })
@@ -117,7 +120,7 @@ export function BringInSheet({ onClose, onChanged, onBroughtIn }: { onClose: () 
         <button type="button" className="btn btn-primary" disabled={busy || chosen.size === 0} onClick={() => void copy()}>{busy ? 'Bringing in…' : `Bring in ${skillCount(chosen.size)}`}</button>
       </>}>
       {candidates.length === 0
-        ? <p className="lw-skills-quiet">LoomWatch didn’t find skills in your apps’ folders. Search for skills instead.</p>
+        ? <p className="lw-skills-quiet">LoomWatch didn’t find skills in your apps’ folders that it can bring in. Search for skills instead.</p>
         : <p className="lw-skills-quiet">Found {skillCount(candidates.length)}. The ticked ones will be copied into LoomWatch; your apps keep their own.</p>}
       {apps.map((app) => {
         const group = candidates.filter((candidate) => candidate.app === app)

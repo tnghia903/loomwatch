@@ -19,14 +19,16 @@ export function Sheet({ title, kicker, onClose, busy = false, children, footer, 
 }) {
   const titleId = useId()
   const panel = useRef<HTMLDivElement>(null)
-  // Read once: a sheet is opened by one thing, and closes back to it.
+  // The latest one counts: what opened the sheet can be gone by the time it closes.
   const fallback = useRef(returnFocus)
+  useEffect(() => { fallback.current = returnFocus })
   useEffect(() => {
     const returnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const otherwise = fallback.current
+    const latest = fallback
     // The page behind keeps its scroll: the sheet is over it, not in it.
     panel.current?.focus({ preventScroll: true })
     return () => {
+      const otherwise = latest.current
       if (returnTo?.isConnected && returnTo !== document.body) returnTo.focus({ preventScroll: true })
       else if (otherwise) document.querySelector<HTMLElement>(otherwise)?.focus({ preventScroll: true })
     }
