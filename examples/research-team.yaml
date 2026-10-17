@@ -4,6 +4,8 @@
 schemaVersion: 1
 id: research-team
 name: Research and review
+spend:
+  perRun: 1.00
 entrypoint: researcher
 guards:
   maxDispatchDepth: 4

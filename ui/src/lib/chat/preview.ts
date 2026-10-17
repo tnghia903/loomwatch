@@ -24,7 +24,7 @@ export function chatPreview(records: readonly RunRecord[], teamPath: string): Ch
     .sort((left, right) => (right.finishedAt ?? right.createdAt).localeCompare(left.finishedAt ?? left.createdAt))[0]
   if (!newest) return null
   const at = newest.finishedAt ?? newest.createdAt
-  if (newest.status === 'running' && newest.waitingOn) return { at, line: 'Waiting for you', live: true }
+  if (newest.status === 'running' && (newest.waitingOn || newest.spendStops?.length)) return { at, line: 'Waiting for you', live: true }
   if (newest.status === 'queued' || newest.status === 'starting' || newest.status === 'running') {
     return { at, line: `Working on: ${firstLine(newest.prompt)}`, live: true }
   }

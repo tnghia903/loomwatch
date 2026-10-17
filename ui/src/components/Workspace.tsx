@@ -85,6 +85,8 @@ import { CHAT_WIDTH, clampChatWidth } from '../lib/chat/chatWidth'
 import { isDocument } from '../lib/chat/document'
 import type { ReceiptLine } from '../lib/story/receipt'
 import { PermissionPrompt } from './run/PermissionPrompt'
+import { SpendStopCard } from './run/SpendStopCard'
+import { dollars } from '../lib/runs/spend'
 import { EvidenceNodeCard, MoreEvidenceCard, OutputNodeCard, PromptNodeCard, RunNodeCard } from './run/StoryNodes'
 import { ChipDot, LoomMark, LoomWordmark } from './ui/glyphs'
 import { SegmentThumb } from './ui/SegmentThumb'
@@ -269,7 +271,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const depth = useStore((store) => depthForZoom(store.transform[2]))
   // Every run, in every team, that is waiting on the operator (lib/story/needsYou.ts).
   const needsYou = useNeedsYou()
-  const needsYouTray = (onScreenRunId: string | null = null) => <NeedsYouTray tickets={needsYou.tickets} working={needsYou.working} onAnswer={needsYou.answer} onPermission={needsYou.answerPermission} onDismiss={needsYou.dismiss} onScreenRunId={onScreenRunId} />
+  const needsYouTray = (onScreenRunId: string | null = null) => <NeedsYouTray tickets={needsYou.tickets} working={needsYou.working} onAnswer={needsYou.answer} onPermission={needsYou.answerPermission} onSpend={needsYou.answerSpend} onDismiss={needsYou.dismiss} onScreenRunId={onScreenRunId} />
   const { resolved: theme } = useTheme()
   const [windowWidth, setWindowWidth] = useState(window.innerWidth)
   const [windowHeight, setWindowHeight] = useState(window.innerHeight)
@@ -1656,6 +1658,14 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         : 'Auto mode is off. Commands an agent isn’t allowed to run on its own ask you first.')
   }, [doc])
   const autoMode = useMemo(() => ({ mode: doc.teamPermissionMode, onChange: editable ? (mode: PermissionMode) => void chooseAutoMode(mode) : undefined }), [doc.teamPermissionMode, editable, chooseAutoMode])
+  // ADR 0068: what one run may spend, beside Auto mode. Saved at once, like Auto mode.
+  const chooseSpend = useCallback(async (perRun: number | null) => {
+    doc.updateTeamSpend(perRun)
+    const saved = await doc.save()
+    const said = perRun === null ? 'Runs of this team have no limit on what they spend.' : `Each run of this team may spend up to ${dollars(perRun)}. Past it, the agents wait for you.`
+    setStatusAnnouncement(saved ? said : `${said} It applies once the team is saved.`)
+  }, [doc])
+  const spendLimit = useMemo(() => ({ perRun: doc.teamSpendPerRun, onChange: editable ? (perRun: number | null) => void chooseSpend(perRun) : undefined }), [doc.teamSpendPerRun, editable, chooseSpend])
   const inspecting = Boolean(inspectedNode || inspectedCapability || inspectedEvidence || provenanceOpen || scheduleOpen || memoryPanelOpen)
   // Ask docks where the inspector does. It waits behind whatever holds the dock, and asking for it
   // again — the header button, ⌘J, the palette — clears the dock for it.
@@ -2462,6 +2472,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             } : undefined}
           />
         )}
+        {/* ADR 0068: the run, or an agent, used what it may spend, and waits for you. */}
+        {runView && !deliveryShown && record && (record.spendStops?.length ?? 0) > 0 && <SpendStopCard run={record} />}
         {deliveryShown ? (
           <>
           <TeamChat
@@ -2484,6 +2496,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onStale={() => void doc.checkDiskRevision()}
             onAlwaysAllow={editable ? allowAlways : undefined}
             autoMode={autoMode}
+            spendLimit={spendLimit}
             announce={setStatusAnnouncement}
             reveal={chatReveal}
             onOpenFinding={openFinding}
@@ -2739,7 +2752,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               doc.setAgentCapabilities(inspectedNode.id, [...(inspectedNode.data.agent.capabilities ?? []), ...added])
               setStatusAnnouncement(`${added.map((capability) => capability.name).join(', ')} ${added.length === 1 ? 'is' : 'are'} now supplied to ${inspectedNode.data.agent.name}. Save the team to keep this change.`)
             }}
-            onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)} onDoneWhenChange={(items) => doc.applyAgentFields(inspectedNode.id, { doneWhen: items.length ? items : undefined })} checkStep={checkStepFor(inspectedNode.data.agent)}
+            onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onSpendChange={(perRun) => doc.updateAgentSpend(inspectedNode.id, perRun)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)} onDoneWhenChange={(items) => doc.applyAgentFields(inspectedNode.id, { doneWhen: items.length ? items : undefined })} checkStep={checkStepFor(inspectedNode.data.agent)}
             onCwdChange={(value) => doc.updateAgentCwd(inspectedNode.id, value)}
             onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onAllowChange={(key, on) => doc.updateAgentAllow(inspectedNode.id, key, on)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onDelete={() => requestNodeDelete([inspectedNode.id])}
             briefCount={memory?.entries.length ?? 0} teamDeliverAs={memory?.deliverAs}

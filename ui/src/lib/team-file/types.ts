@@ -107,6 +107,11 @@ export interface TeamPermissions {
   mode?: PermissionMode
 }
 
+/** What one run may spend on model calls, in US dollars (ADR 0068). */
+export interface SpendConfig {
+  perRun?: number
+}
+
 export interface AgentConfig {
   id: string
   name: string
@@ -130,6 +135,8 @@ export interface AgentConfig {
   memory?: { brief?: boolean; deliverAs?: 'native-file' | 'packet-only' }
   /** What it may do without asking (ADR 0037). Absent, or a switch left out, means off. */
   allow?: AgentAllow
+  /** Its own guard on what one run may spend on it (ADR 0068). Absent: no guard. */
+  spend?: SpendConfig
   /** Skills and tools the operator turned off for it by taking them off the canvas (ADR 0060).
       Absent means none: the agent chooses from every skill in LoomWatch's library. */
   turnedOff?: TurnedOff[]
@@ -198,6 +205,8 @@ export interface TeamDocument {
   memory?: MemoryConfig
   /** Who decides what the agents' switches leave open (ADR 0061). Absent asks you. */
   permissions?: TeamPermissions
+  /** What one run may spend (ADR 0068). Absent: no limit; new teams are written with $1.00. */
+  spend?: SpendConfig
   agents: AgentConfig[]
   edges: EdgeConfig[]
 }

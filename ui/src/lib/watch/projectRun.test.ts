@@ -27,6 +27,22 @@ const pipeline: RunEvent[] = [
 ]
 
 describe('projectRun', () => {
+  // ADR 0068: a turn that ends at the run's spending limit ended there because you chose to finish,
+  // or a routine had nobody to ask. The receipt says so; it is not an alert.
+  it('takes a turn that stopped at the spending limit calmly, and the session as finished', () => {
+    const events: RunEvent[] = [
+      event(0, 'process', { phase: 'spawned', pid: 1 }, 'writer'),
+      event(1, 'message', { role: 'user', content: { type: 'text', text: 'Write the digest.' } }, 'writer'),
+      event(2, 'message', { role: 'agent', content: { type: 'text', text: 'Half a digest.' } }, 'writer'),
+      event(3, 'turn_end', { stopReason: 'spend_limit' }, 'writer'),
+      event(4, 'process', { phase: 'exited', exitCode: 0, message: 'stopped at the run’s spending limit' }, 'writer'),
+    ]
+    const projection = projectRun(events, Infinity, { responder: 'writer' })
+    expect(projection.attention).toEqual([])
+    expect(projection.agents[0]).toMatchObject({ status: 'succeeded', reply: 'Half a digest.' })
+    expect(projection.coverage.agents.level).not.toBe('partial')
+  })
+
   // ADR 0051: "Send now" stops an agent's turn so your note goes in at once. That cancel is what
   // you asked for: it is not an alert, and the note's turn is the agent's answer.
   it('takes a turn stopped for your note as expected, and never lists you as an agent', () => {

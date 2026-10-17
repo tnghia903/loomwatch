@@ -27,8 +27,8 @@ export interface Fabric {
 
 const WORDS: Record<ThreadState, string> = { done: 'finished', failed: 'failed', stopped: 'stopped', working: 'working', waiting: 'waiting for you' }
 
-export function threadState(record: Pick<RunRecord, 'status' | 'waitingOn'>): ThreadState {
-  if (record.waitingOn && record.status === 'running') return 'waiting'
+export function threadState(record: Pick<RunRecord, 'status' | 'waitingOn' | 'spendStops'>): ThreadState {
+  if ((record.waitingOn || record.spendStops?.length) && record.status === 'running') return 'waiting'
   switch (record.status) {
     case 'succeeded': return 'done'
     case 'failed': return 'failed'

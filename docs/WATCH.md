@@ -229,6 +229,27 @@ Response (`202 Accepted`):
 - `teamName` (the team file's `name`) and `agentNames` (each agent's name by id, its id when it
   has none) are fixed at launch, so a client that has not read the team file, such as the menu
   bar, can say who `working` is. Runs recorded before they were kept have neither.
+- `spend` is what the run has spent and may spend on model calls, in US dollars: `{limitUsd,
+  spentUsd, agents: {id: {spentUsd, limitUsd?, stopped?}}, added: [{agent?, atUsd, addUsd}],
+  stopped?}`. `limitUsd` is the team's `spend.perRun` plus whatever was added this run (absent: no limit);
+  an agent's `limitUsd` is its own guard. `spentUsd` adds up the exact cost OpenRouter reported for
+  every call of the run. `stopped` is `finished` once the operator finished the run at its limit,
+  or `nobody_to_ask` once a scheduled run stopped there. It is stored with the run; runs recorded
+  before spend limits have none.
+- `spendStops` lists the limits the run is waiting at: `{id, agent?, name?, limitUsd, spentUsd,
+  addUsd, since}`, with `agent` set when it is that agent's own guard. Every agent that reaches
+  the limit waits at the same stop, and nothing is spent while it waits. It is live only, like
+  `permissionRequests`. `POST /api/runs/{id}/spend` with `{ "stopId": "…", "decision": "add" |
+  "finish", "addUsd": 0.5 }` answers one and returns `200` with the record. `add` grows this run's
+  limit by `addUsd` (the stop's `addUsd` when absent; above $0 and at most $1,000, or 409). `finish`
+  at the team's limit ends the run with what it has. At an agent's guard, it stops that agent and
+  the rest of the team carries on. It returns 404 when the stop is no longer waiting. A run that
+  ended at its limit has `stopReason: "spend_limit"`. If the operator finished it, it `succeeded`,
+  with the last words an agent wrote as its `reply`. A scheduled run `failed` with `errorCode:
+  "spend_limit"`. Either way its checkpoints are kept. The archive records `session_meta` events
+  with `phase: "awaiting_spend"`, `"spend_answered"` (`decision`, `limitUsd`, `addedUsd`) and
+  `"spend_stopped"` (`reason: "nobody_to_ask"`), each with the stop's `stopId`, `scope` (`team` or
+  `agent`), `agent`, `limitUsd`, `spentUsd` and `addUsd`.
 - `permissionRequests` lists what an agent is waiting on the operator for: `{id, agent, name,
   title, kind, switch, detail, since, expiresAt}`, plus `auto` (why Auto mode left a command to
   you, in a run in Auto mode) and `edit` (`{field, value}`: the whole command, when it may be

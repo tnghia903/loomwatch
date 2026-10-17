@@ -13,6 +13,7 @@ import { StatusGlyph } from '../ui/glyphs'
 import { AgentCheckup, type AgentCheckupProps } from './AgentCheckup'
 import { AgentContext } from './AgentContext'
 import { AgentPermissions } from './AgentPermissions'
+import { AgentSpendGuard } from './AgentSpendGuard'
 import { AgentUsageLine } from './AgentUsageLine'
 import { CheckStep, type CheckStepProps } from './CheckStep'
 import { DoneWhen } from './DoneWhen'
@@ -36,6 +37,8 @@ export interface InspectorProps {
   onAddKnowledge?: (added: CapabilityRef[]) => void
   onRename: (field: 'name' | 'role', value: string) => void
   onModelChange: (value: string) => void
+  /** The agent's own guard on what one run may spend on it, or none with `null` (ADR 0068). */
+  onSpendChange?: (perRun: number | null) => void
   /** `undefined` takes the effort out, so the model runs at its own default. */
   onThinkingEffortChange?: (value: string | undefined) => void
   /** Write the agent's Done when list (ADR 0062); absent hides the list. */
@@ -86,7 +89,7 @@ export interface InspectorProps {
 // it), WORKS IN and ALLOWED WITHOUT ASKING (where it works and what it may do there; ADR 0039
 // replaced PROCESS, whose command, arguments and environment stay in Show YAML).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
-export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onDoneWhenChange, checkStep, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff, linked }: InspectorProps) {
+export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onSpendChange, onThinkingEffortChange, onDoneWhenChange, checkStep, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff, linked }: InspectorProps) {
   // The fields a link to Your agents copies are changed there, or after unlinking.
   const locked = readOnly || Boolean(linked)
   const roleField = useRef<HTMLTextAreaElement>(null)
@@ -155,6 +158,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         </div>
         <EffortSlider model={openRouterId(agent.model)} value={agent.thinkingEffort ?? splitModelSelector(agent.model ?? '').thinkingEffort} disabled={locked} onChange={onThinkingEffortChange} />
         {usage && <AgentUsageLine usage={usage.agent} runs={usage.runs} alone={usage.alone} />}
+        {onSpendChange && <AgentSpendGuard perRun={agent.spend?.perRun ?? null} readOnly={locked} onChange={onSpendChange} />}
       </div>
 
       <div className="zone">

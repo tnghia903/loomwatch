@@ -88,6 +88,9 @@ pub struct KeyStatus {
     /// Dollars this key has spent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spent: Option<f64>,
+    /// Dollars this key has spent in the current month (UTC), as `OpenRouter` counts it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spent_this_month: Option<f64>,
     /// Dollars left under the key's own limit, when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit_remaining: Option<f64>,
@@ -226,6 +229,7 @@ impl Ai {
             connected: true,
             label: data.get("label").and_then(Value::as_str).map(str::to_owned),
             spent: data.get("usage").and_then(Value::as_f64),
+            spent_this_month: data.get("usage_monthly").and_then(Value::as_f64),
             limit_remaining: data.get("limit_remaining").and_then(Value::as_f64),
             free_tier: data
                 .get("is_free_tier")

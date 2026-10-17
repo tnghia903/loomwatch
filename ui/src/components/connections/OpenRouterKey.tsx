@@ -6,6 +6,8 @@ import { keyStore } from '../../lib/platform'
 
 const KEYS_PAGE = 'https://openrouter.ai/keys'
 const CREDITS_PAGE = 'https://openrouter.ai/settings/credits'
+/** Where a key gets a credit limit, by month or for good: the one cap that covers every run, Ask and every schedule (ADR 0068). */
+const LIMIT_PAGE = 'https://openrouter.ai/settings/keys'
 
 function money(dollars: number): string {
   return dollars < 0.01 && dollars > 0 ? 'less than $0.01' : `$${dollars.toFixed(2)}`
@@ -15,6 +17,7 @@ function money(dollars: number): string {
 function said(status: KeyStatus): string {
   const parts: string[] = []
   if (status.label) parts.push(`Key ${status.label}`)
+  if (status.spentThisMonth !== undefined) parts.push(`${money(status.spentThisMonth)} this month`)
   if (status.spent !== undefined) parts.push(`${money(status.spent)} spent with this key`)
   if (status.limitRemaining !== undefined && status.limitRemaining !== null) parts.push(`${money(status.limitRemaining)} left under its limit`)
   return parts.join(' · ')
@@ -77,6 +80,7 @@ export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'se
           <span className="t-meta">{said(status) || 'Connected.'}</span>
           {status.freeTier && <span className="t-meta">This account has no credits yet, so only free models work. <a className="link" href={CREDITS_PAGE} target="_blank" rel="noreferrer">Add credits</a> to use the others.</span>}
           {status.problem && <span className="t-meta inline-error">{status.problem}</span>}
+          <span className="t-meta"><a className="link" href={LIMIT_PAGE} target="_blank" rel="noreferrer">Set a monthly limit on this key</a> at openrouter.ai: it holds every run, Ask and every schedule. Each team’s own limit stops one run.</span>
           <span className="t-meta lw-settings-quiet">Each run costs what its model calls cost on OpenRouter; the run’s receipt shows the exact amount. The key is kept in {keyStore()}, outside your team files, and agents never see it.</span>
         </div>
         <div className="lw-settings-actions">

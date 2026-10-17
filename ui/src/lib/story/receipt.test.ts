@@ -231,8 +231,9 @@ describe('the run’s tokens', () => {
     expect(ranOn).toBe('Claude Sonnet 5.5, Claude Opus 5.5')
     expect(tokens).toMatchObject({ value: '242k', exact: '242,499 tokens', cached: '89% cached', cost: '$0.0645', estimate: null })
     expect(tokens?.agents).toEqual([
-      { label: 'Gatherer', value: '204k', exact: '204,000 tokens' },
-      { label: 'Writer', value: '38.5k', exact: '38,499 tokens' },
+      // With what each agent's calls cost, when they all said.
+      { label: 'Gatherer', value: '204k · $0.0412', exact: '204,000 tokens' },
+      { label: 'Writer', value: '38.5k · $0.0233', exact: '38,499 tokens' },
     ])
     expect(tokens?.purposes.map((row) => [row.label, row.value])).toEqual([['The work', '242k']])
     expect(receiptMarkdown(receiptOf(true))).toContain('- **Tokens:** 242k · 89% cached')

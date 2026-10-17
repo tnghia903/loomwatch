@@ -201,7 +201,8 @@ export function DeliveryLane({
       return [node.id, recorded ? modelLabelForAgent({ ...node.data.agent, model: recorded }) : harnessLabels.get(node.id) ?? modelLabelForAgent(node.data.agent)]
     })),
     answered: Boolean(output.text),
-  })), [planned, terminal, attempt, prompt, phase, elapsed, agents, projection, evidenceByAgent, harnessLabels, output.text])
+    spend: record?.spend,
+  })), [planned, terminal, attempt, prompt, phase, elapsed, agents, projection, evidenceByAgent, harnessLabels, output.text, record?.spend])
   // What the run earned on a quest, judged from the whole team file as the run ran it, not from
   // the agents shown or the editor's copy (useRunQuests.ts `agentsRunWith`).
   const earned = useRunQuests({ record: planned ? null : record, projection, phase })

@@ -47,6 +47,9 @@
 /* What runs used, beside the choices that set it. */
 .agent-usage { display: flex; flex-direction: column; gap: 2px; color: var(--color-ink-3); font: 400 11.5px/1.45 var(--font-sans); }
 .agent-usage > span:first-child { color: var(--color-ink-2); }
+/* An agent's own guard on one run's spend (ADR 0068), under the model and what it cost. */
+.agent-spend-input { display: inline-flex; align-items: center; gap: 6px; font: 500 13px/1 var(--font-mono); color: var(--color-ink-2); }
+.agent-spend-input .input { width: 8em; font-variant-numeric: tabular-nums; }
 .build-workspace-heading .build-usage { margin-left: 12px; }
 .build-workspace-heading .build-usage::before { content: '·'; margin-right: 12px; }
 

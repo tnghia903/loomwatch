@@ -1920,6 +1920,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: Vec::new(),
@@ -1967,6 +1968,7 @@ mod tests {
             done_when: Vec::new(),
             checks: None,
             send_back_once: false,
+            spend: crate::spend::SpendConfig::default(),
         }
     }
 
@@ -2005,6 +2007,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![test_agent("lead", OFFLINE), test_agent("worker", &worker)],
@@ -2117,6 +2120,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig {
                 max_dispatch_depth: 2,
@@ -2210,6 +2214,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig {
                 max_concurrent_dispatches: 1,
@@ -2279,6 +2284,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -2372,6 +2378,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: ["a", "b", "c", "d"]
@@ -2447,6 +2454,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![test_agent("lead", OFFLINE)],
@@ -2610,6 +2618,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![test_agent("lead", OFFLINE), test_agent("helper", OFFLINE)],

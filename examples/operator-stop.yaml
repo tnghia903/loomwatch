@@ -13,6 +13,10 @@
 schemaVersion: 1
 id: operator-stop
 name: Review stop demo
+# What one run may spend on model calls, in US dollars (ADR 0068). The offline demo costs nothing;
+# the limit is there for when you give the agents a real model.
+spend:
+  perRun: 1.00
 entrypoint: researcher
 
 agents:

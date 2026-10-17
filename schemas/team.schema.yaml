@@ -24,6 +24,15 @@ properties:
     minLength: 1
   budget:
     $ref: "#/$defs/RetiredBudget"
+  spend:
+    description: >-
+      What one run of this team may spend on model calls, in US dollars (ADR 0068). Every agent of
+      the run draws on it: stages, the lead, Team Bus helpers, summaries and checkpoints. Once a
+      run has used it, the agents wait and the operator chooses to add money and carry on, or to
+      finish with what the team has. A scheduled run has nobody to ask, so it stops and keeps its
+      checkpoints. Absent means no limit; new teams are written with 1.00. A call's cost is known
+      only after it is made, so one call can take a run a few cents past its figure.
+    $ref: "#/$defs/Spend"
   guards:
     description: Server-enforced limits for delegation through the Team Bus.
     $ref: "#/$defs/Guards"
@@ -427,6 +436,15 @@ $defs:
         type: string
         minLength: 1
 
+  Spend:
+    type: object
+    additionalProperties: false
+    properties:
+      perRun:
+        description: The most one run may spend, in US dollars.
+        type: number
+        exclusiveMinimum: 0
+
   RetiredBudget:
     description: >-
       Retired by ADR 0027: LoomWatch no longer tracks spend or enforces a budget. Accepted at team
@@ -492,6 +510,7 @@ $defs:
             - required: [sendBackOnce]
             - required: [allow]
             - required: [turnedOff]
+            - required: [spend]
             - required: [from]
     properties:
       id:
@@ -559,6 +578,13 @@ $defs:
         default: false
       budget:
         $ref: "#/$defs/RetiredBudget"
+      spend:
+        description: >-
+          This agent's own guard on what one run may spend on it, in US dollars (ADR 0068): it
+          stops an agent that runs away, as the team's figure stops the run. When the agent
+          reaches it, it waits and the operator chooses to add money or to stop this agent; the
+          rest of the team carries on. No guard unless set.
+        $ref: "#/$defs/Spend"
       allowRecruiting:
         description: Whether this agent may recruit helpers while executing its own step.
         type: boolean
@@ -1050,6 +1076,7 @@ $defs:
           - max_turn_requests
           - refusal
           - cancelled
+          - spend_limit
       usage:
         type: object
 

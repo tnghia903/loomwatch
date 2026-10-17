@@ -23,6 +23,8 @@ describe('team templates', () => {
     expect(result.documentProblems).toEqual([])
     expect(result.valid).toBe(true)
     expect(doc).toMatchObject({ id: 'blog-writer', name: 'Blog writer', entrypoint: doc.agents[0].id })
+    // A run spends real money: a new team may spend $1.00 a run until you change it (ADR 0068).
+    expect(doc.spend).toEqual({ perRun: 1 })
     for (const agent of doc.agents.filter((candidate) => candidate.kind !== 'operator')) {
       // Every agent runs on LoomWatch's engine, in the team file's own folder.
       expect(agent).not.toHaveProperty('spawn')

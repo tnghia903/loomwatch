@@ -53,6 +53,9 @@ const PROTOCOL_FAILURE: &str = "protocol_failure";
 /// `OpenRouter` key was refused, the account is out of credits, or no key is set.
 const APP_ERROR: &str = "app_error";
 const SPAWN_FAILED: &str = "spawn_failed";
+/// The run stopped at its spool (ADR 0068): as a failure's code when a scheduled run had nobody to
+/// ask, and as the stop reason whenever a run ended there.
+const SPEND_LIMIT: &str = "spend_limit";
 /// Stable pre-acceptance codes from `RUN_PROVENANCE_CONTRACT` §11.
 const STALE_TEAM_REVISION: &str = "stale_team_revision";
 /// A run refused until the operator reviews what the team file starts (ADR 0048).
@@ -261,6 +264,15 @@ pub struct RunRecord {
     /// client can say who [`Self::working`] is without reading the team file.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub agent_names: BTreeMap<String, String>,
+    /// What the run has spent and may spend (ADR 0068): its spool, each agent's share and guard,
+    /// what the operator added. Fixed at launch from the team file, counted as the agents work,
+    /// and stored, so a finished run still shows it. `None` for runs recorded before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spend: Option<crate::spend::RunSpend>,
+    /// Spend stops waiting for the operator: the run, or one agent, used what it may spend (ADR
+    /// 0068). Live only, like `permission_requests`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spend_stops: Vec<crate::spend::SpendStop>,
 }
 
 /// A note sent to an agent at work, waiting for its current turn to end (ADR 0051).
@@ -399,6 +411,8 @@ impl RunRecord {
                     (agent.id.clone(), name.to_owned())
                 })
                 .collect(),
+            spend: Some(crate::spend::RunSpend::for_team(team)),
+            spend_stops: Vec::new(),
         })
     }
 }
@@ -451,6 +465,9 @@ struct RegistryInner {
     /// What "Send now" pulls for each agent at work, keyed `run_id\0agent_id` (ADR 0051). An agent
     /// is shown as working exactly while it has an entry here.
     interrupts: BTreeMap<String, Arc<Interrupt>>,
+    /// The other half of each open spend stop (ADR 0068), keyed by stop id: every agent waiting at
+    /// the stop watches it, and `POST /api/runs/{id}/spend` sends the operator's answer down it.
+    spending: BTreeMap<String, tokio::sync::watch::Sender<Option<crate::spend::SpendAnswer>>>,
 }
 
 /// One run parked on the operator.
@@ -523,15 +540,19 @@ impl RunStore {
         let agent_names = (!record.agent_names.is_empty())
             .then(|| serde_json::to_value(&record.agent_names).ok())
             .flatten();
+        let spend = record
+            .spend
+            .as_ref()
+            .and_then(|spend| serde_json::to_value(spend).ok());
         sqlx::query(
             "INSERT INTO runs
              (run_id, session_id, team_path, prompt, status, mode, entrypoint, responder,
               agent_ids, created_at, started_at, finished_at, error, exit_code, error_code,
               stop_reason, event_count, reply, trigger, delivery, follows_run_id, start_at,
               retry_of_run_id, waiting_on, start_key, start_fingerprint, team_key, only_agent,
-              team_revision, team_name, agent_names)
+              team_revision, team_name, agent_names, spend)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-                     $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
+                     $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
              ON CONFLICT (run_id) DO UPDATE SET
                status = EXCLUDED.status,
                started_at = EXCLUDED.started_at,
@@ -547,6 +568,7 @@ impl RunStore {
                start_at = EXCLUDED.start_at,
                retry_of_run_id = EXCLUDED.retry_of_run_id,
                waiting_on = EXCLUDED.waiting_on,
+               spend = EXCLUDED.spend,
                -- Never cleared by a later write: the key binds for the lifetime of the run, and a
                -- transition that carries no key must not unbind it.
                start_key = COALESCE(EXCLUDED.start_key, runs.start_key),
@@ -591,6 +613,7 @@ impl RunStore {
         .bind(&record.team_revision)
         .bind(&record.team_name)
         .bind(&agent_names)
+        .bind(&spend)
         .execute(self.db.writer())
         .await?;
         Ok(())
@@ -697,6 +720,10 @@ pub(crate) fn decode_run(row: &sqlx::sqlite::SqliteRow) -> Result<StoredRun, sql
                 .try_get::<Option<Value>, _>("agent_names")?
                 .and_then(|names| serde_json::from_value(names).ok())
                 .unwrap_or_default(),
+            spend: row
+                .try_get::<Option<Value>, _>("spend")?
+                .and_then(|spend| serde_json::from_value(spend).ok()),
+            spend_stops: Vec::new(),
         },
         start_key: row.try_get("start_key")?,
         start_fingerprint: row.try_get("start_fingerprint")?,
@@ -1135,6 +1162,115 @@ impl RunRegistry {
         })
     }
 
+    /// What `agent`'s next model call in `run_id` meets (ADR 0068): go ahead, stop, or wait at a
+    /// spend stop for the operator. A run the registry doesn't know has no spool (the CLI's); one
+    /// that has finished spends nothing more. A scheduled run has nobody to ask, so it stops.
+    pub(crate) fn spend_gate(&self, run_id: &str, agent: &str, name: &str) -> crate::spend::Gate {
+        use crate::spend::{Check, Gate};
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        let RegistryInner { runs, spending, .. } = &mut *inner;
+        let Some(entry) = runs.get_mut(run_id) else {
+            return Gate::Ahead;
+        };
+        if entry.record.status.is_terminal() {
+            return Gate::Stop { first: None };
+        }
+        let can_ask = entry.record.trigger != RunTrigger::Schedule;
+        let RunRecord {
+            spend, spend_stops, ..
+        } = &mut entry.record;
+        let Some(spend) = spend.as_mut() else {
+            return Gate::Ahead;
+        };
+        match crate::spend::check(spend, spend_stops, agent, name, can_ask, &now()) {
+            Check::Ahead => Gate::Ahead,
+            Check::Stop { first } => Gate::Stop { first },
+            Check::Wait { stop, opened } => {
+                let answer = spending
+                    .entry(stop.id.clone())
+                    .or_insert_with(|| tokio::sync::watch::channel(None).0)
+                    .subscribe();
+                Gate::Wait {
+                    stop,
+                    opened,
+                    answer,
+                }
+            }
+        }
+    }
+
+    /// Adds what one model call of `agent` cost to its run's spool.
+    pub(crate) fn count_spend(&self, run_id: &str, agent: &str, usd: f64) {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        if let Some(spend) = inner
+            .runs
+            .get_mut(run_id)
+            .and_then(|entry| entry.record.spend.as_mut())
+        {
+            spend.count(agent, usd);
+        }
+    }
+
+    /// Why `run_id` may make no more model calls at all, once it may not: the operator finished it
+    /// at its spool, or a scheduled run had nobody to ask.
+    pub(crate) fn spend_stopped(&self, run_id: &str) -> Option<crate::spend::SpendStopped> {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        let spend = inner.runs.get(run_id)?.record.spend.as_ref()?;
+        Some(crate::spend::SpendStopped {
+            cause: spend.stopped?,
+            limit_usd: spend.limit_usd.unwrap_or_default(),
+        })
+    }
+
+    /// The operator's answer at one spend stop (ADR 0068), handed to every agent waiting there:
+    /// add to the spool (or the agent's guard) and carry on, or finish. Finishing the team's spool
+    /// also releases every other stop of the run, since nothing more will be spent.
+    ///
+    /// # Errors
+    ///
+    /// Not found when the run or the stop is unknown: already answered, or the run ended. A
+    /// conflict when what is to be added isn't a sensible sum; the stop stays open.
+    pub fn answer_spend(
+        &self,
+        run_id: &str,
+        stop_id: &str,
+        decision: crate::spend::SpendDecision,
+        add_usd: Option<f64>,
+    ) -> Result<RunRecord, OperatorError> {
+        use crate::spend::{AnswerError, MAX_TOP_UP_USD, SpendDecision};
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        let RegistryInner { runs, spending, .. } = &mut *inner;
+        let Some(entry) = runs.get_mut(run_id) else {
+            return Err(OperatorError::not_found(format!(
+                "run {run_id} does not exist"
+            )));
+        };
+        let RunRecord {
+            spend, spend_stops, ..
+        } = &mut entry.record;
+        let spend = spend.get_or_insert_with(crate::spend::RunSpend::default);
+        let (stop, answer) = crate::spend::answer(spend, spend_stops, stop_id, decision, add_usd)
+            .map_err(|error| match error {
+            AnswerError::NotOpen => OperatorError::not_found(
+                "That stop is no longer waiting: it was answered, or the run ended.",
+            ),
+            AnswerError::Amount => OperatorError::conflict(format!(
+                "Add an amount of money above $0.00 and at most {}.",
+                crate::spend::usd(MAX_TOP_UP_USD)
+            )),
+        })?;
+        let mut released = vec![stop.id];
+        if decision == SpendDecision::Finish && stop.agent.is_none() {
+            released.extend(spend_stops.drain(..).map(|other| other.id));
+        }
+        for id in released {
+            if let Some(sender) = spending.remove(&id) {
+                sender.send_replace(Some(answer));
+            }
+        }
+        Ok(entry.record.clone())
+    }
+
     /// The operator's answer to one open permission request, handed to the agent waiting on it.
     /// Answers the run as it is once the request is closed. `text` is the changed command or
     /// address for an edit, and the words for an answer in the agent's place.
@@ -1440,9 +1576,15 @@ impl RunRegistry {
             entry.record.waiting_on = None;
             entry.handle = None;
             let open = std::mem::take(&mut entry.record.permission_requests);
+            let stops = std::mem::take(&mut entry.record.spend_stops);
             entry.record.working.clear();
             entry.record.queued_notes.clear();
             forget_permissions(&mut inner, run_id, &open);
+            // Dropping a stop's sender is what tells an agent still waiting at it that the run is
+            // over: it looks again, finds the run finished, and spends nothing more.
+            for stop in stops {
+                inner.spending.remove(&stop.id);
+            }
         }
         true
     }
@@ -1598,6 +1740,7 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
         .route("/api/runs/{id}/cancel", post(cancel_run))
         .route("/api/runs/{id}/deliver", post(deliver_run))
         .route("/api/runs/{id}/permissions", post(answer_permission))
+        .route("/api/runs/{id}/spend", post(answer_spend))
         .route("/api/team/approve", post(approve_team))
         .route_layer(middleware::from_fn(local_evidence))
         .with_state(RunsState {
@@ -3000,6 +3143,18 @@ async fn execute(
             let (_, _, stop_reason) = archived_exit(&archive, &run_id, responder.as_deref()).await;
             registry.mark_succeeded(&run_id, &outcome, stop_reason)
         }
+        Err(error) if spend_stopped(&error).is_some() => {
+            let stopped = spend_stopped(&error).expect("checked by the guard");
+            settle_at_spool(
+                &registry,
+                &archive,
+                &run_id,
+                &lineage,
+                responder.as_deref(),
+                stopped,
+            )
+            .await
+        }
         Err(error) => {
             let (exit_code, event_count, stop_reason) =
                 archived_exit(&archive, &run_id, responder.as_deref()).await;
@@ -3019,6 +3174,119 @@ async fn execute(
         }
     };
     persist_or_log(&registry, &run_id).await;
+}
+
+/// The spool the run stopped at, when that is why it ended (ADR 0068).
+fn spend_stopped(error: &anyhow::Error) -> Option<crate::spend::SpendStopped> {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<crate::spend::SpendStopped>())
+        .copied()
+}
+
+/// End a run that stopped at its spool (ADR 0068). Its checkpoints are kept either way, so it can
+/// be carried on from where it stopped.
+///
+/// - The operator chose "Finish with what it has": the run is done, and its answer is the
+///   responder's last words, or failing that the last words any agent wrote. With none at all
+///   there is nothing to finish with, and it fails.
+/// - A scheduled run had nobody to ask: it fails, saying so, and delivers nothing.
+async fn settle_at_spool(
+    registry: &RunRegistry,
+    archive: &EventArchive,
+    run_id: &str,
+    lineage: &crate::RunLineage,
+    responder: Option<&str>,
+    stopped: crate::spend::SpendStopped,
+) -> bool {
+    let (exit_code, event_count, _) = archived_exit(archive, run_id, responder).await;
+    record_abandoned_checkpoints(archive, run_id, lineage).await;
+    let stop_reason = Some(SPEND_LIMIT.to_owned());
+    let words = match stopped.cause {
+        crate::spend::Stopped::Finished => last_words(archive, run_id, responder).await,
+        crate::spend::Stopped::NobodyToAsk => None,
+    };
+    if let Some(reply) = words {
+        let outcome = SessionOutcome {
+            session_id: run_id.to_owned(),
+            event_count: event_count.unwrap_or_default(),
+            exit_code: 0,
+            reply,
+        };
+        return registry.mark_succeeded(run_id, &outcome, stop_reason);
+    }
+    let error = match stopped.cause {
+        crate::spend::Stopped::Finished => format!(
+            "The team used its {} before any agent wrote anything, so there was nothing to finish              with.",
+            crate::spend::usd(stopped.limit_usd)
+        ),
+        crate::spend::Stopped::NobodyToAsk => stopped.to_string(),
+    };
+    registry.mark_failed(
+        run_id,
+        Some(error),
+        Some(SPEND_LIMIT.to_owned()),
+        stop_reason,
+        exit_code,
+        event_count,
+    )
+}
+
+/// What a run that stopped part way had to say for itself: the responder's last turn of work, or
+/// failing that the last turn of work any agent wrote in. Checkpoints and handovers are the
+/// coordinator's bookkeeping, never an answer, so their turns are skipped.
+async fn last_words(
+    archive: &EventArchive,
+    run_id: &str,
+    responder: Option<&str>,
+) -> Option<String> {
+    let events = archive.load_session(run_id).await.ok()?;
+    let mut bookkeeping: BTreeSet<String> = BTreeSet::new();
+    let mut turns: BTreeMap<String, crate::engine::ReplyText> = BTreeMap::new();
+    let mut latest: Option<String> = None;
+    for event in &events {
+        if event.agent_id.is_empty() {
+            continue;
+        }
+        let agent = &event.agent_id;
+        let turn = turns.entry(agent.clone()).or_default();
+        match event.kind {
+            EventKind::SessionMeta if event.payload["phase"] == "turn_purpose" => {
+                if event.payload["purpose"] == "work" {
+                    bookkeeping.remove(agent);
+                } else {
+                    bookkeeping.insert(agent.clone());
+                }
+            }
+            _ if bookkeeping.contains(agent) => {}
+            EventKind::Message if event.payload["role"] == "user" => turn.clear(),
+            EventKind::Message if event.payload["role"] == "agent" => {
+                if let Some(text) = event
+                    .payload
+                    .pointer("/content/text")
+                    .and_then(Value::as_str)
+                    .filter(|text| !text.trim().is_empty())
+                {
+                    turn.push(text, event.payload["messageId"].as_str());
+                    latest = Some(agent.clone());
+                }
+            }
+            EventKind::ToolCall
+            | EventKind::ToolUpdate
+            | EventKind::Plan
+            | EventKind::Permission => turn.note_activity(),
+            _ => {}
+        }
+    }
+    let said = |agent: &str| {
+        turns
+            .get(agent)
+            .map(|turn| turn.as_str().trim().to_owned())
+            .filter(|text| !text.is_empty())
+    };
+    responder
+        .and_then(said)
+        .or_else(|| latest.as_deref().and_then(said))
 }
 
 /// Leave a `coordinator` checkpoint for every agent of a dead run that did not write one itself.
@@ -3604,6 +3872,38 @@ async fn answer_permission(
             answer.text.as_deref(),
         )
         .map_err(operator_status)?;
+    Ok((StatusCode::OK, Json(record)).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SpendAnswerBody {
+    stop_id: String,
+    decision: crate::spend::SpendDecision,
+    /// What to add, for `add`. The stop's own offer when absent.
+    #[serde(default)]
+    add_usd: Option<f64>,
+}
+
+/// `POST /api/runs/{id}/spend` (ADR 0068): the operator's answer at a spend stop. `200` with the
+/// run once the agents waiting there have it; 404 when that stop is no longer waiting.
+async fn answer_spend(
+    State(state): State<RunsState>,
+    RoutePath(run_id): RoutePath<String>,
+    body: Result<Json<SpendAnswerBody>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(answer) = body.map_err(|rejection| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("invalid spend answer: {}", rejection.body_text()),
+        )
+    })?;
+    let record = state
+        .registry
+        .answer_spend(&run_id, &answer.stop_id, answer.decision, answer.add_usd)
+        .map_err(operator_status)?;
+    // The spool changed, so the stored record follows, as a transition's would.
+    state.registry.persist_quietly(&run_id).await;
     Ok((StatusCode::OK, Json(record)).into_response())
 }
 
@@ -6260,5 +6560,279 @@ pub(crate) mod tests {
                     && event.payload["phase"] == "turn_purpose"
                     && event.payload["purpose"] == "checkpoint")
         );
+    }
+
+    /// A model that plans twice and then answers `done`, each call costing `cost`: three calls in
+    /// all, so a spool smaller than two of them stops it before its answer.
+    fn costly(cost: f64) -> String {
+        use crate::agent::{ToolCall, Usage};
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        demo_model(Demo::responder(move |_| {
+            let call = calls.fetch_add(1, Ordering::SeqCst);
+            let completion = if call < 2 {
+                Completion::calls(
+                    "Planning.",
+                    vec![ToolCall {
+                        id: format!("plan-{call}"),
+                        name: "update_plan".into(),
+                        arguments: r#"{"steps":[{"step":"look","status":"in_progress"}]}"#.into(),
+                    }],
+                )
+            } else {
+                Completion::text("done")
+            };
+            Some(Completion {
+                usage: Usage {
+                    input_tokens: 1000,
+                    output_tokens: 50,
+                    cost_usd: cost,
+                    ..Usage::default()
+                },
+                ..completion
+            })
+        }))
+    }
+
+    fn write_spool_team(dir: &TeamsDir, name: &str, model: &str, per_run: f64) {
+        let yaml = format!(
+            "schemaVersion: 1\nid: spool\nname: Spool\nentrypoint: solo\nspend:\n  perRun: {per_run}\nagents:\n  - id: solo\n    name: Solo\n    role: answer\n    model: {model}\n"
+        );
+        fs::write(dir.0.join(name), yaml).expect("write team file");
+    }
+
+    async fn start(app: &Router, team: &str) -> RunRecord {
+        serde_json::from_value(
+            json_body(
+                app.clone()
+                    .oneshot(post_json(
+                        "/api/runs",
+                        &json!({"teamPath": team, "prompt": "go"}),
+                    ))
+                    .await
+                    .unwrap(),
+            )
+            .await,
+        )
+        .unwrap()
+    }
+
+    /// ADR 0068: a run that has used its spool waits at a stop instead of failing, nothing is
+    /// spent while it waits, and "Add and carry on" grows this run's spool and lets it finish.
+    #[tokio::test]
+    async fn a_run_waits_at_its_spool_and_carries_on_once_money_is_added() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_spool_team(&dir, "spool.yaml", &costly(0.04), 0.05);
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let run = start(&app, "spool.yaml").await;
+        assert_eq!(
+            run.spend.as_ref().and_then(|spend| spend.limit_usd),
+            Some(0.05)
+        );
+
+        let waiting = wait_for(&registry, &run.run_id, |r| !r.spend_stops.is_empty()).await;
+        let stop = waiting.spend_stops[0].clone();
+        assert_eq!(stop.agent, None, "the team's spool, not an agent's guard");
+        assert!((stop.limit_usd - 0.05).abs() < 1e-9, "{stop:?}");
+        assert!(
+            (stop.spent_usd - 0.08).abs() < 1e-9,
+            "one call went over: {stop:?}"
+        );
+        assert!((stop.add_usd - 0.10).abs() < 1e-9, "{stop:?}");
+        assert_eq!(waiting.status, RunStatus::Running);
+        // Nothing is spent while it waits.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let still = registry.get(&run.run_id).unwrap();
+        assert!((still.spend.unwrap().spent_usd - 0.08).abs() < 1e-9);
+
+        let answered = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/spend", run.run_id),
+                &json!({"stopId": stop.id, "decision": "add"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(answered.status(), StatusCode::OK);
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(
+            done.reply.as_deref(),
+            Some("Planning.\n\nPlanning.\n\ndone"),
+            "the turn carried on to its answer"
+        );
+        let spend = done.spend.expect("kept on the record");
+        assert_eq!(spend.limit_usd, Some(0.15));
+        assert!((spend.spent_usd - 0.12).abs() < 1e-9, "{spend:?}");
+        assert_eq!(spend.added.len(), 1);
+        assert!(done.spend_stops.is_empty());
+
+        // The stop and its answer are in the record of the run, for the chat and the receipt.
+        let events = archive.load_session(&run.run_id).await.unwrap();
+        let phases: Vec<&str> = events
+            .iter()
+            .filter_map(|event| event.payload["phase"].as_str())
+            .filter(|phase| phase.contains("spend"))
+            .collect();
+        assert_eq!(phases, ["awaiting_spend", "spend_answered"]);
+
+        // A second answer finds nothing waiting.
+        let again = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/spend", run.run_id),
+                &json!({"stopId": stop.id, "decision": "add"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(again.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// "Finish with what it has": no more calls, and the run is done with the last words an agent
+    /// wrote, stopped at its spool, with its checkpoint kept.
+    #[tokio::test]
+    async fn finishing_at_the_spool_ends_the_run_with_what_it_has() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_spool_team(&dir, "spool.yaml", &costly(0.04), 0.05);
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let run = start(&app, "spool.yaml").await;
+
+        let waiting = wait_for(&registry, &run.run_id, |r| !r.spend_stops.is_empty()).await;
+        let answered = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/spend", run.run_id),
+                &json!({"stopId": waiting.spend_stops[0].id, "decision": "finish"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(answered.status(), StatusCode::OK);
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(done.stop_reason.as_deref(), Some(SPEND_LIMIT));
+        assert_eq!(
+            done.reply.as_deref(),
+            Some("Planning.\n\nPlanning."),
+            "the last words written: each message a paragraph"
+        );
+        assert_eq!(
+            done.spend.as_ref().and_then(|spend| spend.stopped),
+            Some(crate::spend::Stopped::Finished)
+        );
+        let checkpoints = archive
+            .notebook()
+            .checkpoints(&run.run_id, None)
+            .await
+            .unwrap();
+        assert_eq!(checkpoints.len(), 1, "{checkpoints:?}");
+    }
+
+    /// A scheduled run has nobody to ask: at its spool it stops, says so, and keeps its
+    /// checkpoint.
+    #[tokio::test]
+    async fn a_scheduled_run_stops_at_its_spool_and_says_so() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_spool_team(&dir, "spool.yaml", &costly(0.04), 0.05);
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let run = launch(
+            &registry,
+            Some(archive.clone()),
+            &dir.0,
+            Path::new("spool.yaml"),
+            "go",
+            RunTrigger::Schedule,
+        )
+        .expect("launched");
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Failed, "{done:?}");
+        assert_eq!(done.error_code.as_deref(), Some(SPEND_LIMIT));
+        let error = done.error.clone().unwrap_or_default();
+        assert!(
+            error.contains("$0.05") && error.contains("Nobody was there"),
+            "{error}"
+        );
+        assert_eq!(
+            done.spend.as_ref().and_then(|spend| spend.stopped),
+            Some(crate::spend::Stopped::NobodyToAsk)
+        );
+        assert!(done.spend_stops.is_empty(), "nobody was asked");
+        let events = archive.load_session(&run.run_id).await.unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| event.payload["phase"] == "spend_stopped"),
+            "the stop is in the record"
+        );
+        let checkpoints = archive
+            .notebook()
+            .checkpoints(&run.run_id, None)
+            .await
+            .unwrap();
+        assert_eq!(checkpoints.len(), 1, "{checkpoints:?}");
+    }
+
+    /// An agent's own guard (ADR 0068) stops only that agent: "Stop A here" ends its turn with what
+    /// it wrote, and the rest of the team carries on from there.
+    #[tokio::test]
+    async fn an_agents_guard_stops_that_agent_and_the_team_carries_on() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let yaml = format!(
+            "schemaVersion: 1\nid: guard\nname: Guard\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: first\n    model: {}\n    spend:\n      perRun: 0.05\n  - id: b\n    name: B\n    role: second\n    model: {}\nedges:\n  - {{from: a, to: b, layer: configured, kind: sequence, ts: 2026-09-13T00:00:00Z}}\n",
+            costly(0.04),
+            completing()
+        );
+        fs::write(dir.0.join("guard.yaml"), yaml).unwrap();
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let run = start(&app, "guard.yaml").await;
+
+        let waiting = wait_for(&registry, &run.run_id, |r| !r.spend_stops.is_empty()).await;
+        let stop = waiting.spend_stops[0].clone();
+        assert_eq!(stop.agent.as_deref(), Some("a"));
+        assert_eq!(stop.name.as_deref(), Some("A"));
+        let answered = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/spend", run.run_id),
+                &json!({"stopId": stop.id, "decision": "finish"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(answered.status(), StatusCode::OK);
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(done.reply.as_deref(), Some("done"), "B answered");
+        let spend = done.spend.expect("kept");
+        assert!(spend.agents["a"].stopped);
+        assert_eq!(spend.stopped, None, "the team's spool stayed open");
+    }
+
+    /// The spool is stored with the run, so a run read back after a restart still shows it.
+    #[tokio::test]
+    async fn the_spool_is_stored_with_the_run() {
+        let db = crate::db::Db::temp().await;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nspend:\n  perRun: 2.5\nagents:\n  - id: a\n    model: m\n    spend:\n      perRun: 0.3\n",
+        )
+        .unwrap();
+        let mut record =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        record.spend.as_mut().unwrap().count("a", 0.25);
+        let store = RunStore::new(db.clone());
+        store.upsert(&record, None, None).await.unwrap();
+        let back = store.recent().await.unwrap();
+        let spend = back[0].record.spend.clone().expect("stored");
+        assert_eq!(spend.limit_usd, Some(2.5));
+        assert_eq!(spend.agents["a"].limit_usd, Some(0.3));
+        assert!((spend.agents["a"].spent_usd - 0.25).abs() < 1e-9);
     }
 }

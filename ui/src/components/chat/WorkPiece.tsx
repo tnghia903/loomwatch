@@ -9,6 +9,7 @@ import { describeDocument, documentSize, isDocument } from '../../lib/chat/docum
 import { clockTime, listNames, took } from '../../lib/chat/format'
 import { answerRun, cancelRun, isTerminalRun, type RunRecord } from '../../lib/runs/client'
 import { failedAgent, plainRunError } from '../../lib/runs/errors'
+import { openStops, stopSentence } from '../../lib/runs/spend'
 import { useRunSession } from '../../lib/runs/useRunSession'
 import { fileRefsIn, withFolderPaths } from '../../lib/files/fileRefs'
 import { checkAnswer, type AnswerCheck } from '../../lib/story/answerCheck'
@@ -19,11 +20,13 @@ import type { TeamMessage } from '../../lib/watch/messages'
 import type { AutoRan } from '../../lib/watch/events'
 import type { AgentConfig, AllowSwitch } from '../../lib/team-file/types'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
+import { SpendStopCard } from '../run/SpendStopCard'
 import { Markdown } from '../ui/Markdown'
 import { AnswerTools } from './AnswerTools'
 import { AgentFace } from './AgentFace'
 import { AvatarFace } from '../agents/AvatarFace'
 import { Appearing, Swap } from './Appearing'
+import { Spool } from './Spool'
 
 const AgentMessages = lazy(() => import('../run/AgentMessages').then((module) => ({ default: module.AgentMessages })))
 
@@ -171,16 +174,19 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   // A permission request is answered the same way: on the agent's message that asks, once the
   // talk shows it, and on a card of its own until then.
   const asking = live ? record.permissionRequests ?? [] : []
+  // The run used what it may spend, or an agent its own guard (ADR 0068): those agents wait on you.
+  const stops = live ? openStops(record) : []
+  const atSpool = stops.flatMap((stop) => (stop.agent ? [stop.agent] : record.working ?? []))
   // Each figure on the piece's line glows what it is doing: asking you (gold), at work (blue), or,
   // once the piece is over, the one it stopped at (red).
   const stoppedAt = failedAgent(record)
-  const askingYou = new Set([...asking.map((request) => request.agent), ...(waiting ? [waiting.kind === 'review_stop' ? waiting.handoverFrom ?? waiting.node : waiting.node] : [])])
+  const askingYou = new Set([...asking.map((request) => request.agent), ...atSpool, ...(waiting ? [waiting.kind === 'review_stop' ? waiting.handoverFrom ?? waiting.node : waiting.node] : [])])
   const weftState = (id: string) => (live ? (askingYou.has(id) ? 'waiting' : record.working?.includes(id) ? 'working' : '') : stoppedAt === id ? 'failed' : '')
   const askedOnMessage = new Set(open ? session.projection.messages.flatMap((message) => (message.kind === 'permission' && message.state === 'pending' && message.permission ? [message.permission.requestId] : [])) : [])
   const unasked = asking.filter((request) => !askedOnMessage.has(request.id))
   // Who has the work now: said on this piece's line, and on the header's pill while the line is out
   // of view. An agent waiting on you has it first.
-  const waitingOn = waiting ? (waiting.kind === 'review_stop' ? waiting.handoverFrom ?? waiting.node : waiting.node) : asking[0]?.agent ?? null
+  const waitingOn = waiting ? (waiting.kind === 'review_stop' ? waiting.handoverFrom ?? waiting.node : waiting.node) : asking[0]?.agent ?? atSpool[0] ?? null
   const baton = useBaton({ passes, working: live ? record.working ?? [] : [], waitingOn })
   useEffect(() => { onBaton?.(run.runId, live ? baton : null) }, [onBaton, run.runId, live, baton])
   useEffect(() => () => onBaton?.(run.runId, null), [onBaton, run.runId])
@@ -236,15 +242,17 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
       {notes.map((note) => <Note key={note.id} note={note} live={live} name={name} />)}
 
       <div ref={lineRef} className="tc-talk" data-tour={newest ? 'stages' : undefined}>
-        <Weft workers={workers} at={weftAt(workers, record, live, waiting)} live={live} waiting={Boolean(waiting) || asking.length > 0} status={record.status}>
+        <Weft workers={workers} at={weftAt(workers, record, live, waiting)} live={live} waiting={Boolean(waiting) || asking.length > 0 || stops.length > 0} status={record.status}>
           {workers.map((id) => <AvatarFace key={id} id={id} hue={hue(id)} size={22} fontSize={9} text={initials(name(id))} className={weftState(id)} />)}
         </Weft>
-        <Swap key={talkKey(live, waiting, asking.map((request) => request.id), working, run.status, pass)} className="tc-talk-line">
+        <Swap key={talkKey(live, waiting, [...asking.map((request) => request.id), ...stops.map((stop) => stop.id)], working, run.status, pass)} className="tc-talk-line">
           {live
             ? waiting
               ? <><b className="tc-wait">Waiting for you</b> · {waiting.kind === 'review_stop' ? `${name(waiting.handoverFrom ?? '')}'s work is ready for your review` : `${name(waiting.node)} asked you something`}</>
               : asking.length > 0
                 ? <><b className="tc-wait">Waiting for you</b> · {askers(asking.map((request) => name(request.agent)))} your permission</>
+              : stops.length > 0
+                ? <><b className="tc-wait">Waiting for you</b> · {stopSentence(stops[0]).replace(/\.$/, '')}</>
               : passLine
                 ? <>{passLine.map((part, index) => (part.name ? <b key={index}>{part.text}</b> : <Fragment key={index}>{part.text}</Fragment>))}<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
               : working.length > 0
@@ -252,6 +260,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
                 : run.status === 'queued' || run.status === 'starting' ? 'Starting…' : 'Handing over…'
             : `${listNames(workers.map(name))} worked on this${took_ ? ` · ${took_}` : ''}`}
         </Swap>
+        <Spool spend={record.spend} name={name} hue={hue} />
         <span className="tc-talk-acts">
           <button type="button" className="tc-link" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
             {open ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
@@ -322,6 +331,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
         </Appearing>
       )}
       {unasked.length > 0 && <PermissionPrompt inline team={crew} run={{ runId: run.runId, permissionRequests: unasked }} onAlwaysAllow={onAlwaysAllow} onDecide={pin} />}
+      {stops.length > 0 && <SpendStopCard inline run={{ runId: run.runId, spendStops: stops }} onDecide={pin} onRun={onRun} />}
 
       <Outcome tour={newest} run={record} answer={answer} streaming={streaming} name={name} hue={hue} open={answerOpen} solo={Boolean(team.solo)} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
         <AnswerTools

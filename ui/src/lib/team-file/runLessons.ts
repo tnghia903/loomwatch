@@ -36,6 +36,9 @@ export interface LessonRun {
 export interface AgentRunUsage {
   tokens: number | null
   opening: number | null
+  /** What its model calls cost in dollars, from the run's own record (ADR 0068); `null` for a run
+      recorded before spend was kept. Absent: not known either. */
+  costUsd?: number | null
 }
 
 /** How many recent runs a lesson reads: enough to see a habit, few enough to still be this team. */
@@ -50,7 +53,7 @@ const PERMISSION_WORDS: Record<AllowSwitch, string> = { web: 'search the web', e
 const ALLOW_LABEL: Record<AllowSwitch, string> = { web: 'Allow web search', edits: 'Allow file changes', commands: 'Allow commands' }
 
 /** Reduce a run, its projection and its events to what the lessons read. */
-export function lessonRun(record: Pick<RunRecord, 'runId' | 'status' | 'mode' | 'entrypoint' | 'agentIds'>, projection: Pick<RunProjection, 'messages' | 'agents'>, events: readonly Pick<RunEvent, 'agentId' | 'kind' | 'payload'>[] = []): LessonRun {
+export function lessonRun(record: Pick<RunRecord, 'runId' | 'status' | 'mode' | 'entrypoint' | 'agentIds'> & Partial<Pick<RunRecord, 'spend'>>, projection: Pick<RunProjection, 'messages' | 'agents'>, events: readonly Pick<RunEvent, 'agentId' | 'kind' | 'payload'>[] = []): LessonRun {
   const failed = new Map<string, string | null>()
   for (const agent of projection.agents) {
     if (agent.status !== 'failed') continue
@@ -62,8 +65,10 @@ export function lessonRun(record: Pick<RunRecord, 'runId' | 'status' | 'mode' | 
     if (event.kind === 'usage' && typeof event.payload.used === 'number' && !opening.has(event.agentId)) opening.set(event.agentId, event.payload.used)
   }
   const usage = new Map<string, AgentRunUsage>()
+  // The daemon added up what each agent's calls cost (ADR 0068): exact, where tokens are counted.
+  const cost = (id: string) => (record.spend ? record.spend.agents?.[id]?.spentUsd ?? 0 : null)
   for (const agent of projection.agents) {
-    if (agent.tokens !== null || opening.has(agent.id)) usage.set(agent.id, { tokens: agent.tokens, opening: opening.get(agent.id) ?? null })
+    if (agent.tokens !== null || opening.has(agent.id)) usage.set(agent.id, { tokens: agent.tokens, opening: opening.get(agent.id) ?? null, costUsd: cost(agent.id) })
   }
   return { runId: record.runId, succeeded: record.status === 'succeeded', mode: record.mode, entrypoint: record.entrypoint, agentIds: record.agentIds, messages: projection.messages, failed, usage }
 }
@@ -77,6 +82,8 @@ export interface AgentUsage {
   share: number
   /** Typical context after its first step: what it costs before the work. */
   opening: number | null
+  /** Average dollars per team run, over the runs whose record kept spend; absent when none did. */
+  costPerRun?: number | null
 }
 
 export interface TeamUsage {
@@ -97,7 +104,11 @@ export function teamUsage(runs: readonly LessonRun[], agents: readonly AgentConf
     const samples = reported.flatMap((run) => run.usage.get(agent.id) ?? [])
     const total = samples.reduce((sum, usage) => sum + (usage.tokens ?? 0), 0)
     const openings = samples.flatMap((usage) => usage.opening ?? [])
-    return { id: agent.id, name: agent.name, total, opening: openings.length ? median(openings) : null }
+    // Over the runs that kept what they spent; a run it took no part in costs it nothing.
+    const priced = reported.filter((run) => [...run.usage.values()].some((usage) => usage.costUsd != null))
+    const spent = priced.reduce((sum, run) => sum + (run.usage.get(agent.id)?.costUsd ?? 0), 0)
+    const costPerRun = priced.length ? spent / priced.length : null
+    return { id: agent.id, name: agent.name, total, opening: openings.length ? median(openings) : null, costPerRun }
   }).filter((row) => row.total > 0 || row.opening !== null)
   const teamTotal = rows.reduce((sum, row) => sum + row.total, 0)
   return {

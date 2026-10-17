@@ -11,7 +11,7 @@ describe('OpenRouterKey', () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(response({ openrouter: { connected: false } }))
       .mockResolvedValueOnce(response({ error: 'OpenRouter refused this key. Copy it again from openrouter.ai/keys, or make a new one.' }, 400))
-      .mockResolvedValueOnce(response({ openrouter: { connected: true, label: 'sk-or-v1-abc...xyz', spent: 0.4 } }))
+      .mockResolvedValueOnce(response({ openrouter: { connected: true, label: 'sk-or-v1-abc...xyz', spent: 0.4, spentThisMonth: 0.17 } }))
     vi.stubGlobal('fetch', fetch)
     render(<OpenRouterKey />)
 
@@ -25,7 +25,9 @@ describe('OpenRouterKey', () => {
     fireEvent.change(screen.getByLabelText('OpenRouter key'), { target: { value: 'sk-or-v1-good' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save key' }))
     expect(await screen.findByRole('status')).toHaveTextContent('OpenRouter accepted the key')
-    expect(screen.getByText(/Key sk-or-v1-abc\.\.\.xyz · \$0\.40 spent with this key/)).toBeInTheDocument()
+    expect(screen.getByText(/Key sk-or-v1-abc\.\.\.xyz · \$0\.17 this month · \$0\.40 spent with this key/)).toBeInTheDocument()
+    // The one cap that holds every run, Ask and every schedule is the key's own, at OpenRouter (ADR 0068).
+    expect(screen.getByRole('link', { name: 'Set a monthly limit on this key' })).toHaveAttribute('href', 'https://openrouter.ai/settings/keys')
     expect(screen.queryByDisplayValue('sk-or-v1-good')).toBeNull()
 
     const sent = fetch.mock.calls[2]

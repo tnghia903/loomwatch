@@ -363,6 +363,7 @@ $defs:
           - max_turn_requests
           - refusal
           - cancelled
+          - spend_limit
           - null
       processFailures:
         type: array

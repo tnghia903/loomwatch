@@ -6,6 +6,7 @@ import { DEFAULT_AGENT_ROLE } from './createAgent'
 import { isFigureChoice, type FigureChoice } from './figures'
 import { guessIcon, onlyOn, versionOf, type JobSpec, type SavedJob } from './jobs'
 import { capabilitiesOf, modelForPreset, type RolePreset } from './roles'
+import { NEW_TEAM_PER_RUN_USD } from '../runs/spend'
 
 /**
  * The agent builder's working copy of one of Your agents: what is on screen, saved or not. Saving
@@ -146,5 +147,5 @@ export function chatTeamYaml(draft: AgentDraft, model: string, chatId: string, k
   const own = agentFromDraft(draft, model)
   const capabilities = [...knowledge, ...(own.capabilities ?? [])]
   const agent = { ...own, id: chatAgentId(chatId), ...(capabilities.length ? { capabilities } : {}) }
-  return stringify({ schemaVersion: 1, id: `bench-${chatId}`, name: `${agent.name} · chat`, entrypoint: agent.id, agents: [agent] }, { lineWidth: 0 })
+  return stringify({ schemaVersion: 1, id: `bench-${chatId}`, name: `${agent.name} · chat`, spend: { perRun: NEW_TEAM_PER_RUN_USD }, entrypoint: agent.id, agents: [agent] }, { lineWidth: 0 })
 }

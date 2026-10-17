@@ -10,11 +10,13 @@
 //! has always stored (`agent_message_chunk`, `tool_call`, `plan`, `usage_update`, …), so the
 //! archive and the app read a built-in agent's work exactly as they read an app's.
 //!
-//! Three things belong to the daemon, not to the agent, and come in as traits:
+//! Four things belong to the daemon, not to the agent, and come in as traits:
 //! - [`EventSink`]: where events go (the run archive).
 //! - [`Permissions`]: whether a read, an edit, a command or a fetch may happen. The daemon's
 //!   permission policy, Auto mode and the operator's cards answer.
 //! - [`HostTools`]: tools the daemon serves itself, such as the Team Bus and Ask's tools.
+//! - [`Spend`]: whether the next model call may go ahead, and what the last one cost (the run's
+//!   spool, ADR 0068).
 //!
 //! The API key lives in an [`ApiKey`]. It is sent to the provider and nowhere else: not into the
 //! events, not into errors, and not into the environment of a command an agent runs.
@@ -29,6 +31,7 @@ mod provider;
 mod sandbox;
 mod session;
 mod skills;
+mod spend;
 mod sse;
 mod store;
 mod tools;
@@ -52,6 +55,7 @@ pub use session::{
     TurnEnd,
 };
 pub use skills::{SkillEntry, index_skills};
+pub use spend::{Go, Spend, Unmetered};
 pub use store::SessionStore;
 
 /// A boxed future, for the traits the daemon implements ([`EventSink`], [`Permissions`],

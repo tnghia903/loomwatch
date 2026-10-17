@@ -162,9 +162,23 @@ depend on the document as a whole:
   what it kept under `## Not changed`, which is set aside from the answer like `## Not met`. A verdict
   word in the `## Check` block is read as a whole word, so "Metrics …" is not "Met". Operator nodes
   may not set either field.
+- `spend.perRun` (team level) is what one run may spend on model calls, in US dollars. Absent
+  means no limit; new teams and the starter teams are written with `1.00`. Every agent of the run draws on it: stages, the lead, Team Bus helpers,
+  summaries, checkpoints and handovers. The daemon adds up the exact cost OpenRouter reports for
+  each call. Before each call, an agent whose run has used its figure waits, and the run shows a
+  stop: "Add $0.50 and carry on" grows this run's figure (the file is not changed), and "Finish
+  with what it has" ends the run as done, with the last words an agent wrote as its answer, stop
+  reason `spend_limit`, and its checkpoints kept. A scheduled run has nobody to ask: it fails with
+  code `spend_limit`, says so, keeps its checkpoints and delivers nothing. A call's cost is known
+  only after it is made, so one call can take a run a few cents past its figure.
+- `spend.perRun` on an agent is that agent's own guard, for an agent that runs away; there is
+  none unless set. At it, that agent waits, and "Stop it here" ends its turn with what it wrote
+  while the rest of the team carries on. Operator nodes spend nothing and may not set it. The
+  monthly cap, which also covers Ask LoomWatch and every schedule, is a limit on the OpenRouter
+  key itself, set at openrouter.ai.
 - `budget` (team or agent level) is retired.
   Readers accept it in any shape and ignore it, so older team files still load; writers must not
-  add it. LoomWatch neither tracks spend nor refuses a delegation because of it.
+  add it. `spend` replaced it.
 - `usage` payloads are discriminated (`$defs.UsagePayload` in the schema). An agent's
   `sessionUpdate: "usage_update"` carries how much of the model's context is in use and the cost
   OpenRouter reported. Older runs may also hold a bare `costUsd` delta. Both are archived as a

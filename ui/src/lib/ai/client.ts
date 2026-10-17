@@ -10,6 +10,8 @@ export interface KeyStatus {
   label?: string
   /** Dollars this key has spent. */
   spent?: number
+  /** Dollars this key has spent this month (UTC), as OpenRouter counts it. */
+  spentThisMonth?: number
   /** Dollars left under the key's own limit, when it has one. */
   limitRemaining?: number
   /** The account has never bought credits, so only free models work. */

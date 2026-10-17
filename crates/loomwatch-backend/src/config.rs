@@ -69,6 +69,9 @@ pub struct TeamConfig {
     /// (ADR 0061). Absent asks the operator, as before Auto mode existed.
     #[serde(default)]
     pub permissions: TeamPermissions,
+    /// What one run may spend (ADR 0068). Absent: no limit, though spend is still counted.
+    #[serde(default)]
+    pub spend: crate::spend::SpendConfig,
 }
 
 /// The `permissions:` block (ADR 0061).
@@ -491,6 +494,8 @@ pub struct AgentConfig {
     /// A check step may send the work back once when a check is not met: the findings go to the
     /// checked agent's still-open session, and the checks run once more. Off unless set.
     pub send_back_once: bool,
+    /// The agent's own guard on what one run may spend on it (ADR 0068). No guard unless set.
+    pub spend: crate::spend::SpendConfig,
 }
 
 /// At most this many `doneWhen` items, each at most [`DONE_WHEN_CHARS`] characters: the schema's
@@ -552,6 +557,8 @@ struct RawAgent {
     checks: Option<String>,
     #[serde(default)]
     send_back_once: bool,
+    #[serde(default)]
+    spend: Option<crate::spend::SpendConfig>,
     /// Runtime annotation. Accepted and discarded: writers must not persist it and readers must
     /// ignore it (`docs/TEAM_CONFIG.md`).
     #[serde(default, rename = "status")]
@@ -575,6 +582,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     ("doneWhen", !raw.done_when.is_empty()),
                     ("checks", raw.checks.is_some()),
                     ("sendBackOnce", raw.send_back_once),
+                    ("spend", raw.spend.is_some()),
                 ] {
                     if present {
                         return Err(format!(
@@ -612,6 +620,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     done_when: Vec::new(),
                     checks: None,
                     send_back_once: false,
+                    spend: crate::spend::SpendConfig::default(),
                 })
             }
             AgentKind::Harness => {
@@ -642,6 +651,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                         .map(|checked| checked.trim().to_owned())
                         .filter(|checked| !checked.is_empty()),
                     send_back_once: raw.send_back_once,
+                    spend: raw.spend.unwrap_or_default(),
                 })
             }
         }
@@ -1767,6 +1777,35 @@ mod tests {
         legacy.model = "vendor/deep[low]".into();
         legacy.thinking_effort = Some("xhigh".into());
         assert_eq!(legacy.model_selector(), "vendor/deep[xhigh]");
+    }
+
+    /// ADR 0068: `spend.perRun` on the team and on an agent. A team that says nothing has no limit
+    /// and its agents no guard; an operator node spends nothing, so it may not say.
+    #[test]
+    fn spend_limits_load_at_team_and_agent_level() {
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nspend:\n  perRun: 2.5\nagents:\n  - id: a\n    model: m\n    spend:\n      perRun: 0.3\n  - id: b\n    model: m\n",
+        )
+        .expect("valid config");
+        assert_eq!(team.spend.per_run, Some(2.5));
+        assert_eq!(team.agents[0].spend.per_run, Some(0.3));
+        assert_eq!(team.agents[1].spend.per_run, None);
+        let spool = crate::spend::RunSpend::for_team(&team);
+        assert_eq!(spool.limit_usd, Some(2.5));
+        assert_eq!(spool.agents["a"].limit_usd, Some(0.3));
+        assert!(!spool.agents.contains_key("b"));
+
+        let silent = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n",
+        )
+        .expect("valid config");
+        assert_eq!(crate::spend::RunSpend::for_team(&silent).limit_usd, None);
+
+        let error = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n  - id: stop\n    kind: operator\n    role: Approve.\n    spend:\n      perRun: 1\n",
+        )
+        .expect_err("an operator node spends nothing");
+        assert!(format!("{error:#}").contains("no spend"), "{error:#}");
     }
 
     /// Budgets were retired by ADR 0027. A team file written before then still says `budget:` at

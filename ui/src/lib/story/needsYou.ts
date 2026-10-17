@@ -2,16 +2,18 @@ import { baseName } from '../files/paths'
 import type { RunRecord } from '../runs/client'
 import { plainRunError } from '../runs/errors'
 import { permissionSentence, permissionWhat } from '../runs/permissionRequests'
+import { dollars, openStops, stopActions, stopSentence } from '../runs/spend'
 
 /**
  * The needs-you tray: every moment, across every team, where a team is waiting on the operator.
  *
- * A team stops for four reasons — a review step, a question from an agent, an agent asking
- * permission for something its switches do not allow (ADR 0040), or a failure — and each one becomes
+ * A team stops for five reasons — a review step, a question from an agent, an agent asking
+ * permission for something its switches do not allow (ADR 0040), a run or an agent that used what it
+ * may spend (ADR 0068), or a failure — and each one becomes
  * one ticket with the shortest honest set of answers. Pure: derived from the run registry, plus the
  * failures the operator already dismissed.
  */
-export type TicketKind = 'review' | 'question' | 'permission' | 'failed'
+export type TicketKind = 'review' | 'question' | 'permission' | 'spend' | 'failed'
 
 export interface Ticket {
   id: string
@@ -32,6 +34,9 @@ export interface Ticket {
   requestId?: string
   /** A permission ticket's run has more than one agent, so "Allow for the whole team" means more. */
   team?: boolean
+  /** A spend ticket's stop, which its answer names, and the words of its two answers. */
+  stopId?: string
+  spendActions?: { add: string; finish: string }
 }
 
 /** Failures older than this are history, not something waiting on you. */
@@ -60,6 +65,23 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
         since: request.since,
         requestId: request.id,
         team: record.agentIds.length > 1,
+      })
+    }
+    for (const stop of openStops(record)) {
+      tickets.push({
+        id: `${record.runId}:spend:${stop.id}`,
+        kind: 'spend',
+        runId: record.runId,
+        teamPath: record.teamPath,
+        teamName,
+        node: stop.agent ?? null,
+        sendBackTo: null,
+        asker: stop.agent ? stop.name || stop.agent : teamName,
+        text: stopSentence(stop),
+        context: `Spent ${dollars(stop.spentUsd)}. Nothing more is spent until you answer.`,
+        since: stop.since,
+        stopId: stop.id,
+        spendActions: stopActions(stop),
       })
     }
     const waiting = record.waitingOn
@@ -98,7 +120,7 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
   }
   // Permissions, questions and reviews block a running team, so they come before failures; oldest
   // first within.
-  const weight: Record<TicketKind, number> = { permission: 0, question: 0, review: 0, failed: 1 }
+  const weight: Record<TicketKind, number> = { permission: 0, spend: 0, question: 0, review: 0, failed: 1 }
   return tickets.sort((a, b) => weight[a.kind] - weight[b.kind] || Date.parse(a.since) - Date.parse(b.since))
 }
 
