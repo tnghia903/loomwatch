@@ -547,9 +547,11 @@ it reaches a stop.
 
 No process stays running while an agent waits. At a review stop, the agent before the stop is
 parked; on an `ask_user` question, the agent that asked is parked, after writing a checkpoint of
-where its work stands. A parked agent is a snapshot of its conversation kept in the daemon's memory.
-When you answer or send a note back, it is reopened in the same conversation, however long you took.
-No model call is made while it waits. A parked agent does not survive a restart of LoomWatch.
+where its work stands. A parked agent is a snapshot of its conversation kept in LoomWatch's
+database. When you answer or send a note back, it is reopened in the same conversation, however
+long you took. No model call is made while it waits. A restart of LoomWatch ends a run that was
+waiting, as it ends any run in progress: the parked agent is let go, and its checkpoint is where a
+new run picks the work up.
 
 `conversation.stop.keepAliveMinutes` (default 15, minimum 1) is still accepted, but it no longer
 limits a wait. It bounded how long a session could be kept running while the operator decided, and

@@ -1,8 +1,9 @@
 //! Parked agents, kept in the database.
 //!
 //! An agent waiting for its next turn (a hand-off, the operator's answer, a scheduled continue)
-//! is only data: its [`Snapshot`]. Keeping it here means nothing runs while it waits, and a run
-//! the daemon restarted under can still pick it up.
+//! is only data: its [`Snapshot`]. Keeping it here means nothing runs while it waits and nothing
+//! of it is held in memory. A row is there exactly while its agent is parked: reopening takes it
+//! out, parking again puts it back, and the run ending forgets whatever is left.
 
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
@@ -73,18 +74,37 @@ impl SessionStore {
             .fetch_optional(self.db.reader())
             .await
             .context("cannot read a parked agent")?;
-        let Some(row) = row else {
-            return Ok(None);
-        };
-        let packed: Vec<u8> = row.try_get("snapshot")?;
-        let size = match zstd::zstd_safe::get_frame_content_size(&packed) {
-            Ok(Some(size)) if size <= MAX_SNAPSHOT_BYTES => usize::try_from(size)?,
-            _ => anyhow::bail!("a parked agent's record is damaged"),
-        };
-        let json = zstd::bulk::decompress(&packed, size).context("cannot unpack a parked agent")?;
-        Ok(Some(
-            serde_json::from_slice(&json).context("cannot read a parked agent")?,
-        ))
+        row.map(|row| unpack(&row)).transpose()
+    }
+
+    /// Takes the parked agent with this session id out, to reopen it: once taken it is no longer
+    /// parked, so a second reopen finds nothing.
+    ///
+    /// # Errors
+    ///
+    /// When the database fails or what it held can't be read back.
+    pub async fn take(&self, session_id: &str) -> Result<Option<Snapshot>> {
+        let row =
+            sqlx::query("DELETE FROM agent_sessions WHERE session_id = $1 RETURNING snapshot")
+                .bind(session_id)
+                .fetch_optional(self.db.writer())
+                .await
+                .context("cannot reopen a parked agent")?;
+        row.map(|row| unpack(&row)).transpose()
+    }
+
+    /// Forgets one parked agent: the stop it waited at is over, and nothing will reopen it.
+    ///
+    /// # Errors
+    ///
+    /// When the database fails.
+    pub async fn forget(&self, session_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM agent_sessions WHERE session_id = $1")
+            .bind(session_id)
+            .execute(self.db.writer())
+            .await
+            .context("cannot forget a parked agent")?;
+        Ok(())
     }
 
     /// Forgets every agent parked for a run: it has ended, and nothing will resume them.
@@ -100,6 +120,17 @@ impl SessionStore {
             .context("cannot forget a run's parked agents")?;
         Ok(())
     }
+}
+
+/// The snapshot a row holds.
+fn unpack(row: &sqlx::sqlite::SqliteRow) -> Result<Snapshot> {
+    let packed: Vec<u8> = row.try_get("snapshot")?;
+    let size = match zstd::zstd_safe::get_frame_content_size(&packed) {
+        Ok(Some(size)) if size <= MAX_SNAPSHOT_BYTES => usize::try_from(size)?,
+        _ => anyhow::bail!("a parked agent's record is damaged"),
+    };
+    let json = zstd::bulk::decompress(&packed, size).context("cannot unpack a parked agent")?;
+    serde_json::from_slice(&json).context("cannot read a parked agent")
 }
 
 #[cfg(test)]
@@ -155,5 +186,28 @@ mod tests {
         store.forget_run("run-1").await.unwrap();
         assert!(store.load("a").await.unwrap().is_none());
         assert_eq!(store.load("b").await.unwrap(), Some(snapshot("b", "other")));
+    }
+
+    #[tokio::test]
+    async fn a_parked_agent_is_taken_once_and_forgotten_alone() {
+        let store = SessionStore::new(Db::temp().await);
+        store
+            .save("run-1", "writer", &snapshot("a", "first"))
+            .await
+            .unwrap();
+        store
+            .save("run-1", "editor", &snapshot("b", "other"))
+            .await
+            .unwrap();
+
+        assert_eq!(store.take("a").await.unwrap(), Some(snapshot("a", "first")));
+        assert!(
+            store.take("a").await.unwrap().is_none(),
+            "a reopened agent is no longer parked"
+        );
+
+        store.forget("b").await.unwrap();
+        assert!(store.load("b").await.unwrap().is_none());
+        store.forget("never-parked").await.unwrap();
     }
 }

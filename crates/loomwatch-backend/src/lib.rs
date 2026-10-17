@@ -1857,7 +1857,8 @@ struct ParkedStage {
 }
 
 enum ParkedState {
-    /// Closed and reaped. `session/load` on this id reopens the conversation.
+    /// Closed, with its conversation kept in the database (`agent_sessions`) under this id until
+    /// it is reopened or let go. Nothing of it is held in memory meanwhile.
     Reloadable { acp_session_id: String },
     /// Still in this process, until `deadline`.
     KeptAlive {
@@ -1873,7 +1874,7 @@ impl ParkedStage {
     ///
     /// # Errors
     ///
-    /// Returns an error when closing the session or reaping the child fails.
+    /// Returns an error when the session's conversation cannot be kept or its park recorded.
     async fn park(
         agent_id: &str,
         spec: ProcessSpec,
@@ -2139,9 +2140,15 @@ impl ParkedStage {
                     .await
                     .with_context(|| format!("{} failed to close", self.agent_id))?;
             }
-            // Closed when it was parked: only its stored history is left to let go of.
+            // Closed when it was parked: only its stored history is left to let go of. A row left
+            // behind is not worth failing a finished run over: the run's end forgets it anyway.
             ParkedState::Reloadable { acp_session_id } => {
-                crate::engine::forget_parked(&acp_session_id);
+                if let Err(error) = crate::engine::forget_parked(archive, &acp_session_id).await {
+                    eprintln!(
+                        "warning: could not forget {}'s parked session: {error:#}",
+                        self.agent_id
+                    );
+                }
             }
             // Already released on expiry.
             ParkedState::Released => {}
@@ -5399,6 +5406,17 @@ mod tests {
         }
     }
 
+    /// The agents `run_id` has parked in the database right now.
+    async fn parked_in_database(archive: &EventArchive, run_id: &str) -> Vec<String> {
+        sqlx::query_scalar(
+            "SELECT agent_id FROM agent_sessions WHERE run_session_id = $1 ORDER BY agent_id",
+        )
+        .bind(run_id)
+        .fetch_all(archive.db().reader())
+        .await
+        .expect("the parked agents can be read")
+    }
+
     /// **A stop holds with nothing in flight, and holds for as long as the operator takes.**
     ///
     /// The claim decision 7 rests on is not "the timeout is long enough" — it is that there is no
@@ -5766,11 +5784,17 @@ mod tests {
         let answering = tokio::spawn({
             let desk = desk.clone();
             let run_id = run_id.clone();
+            let archive = archive.clone();
             async move {
                 let first = wait_for_stop(&desk, &run_id, |waiting| {
                     waiting.park == crate::operator::ParkTier::Reloadable
                 })
                 .await;
+                assert_eq!(
+                    parked_in_database(&archive, &run_id).await,
+                    ["a"],
+                    "the parked stage waits in the database, not in memory"
+                );
                 desk.deliver(
                     &run_id,
                     &first.node,
@@ -5782,6 +5806,11 @@ mod tests {
                     waiting.context.as_deref() == Some("HANDOVER TWO")
                 })
                 .await;
+                assert_eq!(
+                    parked_in_database(&archive, &run_id).await,
+                    ["a"],
+                    "parked again after the note"
+                );
                 desk.deliver(&run_id, &second.node, answer("good", None))
                     .await
                     .expect("the stop takes the answer");
@@ -5803,6 +5832,10 @@ mod tests {
         .await?;
         answering.await?;
         assert_eq!(outcome.reply, "wrote it");
+        assert!(
+            parked_in_database(&archive, &run_id).await.is_empty(),
+            "the stop is over, so nothing is left parked"
+        );
 
         let events = archive.load_verified_session(&run_id).await?;
         let loaded = events
@@ -5826,6 +5859,117 @@ mod tests {
             })
             .expect("and closed by a session_replayed marker");
         assert!(loaded.seq < replayed.seq);
+        Ok(())
+    }
+
+    /// **A daemon that stops while a stage waits at a review stop leaves a checkpoint to continue
+    /// from, and no parked agent behind.**
+    ///
+    /// The stage's conversation is in the database, but the run that would reopen it was a task
+    /// of the daemon that stopped. The next daemon fails the run like any it finds unfinished,
+    /// clears the stop it can no longer take an answer for, writes the stage's checkpoint from the
+    /// archive (this team has no notebook, so the stage never wrote one), and lets the parked
+    /// agent go.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_restart_at_a_review_stop_leaves_a_checkpoint_and_no_parked_agent() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        let (researcher, _) = stand_in(vec![
+            turn(&[], "the findings so far"),
+            turn(&["## Summary"], "## Summary\nthe findings, handed over"),
+        ]);
+        // Never prompted: the run stops at the review before it.
+        let (writer, _) = stand_in(Vec::new());
+        let team = stop_team(
+            "restarted",
+            pipeline_agent("a", &researcher),
+            pipeline_agent("b", &writer),
+            15,
+        );
+        let archive = EventArchive::new(crate::db::Db::temp().await);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let registry = crate::runs::RunRegistry::durable(archive.run_store());
+        let record = crate::runs::RunRecord::queued(
+            "stop.yaml".to_owned(),
+            "go".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )
+        .expect("a stop team has a pipeline order");
+        let run_id = record.run_id.clone();
+        registry.insert(record);
+        assert!(registry.mark_starting(&run_id));
+        assert!(registry.mark_running(&run_id));
+        let desk = registry.operator_desk(Some(&archive));
+
+        let run = tokio::spawn({
+            let team = team.clone();
+            let archive = archive.clone();
+            let run_id = run_id.clone();
+            let desk = desk.clone();
+            async move {
+                run_pipeline_mode(
+                    &team,
+                    &team_path,
+                    archive.clone(),
+                    "go",
+                    Duration::from_secs(5),
+                    Some(EventLog::new(archive, run_id)),
+                    &Arc::new(memory::TeamMemory::default()),
+                    &RunLineage {
+                        operator: Some(desk),
+                        ..RunLineage::default()
+                    },
+                )
+                .await
+            }
+        });
+        wait_for_stop(&desk, &run_id, |waiting| {
+            waiting.park == crate::operator::ParkTier::Reloadable
+        })
+        .await;
+        assert_eq!(parked_in_database(&archive, &run_id).await, ["a"]);
+
+        // The daemon stops: the run's task goes with it, and what it wrote is on disk.
+        run.abort();
+        assert!(run.await.is_err_and(|error| error.is_cancelled()));
+        archive.flush().await;
+        registry.persist(&run_id).await?;
+        let stored = archive.run_store().recent().await?;
+        assert!(
+            stored
+                .iter()
+                .any(|run| run.record.run_id == run_id && run.record.waiting_on.is_some()),
+            "the stop was on the record when the daemon stopped"
+        );
+
+        let next = crate::runs::RunRegistry::durable(archive.run_store());
+        assert_eq!(next.recover(&archive).await?, 1);
+        let recovered = next.get(&run_id).context("the run is recovered")?;
+        assert_eq!(recovered.status, crate::runs::RunStatus::Failed);
+        assert_eq!(
+            recovered.error.as_deref(),
+            Some(crate::runs::INTERRUPTED_BY_RESTART)
+        );
+        assert_eq!(
+            recovered.waiting_on, None,
+            "nothing is left to take an answer"
+        );
+        assert!(
+            parked_in_database(&archive, &run_id).await.is_empty(),
+            "the parked stage goes with its run"
+        );
+        let checkpoints = archive
+            .notebook()
+            .checkpoints(&run_id, Some("a"))
+            .await
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let point = checkpoints.last().context("the stage has a checkpoint")?;
+        assert!(
+            point.done.contains("the findings, handed over"),
+            "{point:?}"
+        );
+        assert_eq!(point.source, memory::CheckpointSource::Coordinator);
         Ok(())
     }
 

@@ -125,6 +125,13 @@ impl EventArchive {
         crate::runs::RunStore::new(self.db.clone())
     }
 
+    /// The `agent_sessions` table on the same database: agents parked while they wait for an
+    /// answer, as data.
+    #[must_use]
+    pub fn parked_agents(&self) -> crate::agent::SessionStore {
+        crate::agent::SessionStore::new(self.db.clone())
+    }
+
     /// The `operator_questions` table on the same database — the queue behind "waiting for you".
     ///
     /// Same split again: an open question is mutable state with an `answered_at` that gets

@@ -817,16 +817,45 @@ impl RunRegistry {
 
     /// Fill a cold cache from the `runs` table. Returns how many records were recovered.
     ///
-    /// Called once at boot. A recovered run is a *record*, never a live task: its
-    /// [`RunEntry::handle`] is `None`, so cancelling it changes the record and aborts nothing,
+    /// [`Self::recover`] calls it once at boot. A recovered run is a *record*, never a live task:
+    /// its [`RunEntry::handle`] is `None`, so cancelling it changes the record and aborts nothing,
     /// which is the truth after a restart.
     ///
     /// # Errors
     ///
     /// Returns an error when the database fails or a row cannot be decoded.
     pub async fn reload(&self) -> Result<usize, sqlx::Error> {
+        self.reload_records()
+            .await
+            .map(|(recovered, _interrupted)| recovered)
+    }
+
+    /// [`Self::reload`], then settle every run a previous process left unfinished as a cancel
+    /// would: what it was doing becomes a checkpoint to start a new run from, and the agents it had
+    /// parked are let go.
+    ///
+    /// A parked agent's conversation is in the database and would come back as it was, but the
+    /// run that parked it is gone: the code that was waiting on the stop, holding the stages'
+    /// handovers and ready to take the answer, was this process's task and did not survive it. So
+    /// a run waiting at a stop when the daemon stopped is `failed` like any other, and its
+    /// checkpoint is where the operator picks the work up.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database fails or a row cannot be decoded.
+    pub async fn recover(&self, archive: &EventArchive) -> Result<usize, sqlx::Error> {
+        let (recovered, interrupted) = self.reload_records().await?;
+        for run_id in &interrupted {
+            record_abandoned_checkpoints(archive, run_id, &crate::RunLineage::default()).await;
+            forget_parked_agents(archive, run_id).await;
+        }
+        Ok(recovered)
+    }
+
+    /// How many records were recovered, and the runs among them a restart interrupted.
+    async fn reload_records(&self) -> Result<(usize, Vec<String>), sqlx::Error> {
         let Some(store) = &self.store else {
-            return Ok(0);
+            return Ok((0, Vec::new()));
         };
         let stored = store.recent().await?;
         let interrupted = {
@@ -861,6 +890,9 @@ impl RunRegistry {
                     record.status = RunStatus::Failed;
                     record.finished_at = Some(now());
                     record.error = Some(INTERRUPTED_BY_RESTART.to_owned());
+                    // As on every other way to an end: a run that is over cannot still be waiting
+                    // for an answer, and nothing is left here to take one.
+                    record.waiting_on = None;
                     interrupted.push(run_id.clone());
                 }
                 inner.runs.insert(
@@ -888,7 +920,7 @@ impl RunRegistry {
                 if interrupted.len() == 1 { "" } else { "s" }
             );
         }
-        Ok(recovered)
+        Ok((recovered, interrupted))
     }
 
     /// Register a new run. Its `run_id` must be unique.
@@ -2944,6 +2976,9 @@ async fn execute(
         result
     };
     let (result, ()) = tokio::join!(finish, watch_spawn);
+    // The run is over, however it ended. An agent it still has parked (a run that failed while a
+    // stage waited behind a stop leaves one) has nothing left to reopen it.
+    forget_parked_agents(&archive, &run_id).await;
     let responder = registry.get(&run_id).map(|record| record.responder);
     let _applied = match result {
         // CONTRACT §4: a normal turn with no response is `failed`
@@ -3693,6 +3728,17 @@ async fn settle_cancelled(registry: &RunRegistry, archive: Option<&EventArchive>
             ..crate::RunLineage::default()
         };
         record_abandoned_checkpoints(archive, run_id, &lineage).await;
+        forget_parked_agents(archive, run_id).await;
+    }
+}
+
+/// Let go of every agent `run_id` left parked: the run is over, and nothing will reopen them.
+///
+/// Logged, never propagated, like the checkpoints beside it: a row left behind costs disk, while
+/// failing here would change what the operator is told about the run.
+async fn forget_parked_agents(archive: &EventArchive, run_id: &str) {
+    if let Err(error) = archive.parked_agents().forget_run(run_id).await {
+        eprintln!("warning: could not forget run {run_id}'s parked agents: {error:#}");
     }
 }
 
@@ -5963,6 +6009,7 @@ pub(crate) mod tests {
         assert!(fetched["error"].is_null());
     }
 
+    #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn cancel_aborts_the_run_and_stops_the_agent() {
         let pool = crate::db::Db::temp().await;
@@ -5996,6 +6043,24 @@ pub(crate) mod tests {
         })
         .await
         .expect("the agent should be thinking");
+        // As if an earlier stage of this run were parked behind a stop.
+        let parked = archive.parked_agents();
+        parked
+            .save(
+                &accepted.run_id,
+                "earlier",
+                &crate::agent::Snapshot {
+                    session_id: "earlier-session".to_owned(),
+                    model: "m".to_owned(),
+                    effort: None,
+                    history: Vec::new(),
+                    outputs: BTreeMap::new(),
+                    usage: crate::agent::Usage::default(),
+                    messages_written: 0,
+                },
+            )
+            .await
+            .unwrap();
 
         let response = app
             .clone()
@@ -6009,6 +6074,10 @@ pub(crate) mod tests {
         let cancelled: RunRecord = serde_json::from_value(json_body(response).await).unwrap();
         assert_eq!(cancelled.status, RunStatus::Cancelled);
         assert!(cancelled.finished_at.is_some());
+        assert!(
+            parked.load("earlier-session").await.unwrap().is_none(),
+            "a cancelled run lets go of the agents it parked"
+        );
         let checkpoints = archive
             .notebook()
             .checkpoints(&accepted.run_id, Some("solo"))

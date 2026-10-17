@@ -168,9 +168,10 @@ Rules the loader enforces beyond the schema:
 |---|---|---|
 | `context_packets` | run id, agent id, invocation, rendered text, sections with rationale, Brief paths and hashes, budget used | Stored before the opening prompt is sent. Replay and follow-ups read this, never a fresh search against today's memory. |
 | `memory_notes` | team id, run id (null once kept), author agent, kind, title, body, sources, state, revision, supersedes | Immutable revisions; a correction inserts a new revision superseding the old. Optimistic concurrency on `revision`; idempotency key on tool writes. |
-| `checkpoints` | run id, agent id, invocation, done, next, blockers, artifact paths and hashes, archive `seq` high-water mark | Written at stage end (teams with a notebook), on park, by the `checkpoint` tool, and from the archive when a run fails or is cancelled. |
+| `checkpoints` | run id, agent id, invocation, done, next, blockers, artifact paths and hashes, archive `seq` high-water mark | Written at stage end (teams with a notebook), on park, by the `checkpoint` tool, and from the archive when a run fails, is cancelled or is ended by a restart. |
 | `runs` | everything `RunRecord` holds in memory, plus `followsRunId`, `startAt`, `waitingOn` | Run lineage, follow-ups and parked questions must survive a restart. |
 | `operator_questions` | run id, node or agent id, question, asked at, answered at, answer event id | The queue behind "waiting for you". One open question per agent at a time. |
+| `agent_sessions` | session id, run id, agent id, the agent's conversation (compressed), updated at | A parked agent while it waits. Taken out when it is reopened; removed when its stop or its run ends. |
 
 `run_events` is untouched. Memory tool calls archive as the bus's existing `tool_call`/`tool_update`
 events; operator answers archive as user `message` events from the operator node's id. Packet
@@ -222,9 +223,10 @@ metadata and questions travel over REST, so the live WebSocket messages do not c
 
 - **Bounded prompts.** A fixed character budget, so opening prompts do not grow with the age of
   the team. Pinned overflow fails before any agent starts.
-- **No idle processes.** A parked agent is its conversation, kept in the daemon's memory while it
-  waits, not a running process; answering reopens the same conversation. A daemon restart lets it
-  go; the checkpoint written when it parked is where a new run can start from.
+- **No idle processes.** A parked agent is its conversation, kept in the database while it waits,
+  not a running process or anything held in memory; answering reopens the same conversation. A
+  daemon restart ends the run it was parked in, as it ends every unfinished run, and lets it go;
+  its checkpoint is where a new run can start from.
 - **No re-execution.** Follow-ups replay stored handovers and packets; only stages after `startAt`
   run. Retry stays the explicit "from zero" action.
 - **Local text search.** SQLite full-text search over a few thousand notes answers in

@@ -26,7 +26,7 @@ pub(crate) use recorder::{EventLog, Recorder, ReplyText, new_event_id};
 
 use crate::agent::{
     AgentError, Demo, HostTools, NoHostTools, OFFLINE_MODEL, OpenRouter, Provider, Session,
-    SessionConfig, Snapshot, ToolSet,
+    SessionConfig, ToolSet,
 };
 use crate::archive::EventArchive;
 use crate::team_bus::TeamBusConnection;
@@ -106,16 +106,16 @@ impl std::fmt::Display for AppReportedError {
 
 impl std::error::Error for AppReportedError {}
 
-/// Parked conversations, by session id, while their agent waits for an answer. Only data: nothing
-/// runs while an agent is parked.
-static PARKED: LazyLock<Mutex<HashMap<String, Snapshot>>> = LazyLock::new(Mutex::default);
-
 /// Forgets a parked conversation that will not be reopened: its stop is over.
-pub(crate) fn forget_parked(session_id: &str) {
-    PARKED
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .remove(session_id);
+///
+/// Parked conversations are kept in the database ([`crate::agent::SessionStore`]), never in
+/// memory, so one waiting for an answer holds nothing while it waits.
+///
+/// # Errors
+///
+/// When the database fails.
+pub(crate) async fn forget_parked(archive: &EventArchive, session_id: &str) -> Result<()> {
+    archive.parked_agents().forget(session_id).await
 }
 
 /// Scripted stand-ins for a model, by the `demo/<id>` model name a test gives its team.
@@ -386,11 +386,14 @@ impl AgentRun {
         Ok(recorder)
     }
 
-    /// Reopen a parked session, with the run's log and bus.
+    /// Reopen a parked session, with the run's log and bus. The conversation comes out of the
+    /// database, so it reopens the same whether it was parked a minute ago or by a daemon that has
+    /// since restarted.
     ///
     /// # Errors
     ///
-    /// When nothing is parked under `session_id` (it was already reopened or released).
+    /// When nothing is parked under `session_id` (it was already reopened or released), or the
+    /// database fails.
     pub(crate) async fn load_live(
         &mut self,
         agent_id: &str,
@@ -401,10 +404,11 @@ impl AgentRun {
             bail!("this agent has already opened a session");
         }
         self.has_run = true;
-        let snapshot = PARKED
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(session_id)
+        let snapshot = context
+            .archive
+            .parked_agents()
+            .take(session_id)
+            .await?
             .with_context(|| format!("{agent_id}'s parked session {session_id} is gone"))?;
         let mut recorder = self.start_recorder(agent_id, session_id, context).await?;
         recorder
@@ -453,11 +457,12 @@ impl AgentRun {
         Ok(recorder)
     }
 
-    /// Park the session: keep its conversation as data and let go of everything else.
+    /// Park the session: keep its conversation in the database, under the run it belongs to, and
+    /// let go of everything else.
     ///
     /// # Errors
     ///
-    /// When the park can't be recorded.
+    /// When the conversation can't be kept or the park can't be recorded.
     pub(crate) async fn park_session(
         &mut self,
         recorder: &mut Recorder,
@@ -465,13 +470,19 @@ impl AgentRun {
     ) -> Result<()> {
         let session = self
             .session
-            .take()
+            .as_ref()
             .context("only an open session can be parked")?;
-        let snapshot = session.snapshot();
-        PARKED
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(snapshot.session_id.clone(), snapshot);
+        recorder
+            .event_log
+            .archive()
+            .parked_agents()
+            .save(
+                recorder.event_log.session_id(),
+                &session.config().agent_id,
+                &session.snapshot(),
+            )
+            .await?;
+        self.session = None;
         self.records = None;
         recorder
             .append(
@@ -833,5 +844,148 @@ async fn write(recorder: &mut Recorder, record: Record) -> Result<()> {
             recorder.record_frame(&request).await?;
             recorder.record_frame(&response).await
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+    use crate::test_support::{stand_in, turn};
+
+    /// A folder for one test's database, removed when the test ends.
+    struct Folder(PathBuf);
+
+    impl Drop for Folder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn spec(cwd: &Path) -> ProcessSpec {
+        ProcessSpec {
+            cmd: String::new(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            cwd: cwd.to_owned(),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        }
+    }
+
+    fn context(archive: &EventArchive, event_log: Option<EventLog>) -> TeamSessionContext<'_> {
+        TeamSessionContext {
+            archive,
+            bus: None,
+            event_log,
+            packet: None,
+            composed: None,
+            boundary: None,
+        }
+    }
+
+    /// **A parked agent comes back from the database alone, and carries on.**
+    ///
+    /// Parked under one daemon and reopened under the next: a second connection to the same file,
+    /// a new agent, and nothing carried over in memory. Its next turn panics unless it is taken in
+    /// the conversation that holds the first, which a fresh session would not.
+    #[tokio::test]
+    async fn a_parked_agent_carries_on_after_the_daemon_restarts() -> Result<()> {
+        let folder = Folder(
+            std::env::temp_dir().join(format!("loomwatch-parked-{}", Uuid::new_v4().simple())),
+        );
+        std::fs::create_dir_all(&folder.0)?;
+        let path = folder.0.join("loomwatch.db");
+        let (model, demo) = stand_in(vec![
+            turn(&["Find the budget"], "the budget is 40"),
+            turn(&["Now halve it"], "then it is 20").remembering(&["the budget is 40"]),
+        ]);
+        let run_id = Uuid::new_v4().to_string();
+
+        let session_id = {
+            let archive = EventArchive::open(&path).await?;
+            let log = EventLog::new(archive.clone(), run_id.clone());
+            let mut agent = AgentRun::spawn(&spec(&folder.0))?;
+            let mut recorder = agent
+                .open_live("a", &model, &mut context(&archive, Some(log)))
+                .await?;
+            assert_eq!(
+                agent.prompt_turn(&mut recorder, "Find the budget").await?,
+                "the budget is 40"
+            );
+            agent.park_session(&mut recorder, Duration::ZERO).await?;
+            archive.flush().await;
+            agent
+                .acp_session_id()
+                .context("a parked agent keeps its session id")?
+                .to_owned()
+            // The agent, its log and the database close here, as they do when the daemon stops.
+        };
+
+        let archive = EventArchive::open(&path).await?;
+        let parked = archive.parked_agents();
+        let kept = parked
+            .load(&session_id)
+            .await?
+            .context("the parked agent is in the database")?;
+        assert_eq!(kept.model, model);
+
+        let mut agent = AgentRun::spawn(&spec(&folder.0))?;
+        // The run that parked it is gone with the daemon, so this reopen writes to a log of its
+        // own: a second log over the run's session would restart its numbering.
+        let mut recorder = agent
+            .load_live("a", &session_id, &mut context(&archive, None))
+            .await?;
+        assert!(
+            parked.load(&session_id).await?.is_none(),
+            "a reopened agent is no longer parked"
+        );
+        assert_eq!(
+            agent.prompt_turn(&mut recorder, "Now halve it").await?,
+            "then it is 20"
+        );
+        let asked = demo.requests();
+        assert_eq!(asked.len(), 2, "{asked:?}");
+        assert!(
+            asked[1].messages.starts_with(&asked[0].messages),
+            "the second turn is asked in the conversation of the first"
+        );
+
+        let mut again = AgentRun::spawn(&spec(&folder.0))?;
+        let refused = again
+            .load_live("a", &session_id, &mut context(&archive, None))
+            .await
+            .err()
+            .context("an agent can be reopened only once")?;
+        assert!(refused.to_string().contains("is gone"), "{refused:#}");
+        Ok(())
+    }
+
+    /// Forgetting a parked agent removes it from the database, and only it.
+    #[tokio::test]
+    async fn forgetting_a_parked_agent_removes_its_row() -> Result<()> {
+        let archive = EventArchive::new(crate::db::Db::temp().await);
+        let (model, _demo) = stand_in(vec![turn(&[], "one"), turn(&[], "two")]);
+        let run_id = Uuid::new_v4().to_string();
+        let log = EventLog::new(archive.clone(), run_id.clone());
+        let mut parked = Vec::new();
+        for agent_id in ["a", "b"] {
+            let mut agent = AgentRun::spawn(&spec(&std::env::temp_dir()))?;
+            let mut recorder = agent
+                .open_live(agent_id, &model, &mut context(&archive, Some(log.clone())))
+                .await?;
+            agent.prompt_turn(&mut recorder, "go").await?;
+            agent.park_session(&mut recorder, Duration::ZERO).await?;
+            parked.push(agent.acp_session_id().context("parked")?.to_owned());
+        }
+
+        forget_parked(&archive, &parked[0]).await?;
+        assert!(archive.parked_agents().load(&parked[0]).await?.is_none());
+        assert!(archive.parked_agents().load(&parked[1]).await?.is_some());
+        archive.parked_agents().forget_run(&run_id).await?;
+        assert!(archive.parked_agents().load(&parked[1]).await?.is_none());
+        Ok(())
     }
 }

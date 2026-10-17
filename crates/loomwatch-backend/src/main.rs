@@ -122,13 +122,14 @@ enum Commands {
     },
 }
 
-/// A durable registry with its cache already filled from the `runs` table.
+/// A durable registry with its cache already filled from the `runs` table, and every run the last
+/// process left unfinished settled.
 ///
 /// A recovery that fails warns and continues: the daemon starting is worth more than its history
 /// list being complete, and the failure must not be silent.
 async fn recovered_registry(archive: &EventArchive) -> RunRegistry {
     let registry = RunRegistry::durable(archive.run_store());
-    match registry.reload().await {
+    match registry.recover(archive).await {
         Ok(0) => {}
         Ok(recovered) => println!("recovered {recovered} run records"),
         Err(error) => eprintln!("warning: could not recover run records: {error}"),

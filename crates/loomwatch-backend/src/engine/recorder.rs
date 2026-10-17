@@ -48,6 +48,11 @@ impl EventLog {
         &self.inner.session_id
     }
 
+    /// The archive this log writes to.
+    pub(crate) fn archive(&self) -> &EventArchive {
+        &self.inner.archive
+    }
+
     /// How many events this log has appended, i.e. the archive `seq` high-water mark for the run.
     ///
     /// A checkpoint records it so a continuation can say exactly how much evidence the checkpoint
