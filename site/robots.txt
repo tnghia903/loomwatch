@@ -1,0 +1,5 @@
+# Every file on this site is public, search engines included. site/build.sh writes the sitemap.
+User-agent: *
+Allow: /
+
+Sitemap: https://loomwatch.github.io/sitemap.xml
