@@ -81,6 +81,23 @@ export function spoolOf(spend: RunSpend | null | undefined): SpoolView | null {
   return { limit, spent: spend.spentUsd, used: limit === null ? null : spend.spentUsd / limit, threads }
 }
 
+/** How much of its limit a run uses before its line shows what it spent. */
+export const SPOOL_SHOWN_FROM = 0.75
+
+/**
+ * Whether a run's line shows what it spent. Money on every line reads like a meter running on
+ * each message, which worries a newcomer more than it helps, so the line shows it only once it
+ * matters: past three quarters of the run's limit, or once the run met a limit (it waits at one,
+ * you added money there, or it stopped there). A run with no limit never shows it here. The
+ * "Each run" figure, the stop and the receipt say the rest.
+ */
+export function spoolMatters(spend: RunSpend | null | undefined, stops: readonly SpendStop[] = []): boolean {
+  if (!spend) return false
+  if (stops.length > 0 || spend.stopped || (spend.added ?? []).length > 0) return true
+  if (Object.values(spend.agents ?? {}).some((share) => share.stopped)) return true
+  return spend.limitUsd != null && spend.limitUsd > 0 && spend.spentUsd >= spend.limitUsd * SPOOL_SHOWN_FROM
+}
+
 /** "$0.12 of $1.00", or "$0.12" for a run with no limit. */
 export function spoolWords(view: SpoolView): string {
   return view.limit === null ? dollars(view.spent) : `${dollars(view.spent)} of ${dollars(view.limit)}`

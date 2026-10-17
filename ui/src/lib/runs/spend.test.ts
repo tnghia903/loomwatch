@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SpendStop } from './client'
-import { dollarField, dollars, openStops, spendNote, spoolLabel, spoolOf, spoolWords, stopActions, stopSentence, typedDollars } from './spend'
+import { dollarField, dollars, openStops, spendNote, spoolLabel, spoolMatters, spoolOf, spoolWords, stopActions, stopSentence, typedDollars } from './spend'
 
 const stop = (extra: Partial<SpendStop> = {}): SpendStop => ({ id: 's1', limitUsd: 1, spentUsd: 1.03, addUsd: 0.5, since: '2026-10-17T09:00:00Z', ...extra })
 const names: Record<string, string> = { r: 'Researcher', w: 'Writer' }
@@ -51,6 +51,17 @@ describe('spend as the operator reads it (ADR 0068)', () => {
     expect(spoolOf({ spentUsd: 0 })).toBeNull()
     expect(spoolOf(null)).toBeNull()
     expect(spoolOf({ limitUsd: 1, spentUsd: 0 })?.used).toBe(0)
+  })
+
+  it('shows money on a run’s line only near or at a limit', () => {
+    expect(spoolMatters({ limitUsd: 1, spentUsd: 0.5 })).toBe(false)
+    expect(spoolMatters({ limitUsd: 1, spentUsd: 0.75 })).toBe(true)
+    expect(spoolMatters({ spentUsd: 3 })).toBe(false)
+    expect(spoolMatters({ limitUsd: 1, spentUsd: 0.1 }, [stop()])).toBe(true)
+    expect(spoolMatters({ limitUsd: 1.5, spentUsd: 0.1, added: [{ atUsd: 1, addUsd: 0.5 }] })).toBe(true)
+    expect(spoolMatters({ limitUsd: 1, spentUsd: 0.1, stopped: 'nobody_to_ask' })).toBe(true)
+    expect(spoolMatters({ limitUsd: 1, spentUsd: 0.1, agents: { r: { spentUsd: 0.1, limitUsd: 0.05, stopped: true } } })).toBe(true)
+    expect(spoolMatters(null)).toBe(false)
   })
 
   it('only counts the stops of a run that is still going', () => {

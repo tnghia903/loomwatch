@@ -1,8 +1,10 @@
-import type { RunSpend } from '../../lib/runs/client'
-import { spoolLabel, spoolOf, spoolWords } from '../../lib/runs/spend'
+import type { RunSpend, SpendStop } from '../../lib/runs/client'
+import { spoolLabel, spoolMatters, spoolOf, spoolWords } from '../../lib/runs/spend'
 
 interface SpoolProps {
   spend: RunSpend | null | undefined
+  /** The limits the run waits at now. */
+  stops?: readonly SpendStop[]
   name: (id: string) => string
   hue: (id: string) => number
 }
@@ -10,11 +12,12 @@ interface SpoolProps {
 /**
  * What the run has spent, as a spool of thread (ADR 0068). The bobbin holds what is left of the
  * run's limit and unwinds as the agents spend; the thread run off it is in each agent's colour, as
- * long as its share. "$0.12 of $1.00" beside it. A run with no limit shows its threads and what
- * it spent, with no bobbin.
+ * long as its share. "$0.12 of $1.00" beside it. It shows only once the run nears its limit or
+ * meets one (`spoolMatters`); an agent's own guard met on a run with no limit shows its threads
+ * and what it spent, with no bobbin.
  */
-export function Spool({ spend, name, hue }: SpoolProps) {
-  const view = spoolOf(spend)
+export function Spool({ spend, stops, name, hue }: SpoolProps) {
+  const view = spoolMatters(spend, stops) ? spoolOf(spend) : null
   if (!view) return null
   const full = view.used !== null && view.used >= 1
   // Each thread's length on the track: its share of the limit, or of what was spent with none.

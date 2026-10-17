@@ -260,7 +260,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
                 : run.status === 'queued' || run.status === 'starting' ? 'Starting…' : 'Handing over…'
             : `${listNames(workers.map(name))} worked on this${took_ ? ` · ${took_}` : ''}`}
         </Swap>
-        <Spool spend={record.spend} name={name} hue={hue} />
+        <Spool spend={record.spend} stops={stops} name={name} hue={hue} />
         <span className="tc-talk-acts">
           <button type="button" className="tc-link" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
             {open ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
